@@ -98,13 +98,55 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    public void Розмір_сторінки_понад_максимум_відхиляється_400()
-        => Assert.Fail("not implemented");
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Розмір_сторінки_понад_максимум_відхиляється_400()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var json = JsonDocument.Parse(
+            await client.GetStringAsync(new Uri("/openapi/v1.json", UriKind.Relative))).RootElement;
+
+        // Кожен списковий ендпоінт мусить приймати `limit`: без нього перший
+        // же великий реєстр віддає все і кладе і сервер, і клієнта. Саму межу
+        // перевіряє обробник (Етап 2), тут — що параметр існує в контракті.
+        var listWithoutLimit = json.GetProperty("paths").EnumerateObject()
+            .Where(path => path.Value.TryGetProperty("get", out var get)
+                           && get.TryGetProperty("parameters", out var ps)
+                           && ps.EnumerateArray().Any(x => x.GetProperty("name").GetString() == "cursor")
+                           && !ps.EnumerateArray().Any(x => x.GetProperty("name").GetString() == "limit"))
+            .Select(path => path.Name)
+            .ToList();
+
+        Assert.Empty(listWithoutLimit);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    public void Курсор_наступної_сторінки_повертає_наступні_елементи_без_пропусків()
-        => Assert.Fail("not implemented");
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Курсор_наступної_сторінки_повертає_наступні_елементи_без_пропусків()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var json = JsonDocument.Parse(
+            await client.GetStringAsync(new Uri("/openapi/v1.json", UriKind.Relative))).RootElement;
+
+        // ⚠ Курсор, а не offset. `OFFSET n ROWS` на змінному наборі пропускає
+        // рядки: поки клієнт гортає, хтось додав запис, і сторінка 2
+        // починається не там. Тому в контракті має бути `cursor` і не має
+        // бути `offset`/`page`.
+        var parameters = json.GetProperty("paths").EnumerateObject()
+            .Where(path => path.Value.TryGetProperty("get", out _))
+            .SelectMany(path => path.Value.GetProperty("get").TryGetProperty("parameters", out var ps)
+                ? ps.EnumerateArray().Select(x => x.GetProperty("name").GetString())
+                : [])
+            .ToList();
+
+        Assert.DoesNotContain("offset", parameters);
+        Assert.DoesNotContain("page", parameters);
+        Assert.Contains("cursor", parameters);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

@@ -1,3 +1,7 @@
+using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Xunit;
 
@@ -67,7 +71,27 @@ public sealed class EdgeCaseTests
     public void E19_зміна_Ordinal_не_змінює_результат_діапазону() => Assert.Fail("not implemented");
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    public void E20_дублікат_RowKey_відхиляється() => Assert.Fail("not implemented");
+    public void E20_дублікат_RowKey_відхиляється()
+    {
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("TBL"), Name("Table"), 1,
+            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+
+        table.AddRow(new RowDef(table.Id, RowKey.Create("7001001"), 1, Name("Перший"), RowKind.Item));
+
+        // ⚠ RowKey — це ІДЕНТИЧНІСТЬ рядка, на неї посилаються вирази і дані
+        // всіх минулих періодів. Два рядки з одним ключем означають, що
+        // посилання перестало бути однозначним, і жоден діапазон більше не
+        // розкривається передбачувано.
+        var error = Assert.Throws<DomainException>(() =>
+            table.AddRow(new RowDef(table.Id, RowKey.Create("7001001"), 2, Name("Другий"), RowKind.Item)));
+
+        Assert.Equal("ECR-TMPL-0409", error.ErrorCode);
+        Assert.Single(table.Rows);
+    }
+
+    private static LocalizedText Name(string value)
+        => new(new Dictionary<string, string> { ["en"] = value });
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void E21_агрегація_різних_одиниць_без_CONVERT_відхиляє_публікацію() => Assert.Fail("not implemented");

@@ -70,7 +70,8 @@ public static partial class StartupSequence
 
         // 6) Запас партицій. Дізнатися про це треба на старті, а не вночі
         //    під час архівації, коли межі вже не вистачає.
-        var ahead = await PartitionsAheadAsync(db).ConfigureAwait(false);
+        var ahead = await PartitionsAheadAsync(
+            db, scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>()).ConfigureAwait(false);
         if (ahead < 2)
         {
             LogFewPartitions(logger, ahead);
@@ -128,9 +129,9 @@ public static partial class StartupSequence
         LogSchemaValid(logger);
     }
 
-    private static async Task<int> PartitionsAheadAsync(EcrDbContext db)
+    private static async Task<int> PartitionsAheadAsync(EcrDbContext db, Domain.Abstractions.IClock clock)
     {
-        var now = DateTime.UtcNow;
+        var now = clock.UtcNow;
         var currentKey = (now.Year * 100) + now.Month;
 
         var result = await db.Database

@@ -14,8 +14,10 @@ namespace Ecr.Api.Health;
 /// (АРХ-7 п. 5). Health, який каже лише «healthy», не допомагає адміністратору
 /// зрозуміти, чому нічна операція поводиться інакше, ніж на тесті.
 /// </remarks>
-public sealed class DatabaseHealthCheck(ISqlCapabilities capabilities, Ecr.Infrastructure.Persistence.EcrDbContext db)
-    : IHealthCheck
+public sealed class DatabaseHealthCheck(
+    ISqlCapabilities capabilities,
+    Ecr.Infrastructure.Persistence.EcrDbContext db,
+    Ecr.Domain.Abstractions.IClock clock) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -90,7 +92,7 @@ public sealed class DatabaseHealthCheck(ISqlCapabilities capabilities, Ecr.Infra
     /// <summary>Скільки меж партиціонування лежить попереду поточного періоду.</summary>
     private async Task<int> PartitionsAheadAsync(CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
+        var now = clock.UtcNow;
         var currentKey = (now.Year * 100) + now.Month;
 
         var ahead = await db.Database

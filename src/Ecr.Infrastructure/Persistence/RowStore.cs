@@ -17,7 +17,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1: порт уведений `Q-032`,
 /// реалізація — `Q-050`.
 /// </remarks>
-public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk) : IRowStore
+public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock)
+    : IRowStore
 {
     /// <inheritdoc />
     public async Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct)
@@ -83,7 +84,10 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk) : IRowStore
         long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct)
     {
         var id = await bulk.ReserveIdsAsync("doc.TableRowSeq", 1, ct).ConfigureAwait(false);
-        var row = new TableRow(periodKey, id, tableInstanceId, rowKey, ordinal, DateTime.UtcNow);
+        // ⚠ Час — через IClock, а не DateTime.UtcNow: інакше поведінку на
+        // межі періоду неможливо відтворити в тесті (правило 1 із
+        // ForbiddenApiTests, ФВ-1.10a).
+        var row = new TableRow(periodKey, id, tableInstanceId, rowKey, ordinal, clock.UtcNow);
 
         db.TableRows.Add(row);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

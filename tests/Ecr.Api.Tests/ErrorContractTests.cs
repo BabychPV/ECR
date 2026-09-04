@@ -111,9 +111,35 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
     public void Конфлікт_повертає_409_із_переліком_розбіжностей()
-        => Assert.Fail("not implemented");
+    {
+        // Конвеєр перевіряється безпосередньо: підняти справжній конфлікт
+        // через HTTP можна лише разом із batch-PATCH, а він чекає рушій
+        // виразів (Етап 2). Мапінг винятку на 409 із переліком — тут і зараз.
+        var details = new Dictionary<string, object?>
+        {
+            ["conflicts"] = new[] { new { rowKey = "R1", theirValue = "7", byUserId = 77 } },
+        };
+
+        var exception = new Ecr.Application.Errors.ConcurrencyConflictException(
+            ErrorCodes.CellConflict, "Дані змінилися.", details);
+
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        // Кортеж розпаковується приведенням, а не через Item1/Item2: у
+        // ValueTuple це ПОЛЯ, і GetProperty повертає null — тест падав би з
+        // NullReferenceException замість того, що перевіряє.
+        var (status, code, _, extensions) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+
+        // ⚠ 409 БЕЗ переліку не дає клієнту нічого, крім пропозиції спробувати
+        // ще раз наосліп. Користувач має побачити, ЩО саме розійшлося.
+        Assert.Equal(409, status);
+        Assert.Equal(ErrorCodes.CellConflict, code);
+        Assert.NotNull(extensions);
+        Assert.True(extensions!.ContainsKey("conflicts"));
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
