@@ -108,9 +108,17 @@ sqlcmd -S $S -d $DB -E -b -I -i $Q/01-filegroups.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/02-partitions.sql
 sqlcmd -S $S -d $DB -E -b -I -i artifacts/migration.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/07-partition-tables.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/08-system-tables.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql
 # 03, 04, 05 — з етапів 3–5: вони посилаються на calc.* і arc.*
+# 09-seed.sql тут НЕМАЄ: seed виконує сам застосунок при старті (SeedRunner),
+# бо це DML, а не DDL. Запускати його вручну не треба і не можна двічі підряд
+# із різних місць — він ідемпотентний, але джерело має бути одне.
 ```
+
+⚠ `08-system-tables.sql` пропустити не можна: у таблиць `sys_ecr.*` немає
+доменних сутностей, тому міграція їх не створює, і застосунок на старті впаде
+на seed (`Q-041`).
 
 ⚠ `-I` (QUOTED_IDENTIFIER ON) **обов'язковий**: без нього падає створення
 фільтрованих індексів `UX_User_Sid` і `UX_User_Bootstrap` з `Msg 1934`.

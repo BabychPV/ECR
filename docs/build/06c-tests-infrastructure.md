@@ -82,6 +82,24 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     public void Усі_унікальні_індекси_партиційованих_таблиць_містять_PeriodKey()
         => Assert.Fail("not implemented");
 
+    // ⚠ Обидва тести додані після Q-035: міграція EF кладе партиційовані
+    // таблиці на PRIMARY, бо ON ps_ByPeriodKey(PeriodKey) вона виставити не
+    // вміє. Без цих двох перевірок випадіння 07-partition-tables.sql із
+    // розгортання не помітив би НІХТО — архівація «працює» і не звільняє
+    // нічого, без жодної помилки.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public void Партиційовані_таблиці_лежать_на_схемі_партиціонування()
+        => Assert.Fail("not implemented");
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public void Кластерний_індекс_CellValue_стиснений_сторінково()
+        => Assert.Fail("not implemented");
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -643,25 +661,30 @@ namespace Ecr.Infrastructure.Tests.Caching;
 /// Ключ <c>v{id}:r{rev}</c> робить інвалідацію непотрібною: презентаційна
 /// правка створює новий ключ, а не псує старий (D-16).
 /// </summary>
-public sealed class MetadataCacheTests
+[Collection("SqlServer")]
+public sealed class MetadataCacheTests(SqlServerFixture sql)
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public void Повторне_читання_не_звертається_до_БД()
         => Assert.Fail("not implemented");
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public void Після_презентаційної_правки_повертається_новий_знімок()
         => Assert.Fail("not implemented");
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public void Старий_знімок_лишається_валідним_для_старого_ключа()
         => Assert.Fail("not implemented");
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public void Знімок_містить_індекси_колонок_і_рядків_для_швидкого_доступу()
         => Assert.Fail("not implemented");
 }

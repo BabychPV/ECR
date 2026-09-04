@@ -390,6 +390,7 @@ public enum CellStorageMode : byte
 // src/Ecr.Domain/ValueObjects/PeriodKey.cs
 namespace Ecr.Domain.ValueObjects;
 
+using System.Globalization;
 using Ecr.Domain.Enums;
 
 /// <summary>
@@ -427,7 +428,12 @@ public readonly record struct PeriodKey(int Value)
         _ => (Create(year, 1), Create(year, 99))
     };
 
-    public override string ToString() => Value.ToString();
+    /// <remarks>
+    /// ⚠ <see cref="CultureInfo.InvariantCulture"/> обов'язково: ключ їде в
+    /// SQL, у ключі кешу <c>v{id}:r{rev}</c> і в URL. Локаль сервера не має
+    /// права на нього впливати (`docs/tz/08-nfr.md` §90, `Q-040`).
+    /// </remarks>
+    public override string ToString() => Value.ToString(CultureInfo.InvariantCulture);
 }
 ```
 
@@ -2368,12 +2374,24 @@ public sealed record RowDto(
 | `05-rpt-views.sql` | генеровані вʼюхи `rpt.v_*` |
 | `06-rcsi.sql` | `ALTER DATABASE … SET READ_COMMITTED_SNAPSHOT ON` |
 | `07-partition-tables.sql` | **прив'язка партиційованих таблиць до схем** + `DATA_COMPRESSION = PAGE` на `PK_CellValue` |
+| `08-system-tables.sql` | таблиці `sys_ecr.*`: `Language`, `SystemSetting`, `UiString`, `UiStringRevision` |
+| `09-seed.sql` | seed чистої БД — **єдиний скрипт, який виконує застосунок**, а не SQL Agent |
 
 ⚠ `07` існує тому, що `ON ps_ByPeriodKey(PeriodKey)` — частина `CREATE TABLE`, а
 `migrationBuilder` цього не вміє: анотації для розміщення на схемі
 партиціонування в EF Core немає. Без `07` таблиці лягають на `PRIMARY`, і
 модель архівації **мовчки** не працює — `TRUNCATE … WITH (PARTITIONS)`
 виконається і не звільнить нічого (`Q-035`).
+
+⚠ `08` існує з тієї самої причини, з іншого боку: у таблиць `sys_ecr.*` **немає
+доменних сутностей** (доступ через порт `IUiStringCatalog`), а чого немає в
+моделі EF — того міграція не створить. Без `08` seed падає на першому ж
+`MERGE sys_ecr.Language` (`Q-041`).
+
+⚠ `09-seed.sql` — виняток із правила `D-66`: його виконує **застосунок**
+(`SeedRunner`), бо seed це DML, а не DDL, і без нього застосунок не стартує
+(§14). Файл вбудований у збірку як `EmbeddedResource` і витягнутий скриптом із
+`02a-db-schema.md` §17, щоб не з'явилося другої, розбіжної копії.
 
 **Порядок:** `01` → `02` → міграції EF → `07` → `03`, `04`, `05` → `06`.
 Скрипти `03` і `05` посилаються на `calc.*` і `arc.*`, тому до етапів 3–5 їх
