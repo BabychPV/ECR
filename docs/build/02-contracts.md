@@ -845,6 +845,9 @@ namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
+using Ecr.Expressions.Graph;
+using Ecr.Expressions.Parsing;
 
 /// <summary>
 /// Рушій виразів. Один парсер на обидва діалекти; NCalc використовується як
@@ -871,11 +874,99 @@ public interface IFormulaEngine
     /// </summary>
     OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
+// Оголошені поруч із портом — за конвенцією самого пакета (пор. IBackgroundJobScheduler.cs,
+// де в тому самому файлі живуть IBackgroundJob, IJobProgress і JobStatus).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Розкрита залежність формули — контрактна проєкція <c>cfg.FormulaDependency</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — тверде.</b> Поля дослівно повторюють колонки
+/// <c>cfg.FormulaDependency</c> (`02a-db-schema.md` рядок 401) і тип
+/// <c>Ecr.Expressions.Binding.ExtractedDependency</c> з `05d`, а
+/// <c>FormulaEngine.ExtractDependencies</c> у своєму <c>TODO</c> прямо каже
+/// «делегувати dependencyExtractor і <b>спроєктувати в контрактний тип</b>».
+/// Колонки <c>Id</c>, <c>SourceKind</c>, <c>FormulaDefId</c>, <c>BindingId</c>
+/// сюди не входять: їх проставляє той, хто зберігає залежність, а не той, хто
+/// її витягує з виразу.
+/// </remarks>
+/// <param name="DependsOnKind">0 Cell, 1 Header, 2 Registry, 3 CrossPeriod, 4 CrossProject.</param>
+/// <param name="TableDefId">Таблиця, на яку вказує залежність.</param>
+/// <param name="RowKey"><b>Конкретний</b> рядок; <c>null</c> для предиката (B03 §4).</param>
+/// <param name="ColumnDefId">Колонка.</param>
+/// <param name="FilterJson">Предикат для <c>RowMode = Dynamic</c>.</param>
+/// <param name="PeriodOffset"><c>[Period:-1]</c> → −1.</param>
+/// <param name="SortOrder">Позиція в розкритому діапазоні.</param>
+public sealed record FormulaDependencyRef(
+    byte DependsOnKind,
+    int? TableDefId,
+    string? RowKey,
+    int? ColumnDefId,
+    string? FilterJson,
+    short? PeriodOffset,
+    int SortOrder);
+
+/// <summary>
+/// Контекст витягування залежностей: те, чого немає в самому виразі, але без
+/// чого скорочені форми посилань не резолвляться (02b §3.1).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Два останні поля дослівно повторюють
+/// параметри <c>DependencyExtractor.Extract(AstNode, int currentTableDefId,
+/// string? currentRowKey)</c> і <c>ReferenceResolver.Resolve(...)</c> з `05d`.
+/// <see cref="TemplateVersionId"/> додано мною: резолвер працює зі
+/// <c>TemplateVersionSnapshot</c>, і без ідентифікатора версії порт не може
+/// його дістати.
+/// </remarks>
+/// <param name="TemplateVersionId">Версія шаблону, у межах якої резолвляться коди.</param>
+/// <param name="CurrentTableDefId">Таблиця, в якій живе формула — для скорочених форм.</param>
+/// <param name="CurrentRowKey">Рядок формули; <c>null</c> для формул рівня колонки.</param>
+public sealed record DependencyContext(
+    int TemplateVersionId,
+    int CurrentTableDefId,
+    string? CurrentRowKey);
+
+/// <summary>
+/// Вузол графа обчислення для <see cref="IFormulaEngine.BuildEvaluationOrder"/> —
+/// контрактна проєкція <c>cfg.FormulaDef</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — тверде</b> (спершу було «слабке»; уточнено за
+/// схемою після рев'ю Етапу 0). Поля відповідають колонкам
+/// <c>cfg.FormulaDef</c> (<c>02a</c> рядок 374): формула ідентифікується
+/// <c>Id</c>, прив'язана до <c>TableDefId</c>, а її <c>Scope</c> визначає,
+/// котре з <c>ColumnDefId</c>/<c>RowDefId</c> заповнене — це закріплено
+/// перевіркою <c>CK_Formula_Scope</c>. Саме тому вузол оперує
+/// <c>RowDefId</c>, а не <c>RowKey</c>: формула належить <b>визначенню</b>
+/// рядка, а не його ключу.
+/// Результат сортування лягає в <c>cfg.FormulaDef.EvaluationOrder</c> — воно
+/// «обчислюється при <c>Publish</c>, не в рантаймі» (ФВ-9.4).
+/// </remarks>
+/// <param name="FormulaDefId">Ідентифікатор формули — він же вузол графа.</param>
+/// <param name="TableDefId">Таблиця, якій належить формула.</param>
+/// <param name="Scope">Рівень: колонка, рядок або комірка.</param>
+/// <param name="ColumnDefId">Колонка; заповнена для <c>Column</c> і <c>Cell</c>.</param>
+/// <param name="RowDefId">Рядок; заповнений для <c>Row</c> і <c>Cell</c>.</param>
+/// <param name="DependsOnFormulaDefIds">Формули, від яких залежить ця.</param>
+public sealed record FormulaNode(
+    int FormulaDefId,
+    int TableDefId,
+    FormulaScope Scope,
+    int? ColumnDefId,
+    int? RowDefId,
+    IReadOnlyList<int> DependsOnFormulaDefIds);
 ```
 
 ```csharp
 // src/Ecr.Application/Ports/ICalculationModule.cs
 namespace Ecr.Application.Ports;
+
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Модуль розрахунку емісій. <b>Окрема точка розширення від</b>
@@ -887,7 +978,7 @@ public interface ICalculationModule
     string Code { get; }
 
     /// <summary>Рівень драбини виразності, який реалізує модуль.</summary>
-    Ecr.Domain.Enums.CalculationLevel Level { get; }
+    CalculationLevel Level { get; }
 
     /// <summary>Чи здатний модуль обробити цю методологію.</summary>
     bool CanHandle(MethodologyDescriptor methodology);
@@ -895,6 +986,145 @@ public interface ICalculationModule
     /// <summary>Виконує розрахунок. Не пише в БД — повертає результат.</summary>
     Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Опис версії методології — те, за чим модуль вирішує, чи здатний він її
+/// обробити, і за чим рушій знає, як саме рахувати.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Склад полів визначений двома
+/// джерелами. По-перше, <c>GenericCalculationModule.CanHandle</c> у своєму
+/// <c>TODO</c> вимагає <c>methodology.Level == Configuration</c> — отже
+/// <see cref="Level"/> обов'язковий. По-друге, <c>MethodologyVersion</c>
+/// (`05b`) називає три режими, кожен з яких <b>визначає числа</b>:
+/// <c>NumericMode</c> (момент округлення, ФВ-9.9), <c>CalendarMode</c>
+/// (тривалість періоду, ФВ-16.11) і <c>TraceLevel</c> (обсяг журналу, ФВ-9.13).
+/// Модуль не може рахувати, не знаючи їх, і читати сутність сам він не має
+/// права — тому вони тут.
+/// Опис <b>не</b> містить формул, констант і речовин: їх модуль бере через
+/// власні залежності, а descriptor лишається легким — його передають на
+/// кожен рядок.
+/// </remarks>
+/// <param name="MethodologyId">Методологія.</param>
+/// <param name="MethodologyVersionId">Версія — те, що реально рахує.</param>
+/// <param name="Code">Код методології.</param>
+/// <param name="VersionNumber">Номер версії.</param>
+/// <param name="Level">Рівень драбини виразності.</param>
+/// <param name="NumericMode">Арифметика; <c>Legacy</c> відтворює числа чинної системи.</param>
+/// <param name="CalendarMode">Джерело тривалості періоду.</param>
+/// <param name="TraceLevel">Скільки писати в <c>calc.CalculationStep</c>.</param>
+public sealed record MethodologyDescriptor(
+    int MethodologyId,
+    int MethodologyVersionId,
+    string Code,
+    string VersionNumber,
+    CalculationLevel Level,
+    NumericMode NumericMode,
+    CalendarMode CalendarMode,
+    TraceLevel TraceLevel);
+
+/// <summary>
+/// Вхід розрахунку — <b>один рядок документа</b> з усіма аргументами.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Гранульованість «один рядок»
+/// задана <c>CalculationInputBuilder.BuildAsync</c>: «для кожного рядка зібрати
+/// CalculationInput» — і тим, що метод повертає
+/// <c>IReadOnlyList&lt;CalculationInput&gt;</c> на набір <c>rowKeys</c>.
+/// Склад <see cref="CalculationArgument"/> дослівно повторює колонки
+/// <c>calc.CalculationInput</c> (`02a-db-schema.md` рядок 1158):
+/// <c>ArgumentCode</c>, <c>Value</c>, <c>ValueString</c>, <c>UnitId</c>.
+/// <c>DocumentId</c> і <c>SourceRowKey</c> — теж колонки тієї таблиці.
+/// <see cref="TableInstanceId"/> і <see cref="PeriodKey"/> додано мною:
+/// без них модуль не має календарного контексту, а <c>CalendarMode</c> без
+/// періоду не працює (D-78).
+/// </remarks>
+/// <param name="Methodology">Версія методології, яку виконують.</param>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="TableInstanceId">Таблиця документа, з якої взято рядок.</param>
+/// <param name="PeriodKey">Період — потрібен для календарного контексту.</param>
+/// <param name="SourceRowKey">Рядок документа; <c>null</c> для розрахунку рівня таблиці.</param>
+/// <param name="Arguments">Аргументи в одиницях джерела.</param>
+public sealed record CalculationInput(
+    MethodologyDescriptor Methodology,
+    long DocumentId,
+    long TableInstanceId,
+    PeriodKey PeriodKey,
+    string? SourceRowKey,
+    IReadOnlyList<CalculationArgument> Arguments);
+
+/// <summary>Один аргумент розрахунку — рядок <c>calc.CalculationInput</c>.</summary>
+/// <remarks>
+/// Значення зберігається <b>в одиниці джерела</b>: конверсія на межі, а не в
+/// сховищі, інакше повторний перерахунок з архіву дасть інший результат (ФВ-16.9).
+/// </remarks>
+/// <param name="ArgumentCode">Ім'я аргументу — те, на що посилається <c>@Arg</c>.</param>
+/// <param name="Value">Числове значення; <c>null</c> — порожньо.</param>
+/// <param name="ValueString">Текстове значення для нечислових аргументів.</param>
+/// <param name="UnitId">Одиниця значення; <c>null</c> — безрозмірне.</param>
+public sealed record CalculationArgument(
+    string ArgumentCode,
+    decimal? Value,
+    string? ValueString,
+    int? UnitId);
+
+/// <summary>
+/// Результат розрахунку одного рядка: <b>усі</b> виходи методології плюс трейс.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Контейнер, а не один рядок, бо
+/// <c>GenericCalculationModule.ExecuteAsync</c> повертає <b>один</b>
+/// <c>CalculationOutput</c> на вхід, а рахувати має «для КОЖНОЇ речовини
+/// методології … виходи (tons, gsec)» — тобто кілька значень.
+/// <see cref="CalculationOutputValue"/> лягає 1:1 на <c>calc.CalculationResult</c>
+/// (`02a` рядок 1131), <see cref="CalculationTraceStep"/> — на
+/// <c>calc.CalculationStep</c> (`02a` рядок 1179).
+/// Модуль у БД не пише (D-69) — запис робить реалізація
+/// <c>ICalculationResultStore</c>.
+/// </remarks>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="SourceRowKey">Рядок документа.</param>
+/// <param name="Values">Обчислені виходи.</param>
+/// <param name="Trace">Кроки трейсу; порожній список, якщо <c>TraceLevel = Off</c>.</param>
+public sealed record CalculationOutput(
+    long DocumentId,
+    string? SourceRowKey,
+    IReadOnlyList<CalculationOutputValue> Values,
+    IReadOnlyList<CalculationTraceStep> Trace);
+
+/// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
+/// <param name="MethodologyVersionId">Версія, що дала число.</param>
+/// <param name="SubstanceEntryId">Речовина; <c>null</c> для виходів без речовини.</param>
+/// <param name="OutputCode">Код виходу з <c>calc.MethodologyOutput</c>.</param>
+/// <param name="Value">Значення. <c>float</c> заборонений (D-30).</param>
+/// <param name="UnitId">Одиниця результату — обов'язкова (ФВ-16.6).</param>
+public sealed record CalculationOutputValue(
+    int MethodologyVersionId,
+    int? SubstanceEntryId,
+    string OutputCode,
+    decimal Value,
+    int UnitId);
+
+/// <summary>Крок трейсу — рядок <c>calc.CalculationStep</c>.</summary>
+/// <remarks>
+/// Обсяг трейсу керується <c>TraceLevel</c> версії: керуємо тим, <b>що</b>
+/// пишемо, а не скільки зберігаємо (ЗБР-3).
+/// </remarks>
+/// <param name="StepOrder">Порядок кроку.</param>
+/// <param name="StepCode">Код кроку — зазвичай код формули або виходу.</param>
+/// <param name="Expression">Вираз як його бачив рушій.</param>
+/// <param name="Value">Значення кроку.</param>
+/// <param name="TraceJson">Довільна деталізація: підставлені аргументи, константи.</param>
+public sealed record CalculationTraceStep(
+    int StepOrder,
+    string StepCode,
+    string? Expression,
+    decimal? Value,
+    string? TraceJson);
 ```
 
 ```csharp
@@ -921,6 +1151,100 @@ public interface IExternalDataSource
     /// </summary>
     Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Елемент каталогу джерела — те, що конфігуратор бачить у списку і з чого
+/// створює <c>ext.SourceEntity</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — часткове</b> (спершу «слабке»; уточнено після
+/// рев'ю Етапу 0). Поля дослівно відповідають колонкам <c>ext.SourceEntity</c>
+/// (<c>02a</c> рядок 1342): <c>Code</c>, <c>DisplayName</c>, <c>EntityPath</c> —
+/// саме їх заповнює «каталог сутностей джерела — для конфігуратора, щоб не
+/// вводити імена руками». Адаптер при цьому <b>не створює артефактів у базі
+/// джерела</b> (ФВ-11.2): <c>Discover</c> лише читає.
+/// <see cref="SourceUnitSymbol"/> додано мною, бо обидві реалізації
+/// <c>DiscoverAsync</c> у своїх <c>TODO</c> пишуть «збирати атрибути
+/// <b>з їхнім UOM</b>»: одиниця джерела — «найчастіше джерело мовчазних
+/// розбіжностей у числах» (ФВ-16.9), і побачити її треба вже в каталозі.
+/// <c>Id</c>, <c>DataSourceId</c>, <c>RegistryDefId</c>, <c>IsActive</c> сюди
+/// не входять: це наші поля, а не поля джерела.
+/// </remarks>
+/// <param name="Code">Унікальний у межах джерела код.</param>
+/// <param name="DisplayName">Людська назва.</param>
+/// <param name="EntityPath">Шлях в ієрархії AF.</param>
+/// <param name="SourceUnitSymbol">UOM атрибута в термінах джерела; <c>null</c> — безрозмірний.</param>
+/// <param name="DataType">Тип значення в термінах джерела.</param>
+public sealed record SourceEntityDescriptor(
+    string Code,
+    string? DisplayName,
+    string? EntityPath,
+    string? SourceUnitSymbol,
+    string? DataType);
+
+/// <summary>Запит на читання діапазону з джерела.</summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — слабке (здогадка).</b> Форма виведена з
+/// <c>CollectionRunner.RunAsync(int sourceEntityId, DateTime from, DateTime to, …)</c>
+/// і з таблиці <c>itg.CollectionRun</c> (<c>SourceEntityId</c>,
+/// <c>RangeFrom</c>, <c>RangeTo</c>). <see cref="SourcePath"/> потрібен, бо
+/// природний ключ <c>ext.RawDataPoint</c> — це
+/// <c>(SourceEntityId, SourcePath, Timestamp)</c>, а одна сутність джерела може
+/// мати кілька атрибутів. <see cref="MaxPoints"/> додано мною: обидві
+/// реалізації <c>ReadAsync</c> у <c>TODO</c> вимагають «батчі обмеженого розміру».
+/// </remarks>
+/// <param name="DataSourceId">Джерело — визначає транспорт і облікові дані.</param>
+/// <param name="SourceEntityId">Сутність джерела.</param>
+/// <param name="SourcePath">Шлях атрибута; частина природного ключа точки.</param>
+/// <param name="FromUtc">Початок діапазону, включно.</param>
+/// <param name="ToUtc">Кінець діапазону, виключно.</param>
+/// <param name="MaxPoints">Обмеження розміру батча.</param>
+public sealed record CollectionRequest(
+    int DataSourceId,
+    int SourceEntityId,
+    string SourcePath,
+    DateTime FromUtc,
+    DateTime ToUtc,
+    int MaxPoints);
+
+/// <summary>Прочитане з джерела плюс те, що прочитати не вдалося.</summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Наявність
+/// <see cref="FailedIntervals"/> — не прикраса, а пряма вимога <c>TODO</c>
+/// обох реалізацій: «часткова відмова батча — це НЕ загальний провал: успішні
+/// точки зберегти, невдалі повернути в catch-up». Без цього поля адаптер може
+/// повідомити лише «все добре» або «все погано», і журнал покриття
+/// (<c>itg.CollectionCoverage</c>) стане неправдивим.
+/// </remarks>
+/// <param name="Points">Точки в <b>одиниці джерела</b> (ФВ-16.9).</param>
+/// <param name="FailedIntervals">Інтервали, які треба дозібрати.</param>
+/// <param name="ErrorCode">Код помилки джерела (<c>ECR-INT-0503</c>); <c>null</c> — відмов не було.</param>
+public sealed record CollectionResult(
+    IReadOnlyList<SourceDataPoint> Points,
+    IReadOnlyList<TimeInterval> FailedIntervals,
+    string? ErrorCode);
+
+/// <summary>Одна прочитана точка — рядок <c>ext.RawDataPoint</c> до збереження.</summary>
+/// <param name="SourcePath">Шлях атрибута.</param>
+/// <param name="Timestamp">Мітка часу точки.</param>
+/// <param name="ValueNumeric">Числове значення в одиниці джерела.</param>
+/// <param name="ValueString">Текстове значення для нечислових тегів.</param>
+/// <param name="SourceUnitSymbol">UOM джерела; конверсія — на межі, із записом у журнал.</param>
+/// <param name="Quality">Якість у термінах джерела.</param>
+public sealed record SourceDataPoint(
+    string SourcePath,
+    DateTime Timestamp,
+    decimal? ValueNumeric,
+    string? ValueString,
+    string? SourceUnitSymbol,
+    string? Quality);
+
+/// <summary>Часовий інтервал; кінець виключно.</summary>
+public sealed record TimeInterval(DateTime FromUtc, DateTime ToUtc);
 ```
 
 ```csharp
@@ -1045,6 +1369,9 @@ public sealed record UiStringCatalog(
 // src/Ecr.Application/Ports/ISimulationService.cs
 namespace Ecr.Application.Ports;
 
+using Ecr.Application.Security;
+using Ecr.Domain.Enums;
+
 /// <summary>
 /// Симуляція «очима користувача» (<c>ФВ-6.16a</c>, <c>D-96</c>).
 /// **Лише читання**: будь-який запис під нею відхиляється з
@@ -1091,6 +1418,229 @@ public interface IOrphanScanner
     /// <c>Submit</c>.
     /// </summary>
     Task<int> RescanForEntryAsync(long registryEntryId, CancellationToken ct);
+}
+```
+
+---
+
+
+
+> Тип живе в `Ecr.Expressions`, а не в `Ecr.Application`: він належить рушієві виразів, а порт лише його повертає.
+
+```csharp
+// src/Ecr.Expressions/Evaluation/EvaluationResult.cs
+using Ecr.Expressions.Parsing;
+
+namespace Ecr.Expressions.Evaluation;
+
+/// <summary>
+/// Результат обчислення виразу: значення плюс діагностики.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Q-014, обґрунтування — тверде.</b> Файл оголошений у дереві
+/// `05-skeleton.md` §1, але секції з вмістом у `05d` немає (Q-015). Форма
+/// виведена з <c>FormulaEngine.Evaluate</c>, чий <c>TODO</c> каже дослівно:
+/// «делегувати evaluator; <b>загорнути результат і діагностики</b>».
+/// <c>Evaluator.Evaluate</c> повертає <see cref="ExpressionValue"/>, а
+/// діагностики в пакеті мають рівно один тип —
+/// <see cref="ExpressionDiagnostic"/> (02b §11).
+///
+/// Помилка обчислення — це <b>значення</b> всередині
+/// <see cref="ExpressionValue"/> (<c>#DIV/0</c>, <c>#REF</c>, <c>#VALUE</c>,
+/// <c>#UNIT</c>, <c>#CYCLE</c>), а не запис у <see cref="Diagnostics"/>:
+/// одна зіпсована комірка не валить перерахунок таблиці (02b §6.4).
+/// У <see cref="Diagnostics"/> потрапляє те, що стосується <b>виразу</b>, а не
+/// його значення — нерезолвлене посилання, невідома функція.
+/// </remarks>
+/// <param name="Value">Обчислене значення; може бути <c>null</c>-значенням або помилкою.</param>
+/// <param name="Diagnostics">Діагностики виразу; порожній список — усе гаразд.</param>
+public sealed record EvaluationResult(
+    ExpressionValue Value,
+    IReadOnlyList<ExpressionDiagnostic> Diagnostics);
+```
+
+> Уведений за `Q-018` (варіант B) — щоб `Ecr.Calculations` не залежав від EF Core.
+
+```csharp
+// src/Ecr.Application/Ports/IMethodologyStore.cs
+namespace Ecr.Application.Ports;
+
+using Ecr.Domain.Entities.Calculations;
+
+/// <summary>
+/// Читання конфігурації методологій зі сховища.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Порт уведений за рішенням Q-018 (варіант B).</b> До цього
+/// <c>Ecr.Calculations.MethodologyResolver</c> був типізований напряму на
+/// <c>Ecr.Infrastructure.Persistence.EcrDbContext</c>, чого не передбачає
+/// <c>05-skeleton.md</c> §4. Порт лишає <b>логіку</b> підбору версії і
+/// зіставлення рядків у <c>Ecr.Calculations</c>, а сховище — в
+/// <c>Ecr.Infrastructure</c>: інакше проєкт, у якому живуть числа викидів,
+/// неможливо було б протестувати без бази.
+/// </remarks>
+public interface IMethodologyStore
+{
+    /// <summary>
+    /// Опубліковані версії методології. Вибір чинної на дату робить викликач:
+    /// правило «максимальний <c>EffectiveFrom</c> ≤ дата» — це домен, не сховище.
+    /// </summary>
+    Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsAsync(int methodologyId, CancellationToken ct);
+
+    /// <summary>Активні правила прив'язки версії, впорядковані за <c>Priority</c>.</summary>
+    Task<IReadOnlyList<MethodologyRule>> GetRulesAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Формули версії в порядку обчислення.</summary>
+    Task<IReadOnlyList<MethodologyFormula>> GetFormulasAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Речовини версії: для кожної рахуються власні виходи.</summary>
+    Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Оголошені виходи версії — з обов'язковими одиницями (ФВ-16.6).</summary>
+    Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
+}
+```
+
+> Уведений за `Q-018`. Віддає **кандидатів**, а не значення: вибір за категорією, речовиною і датою — правило предметної області (`ФВ-16.5`), і воно лишається в `Ecr.Calculations`.
+
+```csharp
+// src/Ecr.Application/Ports/IConstantStore.cs
+namespace Ecr.Application.Ports;
+
+using Ecr.Domain.Entities.Calculations;
+
+/// <summary>
+/// Читання констант методології зі сховища.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Порт уведений за рішенням Q-018 (варіант B).</b>
+/// Порт віддає <b>кандидатів</b>, а не готове значення: звуження за категорією
+/// і речовиною та вибір темпорального інтервалу — це правила предметної
+/// області (ФВ-16.5), і живуть вони в
+/// <c>Ecr.Calculations.ConstantResolver</c>. Зокрема правило «кілька кандидатів
+/// на одну дату — помилка конфігурації, а не привід узяти перший» неможливо
+/// перевірити, якщо сховище вже вибрало один запис.
+/// </remarks>
+public interface IConstantStore
+{
+    /// <summary>
+    /// Усі константи версії з цим кодом — разом із темпоральними варіантами
+    /// та варіантами за категорією і речовиною.
+    /// </summary>
+    Task<IReadOnlyList<MethodologyConstant>> GetCandidatesAsync(
+        int methodologyVersionId, string code, CancellationToken ct);
+}
+```
+
+> Уведений за `Q-018`. Пише лише в `calc.CalculationResult` і `calc.CalculationStep`; у `doc.CellValue` результати методологій не потрапляють ніколи (`D-69`).
+
+```csharp
+// src/Ecr.Application/Ports/ICalculationResultStore.cs
+namespace Ecr.Application.Ports;
+
+using Ecr.Domain.Enums;
+
+/// <summary>
+/// Запис результатів прогону розрахунку.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Порт уведений за рішенням Q-018 (варіант B).</b> До цього
+/// <c>Ecr.Calculations.CalculationOutputWriter</c> був типізований напряму на
+/// <c>EcrDbContext</c> і <c>BulkCellLoader</c>.
+///
+/// Пише <b>тільки</b> в <c>calc.CalculationResult</c> і <c>calc.CalculationStep</c>.
+/// У <c>doc.CellValue</c> результати методологій не потрапляють ніколи (D-69):
+/// інакше нічний перерахунок писав би десятки мільйонів рядків у партиції
+/// документів і роздував <c>aud.CellChange</c>.
+/// </remarks>
+public interface ICalculationResultStore
+{
+    /// <summary>
+    /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
+    /// одним викликом <c>sp_sequence_get_range</c>.
+    /// </summary>
+    Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct);
+
+    /// <summary>
+    /// Пише результати пакетно (<c>SqlBulkCopy</c>). <c>SaveChanges</c> у циклі
+    /// заборонений: бюджет річного перерахунку — 10 хвилин (ПРД-13).
+    /// </summary>
+    Task WriteResultsAsync(long calculationRunId, IReadOnlyList<CalculationOutput> outputs, CancellationToken ct);
+
+    /// <summary>
+    /// Пише трейс — лише те, що передбачає <paramref name="traceLevel"/>.
+    /// Керуємо тим, <b>що</b> пишемо, а не скільки зберігаємо (ЗБР-3).
+    /// </summary>
+    Task WriteTraceAsync(
+        long calculationRunId, IReadOnlyList<CalculationOutput> outputs,
+        TraceLevel traceLevel, CancellationToken ct);
+
+    /// <summary>Інвалідує залежні зрізи <c>rpt.*</c> після завершення прогону.</summary>
+    Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
+}
+```
+
+> Уведений за `Q-018` — щоб `Ecr.Adapters.PiAf` не залежав від EF Core. Джерело істини про покриття — `itg.CollectionCoverage`, а не `Watermark` (`ER-I-03`).
+
+```csharp
+// src/Ecr.Application/Ports/ICollectionStore.cs
+namespace Ecr.Application.Ports;
+
+using Ecr.Domain.Entities.External;
+
+/// <summary>
+/// Стан і результати збору із зовнішніх джерел.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Порт уведений за рішенням Q-018 (варіант B).</b> До цього
+/// <c>Ecr.Adapters.PiAf.CollectionRunner</c> і <c>CatchUpPlanner</c> були
+/// типізовані напряму на <c>EcrDbContext</c>, хоча <c>05-skeleton.md</c> §4
+/// дозволяє адаптерам знати лише <c>Domain</c> і <c>Application</c>.
+///
+/// Джерело істини щодо того, за які інтервали дані вже є, — це
+/// <c>itg.CollectionCoverage</c>, а не <c>Watermark</c> у розкладі:
+/// watermark — оптимізація, а не стан, і його втрата не має коштувати даних
+/// (ER-I-03).
+/// </remarks>
+public interface ICollectionStore
+{
+    /// <summary>Сутність джерела; <c>null</c>, якщо її немає або вона вимкнена.</summary>
+    Task<SourceEntity?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
+
+    /// <summary>Джерело — воно визначає транспорт. Вибір транспорту це налаштування, не гілка коду (ФВ-11.2).</summary>
+    Task<DataSource?> FindDataSourceAsync(int dataSourceId, CancellationToken ct);
+
+    /// <summary>Створює <c>itg.CollectionRun</c> і повертає його ідентифікатор.</summary>
+    Task<long> StartRunAsync(
+        int sourceEntityId, DateTime fromUtc, DateTime toUtc,
+        bool isCatchUp, int? triggeredByUserId, CancellationToken ct);
+
+    /// <summary>Завершує прогін. Відмова джерела — теж завершення, зі статусом і кодом.</summary>
+    Task FinishRunAsync(
+        long collectionRunId, string status, int pointsRetrieved,
+        string? errorMessage, CancellationToken ct);
+
+    /// <summary>
+    /// Upsert точок за природним ключем <c>(SourceEntityId, SourcePath, Timestamp)</c> —
+    /// повторний запуск того самого діапазону не дублює даних (ФВ-11.3).
+    /// Значення зберігаються <b>в одиниці джерела</b> (ФВ-16.9).
+    /// </summary>
+    /// <returns>Скільки точок фактично записано.</returns>
+    Task<int> UpsertRawPointsAsync(
+        long collectionRunId, int sourceEntityId,
+        IReadOnlyList<SourceDataPoint> points, CancellationToken ct);
+
+    /// <summary>Записує покриті інтервали в <c>itg.CollectionCoverage</c>.</summary>
+    Task WriteCoverageAsync(
+        long collectionRunId, int sourceEntityId,
+        IReadOnlyList<TimeInterval> covered, CancellationToken ct);
+
+    /// <summary>
+    /// Покриті інтервали від <paramref name="notBefore"/> — основа для пошуку
+    /// прогалин. Ознака здоров'я інтеграції — саме журнал покриття, а не тиша (ІНТ-3.3).
+    /// </summary>
+    Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
+        int sourceEntityId, DateTime notBefore, CancellationToken ct);
 }
 ```
 
@@ -1339,6 +1889,8 @@ public sealed class NotFoundException(string errorCode, string message)
 // src/Ecr.Application/Templates/Dto/TemplateDiffDto.cs
 namespace Ecr.Application.Templates.Dto;
 
+using Ecr.Domain.Enums;
+
 /// <summary>
 /// Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,
 /// `RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б
@@ -1365,6 +1917,10 @@ public sealed record TemplateChangeDto(
 // src/Ecr.Application/Templates/Dto/TemplateStructureDto.cs
 namespace Ecr.Application.Templates.Dto;
 
+using Ecr.Application.Documents.Dto;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+
 /// <summary>
 /// Структура опублікованої версії — те, що віддається клієнту й кешується за
 /// ключем <c>v{id}:r{rev}</c> (`ФВ-2.5`).
@@ -1388,6 +1944,8 @@ public sealed record TableDto(
 ```csharp
 // src/Ecr.Application/Registries/Dto/RegistryEntryDto.cs
 namespace Ecr.Application.Registries.Dto;
+
+using Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Запис довідника для UI і резолвінгу. У комірці зберігається

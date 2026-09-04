@@ -80,18 +80,18 @@ SELECT SERVERPROPERTY('Edition')             AS Edition,
 
 | Пакет | Версія | Ліцензія | Навіщо |
 |---|---|---|---|
-| `Microsoft.EntityFrameworkCore` | 10.0.0 | MIT | ORM (`D-02`) |
-| `Microsoft.EntityFrameworkCore.SqlServer` | 10.0.0 | MIT | провайдер |
-| `Microsoft.EntityFrameworkCore.Design` | 10.0.0 | MIT | `dotnet ef migrations` |
-| `Microsoft.EntityFrameworkCore.Relational` | 10.0.0 | MIT | транзитивно, фіксуємо явно |
-| `Microsoft.Data.SqlClient` | 6.0.1 | MIT | `SqlBulkCopy`, raw SQL |
-| `Microsoft.Extensions.Hosting` | 10.0.0 | MIT | host, DI, конфіг |
-| `Microsoft.Extensions.Caching.Memory` | 10.0.0 | MIT | `IMemoryCache` |
-| `Microsoft.Extensions.Caching.SqlServer` | 10.0.0 | MIT | `IDistributedCache` без Redis (`D-06`) |
-| `Microsoft.AspNetCore.OpenApi` | 10.0.0 | MIT | генерація OpenAPI (`D-07`) |
+| `Microsoft.EntityFrameworkCore` | 10.0.11 | MIT | ORM (`D-02`) |
+| `Microsoft.EntityFrameworkCore.SqlServer` | 10.0.11 | MIT | провайдер |
+| `Microsoft.EntityFrameworkCore.Design` | 10.0.11 | MIT | `dotnet ef migrations` |
+| `Microsoft.EntityFrameworkCore.Relational` | 10.0.11 | MIT | транзитивно, фіксуємо явно |
+| `Microsoft.Data.SqlClient` | 6.1.6 | MIT | `SqlBulkCopy`, raw SQL |
+| `Microsoft.Extensions.Hosting` | 10.0.11 | MIT | host, DI, конфіг |
+| `Microsoft.Extensions.Caching.Memory` | 10.0.11 | MIT | `IMemoryCache` |
+| `Microsoft.Extensions.Caching.SqlServer` | 10.0.11 | MIT | `IDistributedCache` без Redis (`D-06`) |
+| `Microsoft.AspNetCore.OpenApi` | 10.0.11 | MIT | генерація OpenAPI (`D-07`) |
 | `Scalar.AspNetCore` | 2.0.0 | MIT | UI документації (`D-07`) |
-| `Microsoft.AspNetCore.Authentication.Negotiate` | 10.0.0 | MIT | Windows-автентифікація |
-| `NCalcSync` | 5.4.0 | MIT | обчислювач виразів (`D-19`) — **не парсер нашої мови** |
+| `Microsoft.AspNetCore.Authentication.Negotiate` | 10.0.11 | MIT | Windows-автентифікація |
+| `NCalcSync` | **6.1.1** | MIT | обчислювач виразів (`D-19`) — **не парсер нашої мови**. Мажор 5→6 за `Q-004`: у 5.x немає виправлення `GHSA-3w5p-95mh-gq75` |
 | `ClosedXML` | 0.104.2 | MIT | експорт/імпорт `.xlsx` |
 | `Quartz` | 3.13.1 | Apache-2.0 | планувальник — **дефолтна реалізація** `IBackgroundJobScheduler` |
 | `Quartz.Extensions.Hosting` | 3.13.1 | Apache-2.0 | інтеграція з host |
@@ -111,8 +111,8 @@ SELECT SERVERPROPERTY('Edition')             AS Edition,
 | `xunit` | 2.9.2 | Apache-2.0 |
 | `xunit.runner.visualstudio` | 2.8.2 | Apache-2.0 |
 | `NSubstitute` | 5.3.0 | BSD-3-Clause |
-| `Testcontainers.MsSql` | 4.0.0 | MIT |
-| `Microsoft.EntityFrameworkCore.Sqlite` | 10.0.0 | MIT |
+| `Testcontainers.MsSql` | 4.14.0 | MIT |
+| `Microsoft.EntityFrameworkCore.Sqlite` | 10.0.11 | MIT |
 | `NetArchTest.Rules` | 1.3.2 | MIT |
 | `coverlet.collector` | 6.0.2 | MIT |
 

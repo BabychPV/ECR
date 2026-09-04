@@ -89,28 +89,31 @@ public sealed record DependencyContext(
     string? CurrentRowKey);
 
 /// <summary>
-/// Вузол графа обчислення для <see cref="IFormulaEngine.BuildEvaluationOrder"/>.
+/// Вузол графа обчислення для <see cref="IFormulaEngine.BuildEvaluationOrder"/> —
+/// контрактна проєкція <c>cfg.FormulaDef</c>.
 /// </summary>
 /// <remarks>
-/// ⚠ <b>Q-014, обґрунтування — слабке (здогадка).</b> У пакеті немає жодного
-/// опису цього типу. Форма виведена з двох фактів:
-/// <see cref="OrderingResult"/> повертає <c>IReadOnlyList&lt;int&gt; Order</c>,
-/// тобто вузол мусить мати цілий ідентифікатор; а <c>TopologicalSorter</c>
-/// працює з <c>DependencyGraph</c>, побудованим із ребер «залежить від»,
-/// тобто вузол мусить принести список своїх залежностей.
-/// Решта полів (<see cref="TableDefId"/>, <see cref="RowKey"/>,
-/// <see cref="ColumnDefId"/>) потрібні, щоб показати користувачеві
-/// <b>які саме</b> формули замкнулися в цикл — цього прямо вимагає
-/// <c>TopologicalSorter.Sort</c>: «ПОВЕРНУТИ шлях циклу, а не просто прапорець».
+/// ⚠ <b>Q-014, обґрунтування — тверде</b> (спершу було «слабке»; уточнено за
+/// схемою після рев'ю Етапу 0). Поля відповідають колонкам
+/// <c>cfg.FormulaDef</c> (<c>02a</c> рядок 374): формула ідентифікується
+/// <c>Id</c>, прив'язана до <c>TableDefId</c>, а її <c>Scope</c> визначає,
+/// котре з <c>ColumnDefId</c>/<c>RowDefId</c> заповнене — це закріплено
+/// перевіркою <c>CK_Formula_Scope</c>. Саме тому вузол оперує
+/// <c>RowDefId</c>, а не <c>RowKey</c>: формула належить <b>визначенню</b>
+/// рядка, а не його ключу.
+/// Результат сортування лягає в <c>cfg.FormulaDef.EvaluationOrder</c> — воно
+/// «обчислюється при <c>Publish</c>, не в рантаймі» (ФВ-9.4).
 /// </remarks>
 /// <param name="FormulaDefId">Ідентифікатор формули — він же вузол графа.</param>
-/// <param name="TableDefId">Таблиця формули.</param>
-/// <param name="RowKey">Рядок; <c>null</c> для формул рівня колонки.</param>
-/// <param name="ColumnDefId">Колонка; <c>null</c> для формул рівня рядка.</param>
+/// <param name="TableDefId">Таблиця, якій належить формула.</param>
+/// <param name="Scope">Рівень: колонка, рядок або комірка.</param>
+/// <param name="ColumnDefId">Колонка; заповнена для <c>Column</c> і <c>Cell</c>.</param>
+/// <param name="RowDefId">Рядок; заповнений для <c>Row</c> і <c>Cell</c>.</param>
 /// <param name="DependsOnFormulaDefIds">Формули, від яких залежить ця.</param>
 public sealed record FormulaNode(
     int FormulaDefId,
     int TableDefId,
-    string? RowKey,
+    FormulaScope Scope,
     int? ColumnDefId,
+    int? RowDefId,
     IReadOnlyList<int> DependsOnFormulaDefIds);

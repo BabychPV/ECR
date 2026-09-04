@@ -1,3 +1,4 @@
+// src/Ecr.Application/Ports/ICalculationResultStore.cs
 namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;

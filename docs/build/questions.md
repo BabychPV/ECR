@@ -82,11 +82,11 @@
 | Q-011 | BOOTSTRAP-FIX | відсутні `using` у 34 файлах | RESOLVED · доповнено за рев'ю (К-2) |
 | Q-012 | DECIDED | `TemplateStructureDto` бере `ColumnDto`/`RowDto` з `Documents.Dto` | **OPEN** — семантика DTO |
 | Q-013 | CONFLICT | циклічна залежність `FormulaEngine` | RESOLVED · варіант **A**, 2026-09-04 |
-| Q-014 | CONTRACT | десять контрактних типів не оголошені ніде | **ЧЕРНЕТКИ НАПИСАНІ · чекають затвердження** |
-| Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | **OPEN** |
+| Q-014 | CONTRACT | десять контрактних типів не оголошені ніде | RESOLVED · перенесені в `02-contracts.md`, 2026-09-04 |
+| Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | RESOLVED · усі створені, 2026-09-04 |
 | Q-016 | ENV | Docker не запущений | **OPEN** |
 | Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **OPEN** |
-| Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | напрям **B** затверджено; **форма 4 портів чекає затвердження** (В-2) |
+| Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | RESOLVED · варіант **B**, порти в контракті, 2026-09-04 |
 | Q-019 | BOOTSTRAP-FIX | немає `[CollectionDefinition("SqlServer")]` | RESOLVED |
 | Q-020 | DECIDED | мінімальні скелети для `StyleMapper`, `ImportDiffBuilder`, `CurrentUser` | RESOLVED |
 | Q-021 | SCOPE | зонд: після зняття Q-014 і Q-018 збирається **все** | RESOLVED · інформаційний |
@@ -94,7 +94,8 @@
 | Q-023 | DECIDED | фронтенд: `index.html`, `main.tsx`, `api/types.ts`, `JSX` під React 19 | RESOLVED |
 | Q-024 | DECIDED | п'ять скелетів, яких вимагає `Program.cs` | RESOLVED |
 | Q-025 | SCOPE | результат рев'ю Етапу 0 і що з ним зроблено | RESOLVED |
-| **Q-026** | **CONTRACT** | **`MethodologyRule`: сутність проти схеми БД** | **OPEN · потребує рішення** |
+| Q-026 | CONTRACT | `MethodologyRule`: сутність проти схеми БД | RESOLVED · схема права (ТЗ: `D-92`, `ФВ-9.5`, `ФВ-13.8`) |
+| **Q-027** | **CONFLICT** | **22 сутності розходяться зі схемою БД** | **OPEN · правило визначене, виконання за етапами** |
 
 ---
 
@@ -740,10 +741,32 @@ src\Ecr.Application\Ports\IExternalDataSource.cs(22,38): error CS0246: The type 
 | **`SourceEntityDescriptor`** | `Ports/IExternalDataSource.cs` | **слабке** | колонки `ext.SourceEntity` + `TODO` «збирати атрибути з їхнім UOM» |
 | **`CollectionRequest`** | `Ports/IExternalDataSource.cs` | **слабке** | параметри `CollectionRunner.RunAsync` + `itg.CollectionRun`; `SourcePath` і `MaxPoints` додав я |
 
-⚠ **Ці оголошення ще не перенесені в `02-contracts.md`** — вони живуть у коді
-`src/`. Перенести їх туди має сенс лише після затвердження, інакше контракт
-зафіксує здогадку як домовленість.
-**Статус:** OPEN · чернетки написані, збірка зелена; **потрібне затвердження форми**
+**Ухвалено 2026-09-04** за вказівкою замовника «вирішуй помилки відповідно ТЗ».
+Перед закріпленням два з чотирьох «слабких» типів уточнено за схемою, і вони
+перестали бути здогадкою:
+
+* **`FormulaNode` → тверде.** Приведено до колонок `cfg.FormulaDef`
+  (`02a` рядок 374): `FormulaDefId`, `TableDefId`, `Scope`, `ColumnDefId`,
+  `RowDefId`. Ключове уточнення — вузол оперує **`RowDefId`, а не `RowKey`**:
+  формула належить *визначенню* рядка. Це закріплено перевіркою
+  `CK_Formula_Scope`, яка вимагає рівно ту комбінацію
+  `ColumnDefId`/`RowDefId`, що відповідає `Scope`. Результат сортування лягає
+  в `cfg.FormulaDef.EvaluationOrder`, яке «обчислюється при `Publish`, не в
+  рантаймі» (`ФВ-9.4`).
+* **`SourceEntityDescriptor` → часткове.** Поля звірені з `ext.SourceEntity`
+  (`02a` рядок 1342); додано посилання на `ФВ-11.2` («адаптер **не створює
+  артефактів у базі джерела**») — `Discover` лише читає.
+
+`CollectionRequest` лишається найслабшим: `SourcePath` виведений із природного
+ключа `ext.RawDataPoint (SourceEntityId, SourcePath, Timestamp)`, `MaxPoints` —
+із вимоги `TODO` «батчі обмеженого розміру». Обидва поля потрібні механічно,
+але їхній набір ніде не зафіксований.
+
+**Усі десять типів перенесені в `02-contracts.md` §5** — у блоки своїх портів,
+за конвенцією пакета. Перевірено скриптом: **37 із 37** блоків із рядком-шляхом
+`// src/...` збігаються з файлами на диску побайтово, тобто контракт і код
+мають одне джерело істини.
+**Статус:** RESOLVED · 2026-09-04
 
 ---
 
@@ -825,11 +848,38 @@ src/Ecr.Web/               index.html                                           
 `index.html` — лише для `npm run build`; 13 контролерів, два health-checks і
 п'ять DTO-файлів — для функціонального зрізу Етапу 1, не для компіляції.
 
-**Що потрібно від людини:** доповнити `05*` секціями для цих файлів. Найбільш
-термінові за наслідками: `EvaluationResult.cs` (блокує), шість `.sql` (без них
-неможливо створити БД), `index.html` (без нього неможливий `npm run build`),
-13 контролерів (без них немає зрізу Етапу 1).
-**Статус:** OPEN
+**Що потрібно від людини:** доповнити `05*` секціями для цих файлів.
+
+---
+
+**Закрито 2026-09-04** за вказівкою «вирішуй помилки відповідно ТЗ».
+Створено **всі 41**. Дерево `05-skeleton.md` §1 і диск тепер розходяться рівно
+в одному місці — `FormulaEngine.cs`, який свідомо переїхав за `Q-013` (A), і
+це вже відображено в дереві.
+
+Джерело для кожної групи, щоб нічого не вигадувати:
+
+| Група | Звідки взято |
+|---|---|
+| **6 `.sql`** | `02a-db-schema.md` §1 і §16 — усі шість **уже написані там** із рядками-локаторами `-- src/…`. Витягнуті дослівно, як контракти. Нічого не складав |
+| **13 контролерів** | `02-contracts.md` §9 — таблиця з 57 ендпоінтів: метод, шлях, право, етап. Кожна дія делегує наявному обробнику; логіки в контролерах немає |
+| **5 `*Dtos.cs`** | Схема `02a` (склад полів) + ендпоінти §9 (що саме віддається). Це DTO **відповідей** для списків; DTO запитів оголошені поруч зі своїми контролерами, як у наявному `CellsController` |
+| **`MethodologyFunctions.cs`** | `02b` §8 — таблиця з 13 функцій діалекту з їхньою семантикою, дослівно |
+| **`UnitOfWork.cs`** | Контракт `IUnitOfWork` (два методи) + `D-29` про заборону довгих транзакцій |
+| **`ReportSnapshotBuilder.cs`** | Контракт `IReportSnapshotBuilder` (три методи) + `D-52`, `D-65`, `ФВ-0.3` |
+| **5 `Jobs/*`** | Контракт `IBackgroundJob` + профільні вимоги: `ФВ-11.3` (збір), `D-66` (партиції), `D-52` (зрізи) |
+| **`PiAfCatalogReader.cs`** | `ФВ-11.2` («адаптер не створює артефактів у базі джерела») + `ФВ-16.9` (UOM у каталозі) |
+
+Додатково створено три файли, яких немає ні в дереві, ні в `05*`, але без яких
+код не повний — усі внесені в дерево:
+`src/Ecr.Api/Controllers/UiStringsController.cs` (ендпоінти `/ui-strings/…` є в
+§9, а контролера для них не було), `src/Ecr.Application/DependencyInjection.cs`
+і `src/Ecr.Api/Startup/StartupSequence.cs` (`Q-024`).
+
+Усі нові файли — скелети за `05-skeleton.md` §3: повна сигнатура, XML-doc
+українською, тіло `NotImplementedException` зі змістовним `TODO`. Жодної
+реалізації не написано: це Етап 0.
+**Статус:** RESOLVED · 2026-09-04
 
 ---
 
@@ -1020,7 +1070,11 @@ CollectionRunner(..., EcrDbContext db)                 → CollectionRunner(...,
 перший»). Форма цих портів визначає, які дані доходять до рушія розрахунку,
 тож затверджувати її треба нарівні з `Q-014`. У `02-contracts.md` порти
 свідомо не перенесені до затвердження.
-**Статус:** OPEN · напрям затверджено; **форма портів чекає затвердження**
+**Ухвалено 2026-09-04** за тією самою вказівкою. Чотири порти перенесені в
+`02-contracts.md` §5 разом із приміткою, навіщо кожен уведений. Форма лишилася
+такою, як описано вище: порт віддає **дані**, правила предметної області
+лишаються в `Ecr.Calculations` і `Ecr.Adapters.PiAf`.
+**Статус:** RESOLVED · 2026-09-04
 
 ---
 
@@ -1363,6 +1417,49 @@ public string ConditionExpression { get; private set; } = null!;
 2. Чи потрібне полю `Code` місце в сутності (схема вимагає його `NOT NULL`
    і в унікальному ключі)?
 
+---
+
+**Вирішено 2026-09-04 за вказівкою замовника «вирішуй помилки відповідно ТЗ».
+Правий `MatchJson`; `Code` додано.** Обидва висновки випливають із ТЗ, а не з
+уподобання:
+
+1. **`ConditionExpression` семантично неможливий.** Опис поля казав «умова
+   **діалекту методологій**». Але діалект `Methodology` посилань на комірки
+   документів **не має взагалі** — `02b-expressions.md` §3.4:
+   > Посилання на комірки документів (`[Sheet].[Table]…`) у діалекті
+   > `Methodology` **заборонені**: методологія працює з підготовленими
+   > аргументами, а не лізе в документ сама.
+
+   А правило має зіставляти саме **рядки документа** (`ФВ-13.3`). Тобто цим
+   діалектом умову зіставлення виразити нічим.
+2. **Третій діалект під це не створюється.** `D-92` прямо відкидає таку ідею
+   в сусідньому випадку (рядковий фільтр у гранті):
+   > він вимагав би **третього** діалекту виразів і компіляції в SQL-предикат
+   > …, тоді як система будується на двох діалектах і одному парсері (`ФВ-9.5`).
+3. **Структурований предикат — наскрізна конвенція пакета.** Те саме завдання
+   в інших місцях розв'язане саме так, і там сутність зі схемою **збігається**
+   (перевірив): `cfg.TableRelationDef.MatchJson` («як зіставляються рядки»),
+   `cfg.CalculationBinding.MatchJson` («як зіставити рядок документа з
+   результатом»), `cfg.FormulaDependency.FilterJson` («предикат для
+   `RowMode = Dynamic`»). `MethodologyRule` — єдине місце, де узгодженість
+   порушена.
+4. **`Code` обов'язковий.** Схема має його `NOT NULL` і в
+   `UQ_MethodologyRule (MethodologyVersionId, Code)`; без нього доменний
+   конструктор не може створити валідний рядок. Плюс `ФВ-13.9` вимагає при
+   публікації перевіряти **перетин** правил — а щоб повідомити про конфлікт,
+   правило треба назвати.
+
+**Що зроблено:** у `src/Ecr.Domain/Entities/Calculations/MethodologyRule.cs`
+`ConditionExpression` → `MatchJson`, додано `Code` (через `EcrCode`), опис
+поля виправлено з «умова діалекту методологій» на «структурований предикат;
+посилається на реєстри й атрибути» — дослівно за `ФВ-13.8`. Конструктор:
+`(int methodologyVersionId, EcrCode code, string matchJson, int priority)`.
+Схему `02a` **не чіпав**. Позначку `⚠ Q-026` з `MethodologyResolver.cs` знято
+не буде до Етапу 4, коли правило реалізується.
+
+**Це окремий випадок ширшої проблеми — див. `Q-027`.**
+**Статус:** RESOLVED · схема права; 2026-09-04
+
 **Додаткова обставина, яку я перевірив.** `MatchJson` є в схемі ще у двох
 таблицях — `cfg.TableRelationDef` (рядок 454) і `cfg.CalculationBinding`
 (рядок 543), — і в **обох** випадках відповідні сутності
@@ -1371,4 +1468,81 @@ public string ConditionExpression { get; private set; } = null!;
 Це схиляє до того, що дефект у сутності, а не в схемі, але вибір усе одно
 не мій: `ConditionExpression` може бути свідомим рішенням саме для правил
 методологій, де предикат посилається на реєстри й атрибути.
-**Статус:** OPEN · блокує мапінг EF на Етапі 1 і зіставлення методологій на Етапі 4
+
+
+---
+
+### Q-027 · CONFLICT · Етап 0 · 2026-09-04 · **системний дефект пакета**
+
+**Де:** `src/Ecr.Domain/Entities/**` проти `docs/build/02a-db-schema.md`
+**Контекст:** після `Q-026` перевірив, чи це поодинокий випадок. Написав скрипт,
+який зіставляє властивості **кожної** доменної сутності з колонками однойменної
+таблиці схеми (з поправкою на службові поля аудиту і на конвенцію обгортки
+значеннєвого типу `XxxValue` ↔ колонка `Xxx`).
+
+**Суть:**
+Це **не поодинокий випадок**. З 49 сутностей **22 не збігаються** зі своєю
+таблицею. `05b-skeleton-domain.md` і `02a-db-schema.md` писалися незалежно і
+розійшлися. Наслідок практичний: модуль 1.3 Етапу 1 («`EcrDbContext`,
+конфігурації сутностей») неможливо виконати чесно — конфігурацію нема на що
+покласти, а `SchemaValidator` на старті відхилятиме базу.
+
+**Повний перелік (22):**
+
+| Сутність | Таблиця | У СХЕМІ, немає в сутності | У СУТНОСТІ, немає в схемі |
+|---|---|---|---|
+| `ApprovalRoute` | `wf.ApprovalRoute` | `TemplateVersionId` | — |
+| `ApprovalStep` | `wf.ApprovalStep` | `IsOptional` | — |
+| `CalculationResult` | `calc.CalculationResult` | `DocumentId`, `SourceRowKey` | `IsCurrent`, `SourceRowId` |
+| `CollectionSchedule` | `ext.CollectionSchedule` | `IsEnabled`, `LastRunAt`, `LookbackDays` | `IsActive`, `LookbackMinutes` |
+| `DataSource` | `ext.DataSource` | `Catalog`, `MaxParallel`, `SecondaryEndpoint` | — |
+| `EntityFieldMap` | `ext.EntityFieldMap` | `TargetColumnDefId`, `TargetKind`, `TargetRegistryFieldDefId`, `TransformCode` | `TargetField` |
+| `Methodology` | `calc.Methodology` | `Group` | — |
+| `MethodologyConstant` | `calc.MethodologyConstant` | `Category`, `Source` | — |
+| `MethodologyFormula` | `calc.MethodologyFormula` | — | `ArgumentsJson` |
+| `MethodologyOutput` | `calc.MethodologyOutput` | `Ordinal` | `MethodologyFormulaId` |
+| `MethodologyRule` | `calc.MethodologyRule` | `Code`, `MatchJson` | `ConditionExpression` | **← `Q-026`, уже виправлено** |
+| `MethodologySubstance` | `calc.MethodologySubstance` | — | `IsActive` |
+| `MethodologyVersion` | `calc.MethodologyVersion` | `ContentHash`, `Level`, `Version` | `EffectiveTo`, `LastEditedByUserId`, `VersionNumber` |
+| `PasswordPolicy` | `sec.PasswordPolicy` | `ExpirationDays`, `RequireDigit`, `RequireSpecial`, `RequireUpper` | `ExpiryDays`, `HistoryDepth`, `RequireComplexity` |
+| `Permission` | `sec.Permission` | `NameL10n` | — |
+| `RegistryEntry` | `dic.RegistryEntry` | `DeletedAt`, `DeletedByUserId`, `Ordinal` | — |
+| `RegistryEntryLink` | `dic.RegistryEntryLink` | `LeftEntryId`, `LinkKind`, `RightEntryId` | `FromEntryId`, `RegistryRelationDefId`, `ToEntryId` |
+| `RegistryExternalKey` | `dic.RegistryExternalKey` | `DataSourceId`, `ExternalPath`, `LastSyncedAt` | `SystemCode` |
+| `RegistryValue` | `dic.RegistryValue` | `ValueNumeric`, `ValueRefEntryId`, `ValueUnitId` | `UnitId`, `ValueDecimal`, `ValueRegistryEntryId` |
+| `RoleAssignment` | `sec.RoleAssignment` | `ValidFrom`, `ValidTo` | `PrincipalSid` |
+| `ScriptVersion` | `calc.ScriptVersion` | `CompiledAt`, `CompilerDiagnostics`, `ContentHash` | `LastTestedAt`, `Status` |
+| `SourceEntity` | `ext.SourceEntity` | `Code`, `DisplayName`, `EntityPath`, `RegistryDefId` | `SourcePath`, `TargetRegistryDefId` |
+| `SubmissionSnapshot` | `calc.SubmissionSnapshot` | `CalendarMode`, `ContentHash`, `MethodologyVersionsJson`, `NumericMode`, `PayloadJson`, `TemplateVersionId` | `Checksum`, `PayloadCompressed`, `VersionsJson` |
+
+Три класи розбіжностей, і вони різні за наслідками:
+
+1. **Різна назва того самого поля** (`LookbackMinutes`↔`LookbackDays`,
+   `ValueDecimal`↔`ValueNumeric`, `Checksum`↔`ContentHash`, `VersionNumber`↔`Version`,
+   `ExpiryDays`↔`ExpirationDays`, `TargetRegistryDefId`↔`RegistryDefId`,
+   `FromEntryId`/`ToEntryId`↔`LeftEntryId`/`RightEntryId`) — найнебезпечніший клас,
+   бо `LookbackMinutes` проти `LookbackDays` **міняє число**: 7 днів проти 7 хвилин.
+2. **Поле є в схемі, але сутність його не має** — рядок неможливо створити
+   доменним конструктором, якщо колонка `NOT NULL` (як `Code` у `Q-026`).
+3. **Поле є в сутності, але не в схемі** — його ніде зберігати
+   (`IsCurrent` у `CalculationResult`, `PrincipalSid` у `RoleAssignment`).
+
+**Правило, за яким це вирішується:**
+**Правий `02a-db-schema.md`.** Підстава — `08-workflow.md` §7: «зміна контракту:
+сигнатури, DTO, коду помилки, **схеми БД**» заборонена, тобто схема є контрактом,
+а сутність — реалізацією поверх неї; і `05-skeleton.md` §3, де «схема БД»
+названа серед контрактів, а сутності — ні. Виняток допускається там, де сутність
+свідомо не зберігає поле (обчислюване), — але тоді це має бути видно з коду.
+
+**Чому не роблю все зараз:** сутності належать різним етапам
+(`07-checkpoints.md`): метадані й документи — Етап 1, безпека — Етап 3,
+розрахунки — Етап 4, зовнішні джерела — Етап 5. Правити їх усі на Етапі 0
+означало б вийти за SCOPE (`08-workflow.md` §6) і зробити це наосліп, без
+тестів, які перевіряють кожне поле. `MethodologyRule` виправлено раніше — як
+пряме продовження `Q-026`, знайденого рев'ю.
+
+**План:** кожна сутність приводиться до схеми **у своєму етапі**, разом із
+конфігурацією EF, яка це і перевіряє. Для Етапу 1 це модуль 1.3 і сутності
+`cfg.*`/`doc.*`; решта — у 3, 4 і 5. Кожна правка — окремим рядком у `progress.md`.
+
+**Статус:** OPEN · правило визначене, виконання рознесене за етапами

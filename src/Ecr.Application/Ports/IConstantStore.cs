@@ -1,3 +1,4 @@
+// src/Ecr.Application/Ports/IConstantStore.cs
 namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Calculations;

@@ -1,3 +1,4 @@
+// src/Ecr.Application/Ports/ICollectionStore.cs
 namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.External;

@@ -126,6 +126,7 @@ ecr-web/
 │   │
 │   ├── Ecr.Application/
 │   │   ├── Ecr.Application.csproj
+│   │   ├── DependencyInjection.cs
 │   │   ├── Ports/
 │   │   │   ├── ICellStore.cs
 │   │   │   ├── IMetadataCache.cs
@@ -220,8 +221,7 @@ ecr-web/
 │   │   ├── Functions/TemplateFunctions.cs
 │   │   ├── Functions/MethodologyFunctions.cs
 │   │   ├── Functions/ConvertFunction.cs
-│   │   ├── PeriodContext.cs
-│   │   └── FormulaEngine.cs
+│   │   └── PeriodContext.cs
 │   │
 │   ├── Ecr.Infrastructure/
 │   │   ├── Ecr.Infrastructure.csproj
@@ -259,6 +259,8 @@ ecr-web/
 │   │   │   ├── ReportSnapshotJob.cs
 │   │   │   ├── PartitionCheckJob.cs
 │   │   │   └── NotificationJob.cs
+│   │   ├── Expressions/
+│   │   │   └── FormulaEngine.cs         ← переїхав з Ecr.Expressions (Q-013 A)
 │   │   ├── Reporting/
 │   │   │   └── ReportSnapshotBuilder.cs
 │   │   ├── Startup/
@@ -328,6 +330,8 @@ ecr-web/
 │   │   │   ├── AuthenticationSetup.cs
 │   │   │   ├── CurrentUser.cs
 │   │   │   └── SecurityStampMiddleware.cs
+│   │   ├── Startup/
+│   │   │   └── StartupSequence.cs
 │   │   ├── Middleware/
 │   │   │   └── CorrelationIdMiddleware.cs
 │   │   ├── Health/
@@ -402,7 +406,7 @@ NOT IN SCOPE: <чого тут робити не можна>
 
 ```
 Ecr.Domain            → (нічого)
-Ecr.Application       → Ecr.Domain
+Ecr.Application       → Ecr.Domain, Ecr.Expressions      (tz/03 §3.3; Q-008)
 Ecr.Expressions       → Ecr.Domain
 Ecr.Calculations      → Ecr.Domain, Ecr.Application, Ecr.Expressions
 Ecr.Infrastructure    → Ecr.Domain, Ecr.Application, Ecr.Expressions
