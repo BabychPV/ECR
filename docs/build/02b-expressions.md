@@ -501,8 +501,8 @@ public enum BinaryOperator : byte
 ```
 
 ```csharp
-// src/Ecr.Expressions/ParseResult.cs
-namespace Ecr.Expressions;
+// src/Ecr.Expressions/Parsing/ParseResult.cs
+namespace Ecr.Expressions.Parsing;
 
 using Ecr.Expressions.Ast;
 
