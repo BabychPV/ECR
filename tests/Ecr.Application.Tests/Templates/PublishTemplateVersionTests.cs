@@ -24,11 +24,22 @@ namespace Ecr.Application.Tests.Templates;
 /// </remarks>
 public sealed class PublishTemplateVersionTests
 {
+    /// <summary>Розмірність «маса»; номери збігаються з <c>uom.Dimension</c> у seed.</summary>
+    private const byte Mass = 1;
+
+    /// <summary>Розмірність «об'єм».</summary>
+    private const byte Volume = 2;
+
+    private const int KilogramUnit = 1;
+    private const int TonneUnit = 8;
+    private const int CubicMetreUnit = 2;
+
     private static readonly DateTime Now = new(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc);
 
     private readonly IRepository<TemplateVersion, int> _versions = Substitute.For<IRepository<TemplateVersion, int>>();
     private readonly IFormulaEngine _formulas = Substitute.For<IFormulaEngine>();
     private readonly IMetadataCache _cache = Substitute.For<IMetadataCache>();
+    private readonly IUnitCatalog _catalogue = Substitute.For<IUnitCatalog>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -39,10 +50,14 @@ public sealed class PublishTemplateVersionTests
         _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
         _clock.UtcNow.Returns(Now);
         _versions.GetAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
+
+        // Порожній довідник за замовчуванням: решта тестів про одиниці не
+        // говорить, і перевірка мусить їх пропускати, а не падати.
+        _catalogue.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
     }
 
     private PublishTemplateVersionHandler Handler()
-        => new(_versions, _formulas, _cache, _audit, _uow, _clock);
+        => new(_versions, _formulas, _cache, _catalogue, _audit, _uow, _clock);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Коректна_версія_публікується()
@@ -108,8 +123,54 @@ public sealed class PublishTemplateVersionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void Несумісні_одиниці_без_CONVERT_відхиляють_публікацію()
-        => Assert.Fail("not implemented");
+    public async Task Несумісні_одиниці_без_CONVERT_відхиляють_публікацію()
+    {
+        // Дві колонки однієї розмірності, але в різних одиницях: тонни й
+        // кілограми. Формула складає їх без CONVERT.
+        Structure("[Jan] + [Total]");
+        Units();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().PublishAsync(1, userId: 9, CancellationToken.None));
+
+        // ⛔ ECR-TMPL-4223 саме при ПУБЛІКАЦІЇ (ФВ-16.7). Помилка одиниць,
+        // виявлена під час нічного перерахунку, — це неправильні числа у
+        // звіті, які хтось помітить через місяць на звірці. Виявлена тут —
+        // червоний екран конфігуратора, який виправляють за хвилину.
+        Assert.Contains("ECR-TMPL-4223", Diagnostics(error), StringComparison.Ordinal);
+
+        // Версія лишилася чернеткою: часткова публікація неможлива.
+        Assert.Equal(TemplateVersionStatus.Draft, _draft.Status);
+
+        // ⚠ Те саме з явним CONVERT — проходить. Механізм не «полегшує»
+        // конверсію: він вимагає, щоб автор формули сказав, у чому саме він
+        // хоче результат (D-74).
+        Structure("CONVERT([Jan], 't', 'kg') + [Total]");
+        Units();
+
+        await Handler().PublishAsync(1, userId: 9, CancellationToken.None);
+        Assert.Equal(TemplateVersionStatus.Published, _draft.Status);
+    }
+
+    /// <summary>
+    /// Ставить одиниці колонкам і довідник: <c>Jan</c> у тоннах, <c>Total</c> у
+    /// кілограмах — одна розмірність, різні одиниці.
+    /// </summary>
+    private void Units()
+    {
+        var columns = _draft.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).ToList();
+        columns.Single(c => c.Code == "Jan").SetUnit(TonneUnit);
+        columns.Single(c => c.Code == "Total").SetUnit(KilogramUnit);
+
+        _catalogue.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kg"] = new(KilogramUnit, "kg", Mass),
+                ["t"] = new(TonneUnit, "t", Mass),
+                ["m3"] = new(CubicMetreUnit, "m3", Volume),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Відповідь_містить_УСІ_проблеми_а_не_лише_першу()

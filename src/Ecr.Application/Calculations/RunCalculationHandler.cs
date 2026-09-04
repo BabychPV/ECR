@@ -19,7 +19,9 @@ namespace Ecr.Application.Calculations;
 public sealed class RunCalculationHandler(
     IPeriodStore periods,
     IWorkflowStore workflow,
+    ICalculationResultStore results,
     IBackgroundJobScheduler jobs,
+    IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock)
 {
@@ -90,6 +92,34 @@ public sealed class RunCalculationHandler(
                 },
                 ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Завершує прогін: пише профіль і робить його актуальним.
+    /// </summary>
+    /// <param name="calculationRunId">Прогін.</param>
+    /// <param name="profile">Профіль по модулях.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Обидві дії — ОДНИМ викликом сховища і однією транзакцією (ФВ-9.11).
+    /// Між зняттям актуальності зі старого прогону і встановленням новому
+    /// існує стан, у якому актуальних прогонів нуль або два; звіт, побудований
+    /// у цю мить, не має правильної відповіді.
+    /// <para>
+    /// Профіль пишеться ЗАВЖДИ, зокрема порожній: бюджет 10 хвилин — вимога,
+    /// і прогін без профілю нічого не каже про те, куди пішов час (J-1).
+    /// </para>
+    /// </remarks>
+    public async Task CompleteAsync(long calculationRunId, ModuleProfile profile, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        await results
+            .SwitchCurrentRunAsync(calculationRunId, profile.ToJson(), ct)
+            .ConfigureAwait(false);
+
+        await results.InvalidateReportSnapshotsAsync(calculationRunId, ct).ConfigureAwait(false);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Перевіряє погодження на перерахунок закритих періодів.</summary>

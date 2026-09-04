@@ -17,6 +17,7 @@ public sealed class PublishTemplateVersionHandler(
     IRepository<Domain.Entities.Configuration.TemplateVersion, int> versions,
     IFormulaEngine formulaEngine,
     IMetadataCache metadataCache,
+    IUnitCatalog unitCatalog,
     IAuditWriter audit,
     IUnitOfWork uow,
     IClock clock)
@@ -34,12 +35,17 @@ public sealed class PublishTemplateVersionHandler(
 
         // Усі дванадцять перевірок із 02b §12 — синтаксис, резолвінг, типи,
         // ациклічність, розкриття діапазонів, сумісність одиниць.
-        // ⚠ Контекст ТИПІВ передається явно: без нього перевірка №3 мовчки не
-        // виконувалася (Q-072). Контексту ОДИНИЦЬ немає й не може бути до
-        // Етапу 4 — він читає `uom.Unit` і розмірності, яких ще не існує;
-        // це видно з виклику, а не ховається в значенні за замовчуванням.
+        // ⚠ Обидва контексти передаються ЯВНО: без контексту типів перевірка №3
+        // мовчки не виконувалася (Q-072), без контексту одиниць — перевірка
+        // сумісності (ФВ-16.6). Значення за замовчуванням тут ховало б пропуск.
+        var structure = PublishChecks.Snapshot(version);
+        var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
+
         var diagnostics = PublishChecks.Run(
-            version, formulaEngine, new SnapshotTypeContext(PublishChecks.Snapshot(version)), unitContext: null);
+            version,
+            formulaEngine,
+            new SnapshotTypeContext(structure),
+            new SnapshotUnitContext(structure, catalogue));
 
         if (diagnostics.Count > 0)
         {

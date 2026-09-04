@@ -41,4 +41,27 @@ public interface ICalculationResultStore
 
     /// <summary>Інвалідує залежні зрізи <c>rpt.*</c> після завершення прогону.</summary>
     public Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
+
+    /// <summary>
+    /// Робить прогін актуальним: попередній перестає бути таким **у тій самій
+    /// транзакції** (ФВ-9.11).
+    /// </summary>
+    /// <param name="calculationRunId">Прогін, який стає актуальним.</param>
+    /// <param name="modulesProfileJson">Профіль по модулях; пишеться завжди.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Прапорець живе на ПРОГОНІ, а не на кожному результаті: у схемі
+    /// <c>calc.CalculationResult</c> колонки <c>IsCurrent</c> немає, і це
+    /// правильно — інакше «перемикання актуального прогону» означало б
+    /// оновити десятки мільйонів рядків, і «одна транзакція» з вимоги стала б
+    /// блокуванням партиції на хвилини. Результат актуальний тоді, коли
+    /// актуальний його прогін.
+    /// <para>
+    /// Дві половини — зняти зі старого і поставити новому — мусять бути
+    /// нероздільні: між ними існує стан, у якому актуальних прогонів нуль або
+    /// два, і звіт, побудований у цю мить, не має правильної відповіді.
+    /// </para>
+    /// </remarks>
+    public Task SwitchCurrentRunAsync(
+        long calculationRunId, string modulesProfileJson, CancellationToken ct);
 }

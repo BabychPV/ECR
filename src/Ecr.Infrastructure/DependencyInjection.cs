@@ -72,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IOrphanScanner, OrphanScanner>();
         services.AddScoped(typeof(IRepository<,>), typeof(Repository<,>));
 
