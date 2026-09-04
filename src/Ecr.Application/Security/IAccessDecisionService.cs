@@ -1,8 +1,9 @@
 // src/Ecr.Application/Security/IAccessDecisionService.cs
-namespace Ecr.Application.Security;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Security;
 
 /// <summary>
 /// Єдина точка рішень про доступ. Поєднує RBAC, стан періоду, правила періодів
@@ -11,13 +12,13 @@ using Ecr.Domain.ValueObjects;
 public interface IAccessDecisionService
 {
     /// <summary>Будує профіль прав користувача. Викликається раз на сесію.</summary>
-    Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct);
+    public Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct);
 
     /// <summary>Чи може користувач читати документ.</summary>
-    Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct);
+    public Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct);
 
     /// <summary>Чи може користувач редагувати конкретну комірку.</summary>
-    Task<EditDecision> CanEditCellAsync(
+    public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct);
 
     /// <summary>
@@ -25,14 +26,14 @@ public interface IAccessDecisionService
     /// комірку зрізу одним проходом. Поштучний виклик <see cref="CanEditCellAsync"/>
     /// у циклі — антипатерн і не вкладається в бюджет.
     /// </summary>
-    Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
+    public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
         AccessProfile profile, long tableInstanceId, CancellationToken ct);
 
     /// <summary>Чи може користувач подати аркуш за період на затвердження.</summary>
-    Task<EditDecision> CanSubmitAsync(
+    public Task<EditDecision> CanSubmitAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>Чи може користувач затвердити аркуш за період.</summary>
-    Task<EditDecision> CanApproveAsync(
+    public Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 }

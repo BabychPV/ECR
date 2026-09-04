@@ -271,10 +271,10 @@ public sealed class TypeChecker
 public interface ITypeContext
 {
     /// <summary>Тип значення колонки.</summary>
-    ExpressionValueType GetColumnType(int tableDefId, int columnDefId);
+    public ExpressionValueType GetColumnType(int tableDefId, int columnDefId);
 
     /// <summary>Тип аргументу методології.</summary>
-    ExpressionValueType GetArgumentType(string name);
+    public ExpressionValueType GetArgumentType(string name);
 }
 ```
 
@@ -314,16 +314,16 @@ public sealed class UnitChecker
 public interface IUnitContext
 {
     /// <summary>Одиниця колонки; <c>null</c> — безрозмірна.</summary>
-    int? GetColumnUnit(int tableDefId, int columnDefId);
+    public int? GetColumnUnit(int tableDefId, int columnDefId);
 
     /// <summary>Одиниця константи методології.</summary>
-    int? GetConstantUnit(string code);
+    public int? GetConstantUnit(string code);
 
     /// <summary>Розмірність одиниці.</summary>
-    byte GetDimension(int unitId);
+    public byte GetDimension(int unitId);
 
     /// <summary>Шукає похідну одиницю за чисельником і знаменником.</summary>
-    int? FindDerived(int numeratorUnitId, int denominatorUnitId);
+    public int? FindDerived(int numeratorUnitId, int denominatorUnitId);
 }
 ```
 
@@ -480,28 +480,28 @@ namespace Ecr.Expressions.Evaluation;
 public interface IEvaluationContext
 {
     /// <summary>Значення комірки; відсутня комірка → <c>DefaultValue</c> або <c>null</c> (02b §6.3).</summary>
-    ExpressionValue GetCell(int tableDefId, string rowKey, int columnDefId, int periodOffset);
+    public ExpressionValue GetCell(int tableDefId, string rowKey, int columnDefId, int periodOffset);
 
     /// <summary>Значення рядків за предикатом — для динамічних діапазонів.</summary>
-    IReadOnlyList<ExpressionValue> GetCellsByPredicate(int tableDefId, string filterJson, int columnDefId);
+    public IReadOnlyList<ExpressionValue> GetCellsByPredicate(int tableDefId, string filterJson, int columnDefId);
 
     /// <summary>Аргумент методології (<c>@Name</c>).</summary>
-    ExpressionValue GetArgument(string name);
+    public ExpressionValue GetArgument(string name);
 
     /// <summary>Константа методології (<c>CST.Name</c>), резолвлена за категорією і датою.</summary>
-    ExpressionValue GetConstant(string name);
+    public ExpressionValue GetConstant(string name);
 
     /// <summary>Результат іншої формули цієї версії (<c>!Name</c>).</summary>
-    ExpressionValue GetFormulaResult(string name);
+    public ExpressionValue GetFormulaResult(string name);
 
     /// <summary>Поле шапки документа (<c>HDR.Name</c>).</summary>
-    ExpressionValue GetHeader(string name);
+    public ExpressionValue GetHeader(string name);
 
     /// <summary>Календарний контекст. Значення залежать від <c>CalendarMode</c> (D-78).</summary>
-    PeriodContext Period { get; }
+    public PeriodContext Period { get; }
 
     /// <summary>Конверсія одиниць для функції <c>CONVERT</c>.</summary>
-    ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode);
+    public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode);
 }
 ```
 

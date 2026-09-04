@@ -1,8 +1,9 @@
 // src/Ecr.Application/Ports/ICalculationModule.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Модуль розрахунку емісій. <b>Окрема точка розширення від</b>
@@ -11,16 +12,16 @@ using Ecr.Domain.ValueObjects;
 public interface ICalculationModule
 {
     /// <summary>Код модуля, унікальний у системі.</summary>
-    string Code { get; }
+    public string Code { get; }
 
     /// <summary>Рівень драбини виразності, який реалізує модуль.</summary>
-    CalculationLevel Level { get; }
+    public CalculationLevel Level { get; }
 
     /// <summary>Чи здатний модуль обробити цю методологію.</summary>
-    bool CanHandle(MethodologyDescriptor methodology);
+    public bool CanHandle(MethodologyDescriptor methodology);
 
     /// <summary>Виконує розрахунок. Не пише в БД — повертає результат.</summary>
-    Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct);
+    public Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

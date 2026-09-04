@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/ICollectionStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.External;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Стан і результати збору із зовнішніх джерел.
@@ -20,18 +21,18 @@ using Ecr.Domain.Entities.External;
 public interface ICollectionStore
 {
     /// <summary>Сутність джерела; <c>null</c>, якщо її немає або вона вимкнена.</summary>
-    Task<SourceEntity?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
+    public Task<SourceEntity?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
 
     /// <summary>Джерело — воно визначає транспорт. Вибір транспорту це налаштування, не гілка коду (ФВ-11.2).</summary>
-    Task<DataSource?> FindDataSourceAsync(int dataSourceId, CancellationToken ct);
+    public Task<DataSource?> FindDataSourceAsync(int dataSourceId, CancellationToken ct);
 
     /// <summary>Створює <c>itg.CollectionRun</c> і повертає його ідентифікатор.</summary>
-    Task<long> StartRunAsync(
+    public Task<long> StartRunAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc,
         bool isCatchUp, int? triggeredByUserId, CancellationToken ct);
 
     /// <summary>Завершує прогін. Відмова джерела — теж завершення, зі статусом і кодом.</summary>
-    Task FinishRunAsync(
+    public Task FinishRunAsync(
         long collectionRunId, string status, int pointsRetrieved,
         string? errorMessage, CancellationToken ct);
 
@@ -41,12 +42,12 @@ public interface ICollectionStore
     /// Значення зберігаються <b>в одиниці джерела</b> (ФВ-16.9).
     /// </summary>
     /// <returns>Скільки точок фактично записано.</returns>
-    Task<int> UpsertRawPointsAsync(
+    public Task<int> UpsertRawPointsAsync(
         long collectionRunId, int sourceEntityId,
         IReadOnlyList<SourceDataPoint> points, CancellationToken ct);
 
     /// <summary>Записує покриті інтервали в <c>itg.CollectionCoverage</c>.</summary>
-    Task WriteCoverageAsync(
+    public Task WriteCoverageAsync(
         long collectionRunId, int sourceEntityId,
         IReadOnlyList<TimeInterval> covered, CancellationToken ct);
 
@@ -54,6 +55,6 @@ public interface ICollectionStore
     /// Покриті інтервали від <paramref name="notBefore"/> — основа для пошуку
     /// прогалин. Ознака здоров'я інтеграції — саме журнал покриття, а не тиша (ІНТ-3.3).
     /// </summary>
-    Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
+    public Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
         int sourceEntityId, DateTime notBefore, CancellationToken ct);
 }

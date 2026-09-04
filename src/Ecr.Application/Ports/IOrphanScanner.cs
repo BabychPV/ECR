@@ -10,12 +10,12 @@ namespace Ecr.Application.Ports;
 public interface IOrphanScanner
 {
     /// <summary>Повний прохід. Повертає кількість змінених рядків.</summary>
-    Task<int> ScanAllAsync(CancellationToken ct);
+    public Task<int> ScanAllAsync(CancellationToken ct);
 
     /// <summary>
     /// Точковий перерахунок після зміни вікна дії запису. **Знімає** ознаку
     /// так само, як ставить: інакше виправлення довідника не розблокувало б
     /// <c>Submit</c>.
     /// </summary>
-    Task<int> RescanForEntryAsync(long registryEntryId, CancellationToken ct);
+    public Task<int> RescanForEntryAsync(long registryEntryId, CancellationToken ct);
 }

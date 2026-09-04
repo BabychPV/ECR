@@ -1,6 +1,6 @@
-namespace Ecr.Application.Ports;
-
 using Ecr.Application.Documents.Dto;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>Експорт документа у <c>.xlsx</c>.</summary>
 public interface IExcelExporter
@@ -11,7 +11,8 @@ public interface IExcelExporter
     /// </summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="options">Режим: тільки значення чи з формулами.</param>
-    Task<Stream> ExportAsync(long documentId, ExcelExportOptions options, CancellationToken ct);
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Stream> ExportAsync(long documentId, ExcelExportOptions options, CancellationToken ct);
 }
 
 /// <summary>Налаштування експорту.</summary>

@@ -1,7 +1,8 @@
 // src/Ecr.Domain/ValueObjects/RowKey.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Text.RegularExpressions;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Стабільна бізнес-ідентичність рядка. Для <c>RowMode = Fixed</c> береться з

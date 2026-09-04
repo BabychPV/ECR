@@ -16,6 +16,7 @@ public sealed class CloneTemplateVersionHandler(
     /// <param name="sourceVersionId">Версія-джерело.</param>
     /// <param name="newVersion">Номер нової версії.</param>
     /// <param name="userId">Автор.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор створеної чернетки.</returns>
     public Task<int> CloneAsync(int sourceVersionId, string newVersion, int userId, CancellationToken ct)
         => throw new NotImplementedException(

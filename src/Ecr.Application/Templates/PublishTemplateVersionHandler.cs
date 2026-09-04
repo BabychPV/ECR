@@ -24,6 +24,7 @@ public sealed class PublishTemplateVersionHandler(
     /// <summary>Виконує публікацію.</summary>
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="userId">Хто публікує.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException">
     /// Валідація не пройдена; у <c>Details</c> — перелік діагностик.
     /// </exception>

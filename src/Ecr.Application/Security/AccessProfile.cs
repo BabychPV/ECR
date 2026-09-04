@@ -1,7 +1,8 @@
 // src/Ecr.Application/Security/AccessProfile.cs
-namespace Ecr.Application.Security;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Security;
 
 /// <summary>
 /// Ефективні права користувача, обчислені <b>раз на сесію</b> (ФВ-6.10).
@@ -50,7 +51,10 @@ public sealed class AccessProfile
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)
     {
         var key = $"{kind}:{resourceId}";
-        if (Denies.Contains(key)) return GrantLevel.None;
+        if (Denies.Contains(key))
+        {
+            return GrantLevel.None;
+        }
         return Grants.TryGetValue(key, out var level) ? level : GrantLevel.None;
     }
 }

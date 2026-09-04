@@ -31,8 +31,8 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 public interface IValidationContext
 {
     /// <summary>Значення комірки поточного рядка.</summary>
-    object? GetCell(string columnCode);
+    public object? GetCell(string columnCode);
 
     /// <summary>Значення комірки конкретного рядка таблиці.</summary>
-    object? GetCell(string rowKey, string columnCode);
+    public object? GetCell(string rowKey, string columnCode);
 }

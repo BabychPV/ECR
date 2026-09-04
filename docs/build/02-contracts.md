@@ -73,7 +73,7 @@ namespace Ecr.Domain.Abstractions;
 public interface IClock
 {
     /// <summary>Поточний момент у UTC. Завжди <see cref="DateTimeKind.Utc"/>.</summary>
-    DateTime UtcNow { get; }
+    public DateTime UtcNow { get; }
 }
 ```
 
@@ -388,10 +388,11 @@ public enum CellStorageMode : byte
 
 ```csharp
 // src/Ecr.Domain/ValueObjects/PeriodKey.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Globalization;
 using Ecr.Domain.Enums;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Ключ партиціонування: <c>Year * 100 + Sequence</c> (R-A6).
@@ -411,9 +412,13 @@ public readonly record struct PeriodKey(int Value)
     public static PeriodKey Create(int year, int sequence)
     {
         if (year is < 1900 or > 9999)
-            throw new ArgumentOutOfRangeException(nameof(year), year, "Рік має бути в межах 1900..9999.");
+        {
+                throw new ArgumentOutOfRangeException(nameof(year), year, "Рік має бути в межах 1900..9999.");
+        }
         if (sequence is < 1 or > 99)
-            throw new ArgumentOutOfRangeException(nameof(sequence), sequence, "Номер періоду має бути в межах 1..99.");
+        {
+                throw new ArgumentOutOfRangeException(nameof(sequence), sequence, "Номер періоду має бути в межах 1..99.");
+        }
         return new PeriodKey(year * 100 + sequence);
     }
 
@@ -453,9 +458,10 @@ public readonly record struct CellAddress(PeriodKey PeriodKey, long TableRowId, 
 
 ```csharp
 // src/Ecr.Domain/ValueObjects/CellValueData.cs
-namespace Ecr.Domain.ValueObjects;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Типізоване значення комірки. Рівно одне з полів <c>Value*</c> заповнене,
@@ -485,12 +491,30 @@ public sealed record CellValueData
     public bool IsWellFormed()
     {
         var filled = 0;
-        if (ValueString is not null) filled++;
-        if (ValueNumeric is not null) filled++;
-        if (ValueDate is not null) filled++;
-        if (ValueBool is not null) filled++;
-        if (ValueRegistryEntryId is not null) filled++;
-        if (ValueUnitId is not null) filled++;
+        if (ValueString is not null)
+        {
+            filled++;
+        }
+        if (ValueNumeric is not null)
+        {
+            filled++;
+        }
+        if (ValueDate is not null)
+        {
+            filled++;
+        }
+        if (ValueBool is not null)
+        {
+            filled++;
+        }
+        if (ValueRegistryEntryId is not null)
+        {
+            filled++;
+        }
+        if (ValueUnitId is not null)
+        {
+            filled++;
+        }
         return IsEmpty ? filled == 0 : filled == 1;
     }
 }
@@ -498,10 +522,11 @@ public sealed record CellValueData
 
 ```csharp
 // src/Ecr.Domain/ValueObjects/LocalizedText.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Локалізований текст. Зберігається однією колонкою <c>…L10n</c> у форматі JSON
@@ -521,8 +546,14 @@ public sealed class LocalizedText
     /// <summary>Значення для мови; якщо немає — для <paramref name="fallback"/>; якщо і його немає — перше наявне.</summary>
     public string? Get(string language, string fallback = "en")
     {
-        if (_values.TryGetValue(language, out var v)) return v;
-        if (_values.TryGetValue(fallback, out var f)) return f;
+        if (_values.TryGetValue(language, out var v))
+        {
+            return v;
+        }
+        if (_values.TryGetValue(fallback, out var f))
+        {
+            return f;
+        }
         return _values.Count > 0 ? _values.Values.First() : null;
     }
 
@@ -541,9 +572,10 @@ public sealed class LocalizedText
 
 ```csharp
 // src/Ecr.Domain/ValueObjects/EcrCode.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Text.RegularExpressions;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Код сутності конфігурації. Обмеження продиктоване лексером виразів:
@@ -586,9 +618,10 @@ public readonly partial record struct EcrCode
 
 ```csharp
 // src/Ecr.Domain/ValueObjects/RowKey.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Text.RegularExpressions;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Стабільна бізнес-ідентичність рядка. Для <c>RowMode = Fixed</c> береться з
@@ -640,9 +673,10 @@ public readonly partial record struct RowKey
 
 ```csharp
 // src/Ecr.Application/Security/EditDecision.cs
-namespace Ecr.Application.Security;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Security;
 
 /// <summary>
 /// Рішення про доступ. Повертає <b>причину</b>, а не <c>bool</c>: користувач має
@@ -661,9 +695,10 @@ public readonly record struct EditDecision(bool IsAllowed, EditDenyReason Reason
 
 ```csharp
 // src/Ecr.Application/Security/AccessProfile.cs
-namespace Ecr.Application.Security;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Security;
 
 /// <summary>
 /// Ефективні права користувача, обчислені <b>раз на сесію</b> (ФВ-6.10).
@@ -712,7 +747,10 @@ public sealed class AccessProfile
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)
     {
         var key = $"{kind}:{resourceId}";
-        if (Denies.Contains(key)) return GrantLevel.None;
+        if (Denies.Contains(key))
+        {
+            return GrantLevel.None;
+        }
         return Grants.TryGetValue(key, out var level) ? level : GrantLevel.None;
     }
 }
@@ -720,10 +758,11 @@ public sealed class AccessProfile
 
 ```csharp
 // src/Ecr.Application/Security/IAccessDecisionService.cs
-namespace Ecr.Application.Security;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Security;
 
 /// <summary>
 /// Єдина точка рішень про доступ. Поєднує RBAC, стан періоду, правила періодів
@@ -732,13 +771,13 @@ using Ecr.Domain.ValueObjects;
 public interface IAccessDecisionService
 {
     /// <summary>Будує профіль прав користувача. Викликається раз на сесію.</summary>
-    Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct);
+    public Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct);
 
     /// <summary>Чи може користувач читати документ.</summary>
-    Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct);
+    public Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct);
 
     /// <summary>Чи може користувач редагувати конкретну комірку.</summary>
-    Task<EditDecision> CanEditCellAsync(
+    public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct);
 
     /// <summary>
@@ -746,15 +785,15 @@ public interface IAccessDecisionService
     /// комірку зрізу одним проходом. Поштучний виклик <see cref="CanEditCellAsync"/>
     /// у циклі — антипатерн і не вкладається в бюджет.
     /// </summary>
-    Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
+    public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
         AccessProfile profile, long tableInstanceId, CancellationToken ct);
 
     /// <summary>Чи може користувач подати аркуш за період на затвердження.</summary>
-    Task<EditDecision> CanSubmitAsync(
+    public Task<EditDecision> CanSubmitAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>Чи може користувач затвердити аркуш за період.</summary>
-    Task<EditDecision> CanApproveAsync(
+    public Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 }
 ```
@@ -769,9 +808,10 @@ public interface IAccessDecisionService
 
 ```csharp
 // src/Ecr.Application/Ports/ICellStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Доступ до комірок. Ховає фізичну модель зберігання: нормалізовану або
@@ -784,10 +824,10 @@ public interface ICellStore
     /// бере <c>ColumnDef.DefaultValue</c> (ФВ-3.8).
     /// Бюджет: p95 &lt; 600 мс на 500×60 (tz/08 §8.2).
     /// </summary>
-    Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
+    public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>Значення конкретних комірок.</summary>
-    Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
+    public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
 
     /// <summary>
@@ -795,10 +835,10 @@ public interface ICellStore
     /// заборонене: або весь батч, або нічого (B04 §2.3).
     /// Бюджет: p95 &lt; 150 мс на 100 комірок.
     /// </summary>
-    Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
+    public Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
 
     /// <summary>Масове завантаження через <c>SqlBulkCopy</c>: імпорт, генератор, міграція.</summary>
-    Task BulkInsertAsync(IReadOnlyList<CellRecord> records, CancellationToken ct);
+    public Task BulkInsertAsync(IReadOnlyList<CellRecord> records, CancellationToken ct);
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>
@@ -825,9 +865,10 @@ public sealed record CellChangeSet(
 
 ```csharp
 // src/Ecr.Application/Ports/IMetadataCache.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Configuration;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Кеш метаданих шаблону. Опублікована версія структурно незмінна, тому ключ
@@ -838,22 +879,23 @@ using Ecr.Domain.Entities.Configuration;
 public interface IMetadataCache
 {
     /// <summary>Повна структура версії шаблону.</summary>
-    Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct);
+    public Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>Скидає запис. Потрібно лише після <c>Publish</c> або міграції.</summary>
-    Task InvalidateAsync(int templateVersionId, CancellationToken ct);
+    public Task InvalidateAsync(int templateVersionId, CancellationToken ct);
 }
 ```
 
 ```csharp
 // src/Ecr.Application/Ports/IFormulaEngine.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Рушій виразів. Один парсер на обидва діалекти; NCalc використовується як
@@ -863,22 +905,22 @@ using Ecr.Expressions.Parsing;
 public interface IFormulaEngine
 {
     /// <summary>Розбирає вираз. Помилка синтаксису — результат, а не виняток.</summary>
-    ParseResult Parse(string expression, ExpressionDialect dialect);
+    public ParseResult Parse(string expression, ExpressionDialect dialect);
 
     /// <summary>
     /// Витягує залежності виразу. Діапазони рядків розкриваються в явний список
     /// <c>RowKey</c> на момент <c>Publish</c> — у рантаймі діапазонів не існує (B03 §4).
     /// </summary>
-    IReadOnlyList<FormulaDependencyRef> ExtractDependencies(ParsedExpression expression, DependencyContext context);
+    public IReadOnlyList<FormulaDependencyRef> ExtractDependencies(ParsedExpression expression, DependencyContext context);
 
     /// <summary>Обчислює вираз.</summary>
-    EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
+    public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
 
     /// <summary>
     /// Топологічний порядок обчислення. Цикл повертається як помилка публікації,
     /// а не як тихо неправильне число (ФВ-9.4).
     /// </summary>
-    OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes);
+    public OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -969,10 +1011,11 @@ public sealed record FormulaNode(
 
 ```csharp
 // src/Ecr.Application/Ports/ICalculationModule.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Модуль розрахунку емісій. <b>Окрема точка розширення від</b>
@@ -981,16 +1024,16 @@ using Ecr.Domain.ValueObjects;
 public interface ICalculationModule
 {
     /// <summary>Код модуля, унікальний у системі.</summary>
-    string Code { get; }
+    public string Code { get; }
 
     /// <summary>Рівень драбини виразності, який реалізує модуль.</summary>
-    CalculationLevel Level { get; }
+    public CalculationLevel Level { get; }
 
     /// <summary>Чи здатний модуль обробити цю методологію.</summary>
-    bool CanHandle(MethodologyDescriptor methodology);
+    public bool CanHandle(MethodologyDescriptor methodology);
 
     /// <summary>Виконує розрахунок. Не пише в БД — повертає результат.</summary>
-    Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct);
+    public Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1135,9 +1178,10 @@ public sealed record CalculationTraceStep(
 
 ```csharp
 // src/Ecr.Application/Ports/IExternalDataSource.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Читання із зовнішнього джерела. PI AF — <b>виключно джерело</b>: система в
@@ -1146,16 +1190,16 @@ using Ecr.Domain.Enums;
 public interface IExternalDataSource
 {
     /// <summary>Транспорт, який реалізує адаптер.</summary>
-    ExternalTransport Transport { get; }
+    public ExternalTransport Transport { get; }
 
     /// <summary>Каталог сутностей джерела — для конфігуратора, щоб не вводити імена руками.</summary>
-    Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct);
 
     /// <summary>
     /// Читає діапазон. Ідемпотентно: повторний запуск того самого діапазону не
     /// дублює даних (ФВ-11.3).
     /// </summary>
-    Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct);
+    public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1265,29 +1309,29 @@ namespace Ecr.Application.Ports;
 public interface IBackgroundJobScheduler
 {
     /// <summary>Ставить задачу в чергу негайно.</summary>
-    Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+    public Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
 
     /// <summary>Планує задачу за cron-виразом.</summary>
-    Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+    public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct) where TJob : IBackgroundJob;
 
     /// <summary>Скасовує задачу.</summary>
-    Task CancelAsync(string jobId, CancellationToken ct);
+    public Task CancelAsync(string jobId, CancellationToken ct);
 
     /// <summary>Стан виконання для UI прогресу.</summary>
-    Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
+    public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
 }
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
 {
     /// <summary>Виконує задачу. Має бути ідемпотентною і відновлюваною.</summary>
-    Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct);
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct);
 }
 
 /// <summary>Канал прогресу для довгих операцій (усе довше ~5 с — у фон).</summary>
 public interface IJobProgress
 {
-    Task ReportAsync(int percent, string? message, CancellationToken ct);
+    public Task ReportAsync(int percent, string? message, CancellationToken ct);
 }
 
 /// <summary>Стан фонової задачі.</summary>
@@ -1307,9 +1351,10 @@ public interface IRecalculationJob : IBackgroundJob;
 
 ```csharp
 // src/Ecr.Application/Ports/ISqlCapabilities.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Можливості СУБД, визначені при старті (АРХ-7). Редакція впливає <b>лише</b>
@@ -1319,19 +1364,19 @@ using Ecr.Domain.Enums;
 /// </summary>
 public interface ISqlCapabilities
 {
-    SqlEditionMode EffectiveMode { get; }
-    string EditionName { get; }
-    int ProductMajorVersion { get; }
-    bool IsReadCommittedSnapshotOn { get; }
+    public SqlEditionMode EffectiveMode { get; }
+    public string EditionName { get; }
+    public int ProductMajorVersion { get; }
+    public bool IsReadCommittedSnapshotOn { get; }
 
     /// <summary>Перебудова індексів без блокування (<c>ONLINE = ON</c>).</summary>
-    bool SupportsOnlineIndexRebuild { get; }
+    public bool SupportsOnlineIndexRebuild { get; }
 
     /// <summary>Resource Governor для ізоляції фонових задач від інтерактивного піку.</summary>
-    bool SupportsResourceGovernor { get; }
+    public bool SupportsResourceGovernor { get; }
 
     /// <summary>Розмір батча архівації, підібраний під редакцію.</summary>
-    int ArchiveBatchSize { get; }
+    public int ArchiveBatchSize { get; }
 }
 ```
 
@@ -1346,8 +1391,8 @@ namespace Ecr.Application.Ports;
 /// </summary>
 public interface IUnitOfWork
 {
-    Task<int> SaveChangesAsync(CancellationToken ct);
-    Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken ct);
+    public Task<int> SaveChangesAsync(CancellationToken ct);
+    public Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken ct);
 }
 ```
 
@@ -1367,10 +1412,10 @@ public interface IUiStringCatalog
     /// підмінюється мовою за замовчуванням; ключа немає ніде — повертається
     /// сам ключ. Одна забута локалізація не має ламати екран.
     /// </summary>
-    Task<UiStringCatalog> GetAsync(string languageCode, CancellationToken ct);
+    public Task<UiStringCatalog> GetAsync(string languageCode, CancellationToken ct);
 
     /// <summary>Поточна версія каталогу. Змінюється будь-яким записом.</summary>
-    Task<int> GetRevisionAsync(CancellationToken ct);
+    public Task<int> GetRevisionAsync(CancellationToken ct);
 }
 
 /// <param name="LanguageCode">Мова зрізу.</param>
@@ -1384,10 +1429,11 @@ public sealed record UiStringCatalog(
 
 ```csharp
 // src/Ecr.Application/Ports/ISimulationService.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Application.Security;
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Симуляція «очима користувача» (<c>ФВ-6.16a</c>, <c>D-96</c>).
@@ -1401,16 +1447,16 @@ public interface ISimulationService
     /// запису «подивитися очима» стало б способом безслідно переглянути чужі
     /// дані, тому запис не відкладається і не батчиться.
     /// </summary>
-    Task<long> StartAsync(int actorUserId, int subjectUserId, string reason, CancellationToken ct);
+    public Task<long> StartAsync(int actorUserId, int subjectUserId, string reason, CancellationToken ct);
 
-    Task EndAsync(long sessionId, CancellationToken ct);
+    public Task EndAsync(long sessionId, CancellationToken ct);
 
     /// <summary>
     /// Профіль суб'єкта для активного сеансу. **Не кешується** (`ФВ-6.16a` п. 4):
     /// покладений під ключ суб'єкта, він дістався б справжньому користувачеві
     /// з прапорцем <c>IsSimulation</c>. Симуляція рідкісна — перебудова дешева.
     /// </summary>
-    Task<AccessProfile> BuildProfileAsync(long sessionId, CancellationToken ct);
+    public Task<AccessProfile> BuildProfileAsync(long sessionId, CancellationToken ct);
 }
 ```
 
@@ -1427,14 +1473,14 @@ namespace Ecr.Application.Ports;
 public interface IOrphanScanner
 {
     /// <summary>Повний прохід. Повертає кількість змінених рядків.</summary>
-    Task<int> ScanAllAsync(CancellationToken ct);
+    public Task<int> ScanAllAsync(CancellationToken ct);
 
     /// <summary>
     /// Точковий перерахунок після зміни вікна дії запису. **Знімає** ознаку
     /// так само, як ставить: інакше виправлення довідника не розблокувало б
     /// <c>Submit</c>.
     /// </summary>
-    Task<int> RescanForEntryAsync(long registryEntryId, CancellationToken ct);
+    public Task<int> RescanForEntryAsync(long registryEntryId, CancellationToken ct);
 }
 ```
 
@@ -1480,9 +1526,10 @@ public sealed record EvaluationResult(
 
 ```csharp
 // src/Ecr.Application/Ports/IMethodologyStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Calculations;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Читання конфігурації методологій зі сховища.
@@ -1502,19 +1549,19 @@ public interface IMethodologyStore
     /// Опубліковані версії методології. Вибір чинної на дату робить викликач:
     /// правило «максимальний <c>EffectiveFrom</c> ≤ дата» — це домен, не сховище.
     /// </summary>
-    Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsAsync(int methodologyId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsAsync(int methodologyId, CancellationToken ct);
 
     /// <summary>Активні правила прив'язки версії, впорядковані за <c>Priority</c>.</summary>
-    Task<IReadOnlyList<MethodologyRule>> GetRulesAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyRule>> GetRulesAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>Формули версії в порядку обчислення.</summary>
-    Task<IReadOnlyList<MethodologyFormula>> GetFormulasAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyFormula>> GetFormulasAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>Речовини версії: для кожної рахуються власні виходи.</summary>
-    Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>Оголошені виходи версії — з обов'язковими одиницями (ФВ-16.6).</summary>
-    Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
 }
 ```
 
@@ -1522,9 +1569,10 @@ public interface IMethodologyStore
 
 ```csharp
 // src/Ecr.Application/Ports/IConstantStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Calculations;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Читання констант методології зі сховища.
@@ -1544,7 +1592,7 @@ public interface IConstantStore
     /// Усі константи версії з цим кодом — разом із темпоральними варіантами
     /// та варіантами за категорією і речовиною.
     /// </summary>
-    Task<IReadOnlyList<MethodologyConstant>> GetCandidatesAsync(
+    public Task<IReadOnlyList<MethodologyConstant>> GetCandidatesAsync(
         int methodologyVersionId, string code, CancellationToken ct);
 }
 ```
@@ -1553,9 +1601,10 @@ public interface IConstantStore
 
 ```csharp
 // src/Ecr.Application/Ports/ICalculationResultStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Запис результатів прогону розрахунку.
@@ -1576,24 +1625,24 @@ public interface ICalculationResultStore
     /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
     /// одним викликом <c>sp_sequence_get_range</c>.
     /// </summary>
-    Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct);
+    public Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct);
 
     /// <summary>
     /// Пише результати пакетно (<c>SqlBulkCopy</c>). <c>SaveChanges</c> у циклі
     /// заборонений: бюджет річного перерахунку — 10 хвилин (ПРД-13).
     /// </summary>
-    Task WriteResultsAsync(long calculationRunId, IReadOnlyList<CalculationOutput> outputs, CancellationToken ct);
+    public Task WriteResultsAsync(long calculationRunId, IReadOnlyList<CalculationOutput> outputs, CancellationToken ct);
 
     /// <summary>
     /// Пише трейс — лише те, що передбачає <paramref name="traceLevel"/>.
     /// Керуємо тим, <b>що</b> пишемо, а не скільки зберігаємо (ЗБР-3).
     /// </summary>
-    Task WriteTraceAsync(
+    public Task WriteTraceAsync(
         long calculationRunId, IReadOnlyList<CalculationOutput> outputs,
         TraceLevel traceLevel, CancellationToken ct);
 
     /// <summary>Інвалідує залежні зрізи <c>rpt.*</c> після завершення прогону.</summary>
-    Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
+    public Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
 }
 ```
 
@@ -1601,9 +1650,10 @@ public interface ICalculationResultStore
 
 ```csharp
 // src/Ecr.Application/Ports/ICollectionStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.External;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Стан і результати збору із зовнішніх джерел.
@@ -1622,18 +1672,18 @@ using Ecr.Domain.Entities.External;
 public interface ICollectionStore
 {
     /// <summary>Сутність джерела; <c>null</c>, якщо її немає або вона вимкнена.</summary>
-    Task<SourceEntity?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
+    public Task<SourceEntity?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
 
     /// <summary>Джерело — воно визначає транспорт. Вибір транспорту це налаштування, не гілка коду (ФВ-11.2).</summary>
-    Task<DataSource?> FindDataSourceAsync(int dataSourceId, CancellationToken ct);
+    public Task<DataSource?> FindDataSourceAsync(int dataSourceId, CancellationToken ct);
 
     /// <summary>Створює <c>itg.CollectionRun</c> і повертає його ідентифікатор.</summary>
-    Task<long> StartRunAsync(
+    public Task<long> StartRunAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc,
         bool isCatchUp, int? triggeredByUserId, CancellationToken ct);
 
     /// <summary>Завершує прогін. Відмова джерела — теж завершення, зі статусом і кодом.</summary>
-    Task FinishRunAsync(
+    public Task FinishRunAsync(
         long collectionRunId, string status, int pointsRetrieved,
         string? errorMessage, CancellationToken ct);
 
@@ -1643,12 +1693,12 @@ public interface ICollectionStore
     /// Значення зберігаються <b>в одиниці джерела</b> (ФВ-16.9).
     /// </summary>
     /// <returns>Скільки точок фактично записано.</returns>
-    Task<int> UpsertRawPointsAsync(
+    public Task<int> UpsertRawPointsAsync(
         long collectionRunId, int sourceEntityId,
         IReadOnlyList<SourceDataPoint> points, CancellationToken ct);
 
     /// <summary>Записує покриті інтервали в <c>itg.CollectionCoverage</c>.</summary>
-    Task WriteCoverageAsync(
+    public Task WriteCoverageAsync(
         long collectionRunId, int sourceEntityId,
         IReadOnlyList<TimeInterval> covered, CancellationToken ct);
 
@@ -1656,7 +1706,7 @@ public interface ICollectionStore
     /// Покриті інтервали від <paramref name="notBefore"/> — основа для пошуку
     /// прогалин. Ознака здоров'я інтеграції — саме журнал покриття, а не тиша (ІНТ-3.3).
     /// </summary>
-    Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
+    public Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
         int sourceEntityId, DateTime notBefore, CancellationToken ct);
 }
 ```
@@ -1698,7 +1748,7 @@ public interface ITemplateVersionStore
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="ct">Скасування.</param>
     /// <returns>Нова ревізія.</returns>
-    Task<int> IncrementPresentationRevisionAsync(int templateVersionId, CancellationToken ct);
+    public Task<int> IncrementPresentationRevisionAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
     /// Чи існують документи, прив'язані до цієї версії.
@@ -1708,7 +1758,7 @@ public interface ITemplateVersionStore
     /// та сама зміна коду колонки без документів <c>Safe</c>, з документами —
     /// <c>Breaking</c> і відмова операції.
     /// </remarks>
-    Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
+    public Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
 }
 ```
 
@@ -1716,9 +1766,10 @@ public interface ITemplateVersionStore
 
 ```csharp
 // src/Ecr.Application/Ports/IRowStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Рядки таблиці документа: ідентичність, версія, створення.
@@ -1747,7 +1798,7 @@ public interface IRowStore
     /// знімок структури — тобто <c>TemplateVersionId</c>. Класти його в запит
     /// не можна: клієнт не має диктувати, за якою версією тлумачити дані.
     /// </remarks>
-    Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
+    public Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>
     /// Поточні версії рядків таблиці: <c>RowKey</c> → hex <c>rowversion</c>.
@@ -1756,13 +1807,13 @@ public interface IRowStore
     /// Один виклик на батч, не на рядок: бюджет запису — 300 мс на 100 комірок,
     /// і N запитів у нього не вкладаються.
     /// </remarks>
-    Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(
+    public Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
     /// Ідентифікатори рядків за ключами: <c>RowKey</c> → <c>TableRow.Id</c>.
     /// </summary>
-    Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(
+    public Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
@@ -1774,7 +1825,7 @@ public interface IRowStore
     /// <c>SqlBulkCopy</c>. З <c>IDENTITY</c> довелося б вставляти рядки,
     /// зчитувати ключі й лише потім комірки.
     /// </remarks>
-    Task<long> CreateRowAsync(
+    public Task<long> CreateRowAsync(
         long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct);
 
     /// <summary>
@@ -1786,7 +1837,7 @@ public interface IRowStore
     /// <c>baseVersion</c> пройде як коректний, і чужа правка зникне без сліду
     /// (B04 §2.4).
     /// </remarks>
-    Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct);
+    public Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
     /// Збережені ознаки «осиротілості» рядків: <c>TableRow.Id</c> → <c>IsOrphaned</c>.
@@ -1797,7 +1848,7 @@ public interface IRowStore
     /// кожен рядок і вийти за бюджет 400 мс (ФВ-8.13, <c>D-98</c>).
     /// Ознаку ставить <c>OrphanScanJob</c> уночі.
     /// </remarks>
-    Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
+    public Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 }
 
@@ -1821,9 +1872,10 @@ public sealed record TableInstanceRef(
 
 ```csharp
 // src/Ecr.Api/Errors/EcrProblemDetails.cs
-namespace Ecr.Api.Errors;
 
 using Microsoft.AspNetCore.Mvc;
+
+namespace Ecr.Api.Errors;
 
 /// <summary>
 /// Помилка API. Розширює стандартний <see cref="ProblemDetails"/> кодом і
@@ -2054,9 +2106,10 @@ public sealed class NotFoundException(string errorCode, string message)
 
 ```csharp
 // src/Ecr.Application/Templates/Dto/TemplateDiffDto.cs
-namespace Ecr.Application.Templates.Dto;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Templates.Dto;
 
 /// <summary>
 /// Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,
@@ -2072,6 +2125,8 @@ public sealed record TemplateDiffDto(
 /// <param name="ElementPath">Шлях: <c>Sheet.Table.Column</c> або <c>Sheet.Table.RowKey</c>.</param>
 /// <param name="Kind">`Added` / `Removed` / `Modified` / `Presentation`.</param>
 /// <param name="ChangeClass">Клас ризику; `Breaking` у версії з документами — відмова.</param>
+/// <param name="OldValue">Значення до зміни; <c>null</c> для <c>Added</c>.</param>
+/// <param name="NewValue">Значення після зміни; <c>null</c> для <c>Removed</c>.</param>
 public sealed record TemplateChangeDto(
     string ElementPath,
     string Kind,
@@ -2082,11 +2137,12 @@ public sealed record TemplateChangeDto(
 
 ```csharp
 // src/Ecr.Application/Templates/Dto/TemplateStructureDto.cs
-namespace Ecr.Application.Templates.Dto;
 
 using Ecr.Application.Documents.Dto;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Templates.Dto;
 
 /// <summary>
 /// Структура опублікованої версії — те, що віддається клієнту й кешується за
@@ -2110,9 +2166,10 @@ public sealed record TableDto(
 
 ```csharp
 // src/Ecr.Application/Registries/Dto/RegistryEntryDto.cs
-namespace Ecr.Application.Registries.Dto;
 
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Registries.Dto;
 
 /// <summary>
 /// Запис довідника для UI і резолвінгу. У комірці зберігається
@@ -2127,6 +2184,12 @@ public sealed record RegistryEntryDto(
     DateOnly? ValidFrom,
     DateOnly? ValidTo);
 
+/// <summary>Створення або оновлення запису довідника.</summary>
+/// <param name="Id"><c>null</c> — створення нового запису; інакше — оновлення наявного.</param>
+/// <param name="RegistryDefId">Довідник, до якого належить запис.</param>
+/// <param name="Code">Стабільний код; не змінюється при перейменуванні (`ФВ-8.8`).</param>
+/// <param name="Display">Локалізована назва для показу.</param>
+/// <param name="ParentEntryId">Батьківський запис в ієрархії; <c>null</c> — корінь.</param>
 /// <param name="Values">Значення полів: код поля → значення відповідного типу.</param>
 public sealed record RegistryEntryUpsertDto(
     long? Id,

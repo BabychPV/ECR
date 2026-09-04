@@ -97,5 +97,5 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
 public interface IEcrTransaction
 {
     /// <summary>Фіксує транзакцію.</summary>
-    Task CommitAsync(CancellationToken ct);
+    public Task CommitAsync(CancellationToken ct);
 }

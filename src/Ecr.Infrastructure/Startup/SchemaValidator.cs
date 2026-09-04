@@ -39,6 +39,7 @@ public sealed class SchemaValidator(
 
     /// <summary>Виконує послідовність перевірок.</summary>
     /// <param name="startupMode"><c>Validate</c> у прод, <c>Migrate</c> у dev/test.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <exception cref="InvalidOperationException">
     /// Середовище непридатне; повідомлення пояснює, що саме і як виправити.
     /// </exception>

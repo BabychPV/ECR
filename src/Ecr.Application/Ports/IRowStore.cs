@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/IRowStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Рядки таблиці документа: ідентичність, версія, створення.
@@ -30,7 +31,7 @@ public interface IRowStore
     /// знімок структури — тобто <c>TemplateVersionId</c>. Класти його в запит
     /// не можна: клієнт не має диктувати, за якою версією тлумачити дані.
     /// </remarks>
-    Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
+    public Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>
     /// Поточні версії рядків таблиці: <c>RowKey</c> → hex <c>rowversion</c>.
@@ -39,13 +40,13 @@ public interface IRowStore
     /// Один виклик на батч, не на рядок: бюджет запису — 300 мс на 100 комірок,
     /// і N запитів у нього не вкладаються.
     /// </remarks>
-    Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(
+    public Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
     /// Ідентифікатори рядків за ключами: <c>RowKey</c> → <c>TableRow.Id</c>.
     /// </summary>
-    Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(
+    public Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
@@ -57,7 +58,7 @@ public interface IRowStore
     /// <c>SqlBulkCopy</c>. З <c>IDENTITY</c> довелося б вставляти рядки,
     /// зчитувати ключі й лише потім комірки.
     /// </remarks>
-    Task<long> CreateRowAsync(
+    public Task<long> CreateRowAsync(
         long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct);
 
     /// <summary>
@@ -69,7 +70,7 @@ public interface IRowStore
     /// <c>baseVersion</c> пройде як коректний, і чужа правка зникне без сліду
     /// (B04 §2.4).
     /// </remarks>
-    Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct);
+    public Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
     /// Збережені ознаки «осиротілості» рядків: <c>TableRow.Id</c> → <c>IsOrphaned</c>.
@@ -80,7 +81,7 @@ public interface IRowStore
     /// кожен рядок і вийти за бюджет 400 мс (ФВ-8.13, <c>D-98</c>).
     /// Ознаку ставить <c>OrphanScanJob</c> уночі.
     /// </remarks>
-    Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
+    public Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 }
 

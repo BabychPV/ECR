@@ -1,8 +1,8 @@
-namespace Ecr.Infrastructure.Security;
-
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+
+namespace Ecr.Infrastructure.Security;
 
 /// <summary>
 /// Перевіряє <c>SecurityStamp</c> на **кожен** запит: відкликання ролі має

@@ -100,6 +100,7 @@ public sealed class CalculationOrchestrator(
     /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
     /// <param name="triggeredByUserId">Хто запустив; <c>null</c> — за розкладом.</param>
     /// <param name="progress">Канал прогресу для UI.</param>
+    /// <param name="ct">Токен скасування.</param>
     public Task<long> RunAsync(int projectId, PeriodKey? periodKey, int? triggeredByUserId,
                                IJobProgress progress, CancellationToken ct)
         => throw new NotImplementedException(

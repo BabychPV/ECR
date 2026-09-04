@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/IMetadataCache.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Configuration;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Кеш метаданих шаблону. Опублікована версія структурно незмінна, тому ключ
@@ -12,8 +13,8 @@ using Ecr.Domain.Entities.Configuration;
 public interface IMetadataCache
 {
     /// <summary>Повна структура версії шаблону.</summary>
-    Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct);
+    public Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>Скидає запис. Потрібно лише після <c>Publish</c> або міграції.</summary>
-    Task InvalidateAsync(int templateVersionId, CancellationToken ct);
+    public Task InvalidateAsync(int templateVersionId, CancellationToken ct);
 }

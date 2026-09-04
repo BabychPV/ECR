@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/IConstantStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Calculations;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Читання констант методології зі сховища.
@@ -21,6 +22,6 @@ public interface IConstantStore
     /// Усі константи версії з цим кодом — разом із темпоральними варіантами
     /// та варіантами за категорією і речовиною.
     /// </summary>
-    Task<IReadOnlyList<MethodologyConstant>> GetCandidatesAsync(
+    public Task<IReadOnlyList<MethodologyConstant>> GetCandidatesAsync(
         int methodologyVersionId, string code, CancellationToken ct);
 }

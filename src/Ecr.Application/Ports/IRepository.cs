@@ -10,14 +10,14 @@ namespace Ecr.Application.Ports;
 public interface IRepository<T, in TId> where T : class
 {
     /// <summary>Знаходить за ідентифікатором або повертає <c>null</c>.</summary>
-    Task<T?> FindAsync(TId id, CancellationToken ct);
+    public Task<T?> FindAsync(TId id, CancellationToken ct);
 
     /// <summary>Знаходить або кидає <see cref="Errors.NotFoundException"/>.</summary>
-    Task<T> GetAsync(TId id, CancellationToken ct);
+    public Task<T> GetAsync(TId id, CancellationToken ct);
 
     /// <summary>Додає новий агрегат.</summary>
-    void Add(T entity);
+    public void Add(T entity);
 
     /// <summary>Позначає агрегат видаленим (фізичне видалення — лише де це дозволено).</summary>
-    void Remove(T entity);
+    public void Remove(T entity);
 }

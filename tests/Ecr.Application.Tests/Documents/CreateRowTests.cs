@@ -38,7 +38,10 @@ public sealed class CreateRowTests
         var table = new TableDef(sheetDefId: 1, EcrCode.Create("Main"), Text("Main"), 1,
                                  TableLayoutKind.MonthsInColumns, mode);
         SetId(table, 3);
-        if (maxRows is { } m) table.SetMaxDynamicRows(m);
+        if (maxRows is { } m)
+        {
+            table.SetMaxDynamicRows(m);
+        }
         sheet.AddTable(table);
 
         _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())

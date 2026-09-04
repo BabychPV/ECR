@@ -22,8 +22,8 @@ public sealed class TypeChecker
 public interface ITypeContext
 {
     /// <summary>Тип значення колонки.</summary>
-    ExpressionValueType GetColumnType(int tableDefId, int columnDefId);
+    public ExpressionValueType GetColumnType(int tableDefId, int columnDefId);
 
     /// <summary>Тип аргументу методології.</summary>
-    ExpressionValueType GetArgumentType(string name);
+    public ExpressionValueType GetArgumentType(string name);
 }

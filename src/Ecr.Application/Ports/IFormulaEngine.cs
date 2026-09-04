@@ -1,11 +1,12 @@
 // src/Ecr.Application/Ports/IFormulaEngine.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Рушій виразів. Один парсер на обидва діалекти; NCalc використовується як
@@ -15,22 +16,22 @@ using Ecr.Expressions.Parsing;
 public interface IFormulaEngine
 {
     /// <summary>Розбирає вираз. Помилка синтаксису — результат, а не виняток.</summary>
-    ParseResult Parse(string expression, ExpressionDialect dialect);
+    public ParseResult Parse(string expression, ExpressionDialect dialect);
 
     /// <summary>
     /// Витягує залежності виразу. Діапазони рядків розкриваються в явний список
     /// <c>RowKey</c> на момент <c>Publish</c> — у рантаймі діапазонів не існує (B03 §4).
     /// </summary>
-    IReadOnlyList<FormulaDependencyRef> ExtractDependencies(ParsedExpression expression, DependencyContext context);
+    public IReadOnlyList<FormulaDependencyRef> ExtractDependencies(ParsedExpression expression, DependencyContext context);
 
     /// <summary>Обчислює вираз.</summary>
-    EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
+    public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
 
     /// <summary>
     /// Топологічний порядок обчислення. Цикл повертається як помилка публікації,
     /// а не як тихо неправильне число (ФВ-9.4).
     /// </summary>
-    OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes);
+    public OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

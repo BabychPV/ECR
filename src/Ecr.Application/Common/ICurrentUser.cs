@@ -8,14 +8,14 @@ namespace Ecr.Application.Common;
 public interface ICurrentUser
 {
     /// <summary>Ідентифікатор; <c>null</c> для анонімного запиту.</summary>
-    int? UserId { get; }
+    public int? UserId { get; }
 
     /// <summary>Ім'я для аудиту і повідомлень.</summary>
-    string? UserName { get; }
+    public string? UserName { get; }
 
     /// <summary>Наскрізний ідентифікатор запиту.</summary>
-    string CorrelationId { get; }
+    public string CorrelationId { get; }
 
     /// <summary>Мова інтерфейсу для локалізації повідомлень.</summary>
-    string Language { get; }
+    public string Language { get; }
 }

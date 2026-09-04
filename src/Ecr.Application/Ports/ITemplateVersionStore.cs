@@ -28,7 +28,7 @@ public interface ITemplateVersionStore
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="ct">Скасування.</param>
     /// <returns>Нова ревізія.</returns>
-    Task<int> IncrementPresentationRevisionAsync(int templateVersionId, CancellationToken ct);
+    public Task<int> IncrementPresentationRevisionAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
     /// Чи існують документи, прив'язані до цієї версії.
@@ -38,5 +38,5 @@ public interface ITemplateVersionStore
     /// та сама зміна коду колонки без документів <c>Safe</c>, з документами —
     /// <c>Breaking</c> і відмова операції.
     /// </remarks>
-    Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
+    public Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
 }

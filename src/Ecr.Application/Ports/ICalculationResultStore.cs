@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/ICalculationResultStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Запис результатів прогону розрахунку.
@@ -22,22 +23,22 @@ public interface ICalculationResultStore
     /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
     /// одним викликом <c>sp_sequence_get_range</c>.
     /// </summary>
-    Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct);
+    public Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct);
 
     /// <summary>
     /// Пише результати пакетно (<c>SqlBulkCopy</c>). <c>SaveChanges</c> у циклі
     /// заборонений: бюджет річного перерахунку — 10 хвилин (ПРД-13).
     /// </summary>
-    Task WriteResultsAsync(long calculationRunId, IReadOnlyList<CalculationOutput> outputs, CancellationToken ct);
+    public Task WriteResultsAsync(long calculationRunId, IReadOnlyList<CalculationOutput> outputs, CancellationToken ct);
 
     /// <summary>
     /// Пише трейс — лише те, що передбачає <paramref name="traceLevel"/>.
     /// Керуємо тим, <b>що</b> пишемо, а не скільки зберігаємо (ЗБР-3).
     /// </summary>
-    Task WriteTraceAsync(
+    public Task WriteTraceAsync(
         long calculationRunId, IReadOnlyList<CalculationOutput> outputs,
         TraceLevel traceLevel, CancellationToken ct);
 
     /// <summary>Інвалідує залежні зрізи <c>rpt.*</c> після завершення прогону.</summary>
-    Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
+    public Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
 }

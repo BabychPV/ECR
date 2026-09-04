@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/IMethodologyStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.Entities.Calculations;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Читання конфігурації методологій зі сховища.
@@ -21,17 +22,17 @@ public interface IMethodologyStore
     /// Опубліковані версії методології. Вибір чинної на дату робить викликач:
     /// правило «максимальний <c>EffectiveFrom</c> ≤ дата» — це домен, не сховище.
     /// </summary>
-    Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsAsync(int methodologyId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyVersion>> GetPublishedVersionsAsync(int methodologyId, CancellationToken ct);
 
     /// <summary>Активні правила прив'язки версії, впорядковані за <c>Priority</c>.</summary>
-    Task<IReadOnlyList<MethodologyRule>> GetRulesAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyRule>> GetRulesAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>Формули версії в порядку обчислення.</summary>
-    Task<IReadOnlyList<MethodologyFormula>> GetFormulasAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyFormula>> GetFormulasAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>Речовини версії: для кожної рахуються власні виходи.</summary>
-    Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>Оголошені виходи версії — з обов'язковими одиницями (ФВ-16.6).</summary>
-    Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
 }

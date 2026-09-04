@@ -1,8 +1,9 @@
 // src/Ecr.Domain/ValueObjects/PeriodKey.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Globalization;
 using Ecr.Domain.Enums;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Ключ партиціонування: <c>Year * 100 + Sequence</c> (R-A6).
@@ -22,9 +23,13 @@ public readonly record struct PeriodKey(int Value)
     public static PeriodKey Create(int year, int sequence)
     {
         if (year is < 1900 or > 9999)
-            throw new ArgumentOutOfRangeException(nameof(year), year, "Рік має бути в межах 1900..9999.");
+        {
+                throw new ArgumentOutOfRangeException(nameof(year), year, "Рік має бути в межах 1900..9999.");
+        }
         if (sequence is < 1 or > 99)
-            throw new ArgumentOutOfRangeException(nameof(sequence), sequence, "Номер періоду має бути в межах 1..99.");
+        {
+                throw new ArgumentOutOfRangeException(nameof(sequence), sequence, "Номер періоду має бути в межах 1..99.");
+        }
         return new PeriodKey(year * 100 + sequence);
     }
 

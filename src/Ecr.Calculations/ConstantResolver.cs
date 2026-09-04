@@ -19,6 +19,7 @@ public sealed class ConstantResolver(IConstantStore constants)
     /// <param name="category">Категорія; <c>null</c> — без категорії.</param>
     /// <param name="substanceEntryId">Речовина; <c>null</c> — спільна константа.</param>
     /// <param name="onDate">Дата періоду для темпорального вибору.</param>
+    /// <param name="ct">Токен скасування.</param>
     public Task<(decimal Value, int UnitId)?> ResolveAsync(
         int methodologyVersionId, string code, string? category, int? substanceEntryId,
         DateOnly onDate, CancellationToken ct)

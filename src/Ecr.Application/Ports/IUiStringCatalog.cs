@@ -13,10 +13,10 @@ public interface IUiStringCatalog
     /// підмінюється мовою за замовчуванням; ключа немає ніде — повертається
     /// сам ключ. Одна забута локалізація не має ламати екран.
     /// </summary>
-    Task<UiStringCatalog> GetAsync(string languageCode, CancellationToken ct);
+    public Task<UiStringCatalog> GetAsync(string languageCode, CancellationToken ct);
 
     /// <summary>Поточна версія каталогу. Змінюється будь-яким записом.</summary>
-    Task<int> GetRevisionAsync(CancellationToken ct);
+    public Task<int> GetRevisionAsync(CancellationToken ct);
 }
 
 /// <param name="LanguageCode">Мова зрізу.</param>

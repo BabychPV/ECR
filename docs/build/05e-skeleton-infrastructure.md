@@ -419,6 +419,7 @@ public sealed class AccessProfileCache(IMemoryCache memory)
     /// <param name="userId">Користувач.</param>
     /// <param name="securityStamp">Штамп безпеки — частина ключа.</param>
     /// <param name="factory">Побудова профілю при промаху.</param>
+    /// <param name="ct">Токен скасування.</param>
     public Task<AccessProfile> GetOrCreateAsync(
         int userId, string securityStamp, Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
         => throw new NotImplementedException(

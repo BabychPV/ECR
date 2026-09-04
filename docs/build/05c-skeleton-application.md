@@ -54,16 +54,16 @@ namespace Ecr.Application.Ports;
 public interface IRepository<T, in TId> where T : class
 {
     /// <summary>Знаходить за ідентифікатором або повертає <c>null</c>.</summary>
-    Task<T?> FindAsync(TId id, CancellationToken ct);
+    public Task<T?> FindAsync(TId id, CancellationToken ct);
 
     /// <summary>Знаходить або кидає <see cref="Errors.NotFoundException"/>.</summary>
-    Task<T> GetAsync(TId id, CancellationToken ct);
+    public Task<T> GetAsync(TId id, CancellationToken ct);
 
     /// <summary>Додає новий агрегат.</summary>
-    void Add(T entity);
+    public void Add(T entity);
 
     /// <summary>Позначає агрегат видаленим (фізичне видалення — лише де це дозволено).</summary>
-    void Remove(T entity);
+    public void Remove(T entity);
 }
 ```
 
@@ -87,16 +87,16 @@ namespace Ecr.Application.Ports;
 public interface IAuditWriter
 {
     /// <summary>Записує зміни комірок однією операцією, у тій самій транзакції.</summary>
-    Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct);
+    public Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct);
 
     /// <summary>Записує структурну зміну.</summary>
-    Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
+    public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
 
     /// <summary>Записує подію безпеки.</summary>
-    Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
+    public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
 
     /// <summary>Записує подію публікації з diff <b>результатів</b>, а не коду (ФВ-9.6).</summary>
-    Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);
+    public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);
 }
 
 /// <summary>Зміна комірки для аудиту.</summary>
@@ -204,10 +204,10 @@ public sealed record ImportRejection(string RowKey, string ColumnCode, string Re
 MODULE: application | STAGE: 5
 
 ```csharp
-namespace Ecr.Application.Ports;
-
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Побудова зрізу звітності. <c>rpt.*</c> — **зріз без логіки**: агрегації
@@ -219,14 +219,14 @@ public interface IReportSnapshotBuilder
     /// Будує зріз. Статус успадковується від даних: <c>Draft</c>, поки аркуші
     /// не затверджені (D-65) — регуляторні вʼюхи такий зріз не віддають.
     /// </summary>
-    Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
+    public Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
                           string? parametersJson, CancellationToken ct);
 
     /// <summary>Позначає зріз поданим — після цього він іммутабельний.</summary>
-    Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
+    public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
 
     /// <summary>Перераховує статус зрізу після зміни стану затвердження аркушів.</summary>
-    Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
+    public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
 }
 ```
 
@@ -242,13 +242,13 @@ namespace Ecr.Application.Security;
 public interface IPasswordHasher
 {
     /// <summary>Хешує пароль. Результат містить сіль і параметри алгоритму.</summary>
-    string Hash(string password);
+    public string Hash(string password);
 
     /// <summary>Перевіряє пароль. Час виконання не має залежати від правильності.</summary>
-    bool Verify(string password, string hash);
+    public bool Verify(string password, string hash);
 
     /// <summary>Чи потрібно перехешувати через зміну параметрів алгоритму.</summary>
-    bool NeedsRehash(string hash);
+    public bool NeedsRehash(string hash);
 }
 ```
 
@@ -268,16 +268,16 @@ namespace Ecr.Application.Common;
 public interface ICurrentUser
 {
     /// <summary>Ідентифікатор; <c>null</c> для анонімного запиту.</summary>
-    int? UserId { get; }
+    public int? UserId { get; }
 
     /// <summary>Ім'я для аудиту і повідомлень.</summary>
-    string? UserName { get; }
+    public string? UserName { get; }
 
     /// <summary>Наскрізний ідентифікатор запиту.</summary>
-    string CorrelationId { get; }
+    public string CorrelationId { get; }
 
     /// <summary>Мова інтерфейсу для локалізації повідомлень.</summary>
-    string Language { get; }
+    public string Language { get; }
 }
 ```
 
@@ -391,6 +391,7 @@ public sealed class CloneTemplateVersionHandler(
     /// <param name="sourceVersionId">Версія-джерело.</param>
     /// <param name="newVersion">Номер нової версії.</param>
     /// <param name="userId">Автор.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор створеної чернетки.</returns>
     public Task<int> CloneAsync(int sourceVersionId, string newVersion, int userId, CancellationToken ct)
         => throw new NotImplementedException(
@@ -694,10 +695,10 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 public interface IValidationContext
 {
     /// <summary>Значення комірки поточного рядка.</summary>
-    object? GetCell(string columnCode);
+    public object? GetCell(string columnCode);
 
     /// <summary>Значення комірки конкретного рядка таблиці.</summary>
-    object? GetCell(string rowKey, string columnCode);
+    public object? GetCell(string rowKey, string columnCode);
 }
 ```
 
@@ -760,6 +761,7 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="dirty">Змінені комірки.</param>
+    /// <param name="ct">Токен скасування.</param>
     public Task RecalculateAsync(long documentId, PeriodKey periodKey, DirtySet dirty, CancellationToken ct)
         => throw new NotImplementedException(
             "TODO: 1) за зворотним індексом cfg.FormulaDependency знайти формули, залежні від seeds; " +

@@ -9,16 +9,16 @@ namespace Ecr.Application.Ports;
 public interface IAuditWriter
 {
     /// <summary>Записує зміни комірок однією операцією, у тій самій транзакції.</summary>
-    Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct);
+    public Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct);
 
     /// <summary>Записує структурну зміну.</summary>
-    Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
+    public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
 
     /// <summary>Записує подію безпеки.</summary>
-    Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
+    public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
 
     /// <summary>Записує подію публікації з diff <b>результатів</b>, а не коду (ФВ-9.6).</summary>
-    Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);
+    public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);
 }
 
 /// <summary>Зміна комірки для аудиту.</summary>

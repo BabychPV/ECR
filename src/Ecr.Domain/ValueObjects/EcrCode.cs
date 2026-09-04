@@ -1,7 +1,8 @@
 // src/Ecr.Domain/ValueObjects/EcrCode.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Text.RegularExpressions;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Код сутності конфігурації. Обмеження продиктоване лексером виразів:

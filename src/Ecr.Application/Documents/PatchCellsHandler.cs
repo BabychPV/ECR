@@ -110,7 +110,10 @@ public sealed class PatchCellsHandler(
         var addresses = new List<CellAddress>();
         foreach (var row in updates)
         {
-            if (!rowIds.TryGetValue(row.RowKey, out var rowId)) continue;
+            if (!rowIds.TryGetValue(row.RowKey, out var rowId))
+            {
+                continue;
+            }
             foreach (var cell in row.Cells)
             {
                 addresses.Add(new CellAddress(periodKey, rowId, ColumnDefIdOf(columns, cell.ColumnCode)));
@@ -162,7 +165,10 @@ public sealed class PatchCellsHandler(
 
         foreach (var row in updates)
         {
-            if (!rowIds.TryGetValue(row.RowKey, out var id)) continue;
+            if (!rowIds.TryGetValue(row.RowKey, out var id))
+            {
+                continue;
+            }
             touched.Add(id);
             Distribute(row, id, periodKey, columns, instance.TableDefId, upserts, deletes);
         }

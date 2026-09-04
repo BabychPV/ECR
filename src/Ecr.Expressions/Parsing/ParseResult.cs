@@ -1,7 +1,8 @@
 // src/Ecr.Expressions/Parsing/ParseResult.cs
-namespace Ecr.Expressions.Parsing;
 
 using Ecr.Expressions.Ast;
+
+namespace Ecr.Expressions.Parsing;
 
 /// <summary>
 /// Результат розбору. Помилка синтаксису — це <b>результат</b>, а не виняток:

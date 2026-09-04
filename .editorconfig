@@ -15,6 +15,14 @@ csharp_style_namespace_declarations = file_scoped:error
 csharp_prefer_braces = true:warning
 dotnet_style_require_accessibility_modifiers = always:warning
 
+# Стиль, який пакет вимагає від УСЬОГО коду, зокрема скелета (Q-064).
+# Явна форма dotnet_diagnostic.* потрібна не лише для наочності: `dotnet format`
+# читає саме її, а успадкований суфікс `:warning` він не бачить і нічого не
+# виправляє.
+dotnet_diagnostic.IDE0011.severity = warning
+dotnet_diagnostic.IDE0040.severity = warning
+dotnet_diagnostic.IDE0065.severity = warning
+
 # Забороняємо мовчазне ігнорування async
 dotnet_diagnostic.CS4014.severity = error
 dotnet_diagnostic.CS1998.severity = warning

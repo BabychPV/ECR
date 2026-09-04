@@ -9,29 +9,29 @@ namespace Ecr.Application.Ports;
 public interface IBackgroundJobScheduler
 {
     /// <summary>Ставить задачу в чергу негайно.</summary>
-    Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+    public Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
 
     /// <summary>Планує задачу за cron-виразом.</summary>
-    Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+    public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct) where TJob : IBackgroundJob;
 
     /// <summary>Скасовує задачу.</summary>
-    Task CancelAsync(string jobId, CancellationToken ct);
+    public Task CancelAsync(string jobId, CancellationToken ct);
 
     /// <summary>Стан виконання для UI прогресу.</summary>
-    Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
+    public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
 }
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
 {
     /// <summary>Виконує задачу. Має бути ідемпотентною і відновлюваною.</summary>
-    Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct);
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct);
 }
 
 /// <summary>Канал прогресу для довгих операцій (усе довше ~5 с — у фон).</summary>
 public interface IJobProgress
 {
-    Task ReportAsync(int percent, string? message, CancellationToken ct);
+    public Task ReportAsync(int percent, string? message, CancellationToken ct);
 }
 
 /// <summary>Стан фонової задачі.</summary>

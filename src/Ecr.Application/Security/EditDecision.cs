@@ -1,7 +1,8 @@
 // src/Ecr.Application/Security/EditDecision.cs
-namespace Ecr.Application.Security;
 
 using Ecr.Domain.Enums;
+
+namespace Ecr.Application.Security;
 
 /// <summary>
 /// Рішення про доступ. Повертає <b>причину</b>, а не <c>bool</c>: користувач має

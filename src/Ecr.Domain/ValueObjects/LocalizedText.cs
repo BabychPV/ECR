@@ -1,8 +1,9 @@
 // src/Ecr.Domain/ValueObjects/LocalizedText.cs
-namespace Ecr.Domain.ValueObjects;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
+namespace Ecr.Domain.ValueObjects;
 
 /// <summary>
 /// Локалізований текст. Зберігається однією колонкою <c>…L10n</c> у форматі JSON
@@ -22,8 +23,14 @@ public sealed class LocalizedText
     /// <summary>Значення для мови; якщо немає — для <paramref name="fallback"/>; якщо і його немає — перше наявне.</summary>
     public string? Get(string language, string fallback = "en")
     {
-        if (_values.TryGetValue(language, out var v)) return v;
-        if (_values.TryGetValue(fallback, out var f)) return f;
+        if (_values.TryGetValue(language, out var v))
+        {
+            return v;
+        }
+        if (_values.TryGetValue(fallback, out var f))
+        {
+            return f;
+        }
         return _values.Count > 0 ? _values.Values.First() : null;
     }
 

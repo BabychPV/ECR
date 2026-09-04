@@ -28,14 +28,14 @@ public sealed class UnitChecker
 public interface IUnitContext
 {
     /// <summary>Одиниця колонки; <c>null</c> — безрозмірна.</summary>
-    int? GetColumnUnit(int tableDefId, int columnDefId);
+    public int? GetColumnUnit(int tableDefId, int columnDefId);
 
     /// <summary>Одиниця константи методології.</summary>
-    int? GetConstantUnit(string code);
+    public int? GetConstantUnit(string code);
 
     /// <summary>Розмірність одиниці.</summary>
-    byte GetDimension(int unitId);
+    public byte GetDimension(int unitId);
 
     /// <summary>Шукає похідну одиницю за чисельником і знаменником.</summary>
-    int? FindDerived(int numeratorUnitId, int denominatorUnitId);
+    public int? FindDerived(int numeratorUnitId, int denominatorUnitId);
 }

@@ -1,7 +1,8 @@
 // src/Ecr.Application/Ports/ICellStore.cs
-namespace Ecr.Application.Ports;
 
 using Ecr.Domain.ValueObjects;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Доступ до комірок. Ховає фізичну модель зберігання: нормалізовану або
@@ -14,10 +15,10 @@ public interface ICellStore
     /// бере <c>ColumnDef.DefaultValue</c> (ФВ-3.8).
     /// Бюджет: p95 &lt; 600 мс на 500×60 (tz/08 §8.2).
     /// </summary>
-    Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
+    public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>Значення конкретних комірок.</summary>
-    Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
+    public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
 
     /// <summary>
@@ -25,10 +26,10 @@ public interface ICellStore
     /// заборонене: або весь батч, або нічого (B04 §2.3).
     /// Бюджет: p95 &lt; 150 мс на 100 комірок.
     /// </summary>
-    Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
+    public Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
 
     /// <summary>Масове завантаження через <c>SqlBulkCopy</c>: імпорт, генератор, міграція.</summary>
-    Task BulkInsertAsync(IReadOnlyList<CellRecord> records, CancellationToken ct);
+    public Task BulkInsertAsync(IReadOnlyList<CellRecord> records, CancellationToken ct);
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>

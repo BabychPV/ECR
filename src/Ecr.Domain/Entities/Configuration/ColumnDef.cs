@@ -201,11 +201,17 @@ public sealed class ColumnDef : Entity<int>
         var digits = 0;
         foreach (var ch in text)
         {
-            if (char.IsDigit(ch)) digits++;
+            if (char.IsDigit(ch))
+            {
+                digits++;
+            }
         }
 
         // Провідний нуль у «0.5» цифрою precision не є.
-        if (text.StartsWith("0.", StringComparison.Ordinal)) digits--;
+        if (text.StartsWith("0.", StringComparison.Ordinal))
+        {
+            digits--;
+        }
         return digits;
     }
 }

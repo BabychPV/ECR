@@ -27,6 +27,7 @@ public sealed class PatchPresentationHandler(
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="patchJson">Перелік змін у форматі <c>{entityType, entityId, field, value}</c>.</param>
     /// <param name="userId">Автор.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <returns>Нове значення <c>PresentationRevision</c>.</returns>
     /// <exception cref="BusinessRuleException">
     /// Серед змін є структурна — <c>ECR-TMPL-0409</c>.

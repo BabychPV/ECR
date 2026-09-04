@@ -1,7 +1,8 @@
 // src/Ecr.Api/Errors/EcrProblemDetails.cs
-namespace Ecr.Api.Errors;
 
 using Microsoft.AspNetCore.Mvc;
+
+namespace Ecr.Api.Errors;
 
 /// <summary>
 /// Помилка API. Розширює стандартний <see cref="ProblemDetails"/> кодом і

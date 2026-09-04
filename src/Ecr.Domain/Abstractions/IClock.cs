@@ -9,5 +9,5 @@ namespace Ecr.Domain.Abstractions;
 public interface IClock
 {
     /// <summary>Поточний момент у UTC. Завжди <see cref="DateTimeKind.Utc"/>.</summary>
-    DateTime UtcNow { get; }
+    public DateTime UtcNow { get; }
 }

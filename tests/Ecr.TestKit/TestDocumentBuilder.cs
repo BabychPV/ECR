@@ -28,6 +28,7 @@ public sealed class TestDocumentBuilder(string connectionString)
     /// <param name="periodKey">Ключ періоду (<c>Year*100 + Sequence</c>).</param>
     /// <param name="columnCount">Скільки колонок у таблиці.</param>
     /// <param name="rowCount">Скільки рядків створити в екземплярі.</param>
+    /// <param name="ct">Токен скасування.</param>
     public async Task<TestDocument> BuildAsync(
         int periodKey = 202601, int columnCount = 3, int rowCount = 4, CancellationToken ct = default)
     {

@@ -80,9 +80,18 @@ public sealed class GetTableSliceHandler(
         var permissions = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (address, decision) in decisions)
         {
-            if (decision.IsAllowed) continue;
-            if (!keyById.TryGetValue(address.TableRowId, out var rowKey)) continue;
-            if (!columnCodeById.TryGetValue(address.ColumnDefId, out var code)) continue;
+            if (decision.IsAllowed)
+            {
+                continue;
+            }
+            if (!keyById.TryGetValue(address.TableRowId, out var rowKey))
+            {
+                continue;
+            }
+            if (!columnCodeById.TryGetValue(address.ColumnDefId, out var code))
+            {
+                continue;
+            }
             permissions[$"{rowKey}:{code}"] = decision.Reason.ToString();
         }
 
@@ -98,12 +107,30 @@ public sealed class GetTableSliceHandler(
     /// </remarks>
     private static object? Unwrap(Domain.ValueObjects.CellValueData v)
     {
-        if (v.ValueNumeric is { } n) return n;
-        if (v.ValueString is { } s) return s;
-        if (v.ValueBool is { } b) return b;
-        if (v.ValueDate is { } d) return d;
-        if (v.ValueRegistryEntryId is { } r) return r;
-        if (v.ValueUnitId is { } u) return u;
+        if (v.ValueNumeric is { } n)
+        {
+            return n;
+        }
+        if (v.ValueString is { } s)
+        {
+            return s;
+        }
+        if (v.ValueBool is { } b)
+        {
+            return b;
+        }
+        if (v.ValueDate is { } d)
+        {
+            return d;
+        }
+        if (v.ValueRegistryEntryId is { } r)
+        {
+            return r;
+        }
+        if (v.ValueUnitId is { } u)
+        {
+            return u;
+        }
         return null;
     }
 }

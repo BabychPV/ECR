@@ -21,6 +21,7 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="dirty">Змінені комірки.</param>
+    /// <param name="ct">Токен скасування.</param>
     public Task RecalculateAsync(long documentId, PeriodKey periodKey, DirtySet dirty, CancellationToken ct)
         => throw new NotImplementedException(
             "TODO: 1) за зворотним індексом cfg.FormulaDependency знайти формули, залежні від seeds; " +

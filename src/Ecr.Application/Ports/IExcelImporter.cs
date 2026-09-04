@@ -1,6 +1,6 @@
-namespace Ecr.Application.Ports;
-
 using Ecr.Application.Documents.Dto;
+
+namespace Ecr.Application.Ports;
 
 /// <summary>Імпорт із <c>.xlsx</c> — завжди через попередній перегляд diff (ФВ-4.3).</summary>
 public interface IExcelImporter
@@ -9,10 +9,10 @@ public interface IExcelImporter
     /// Розбирає файл і будує diff **без застосування**. Показує, що зміниться,
     /// що конфліктує і що буде відхилено правами або станом періоду.
     /// </summary>
-    Task<ImportPreview> PreviewAsync(long documentId, Stream file, CancellationToken ct);
+    public Task<ImportPreview> PreviewAsync(long documentId, Stream file, CancellationToken ct);
 
     /// <summary>Застосовує раніше побудований diff після підтвердження користувачем.</summary>
-    Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct);
+    public Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct);
 }
 
 /// <summary>Результат попереднього перегляду імпорту.</summary>

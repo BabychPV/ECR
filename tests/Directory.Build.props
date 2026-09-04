@@ -8,12 +8,15 @@
 
   <PropertyGroup>
     <!--
-      CA1707    — назви тестів українською з підкресленнями: це вимога
-                  08-workflow.md §9, а не недогляд.
       xUnit1026 — [Theory] із параметром, який тіло-заглушка Assert.Fail
-                  ще не використовує. Зникне разом із заглушками.
+                  ще не використовує. Зникне разом із заглушками, тому
+                  лишається ВИДИМИМ попередженням, а не вимикається.
+
+      CA1707 сюди більше не входить: він вимкнений у tests/.editorconfig.
+      Причина різна за суттю — xUnit1026 колись перестане спрацьовувати,
+      а CA1707 у тестах хибний назавжди.
     -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CA1707;xUnit1026</WarningsNotAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);xUnit1026</WarningsNotAsErrors>
   </PropertyGroup>
 
 </Project>
