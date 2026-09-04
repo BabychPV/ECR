@@ -65,20 +65,25 @@ public sealed class CellValueDataTests
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Явна_порожнеча_і_відсутність_комірки_це_різні_стани()
     {
-        // «Заповнили порожнім» — комірка існує і матеріалізована.
-        CellValueData explicitlyEmpty = CellValueData.Empty;
-
-        // «Не заповнювали» — комірки немає взагалі; порожні комірки не
-        // матеріалізуються (ФВ-3.8), тому цей стан представлений відсутністю
-        // об'єкта, а не якимось його значенням.
-        CellValueData? notFilled = null;
-
-        Assert.NotNull(explicitlyEmpty);
-        Assert.Null(notFilled);
-
-        // Головне, заради чого існує розрізнення: клієнт бере DefaultValue
-        // колонки лише для «не заповнювали». Для «заповнили порожнім» дефолт
-        // підставляти не можна — користувач свідомо сказав «тут нічого немає».
+        // «Заповнили порожнім» — комірка існує, позначена явно і КОРЕКТНА.
+        var explicitlyEmpty = CellValueData.Empty;
         Assert.True(explicitlyEmpty.IsEmpty);
+        Assert.True(explicitlyEmpty.IsWellFormed());
+
+        // Об'єкт без жодного значення і без позначки — НЕ те саме: він
+        // некоректний, і сховище такого прийняти не має. Саме ця пара асертів
+        // не дає звести «заповнили порожнім» до «нічого не заповнено».
+        var nothingSaid = new CellValueData();
+        Assert.False(nothingSaid.IsEmpty);
+        Assert.False(nothingSaid.IsWellFormed());
+        Assert.NotEqual(explicitlyEmpty, nothingSaid);
+
+        // Третій стан — «не заповнювали» — у типі не представлений НІЯК:
+        // порожні комірки не матеріалізуються (ФВ-3.8), тому його носить
+        // відсутність рядка в сховищі. Наслідок для клієнта: DefaultValue
+        // колонки підставляється лише там, де комірки немає; для явної
+        // порожнечі підставляти його заборонено.
+        Assert.True(explicitlyEmpty.IsEmpty);
+        Assert.False((explicitlyEmpty with { IsEmpty = false }).IsWellFormed());
     }
 }

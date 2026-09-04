@@ -9,80 +9,71 @@
 --     (SERVERPROPERTY('InstanceDefaultDataPath')). Це шлях у файловій системі
 --     ХОСТА SQL Server, а не адреса підключення, тому рядком підключення він
 --     не задається в принципі.
---   • Перевизначити потрібно лише тоді, коли архів має лежати на іншому
---     носії: тоді заповніть @DataPath / @ArchivePath нижче.
+--   • Заповнювати @ArchivePath потрібно лише тоді, коли архівна файлова група
+--     має лежати на іншому носії — саме в цьому сенс окремої групи.
 --
 -- Ідемпотентний: повторний запуск не падає і нічого не дублює.
 --
 --   sqlcmd -S <сервер> -d <база> -E -i 01-filegroups.sql
 
 SET NOCOUNT ON;
-SET XACT_ABORT ON;
 
 DECLARE @DataPath    nvarchar(260) = NULL;   -- NULL = типовий каталог інстансу
 DECLARE @ArchivePath nvarchar(260) = NULL;   -- NULL = той самий, що й @DataPath
 
-IF @DataPath IS NULL
-    SET @DataPath = CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260));
+-- NULLIF: SERVERPROPERTY на нетиповій конфігурації може віддати порожній рядок,
+-- і без цієї перевірки файли поїхали б у корінь диска.
+SET @DataPath = NULLIF(LTRIM(RTRIM(COALESCE(
+    @DataPath, CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260))))), N'');
 
 IF @DataPath IS NULL
-    THROW 50020, N'Не вдалося визначити каталог даних інстансу. Задайте @DataPath у скрипті.', 1;
+    THROW 50020, N'Не вдалося визначити каталог даних інстансу. Задайте @DataPath на початку скрипта.', 1;
 
 IF RIGHT(@DataPath, 1) <> N'\' SET @DataPath = @DataPath + N'\';
-IF @ArchivePath IS NULL SET @ArchivePath = @DataPath;
+
+SET @ArchivePath = NULLIF(LTRIM(RTRIM(COALESCE(@ArchivePath, @DataPath))), N'');
 IF RIGHT(@ArchivePath, 1) <> N'\' SET @ArchivePath = @ArchivePath + N'\';
 
 DECLARE @db sysname = DB_NAME();
 DECLARE @sql nvarchar(max);
 
--- 1. Файлові групи
-DECLARE @fg TABLE (Name sysname PRIMARY KEY);
-INSERT INTO @fg (Name) VALUES (N'DATA_HOT'), (N'DATA_ARCHIVE'), (N'AUDIT'), (N'INDEXES');
+-- 1. Файлові групи, яких ще немає.
+--    Один пакет DDL замість циклу: коротше і без курсорів у скрипті,
+--    який читає людина перед запуском на проді.
+SELECT @sql = STRING_AGG(
+        CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILEGROUP ' + QUOTENAME(g.Name) + N';'
+             AS nvarchar(max)), NCHAR(10))
+FROM (VALUES (N'DATA_HOT'), (N'DATA_ARCHIVE'), (N'AUDIT'), (N'INDEXES')) AS g(Name)
+WHERE NOT EXISTS (SELECT 1 FROM sys.filegroups f WHERE f.name = g.Name);
 
-DECLARE @name sysname;
-DECLARE fg CURSOR LOCAL FAST_FORWARD FOR SELECT Name FROM @fg;
-OPEN fg;
-FETCH NEXT FROM fg INTO @name;
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.filegroups WHERE name = @name)
-    BEGIN
-        SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILEGROUP ' + QUOTENAME(@name) + N';';
-        EXEC sp_executesql @sql;
-    END
-    FETCH NEXT FROM fg INTO @name;
-END
-CLOSE fg; DEALLOCATE fg;
+IF @sql IS NOT NULL EXEC sp_executesql @sql;
 
--- 2. Файли. Розміри і приріст — за профілем навантаження: архів росте
---    ривками при архівації року, гарячі дані — рівномірно.
-DECLARE @files TABLE (LogicalName sysname, FileGroup sysname, SizeMb int, GrowthMb int, UseArchivePath bit);
-INSERT INTO @files (LogicalName, FileGroup, SizeMb, GrowthMb, UseArchivePath) VALUES
-    (N'Ecr_hot',     N'DATA_HOT',     4096, 1024, 0),
-    (N'Ecr_archive', N'DATA_ARCHIVE', 4096, 4096, 1),
-    (N'Ecr_audit',   N'AUDIT',        4096, 2048, 0),
-    (N'Ecr_idx',     N'INDEXES',      2048, 1024, 0);
+-- 2. Файли. Розміри і приріст — за профілем навантаження: архів росте ривками
+--    при архівації року, гарячі дані — рівномірно, індекси найповільніше.
+--    Виконується ПІСЛЯ кроку 1: ADD FILE вимагає наявної файлової групи.
+SET @sql = NULL;
 
-DECLARE @logical sysname, @group sysname, @size int, @growth int, @useArc bit, @file nvarchar(400);
-DECLARE fl CURSOR LOCAL FAST_FORWARD FOR
-    SELECT LogicalName, FileGroup, SizeMb, GrowthMb, UseArchivePath FROM @files;
-OPEN fl;
-FETCH NEXT FROM fl INTO @logical, @group, @size, @growth, @useArc;
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.database_files WHERE name = @logical)
-    BEGIN
-        SET @file = CASE WHEN @useArc = 1 THEN @ArchivePath ELSE @DataPath END + @logical + N'.ndf';
-        SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILE (NAME = ' + QUOTENAME(@logical, '''')
-                 + N', FILENAME = ' + QUOTENAME(@file, '''')
-                 + N', SIZE = ' + CAST(@size AS nvarchar(10)) + N'MB'
-                 + N', FILEGROWTH = ' + CAST(@growth AS nvarchar(10)) + N'MB)'
-                 + N' TO FILEGROUP ' + QUOTENAME(@group) + N';';
-        EXEC sp_executesql @sql;
-    END
-    FETCH NEXT FROM fl INTO @logical, @group, @size, @growth, @useArc;
-END
-CLOSE fl; DEALLOCATE fl;
+SELECT @sql = STRING_AGG(
+        CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILE (NAME = '
+             + QUOTENAME(f.LogicalName, '''')
+             + N', FILENAME = ' + QUOTENAME(
+                   CASE WHEN f.UseArchivePath = 1 THEN @ArchivePath ELSE @DataPath END
+                   + f.LogicalName + N'.ndf', '''')
+             + N', SIZE = ' + CAST(f.SizeMb AS nvarchar(10)) + N'MB'
+             + N', FILEGROWTH = ' + CAST(f.GrowthMb AS nvarchar(10)) + N'MB)'
+             + N' TO FILEGROUP ' + QUOTENAME(f.FileGroup) + N';'
+             AS nvarchar(max)), NCHAR(10))
+FROM (VALUES
+        (N'Ecr_hot',     N'DATA_HOT',     4096, 1024, 0),
+        (N'Ecr_archive', N'DATA_ARCHIVE', 4096, 4096, 1),
+        (N'Ecr_audit',   N'AUDIT',        4096, 2048, 0),
+        (N'Ecr_idx',     N'INDEXES',      2048, 1024, 0)
+     ) AS f(LogicalName, FileGroup, SizeMb, GrowthMb, UseArchivePath)
+WHERE NOT EXISTS (SELECT 1 FROM sys.database_files d WHERE d.name = f.LogicalName);
 
-PRINT N'Файлові групи і файли готові. Каталог даних: ' + @DataPath + N', архів: ' + @ArchivePath;
+IF @sql IS NOT NULL EXEC sp_executesql @sql;
+
+PRINT N'База ' + @db + N': файлові групи і файли готові.';
+PRINT N'  каталог даних: ' + @DataPath;
+PRINT N'  каталог архіву: ' + @ArchivePath;
 GO

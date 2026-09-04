@@ -35,10 +35,18 @@ public sealed class PeriodKeyTests
         Assert.Equal(202604, q4.Value);
         Assert.Equal(4, q4.Sequence);
 
-        // Саме тут ламається здогадка «ключ = YYYYMM»: 202604 для квартального
-        // періоду означає Q4, а для місячного — квітень. Число те саме, зміст різний,
-        // і відрізняє їх лише PeriodKind проєкту, а не сам ключ.
-        Assert.Equal(PeriodKey.Create(2026, 4).Value, q4.Value);
+        // Регресійний захист від наївного мапінгу «квартал → останній місяць
+        // квартала», який дав би 202612 для Q4 і 202603 для Q1. Ключ будується
+        // з ПОСЛІДОВНОСТІ, а не з місяця, тому обидва значення хибні.
+        Assert.NotEqual(202612, q4.Value);
+        Assert.NotEqual(202610, q4.Value);
+        Assert.Equal(202601, PeriodKey.Create(2026, 1).Value);
+        Assert.NotEqual(202603, PeriodKey.Create(2026, 1).Value);
+
+        // Послідовність квартального періоду не виходить за 4 — але це обмеження
+        // календаря проєкту, не самого ключа: сам ключ приймає 1..99 (Custom),
+        // і саме тому виводити місяць арифметикою з ключа заборонено.
+        Assert.Equal(4, PeriodKey.YearRange(2026, PeriodKind.Quarterly).To.Sequence);
     }
 
     [Fact]
