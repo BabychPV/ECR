@@ -70,7 +70,8 @@ public sealed class PatchCellsTests
     };
 
     private PatchCellsHandler Handler()
-        => new(_cells, _rows, _metadata, _access, new Ecr.Application.Validation.ValidationEngine(Substitute.For<IFormulaEngine>()),
+        => new(_cells, _rows, _metadata, _access,
+               new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _audit, _jobs, _uow, _user, _clock);
 
     private static PatchCellsRequest Request(params PatchRow[] rows)
@@ -209,18 +210,108 @@ public sealed class PatchCellsTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Комірковий_Error_валідації_блокує_запис()
-        => Assert.Fail("not implemented");
+    public async Task Комірковий_Error_валідації_блокує_запис()
+    {
+        WithRule(ValidationSeverity.Error, scope: 0, "[Volume] >= 0");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", -5m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+
+        // Нічого не записано: комірковий Error — єдиний рівень, який блокує
+        // запис (R-B3), і блокує він увесь батч, а не одну комірку.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Рядковий_Error_валідації_НЕ_блокує_запис_а_повертається_у_відповіді()
-        => Assert.Fail("not implemented");
+    public async Task Рядковий_Error_валідації_НЕ_блокує_запис_а_повертається_у_відповіді()
+    {
+        WithRule(ValidationSeverity.Error, scope: 1, "[Volume] >= 1000");
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])),
+            CancellationToken.None);
+
+        // ⚠ Той самий рівень Error, інший наслідок: рядок може бути
+        // незавершеним посеред заповнення, і заборона зберегти проміжний стан
+        // зробила б роботу з великою таблицею неможливою.
+        Assert.Equal(1, response.AppliedCells);
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+
+        var message = Assert.Single(response.Validation);
+        Assert.Equal("Error", message.Severity);
+        Assert.Equal("7001001", message.RowKey);
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Попередження_не_блокує_запис()
-        => Assert.Fail("not implemented");
+    public async Task Попередження_не_блокує_запис()
+    {
+        WithRule(ValidationSeverity.Warning, scope: 0, "[Volume] <= 100");
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.Equal("Warning", Assert.Single(response.Validation).Severity);
+
+        // Попередження саме ПОВЕРТАЄТЬСЯ, а не мовчки зникає: інакше рівні
+        // валідації не мали б жодного сенсу, крім Error.
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Після_запису_залежні_комірки_ставляться_в_чергу_перерахунку()
-        => Assert.Fail("not implemented");
+    public async Task Після_запису_залежні_комірки_ставляться_в_чергу_перерахунку()
+    {
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        await _jobs.Received(1).EnqueueAsync<IRecalculationJob>(
+            Arg.Any<object>(), Arg.Any<CancellationToken>());
+
+        // ⚠ Черга — ПІСЛЯ commit і поза транзакцією: воркер інакше почав би
+        // читати рядки, яких ще не видно, і отримав би або старі значення,
+        // або блокування на піку останнього дня періоду.
+        Received.InOrder(() =>
+        {
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>());
+        });
+    }
+
+    /// <summary>Додає таблицю з одним правилом валідації у знімок метаданих.</summary>
+    private void WithRule(ValidationSeverity severity, byte scope, string expression)
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("Volume"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
+        SetId(column, VolumeColumnId);
+
+        var sheet = new SheetDef(
+            templateVersionId: 2, EcrCode.Create("Water"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("Main"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.MonthsInColumns, TableRowMode.Fixed);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
+
+        table.AddColumn(column);
+        table.AddValidationRule(new ValidationRule(
+            tableDefId: 3, EcrCode.Create("RULE"), severity, scope, expression,
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Порушено RULE" })));
+        sheet.AddTable(table);
+
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(
+                TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
+                ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = column },
+                RowsByKey: new Dictionary<(int, string), RowDef>()));
+    }
 }

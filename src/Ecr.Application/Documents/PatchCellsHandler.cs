@@ -173,6 +173,24 @@ public sealed class PatchCellsHandler(
             Distribute(row, id, periodKey, columns, instance.TableDefId, upserts, deletes);
         }
 
+        // 6a. Валідація. ⚠ Блокує запис ЛИШЕ комірковий Error (R-B3, D-90):
+        //     заборона зберегти проміжний стан зробила б роботу з великою
+        //     таблицею неможливою — користувач заповнює її не за один раз.
+        var messages = Validate(snapshot, instance.TableDefId, request, upserts, rowIds);
+        var blocking = messages.Where(m => m.BlocksSave).ToList();
+        if (blocking.Count > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-CELL-0422",
+                $"Валідація відхилила запис: комірок із помилкою — {blocking.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["cells"] = blocking
+                        .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
+                        .ToList(),
+                });
+        }
+
         var now = clock.UtcNow;
 
         // 7. Одна транзакція: значення, «дотик» рядків і аудит. Аудит поза
@@ -200,7 +218,72 @@ public sealed class PatchCellsHandler(
         return new PatchCellsResponse(
             AppliedCells: upserts.Count + deletes.Count,
             RowVersions: newVersions,
-            Validation: []);
+            // Повідомлення, які запис НЕ блокують, повертаються клієнтові:
+            // інакше про них ніхто б не дізнався, і сенс рівнів зник би.
+            Validation: messages
+                .Select(m => new ValidationMessageDto(
+                    m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode))
+                .ToList());
+    }
+
+    /// <summary>Валідує змінені комірки і правила рівня рядка.</summary>
+    private List<Validation.ValidationMessage> Validate(
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        int tableDefId,
+        PatchCellsRequest request,
+        List<CellRecord> upserts,
+        IReadOnlyDictionary<string, long> rowIds)
+    {
+        var table = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .FirstOrDefault(t => t.Id == tableDefId);
+
+        IReadOnlyList<Domain.Entities.Configuration.ValidationRule> rules =
+            table?.ValidationRules ?? [];
+        var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
+        var messages = new List<Validation.ValidationMessage>();
+
+        foreach (var record in upserts)
+        {
+            if (!snapshot.ColumnsById.TryGetValue(record.Address.ColumnDefId, out var column))
+            {
+                continue;
+            }
+
+            var rowKey = byRowId.GetValueOrDefault(record.Address.TableRowId);
+            foreach (var message in validation.ValidateCell(column, record.Value, rules))
+            {
+                messages.Add(message with { RowKey = rowKey });
+            }
+        }
+
+        // Правила рівня рядка виконуються після коміркових і запис НЕ блокують:
+        // рядок може бути незавершеним посеред заповнення, і це нормальний стан.
+        foreach (var row in request.Rows)
+        {
+            messages.AddRange(validation
+                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row))
+                .Select(m => m with { RowKey = row.RowKey }));
+        }
+
+        return messages;
+    }
+
+    /// <summary>Значення рядка з самого запиту — без звернення до сховища.</summary>
+    /// <remarks>
+    /// ⚠ Правило рівня рядка бачить те, що клієнт ЩОЙНО надіслав, а не те, що
+    /// лежить у базі: перевіряти треба намір користувача, інакше повідомлення
+    /// стосувалося б стану, який зараз перезаписується.
+    /// </remarks>
+    private sealed class PatchRowValidationContext(PatchRow row) : Validation.IValidationContext
+    {
+        public object? GetCell(string columnCode)
+            => row.Cells
+                  .FirstOrDefault(c => string.Equals(c.ColumnCode, columnCode, StringComparison.OrdinalIgnoreCase))
+                  ?.Value;
+
+        public object? GetCell(string rowKey, string columnCode)
+            => string.Equals(rowKey, row.RowKey, StringComparison.Ordinal) ? GetCell(columnCode) : null;
     }
 
     private static void Distribute(

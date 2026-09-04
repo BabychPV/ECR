@@ -9,6 +9,8 @@ public sealed class TableDef : Entity<int>
 {
     private readonly List<ColumnDef> _columns = [];
     private readonly List<RowDef> _rows = [];
+    private readonly List<FormulaDef> _formulas = [];
+    private readonly List<ValidationRule> _validationRules = [];
 
     private TableDef() { }
 
@@ -90,6 +92,37 @@ public sealed class TableDef : Entity<int>
         }
 
         _columns.Add(column);
+    }
+
+    /// <summary>Формули таблиці.</summary>
+    /// <remarks>
+    /// ⚠ Формули належать ТАБЛИЦІ, а не аркушу чи версії: саме так їх адресує
+    /// схема (<c>cfg.FormulaDef.TableDefId</c>), і саме таблиця дає контекст
+    /// скороченим формам посилань — <c>[Jan]</c> без коду таблиці означає
+    /// «колонка цієї таблиці» (02b §3.1).
+    /// </remarks>
+    public IReadOnlyList<FormulaDef> Formulas => _formulas;
+
+    /// <summary>Додає формулу.</summary>
+    /// <exception cref="DomainException">Таблиця вже опублікована.</exception>
+    public void AddFormula(FormulaDef formula)
+    {
+        ArgumentNullException.ThrowIfNull(formula);
+        _formulas.Add(formula);
+    }
+
+    /// <summary>Правила валідації таблиці.</summary>
+    /// <remarks>
+    /// Належать таблиці за схемою (<c>cfg.ValidationRule.TableDefId</c>).
+    /// Правило рівня комірки додатково вказує <c>ColumnDefId</c>.
+    /// </remarks>
+    public IReadOnlyList<ValidationRule> ValidationRules => _validationRules;
+
+    /// <summary>Додає правило валідації.</summary>
+    public void AddValidationRule(ValidationRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        _validationRules.Add(rule);
     }
 
     /// <summary>Додає рядок фіксованої таблиці.</summary>

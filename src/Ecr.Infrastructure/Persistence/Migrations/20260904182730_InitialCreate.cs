@@ -438,28 +438,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "ValidationRule",
-                schema: "cfg",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    TableDefId = table.Column<int>(type: "int", nullable: false),
-                    Code = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
-                    Severity = table.Column<byte>(type: "tinyint", nullable: false),
-                    Scope = table.Column<byte>(type: "tinyint", nullable: false),
-                    ColumnDefId = table.Column<int>(type: "int", nullable: true),
-                    Expression = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: false),
-                    MessageL10n = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    IsActive = table.Column<bool>(type: "bit", nullable: false, defaultValue: true)
-                        .Annotation("Relational:DefaultConstraintName", "DF_VRule_Active")
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ValidationRule", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Unit",
                 schema: "uom",
                 columns: table => new
@@ -847,12 +825,20 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     IsSnapshot = table.Column<bool>(type: "bit", nullable: false, defaultValue: false)
                         .Annotation("Relational:DefaultConstraintName", "DF_Formula_Snap"),
                     IsDeleted = table.Column<bool>(type: "bit", nullable: false, defaultValue: false)
-                        .Annotation("Relational:DefaultConstraintName", "DF_Formula_Del")
+                        .Annotation("Relational:DefaultConstraintName", "DF_Formula_Del"),
+                    TableDefId1 = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_FormulaDef", x => x.Id);
                     table.CheckConstraint("CK_Formula_Scope", "(Scope = 0 AND ColumnDefId IS NOT NULL) OR (Scope = 1 AND RowDefId IS NOT NULL) OR (Scope = 2 AND ColumnDefId IS NOT NULL AND RowDefId IS NOT NULL)");
+                    table.ForeignKey(
+                        name: "FK_FormulaDef_TableDef_TableDefId1",
+                        column: x => x.TableDefId1,
+                        principalSchema: "cfg",
+                        principalTable: "TableDef",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_Formula_Table",
                         column: x => x.TableDefId,
@@ -888,6 +874,35 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     table.PrimaryKey("PK_RowDef", x => x.Id);
                     table.ForeignKey(
                         name: "FK_RowDef_Table",
+                        column: x => x.TableDefId,
+                        principalSchema: "cfg",
+                        principalTable: "TableDef",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ValidationRule",
+                schema: "cfg",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    TableDefId = table.Column<int>(type: "int", nullable: false),
+                    Code = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    Severity = table.Column<byte>(type: "tinyint", nullable: false),
+                    Scope = table.Column<byte>(type: "tinyint", nullable: false),
+                    ColumnDefId = table.Column<int>(type: "int", nullable: true),
+                    Expression = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: false),
+                    MessageL10n = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IsActive = table.Column<bool>(type: "bit", nullable: false, defaultValue: true)
+                        .Annotation("Relational:DefaultConstraintName", "DF_VRule_Active")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ValidationRule", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_ValidationRule_TableDef_TableDefId",
                         column: x => x.TableDefId,
                         principalSchema: "cfg",
                         principalTable: "TableDef",

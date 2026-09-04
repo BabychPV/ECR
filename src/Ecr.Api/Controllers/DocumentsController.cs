@@ -1,4 +1,5 @@
 using Ecr.Application.Documents;
+using Ecr.Domain.ValueObjects;
 using Ecr.Application.Workflow;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,7 +19,8 @@ public sealed class DocumentsController(
     ValidateDocumentHandler validate,
     SubmitSheetHandler submit,
     ApproveSheetHandler approve,
-    ReopenDocumentHandler reopen) : ControllerBase
+    ReopenDocumentHandler reopen,
+    RecalculateDocumentHandler recalculate) : ControllerBase
 {
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -58,17 +60,41 @@ public sealed class DocumentsController(
     /// </remarks>
     [HttpPost("{id:long}/validate")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> Validate(long id, [FromQuery] int periodKey, CancellationToken ct)
-        => throw new NotImplementedException("TODO: делегувати validate.HandleAsync(id, periodKey, ct).");
+    public async Task<IActionResult> Validate(long id, [FromQuery] int periodKey, CancellationToken ct)
+    {
+        var messages = await validate.HandleAsync(id, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+
+        // Повертаються ВСІ рівні. Рішення «чи можна подавати» ухвалює клієнт
+        // за наявністю Error, а не сервер за кодом відповіді: 200 тут означає
+        // «перевірку виконано», а не «зауважень немає».
+        return Ok(new
+        {
+            documentId = id,
+            periodKey,
+            messages = messages.Select(m => new
+            {
+                severity = m.Severity.ToString(),
+                ruleCode = m.RuleCode,
+                message = m.Message,
+                rowKey = m.RowKey,
+                columnCode = m.ColumnCode,
+                blocksSave = m.BlocksSave,
+            }),
+        });
+    }
 
     /// <summary>Перерахунок документа. Право <c>Calculation.Recalculate</c>.</summary>
     /// <remarks>Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.</remarks>
     [HttpPost("{id:long}/recalculate")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    public Task<IActionResult> Recalculate(long id, [FromQuery] int periodKey, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Calculation.Recalculate; поставити задачу через IBackgroundJobScheduler; " +
-            "202 із jobId. ⚠ ЗАКРИТІ періоди автоматично не перераховуються ніколи (ФВ-9.7).");
+    public async Task<IActionResult> Recalculate(long id, [FromQuery] int periodKey, CancellationToken ct)
+    {
+        // Контролер лише делегує: рішення про чергу, payload і умови — у
+        // прикладному шарі, інакше те саме правило почало б жити у двох місцях.
+        var jobId = await recalculate.HandleAsync(id, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+
+        return Accepted(new { jobId, documentId = id, periodKey });
+    }
 
     /// <summary>Подання аркуша на погодження.</summary>
     [HttpPost("{id:long}/submit")]

@@ -26,13 +26,12 @@ public static class DependencyInjection
     /// треба доповнювати руками; вигода — список видно, і забутий обробник
     /// падає при старті, а не на першому запиті користувача.
     ///
-    /// ⚠ Чого тут ПОКИ немає і чому: <c>ValidationEngine</c>,
+    /// Рушій виразів з'явився на Етапі 2, тому <c>ValidationEngine</c>,
     /// <c>RecalculationService</c>, <c>PatchCellsHandler</c>,
     /// <c>ValidateDocumentHandler</c> і <c>PublishTemplateVersionHandler</c>
-    /// прямо чи через <c>ValidationEngine</c> залежать від
-    /// <c>IFormulaEngine</c>, а рушій виразів — це Етап 2. Зареєструвати їх
-    /// «на майбутнє» неможливо: у Development контейнер перевіряється при
-    /// побудові, і застосунок не стартував би взагалі (`Q-051`).
+    /// зареєстровані тут. Раніше їх не було саме тому, що в Development
+    /// контейнер перевіряється при побудові, і застосунок не стартував би
+    /// взагалі (`Q-051`).
     /// </remarks>
     public static IServiceCollection AddEcrApplication(this IServiceCollection services)
     {
@@ -49,6 +48,19 @@ public static class DependencyInjection
         services.AddScoped<CreateDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
+
+        // Вирази, валідація і перерахунок (модулі 2.6–2.8)
+        services.AddScoped<Validation.ValidationEngine>();
+        services.AddScoped<Recalculation.RecalculationService>();
+        services.AddScoped<ValidateDocumentHandler>();
+        services.AddScoped<Templates.PublishTemplateVersionHandler>();
+
+        // ⚠ PatchCellsHandler і RecalculateDocumentHandler тут НЕ реєструються:
+        // обидва залежать від IBackgroundJobScheduler, реалізації якого ще
+        // немає — вибір Quartz/Hangfire упирається в допустимість LGPL (D-09),
+        // і це Етап 5. У Development контейнер перевіряється при побудові, тож
+        // «зареєструвати на майбутнє» означало б, що застосунок не стартує
+        // взагалі (`Q-051`).
 
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();

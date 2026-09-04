@@ -80,6 +80,19 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddScoped<IMetadataCache, MetadataCache>();
 
+        // Синхронний доступ до вже завантаженого знімка: потрібен рушію
+        // виразів, бо ExtractDependencies у контракті синхронний, а блокувальне
+        // очікування заборонене архітектурним правилом (див. ITemplateStructure).
+        services.AddSingleton<ITemplateStructure, Caching.CachedTemplateStructure>();
+
+        // Рушій виразів. Парсер, обчислювач і сортувальник без стану —
+        // Singleton; сам рушій теж, бо знімок бере з кешу, а не тримає.
+        services.AddSingleton<Ecr.Expressions.Parsing.Parser>();
+        services.AddSingleton<Ecr.Expressions.Evaluation.Evaluator>();
+        services.AddSingleton<Ecr.Expressions.Graph.TopologicalSorter>();
+        services.AddSingleton<Ecr.Expressions.Functions.FunctionRegistry>();
+        services.AddSingleton<IFormulaEngine, Expressions.FormulaEngine>();
+
         // Безпека. AccessProfileCache — Singleton поверх IMemoryCache: профіль
         // будується раз на (користувач × SecurityStamp), і зміна штампа сама
         // дає новий ключ, тому інвалідація не потрібна (ФВ-6.7).

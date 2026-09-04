@@ -32,12 +32,9 @@ public sealed class PublishTemplateVersionHandler(
     {
         var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        // ⚠ Перевірки виразів (усі 12 із 02b §12 — синтаксис, резолвінг,
-        //    типи, ациклічність, розкриття діапазонів, сумісність одиниць)
-        //    вмикаються на Етапі 2 разом із рушієм. Тут навмисно НЕ ставиться
-        //    заглушка «повертає true»: вона створила б враження, що перевірка
-        //    працює. Місце виклику зафіксоване нижче.
-        var diagnostics = await CollectDiagnosticsAsync(version, ct).ConfigureAwait(false);
+        // Усі дванадцять перевірок із 02b §12 — синтаксис, резолвінг, типи,
+        // ациклічність, розкриття діапазонів, сумісність одиниць.
+        var diagnostics = PublishChecks.Run(version, formulaEngine);
 
         if (diagnostics.Count > 0)
         {
@@ -46,7 +43,12 @@ public sealed class PublishTemplateVersionHandler(
             throw new BusinessRuleException(
                 "ECR-TMPL-0422",
                 $"Публікацію відхилено: знайдено проблем — {diagnostics.Count}.",
-                new Dictionary<string, object?> { ["diagnostics"] = diagnostics });
+                new Dictionary<string, object?>
+                {
+                    ["diagnostics"] = diagnostics
+                        .Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length))
+                        .ToList(),
+                });
         }
 
         // Перехід стану. Кидає ECR-TMPL-0409, якщо версія вже опублікована;
@@ -66,16 +68,15 @@ public sealed class PublishTemplateVersionHandler(
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Збирає діагностики перевірок публікації.
-    /// </summary>
-    /// <remarks>
-    /// На Етапі 1 перевірок виразів ще немає — рушій з'являється на Етапі 2.
-    /// Метод повертає порожній список, і це <b>не</b> заглушка «все гаразд»:
-    /// версія без формул справді не має чого перевіряти, а щойно формули
-    /// з'являться, тут викликається <c>formulaEngine</c> за 02b §12.
-    /// </remarks>
-    private Task<IReadOnlyList<string>> CollectDiagnosticsAsync(
-        Domain.Entities.Configuration.TemplateVersion version, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<string>>([]);
 }
+
+/// <summary>Проблема публікації у відповіді API.</summary>
+/// <remarks>
+/// Окремий тип, а не <c>ExpressionDiagnostic</c>: у відповідь іде рівно те, що
+/// потрібно конфігуратору для підсвічування — код, текст і межі фрагмента.
+/// </remarks>
+/// <param name="Code">Код помилки з каталогу.</param>
+/// <param name="Message">Пояснення.</param>
+/// <param name="Position">Зсув у тексті виразу.</param>
+/// <param name="Length">Довжина проблемного фрагмента.</param>
+public sealed record DiagnosticInfo(string Code, string Message, int Position, int Length);

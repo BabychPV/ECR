@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    [Migration("20260904163959_InitialCreate")]
+    [Migration("20260904182730_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -243,6 +243,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("tinyint");
 
                     b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TableDefId1")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
@@ -1836,6 +1839,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Formula_Table");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany("Formulas")
+                        .HasForeignKey("TableDefId1")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDependency", b =>
@@ -1895,6 +1903,15 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_TemplateVersion_Template");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ValidationRule", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany("ValidationRules")
+                        .HasForeignKey("TableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>
@@ -1989,7 +2006,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 {
                     b.Navigation("Columns");
 
+                    b.Navigation("Formulas");
+
                     b.Navigation("Rows");
+
+                    b.Navigation("ValidationRules");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.Template", b =>

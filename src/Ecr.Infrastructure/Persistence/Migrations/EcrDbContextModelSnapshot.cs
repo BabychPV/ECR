@@ -242,6 +242,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("TableDefId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("TableDefId1")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.ToTable("FormulaDef", "cfg", t =>
@@ -1833,6 +1836,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Formula_Table");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany("Formulas")
+                        .HasForeignKey("TableDefId1")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDependency", b =>
@@ -1892,6 +1900,15 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_TemplateVersion_Template");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ValidationRule", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany("ValidationRules")
+                        .HasForeignKey("TableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>
@@ -1986,7 +2003,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 {
                     b.Navigation("Columns");
 
+                    b.Navigation("Formulas");
+
                     b.Navigation("Rows");
+
+                    b.Navigation("ValidationRules");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.Template", b =>

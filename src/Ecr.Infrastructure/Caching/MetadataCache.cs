@@ -37,6 +37,12 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
         }
 
         var key = CacheKey(templateVersionId, revision.Value);
+        memory.Set(RevisionKey(templateVersionId), revision.Value, new MemoryCacheEntryOptions
+        {
+            Size = 1,
+            Priority = CacheItemPriority.High,
+        });
+
         if (memory.TryGetValue(key, out TemplateVersionSnapshot? cached) && cached is not null)
         {
             return cached;
@@ -76,7 +82,22 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
         }
     }
 
-    private static string CacheKey(int templateVersionId, int revision)
+    /// <summary>
+    /// Ключ, під яким лежить ПОТОЧНА ревізія версії.
+    /// </summary>
+    /// <remarks>
+    /// Потрібен синхронному <c>ITemplateStructure</c>: щоб дістати знімок із
+    /// кешу, треба знати ревізію, а вона живе в базі. Запис цього числа поруч
+    /// зі знімком — єдиний спосіб уникнути синхронного запиту там, де його
+    /// робити не можна.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    public static string RevisionKey(int templateVersionId) => $"rev:{templateVersionId}";
+
+    /// <summary>Ключ знімка: <c>v{id}:r{rev}</c> (D-16).</summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="revision">Презентаційна ревізія.</param>
+    public static string CacheKey(int templateVersionId, int revision)
         => $"v{templateVersionId}:r{revision}";
 
     /// <summary>
