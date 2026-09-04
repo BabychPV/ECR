@@ -51,6 +51,17 @@ public sealed class User : Entity<int>
 
     public bool IsActive { get; private set; }
 
+    /// <summary>Момент створення запису.</summary>
+    /// <remarks>
+    /// Разом із <see cref="CreatedByUserId"/> відповідає на питання «хто і коли
+    /// завів цього користувача». Для bootstrap-запису автора немає — його
+    /// створює сама система (D-97), тому поле обнуляється.
+    /// </remarks>
+    public DateTime CreatedAt { get; private set; }
+
+    /// <summary>Автор створення; <c>null</c> для bootstrap-запису.</summary>
+    public int? CreatedByUserId { get; private set; }
+
     /// <summary>Змінює пароль і **обов'язково** крутить <c>SecurityStamp</c>.</summary>
     public void SetPassword(string passwordHash)
         => throw new NotImplementedException(

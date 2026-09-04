@@ -76,17 +76,17 @@ dotnet ef migrations add InitialCreate \
   --startup-project src/Ecr.Api \
   --output-dir Persistence/Migrations
 
-# застосувати до локальної БД
-dotnet ef database update \
-  --project src/Ecr.Infrastructure \
-  --startup-project src/Ecr.Api
-
-# згенерувати SQL-скрипт (для середовищ, де застосунок не має DDL-прав — D-66)
+# застосувати: ТІЛЬКИ скриптом, і в dev теж
+# `dotnet ef database update` тут не працює — InvariantGlobalization=true
+# валить його з «Globalization Invariant Mode is not supported» (Q-036).
+# Це й не потрібно: за D-66 застосунок не має DDL-прав, і скрипт — штатний шлях.
 dotnet ef migrations script \
   --project src/Ecr.Infrastructure \
-  --startup-project src/Ecr.Api \
   --idempotent --output artifacts/migration.sql
 ```
+
+⚠ `migrations script` бере збірку, а не джерела: **не** передавайте `--no-build`
+після зміни конфігурацій — отримаєте скрипт зі старої моделі без жодної помилки.
 
 Об'єкти, які **не створюються міграціями EF** і живуть окремими SQL-скриптами
 (`src/Ecr.Infrastructure/Persistence/Sql/`), бо їх виконує SQL Agent під окремим
@@ -99,11 +99,23 @@ principal (`D-66`): партиційні функції і схеми, файл�
 архівна файлова група має лежати на іншому носії, заповніть `@ArchivePath`
 на початку `01-filegroups.sql`.
 
+Порядок має значення: `07` переносить таблиці на схеми партиціонування і тому
+йде **після** міграцій.
+
 ```bash
-sqlcmd -S localhost -d Ecr -E -i src/Ecr.Infrastructure/Persistence/Sql/01-filegroups.sql
-sqlcmd -S localhost -d Ecr -E -i src/Ecr.Infrastructure/Persistence/Sql/02-partitions.sql
-sqlcmd -S localhost -d Ecr -E -i src/Ecr.Infrastructure/Persistence/Sql/03-archive-proc.sql
+S="localhost"; DB="Ecr"; Q="src/Ecr.Infrastructure/Persistence/Sql"
+sqlcmd -S $S -d $DB -E -b -I -i $Q/01-filegroups.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/02-partitions.sql
+sqlcmd -S $S -d $DB -E -b -I -i artifacts/migration.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/07-partition-tables.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql
+# 03, 04, 05 — з етапів 3–5: вони посилаються на calc.* і arc.*
 ```
+
+⚠ `-I` (QUOTED_IDENTIFIER ON) **обов'язковий**: без нього падає створення
+фільтрованих індексів `UX_User_Sid` і `UX_User_Bootstrap` з `Msg 1934`.
+⚠ `-b` теж: без нього `sqlcmd` повертає 0 навіть після помилки, і конвеєр
+вважає розгортання успішним.
 
 ## 4. Запуск
 

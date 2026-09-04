@@ -101,6 +101,12 @@
 | Q-032 | DECIDED | три порти Етапу 1: `ITemplateVersionStore`, `IRowStore`, `IRecalculationJob` | RESOLVED · форма чекає підтвердження |
 | Q-033 | SCOPE | аудит, четвертий прохід: розсинхрон контракту, виправлена методика `Q-027` | RESOLVED |
 | Q-026 | CONTRACT | `MethodologyRule`: сутність проти схеми БД | RESOLVED · схема права (ТЗ: `D-92`, `ФВ-9.5`, `ФВ-13.8`) |
+| Q-034 | BOOTSTRAP-FIX | згенерована міграція порушує стильові правила | RESOLVED |
+| Q-035 | CONFLICT | партиційовані таблиці лягли на `PRIMARY`; хто прив'язує їх до схеми | RESOLVED · варіант B, `07-partition-tables.sql` |
+| Q-036 | ENV | `InvariantGlobalization` блокує `ef database update`; потрібен `sqlcmd -I` | RESOLVED |
+| Q-037 | CONFLICT | 57 розбіжностей зі схемою на рівні стовпців, індексів, `DEFAULT`, `CHECK` | RESOLVED · схема виграє |
+| Q-038 | BOOTSTRAP-FIX | тіньові FK-колонки і винайдені EF індекси | RESOLVED |
+| **Q-039** | **ENV** | **зіставлення бази не задане в контракті — впливає на унікальність кодів** | **OPEN · потребує рішення** |
 | **Q-027** | **CONFLICT** | **22 сутності розходяться зі схемою БД** | **OPEN** · Етап 1 **не зачеплено** (`Q-028`), виконання за етапами 3–5 |
 
 ---
@@ -2015,3 +2021,306 @@ DTO ↔ колонки схеми        6 із 6
    розбіжностей 22 із **55** сутностей, і одна з них була в Етапі 1.
 
 **Статус:** RESOLVED
+
+---
+
+### Q-034 · BOOTSTRAP-FIX · Етап 1 · 2026-09-04
+
+**Де:** `.editorconfig`
+**Контекст:** перша спроба зібрати проєкт зі згенерованою міграцією EF.
+
+**Суть:**
+`dotnet ef migrations add` пише код, який порушує стильові правила пакета, а
+вони в нас — помилки збірки.
+
+**Текст помилки (42 входження):**
+```
+Persistence\Migrations\..._InitialCreate.cs: error CA1861: Prefer 'static readonly' fields over constant array arguments
+Persistence\Migrations\..._InitialCreate.cs: error IDE0161: Convert to file-scoped namespace
+```
+
+**Що зробив:** додав секцію `[**/Migrations/*.cs]` із `generated_code = true` і
+точковим вимкненням `CA1861`, `IDE0161`, `IDE0300`, `IDE0303`. У решті проєкту
+правила чинні; тут вони не мають сенсу, бо файл переписує інструмент — кожна
+регенерація знову ламала б збірку.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-035 · CONFLICT → DECIDED · Етап 1 · 2026-09-04
+
+**Де:** `src/Ecr.Infrastructure/Persistence/Sql/07-partition-tables.sql` (новий),
+`docs/build/02-contracts.md` §13
+**Контекст:** міграцію застосовано до реальної бази `EcrTest` на SQL Server 2019
+Express і перевірено фізичну модель запитом до `sys.*`.
+
+#### Що підтвердилося на живій базі
+
+```
+PK doc.CellValue     = (PeriodKey, TableRowId, ColumnDefId)   ← партиційний стовпець ПЕРШИЙ, сурогата немає
+PK doc.TableRow      = (PeriodKey, Id)
+PK doc.TableInstance = (PeriodKey, Id)
+FK_CellValue_Row, FK_CellValue_Column, FK_TableRow_Instance   ← складені FK створені
+```
+
+#### Що НЕ спрацювало
+
+```
+DATA_SPACE doc.CellValue     = PRIMARY
+DATA_SPACE doc.TableRow      = PRIMARY
+DATA_SPACE doc.TableInstance = PRIMARY
+```
+
+**Партиційовані таблиці лягли на `PRIMARY`, а не на `ps_ByPeriodKey`.** Схема
+партиціонування існувала (`02-partitions.sql`, 24 межі), але таблиці до неї не
+були прив'язані.
+
+**Чому так.** `ON ps_ByPeriodKey(PeriodKey)` — частина `CREATE TABLE`, а
+`migrationBuilder.CreateTable` цього не вміє: анотації для розміщення на схемі
+партиціонування в EF Core немає взагалі. `02-contracts.md` §13 розподіляє
+відповідальність так: «EF Core міграції створюють таблиці, ключі, FK, індекси»,
+а окремими скриптами — «партиційні функції і схеми». Між цими двома реченнями
+і провалилася **прив'язка таблиці до схеми**: її не робив ні міграція, ні скрипт.
+
+**Наслідок не косметичний.** Без прив'язки не працює нічого з моделі архівації:
+`TRUNCATE … WITH (PARTITIONS)` у `03-archive-proc.sql`, `SPLIT`/`MERGE` у
+`04-partition-maintenance.sql`, `PartitionCheckJob`. Причому **без помилки**:
+`arc.usp_ArchiveYear` виконався би і мовчки не звільнив нічого.
+
+#### Рішення: варіант B
+
+Розглядалися три:
+
+* **A.** дописати `migrationBuilder.Sql(...)` у згенерований файл міграції —
+  правка зникає при регенерації;
+* **B.** окремий скрипт після міграцій — **вибрано**;
+* **C.** створювати сім таблиць повністю скриптом — два джерела визначення
+  таблиці, найгірше.
+
+Створено `07-partition-tables.sql`. Він **ідемпотентний** і **керується
+таблицею відповідностей** «таблиця → схема → партиційний стовпець», тому
+`calc.*` і `aud.*` підхопляться самі, коли з'являться на етапах 3–5.
+Перенесення робиться через `CREATE … INDEX … WITH (DROP_EXISTING = ON) ON
+ps_…(col)`, а не `DROP`+`CREATE`: так зберігаються обмеження `PK`/`UNIQUE` і
+чужі `FK`, які на них посилаються. `ALTER INDEX … REBUILD` тут не годиться
+взагалі — він не змінює розміщення. Наприкінці скрипт **сам перевіряє**
+результат і падає з `THROW 50031`, якщо хоч один індекс лишився поза схемою.
+
+Заодно закрито другу прогалину того самого класу: `DATA_COMPRESSION = PAGE` на
+`PK_CellValue`, якого міграція теж не вміє виставити.
+
+**Розподіл відповідальності тепер такий:** міграції EF створюють **форму**
+(стовпці, ключі, FK, індекси, `CHECK`, `DEFAULT`), скрипти `Sql/` — **фізичне
+розміщення** (файлові групи, партиційні функції і схеми, прив'язка таблиць,
+стиснення) і серверні об'єкти (процедури, в'юхи). `02-contracts.md` §13
+оновлено.
+
+**Перевірено на живій базі після виправлення:**
+```
+doc.CellValue     PK_CellValue     ps_ByPeriodKey  PAGE  25 партицій
+doc.TableRow      PK_TableRow      ps_ByPeriodKey  NONE  25
+doc.TableRow      UQ_TableRow_Key  ps_ByPeriodKey  NONE  25
+doc.TableInstance PK_TableInstance ps_ByPeriodKey  NONE  25
+doc.TableInstance UQ_TableInstance ps_ByPeriodKey  NONE  25
+```
+
+**Статус:** RESOLVED
+
+---
+
+### Q-036 · ENV · Етап 1 · 2026-09-04
+
+**Де:** `Directory.Build.props`, `docs/build/09-commands.md` §3
+**Контекст:** `dotnet ef database update` проти локального SQL Server.
+
+**Суть:**
+`InvariantGlobalization = true` зі скелета несумісний із застосуванням міграцій
+інструментом EF.
+
+**Текст помилки:**
+```
+Globalization Invariant Mode is not supported.
+   at Microsoft.EntityFrameworkCore.Design.OperationExecutor.UpdateDatabaseImpl(...)
+```
+
+`migrations add` і `migrations script` працюють; падає саме `database update`,
+бо він піднімає застосунок і відкриває з'єднання `Microsoft.Data.SqlClient`,
+якому потрібна глобалізація.
+
+**Що зробив:** нічого не змінював у налаштуваннях. Застосовував міграцію так,
+як і має бути в проді за `D-66` — згенерованим скриптом:
+```bash
+dotnet ef migrations script --idempotent --project src/Ecr.Infrastructure --output artifacts/migration.sql
+sqlcmd -S <сервер> -d <база> -E -b -I -i artifacts/migration.sql
+```
+
+⚠ Два зауваження, які коштували часу:
+
+1. Прапорець **`-I`** (QUOTED_IDENTIFIER ON) **обов'язковий**. Без нього падає
+   створення фільтрованого індексу:
+   ```
+   Msg 1934: CREATE INDEX failed because the following SET options have incorrect settings: 'QUOTED_IDENTIFIER'.
+   ```
+2. `migrations script` **не збирає проєкт заново**, якщо передати `--no-build`.
+   Один раз я отримав скрипт на 10 рядків із застарілої збірки і півгодини
+   шукав, чому в базі немає таблиць.
+
+**Висновок:** `database update` у цьому проєкті не використовується взагалі — і
+це збігається з `D-66` (застосунок не має DDL-прав). Рядок із `09-commands.md`
+§3 прибрано, щоб ніхто більше на нього не витрачав час.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-037 · CONFLICT · Етап 1 · 2026-09-04
+
+**Де:** `src/Ecr.Infrastructure/Persistence/Configurations/*`, `docs/build/progress.md`
+**Контекст:** порівняння **реальної** бази `EcrTest` зі `02a-db-schema.md`
+запитами до `sys.columns`, `sys.indexes`, `sys.check_constraints`,
+`sys.default_constraints` після застосування міграції.
+
+**Суть:**
+`Q-027` порівнював сутності зі схемою **на рівні складу сутностей**, не на
+рівні стовпців. Тому висновок «у `cfg.*` і `doc.*` розбіжностей нуль», який
+я вписав у `progress.md`, був правдою лише про те, що порівнювалося. На рівні
+стовпців, індексів і `DEFAULT` розбіжностей виявилося **57**.
+
+**Що показало порівняння з живою базою:**
+```
+стовпці      32 розбіжності: 20 довжин/точностей, 5 відсутніх, 2 IDENTITY, 4 тіньові, 1 хибне ім'я
+індекси      13 розбіжностей: 6 хибних імен, 2 відсутні фільтровані, 4 винайдені EF, 1 форма ключа
+DEFAULT      12 відсутніх значень + 51 безіменне обмеження
+CHECK        22 з 22 відсутні
+SEQUENCE     2 з 2 відсутні
+```
+
+Найважливіші з них — не косметика:
+
+* **`uom.Unit.FactorToBase` і `OffsetToBase`: `decimal(28,12)` замість
+  `decimal(38,18)`.** Коефіцієнт множиться на кожне значення у звіті; зрізана
+  13-та цифра стає розбіжністю в тоннах (`D-30`).
+* **12 відсутніх `DEFAULT`** — серед них `doc.PeriodPolicy` (`15`, `45`, `45`),
+  `doc.Project.YearGraceOffsetDays` (`45`), `TimeZoneId`
+  (`N'Central Asia Standard Time'`), `cfg.RegistryDef.SourceKind` (`2`),
+  `DefinitionVersion` (`1`), `uom.Unit.FactorToBase` (`1`). Вставка через
+  seed-скрипт або `Ecr.DataGen` або впала б на `NOT NULL`, або тихо записала
+  нуль там, де за контрактом 45 днів.
+* **22 відсутні `CHECK`** — уся серверна частина інваріантів, включно з
+  `CK_CellValue_Empty` (третій стан комірки з `R-B4`), `CK_User_Provider`
+  (`WindowsSid` **або** `PasswordHash`, ніколи обидва) і `CK_ApprState_Reopen`
+  (`Reopen` без причини, `D-67`).
+* **`sec.User`: немає `CreatedAt` і `CreatedByUserId`**; **`wf.ApprovalState`:
+  немає `RowVersion`** — без нього оптимістичне блокування подання не працює.
+* **Форма ключа.** `doc.DocumentSheet` і `wf.ApprovalState` мали складений `PK`
+  замість сурогатного `Id` + `UNIQUE`. Складений виглядає природніше, але
+  схема — єдине джерело істини про форму ключа (`08-workflow.md` §7).
+* **`cfg.ColumnDef.DefaultValue`** мав `HasColumnName("[Default]")` — у базі
+  з'явився стовпець із дужками в імені. У схемі він зветься `DefaultValue`.
+
+**Правило застосоване одне: схема виграє** (`08-workflow.md` §7). Виправлено
+все, домен доповнено трьома властивостями (`User.CreatedAt`,
+`User.CreatedByUserId`, `ApprovalState.RowVersion`).
+
+**Перевірка після виправлення** — три незалежні порівняння з живою базою:
+```
+стовпці   0 розбіжностей
+індекси   0 розбіжностей
+DEFAULT   0 розбіжностей (усі 63 з іменами за контрактом)
+CHECK     22 з 22 на місці
+SEQUENCE  doc.TableInstanceSeq, doc.TableRowSeq
+```
+
+**Урок, який дорожчий за самі виправлення.** `Q-028` і `Q-033` називали Етап 1
+чистим, бо перевіряли **склад** сутностей. Порівняння з **реальною базою** дало
+57 розбіжностей за один прохід. Жодну з них не було видно ні в збірці, ні в
+не-Integration тестах. Твердження в `progress.md` виправлено.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-038 · BOOTSTRAP-FIX · Етап 1 · 2026-09-04
+
+**Де:** `Configurations/TemplateVersionConfiguration.cs`,
+`ConfigurationRestConfiguration.cs`, `DocumentConfiguration.cs`,
+`EcrDbContext.cs`
+**Контекст:** те саме порівняння з живою базою (`Q-037`), два окремі класи
+дефектів, які варті власного запису — обидва зробила конвенція EF, і обидва
+повторяться в кожній новій конфігурації, якщо не знати причини.
+
+#### 1. Тіньові колонки під зовнішні ключі
+
+У базі з'явилися стовпці, яких немає ніде: `TemplateId1`, `RegistryDefId1`,
+`DocumentId1`, `ProjectId1` — кожен із власним індексом.
+
+**Причина.** Я писав `builder.HasOne<Template>().WithMany()` — без інверсної
+навігації. Але в агрегата є `Template.Versions`, і конвенція знаходить її як
+**окремий** зв'язок. Виходить два зв'язки на одну пару сутностей: мій із
+`TemplateId` і конвенційний із тіньовим `TemplateId1`.
+
+**Виправлення:** `WithMany(t => t.Versions)` — явно назвати навігацію. Плюс
+`Navigation(x => x.Versions).UsePropertyAccessMode(PropertyAccessMode.Field)`,
+бо колекція за читанням і живе у приватному полі.
+
+#### 2. Індекси, яких ніхто не замовляв
+
+```
+IX_CellValue_TableDefId_ColumnDefId   ← на таблиці в ~108 млн рядків/рік
+IX_FormulaDef_TableDefId
+IX_FormulaDependency_FormulaDefId
+IX_Unit_DimensionId
+```
+
+**Причина.** `ForeignKeyIndexConvention` створює індекс під кожен FK, якщо його
+стовпці не є префіксом наявного індексу. У `doc.CellValue` складений FK — це
+`(TableDefId, ColumnDefId)`, а `PK` починається з `PeriodKey`, тому конвенція
+додала свій. У `02a-db-schema.md` про `CellValue` сказано прямо: «Некластерних
+індексів немає жодного».
+
+**Виправлення:** `configurationBuilder.Conventions.Remove<ForeignKeyIndexConvention>()`.
+Тепер кожен індекс оголошений явно, і схема лишається єдиним джерелом істини
+про індекси. Після цього порівняння індексів дало 0 розбіжностей.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-039 · ENV · Етап 1 · 2026-09-04 · **потребує рішення**
+
+**Де:** `docs/build/02a-db-schema.md`, `04-environment.md`
+**Контекст:** запит до `sys.*` на тестовій базі впав з помилкою зіставлення.
+
+**Текст помилки:**
+```
+Msg 451: Cannot resolve collation conflict between "Latin1_General_CI_AS_KS_WS"
+and "Cyrillic_General_CI_AS" in add operator occurring in ORDER BY statement column 1.
+```
+
+**Суть:**
+Тестова база отримала зіставлення інстансу — `Cyrillic_General_CI_AS`.
+**У документації пакета зіставлення не задано ніде** (`grep -i collat` по
+`docs/` не дає нічого). Тобто база в NCOC отримає те, що стоїть на їхньому
+інстансі, і ніхто цього не перевіряє.
+
+**Чому це не дрібниця.** Зіставлення визначає, чи `UQ_Template_Code`,
+`UQ_Unit_Code`, `UQ_Role`, `UQ_RegistryDef` вважають `"ABC"` і `"abc"` одним
+кодом. При `CI` — так, при `CS` — ні. Це змінює поведінку **унікальності
+бізнес-кодів**, а не тільки сортування. Той самий seed на двох інстансах з
+різним зіставленням дасть різний результат: на одному вставиться, на другому
+впаде на порушенні унікальності.
+
+**Чого я не робив:** не змінював зіставлення тестової базі. Продуктивну базу
+створюють DBA замовника, і тестова має бути схожою на неї, а не на мій вибір.
+
+**Рекомендація:** зафіксувати зіставлення явно при `CREATE DATABASE` —
+`Latin1_General_100_CI_AS_SC` (нейтральне до мови, нечутливе до регістру,
+чутливе до наголосів, з підтримкою додаткових символів). Текст усе одно
+`nvarchar`, а бізнес-коди — ASCII, тож локаль зіставлення на них не впливає;
+важлива саме `CI`-частина, бо саме її очікує решта системи.
+
+**Що потрібно від людини:** підтвердити зіставлення і чи вписувати його в
+`02a-db-schema.md` як вимогу до `CREATE DATABASE`.
+
+**Статус:** OPEN

@@ -39,3 +39,15 @@ indent_size = 4
 
 [*.md]
 trim_trailing_whitespace = false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Міграції EF Core — ЗГЕНЕРОВАНИЙ код (Q-034).
+# Тримати його під тими самими стильовими правилами, що й рукописний, немає
+# сенсу: файл переписує інструмент, і кожна регенерація знову ламала б збірку.
+# Правила вимкнені точково, лише тут; у решті проєкту вони чинні.
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.IDE0161.severity = none
+dotnet_diagnostic.IDE0300.severity = none
+dotnet_diagnostic.IDE0303.severity = none

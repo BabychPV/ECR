@@ -43,6 +43,9 @@ public sealed class ApprovalState : Entity<long>
     /// <summary>Причина `Reopen` — обов'язкова, це перевіряє і база (D-67).</summary>
     public string? ReopenReason { get; private set; }
 
+    /// <summary>Оптимістичне блокування: два подання одного аркуша не змішуються.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     /// <summary>
     /// Повернення в <c>Draft</c> для правки поданого. Створює потребу в
     /// **новому** зрізі; старий лишається `Submitted` назавжди (ФВ-5.20a).

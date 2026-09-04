@@ -5,6 +5,7 @@ using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Units;
 using Ecr.Domain.Entities.Workflow;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -72,16 +73,57 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
-        => throw new NotImplementedException(
-            "TODO: modelBuilder.ApplyConfigurationsFromAssembly(typeof(EcrDbContext).Assembly). " +
-            "Далі — глобальні конвенції: усі decimal без явної точності → (28,10); " +
-            "усі DateTime → datetime2(3); заборонити каскадне видалення за замовчуванням " +
-            "(soft delete скрізь, ФВ-7.6).");
+    {
+        ArgumentNullException.ThrowIfNull(modelBuilder);
+
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(EcrDbContext).Assembly);
+
+        // ⚠ Каскадне видалення вимкнене скрізь за замовчуванням: у системі
+        // діє soft delete (ФВ-7.6), бо на кожен запис хтось посилається —
+        // комірки, аудит, формули. Каскад тут означав би тихе зникнення
+        // історії разом із довідником.
+        foreach (var fk in modelBuilder.Model.GetEntityTypes().SelectMany(e => e.GetForeignKeys()))
+        {
+            fk.DeleteBehavior = DeleteBehavior.Restrict;
+        }
+
+        // Id для партиційованих таблиць беруться з SEQUENCE, а не з IDENTITY:
+        // значення потрібне ДО вставки, щоб завантажити TableRow і CellValue
+        // одним проходом SqlBulkCopy (B02 §2.3). CACHE 1000 — компроміс між
+        // круглими втратами при перезапуску і зверненнями до системних таблиць.
+        modelBuilder.HasSequence<long>("TableInstanceSeq", "doc").StartsAt(1).IncrementsBy(1);
+        modelBuilder.HasSequence<long>("TableRowSeq", "doc").StartsAt(1).IncrementsBy(1);
+    }
 
     /// <inheritdoc />
-    protected override void ConfigureConventions(ModelConfigurationBuilder builder)
-        => throw new NotImplementedException(
-            "TODO: builder.Properties<decimal>().HavePrecision(28, 10); " +
-            "builder.Properties<DateTime>().HaveColumnType(\"datetime2(3)\"). " +
-            "float/double не використовуються ніде — якщо з'явилися, це помилка моделі (D-30).");
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(configurationBuilder);
+
+        // decimal(28,10) скрізь: точність задається один раз, а не забувається
+        // в кожній новій колонці. float і double не використовуються ніде —
+        // порядок додавання змінює результат, і звірка з еталоном стає
+        // неможливою (D-30).
+        configurationBuilder.Properties<decimal>().HavePrecision(28, 10);
+
+        // Локалізований текст — одна колонка nvarchar(max) із JSON (ФВ-2.2).
+        // Конвенція, а не налаштування на кожну властивість: інакше перша ж
+        // забута сутність ламає побудову моделі.
+        configurationBuilder.Properties<Domain.ValueObjects.LocalizedText>()
+            .HaveConversion<Configurations.LocalizedTextConverter, Configurations.LocalizedTextComparer>()
+            .HaveColumnType("nvarchar(max)");
+
+        // datetime2(3) — мілісекунди. datetime2(7) коштує зайвих байт на
+        // ~108 млн рядків і не дає нічого: точніше за мілісекунду тут ніщо
+        // не вимірюється.
+        configurationBuilder.Properties<DateTime>().HaveColumnType("datetime2(3)");
+        configurationBuilder.Properties<DateTimeOffset>().HaveColumnType("datetimeoffset(3)");
+
+        // ⚠ Індекси під зовнішні ключі EF більше не вигадує.
+        // Конвенція створила IX_CellValue_TableDefId_ColumnDefId на таблиці в
+        // ~108 млн рядків — індекс, якого в 02a-db-schema.md немає і який
+        // коштував би гігабайти й уповільнював кожну вставку. Схема — єдине
+        // джерело істини про індекси (08-workflow §7): кожен оголошений явно.
+        configurationBuilder.Conventions.Remove<ForeignKeyIndexConvention>();
+    }
 }
