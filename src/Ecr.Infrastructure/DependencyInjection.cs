@@ -21,7 +21,6 @@ public static class DependencyInjection
     /// ⚠ Тут реєструється лише те, чиї реалізації **існують**. Порти етапів
     /// 2–5 (<c>ICollectionStore</c>, <c>IMethodologyStore</c>,
     /// <c>IConstantStore</c>, <c>ICalculationResultStore</c>,
-    /// <c>IOrphanScanner</c>,
     /// <c>IRecalculationJob</c>, <c>IJobProgress</c>)
     /// не реєструються, бо реалізацій ще немає. Зареєструвати їх «на майбутнє»
     /// не можна: у Development контейнер перевіряється при побудові, і
@@ -72,6 +71,8 @@ public static class DependencyInjection
         services.AddScoped<IDocumentStore, DocumentStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
+        services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IOrphanScanner, OrphanScanner>();
         services.AddScoped(typeof(IRepository<,>), typeof(Repository<,>));
 
         // BulkCellLoader працює власним з'єднанням (SqlBulkCopy), тому рядок
@@ -103,6 +104,7 @@ public static class DependencyInjection
         // будується раз на (користувач × SecurityStamp), і зміна штампа сама
         // дає новий ключ, тому інвалідація не потрібна (ФВ-6.7).
         services.AddSingleton<Caching.AccessProfileCache>();
+        services.AddSingleton<IRegistryEntryCache, Caching.RegistryEntryCache>();
         services.AddScoped<Application.Security.IAccessDecisionService, AccessDecisionService>();
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();

@@ -97,16 +97,14 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
         // (`wf.ApprovalRoute.TemplateVersionId`, `dic.RegistryEntry.Ordinal`),
         // і будь-яке значення для них було б вигаданим.
         //
-        // Кожна повертається в модель на своєму етапі разом із конфігурацією.
-        // `wf.ApprovalRoute`, `wf.ApprovalStep` і `sec.RoleAssignment` повернуті
-        // на Етапі 3 разом із бракуючими полями (`TemplateVersionId`,
-        // `IsOptional`, `ValidFrom`/`ValidTo`); `dic.*` — Етап 4.
-        // Тест `Міграція_не_створює_таблиць_поза_контрактними_схемами`
-        // стежить, щоб цей список не поповнювався мовчки.
-        modelBuilder.Ignore<RegistryEntry>();
-        modelBuilder.Ignore<RegistryEntryLink>();
-        modelBuilder.Ignore<RegistryExternalKey>();
-        modelBuilder.Ignore<RegistryValue>();
+        // Кожна повернулася в модель на своєму етапі разом із конфігурацією.
+        // `wf.ApprovalRoute`, `wf.ApprovalStep` і `sec.RoleAssignment` — на
+        // Етапі 3 разом із бракуючими полями (`TemplateVersionId`,
+        // `IsOptional`, `ValidFrom`/`ValidTo`); чотири `dic.*` — на Етапі 4
+        // (`Ordinal`, `LinkKind`, `DataSourceId`, `ValueNumeric`).
+        // **Список порожній.** Тест
+        // `Міграція_не_створює_таблиць_поза_контрактними_схемами` стежить, щоб
+        // він не наповнювався мовчки знову.
 
         // ⚠ Каскадне видалення вимкнене скрізь за замовчуванням: у системі
         // діє soft delete (ФВ-7.6), бо на кожен запис хтось посилається —

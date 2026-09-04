@@ -182,8 +182,8 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     /// </remarks>
     private static readonly string[] Deferred =
     [
-        // Етап 4 — реєстри, одиниці, розрахунки
-        "dic.RegistryEntry", "dic.RegistryEntryLink", "dic.RegistryExternalKey", "dic.RegistryValue",
+        // Етап 4 — розрахунки. Чотири `dic.*` прибрані: таблиці створює
+        // міграція `Stage4Dictionaries` разом із поверненням сутностей у модель.
         "calc.CalculationInput", "calc.CalculationResult", "calc.CalculationRun", "calc.CalculationStep",
         "calc.Methodology", "calc.MethodologyConstant", "calc.MethodologyFormula",
         "calc.MethodologyOutput", "calc.MethodologyRule", "calc.MethodologySubstance",
@@ -360,11 +360,57 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
+    // ⛔ Ось механізм, що не дає щільності стати «конверсією одиниць»
+    // (ФВ-16.5, D-75). Домовленості тут недостатньо: коефіцієнт «м³ → т»
+    // виглядає як звичайна конверсія і вставляється одним INSERT — після чого
+    // те саме число перетворюється по-різному залежно від того, хто заповнив
+    // довідник. Перевірка саме на базі: обмеження мусить триматися й для
+    // імпорту, і для міграції, і для DBA з SSMS — тобто там, куди C#-код не
+    // дістає взагалі.
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public void Конверсію_між_різними_розмірностями_неможливо_вставити_в_таблицю()
-        => Assert.Fail("not implemented");
+    public async Task Конверсію_між_різними_розмірностями_неможливо_вставити_в_таблицю()
+    {
+        // Об'єм → маса: саме той перехід, який потребує щільності.
+        var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
+            "INSERT INTO uom.Conversion (FromUnitId, ToUnitId, Factor, [Offset], Kind, Note) "
+            + "SELECT f.Id, t.Id, 1000.0, 0.0, 0, N'density' "
+            + "FROM uom.Unit f, uom.Unit t WHERE f.Code = N'm3' AND t.Code = N'kg'"));
+
+        Assert.Contains("CK_Conv_SameDimension", error.Message, StringComparison.Ordinal);
+
+        // Жодного рядка не лишилося: відмова, а не часткова вставка.
+        Assert.Equal(0, await ScalarAsync<int>(
+            "SELECT COUNT(*) FROM uom.Conversion c "
+            + "JOIN uom.Unit f ON f.Id = c.FromUnitId JOIN uom.Unit t ON t.Id = c.ToUnitId "
+            + "WHERE f.DimensionId <> t.DimensionId"));
+
+        // А в межах однієї розмірності конверсія вставляється: обмеження
+        // забороняє саме перехід між розмірностями, а не таблицю цілком.
+        await ExecuteAsync(
+            "INSERT INTO uom.Conversion (FromUnitId, ToUnitId, Factor, [Offset], Kind, Note) "
+            + "SELECT f.Id, t.Id, 1016.0, 0.0, 1, N'long ton' "
+            + "FROM uom.Unit f, uom.Unit t WHERE f.Code = N't' AND t.Code = N'kg'");
+
+        Assert.Equal(1, await ScalarAsync<int>(
+            "SELECT COUNT(*) FROM uom.Conversion c "
+            + "JOIN uom.Unit f ON f.Id = c.FromUnitId JOIN uom.Unit t ON t.Id = c.ToUnitId "
+            + "WHERE f.Code = N't' AND t.Code = N'kg'"));
+
+        // ⚠ Невідома одиниця теж не проходить: ISNULL(@r, 0) у функції означає
+        // «немає рядка — немає дозволу». Зворотне тлумачення зробило б дірку
+        // рівно там, де даних бракує. FK спрацьовує раніше за CHECK — і це теж
+        // правильна відмова.
+        var unknown = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
+            "INSERT INTO uom.Conversion (FromUnitId, ToUnitId, Factor, [Offset], Kind, Note) "
+            + "SELECT 2147483647, t.Id, 1.0, 0.0, 0, NULL FROM uom.Unit t WHERE t.Code = N'kg'"));
+
+        Assert.True(
+            unknown.Message.Contains("CK_Conv_SameDimension", StringComparison.Ordinal)
+            || unknown.Message.Contains("FK_Conv_From", StringComparison.Ordinal));
+    }
 
     private async Task<T?> ScalarAsync<T>(string query)
     {

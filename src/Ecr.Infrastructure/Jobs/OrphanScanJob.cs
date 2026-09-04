@@ -1,6 +1,7 @@
 // src/Ecr.Infrastructure/Jobs/OrphanScanJob.cs
 
 using Ecr.Application.Ports;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -17,19 +18,39 @@ namespace Ecr.Infrastructure.Jobs;
 /// чинними. Інакше виправлення довідника не розблокувало б <c>Submit</c>, і
 /// користувач лишився б із помилкою, причину якої вже усунуто.
 /// </para>
+/// <para>
+/// Сама логіка — в <see cref="IOrphanScanner"/>: та сама, якою користується
+/// точковий перерахунок при зміні вікна дії. Дві реалізації розійшлися б, і
+/// нічний прохід скасовував би те, що зробив денний.
+/// </para>
 /// </remarks>
-public sealed class OrphanScanJob(IOrphanScanner scanner) : IBackgroundJob
+public sealed partial class OrphanScanJob(IOrphanScanner scanner, ILogger<OrphanScanJob> logger) : IBackgroundJob
 {
-    public string Code => "orphan-scan";
+    /// <summary>Код задачі в черзі.</summary>
+    public static string Code => "orphan-scan";
 
-    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: 1) прохід по відкритих і Grace-періодах — закриті не чіпати, " +
-            "їхні дані вже подані і ознака нічого не змінить;\n" +
-            "2) set-based UPDATE, не рядок за рядком: обсяг — мільйони рядків;\n" +
-            "3) ставити І знімати IsOrphaned одним проходом, OrphanedAt = null при знятті;\n" +
-            "4) прогрес по періодах, щоб задачу було видно в черзі;\n" +
-            "5) підсумок у журнал: скільки поставлено, скільки знято. " +
-            "Ненульове зняття — нормально; ненульова постановка — привід подивитися, " +
-            "що сталося з довідником.");
+    /// <inheritdoc />
+    public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(progress);
+
+        await progress.ReportAsync(0, "Перевірка посилань на довідники", ct).ConfigureAwait(false);
+
+        var changed = await scanner.ScanAllAsync(ct).ConfigureAwait(false);
+
+        await progress.ReportAsync(100, $"Змінено рядків: {changed}", ct).ConfigureAwait(false);
+
+        // ⚠ Підсумок у журнал ЗАВЖДИ, зокрема нульовий. Задача, яка мовчить,
+        // коли нічого не знайшла, і мовчить, коли не запустилася, — це задача,
+        // про зупинку якої дізнаються з першого заблокованого Submit.
+        //
+        // Ненульове зняття — нормально: хтось виправив довідник. Ненульова
+        // постановка — привід подивитися, що з ним сталося.
+        LogSummary(logger, changed);
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "orphan-scan: рядків зі зміненою ознакою IsOrphaned — {Changed}.")]
+    private static partial void LogSummary(ILogger logger, int changed);
 }

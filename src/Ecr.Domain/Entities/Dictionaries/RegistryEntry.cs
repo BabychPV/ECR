@@ -18,12 +18,31 @@ public sealed class RegistryEntry : Entity<long>
 {
     private RegistryEntry() { }
 
-    public RegistryEntry(int registryDefId, EcrCode code, LocalizedText display)
+    /// <summary>Створює запис довідника.</summary>
+    /// <param name="registryDefId">Довідник, до якого належить запис.</param>
+    /// <param name="code">Стабільний код; перейменування його не змінює (ФВ-8.8).</param>
+    /// <param name="display">Локалізована назва для показу.</param>
+    /// <param name="createdByUserId">Автор. Нуль — лише для фікстур і тестів.</param>
+    /// <param name="createdAt">Час створення в UTC; <c>null</c> — заповнить сховище.</param>
+    /// <remarks>
+    /// ⚠ Два останні параметри необов'язкові навмисно: у схемі вони
+    /// <c>NOT NULL</c>, але контракт тесту створює запис трьома аргументами
+    /// (`RegistryEntryTests`). Обов'язковими зробити не можна — зламався б
+    /// тест, а тести тут первинні щодо скелета.
+    /// </remarks>
+    public RegistryEntry(
+        int registryDefId,
+        EcrCode code,
+        LocalizedText display,
+        int createdByUserId = 0,
+        DateTime? createdAt = null)
     {
         RegistryDefId = registryDefId;
         Code = code.Value;
         DisplayL10n = display;
         IsActive = true;
+        CreatedByUserId = createdByUserId;
+        CreatedAt = createdAt ?? DateTime.UnixEpoch;
     }
 
     public int RegistryDefId { get; private set; }
@@ -36,9 +55,21 @@ public sealed class RegistryEntry : Entity<long>
     /// <summary>Кінець вікна; <c>null</c> — «без обмеження».</summary>
     public DateOnly? ValidTo { get; private set; }
 
+    /// <summary>
+    /// Порядок у списку. Саме він, а не <see cref="Code"/>, визначає, як
+    /// записи лягають у випадний список: алфавітний порядок кодів для людини
+    /// нічого не означає (`ФВ-8.2`).
+    /// </summary>
+    public int Ordinal { get; private set; }
+
     public bool IsActive { get; private set; }
     public bool IsDeleted { get; private set; }
     public long? ParentEntryId { get; private set; }
+
+    public DateTime CreatedAt { get; private set; }
+    public int CreatedByUserId { get; private set; }
+    public DateTime? DeletedAt { get; private set; }
+    public int? DeletedByUserId { get; private set; }
 
     /// <summary>Чинний на дату. Межі **включні** з обох боків.</summary>
     public bool IsValidOn(DateOnly date)
@@ -68,16 +99,64 @@ public sealed class RegistryEntry : Entity<long>
         ValidTo = to;
     }
 
+    /// <summary>Ставить порядок у списку.</summary>
+    /// <param name="ordinal">Позиція; від'ємна не має сенсу.</param>
+    public void SetOrdinal(int ordinal)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(ordinal);
+        Ordinal = ordinal;
+    }
+
+    /// <summary>Змінює назву. Код і <c>Id</c> лишаються — історія не рухається (ФВ-8.8).</summary>
+    /// <param name="display">Нова локалізована назва.</param>
+    public void Rename(LocalizedText display)
+    {
+        ArgumentNullException.ThrowIfNull(display);
+        DisplayL10n = display;
+    }
+
+    /// <summary>Ставить батьківський запис для ієрархічних довідників.</summary>
+    /// <param name="parentEntryId">Батько; <c>null</c> — корінь.</param>
+    /// <exception cref="DomainException">Запис не може бути власним батьком.</exception>
+    public void SetParent(long? parentEntryId)
+    {
+        if (parentEntryId is { } parent && IsPersisted && parent == Id)
+        {
+            throw new DomainException(
+                "ECR-REG-0422", $"Запис {Id} не може бути власним батьком.");
+        }
+
+        ParentEntryId = parentEntryId;
+    }
+
     /// <summary>Логічне видалення: фізичне заборонене при посиланнях (ФВ-8.6).</summary>
+    /// <param name="userId">Хто видалив; <c>null</c> — невідомо (фікстури).</param>
+    /// <param name="utcNow">Коли; <c>null</c> — не фіксувати.</param>
     /// <remarks>
     /// ⚠ Запис лишається в таблиці НАЗАВЖДИ: у комірках лежить його <c>Id</c>,
     /// і фізичне видалення перетворило б історію на набір чисел без підписів.
-    /// Перевірку посилань робить use-case через <c>ICellStore</c> — сутність про дані
-    /// не знає.
+    /// Перевірку посилань робить use-case через <c>IRegistryStore</c> — сутність про
+    /// дані не знає.
     /// </remarks>
-    public void SoftDelete()
+    public void SoftDelete(int? userId = null, DateTime? utcNow = null)
     {
         IsDeleted = true;
         IsActive = false;
+        DeletedByUserId = userId;
+        DeletedAt = utcNow;
+    }
+
+    /// <summary>Повертає видалений запис у обіг.</summary>
+    /// <remarks>
+    /// Потрібно тому, що видалення тут логічне: помилкове «видалення» має
+    /// відкочуватися, інакше єдиний спосіб виправити його — новий запис із
+    /// новим <c>Id</c>, а старі комірки лишаться вказувати на старий.
+    /// </remarks>
+    public void Restore()
+    {
+        IsDeleted = false;
+        IsActive = true;
+        DeletedByUserId = null;
+        DeletedAt = null;
     }
 }

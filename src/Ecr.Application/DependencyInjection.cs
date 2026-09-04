@@ -94,6 +94,15 @@ public static class DependencyInjection
 
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
+
+        // Етап 4 — довідники та одиниці.
+        services.AddSingleton<Registries.RegistryResolver>();
+        services.AddScoped<Registries.ListRegistriesHandler>();
+        services.AddScoped<Registries.GetRegistryEntriesHandler>();
+        services.AddScoped<Registries.UpsertRegistryEntryHandler>();
+        services.AddScoped<Registries.SetEntryValidityHandler>();
+        services.AddScoped<Registries.SwitchRegistrySourceHandler>();
+        services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
 
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з
