@@ -41,9 +41,30 @@ public sealed class RealFormulaEngine : IFormulaEngine
         ParsedExpression expression, DependencyContext context) => [];
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Справжній <see cref="TopologicalSorter"/>, а не порядок вхідного
+    /// списку. Раніше тут була заглушка, і тест «порядок обчислюється при
+    /// публікації» проходив би навіть тоді, коли публікація не сортує нічого:
+    /// вона перевіряла б заглушку.
+    /// </remarks>
     public OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
-        return new OrderingResult(true, nodes.Select(n => n.FormulaDefId).ToList(), null);
+
+        var graph = new DependencyGraph();
+        foreach (var node in nodes)
+        {
+            // Вузол без ребер теж має потрапити в граф — інакше формула, від
+            // якої ніхто не залежить, зникла б із порядку. Ребро із себе на
+            // себе тут дало б цикл, якого немає.
+            graph.AddNode(node.FormulaDefId);
+
+            foreach (var dependency in node.DependsOnFormulaDefIds)
+            {
+                graph.AddEdge(node.FormulaDefId, dependency);
+            }
+        }
+
+        return new TopologicalSorter().Sort(graph);
     }
 }

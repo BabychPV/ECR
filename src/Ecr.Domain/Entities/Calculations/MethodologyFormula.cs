@@ -36,8 +36,24 @@ public sealed class MethodologyFormula : Entity<int>
     public int? OutputUnitId { get; private set; }
 
     /// <summary>Проставляє порядок, отриманий із графа залежностей.</summary>
+    /// <param name="order">Позиція в топологічному порядку.</param>
+    /// <remarks>
+    /// ⚠ Викликається **лише** з процедури публікації після топологічного
+    /// сортування. Дозволити людині задати порядок руками означало б, що додана
+    /// формула тихо зміщує решту, а помилка виявиться числом у звіті, не
+    /// помилкою публікації (ФВ-9.4).
+    /// </remarks>
     public void SetEvaluationOrder(int order)
-        => throw new NotImplementedException(
-            "TODO: присвоїти порядок; викликається ЛИШЕ з процедури публікації " +
-            "після топологічного сортування. Виклик ззовні — помилка проєктування.");
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(order);
+        EvaluationOrder = order;
+    }
+
+    /// <summary>Оголошує одиницю результату формули (ФВ-16.6).</summary>
+    /// <param name="unitId">Одиниця з <c>uom.Unit</c>.</param>
+    public void SetOutputUnit(int unitId) => OutputUnitId = unitId;
+
+    /// <summary>Задає оголошений список аргументів.</summary>
+    /// <param name="argumentsJson">JSON-масив імен; токен поза ним — помилка публікації.</param>
+    public void SetArguments(string? argumentsJson) => ArgumentsJson = argumentsJson;
 }

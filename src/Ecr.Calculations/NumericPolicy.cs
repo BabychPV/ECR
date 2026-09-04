@@ -17,11 +17,34 @@ public sealed class NumericPolicy(NumericMode mode)
     public NumericMode Mode { get; } = mode;
 
     /// <summary>Округлення згідно з режимом.</summary>
-    public decimal Round(decimal value, int digits)
-        => throw new NotImplementedException(
-            "TODO: MidpointRounding.AwayFromZero в обох режимах — банківське округлення дало б " +
-            "інші числа. Різниця Legacy/Strict — у МОМЕНТІ округлення: Legacy округлює після " +
-            "кожного кроку так само, як чинна система, Strict — лише на виході.");
+    /// <param name="value">Значення.</param>
+    /// <param name="digits">Скільки знаків лишити.</param>
+    /// <remarks>
+    /// ⚠ <see cref="MidpointRounding.AwayFromZero"/> в **обох** режимах.
+    /// Банківське округлення (<c>ToEven</c>, типове для .NET) дало б інші
+    /// числа на кожному «.5», і звірка з чинною системою розійшлася б у
+    /// сотнях рядків без жодної помилки у формулі.
+    /// </remarks>
+    public static decimal Round(decimal value, int digits)
+        => decimal.Round(value, digits, MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// Округлення проміжного кроку — те, що відрізняє режими.
+    /// </summary>
+    /// <param name="value">Значення кроку.</param>
+    /// <remarks>
+    /// ⛔ Ось уся різниця <c>Legacy</c> і <c>Strict</c>: **момент** округлення,
+    /// а не спосіб. <c>Legacy</c> округлює після кожного кроку так само, як
+    /// чинна система на аркуші Excel; <c>Strict</c> веде повну точність і
+    /// округлює лише на виході. На ланцюгу з чотирьох формул різниця
+    /// накопичується до шостого знака — рівно там, де йде звірка.
+    /// </remarks>
+    public decimal RoundStep(decimal value)
+        => Mode == NumericMode.Legacy ? Round(value, OutputScale) : value;
+
+    /// <summary>Округлення значення, що йде в <c>calc.CalculationResult</c>.</summary>
+    /// <param name="value">Значення виходу.</param>
+    public decimal RoundOutput(decimal value) => Round(value, OutputScale);
 
     /// <summary>Скільки знаків зберігати для виходу.</summary>
     public int OutputScale => 6;

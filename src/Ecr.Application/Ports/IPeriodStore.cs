@@ -29,4 +29,24 @@ public interface IPeriodStore
 
     /// <summary>Додає проєкт; ідентифікатор з'являється після збереження.</summary>
     public Task AddProjectAsync(Project project, CancellationToken ct);
+
+    /// <summary>
+    /// Стани періодів проєкту: <c>periodKey</c> → стан.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Конкретний період; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремо від <see cref="FindProjectAsync"/> навмисно: перевірка «чи не
+    /// закритий період» не потребує ні документів, ні політики, ні поясу — а
+    /// агрегат тягне їх усі. На запуску перерахунку повного року це різниця
+    /// між одним запитом і завантаженням проєкту цілком.
+    /// </remarks>
+    public Task<IReadOnlyList<PeriodStateRef>> GetPeriodStatesAsync(
+        int projectId, int? periodKey, CancellationToken ct);
 }
+
+/// <summary>Стан одного періоду.</summary>
+/// <param name="PeriodKey">Ключ періоду (R-A6).</param>
+/// <param name="State">Стан; <c>Closed</c> блокує перерахунок (ФВ-9.7).</param>
+public sealed record PeriodStateRef(int PeriodKey, Ecr.Domain.Enums.PeriodState State);

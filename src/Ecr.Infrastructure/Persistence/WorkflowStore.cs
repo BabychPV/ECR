@@ -122,4 +122,28 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 s.SubmittedByUserId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // AnyAsync, а не Count: провайдер перекладає його в EXISTS і зупиняється
+        // на першому рядку. Різниця помітна саме тут — таблиця станів росте
+        // разом із документами.
+        var query =
+            from state in db.ApprovalStates.AsNoTracking()
+            join document in db.Documents.AsNoTracking()
+                on state.DocumentId equals document.Id
+            where document.ProjectId == projectId
+                  && state.PeriodKey == periodKey.Value
+
+                  // ⚠ Дужки обов'язкові: `&&` зв'язує сильніше за `||`, і без
+                  // них умова читалася б як «(проєкт і період і Submitted) АБО
+                  // Approved» — тобто будь-який затверджений аркуш будь-якого
+                  // проєкту робив би відповідь істинною.
+                  && (state.Status == Domain.Enums.DocumentStatus.Submitted
+                      || state.Status == Domain.Enums.DocumentStatus.Approved)
+            select state.DocumentId;
+
+        return query.AnyAsync(ct);
+    }
 }

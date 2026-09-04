@@ -43,6 +43,20 @@ public interface IWorkflowStore
     /// <summary>Зрізи аркуша за період, від найновішого.</summary>
     public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Чи має проєкт хоч один поданий аркуш у цьому періоді.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Питання «чи є хоч один», а не перелік: поданий зріз не перераховується
+    /// взагалі (ФВ-9.17), і для відмови достатньо одного. Тягнути всі аркуші
+    /// заради <c>Count &gt; 0</c> означало б читати таблицю на кожен запуск
+    /// перерахунку.
+    /// </remarks>
+    public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct);
 }
 
 /// <summary>

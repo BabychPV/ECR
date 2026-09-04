@@ -35,4 +35,46 @@ public interface IMethodologyStore
 
     /// <summary>Оголошені виходи версії — з обов'язковими одиницями (ФВ-16.6).</summary>
     public Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Методологія-контейнер разом з усіма своїми версіями; <c>null</c> — версії немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме агрегат, а не окрема версія: перевірку «вікна дії не
+    /// перетинаються» неможливо зробити, не бачачи сусідів (ФВ-13.3), а
+    /// збирати їх у застосунку означало б повторити правило вибору версії
+    /// втретє.
+    /// </remarks>
+    public Task<Methodology?> FindByVersionAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Золотий набір версії: входи з очікуваними числами і допуском (ФВ-13.7).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Порожній набір означає «зеленого тесту немає», і публікація
+    /// відхиляється (ФВ-9.12). Це не формальність: без очікуваних чисел
+    /// правильність результату перевіряє той, хто відкриє звіт — тобто вже
+    /// після того, як його подали.
+    /// </remarks>
+    public Task<IReadOnlyList<MethodologyTestCase>> GetTestCasesAsync(
+        int methodologyVersionId, CancellationToken ct);
 }
+
+/// <summary>
+/// Тест методології: вхід, очікувані виходи і допуск.
+/// </summary>
+/// <remarks>
+/// ⚠ Тип оголошений тут, а не як сутність, бо таблиці <c>calc.TestCase</c> у
+/// схемі **немає** — при тому, що ФВ-13.7 прямо на неї посилається. Розбіжність
+/// записана як <c>P-08</c>; порт віддає ту форму, яка потрібна публікації, і
+/// зміна сховища її не зачепить.
+/// </remarks>
+/// <param name="Code">Код тесту — те, що потрапляє в повідомлення про провал.</param>
+/// <param name="Input">Вхід розрахунку.</param>
+/// <param name="Expected">Очікувані значення: код виходу → число.</param>
+/// <param name="Tolerance">Допуск порівняння; нуль означає точний збіг.</param>
+public sealed record MethodologyTestCase(
+    string Code,
+    CalculationInput Input,
+    IReadOnlyDictionary<string, decimal> Expected,
+    decimal Tolerance);

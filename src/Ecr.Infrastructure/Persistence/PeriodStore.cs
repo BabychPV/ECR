@@ -57,4 +57,31 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
         db.Projects.Add(project);
         return Task.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PeriodStateRef>> GetPeriodStatesAsync(
+        int projectId, int? periodKey, CancellationToken ct)
+    {
+        var query = db.Periods
+            .AsNoTracking()
+            .Where(p => p.ProjectId == projectId);
+
+        if (periodKey is { } single)
+        {
+            query = query.Where(p => p.PeriodKeyValue == single);
+        }
+
+        // Take за межею календаря: 12 місяців × запас. Без неї помилка в даних
+        // виглядала б як повільність, а не як помилка (правило 6 архітектурних
+        // тестів — ToListAsync без Take).
+        return await query
+            .OrderBy(p => p.PeriodKeyValue)
+            .Take(MaxPeriods)
+            .Select(p => new PeriodStateRef(p.PeriodKeyValue, p.State))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Стеля вибірки періодів: рік має щонайбільше 12 (D-108).</summary>
+    private const int MaxPeriods = 64;
 }

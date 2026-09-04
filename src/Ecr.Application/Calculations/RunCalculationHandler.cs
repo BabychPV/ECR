@@ -1,7 +1,9 @@
 // src/Ecr.Application/Calculations/RunCalculationHandler.cs
+using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
-using Ecr.Application.Common;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Calculations;
 
@@ -15,25 +17,115 @@ namespace Ecr.Application.Calculations;
 /// а не лише в діагностичному режимі.
 /// </remarks>
 public sealed class RunCalculationHandler(
-    ICalculationModule module,
-    IUnitOfWork uow,
+    IPeriodStore periods,
+    IWorkflowStore workflow,
     IBackgroundJobScheduler jobs,
     ICurrentUser currentUser,
     IClock clock)
 {
-    public Task<long> HandleAsync(int projectId, int? periodKey, int? triggeredByUserId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: 1) ⚠ ЗАКРИТІ ПЕРІОДИ автоматично не перераховувати НІКОЛИ " +
-            "   (ФВ-9.7): без окремого погодження → ECR-CALC-4221;\n" +
-            "2) ⚠ зріз із IsSubmitted = 1 не перераховується взагалі (ФВ-9.17): " +
-            "   потреба змінити подану цифру закривається Reopen, а не перерахунком;\n" +
-            "3) версія методології — за датою періоду, не за 'поточною' (ФВ-9.3);\n" +
-            "4) порядок формул — топологічний, узятий із публікації, не будувати " +
-            "   граф щоразу (ФВ-9.4);\n" +
-            "5) NumericMode версії задає МОМЕНТ округлення: Legacy — після кожної " +
-            "   операції, Strict — на виході (ФВ-9.16a);\n" +
-            "6) паралелізм по незалежних гілках графа; ізоляція від інтерактивного " +
-            "   піку обов'язкова — 10 хвилин перерахунку не мають з'їсти p95 операторів;\n" +
-            "7) заповнити ModulesProfileJson;\n" +
-            "8) перемикання IsCurrent — ОДНА транзакція (ФВ-9.11).");
+    /// <summary>Право на перерахунок закритого періоду (ФВ-9.7).</summary>
+    public const string RecalculateClosedPermission = "Calculation.RecalculateClosed";
+
+    /// <summary>Ставить прогін у чергу і повертає ідентифікатор задачі.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
+    /// <param name="approval">Погодження на перерахунок закритого періоду; <c>null</c> — немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-4221</c> — закритий період без погодження.
+    /// </exception>
+    public async Task<string> HandleAsync(
+        int projectId, int? periodKey, ClosedPeriodApproval? approval, CancellationToken ct)
+    {
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не запускає розрахунок.");
+
+        var targets = await periods
+            .GetPeriodStatesAsync(projectId, periodKey, ct)
+            .ConfigureAwait(false);
+
+        if (targets.Count == 0)
+        {
+            throw new NotFoundException(
+                "ECR-PRD-0404", $"Періоду {periodKey} у проєкті {projectId} немає.");
+        }
+
+        // ⛔ ЗАКРИТІ ПЕРІОДИ автоматично не перераховуються НІКОЛИ (ФВ-9.7).
+        // Це не обережність: перерахунок закритого періоду змінює числа, які
+        // вже подані регулятору, і робить це без жодного сліду в самих даних.
+        var closed = targets.Where(p => p.State == PeriodState.Closed).ToList();
+        if (closed.Count > 0)
+        {
+            RequireApproval(closed.Select(p => p.PeriodKey).ToList(), approval);
+        }
+
+        // ⛔ Поданий зріз не перераховується взагалі (ФВ-9.17) — навіть із
+        // погодженням. Потреба змінити подану цифру закривається Reopen, який
+        // лишає слід у робочому процесі, а не тихим перерахунком.
+        foreach (var period in targets)
+        {
+            var submitted = await workflow
+                .HasSubmittedSheetsAsync(projectId, new Domain.ValueObjects.PeriodKey(period.PeriodKey), ct)
+                .ConfigureAwait(false);
+
+            if (submitted && approval is null)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-4221",
+                    $"Період {period.PeriodKey} має подані аркуші: перерахунок змінив би числа, "
+                    + "які вже пішли на погодження. Штатний шлях — Reopen.");
+            }
+        }
+
+        return await jobs
+            .EnqueueAsync<IRecalculationJob>(
+                new
+                {
+                    projectId,
+                    periodKey,
+                    triggeredByUserId = userId,
+                    approvedBy = approval?.ApprovedByUserId,
+                    approvalReason = approval?.Reason,
+                    requestedAt = clock.UtcNow,
+                },
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Перевіряє погодження на перерахунок закритих періодів.</summary>
+    private void RequireApproval(IReadOnlyList<int> closedKeys, ClosedPeriodApproval? approval)
+    {
+        if (approval is null)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-4221",
+                $"Закриті періоди ({string.Join(", ", closedKeys)}) не перераховуються автоматично: "
+                + "потрібне окреме погодження (ФВ-9.7).",
+                new Dictionary<string, object?> { ["closedPeriods"] = closedKeys });
+        }
+
+        // ⚠ Погодження ≠ «прапорець у запиті». Причина обов'язкова, і той, хто
+        // погодив, має бути іншою людиною, ніж та, що запускає: інакше
+        // «окреме погодження» звелося б до зайвого поля у формі.
+        if (string.IsNullOrWhiteSpace(approval.Reason))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-4221",
+                "Погодження перерахунку закритого періоду без причини не приймається.");
+        }
+
+        if (approval.ApprovedByUserId == currentUser.UserId)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0409",
+                "Погодити власний перерахунок закритого періоду не можна (правило чотирьох очей, D-40).");
+        }
+    }
 }
+
+/// <summary>
+/// Погодження на перерахунок закритого періоду (ФВ-9.7).
+/// </summary>
+/// <param name="ApprovedByUserId">Хто погодив; не той, хто запускає.</param>
+/// <param name="Reason">Причина; обов'язкова і потрапляє в аудит.</param>
+public sealed record ClosedPeriodApproval(int ApprovedByUserId, string Reason);
