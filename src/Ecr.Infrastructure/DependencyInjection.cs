@@ -20,7 +20,7 @@ public static class DependencyInjection
     /// <remarks>
     /// ⚠ Тут реєструється лише те, чиї реалізації **існують**. Порти етапу 5
     /// (<c>ICollectionStore</c>,
-    /// <c>IRecalculationJob</c>, <c>IJobProgress</c>)
+    /// <c>IJobProgress</c>)
     /// не реєструються, бо реалізацій ще немає. Зареєструвати їх «на майбутнє»
     /// не можна: у Development контейнер перевіряється при побудові, і
     /// застосунок просто не стартував би.
@@ -124,6 +124,12 @@ public static class DependencyInjection
         // відповідав 500, включно з поданням. Одна відсутня реєстрація вимикала
         // цілий контролер, і видно це було лише на живому запиті.
         services.AddSingleton<IBackgroundJobScheduler>(_ => new Jobs.QuartzJobScheduler());
+
+        // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
+        // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
+        // приймав би завдання, і не виконувалося б нічого.
+        services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
+        services.AddScoped<Jobs.OrphanScanJob>();
 
         services.AddSingleton<ISqlCapabilities>(_ => new SqlCapabilitiesProbe());
         services.AddSingleton<IClock, SystemClock>();

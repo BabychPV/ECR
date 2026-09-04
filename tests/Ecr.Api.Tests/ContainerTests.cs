@@ -136,7 +136,6 @@ public sealed class ContainerTests(SqlServerFixture sql)
             "IExcelImporter",         // Етап 5
             "IExternalDataSource",    // Етап 5
             "IJobProgress",           // Етап 5
-            "IRecalculationJob",      // Етап 5
         ];
 
         var ports = typeof(Ecr.Application.Ports.IUserStore).Assembly

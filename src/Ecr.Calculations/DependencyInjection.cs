@@ -27,6 +27,7 @@ public static class DependencyInjection
 
         services.AddScoped<ICalculationModule, GenericCalculationModule>();
         services.AddScoped<CalculationOrchestrator>();
+        services.AddScoped<ICalculationRunner>(p => p.GetRequiredService<CalculationOrchestrator>());
 
         return services;
     }

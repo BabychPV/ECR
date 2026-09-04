@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 
@@ -17,30 +20,166 @@ public sealed class CalculationOrchestrator(
     IEnumerable<ICalculationModule> modules,
     CalculationInputBuilder inputBuilder,
     CalculationOutputWriter outputWriter,
-    IFormulaEngine formulaEngine)
+    IRowStore rows) : ICalculationRunner
 {
-    /// <summary>Виконує прогін.</summary>
-    /// <param name="projectId">Проєкт.</param>
-    /// <param name="periodKey">Період; <c>null</c> — повний рік.</param>
-    /// <param name="triggeredByUserId">Хто запустив; <c>null</c> — за розкладом.</param>
+    /// <summary>
+    /// Скільки методологій одного пакета виконувати одночасно.
+    /// </summary>
+    /// <remarks>
+    /// Обмеження обов'язкове: прогін не має з'їдати p95 операторів, які в цей
+    /// час заповнюють форми. Ізоляція від інтерактивного піку — вимога, а не
+    /// побажання (ПРД-13).
+    /// </remarks>
+    private const int MaxParallelism = 4;
+
+    /// <inheritdoc />
+    /// <param name="calculationRunId">Прогін, створений use-case.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="bindings">Прив'язки методологій до таблиць документа.</param>
     /// <param name="progress">Канал прогресу для UI.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<long> RunAsync(int projectId, PeriodKey? periodKey, int? triggeredByUserId,
-                               IJobProgress progress, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO — усе нижче випливає з бюджету 10 хвилин:\n" +
-            "1) створити calc.CalculationRun;\n" +
-            "2) підібрати методології ПРАВИЛАМИ (MethodologyRule.MatchJson), не жорстким списком;\n" +
-            "3) побудувати граф залежностей МІЖ методологіями (MethodologyDependency бере участь " +
-            "   у топологічному порядку нарівні з формулами) і розбити на РІВНІ;\n" +
-            "4) виконувати рівень за рівнем, усередині рівня — ПАРАЛЕЛЬНО " +
-            "   (Parallel.ForEachAsync з обмеженням): послідовний прогін у 10 хвилин не вкладеться;\n" +
-            "5) входи читати ПАКЕТНО — один запит на методологію × період, не N запитів на рядок;\n" +
-            "6) результати писати SqlBulkCopy через outputWriter; SaveChanges у циклі заборонений;\n" +
-            "7) проміжні значення тримати в пам'яті воркера;\n" +
-            "8) заповнити ModulesProfileJson — профіль по модулях: очікується, що топ-5 дають " +
-            "   ~80% часу, і оптимізувати треба саме їх (питання J-1);\n" +
-            "9) ⚠ ЗАКРИТІ ПЕРІОДИ автоматично не перераховувати НІКОЛИ (ФВ-9.7): це окрема " +
-            "   операція з власним погодженням, інакше публікація методології заднім числом " +
-            "   змінює подану звітність.");
+    /// <returns>Профіль по модулях — заповнюється завжди (J-1).</returns>
+    public async Task<ModuleProfile> RunAsync(
+        long calculationRunId,
+        long documentId,
+        PeriodKey periodKey,
+        IReadOnlyList<CalculationBindingRef> bindings,
+        IJobProgress progress,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        ArgumentNullException.ThrowIfNull(progress);
+
+        var profile = new ModuleProfile();
+        if (bindings.Count == 0)
+        {
+            return profile;
+        }
+
+        var onDate = PeriodDate(periodKey);
+
+        // 1. Версія методології — за ДАТОЮ ПЕРІОДУ, не за «поточною» (ФВ-9.3).
+        var resolved = new List<ResolvedBinding>(bindings.Count);
+        foreach (var binding in bindings)
+        {
+            var descriptor = await resolver
+                .ResolveVersionAsync(binding.MethodologyId, onDate, ct)
+                .ConfigureAwait(false);
+
+            if (descriptor is not null)
+            {
+                resolved.Add(new ResolvedBinding(binding.TableInstanceId, descriptor));
+            }
+        }
+
+        // 2. Пакети незалежних методологій. Залежності між ними беруть участь
+        //    у порядку нарівні з формулами; поки їх немає в схемі, кожна
+        //    методологія незалежна — і весь набір лягає в один пакет.
+        var batches = CalculationPlan.Build(
+            resolved.Select(r => new CalculationNode(r.Descriptor.MethodologyVersionId, [])).ToList());
+
+        var byVersion = resolved.ToLookup(r => r.Descriptor.MethodologyVersionId);
+        var done = 0;
+
+        foreach (var batch in batches)
+        {
+            // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
+            //    хвилин не вкладається: методології одного пакета незалежні за
+            //    побудовою, і виконувати їх по черзі означає платити сумою там,
+            //    де можна платити максимумом.
+            var measured = new ConcurrentBag<(string Module, TimeSpan Elapsed, int Rows)>();
+
+            await Parallel.ForEachAsync(
+                batch.MethodologyVersionIds,
+                new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism, CancellationToken = ct },
+                async (versionId, token) =>
+                {
+                    foreach (var binding in byVersion[versionId])
+                    {
+                        var stat = await ExecuteAsync(
+                            calculationRunId, documentId, periodKey, binding, token).ConfigureAwait(false);
+
+                        measured.Add(stat);
+                    }
+                }).ConfigureAwait(false);
+
+            foreach (var (module, elapsed, rowCount) in measured)
+            {
+                profile.Record(module, elapsed, rowCount);
+            }
+
+            done += batch.MethodologyVersionIds.Count;
+
+            await progress
+                .ReportAsync(done * 100 / resolved.Count, $"Пакет {batch.Ordinal + 1} із {batches.Count}", ct)
+                .ConfigureAwait(false);
+        }
+
+        return profile;
+    }
+
+    /// <summary>Виконує одну прив'язку і повертає її внесок у профіль.</summary>
+    private async Task<(string Module, TimeSpan Elapsed, int Rows)> ExecuteAsync(
+        long calculationRunId,
+        long documentId,
+        PeriodKey periodKey,
+        ResolvedBinding binding,
+        CancellationToken ct)
+    {
+        var module = modules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
+        if (module is null)
+        {
+            // ⛔ Немає модуля, здатного виконати рівень методології — це
+            // помилка конфігурації, а не порожній результат. Найчастіша
+            // причина: рівень 2 (скрипти), який не зареєстрований без дозволу
+            // ІБ (K-1). Мовчазний нуль тут виглядав би як «викидів немає».
+            throw new Domain.Abstractions.DomainException(
+                "ECR-CALC-0422",
+                $"Немає модуля для методології {binding.Descriptor.Code} "
+                + $"рівня {binding.Descriptor.Level}.");
+        }
+
+        var rowKeys = await resolver
+            .MatchRowsAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
+            .ConfigureAwait(false);
+
+        // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
+        var inputs = await inputBuilder
+            .BuildAsync(binding.TableInstanceId, rowKeys, periodKey, binding.Descriptor, ct)
+            .ConfigureAwait(false);
+
+        var stopwatch = Stopwatch.StartNew();
+        var outputs = new List<CalculationOutput>(inputs.Count);
+
+        foreach (var input in inputs)
+        {
+            // 5. Проміжні значення живуть у пам'яті воркера: модуль нічого не
+            //    пише і не читає з бази між рядками.
+            outputs.Add(await module.ExecuteAsync(input, ct).ConfigureAwait(false));
+        }
+
+        stopwatch.Stop();
+
+        await outputWriter
+            .WriteAsync(calculationRunId, outputs, binding.Descriptor.TraceLevel, ct)
+            .ConfigureAwait(false);
+
+        return (module.Code, stopwatch.Elapsed, inputs.Count);
+    }
+
+    /// <summary>Останній день періоду — дата, на яку резолвиться версія.</summary>
+    private static DateOnly PeriodDate(PeriodKey periodKey)
+    {
+        // PeriodKey = Year*100 + Sequence (R-A6).
+        var year = periodKey.Value / 100;
+        var sequence = Math.Clamp(periodKey.Value % 100, 1, 12);
+
+        return new DateOnly(year, sequence, DateTime.DaysInMonth(year, sequence));
+    }
+
+    /// <summary>Прив'язка з уже підібраною версією.</summary>
+    private sealed record ResolvedBinding(long TableInstanceId, MethodologyDescriptor Descriptor);
 }
+
+
