@@ -93,6 +93,12 @@ dotnet ef migrations script \
 principal (`D-66`): партиційні функції і схеми, файлові групи, процедура
 архівації, вʼюхи `rpt.v_*`.
 
+Базу визначає параметр `-d`, а не вміст скриптів: усередині вони працюють
+через `DB_NAME()` (`Q-029`). Каталог файлів даних скрипт визначає сам із
+властивостей інстансу — редагувати нічого не треба. Виняток один: якщо
+архівна файлова група має лежати на іншому носії, заповніть `@ArchivePath`
+на початку `01-filegroups.sql`.
+
 ```bash
 sqlcmd -S localhost -d Ecr -E -i src/Ecr.Infrastructure/Persistence/Sql/01-filegroups.sql
 sqlcmd -S localhost -d Ecr -E -i src/Ecr.Infrastructure/Persistence/Sql/02-partitions.sql
