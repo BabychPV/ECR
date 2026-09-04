@@ -120,6 +120,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <item>`07` — прив'язка партиційованих таблиць до схем. Пропустити його
     /// означає тестувати не ту фізичну модель, яка поїде в прод (`Q-035`);</item>
     /// <item>`08` — таблиці `sys_ecr`, яких немає в моделі EF;</item>
+    /// <item>`10` — тригери незмінності: `HasTrigger()` їх не створює;</item>
     /// <item>`06` — RCSI;</item>
     /// <item>seed.</item>
     /// </list>
@@ -138,6 +139,11 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         await RunScriptAsync("07-partition-tables.sql").ConfigureAwait(false);
         await RunScriptAsync("08-system-tables.sql").ConfigureAwait(false);
+
+        // ⚠ 10 обов'язково: HasTrigger() у конфігурації EF тригера НЕ створює,
+        // він лише вимикає OUTPUT-клаузу. Без цього скрипта незмінність
+        // опублікованої структури не тримає ніщо (Q-045).
+        await RunScriptAsync("10-triggers.sql").ConfigureAwait(false);
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
 
         await using var seedDb = CreateContext();

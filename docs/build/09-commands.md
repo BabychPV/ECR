@@ -109,6 +109,7 @@ sqlcmd -S $S -d $DB -E -b -I -i $Q/02-partitions.sql
 sqlcmd -S $S -d $DB -E -b -I -i artifacts/migration.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/07-partition-tables.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/08-system-tables.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/10-triggers.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql
 # 03, 04, 05 — з етапів 3–5: вони посилаються на calc.* і arc.*
 # 09-seed.sql тут НЕМАЄ: seed виконує сам застосунок при старті (SeedRunner),
@@ -119,6 +120,13 @@ sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql
 ⚠ `08-system-tables.sql` пропустити не можна: у таблиць `sys_ecr.*` немає
 доменних сутностей, тому міграція їх не створює, і застосунок на старті впаде
 на seed (`Q-041`).
+
+⚠ `10-triggers.sql` пропустити теж не можна, і його відсутність **не дає
+жодної помилки**: `HasTrigger()` у конфігурації EF тригера не створює, тому без
+цього скрипта структурну зміну опублікованої версії ніщо не зупиняє (`Q-045`).
+
+Усі скрипти теки **ідемпотентні**: повторний запуск будь-якого з них проходить
+без помилки. Це перевірено запуском кожного двічі поспіль, а не заявлено.
 
 ⚠ `-I` (QUOTED_IDENTIFIER ON) **обов'язковий**: без нього падає створення
 фільтрованих індексів `UX_User_Sid` і `UX_User_Bootstrap` з `Msg 1934`.

@@ -2376,6 +2376,7 @@ public sealed record RowDto(
 | `07-partition-tables.sql` | **прив'язка партиційованих таблиць до схем** + `DATA_COMPRESSION = PAGE` на `PK_CellValue` |
 | `08-system-tables.sql` | таблиці `sys_ecr.*`: `Language`, `SystemSetting`, `UiString`, `UiStringRevision` |
 | `09-seed.sql` | seed чистої БД — **єдиний скрипт, який виконує застосунок**, а не SQL Agent |
+| `10-triggers.sql` | тригери незмінності `TR_ColumnDef_Immutable`, `TR_RowDef_Immutable`, `TR_FormulaDef_Immutable` |
 
 ⚠ `07` існує тому, що `ON ps_ByPeriodKey(PeriodKey)` — частина `CREATE TABLE`, а
 `migrationBuilder` цього не вміє: анотації для розміщення на схемі
@@ -2392,6 +2393,13 @@ public sealed record RowDto(
 (`SeedRunner`), бо seed це DML, а не DDL, і без нього застосунок не стартує
 (§14). Файл вбудований у збірку як `EmbeddedResource` і витягнутий скриптом із
 `02a-db-schema.md` §17, щоб не з'явилося другої, розбіжної копії.
+
+⚠ `10` існує тому, що **`HasTrigger()` тригера не створює**. Ця анотація лише
+каже EF Core не користуватися `OUTPUT`-клаузою на таблиці — інакше
+`SaveChanges` падає в рантаймі (ТЗ §13.5 п.1). Сам тригер не створює ні
+міграція, ні будь-що інше. Без `10` незмінність опублікованої структури
+(`ФВ-7.1`) не тримає **ніщо**: структурна зміна колонки в опублікованій версії
+проходить без помилки (`Q-045`).
 
 **Порядок:** `01` → `02` → міграції EF → `07` → `03`, `04`, `05` → `06`.
 Скрипти `03` і `05` посилаються на `calc.*` і `arc.*`, тому до етапів 3–5 їх
