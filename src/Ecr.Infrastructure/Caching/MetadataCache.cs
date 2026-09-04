@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Microsoft.Extensions.Caching.Memory;
+using Ecr.Infrastructure.Persistence;
 
 namespace Ecr.Infrastructure.Caching;
 

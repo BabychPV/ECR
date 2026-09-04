@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Services;
+using Ecr.Infrastructure.Persistence;
 
 namespace Ecr.Infrastructure.Jobs;
 

@@ -1,6 +1,8 @@
 // src/Ecr.Infrastructure/Jobs/OrphanScanJob.cs
 namespace Ecr.Infrastructure.Jobs;
 
+using Ecr.Application.Ports;
+
 /// <summary>
 /// Знаходить рядки, що посилаються на записи реєстру, які перестали бути
 /// чинними у своєму періоді (<c>ФВ-8.13</c>, <c>D-98</c>).

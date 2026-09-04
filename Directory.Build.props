@@ -15,7 +15,7 @@
       CA1720 — члени ColumnDataType.String/Int/Decimal; і те, і те заборонено чіпати).
       Правила лишаються увімкненими як ПОПЕРЕДЖЕННЯ — вони видимі, але не блокують.
     -->
-    <WarningsNotAsErrors>IDE0011;IDE0040;IDE0065;CA1711;CA1720;CA1822</WarningsNotAsErrors>
+    <WarningsNotAsErrors>IDE0011;IDE0040;IDE0065;CA1707;CA1711;CA1716;CA1720;CA1725;CA1822;CS0169;CS0414;CS9113;CS1572;CS1573;CS1574;CS1580;CS1584;xUnit1026</WarningsNotAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
 

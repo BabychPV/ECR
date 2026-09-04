@@ -1,3 +1,4 @@
+using Xunit;
 using Testcontainers.MsSql;
 
 namespace Ecr.TestKit;

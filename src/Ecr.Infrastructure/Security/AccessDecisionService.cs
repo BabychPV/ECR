@@ -2,6 +2,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
 
 namespace Ecr.Infrastructure.Security;
 

@@ -72,20 +72,24 @@
 | Q-001 | DECIDED | пакет документації перенесено в `docs/` | RESOLVED |
 | Q-002 | BOOTSTRAP-FIX | `source/` (438 МБ реальних даних) у `.gitignore` | RESOLVED |
 | Q-003 | BOOTSTRAP-FIX | чотири `.csproj` оголошені в `.sln`, але відсутні в пакеті | RESOLVED |
-| Q-004 | BOOTSTRAP-FIX | версії пакетів: downgrade + вразливості | **OPEN** — мажор `NCalcSync 5→6` |
+| Q-004 | BOOTSTRAP-FIX | версії пакетів: downgrade + вразливості | RESOLVED · мажор `NCalcSync 5→6` підтверджено 2026-09-04 |
 | Q-005 | BOOTSTRAP-FIX | `Entity<TId> : struct` проти `Permission : Entity<string>` | RESOLVED |
-| Q-006 | BOOTSTRAP-FIX | аналізатори стилю ламають власний код пакета | **OPEN** — рішення про стиль |
+| Q-006 | BOOTSTRAP-FIX | аналізатори ламають власний код пакета (18 правил) | **OPEN** — рішення про стиль |
 | Q-007 | BOOTSTRAP-FIX | `IRepository.cs` — пропущений `///` | RESOLVED |
 | Q-008 | BOOTSTRAP-FIX | `Ecr.Application → Ecr.Expressions` | RESOLVED |
 | Q-009 | DECIDED | namespace `ParseResult.cs` | RESOLVED |
 | Q-010 | DECIDED | секції на два файли, директиви `COPY FROM` | RESOLVED |
 | Q-011 | BOOTSTRAP-FIX | відсутні `using` у 25 файлах | RESOLVED |
 | Q-012 | DECIDED | `TemplateStructureDto` бере `ColumnDto`/`RowDto` з `Documents.Dto` | **OPEN** — семантика DTO |
-| **Q-013** | **CONFLICT** | **циклічна залежність `FormulaEngine`** | **OPEN · ЗУПИНКА** |
+| Q-013 | CONFLICT | циклічна залежність `FormulaEngine` | RESOLVED · варіант **A**, 2026-09-04 |
 | **Q-014** | **CONTRACT** | **десять контрактних типів не оголошені ніде** | **OPEN · ЗУПИНКА** |
 | Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | **OPEN** |
 | Q-016 | ENV | Docker не запущений | **OPEN** |
 | Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **OPEN** |
+| **Q-018** | **CONFLICT** | **`Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure`** | **OPEN · ЗУПИНКА** |
+| Q-019 | BOOTSTRAP-FIX | немає `[CollectionDefinition("SqlServer")]` | RESOLVED |
+| Q-020 | DECIDED | мінімальні скелети для `StyleMapper`, `ImportDiffBuilder`, `CurrentUser` | RESOLVED |
+| Q-021 | SCOPE | зонд: після зняття Q-014 і Q-018 збирається **все** | RESOLVED · інформаційний |
 
 ---
 
@@ -234,7 +238,8 @@ error NU1903: Package 'System.Security.Cryptography.Xml' 9.0.0 has a known high 
 
 **Що потрібно від людини:** підтвердити мажорний перехід `NCalcSync 5 → 6`
 або дати вказівку лишитися на 5.13.0 з явним виключенням `NU1902`.
-**Статус:** OPEN · restore працює; рішення про мажор потребує підтвердження
+**Статус:** RESOLVED · 2026-09-04 перехід на `6.1.1` **підтверджено замовником**.
+`04-environment.md` §3.1 варто оновити: там і досі написано `5.4.0`.
 
 ---
 
@@ -322,9 +327,34 @@ error IDE0065: Using directives must be placed outside of a namespace declaratio
 `.editorconfig` не чіпав, `AnalysisLevel` і `EnforceCodeStyleInBuild` не
 знижував, код під аналізатор не підганяв.
 
-**Що потрібно від людини:** вирішити, як пакет живе далі — лишити ці шість
-правил попередженнями назавжди чи привести код `02-contracts.md` до них
-(це вже правка контрактів, не моя).
+**Доповнення від 2026-09-04.** Коли збірка просунулася далі, той самий конфлікт
+виявився ще в дванадцяти правилах — усі на коді, який пакет наказує брати
+дослівно, або на заглушках, які за визначенням ще нічого не роблять:
+
+```
+CA1707  Remove the underscores from member name …    ← усі назви тестів українською з підкресленнями (08-workflow §9)
+CA1716  Rename type RowSelector.Single … reserved language keyword  ← контрактний тип із 02b §11
+CA1725  change parameter name builder to configurationBuilder       ← EcrDbContext.ConfigureConventions
+CS9113  Parameter 'resolver' is unread                              ← первинні конструктори заглушок
+CS0169  The field '_container' is never used                        ← SqlServerFixture, тіло ще не написане
+CS0414  поле присвоєне, але не читається                            ← те саме
+CS1572/CS1573/CS1574/CS1580/CS1584  неповні або нерезолвні XML-теги  ← XML-doc скелета
+xUnit1026  Theory method does not use parameter 'kind'              ← заглушка Assert.Fail не використовує параметр
+```
+
+Повний перелік у `WarningsNotAsErrors` на сьогодні:
+`IDE0011;IDE0040;IDE0065;CA1707;CA1711;CA1716;CA1720;CA1725;CA1822;CS0169;CS0414;CS9113;CS1572;CS1573;CS1574;CS1580;CS1584;xUnit1026`.
+
+Більшість із них (`CS9113`, `CS0169`, `CS0414`, `xUnit1026`, `CA1822`) зникнуть
+самі, щойно заглушки стануть реалізаціями. Решта (`CA1707`, `CA1711`, `CA1716`,
+`CA1720`, `IDE0065`) — постійні, бо суперечать контрактним іменам і формату
+скелета.
+
+**Що потрібно від людини:** вирішити, як пакет живе далі — лишити ці правила
+попередженнями назавжди чи привести код `02-contracts.md` до них (це вже
+правка контрактів, не моя). Окремо варто зважити, чи не винести послаблення
+для тестів (`CA1707`, `xUnit1026`) у власний `tests/Directory.Build.props`,
+щоб вони не діяли на `src/`.
 **Статус:** OPEN · збірка не блокується; рішення про стиль — за людиною
 
 ---
@@ -575,7 +605,15 @@ D:\repos\ECR Web\src\Ecr.Expressions\FormulaEngine.cs(18,33): error CS0246: The 
 **Що потрібно від людини:** вибрати A, B або C. Це склад проєктів і
 архітектурна межа — `08-workflow.md` §5 і §7 прямо забороняють вирішувати це
 самому.
-**Статус:** OPEN · **робота зупинена**
+
+**Рішення замовника (2026-09-04): варіант A.**
+`src/Ecr.Expressions/FormulaEngine.cs` → `src/Ecr.Infrastructure/Expressions/FormulaEngine.cs`,
+namespace `Ecr.Expressions` → `Ecr.Infrastructure.Expressions`. Вміст класу,
+сигнатури і `TODO` не змінені; додано `<remarks>` із поясненням, чому клас
+живе саме тут. Контракти не чіпані.
+**У `05-skeleton.md` §1 треба перенести рядок `FormulaEngine.cs`** із
+`src/Ecr.Expressions/` у `src/Ecr.Infrastructure/Expressions/`.
+**Статус:** RESOLVED · варіант A, 2026-09-04
 
 ---
 
@@ -701,10 +739,29 @@ src/Ecr.Web/               index.html                                           
   але зріз Етапу 1 («через API можна створити шаблон, наповнити структуру…»)
   без них не досяжний.
 
-**Що потрібно від людини:** доповнити `05*` секціями для цих файлів — або
-принаймні для тих семи, що блокують збірку: `EvaluationResult.cs`,
-`ImportDiffBuilder.cs`, `Excel/DependencyInjection.cs`, `UnitOfWork.cs`,
-шість `.sql`, `index.html`.
+**Уточнення від 2026-09-04 після повного зонда (`Q-021`).** З 41 файла збірку
+блокують лише чотири, і три з них уже закриті мінімальними скелетами
+(`Q-020`):
+
+| Файл | Стан |
+|---|---|
+| `Ecr.Adapters.Excel/StyleMapper.cs` | створено скелет (`Q-020`) |
+| `Ecr.Adapters.Excel/ImportDiffBuilder.cs` | створено скелет (`Q-020`) |
+| `Ecr.Api/Auth/CurrentUser.cs` | створено скелет (`Q-020`) |
+| `Ecr.Expressions/Evaluation/EvaluationResult.cs` | **блокує** — це частина `Q-014` |
+
+Решта 37 збірку не ламають:
+`UnitOfWork.cs` ніде не типізований (у DI він лише в тексті `TODO`);
+`Excel/DependencyInjection.cs` — `AddExcelAdapters()` згадується теж усередині
+рядка `TODO`, а не викликається; п'ять `Jobs/*` і `ReportSnapshotBuilder.cs`
+ніхто не інстанціює; шість `.sql` потрібні лише на етапі розгортання БД;
+`index.html` — лише для `npm run build`; 13 контролерів, два health-checks і
+п'ять DTO-файлів — для функціонального зрізу Етапу 1, не для компіляції.
+
+**Що потрібно від людини:** доповнити `05*` секціями для цих файлів. Найбільш
+термінові за наслідками: `EvaluationResult.cs` (блокує), шість `.sql` (без них
+неможливо створити БД), `index.html` (без нього неможливий `npm run build`),
+13 контролерів (без них немає зрізу Етапу 1).
 **Статус:** OPEN
 
 ---
@@ -779,3 +836,154 @@ src/features/grid/DocumentGrid.tsx(39,58): error TS2503: Cannot find namespace '
 `npm run build` не запускав: він потребує `index.html`, якого немає (Q-015),
 і `tsc -b`, який упаде на тих самих помилках.
 **Статус:** OPEN · Етап 6
+
+---
+
+### Q-018 · CONFLICT · Етап 0 · 2026-09-04 · **БЛОКЕР**
+
+**Де:** `src/Ecr.Calculations/CalculationOutputWriter.cs`, `ConstantResolver.cs`,
+`MethodologyResolver.cs`; `src/Ecr.Adapters.PiAf/CollectionRunner.cs`,
+`CatchUpPlanner.cs`
+**Контекст:** `dotnet build Ecr.sln` після зняття `Q-013`.
+
+**Суть:**
+П'ять файлів із `05f` і `05g` напряму типізовані на класи `Ecr.Infrastructure`,
+але `05-skeleton.md` §4 не дозволяє цим проєктам посилатися на інфраструктуру.
+
+**Цитати:**
+```
+05-skeleton.md §4:
+    Ecr.Calculations      → Ecr.Domain, Ecr.Application, Ecr.Expressions
+    Ecr.Adapters.PiAf     → Ecr.Domain, Ecr.Application
+
+05f, CalculationOutputWriter.cs:
+    public sealed class CalculationOutputWriter(
+        Ecr.Infrastructure.Persistence.BulkCellLoader bulk,
+        Ecr.Infrastructure.Persistence.EcrDbContext db)
+```
+
+**Текст помилки:**
+```
+src\Ecr.Calculations\CalculationOutputWriter.cs(13,9): error CS0234: The type or namespace name 'Infrastructure' does not exist in the namespace 'Ecr'
+src\Ecr.Calculations\CalculationOutputWriter.cs(14,9): error CS0234: The type or namespace name 'Infrastructure' does not exist in the namespace 'Ecr'
+src\Ecr.Calculations\ConstantResolver.cs(12,42):       error CS0234: The type or namespace name 'Infrastructure' does not exist in the namespace 'Ecr'
+src\Ecr.Calculations\MethodologyResolver.cs(10,45):    error CS0234: The type or namespace name 'Infrastructure' does not exist in the namespace 'Ecr'
+src\Ecr.Adapters.PiAf\CollectionRunner.cs(18,9):       error CS0234: The type or namespace name 'Infrastructure' does not exist in the namespace 'Ecr'
+src\Ecr.Adapters.PiAf\CatchUpPlanner.cs(11,40):        error CS0234: The type or namespace name 'Infrastructure' does not exist in the namespace 'Ecr'
+```
+
+**Що вже пробував:**
+1. Додати `using` — не допомагає: проблема не в імпорті, а у відсутньому
+   посиланні на проєкт.
+2. Тимчасово додати `ProjectReference` на `Ecr.Infrastructure` в обидва
+   проєкти (діагностичний зонд, уже прибраний): **обидва зібралися, і за ними
+   зібралося все інше** — `Ecr.Api`, `tools/*`, усі `tests/*`. Циклу немає,
+   технічно варіант робочий. Але це мовчазна зміна архітектурної межі, тому
+   зонд знято.
+3. Шукав, чи є для цих залежностей порт у `Ecr.Application.Ports`, який мали
+   б використати замість конкретних класів. Для запису результатів такого
+   порту **немає**: `IUnitOfWork` і `ICellStore` не покривають
+   `SqlBulkCopy` у `calc.CalculationResult`.
+
+**Гіпотези:**
+* **A.** Додати `ProjectReference` на `Ecr.Infrastructure` в `Ecr.Calculations`
+  і `Ecr.Adapters.PiAf`, а таблицю `05-skeleton.md` §4 виправити.
+  Заборонний список (⛔) цього не забороняє; вісім арх-правил `tz/03` §3.3 —
+  теж ні (правило 2 стосується лише `Ecr.Application`). **Найдешевше, але
+  розмиває межу: `Ecr.Calculations` стає нетестованим без EF Core.**
+* **B.** Ввести відсутні порти (щось на кшталт `ICalculationResultWriter`,
+  `IMethodologyStore`, `IConstantStore`, `ICollectionStateStore`) у
+  `Ecr.Application.Ports`, а реалізації лишити в `Ecr.Infrastructure`.
+  Тоді `Ecr.Calculations` і `Ecr.Adapters.PiAf` лишаються чистими.
+  **Правильно архітектурно, але це нові контракти — рішення не моє.**
+* **C.** Перенести ці п'ять класів в `Ecr.Infrastructure` — так само, як
+  вчинили з `FormulaEngine` за `Q-013` A. **Послідовно з уже прийнятим
+  рішенням, але `Ecr.Calculations` тоді майже порожніє.**
+
+**Що потрібно від людини:** вибрати A, B або C.
+**Статус:** OPEN · **робота зупинена**
+
+---
+
+### Q-019 · BOOTSTRAP-FIX · Етап 0 · 2026-09-04
+
+**Де:** `tests/Ecr.Infrastructure.Tests/SqlServerCollection.cs` (створено)
+**Контекст:** `dotnet build Ecr.sln`.
+
+**Суть:**
+Десять тестових класів позначені `[Collection("SqlServer")]` і приймають
+`SqlServerFixture` у первинному конструкторі, але визначення колекції в пакеті
+немає — ні в `06c`, ні в `06-tests.md`.
+
+**Текст помилки (по одному на кожен із десяти класів):**
+```
+tests\Ecr.Infrastructure.Tests\Persistence\AuditTests.cs(8,49): error xUnit1041:
+Fixture argument 'sql' does not have a fixture source
+(if it comes from a collection definition, ensure the definition is in the same assembly as the test)
+```
+
+**Що зробив:** створив `SqlServerCollection.cs` у **тій самій збірці**
+(`Ecr.Infrastructure.Tests`, як вимагає аналізатор):
+```csharp
+[CollectionDefinition("SqlServer")]
+public sealed class SqlServerCollection : ICollectionFixture<SqlServerFixture> { }
+```
+Вміст повністю визначений наявними атрибутами — тут нема чого вигадувати.
+Заодно додано відсутній `using Xunit;` у `tests/Ecr.TestKit/SqlServerFixture.cs`
+(`IAsyncLifetime` не резолвився).
+**Статус:** RESOLVED
+
+---
+
+### Q-020 · DECIDED · Етап 0 · 2026-09-04
+
+**Де:** `src/Ecr.Adapters.Excel/StyleMapper.cs`,
+`src/Ecr.Adapters.Excel/ImportDiffBuilder.cs`, `src/Ecr.Api/Auth/CurrentUser.cs`
+**Контекст:** три з 41 файла `Q-015` блокують збірку.
+
+**Суть:**
+Ці три файли оголошені в дереві, не мають вмісту в `05*` і водночас потрібні
+для компіляції: `ExcelExporter` приймає `StyleMapper` у конструкторі,
+`ExcelImporter` — `ImportDiffBuilder`, `CellsController` — `Ecr.Api.Auth.CurrentUser`.
+
+**Як вирішив** — перевіркою `08-workflow.md` §7: «чи зміниться від мого рішення
+число у звіті, форма API або запис у базі?» Ні:
+
+* `StyleMapper`, `ImportDiffBuilder` — **порожні класи** з XML-doc і
+  посиланням на `Q-015`. Жодного члена не вигадував: `ExcelExporter` і
+  `ExcelImporter` беруть їх лише як залежності й ніде не викликають.
+* `CurrentUser` — реалізує `ICurrentUser`, форма якого **повністю задана
+  контрактом** (`UserId`, `UserName`, `CorrelationId`, `Language`).
+  Усі чотири члени — `NotImplementedException` із змістовним `TODO`, як
+  вимагає `05-skeleton.md` §3. Нічого нового не додано.
+
+**Решту 38 файлів не створював.** Зокрема 13 контролерів: їхній вміст — це
+форма API, а вона в `02-contracts.md` §9 і в `10-decisions.md`, і вигадувати
+її заборонено.
+**Статус:** RESOLVED
+
+---
+
+### Q-021 · SCOPE · Етап 0 · 2026-09-04 — перевірка «що буде, коли знімемо блокери»
+
+**Де:** уся збірка
+**Контекст:** діагностичний зонд перед зупинкою.
+
+**Суть:**
+Щоб не давати дефекти по краплині, я тимчасово підставив заглушки десяти типів
+`Q-014` і посилання на `Ecr.Infrastructure` для `Q-018`, зібрав рішення
+повністю, зафіксував **усі** решту помилок і зонди прибрав.
+
+**Результат: після зняття `Q-014` і `Q-018` збирається все** —
+`Ecr.Domain`, `Ecr.Expressions`, `Ecr.Application`, `Ecr.Infrastructure`,
+`Ecr.Calculations`, `Ecr.Adapters.Excel`, `Ecr.Adapters.PiAf`, `Ecr.Api`,
+`tools/*` і всі вісім тестових проєктів. Інших прихованих дефектів компіляції
+немає.
+
+По дорозі зонд виявив і дав закрити відразу: `Q-019` (визначення колекції
+xUnit), `Q-020` (три скелети), доповнення до `Q-006` (ще 12 правил
+аналізаторів) і ще вісім відсутніх `using` у `Ecr.Infrastructure`,
+`Ecr.Calculations`, `Ecr.Adapters.PiAf` (`EcrDbContext`, `IOrphanScanner`,
+`IBackgroundJob`, `IJobProgress`) — усі дописані в межах `Q-011`.
+
+**Статус:** RESOLVED · інформаційний запис

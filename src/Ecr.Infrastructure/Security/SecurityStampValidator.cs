@@ -1,5 +1,7 @@
 namespace Ecr.Infrastructure.Security;
 
+using Ecr.Infrastructure.Persistence;
+
 /// <summary>
 /// Перевіряє <c>SecurityStamp</c> на **кожен** запит: відкликання ролі має
 /// діяти негайно, а не після закінчення cookie (ФВ-6.10, тест безпеки №2).
