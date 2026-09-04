@@ -132,4 +132,47 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
 
         return rows.ToDictionary(r => r.Id, r => r.IsOrphaned);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
+        => await db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.DocumentId == documentId && t.PeriodKeyValue == periodKey.Value)
+            .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
+            .Join(db.Projects, x => x.ProjectId, p => p.Id,
+                  (x, p) => new TableInstanceRef(
+                      x.t.Id, x.t.DocumentId, x.t.TableDefId, p.TemplateVersionId, x.t.PeriodKeyValue))
+            .Take(MaxTableInstances)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
+        => await db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value && r.IsOrphaned && !r.IsDeleted)
+            .Join(db.TableInstances.Where(t => t.DocumentId == documentId),
+                  r => r.TableInstanceId, t => t.Id, (r, _) => r.Id)
+            .Take(MaxOrphanReport)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <summary>Стеля кількості екземплярів таблиць в одному документі.</summary>
+    /// <remarks>
+    /// Аркушів у шаблоні 24, таблиць на аркуші — одиниці. Тисяча — межа з
+    /// величезним запасом; вона тут не для економії, а щоб запит мав межу.
+    /// </remarks>
+    private const int MaxTableInstances = 1000;
+
+    /// <summary>
+    /// Скільки осиротілих рядків показувати.
+    /// </summary>
+    /// <remarks>
+    /// Подання блокує вже перший — решта потрібна лише щоб людина побачила
+    /// масштаб. Повний перелік на зламаному реєстрі був би десятками тисяч
+    /// рядків, які ніхто не читатиме.
+    /// </remarks>
+    private const int MaxOrphanReport = 200;
 }

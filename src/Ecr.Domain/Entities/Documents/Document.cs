@@ -43,6 +43,22 @@ public sealed class Document : Entity<long>
 
     public IReadOnlyList<DocumentSheet> Sheets => _sheets;
 
+    /// <summary>Додає аркуш у склад документа (ФВ-3.2).</summary>
+    /// <param name="sheetDefId">Аркуш зі структури шаблону.</param>
+    /// <remarks>
+    /// Повторне додавання ігнорується: склад — це множина, а не список, і
+    /// подвоєний аркуш означав би подвоєні таблиці на тому самому місці.
+    /// </remarks>
+    public void IncludeSheet(int sheetDefId)
+    {
+        if (_sheets.Exists(s => s.SheetDefId == sheetDefId))
+        {
+            return;
+        }
+
+        _sheets.Add(new DocumentSheet(Id, sheetDefId));
+    }
+
     /// <summary>Фіксує зміну документа.</summary>
     public void Touch(int userId, DateTime utcNow)
     {

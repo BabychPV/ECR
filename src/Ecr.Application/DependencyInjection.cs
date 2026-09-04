@@ -44,8 +44,17 @@ public static class DependencyInjection
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
 
+        // Шаблони і проєкти: переліки і створення (модуль 1.7)
+        services.AddScoped<Templates.ListTemplatesHandler>();
+        services.AddScoped<Templates.CreateTemplateHandler>();
+        services.AddScoped<Templates.ListTemplateVersionsHandler>();
+        services.AddScoped<Projects.ListProjectsHandler>();
+        services.AddScoped<Projects.CreateProjectHandler>();
+
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();
+        services.AddScoped<ListDocumentsHandler>();
+        services.AddScoped<GetDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
 

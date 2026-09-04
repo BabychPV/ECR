@@ -8,7 +8,7 @@ namespace Ecr.Application.Templates;
 /// внести структурну зміну після публікації (ФВ-7.1).
 /// </summary>
 public sealed class CloneTemplateVersionHandler(
-    IRepository<Domain.Entities.Configuration.TemplateVersion, int> versions,
+    ITemplateVersionStore versions,
     IUnitOfWork uow,
     IClock clock)
 {
@@ -18,11 +18,24 @@ public sealed class CloneTemplateVersionHandler(
     /// <param name="userId">Автор.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор створеної чернетки.</returns>
-    public Task<int> CloneAsync(int sourceVersionId, string newVersion, int userId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: глибоко скопіювати аркуші, таблиці, колонки, рядки, стилі, формули, " +
-            "правила валідації, зв'язки таблиць і правила періодів; " +
-            "ClonedFromVersionId = sourceVersionId; Status = Draft; PresentationRevision = 0; " +
-            "нові Id призначає БД. Дані документів НЕ копіюються — вони лишаються на старій версії " +
-            "до явної міграції (ФВ-7.7).");
+    /// <remarks>
+    /// Клонується вся структура: аркуші, таблиці, колонки, рядки, стилі,
+    /// формули і правила валідації. <c>Code</c> і <c>RowKey</c> зберігаються —
+    /// на них посилаються формули.
+    ///
+    /// ⛔ Дані документів **не** копіюються: вони лишаються на старій версії
+    /// до явної міграції (ФВ-7.7). Скопійовані, вони перетворилися б на другу
+    /// копію тих самих чисел, яку ніхто не оновлює.
+    /// </remarks>
+    public async Task<int> CloneAsync(int sourceVersionId, string newVersion, int userId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newVersion);
+
+        var versionId = await versions
+            .CloneAsync(sourceVersionId, newVersion, userId, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        return versionId;
+    }
 }

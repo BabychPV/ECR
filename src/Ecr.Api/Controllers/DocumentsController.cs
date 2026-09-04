@@ -1,3 +1,4 @@
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Domain.ValueObjects;
 using Ecr.Application.Workflow;
@@ -15,6 +16,8 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/documents")]
 [Authorize]
 public sealed class DocumentsController(
+    ListDocumentsHandler listDocuments,
+    GetDocumentHandler getDocument,
     CreateDocumentHandler create,
     ValidateDocumentHandler validate,
     SubmitSheetHandler submit,
@@ -31,26 +34,53 @@ public sealed class DocumentsController(
     /// </remarks>
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> List([FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: курсорна пагінація; зведений стан рахувати запитом по wf.ApprovalState; " +
-            "фільтрувати за AccessProfile.");
+    public async Task<IActionResult> List(
+        [FromQuery] int limit,
+        [FromQuery] string? cursor,
+        [FromQuery] int? projectId,
+        [FromQuery] int? periodKey,
+        CancellationToken ct)
+    {
+        var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
+        if (!page.IsValid)
+        {
+            return BadRequest(new { error = $"limit поза межами 1..{CursorRequest.MaxLimit}" });
+        }
+
+        // ⛔ Зведений стан рахується запитом по wf.ApprovalState і лише коли
+        // вказано період: без періоду «стан документа» не визначений — аркуші
+        // за різні періоди бувають у різних станах одночасно (D-93).
+        return Ok(await listDocuments
+            .HandleAsync(projectId, periodKey, page, ct)
+            .ConfigureAwait(false));
+    }
 
     /// <summary>Створює документ. Право <c>Document.Create</c>.</summary>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    public Task<IActionResult> Create([FromBody] CreateDocumentRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати create.HandleAsync(request.ProjectId, request.TemplateVersionId, " +
-            "request.SheetDefIds, ct); 201 із Location.");
+    public async Task<IActionResult> Create([FromBody] CreateDocumentRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var documentId = await create
+            .HandleAsync(request.ProjectId, request.TemplateVersionId, request.SheetDefIds, ct)
+            .ConfigureAwait(false);
+
+        return Created($"/api/v1/documents/{documentId}", new { documentId });
+    }
 
     /// <summary>Документ і його аркуші. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:long}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public Task<IActionResult> Get(long id, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: шапка документа, перелік аркушів і їхній стан за (DocumentId, SheetDefId, PeriodKey).");
+    public async Task<IActionResult> Get(long id, [FromQuery] int? periodKey, CancellationToken ct)
+    {
+        var document = await getDocument.HandleAsync(id, periodKey, ct).ConfigureAwait(false);
+
+        return document is null
+            ? NotFound(new { errorCode = "ECR-DOC-0404" })
+            : Ok(document);
+    }
 
     /// <summary>Валідація документа. Право <c>Document.View</c>.</summary>
     /// <remarks>

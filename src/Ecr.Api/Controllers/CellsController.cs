@@ -1,4 +1,7 @@
 using Ecr.Application.Documents;
+using Ecr.Application.Ports;
+using Ecr.Application.Security;
+using Ecr.Domain.ValueObjects;
 using Ecr.Application.Documents.Dto;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +16,8 @@ public sealed class CellsController(
     PatchCellsHandler patchHandler,
     GetTableSliceHandler sliceHandler,
     CreateRowHandler rowHandler,
+    IAccessDecisionService access,
+    IRowStore rows,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Зріз таблиці для grid.</summary>
@@ -20,10 +25,17 @@ public sealed class CellsController(
     [HttpGet("tables/{tableInstanceId:long}")]
     [ProducesResponseType<TableSliceDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public Task<ActionResult<TableSliceDto>> GetSlice(long documentId, long tableInstanceId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: узяти AccessProfile із контексту (він уже в кеші сесії), викликати sliceHandler. " +
-            "Жодної логіки в контролері.");
+    public async Task<ActionResult<TableSliceDto>> GetSlice(
+        long documentId, long tableInstanceId, CancellationToken ct)
+    {
+        // Профіль береться з кешу сесії: він уже побудований, і другий похід
+        // за правами з'їв би бюджет відкриття таблиці (ФВ-6.10).
+        var profile = await ProfileAsync(ct).ConfigureAwait(false);
+
+        return await sliceHandler
+            .HandleAsync(documentId, tableInstanceId, profile, currentUser.Language, ct)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>Пакетна зміна комірок.</summary>
     /// <remarks>
@@ -34,18 +46,56 @@ public sealed class CellsController(
     [ProducesResponseType<PatchCellsResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<ActionResult<PatchCellsResponse>> Patch(
+    public async Task<ActionResult<PatchCellsResponse>> Patch(
         long documentId, [FromBody] PatchCellsRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити, що request.TableInstanceId належить documentId; " +
-            "викликати patchHandler. Винятки перетворює ExceptionHandlingMiddleware — " +
-            "ловити їх тут не треба.");
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ⚠ Належність екземпляра таблиці документові перевіряється ТУТ і до
+        // будь-якої роботи. Без цієї перевірки шлях у URL стає декоративним:
+        // клієнт указав би чужий TableInstanceId і писав би в чужий документ,
+        // маючи право лише на свій.
+        var owner = await rows.ResolveTableInstanceAsync(request.TableInstanceId, ct)
+            .ConfigureAwait(false);
+
+        if (owner.DocumentId != documentId)
+        {
+            return NotFound(new { errorCode = "ECR-DOC-0404" });
+        }
+
+        // Винятки перетворює ExceptionHandlingMiddleware — ловити їх тут не
+        // треба: конфлікт baseVersion має піти клієнту як 409 із переліком.
+        return await patchHandler.HandleAsync(request, ct).ConfigureAwait(false);
+    }
 
     /// <summary>Додає рядок у динамічну таблицю.</summary>
     [HttpPost("rows")]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    public Task<IActionResult> CreateRow(long documentId, [FromBody] CreateRowRequest request, CancellationToken ct)
-        => throw new NotImplementedException("TODO: делегувати rowHandler; повернути 201 із RowKey.");
+    public async Task<IActionResult> CreateRow(
+        long documentId, [FromBody] CreateRowRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var profile = await ProfileAsync(ct).ConfigureAwait(false);
+        var requested = string.IsNullOrWhiteSpace(request.RowKey)
+            ? (RowKey?)null
+            : RowKey.Create(request.RowKey);
+
+        var rowKey = await rowHandler
+            .HandleAsync(documentId, request.TableInstanceId, requested, profile, ct)
+            .ConfigureAwait(false);
+
+        return Created(
+            $"/api/v1/documents/{documentId}/tables/{request.TableInstanceId}",
+            new { rowKey = rowKey.Value });
+    }
+
+    /// <summary>Профіль доступу поточного користувача.</summary>
+    private Task<AccessProfile> ProfileAsync(CancellationToken ct)
+        => access.BuildProfileAsync(
+            currentUser.UserId ?? throw new Application.Errors.AccessDeniedException(
+                Errors.ErrorCodes.Unauthorized, "Сесія не містить користувача."),
+            ct);
 }
 
 /// <summary>Запит на створення рядка.</summary>

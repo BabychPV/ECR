@@ -54,8 +54,11 @@ public sealed class SubmitSheetHandler(
         // ⚠ Рядки з IsOrphaned блокують подання (ФВ-8.13). До Етапу 4 прапорець
         // ніхто не ставить — перевірка коректна і завжди пропускає; це не
         // несправність, а порядок робіт.
-        var orphans = await rowStore.GetOrphanFlagsAsync(documentId, key, ct).ConfigureAwait(false);
-        var orphaned = orphans.Where(p => p.Value).Select(p => p.Key).ToList();
+        //
+        // ⚠ Саме GetOrphanedRowIdsAsync, а не GetOrphanFlagsAsync: у другого
+        // перший аргумент — TableInstanceId, і передача documentId туди
+        // компілювалася, але не знаходила нічого ніколи.
+        var orphaned = await rowStore.GetOrphanedRowIdsAsync(documentId, key, ct).ConfigureAwait(false);
         if (orphaned.Count > 0)
         {
             throw new BusinessRuleException(

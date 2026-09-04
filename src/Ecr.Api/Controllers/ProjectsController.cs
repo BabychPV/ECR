@@ -1,3 +1,4 @@
+using Ecr.Application.Common;
 using Ecr.Application.Periods;
 using Ecr.Application.Projects;
 using Microsoft.AspNetCore.Authorization;
@@ -10,6 +11,8 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/projects")]
 [Authorize]
 public sealed class ProjectsController(
+    ListProjectsHandler list,
+    CreateProjectHandler create,
     BuildPeriodCalendarHandler buildCalendar,
     GetPeriodCalendarHandler getCalendar,
     SetCurrentPeriodHandler setCurrentPeriod,
@@ -18,10 +21,12 @@ public sealed class ProjectsController(
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> List([FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: показувати лише проєкти, видимі за AccessProfile; курсорна пагінація " +
-            "через CursorRequest (limit більший за MaxLimit → 400).");
+    public async Task<IActionResult> List(
+        [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
+        // Видимість за AccessProfile — в обробнику: перелік проєктів, до яких
+        // немає доступу, це вже розвідка структури підприємства.
+        => Ok(await list.HandleAsync(new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
+            .ConfigureAwait(false));
 
     /// <summary>Створює проєкт. Право <c>Project.Manage</c>.</summary>
     /// <remarks>
@@ -31,10 +36,28 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    public Task<IActionResult> Create([FromBody] CreateProjectRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Project.Manage через IAccessDecisionService; створити doc.Project; " +
-            "201 із Location.");
+    public async Task<IActionResult> Create([FromBody] CreateProjectRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var kind = Enum.TryParse<Ecr.Domain.Enums.PeriodKind>(request.PeriodKind, out var parsed)
+            ? parsed
+            : Ecr.Domain.Enums.PeriodKind.Monthly;
+
+        var projectId = await create
+            .HandleAsync(
+                request.Code, request.NameL10n, request.TimeZoneId, kind,
+                // ⛔ Рік за замовчуванням підставляє ОБРОБНИК: час у системі
+                // береться лише через IClock (архітектурне правило), інакше
+                // тест на «зараз» залежав би від годинника машини.
+                request.Year,
+                request.TemplateVersionId ?? 0,
+                request.PeriodPolicyId ?? 0,
+                ct)
+            .ConfigureAwait(false);
+
+        return Created($"/api/v1/projects/{projectId}", new { projectId });
+    }
 
     /// <summary>Клонує проєкт разом із налаштуваннями. Право <c>Project.Manage</c>.</summary>
     [HttpPost("{id:int}/clone")]
@@ -91,8 +114,23 @@ public sealed class ProjectsController(
 /// <param name="NameL10n">Назва мовами каталогу.</param>
 /// <param name="TimeZoneId">Пояс майданчика; після відкриття періоду не змінюється.</param>
 /// <param name="PeriodKind">Періодичність.</param>
+/// <param name="Year">Звітний рік; типово поточний.</param>
+/// <param name="TemplateVersionId">Версія шаблону, за якою заповнюються документи.</param>
+/// <param name="PeriodPolicyId">Політика зсувів періодів.</param>
+/// <remarks>
+/// ⚠ Три останні поля додані понад форму <c>05h</c>: без версії шаблону
+/// проєкт не має структури, без політики — меж періодів, а без року календар
+/// нема на що будувати. Позиційний префікс контракту не змінений
+/// (<c>D1-01</c>).
+/// </remarks>
 public sealed record CreateProjectRequest(
-    string Code, IReadOnlyDictionary<string, string> NameL10n, string TimeZoneId, string PeriodKind);
+    string Code,
+    IReadOnlyDictionary<string, string> NameL10n,
+    string TimeZoneId,
+    string PeriodKind,
+    int? Year = null,
+    int? TemplateVersionId = null,
+    int? PeriodPolicyId = null);
 
 /// <summary>Запит на клонування проєкту.</summary>
 /// <param name="Code">Код нового проєкту.</param>

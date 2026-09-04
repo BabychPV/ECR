@@ -83,6 +83,29 @@ public interface IRowStore
     /// </remarks>
     public Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>Екземпляри таблиць документа за період.</summary>
+    /// <remarks>
+    /// Потрібні валідації і поданню: обидві працюють із ДОКУМЕНТОМ цілком, а
+    /// не з окремою таблицею, і без цього переліку довелося б або
+    /// перебирати структуру шаблону запитом на кожну таблицю, або тягнути
+    /// <c>DbContext</c> у застосунок.
+    /// </remarks>
+    public Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Рядки документа з ознакою <c>IsOrphaned</c> за період.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий метод від <see cref="GetOrphanFlagsAsync"/>, а не «той самий
+    /// із іншим числом»: там перший аргумент — <c>TableInstanceId</c>, тут —
+    /// <c>DocumentId</c>. Обидва <c>long</c>, тож переплутати їх компілятор не
+    /// заважає — і саме так у <c>SubmitSheetHandler</c> з'явилася перевірка,
+    /// яка мовчки нічого не знаходила.
+    /// </remarks>
+    public Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct);
 }
 
 /// <summary>Ідентичність екземпляра таблиці.</summary>
