@@ -130,6 +130,20 @@ public sealed class UnitChecker
         {
             case "SUM" or "AVERAGE" or "MIN" or "MAX" or "PRODUCT" or "SUMIF":
             {
+                // ⛔ Колонка з одиницею НА РЯДОК (ФВ-16.8, D-87): підсумувати її
+                // без CONVERT не можна взагалі. Тут навіть немає двох одиниць,
+                // які видно у виразі, — одиниця лежить у кожній комірці, і
+                // SUM склав би тонни з кілограмами, не давши жодного натяку.
+                foreach (var argument in node.Arguments)
+                {
+                    if (HasRowScopedUnit(argument, context))
+                    {
+                        Report(diagnostics, node,
+                            "Агрегація колонки з одиницею на рядок потребує явного CONVERT "
+                            + "до спільної одиниці (ФВ-16.8).");
+                    }
+                }
+
                 // Агрегація різних одиниць — той самий D-74, лише розмазаний
                 // по діапазону: одна комірка в кілограмах усередині тонн дає
                 // підсумок, який виглядає правдоподібно.
@@ -148,14 +162,112 @@ public sealed class UnitChecker
             case "ROUND" or "ABS":
                 return units.Count > 0 ? units[0] : null;
 
-            // ⚠ CONVERT повертає одиницю за КОДОМ із другого аргументу, і код
-            // резолвиться в uom.Unit — це Етап 4 разом із самим довідником.
-            // Тут вона лишається безрозмірною свідомо, щоб не вигадувати
-            // ідентифікатор, якого ще немає.
+            case "CONVERT":
+                return CheckConvert(node, context, diagnostics);
+
             default:
                 return null;
         }
     }
+
+    /// <summary>Одиниця результату <c>CONVERT(значення, 'з', 'у')</c>.</summary>
+    /// <remarks>
+    /// ⚠ Це ЄДИНЕ місце, де одиниця змінюється (D-74). Саме тому код цільової
+    /// одиниці резолвиться тут, а не тлумачиться як рядковий літерал: інакше
+    /// <c>CONVERT(x, 'kg', 'g')</c> лишався б безрозмірним, і наступне
+    /// додавання до грамів проходило б перевірку випадково.
+    /// </remarks>
+    private static int? CheckConvert(
+        FunctionNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics)
+    {
+        if (node.Arguments.Count < 3)
+        {
+            Report(diagnostics, node,
+                "CONVERT потребує трьох аргументів: значення, вихідна одиниця, цільова одиниця.");
+            return null;
+        }
+
+        // ⚠ ЦІЛЬОВА одиниця мусить бути літералом — і саме вона робить
+        // перевірку можливою: результат виразу має оголошену одиницю, яку
+        // видно при публікації. Обчислювана ціль означала б, що одиниця
+        // результату відома лише в рантаймі, тобто не перевіряється взагалі.
+        var to = UnitCode(node.Arguments[2]);
+        if (to is null)
+        {
+            Report(diagnostics, node,
+                "Цільова одиниця CONVERT задається літералом, а не виразом: "
+                + "інакше одиниця результату невідома до запуску.");
+            return null;
+        }
+
+        var target = context.ResolveUnitByCode(to);
+        if (target is null)
+        {
+            Report(diagnostics, node, $"Одиниці «{to}» немає в довіднику uom.Unit.");
+            return null;
+        }
+
+        // ⚠ ВИХІДНА одиниця може бути посиланням на колонку `DataType = Unit`
+        // (ФВ-16.8): саме так фікстура пише `CONVERT([Amount], [AmountUnit],
+        // 'kg')`. Розмірність такого джерела при публікації невідома — її
+        // звіряє рантайм, а тут вимагати літерал означало б заборонити
+        // єдиний легальний спосіб звести одиницю на рядок до спільної.
+        var from = UnitCode(node.Arguments[1]);
+        if (from is null)
+        {
+            if (node.Arguments[1] is not CellReferenceNode)
+            {
+                Report(diagnostics, node,
+                    "Вихідна одиниця CONVERT — це літерал або посилання на колонку одиниці.");
+            }
+
+            return target;
+        }
+
+        var source = context.ResolveUnitByCode(from);
+        if (source is null)
+        {
+            Report(diagnostics, node, $"Одиниці «{from}» немає в довіднику uom.Unit.");
+            return null;
+        }
+
+        // ⛔ Різні розмірності — відмова, а не спроба «через базу»: саме тут
+        // щільність не стає конверсією (ФВ-16.3, ФВ-16.5).
+        if (context.GetDimension(source.Value) != context.GetDimension(target.Value))
+        {
+            Report(diagnostics, node,
+                $"CONVERT з «{from}» у «{to}» неможливий: різні розмірності. "
+                + "Потрібен контекстний коефіцієнт, а він належить методології.");
+            return null;
+        }
+
+        return target;
+    }
+
+    /// <summary>Код одиниці з літерала; <c>null</c> — це не літерал.</summary>
+    private static string? UnitCode(AstNode node)
+        => node is LiteralNode { Value: string code } ? code : null;
+
+    /// <summary>
+    /// Чи містить піддерево посилання на колонку з одиницею на рядок, яку не
+    /// привели <c>CONVERT</c>-ом.
+    /// </summary>
+    /// <remarks>
+    /// Обхід зупиняється на <c>CONVERT</c>: усе, що під ним, уже приведено до
+    /// однієї одиниці, і саме заради цього конверсія й написана.
+    /// </remarks>
+    private static bool HasRowScopedUnit(AstNode node, IUnitContext context)
+        => node switch
+        {
+            FunctionNode f when f.Name.Equals("CONVERT", StringComparison.OrdinalIgnoreCase) => false,
+            CellReferenceNode reference => context.IsRowScopedUnit(reference),
+            FunctionNode f => f.Arguments.Any(a => HasRowScopedUnit(a, context)),
+            BinaryNode b => HasRowScopedUnit(b.Left, context) || HasRowScopedUnit(b.Right, context),
+            UnaryNode u => HasRowScopedUnit(u.Operand, context),
+            ConditionalNode c => HasRowScopedUnit(c.WhenTrue, context)
+                                 || HasRowScopedUnit(c.WhenFalse, context),
+            _ => false,
+        };
 
     private static int? Same(
         int? left,
@@ -208,4 +320,19 @@ public interface IUnitContext
 
     /// <summary>Шукає похідну одиницю за чисельником і знаменником.</summary>
     public int? FindDerived(int numeratorUnitId, int denominatorUnitId);
+
+    /// <summary>Одиниця за кодом із <c>CONVERT</c>; <c>null</c> — такої немає.</summary>
+    public int? ResolveUnitByCode(string code);
+
+    /// <summary>
+    /// Чи задається одиниця цього посилання **на рядок**
+    /// (<c>ColumnDef.DataType = Unit</c>, ФВ-16.8).
+    /// </summary>
+    /// <remarks>
+    /// Окреме питання від <see cref="GetReferenceUnit"/>: там відповідь «яка
+    /// одиниця», тут — «чи є вона взагалі однією». Для такої колонки перша
+    /// відповідь не існує, і <c>null</c> у ній означав би «безрозмірна» —
+    /// рівно навпаки до дійсності.
+    /// </remarks>
+    public bool IsRowScopedUnit(CellReferenceNode reference);
 }

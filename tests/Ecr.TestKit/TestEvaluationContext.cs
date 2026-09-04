@@ -56,7 +56,30 @@ public sealed class TestEvaluationContext : IEvaluationContext
     public Dictionary<string, ExpressionValue> Headers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Множники конверсії: <c>from|to</c> → коефіцієнт.</summary>
+    /// <remarks>
+    /// Це ЯВНІ конверсії <c>uom.Conversion</c>, і вони мають пріоритет над
+    /// маршрутом через базову одиницю — так само, як у бойовому
+    /// <c>UnitConverter</c> (D4-01): <c>LegacyPinned</c> існує рівно щоб
+    /// відтворити число чинної системи.
+    /// </remarks>
     public Dictionary<string, decimal> Conversions { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Довідник одиниць за кодом — джерело маршруту через базу.</summary>
+    public Dictionary<string, UnitSpec> Units { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Одиниця довідника: розмірність і перехід до базової.</summary>
+    /// <param name="Dimension">Розмірність; конверсія можлива лише в її межах.</param>
+    /// <param name="FactorToBase">Множник переходу до базової одиниці.</param>
+    /// <param name="OffsetToBase">Зсув; ненульовий лише в температури.</param>
+    public readonly record struct UnitSpec(byte Dimension, decimal FactorToBase, decimal OffsetToBase = 0m);
+
+    /// <summary>Записує одиницю в довідник контексту.</summary>
+    /// <param name="code">Код одиниці.</param>
+    /// <param name="dimension">Розмірність.</param>
+    /// <param name="factorToBase">Множник до базової.</param>
+    /// <param name="offsetToBase">Зсув до базової.</param>
+    public void SetUnit(string code, byte dimension, decimal factorToBase, decimal offsetToBase = 0m)
+        => Units[code] = new UnitSpec(dimension, factorToBase, offsetToBase);
 
     /// <summary>Зсуви періодів, доступні в межах проєкту.</summary>
     /// <remarks>
@@ -244,8 +267,28 @@ public sealed class TestEvaluationContext : IEvaluationContext
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        return Conversions.TryGetValue($"{fromUnitCode}|{toUnitCode}", out var factor)
-            ? ExpressionValue.Number(number * factor)
-            : ExpressionValue.Error(ExpressionErrors.BadUnit);
+        // 1. Явна конверсія — перша: вона існує саме щоб перекрити маршрут.
+        if (Conversions.TryGetValue($"{fromUnitCode}|{toUnitCode}", out var factor))
+        {
+            return ExpressionValue.Number(number * factor);
+        }
+
+        // 2. Маршрут через базову одиницю — і лише в межах однієї розмірності.
+        if (Units.TryGetValue(fromUnitCode, out var from) && Units.TryGetValue(toUnitCode, out var to))
+        {
+            // ⛔ Різні розмірності — #UNIT, а не спроба «через базу». Саме тут
+            // щільність не стає конверсією (ФВ-16.3, ФВ-16.5).
+            if (from.Dimension != to.Dimension || to.FactorToBase == 0m)
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadUnit);
+            }
+
+            // Зсув — єдина причина, чому формула не «значення × k». Без нього
+            // нуль Цельсія став би нулем Кельвіна: помилка на 273 градуси.
+            var inBase = (number * from.FactorToBase) + from.OffsetToBase;
+            return ExpressionValue.Number((inBase - to.OffsetToBase) / to.FactorToBase);
+        }
+
+        return ExpressionValue.Error(ExpressionErrors.BadUnit);
     }
 }

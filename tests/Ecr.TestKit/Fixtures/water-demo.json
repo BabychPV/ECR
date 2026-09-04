@@ -228,7 +228,7 @@
     "Waste_08.PredicateSum_W01": "15900.000",
     "calculation": {
       "7001001": {
-        "SUB-COD": { "tons": "0.912688", "gsec_Actual": "0.340774", "gsec_Fixed360": "0.352117" },
+        "SUB-COD": { "tons": "0.912688", "gsec_Actual": "0.340758", "gsec_Fixed360": "0.352117" },
         "SUB-TSS": { "tons": "0.292060" }
       }
     }

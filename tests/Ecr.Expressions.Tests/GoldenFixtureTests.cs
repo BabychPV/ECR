@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using Xunit;
@@ -17,6 +18,9 @@ namespace Ecr.Expressions.Tests;
 public sealed class GoldenFixtureTests
 {
     private static readonly FixtureWorkbook Workbook = FixtureWorkbook.Load();
+
+    /// <summary>Місячні колонки фікстури.</summary>
+    private static readonly string[] Months = ["Jan", "Feb", "Mar"];
 
     [Theory]
     [InlineData("7001001", "3650.750")]
@@ -82,12 +86,85 @@ public sealed class GoldenFixtureTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void F6_конверсія_кубометрів_у_тонни_через_щільність()
-        => Assert.Fail("not implemented");
+    {
+        // (4750.625 + 4020.500 + 3041.375) m3 = 11812.500 m3
+        //   × 1000 kg_per_m3        → 11812500.000 kg
+        //   CONVERT(kg → t): / 1000 → 11812.500 t
+        var months = Months.Sum(m => Number("Water_07", "Main", "7009000", m));
+        Assert.Equal(11812.500m, months);
+
+        // ⛔ Вираз F6 із фікстури не розбирається ЖОДНИМ діалектом, і це не
+        // випадковість, а невирішена половина Q-066:
+        //   • `Template` не має `CST.` — шаблон, який знає про методології,
+        //     перестає бути переносним;
+        //   • `Methodology` не має `[Jan]` — методологія не читає комірки
+        //     документа безпосередньо.
+        // Формула лежить у таблиці шаблону, а написана мовою, якої немає.
+        // Записано як P-07; тут ця обставина ЗАФІКСОВАНА тестом, а не
+        // прихована пропуском.
+        const string fixtureExpression =
+            "CONVERT(([Jan] + [Feb] + [Mar]) * CST.CST_WATER_DENSITY, 'kg', 't')";
+
+        Assert.False(Expr.Parse(fixtureExpression, ExpressionDialect.Template).IsSuccess);
+        Assert.False(Expr.Parse(fixtureExpression, ExpressionDialect.Methodology).IsSuccess);
+        Assert.Contains(Workbook.SkippedFormulas, s => s.StartsWith("F6:", StringComparison.Ordinal));
+
+        // Число при цьому обчислюване, і саме воно предмет тесту. Щільність —
+        // звичайне значення документа: рекомендація Q-066 саме така, бо
+        // коефіцієнт залежить від речовини й умов і мусить бути видимим
+        // у даних, а не захованим у «конверсії м³ → т» (ФВ-16.5).
+        var context = Context("Water_07", "Main", "7009000");
+        context.SetCell("Water_07", "Main", "7009000", "Density", ExpressionValue.Number(1000m));
+
+        var value = Expr.Eval(
+            "CONVERT(([Jan] + [Feb] + [Mar]) * [Density], 'kg', 't')",
+            context,
+            ExpressionDialect.Template);
+
+        Assert.Equal(
+            Decimal(Workbook.Expected("Water_070.Rollup", "C009", "TotalTons").GetString()!),
+            value.AsNumber());
+        Assert.Equal(11812.500m, value.AsNumber());
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void F7_одиниця_на_рядок_приводить_тонни_і_кілограми_до_спільної_одиниці()
-        => Assert.Fail("not implemented");
+    {
+        // Колонка `AmountUnit` має dataType = Unit: одиниця лежить у КОЖНІЙ
+        // комірці окремо (ФВ-16.8, R-A4, D-87).
+        var expected = Workbook.Expected("Waste_08.Items.AmountKg");
+
+        foreach (var row in expected.EnumerateObject())
+        {
+            var amount = Workbook.Cell("Waste_08", "Items", row.Name, "Amount");
+            var unit = Workbook.Cell("Waste_08", "Items", row.Name, "AmountUnit");
+
+            var converted = Workbook.Context.Convert(amount, (string)unit.Value!, "kg");
+
+            Assert.Equal(Decimal(row.Value.GetString()!), converted.AsNumber());
+        }
+
+        // 12.500 t і 3400.000 kg — те саме число після приведення, різні до
+        // нього. ⛔ Без CONVERT SUM склав би 12.5 із 3400 і дав 3412.5:
+        // правдоподібне число, менше за правильне у 4.6 раза.
+        Assert.Equal(
+            12500.000m,
+            Workbook.Context.Convert(ExpressionValue.Number(12.500m), "t", "kg").AsNumber());
+        Assert.Equal(
+            3400.000m,
+            Workbook.Context.Convert(ExpressionValue.Number(3400.000m), "kg", "kg").AsNumber());
+    }
+
+    /// <summary>Контекст фікстури, спрямований на конкретний рядок.</summary>
+    private static TestEvaluationContext Context(string sheet, string table, string row)
+    {
+        var context = Workbook.Context;
+        context.CurrentSheet = sheet;
+        context.CurrentTable = table;
+        context.CurrentRow = row;
+        return context;
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]

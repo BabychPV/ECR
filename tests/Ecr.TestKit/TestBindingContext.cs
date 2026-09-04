@@ -30,6 +30,12 @@ public sealed class TestBindingContext : ITypeContext, IUnitContext
     /// <summary>Похідні одиниці: <c>чисельник|знаменник</c> → одиниця.</summary>
     public Dictionary<string, int> Derived { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Одиниці за кодом — те, що резолвить <c>CONVERT</c>.</summary>
+    public Dictionary<string, int> UnitsByCode { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Колонки, у яких одиниця задається на рядок (ФВ-16.8).</summary>
+    public HashSet<string> RowScopedUnitColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Тип колонки, якої немає в таблиці типів.</summary>
     public ExpressionValueType DefaultColumnType { get; set; } = ExpressionValueType.Number;
 
@@ -67,4 +73,15 @@ public sealed class TestBindingContext : ITypeContext, IUnitContext
     /// <inheritdoc />
     public int? FindDerived(int numeratorUnitId, int denominatorUnitId)
         => Derived.TryGetValue($"{numeratorUnitId}|{denominatorUnitId}", out var unit) ? unit : null;
+
+    /// <inheritdoc />
+    public int? ResolveUnitByCode(string code)
+        => code is not null && UnitsByCode.TryGetValue(code, out var unit) ? unit : null;
+
+    /// <inheritdoc />
+    public bool IsRowScopedUnit(CellReferenceNode reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return RowScopedUnitColumns.Contains(reference.ColumnSelector);
+    }
 }

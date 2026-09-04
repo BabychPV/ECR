@@ -69,10 +69,48 @@ public sealed class EdgeCaseTests
         => Assert.Equal(-3m, Expr.Number("ROUND(-2.5, 0)"));
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void E14_конверсія_різних_розмірностей_дає_помилку() => Assert.Fail("not implemented");
+    public void E14_конверсія_різних_розмірностей_дає_помилку()
+    {
+        var context = UnitContext();
+
+        // ⛔ Маса → об'єм. Не «немає коефіцієнта», а не існує в принципі:
+        // перехід між ними потребує щільності, тобто властивості речовини
+        // (ФВ-16.3, ФВ-16.5).
+        var value = Expr.Eval("CONVERT(1, 'kg', 'm3')", context, ExpressionDialect.Methodology);
+
+        Assert.True(value.IsError);
+        Assert.Equal(ExpressionErrors.BadUnit, value.ErrorCode);
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void E15_конверсія_градусів_у_Кельвіни_дає_273_15() => Assert.Fail("not implemented");
+    public void E15_конверсія_градусів_у_Кельвіни_дає_273_15()
+    {
+        var context = UnitContext();
+
+        // ⚠ Зсув — єдина причина, чому формула конверсії не «значення × k».
+        // Без нього нуль Цельсія став би нулем Кельвіна, тобто абсолютним
+        // нулем: помилка на 273 градуси, яку видно лише тому, хто знає фізику.
+        Assert.Equal(273.15m, Expr.Number("CONVERT(0, 'degC', 'K')", context));
+        Assert.Equal(373.15m, Expr.Number("CONVERT(100, 'degC', 'K')", context));
+
+        // І назад — симетрично.
+        Assert.Equal(0m, Expr.Number("CONVERT(273.15, 'K', 'degC')", context));
+    }
+
+    /// <summary>Контекст із довідником одиниць за seed-ом (`09-seed.sql`).</summary>
+    private static TestEvaluationContext UnitContext()
+    {
+        var context = new TestEvaluationContext();
+
+        context.SetUnit("kg", dimension: 1, factorToBase: 1m);
+        context.SetUnit("t", dimension: 1, factorToBase: 1000m);
+        context.SetUnit("g", dimension: 1, factorToBase: 0.001m);
+        context.SetUnit("m3", dimension: 2, factorToBase: 1m);
+        context.SetUnit("K", dimension: 5, factorToBase: 1m);
+        context.SetUnit("degC", dimension: 5, factorToBase: 1m, offsetToBase: 273.15m);
+
+        return context;
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void E16_крос_період_за_межу_проєкту_дає_null()
@@ -156,7 +194,33 @@ public sealed class EdgeCaseTests
         => new(new Dictionary<string, string> { ["en"] = value });
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void E21_агрегація_різних_одиниць_без_CONVERT_відхиляє_публікацію() => Assert.Fail("not implemented");
+    public void E21_агрегація_різних_одиниць_без_CONVERT_відхиляє_публікацію()
+    {
+        var context = new TestBindingContext();
+
+        // Колонка `DataType = Unit`: одиниця лежить у кожній комірці окремо
+        // (ФВ-16.8, R-A4). SUM склав би тонни з кілограмами і дав число, яке
+        // виглядає правдоподібно.
+        context.RowScopedUnitColumns.Add("Amount");
+        context.UnitsByCode["kg"] = 1;
+        context.Dimensions[1] = 1;
+
+        var diagnostics = new List<ExpressionDiagnostic>();
+        new UnitChecker().Check(
+            Expr.Parse("SUM([Items].[Amount])").Expression!.Root, context, diagnostics);
+
+        // ⛔ Помилка ПУБЛІКАЦІЇ, а не рантайму: у рантаймі вона вже нічого не
+        // рятує — число подане.
+        Assert.Contains(diagnostics, d => d.Code == "ECR-TMPL-4223");
+
+        // Явне приведення знімає заборону — і це єдиний спосіб (D-74).
+        var converted = new List<ExpressionDiagnostic>();
+        new UnitChecker().Check(
+            Expr.Parse("SUM(CONVERT([Items].[Amount], [AmountUnit], 'kg'))").Expression!.Root,
+            context, converted);
+
+        Assert.Empty(converted);
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void E22_відсутня_комірка_бере_DefaultValue()

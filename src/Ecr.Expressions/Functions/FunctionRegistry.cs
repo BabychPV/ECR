@@ -141,7 +141,7 @@ public sealed class FunctionRegistry
             "MOD" => MethodologyFunctions.Mod(args),
             "COALESCE" => MethodologyFunctions.Coalesce(args),
             "SWITCH" => MethodologyFunctions.Switch(args),
-            "SUBSTANCE" => MethodologyFunctions.Substance(args),
+            "SUBSTANCE" => MethodologyFunctions.Substance(args, context),
 
             // Сюди не потрапити з розібраного виразу: парсер відхиляє невідомі
             // імена ще при публікації. Лишається як явна межа набору.
