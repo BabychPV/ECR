@@ -1,6 +1,8 @@
 // src/Ecr.Application/Ports/ISimulationService.cs
 namespace Ecr.Application.Ports;
 
+using Ecr.Application.Security;
+
 /// <summary>
 /// Симуляція «очима користувача» (<c>ФВ-6.16a</c>, <c>D-96</c>).
 /// **Лише читання**: будь-який запис під нею відхиляється з

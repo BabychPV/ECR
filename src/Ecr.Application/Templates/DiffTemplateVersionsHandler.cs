@@ -1,5 +1,6 @@
 // src/Ecr.Application/Templates/DiffTemplateVersionsHandler.cs
 using Ecr.Application.Ports;
+using Ecr.Application.Templates.Dto;
 
 namespace Ecr.Application.Templates;
 

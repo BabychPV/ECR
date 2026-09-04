@@ -1,6 +1,7 @@
 // src/Ecr.Application/Calculations/RunCalculationHandler.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Application.Common;
 
 namespace Ecr.Application.Calculations;
 

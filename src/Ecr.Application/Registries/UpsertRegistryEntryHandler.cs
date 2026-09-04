@@ -1,6 +1,8 @@
 // src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Application.Common;
+using Ecr.Application.Registries.Dto;
 
 namespace Ecr.Application.Registries;
 

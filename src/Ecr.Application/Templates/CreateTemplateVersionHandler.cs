@@ -2,6 +2,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.ValueObjects;
+using Ecr.Application.Common;
 
 namespace Ecr.Application.Templates;
 

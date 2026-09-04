@@ -1,5 +1,6 @@
 // src/Ecr.Application/Templates/GetTemplateStructureHandler.cs
 using Ecr.Application.Ports;
+using Ecr.Application.Templates.Dto;
 
 namespace Ecr.Application.Templates;
 

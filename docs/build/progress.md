@@ -5,9 +5,9 @@
 > файлу на слово — він перезапускає build і тести сам; розбіжність між записами
 > тут і фактом є критичним зауваженням.
 
-**Поточний етап:** Етап 0 (bootstrap)
-**Останній тег:** —
-**Оновлено:** —
+**Поточний етап:** Етап 0 (bootstrap) — **ЗАБЛОКОВАНО**
+**Останній тег:** `stage-0`
+**Оновлено:** 2026-09-04
 
 ---
 
@@ -24,21 +24,36 @@
 
 ## Етап 0 — BOOTSTRAP
 
-- [ ] Структура папок створена за деревом з `05-skeleton.md`
-- [ ] Усі файли з `05-skeleton.md` створені без змін
-- [ ] Усі файли з `06-tests.md` створені без змін
-- [ ] `git init` + commit + тег `stage-0`
-- [ ] `dotnet restore` — OK
-- [ ] `npm install` — OK
-- [ ] `dotnet build` — OK
-- [ ] `npm run build` — OK
-- [ ] Тести запускаються і падають (`Assert.Fail`), раннер працює
-- [ ] `09-commands.md` оновлено реальними командами, журнал §8 заповнено
-- [ ] commit + тег `stage-0-verified`
-- [ ] Звіт показано, робота зупинена
+- [x] Структура папок створена за деревом з `05-skeleton.md` — пакет документації перенесено в `docs/` (`Q-001`)
+- [!] Усі файли з `05-skeleton.md` створені без змін — створено 344; **41 файл дерева не має вмісту в `05a`…`05j`** (`Q-015`)
+- [x] Усі файли з `06-tests.md` створені без змін — разом із `06a`…`06e` і фікстурою `water-demo.json`
+- [x] `git init` + commit + тег `stage-0`
+- [x] `dotnet restore` — OK після виправлення версій (`Q-004`)
+- [x] `npm install` — OK, без правок версій (362 пакети)
+- [!] `dotnet build` — **FAILED**: `Q-013` (циклічна залежність `FormulaEngine`) і `Q-014` (10 неоголошених контрактних типів)
+- [!] `npm run build` — не запускався: немає `src/Ecr.Web/index.html` (`Q-015`)
+- [!] Тести запускаються і падають (`Assert.Fail`), раннер працює —
+      **frontend: 23 знайдено, 23 впали як очікувано ✅**;
+      **backend: не запускалися — усі тестові проєкти залежать від `Ecr.TestKit`,
+      який не збирається через `Q-013`/`Q-014`**
+- [x] `09-commands.md` оновлено реальними командами, журнал §8 заповнено (частково — те, що вдалося виконати)
+- [ ] commit + тег `stage-0-verified` — **не поставлено**: збірка червона
+- [x] Звіт показано, робота зупинена
 
-**BOOTSTRAP-FIX (кількість):** —
-**Знайдено тестів:** —
+**BOOTSTRAP-FIX (кількість):** 8 (`Q-002`…`Q-008`, `Q-011`) + 4 `DECIDED` (`Q-001`, `Q-009`, `Q-010`, `Q-012`)
+**Знайдено тестів:** frontend 23 (23 failed, 0 passed). Backend — невідомо, збірка не дійшла.
+
+**Блокери, що зупинили етап:**
+- `Q-013` CONFLICT — `FormulaEngine` у `Ecr.Expressions` реалізує `IFormulaEngine`
+  з `Ecr.Application.Ports`, а `Ecr.Application` уже залежить від `Ecr.Expressions`.
+- `Q-014` CONTRACT — десять типів (`FormulaDependencyRef`, `DependencyContext`,
+  `FormulaNode`, `EvaluationResult`, `MethodologyDescriptor`, `CalculationInput`,
+  `CalculationOutput`, `SourceEntityDescriptor`, `CollectionRequest`,
+  `CollectionResult`) вживаються в портах, але не оголошені ніде в пакеті.
+
+**Що зібралося:** `Ecr.Domain` — 0 errors, 0 warnings.
+**Що не зібралося:** `Ecr.Expressions` (і все, що за ним: `Application`,
+`Infrastructure`, `Calculations`, `Adapters.*`, `Api`, `tools/*`, усі `tests/*`).
 
 ---
 
@@ -72,8 +87,9 @@
 
 | Тег | Дата | Build | Тести | Коментар |
 |---|---|---|---|---|
-| `stage-0` | | | | файли створені, ще не збиралося |
-| `stage-0-verified` | | | | збирається, тести падають як очікувано |
+| `stage-0` | 2026-09-04 | — | — | 344 файли створені, ще не збиралося |
+| `stage-0-fixes` | 2026-09-04 | FAILED | — | BOOTSTRAP-FIX Q-002…Q-012; заблоковано Q-013, Q-014 |
+| `stage-0-verified` | | | | **не поставлено** — збірка червона |
 | `stage-1` | | | | |
 | `stage-1-reviewed` | | | | |
 | `stage-2` | | | | |

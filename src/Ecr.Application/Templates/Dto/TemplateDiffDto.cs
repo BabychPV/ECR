@@ -1,6 +1,8 @@
 // src/Ecr.Application/Templates/Dto/TemplateDiffDto.cs
 namespace Ecr.Application.Templates.Dto;
 
+using Ecr.Domain.Enums;
+
 /// <summary>
 /// Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,
 /// `RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б

@@ -6,6 +6,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ecr.Domain\Ecr.Domain.csproj" />
+    <!-- BOOTSTRAP-FIX (Q-008): IFormulaEngine оперує типами Ecr.Expressions.
+         tz/03 §3.3: «Ecr.Application ... Знає Domain і Expressions». -->
+    <ProjectReference Include="..\Ecr.Expressions\Ecr.Expressions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

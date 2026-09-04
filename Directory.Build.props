@@ -8,7 +8,14 @@
 
     <!-- Попередження = помилки. Дисципліна дешевша за розбір «чому воно так» через рік. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <WarningsNotAsErrors></WarningsNotAsErrors>
+    <!--
+      BOOTSTRAP-FIX (Q-006): аналізатори стилю й іменування не роблять збірку червоною.
+      Причина: скелет із docs/build/05* створюється ДОСЛІВНО, а частина його коду
+      суперечить власним правилам пакета (CA1711 вимагає перейменувати тип Permission,
+      CA1720 — члени ColumnDataType.String/Int/Decimal; і те, і те заборонено чіпати).
+      Правила лишаються увімкненими як ПОПЕРЕДЖЕННЯ — вони видимі, але не блокують.
+    -->
+    <WarningsNotAsErrors>IDE0011;IDE0040;IDE0065;CA1711;CA1720;CA1822</WarningsNotAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
 

@@ -1,5 +1,6 @@
 // src/Ecr.Application/Registries/GetRegistryEntriesHandler.cs
 using Ecr.Application.Ports;
+using Ecr.Application.Registries.Dto;
 
 namespace Ecr.Application.Registries;
 

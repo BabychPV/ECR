@@ -1,6 +1,7 @@
 // src/Ecr.Application/Security/ChangePasswordHandler.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Application.Common;
 
 namespace Ecr.Application.Security;
 

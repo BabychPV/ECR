@@ -3,7 +3,7 @@ namespace Ecr.Application.Ports;
 /// <summary>
 /// Сховище агрегата. Навмисно вузьке: <see cref="IQueryable{T}"/> назовні не
 /// віддається, бо тоді деталі провайдера протікають у use-cases і
-<c>ToList()</c> без <c>Take()</c> стає питанням дисципліни, а не типу.
+/// <c>ToList()</c> без <c>Take()</c> стає питанням дисципліни, а не типу.
 /// </summary>
 /// <typeparam name="T">Тип агрегата.</typeparam>
 /// <typeparam name="TId">Тип ідентифікатора.</typeparam>

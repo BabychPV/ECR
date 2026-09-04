@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/SimulateMethodologyHandler.cs
 using Ecr.Application.Ports;
+using Ecr.Application.Calculations.Dto;
 
 namespace Ecr.Application.Calculations;
 

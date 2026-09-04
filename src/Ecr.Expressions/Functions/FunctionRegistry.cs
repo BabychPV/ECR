@@ -1,5 +1,6 @@
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
+using Ecr.Expressions.Ast;
 
 namespace Ecr.Expressions.Functions;
 

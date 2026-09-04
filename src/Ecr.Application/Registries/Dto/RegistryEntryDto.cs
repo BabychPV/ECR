@@ -1,6 +1,8 @@
 // src/Ecr.Application/Registries/Dto/RegistryEntryDto.cs
 namespace Ecr.Application.Registries.Dto;
 
+using Ecr.Domain.ValueObjects;
+
 /// <summary>
 /// Запис довідника для UI і резолвінгу. У комірці зберігається
 /// <see cref="Id"/>, а не <see cref="Display"/> (`ФВ-8.8`) — саме тому

@@ -1,6 +1,10 @@
 // src/Ecr.Application/Templates/Dto/TemplateStructureDto.cs
 namespace Ecr.Application.Templates.Dto;
 
+using Ecr.Application.Documents.Dto;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+
 /// <summary>
 /// Структура опублікованої версії — те, що віддається клієнту й кешується за
 /// ключем <c>v{id}:r{rev}</c> (`ФВ-2.5`).

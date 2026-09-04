@@ -1,9 +1,12 @@
 # 09 — Команди збірки і тестів
 
-> **⚠ УВАГА: усе нижче — ГІПОТЕЗА.** Команди складені на ПК-1 **без можливості
-> їх виконати**. На Етапі 0 ти зобов'язаний перевірити кожну і **переписати цей
-> файл реально працюючими командами свого середовища** (крок 7 Етапу 0).
-> Поки цей блок не прибрано — файл не перевірений.
+> **Статус: перевірено частково (2026-09-04, ПК-2).** Команди, які вдалося
+> виконати, звірені й позначені в журналі §8. Решту перевірити неможливо, доки
+> не зняті блокери `Q-013` і `Q-014` — бекенд не збирається. Попередження
+> лишається до повної перевірки.
+>
+> Шляхи в цьому файлі — **від кореня репозиторію** (`D:/repos/ECR Web`),
+> сам пакет документації живе в `docs/` (`Q-001`).
 
 ---
 
@@ -147,20 +150,40 @@ git diff stage-1..HEAD --stat        # для рев'ю
 
 ## 8. Журнал перевірки команд (заповнюється на ПК-2)
 
-| # | Команда | Статус | Фактична команда, якщо відрізняється |
+| # | Команда | Статус | Факт / примітка |
 |---|---|---|---|
-| 1 | `dotnet --list-sdks` | ⬜ | |
-| 2 | `dotnet restore Ecr.sln` | ⬜ | |
-| 3 | `dotnet build Ecr.sln` | ⬜ | |
-| 4 | `dotnet test --filter "Category!=Integration"` | ⬜ | |
-| 5 | `dotnet test --filter "Category=Integration"` | ⬜ | |
-| 6 | `dotnet ef migrations add` | ⬜ | |
-| 7 | `dotnet run --project src/Ecr.Api` | ⬜ | |
-| 8 | `npm install` | ⬜ | |
-| 9 | `npm run build` | ⬜ | |
-| 10 | `npm run test` | ⬜ | |
+| 1 | `dotnet --list-sdks` | ✅ | `10.0.301` (і `8.0.412`) — відповідає `04-environment.md` |
+| 1a | `node -v` / `npm -v` / `git --version` | ✅ | `v22.19.0` / `10.9.3` / `2.46.2.windows.1` |
+| 1b | `docker ps` | ❌ | Docker Desktop не запущений — `Q-016`, деградований режим |
+| 1c | `sqlcmd -S localhost -E -Q "..."` | ⬜ | не виконувалося: Етап 0 до БД не звертається (`04-environment.md` §2.1) |
+| 2 | `dotnet restore Ecr.sln` | ⚠ | працює **після** `Q-003` (4 відсутні `.csproj`) і `Q-004` (версії пакетів) |
+| 3 | `dotnet build Ecr.sln -c Debug` | ❌ | падає на `src/Ecr.Expressions/FormulaEngine.cs` — `Q-013`, `Q-014`. `Ecr.Domain` окремо: **0 errors, 0 warnings** |
+| 4 | `dotnet test Ecr.sln --filter "Category!=Integration"` | ⬜ | недосяжно: усі тестові проєкти залежать від `Ecr.TestKit` → `Ecr.Infrastructure` → `Ecr.Application` → `Ecr.Expressions` |
+| 5 | `dotnet test Ecr.sln --filter "Category=Integration"` | ⬜ | недосяжно + немає Docker (`Q-016`) |
+| 6 | `dotnet ef migrations add` | ⬜ | недосяжно: `Ecr.Infrastructure` не збирається |
+| 7 | `dotnet run --project src/Ecr.Api` | ⬜ | недосяжно |
+| 8 | `npm install` | ✅ | у `src/Ecr.Web`; 362 пакети, версії з `04-environment.md` §4 **без правок**; 3 хв |
+| 9 | `npm run build` | ⬜ | недосяжно: немає `src/Ecr.Web/index.html` (`Q-015`) |
+| 10 | `npm run test` | ✅ | `npx vitest run` — **5 файлів, 23 тести, 23 failed** (`not implemented`) — саме те, чого вимагає Етап 0 |
+| 10a | `npm run typecheck` | ❌ | 7 помилок: немає згенерованого `src/api/schema.d.ts` і модуля `@/api/types`; `JSX` під React 19 — `Q-017` |
 
-Статуси: ⬜ не перевірено · ✅ працює · ⚠ працює з правкою · ❌ не працює
-(тоді — запис у `questions.md`).
+Статуси: ⬜ не перевірено · ✅ працює · ⚠ працює з правкою · ❌ не працює.
 
-**Після заповнення таблиці прибери попередження на початку файлу.**
+### Фактичні команди, що працюють сьогодні
+
+```bash
+# перевірка середовища
+dotnet --list-sdks && node -v && npm -v && git --version
+
+# бекенд: restore працює, build падає (Q-013, Q-014)
+dotnet restore Ecr.sln
+dotnet build src/Ecr.Domain/Ecr.Domain.csproj -c Debug   # єдиний, що зелений
+
+# фронтенд: працює повністю
+cd src/Ecr.Web
+npm install
+npx vitest run          # 23 тести, усі падають — очікувано
+```
+
+**Попередження на початку файлу знімається після зняття `Q-013` і `Q-014`
+і повного проходу §6.**
