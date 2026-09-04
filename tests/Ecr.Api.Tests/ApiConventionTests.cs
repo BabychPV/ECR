@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Mvc;
@@ -151,5 +152,75 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Довга_операція_повертає_202_із_ідентифікатором_задачі()
-        => Assert.Fail("not implemented");
+    {
+        // ⚠ Перевірка читає ВИХІДНИЙ КОД контролерів, а не рефлексію.
+        // Рефлексія бачить атрибут `ProducesResponseType(202)` і не бачить, що
+        // тіло дії повертає `Ok`: саме так з'являється ендпоінт, який обіцяє
+        // задачу і віддає результат синхронно — на 200 мс у тесті й на дві
+        // хвилини таймауту в проді.
+        var controllers = Directory.EnumerateFiles(
+            Path.Combine(Root(), "src", "Ecr.Api", "Controllers"), "*.cs");
+
+        var broken = new List<string>();
+
+        foreach (var path in controllers)
+        {
+            foreach (var action in Actions(File.ReadAllText(path)))
+            {
+                if (!action.Declares202)
+                {
+                    continue;
+                }
+
+                if (!action.Body.Contains("Accepted(", StringComparison.Ordinal))
+                {
+                    broken.Add($"{Path.GetFileName(path)}.{action.Name}: оголошено 202, повертає інше");
+                    continue;
+                }
+
+                // ⛔ 202 без ідентифікатора задачі — відповідь «щось почалося,
+                // а що саме — не скажу». Клієнту нема чого опитувати, і
+                // прогрес довгої операції показати неможливо.
+                if (!action.Body.Contains("jobId", StringComparison.Ordinal))
+                {
+                    broken.Add($"{Path.GetFileName(path)}.{action.Name}: 202 без jobId");
+                }
+            }
+        }
+
+        Assert.Empty(broken);
+    }
+
+    /// <summary>Дії контролера: ім'я, атрибути і тіло.</summary>
+    private static IEnumerable<(string Name, bool Declares202, string Body)> Actions(string source)
+    {
+        var matches = Regex.Matches(
+            source,
+            @"(?<attributes>(?:\s*\[[^\]]+\]\s*)+)\s*public\s+(?:async\s+)?Task<[^(]*?>\s+(?<name>\w+)\s*\(",
+            RegexOptions.Singleline);
+
+        for (var i = 0; i < matches.Count; i++)
+        {
+            var start = matches[i].Index + matches[i].Length;
+            var end = i + 1 < matches.Count ? matches[i + 1].Index : source.Length;
+
+            yield return (
+                matches[i].Groups["name"].Value,
+                matches[i].Groups["attributes"].Value.Contains("Status202Accepted", StringComparison.Ordinal),
+                source[start..end]);
+        }
+    }
+
+    /// <summary>Корінь репозиторію.</summary>
+    private static string Root()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Ecr.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName
+               ?? throw new InvalidOperationException("Не знайдено Ecr.sln від каталогу збірки вгору.");
+    }
 }

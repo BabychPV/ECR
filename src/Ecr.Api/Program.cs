@@ -32,7 +32,13 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
     sp => sp.GetRequiredService<CurrentUser>());
-builder.Services.AddControllers();
+// ⚠ Метрики бюджету — фільтром, а не викликом у кожній дії: метрика, яку
+// треба не забути дописати, рано чи пізно не дописується. До цього
+// `EcrMetrics` існував і не викликався жодного разу (аудит Етапу 5).
+builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
+builder.Services.AddScoped<Ecr.Api.Observability.BudgetMetricsFilter>();
+builder.Services.AddControllers(options =>
+    options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>());
 builder.Services.AddOpenApi();
 
 // ⚠ Теги розділяють перевірки за призначенням: /health/live не має права

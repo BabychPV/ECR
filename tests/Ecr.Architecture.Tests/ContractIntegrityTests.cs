@@ -143,7 +143,62 @@ public sealed class ContractIntegrityTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Кожен_ендпоінт_із_таблиці_бюджету_має_метрику()
-        => Assert.Fail("not implemented");
+    {
+        // Правило контракту (`02-contracts.md` §11): операція з таблиці
+        // бюджету зобов'язана мати метрику. Без вимірювання «вкладаємося»
+        // означає «здається швидким тому, хто це писав».
+        var operations = BudgetOperations();
+        Assert.NotEmpty(operations);
+
+        var mapped = typeof(Ecr.Api.Observability.BudgetMetrics)
+            .GetProperty(nameof(Ecr.Api.Observability.BudgetMetrics.ByOperation))!
+            .GetValue(null) as IReadOnlyDictionary<string, string>;
+
+        Assert.NotNull(mapped);
+
+        var unmeasured = operations
+            .Where(op => !mapped!.Keys.Any(key => op.StartsWith(key, StringComparison.Ordinal)))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(unmeasured);
+
+        // ⛔ І зворотний бік: метрика, названа в зіставленні, мусить існувати
+        // в таблиці метрик контракту. Інакше зіставлення посилалося б на
+        // лічильник, якого ніхто не створює, і перевірка була б формальністю.
+        var declared = DeclaredMetrics();
+        Assert.NotEmpty(declared);
+
+        Assert.Empty(mapped!.Values.Distinct().Except(declared, StringComparer.Ordinal));
+    }
+
+    /// <summary>Операції з таблиць бюджету `tz/08` §8.2 і §8.3.</summary>
+    private static List<string> BudgetOperations()
+    {
+        var path = Path.Combine(SourceTree.Root, "docs", "tz", "08-nfr.md");
+        var text = File.ReadAllText(path);
+
+        var section = text[text.IndexOf("## 8.2", StringComparison.Ordinal)..
+                           text.IndexOf("## 8.4", StringComparison.Ordinal)];
+
+        return Regex.Matches(section, @"^\|\s*(?:\*\*)?([^|*][^|]*?)(?:\*\*)?\s*\|", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value.Trim())
+            .Where(op => op.Length > 0
+                         && !op.StartsWith("Операція", StringComparison.Ordinal)
+                         && !op.StartsWith("---", StringComparison.Ordinal))
+            .Select(op => op.Replace("ПРД-13. ", string.Empty, StringComparison.Ordinal))
+            .ToList();
+    }
+
+    /// <summary>Метрики, оголошені в таблиці `02-contracts.md` §11.</summary>
+    private static HashSet<string> DeclaredMetrics()
+    {
+        var path = Path.Combine(SourceTree.Root, "docs", "build", "02-contracts.md");
+
+        return Regex.Matches(File.ReadAllText(path), @"^\|\s*`(ecr\.[a-z_.]+)`\s*\|", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
