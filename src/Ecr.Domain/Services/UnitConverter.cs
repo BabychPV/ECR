@@ -1,3 +1,4 @@
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Units;
 
 namespace Ecr.Domain.Services;
@@ -18,18 +19,75 @@ public sealed class UnitConverter
     /// <param name="to">Цільова одиниця.</param>
     /// <param name="explicitConversion">Явна конверсія, якщо вона є в <c>uom.Conversion</c>.</param>
     /// <returns>Значення в цільовій одиниці.</returns>
-    /// <exception cref="Abstractions.DomainException">
+    /// <exception cref="DomainException">
     /// Різні розмірності — <c>ECR-UOM-0422</c>. Це відмова, а не спроба вгадати.
     /// </exception>
     public decimal Convert(decimal value, Unit from, Unit to, UnitConversion? explicitConversion)
-        => throw new NotImplementedException(
-            "TODO: 1) from.Id == to.Id → value; " +
-            "2) explicitConversion != null → value * Factor + Offset; " +
-            "3) from.DimensionId == to.DimensionId → base = value * from.FactorToBase + from.OffsetToBase, " +
-            "   result = (base - to.OffsetToBase) / to.FactorToBase; " +
-            "4) інакше DomainException('ECR-UOM-0422'). " +
-            "Усі обчислення в decimal — float заборонений (D-30).");
+    {
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(to);
+
+        if (from.Id == to.Id)
+        {
+            return value;
+        }
+
+        // ⚠ Явна конверсія має пріоритет над маршрутом через базу — і це не
+        // оптимізація. `LegacyPinned` існує саме щоб відтворити число чинної
+        // системи, яке порахували за іншим коефіцієнтом; маршрут через базу
+        // дав би «правильніше» значення і розійшовся б із поданим звітом.
+        if (explicitConversion is not null)
+        {
+            if (explicitConversion.FromUnitId != from.Id || explicitConversion.ToUnitId != to.Id)
+            {
+                throw new DomainException(
+                    "ECR-UOM-0422",
+                    $"Явна конверсія описує {explicitConversion.FromUnitId} → {explicitConversion.ToUnitId}, "
+                    + $"а запитано {from.Id} → {to.Id}.");
+            }
+
+            return (value * explicitConversion.Factor) + explicitConversion.Offset;
+        }
+
+        // ⛔ Різні розмірності — ВІДМОВА, а не спроба вгадати. Саме тут щільність
+        // не стає «конверсією»: м³ у кг перевести не можна, бо коефіцієнт
+        // залежить від речовини й умов і живе в calc.MethodologyConstant
+        // (ФВ-16.3, ФВ-16.5).
+        if (from.DimensionId != to.DimensionId)
+        {
+            throw new DomainException(
+                "ECR-UOM-0422",
+                $"Конверсія {from.Code} → {to.Code} неможлива: різні розмірності "
+                + $"({from.DimensionId} і {to.DimensionId}). Потрібен контекстний коефіцієнт, "
+                + "а він належить методології, не довіднику одиниць.");
+        }
+
+        // Маршрут через базову одиницю. Зсув потрібен лише температурі, але
+        // формула єдина: для решти OffsetToBase дорівнює нулю, і жодного
+        // окремого випадку не з'являється.
+        var inBase = (value * from.FactorToBase) + from.OffsetToBase;
+
+        if (to.FactorToBase == 0m)
+        {
+            throw new DomainException(
+                "ECR-UOM-0422",
+                $"Одиниця {to.Code} має нульовий множник переходу до бази: конверсія неможлива.");
+        }
+
+        // Усі обчислення в decimal — float заборонений (D-30): звітні числа
+        // звіряються до копійки, і подвійна точність тут дає розбіжність,
+        // якої ніхто не може пояснити.
+        return (inBase - to.OffsetToBase) / to.FactorToBase;
+    }
 
     /// <summary>Чи можлива конверсія без явного правила.</summary>
-    public bool CanConvert(Unit from, Unit to) => from.DimensionId == to.DimensionId;
+    /// <param name="from">Вихідна одиниця.</param>
+    /// <param name="to">Цільова одиниця.</param>
+    public bool CanConvert(Unit from, Unit to)
+    {
+        ArgumentNullException.ThrowIfNull(from);
+        ArgumentNullException.ThrowIfNull(to);
+
+        return from.DimensionId == to.DimensionId;
+    }
 }

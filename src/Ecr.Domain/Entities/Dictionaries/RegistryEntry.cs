@@ -50,15 +50,34 @@ public sealed class RegistryEntry : Entity<long>
     /// що посилаються на цей запис (ФВ-8.13a) — але **не тут**: сутність не
     /// знає про документи. Цим займається <c>SetEntryValidityHandler</c>.
     /// </summary>
+    /// <param name="from">Початок вікна; <c>null</c> — від початку.</param>
+    /// <param name="to">Кінець вікна; <c>null</c> — без обмеження.</param>
+    /// <exception cref="DomainException">Кінець раніший за початок — <c>ECR-REG-0422</c>.</exception>
     public void SetValidity(DateOnly? from, DateOnly? to)
-        => throw new NotImplementedException(
-            "TODO: перевірити from <= to, записати межі, підняти ModifiedAt. " +
-            "Звуження вікна може осиротити рядки, розширення — повернути їх; " +
-            "обидва напрямки обробляє IOrphanScanner.RescanForEntryAsync (D-98).");
+    {
+        // Порожнє вікно — не «нічого не чинне», а помилка вводу: запис, який
+        // не чинний ніколи, неможливо ні обрати, ні пояснити.
+        if (from is { } start && to is { } end && end < start)
+        {
+            throw new DomainException(
+                "ECR-REG-0422",
+                $"Кінець вікна чинності {end} раніший за початок {start}.");
+        }
+
+        ValidFrom = from;
+        ValidTo = to;
+    }
 
     /// <summary>Логічне видалення: фізичне заборонене при посиланнях (ФВ-8.6).</summary>
+    /// <remarks>
+    /// ⚠ Запис лишається в таблиці НАЗАВЖДИ: у комірках лежить його <c>Id</c>,
+    /// і фізичне видалення перетворило б історію на набір чисел без підписів.
+    /// Перевірку посилань робить use-case через <c>ICellStore</c> — сутність про дані
+    /// не знає.
+    /// </remarks>
     public void SoftDelete()
-        => throw new NotImplementedException(
-            "TODO: IsDeleted = true, IsActive = false. Перевірку посилань робить " +
-            "use-case через ICellStore — сутність про дані не знає.");
+    {
+        IsDeleted = true;
+        IsActive = false;
+    }
 }
