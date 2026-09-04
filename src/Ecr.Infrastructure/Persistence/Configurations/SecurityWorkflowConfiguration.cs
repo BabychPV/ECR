@@ -136,3 +136,47 @@ public sealed class ApprovalStateConfiguration : IEntityTypeConfiguration<Approv
         builder.Property(x => x.RowVersion).IsRowVersion();
     }
 }
+
+/// <summary>Конфігурація <see cref="Permission"/>.</summary>
+/// <remarks>
+/// Ключ — сам код права, без сурогата: каталог фіксований і приходить із seed,
+/// а посилаються на право саме за кодом.
+/// </remarks>
+public sealed class PermissionConfiguration : IEntityTypeConfiguration<Permission>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<Permission> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("Permission", "sec");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).HasColumnName("Code").HasMaxLength(64);
+        builder.Property(x => x.Group).HasColumnName("Group").HasMaxLength(64).IsRequired();
+        builder.LocalizedText(x => x.NameL10n);
+
+        builder.Property(x => x.IsDangerous).HasDefaultValue(false, "DF_Perm_Dang");
+    }
+}
+
+/// <summary>Конфігурація <see cref="PasswordPolicy"/>.</summary>
+public sealed class PasswordPolicyConfiguration : IEntityTypeConfiguration<PasswordPolicy>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<PasswordPolicy> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("PasswordPolicy", "sec");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_PasswordPolicy");
+
+        builder.Property(x => x.MinLength).HasDefaultValue(12, "DF_PwdP_Len");
+        builder.Property(x => x.RequireUpper).HasDefaultValue(true, "DF_PwdP_Up");
+        builder.Property(x => x.RequireDigit).HasDefaultValue(true, "DF_PwdP_Dig");
+        builder.Property(x => x.RequireSpecial).HasDefaultValue(false, "DF_PwdP_Spc");
+        builder.Property(x => x.MaxFailedAttempts).HasDefaultValue(5, "DF_PwdP_Att");
+        builder.Property(x => x.LockoutMinutes).HasDefaultValue(15, "DF_PwdP_Lck");
+    }
+}

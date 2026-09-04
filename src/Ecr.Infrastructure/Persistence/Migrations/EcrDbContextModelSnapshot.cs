@@ -1480,46 +1480,76 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Code")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
-                    b.Property<int>("ExpiryDays")
-                        .HasColumnType("int");
-
-                    b.Property<int>("HistoryDepth")
+                    b.Property<int?>("ExpirationDays")
                         .HasColumnType("int");
 
                     b.Property<int>("LockoutMinutes")
-                        .HasColumnType("int");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(15, "DF_PwdP_Lck");
 
                     b.Property<int>("MaxFailedAttempts")
-                        .HasColumnType("int");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(5, "DF_PwdP_Att");
 
                     b.Property<int>("MinLength")
-                        .HasColumnType("int");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(12, "DF_PwdP_Len");
 
-                    b.Property<bool>("RequireComplexity")
-                        .HasColumnType("bit");
+                    b.Property<bool>("RequireDigit")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_PwdP_Dig");
+
+                    b.Property<bool>("RequireSpecial")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_PwdP_Spc");
+
+                    b.Property<bool>("RequireUpper")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_PwdP_Up");
 
                     b.HasKey("Id");
 
-                    b.ToTable("PasswordPolicies");
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_PasswordPolicy");
+
+                    b.ToTable("PasswordPolicy", "sec");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Security.Permission", b =>
                 {
                     b.Property<string>("Id")
-                        .HasColumnType("nvarchar(450)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("Code");
 
                     b.Property<string>("Group")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("Group");
 
                     b.Property<bool>("IsDangerous")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_Perm_Dang");
+
+                    b.Property<string>("NameL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
-                    b.ToTable("Permissions");
+                    b.ToTable("Permission", "sec");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Security.ResourceGrant", b =>

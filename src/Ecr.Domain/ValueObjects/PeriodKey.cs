@@ -1,6 +1,7 @@
 // src/Ecr.Domain/ValueObjects/PeriodKey.cs
 namespace Ecr.Domain.ValueObjects;
 
+using System.Globalization;
 using Ecr.Domain.Enums;
 
 /// <summary>
@@ -38,5 +39,10 @@ public readonly record struct PeriodKey(int Value)
         _ => (Create(year, 1), Create(year, 99))
     };
 
-    public override string ToString() => Value.ToString();
+    /// <remarks>
+    /// ⚠ <see cref="CultureInfo.InvariantCulture"/> обов'язково: ключ їде в
+    /// SQL, у ключі кешу <c>v{id}:r{rev}</c> і в URL. Локаль сервера не має
+    /// права на нього впливати (`docs/tz/08-nfr.md` §90, `Q-040`).
+    /// </remarks>
+    public override string ToString() => Value.ToString(CultureInfo.InvariantCulture);
 }

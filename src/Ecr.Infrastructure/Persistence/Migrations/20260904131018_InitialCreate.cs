@@ -115,8 +115,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Conversion", x => x.Id);
-                    table.CheckConstraint("CK_Conv_NotSelf", "FromUnitId <> ToUnitId");
                     table.CheckConstraint("CK_Conv_Note", "Kind <> 1 OR Note IS NOT NULL");
+                    table.CheckConstraint("CK_Conv_NotSelf", "FromUnitId <> ToUnitId");
                 });
 
             migrationBuilder.CreateTable(
@@ -140,22 +140,30 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "PasswordPolicies",
+                name: "PasswordPolicy",
+                schema: "sec",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
-                    Code = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    MinLength = table.Column<int>(type: "int", nullable: false),
-                    MaxFailedAttempts = table.Column<int>(type: "int", nullable: false),
-                    LockoutMinutes = table.Column<int>(type: "int", nullable: false),
-                    HistoryDepth = table.Column<int>(type: "int", nullable: false),
-                    ExpiryDays = table.Column<int>(type: "int", nullable: false),
-                    RequireComplexity = table.Column<bool>(type: "bit", nullable: false)
+                    Code = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    MinLength = table.Column<int>(type: "int", nullable: false, defaultValue: 12)
+                        .Annotation("Relational:DefaultConstraintName", "DF_PwdP_Len"),
+                    MaxFailedAttempts = table.Column<int>(type: "int", nullable: false, defaultValue: 5)
+                        .Annotation("Relational:DefaultConstraintName", "DF_PwdP_Att"),
+                    LockoutMinutes = table.Column<int>(type: "int", nullable: false, defaultValue: 15)
+                        .Annotation("Relational:DefaultConstraintName", "DF_PwdP_Lck"),
+                    RequireUpper = table.Column<bool>(type: "bit", nullable: false, defaultValue: true)
+                        .Annotation("Relational:DefaultConstraintName", "DF_PwdP_Up"),
+                    RequireDigit = table.Column<bool>(type: "bit", nullable: false, defaultValue: true)
+                        .Annotation("Relational:DefaultConstraintName", "DF_PwdP_Dig"),
+                    RequireSpecial = table.Column<bool>(type: "bit", nullable: false, defaultValue: false)
+                        .Annotation("Relational:DefaultConstraintName", "DF_PwdP_Spc"),
+                    ExpirationDays = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_PasswordPolicies", x => x.Id);
+                    table.PrimaryKey("PK_PasswordPolicy", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -204,16 +212,19 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Permissions",
+                name: "Permission",
+                schema: "sec",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "nvarchar(450)", nullable: false),
-                    Group = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    IsDangerous = table.Column<bool>(type: "bit", nullable: false)
+                    Code = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    Group = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    NameL10n = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IsDangerous = table.Column<bool>(type: "bit", nullable: false, defaultValue: false)
+                        .Annotation("Relational:DefaultConstraintName", "DF_Perm_Dang")
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Permissions", x => x.Id);
+                    table.PrimaryKey("PK_Permission", x => x.Code);
                 });
 
             migrationBuilder.CreateTable(
@@ -1134,6 +1145,13 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 columns: new[] { "TableDefId", "RowKey", "ColumnDefId" });
 
             migrationBuilder.CreateIndex(
+                name: "UQ_PasswordPolicy",
+                schema: "sec",
+                table: "PasswordPolicy",
+                column: "Code",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "UQ_Period",
                 schema: "doc",
                 table: "Period",
@@ -1322,7 +1340,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "cfg");
 
             migrationBuilder.DropTable(
-                name: "PasswordPolicies");
+                name: "PasswordPolicy",
+                schema: "sec");
 
             migrationBuilder.DropTable(
                 name: "Period",
@@ -1337,7 +1356,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "doc");
 
             migrationBuilder.DropTable(
-                name: "Permissions");
+                name: "Permission",
+                schema: "sec");
 
             migrationBuilder.DropTable(
                 name: "RegistryEntries");

@@ -32,7 +32,19 @@
     <!-- CS1591: не вимагаємо XML-doc на кожному члені в тестах і tools -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
 
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      ⚠ false, а не true, попри `docs/tz/08-nfr.md` §90 (`Q-040`).
+      Причина не стильова: у режимі globalization-invariant
+      `Microsoft.Data.SqlClient` НЕ ВІДКРИВАЄ з'єднання взагалі —
+      `System.NotSupportedException: Globalization Invariant Mode is not
+      supported` на `SqlConnection.Open()`. Тобто з `true` застосунок не може
+      дійти до бази, і жоден інтеграційний тест не стартує.
+
+      Намір NFR — «форматування чисел і дат не залежить від локалі сервера» —
+      лишається чинним, але тримається явним `CultureInfo.InvariantCulture` у
+      місцях форматування (за цим стежить CA1305), а не режимом середовища.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>

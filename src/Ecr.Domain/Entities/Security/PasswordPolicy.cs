@@ -27,11 +27,13 @@ public sealed class PasswordPolicy : Entity<int>
     public int MaxFailedAttempts { get; private set; }
     public int LockoutMinutes { get; private set; }
 
-    /// <summary>Кількість останніх паролів, які не можна повторити. `0` — не діє.</summary>
-    public int HistoryDepth { get; private set; }
+    // ⚠ Складність — це ТРИ окремі прапорці, а не один RequireComplexity
+    // (`Q-040`). Різниця не косметична: «складний пароль» без розкладки на
+    // вимоги неможливо ні показати користувачеві, ні перевірити однозначно.
+    public bool RequireUpper { get; private set; }
+    public bool RequireDigit { get; private set; }
+    public bool RequireSpecial { get; private set; }
 
-    /// <summary>Строк дії в днях. `0` — не діє.</summary>
-    public int ExpiryDays { get; private set; }
-
-    public bool RequireComplexity { get; private set; }
+    /// <summary>Строк дії в днях; <c>null</c> — не діє (ФВ-6.4a, `P-1`).</summary>
+    public int? ExpirationDays { get; private set; }
 }

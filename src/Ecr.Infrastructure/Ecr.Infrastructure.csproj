@@ -29,6 +29,10 @@
   <ItemGroup>
     <!-- SQL-скрипти йдуть у вихід: їх виконує SQL Agent, а не застосунок (D-66) -->
     <None Update="Persistence\Sql\*.sql" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Виняток: 09-seed.sql виконує САМ застосунок (§14), тому він ще й
+         вбудований у збірку. Інакше застосунок можна було б запустити з
+         чужою копією seed, і розбіжність вилізла б аж на екрані входу. -->
+    <EmbeddedResource Include="Persistence\Sql\09-seed.sql" />
   </ItemGroup>
 
 </Project>
