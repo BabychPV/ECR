@@ -131,6 +131,35 @@ public sealed class Project : Entity<int>
         CurrentPeriodChangedAt = utcNow;
     }
 
+    /// <summary>
+    /// Змінює пояс майданчика. Дозволено лише поки жоден період не відкривався.
+    /// </summary>
+    /// <param name="timeZoneId">Новий пояс.</param>
+    /// <exception cref="DomainException">Перший період уже відкривався.</exception>
+    /// <remarks>
+    /// ⚠ Ретроактивна зміна зсунула б межі **закритих** періодів і переписала
+    /// б <c>IsLateEdit</c> на **поданих** формах (ФВ-1.1a, D-110). Тобто змінила
+    /// б минуле: запис, який був вчасним, став би пізнім заднім числом.
+    /// </remarks>
+    public void ChangeTimeZone(string timeZoneId)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            throw new DomainException("ECR-PRD-0422", "Пояс майданчика обов'язковий.");
+        }
+
+        // Ознака — не статус проєкту, а факт, що якийсь період уже виходив зі
+        // Scheduled: саме з цієї миті межі стали чиїмись зобов'язаннями.
+        if (_periods.Any(p => p.State != PeriodState.Scheduled))
+        {
+            throw new DomainException(
+                "ECR-PRD-0409",
+                "Пояс майданчика не змінюється після відкриття першого періоду (ФВ-1.1a).");
+        }
+
+        TimeZoneId = timeZoneId;
+    }
+
     /// <summary>Перевіряє, що дата належить проєкту (ФВ-1.11).</summary>
     public bool ContainsDate(DateOnly date) => date >= PeriodStart && date <= PeriodEnd;
 }
