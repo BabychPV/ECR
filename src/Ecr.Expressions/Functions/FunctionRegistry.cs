@@ -13,9 +13,25 @@ public sealed class FunctionRegistry
 {
 
 
-    /// <summary>Одинадцять функцій діалекту <c>Template</c> (02b §7).</summary>
+    /// <summary>
+    /// Дванадцять функцій діалекту <c>Template</c> (02b §7).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>CONVERT</c> тут не за симетрією з методологіями, а за потребою
+    /// (<c>Q-066</c>). У чинному шаблоні **216 формул ділять на 1000** —
+    /// це конверсія одиниць магічним числом (м³ → тис. м³, кг → т). Саме її
+    /// забороняє <c>D-74</c> («неявних конверсій не буває») і саме її замінює
+    /// <c>CONVERT</c>. Без неї в діалекті шаблонів цим 216 формулам просто
+    /// нема куди мігрувати.
+    ///
+    /// Те саме каже <c>ФВ-16.8</c>: «агрегація колонки з одиницею на рядок без
+    /// <c>CONVERT</c> — <c>ECR-TMPL-4223</c>». Код помилки — <c>TMPL</c>, тобто
+    /// перевірка публікації ШАБЛОНУ; вимога описує засіб для випадку, який
+    /// існує в таблиці документа.
+    /// </remarks>
     private static readonly FunctionSignature[] TemplateSet =
     [
+        new("CONVERT", 3, 3, false, ExpressionValueType.Number),
         new("SUM", 1, null, true, ExpressionValueType.Number),
         new("AVERAGE", 1, null, true, ExpressionValueType.Number),
         new("MIN", 1, null, true, ExpressionValueType.Number),
@@ -29,10 +45,9 @@ public sealed class FunctionRegistry
         new("SUMIF", 2, 3, true, ExpressionValueType.Number),
     ];
 
-    /// <summary>Тринадцять функцій, які додає діалект <c>Methodology</c> (02b §8).</summary>
+    /// <summary>Дванадцять функцій, які додає діалект <c>Methodology</c> (02b §8).</summary>
     private static readonly FunctionSignature[] MethodologyOnlySet =
     [
-        new("CONVERT", 3, 3, false, ExpressionValueType.Number),
         new("POWER", 2, 2, false, ExpressionValueType.Number),
         new("SQRT", 1, 1, false, ExpressionValueType.Number),
         new("EXP", 1, 1, false, ExpressionValueType.Number),

@@ -61,7 +61,7 @@ public sealed class ClientServerEquivalenceTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Набір_покриває_усі_одинадцять_функцій_діалекту_шаблонів()
+    public void Набір_покриває_усі_функції_діалекту_шаблонів()
     {
         var covered = Cases.EnumerateArray()
             .Select(c => c.GetProperty("function").GetString()!)
@@ -70,10 +70,15 @@ public sealed class ClientServerEquivalenceTests
 
         var declared = FunctionRegistry.Names(ExpressionDialect.Template);
 
+        // ⚠ CONVERT — єдиний виняток, і не за недоглядом: конверсія потребує
+        // довідника uom, якого на клієнті немає й не буде. Підказка під час
+        // введення просто не показує одиниць — розходитися тут нічому.
+        var shared = declared.Except(["CONVERT"], StringComparer.OrdinalIgnoreCase);
+
         // Функція, якої немає в наборі, — це функція, чию поведінку клієнт і
         // сервер ніде не звіряють. Саме там і з'явиться перше розходження.
-        Assert.Equal(11, declared.Count);
-        Assert.Empty(declared.Except(covered, StringComparer.OrdinalIgnoreCase));
+        Assert.Equal(12, declared.Count);
+        Assert.Empty(shared.Except(covered, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>Числа порівнюються як <c>decimal</c>, решта — як текст.</summary>

@@ -50,13 +50,18 @@ public sealed class DialectTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Функція_поза_набором_діалекту_дає_ECR_TMPL_0422()
     {
-        // CONVERT існує, але лише в методологіях: набір Template закритий на
-        // одинадцяти функціях (02b §7).
-        var result = Expr.Parse("CONVERT(1, 't', 'kg')", ExpressionDialect.Template);
+        // SQRT існує, але лише в методологіях: набір Template закритий
+        // (02b §7). ⚠ Раніше тут стояв CONVERT — він перейшов у діалект
+        // шаблонів за Q-066: у чинному шаблоні 216 формул конвертують одиниці
+        // діленням на 1000, і без CONVERT їм нема куди мігрувати.
+        var result = Expr.Parse("SQRT(4)", ExpressionDialect.Template);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Diagnostics, d => d.Code == "ECR-TMPL-0422");
-        Assert.True(Expr.Parse("CONVERT(1, 't', 'kg')", ExpressionDialect.Methodology).IsSuccess);
+        Assert.True(Expr.Parse("SQRT(4)", ExpressionDialect.Methodology).IsSuccess);
+
+        // А CONVERT тепер доступний в обох діалектах.
+        Assert.True(Expr.Parse("CONVERT(1, 't', 'kg')", ExpressionDialect.Template).IsSuccess);
 
         var unknown = Expr.Parse("VLOOKUP(1, 2, 3)", ExpressionDialect.Methodology);
         Assert.False(unknown.IsSuccess);

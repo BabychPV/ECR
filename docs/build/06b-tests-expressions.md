@@ -663,7 +663,7 @@ public sealed class ClientServerEquivalenceTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Набір_покриває_усі_одинадцять_функцій_діалекту_шаблонів()
+    public void Набір_покриває_усі_функції_діалекту_шаблонів()
         => Assert.Fail("not implemented");
 }
 ```
