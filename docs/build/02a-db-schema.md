@@ -1854,19 +1854,39 @@ CREATE TABLE sec.RolePermission
 );
 GO
 
+-- ⚠ Виправлено 2026-09-04 (Q-042). Попередня редакція мала UserId NOT NULL і
+-- жодного поля під SID, через що ФВ-6.15 — «основний спосіб призначення для
+-- доменних користувачів — НА AD-ГРУПУ (PrincipalSid), не на особу» — була
+-- нездійсненною за побудовою. Сама вимога називає поле поіменно, тож бракувало
+-- його саме СХЕМІ, а не сутності.
 CREATE TABLE sec.RoleAssignment
 (
-    Id         int          IDENTITY(1,1) NOT NULL,
-    UserId     int          NOT NULL,
-    RoleId     int          NOT NULL,
-    ScopeJson  nvarchar(max) NULL,     -- звуження за полями IsScopeField
-    ValidFrom  date         NULL,
-    ValidTo    date         NULL,
+    Id           int           IDENTITY(1,1) NOT NULL,
+    UserId       int           NULL,       -- локальний користувач
+    PrincipalSid nvarchar(200) NULL,       -- AD-група (ФВ-6.15)
+    RoleId       int           NOT NULL,
+    ScopeJson    nvarchar(max) NULL,       -- звуження за полями IsScopeField
+    ValidFrom    date          NULL,
+    ValidTo      date          NULL,
     CONSTRAINT PK_RoleAssignment PRIMARY KEY (Id),
-    CONSTRAINT UQ_RoleAssignment UNIQUE (UserId, RoleId),
+    -- Рівно один адресат: або особа, або група. Обидва разом зробили б
+    -- призначення двозначним, жоден — «нічиїм».
+    CONSTRAINT CK_RoleAssign_Principal CHECK
+        ((UserId IS NOT NULL AND PrincipalSid IS NULL) OR
+         (UserId IS NULL     AND PrincipalSid IS NOT NULL)),
     CONSTRAINT FK_RoleAssign_User FOREIGN KEY (UserId) REFERENCES sec.[User] (Id),
     CONSTRAINT FK_RoleAssign_Role FOREIGN KEY (RoleId) REFERENCES sec.Role (Id)
 );
+GO
+
+-- Унікальність — двома фільтрованими індексами, а не одним UNIQUE: у складеному
+-- ключі (UserId, RoleId) з NULL-адресатом дублікати не ловляться взагалі.
+CREATE UNIQUE INDEX UQ_RoleAssignment_User ON sec.RoleAssignment (UserId, RoleId)
+    WHERE UserId IS NOT NULL;
+GO
+
+CREATE UNIQUE INDEX UQ_RoleAssignment_Sid ON sec.RoleAssignment (PrincipalSid, RoleId)
+    WHERE PrincipalSid IS NOT NULL;
 GO
 
 -- Успадкування Project → Sheet → Table → Column; IsDeny виграє ЗАВЖДИ (ФВ-6.6)
