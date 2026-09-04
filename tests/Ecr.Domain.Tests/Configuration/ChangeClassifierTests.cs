@@ -12,6 +12,8 @@ namespace Ecr.Domain.Tests.Configuration;
 /// </summary>
 public sealed class ChangeClassifierTests
 {
+    private static readonly ChangeClassifier Classifier = new();
+
     [Theory]
     [InlineData("HeaderL10n")]
     [InlineData("Ordinal")]
@@ -19,7 +21,12 @@ public sealed class ChangeClassifierTests
     [InlineData("IsHidden")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Презентаційні_поля_класифікуються_як_Presentation(string field)
-        => Assert.Fail("not implemented");
+    {
+        // Презентація лишається презентацією і тоді, коли документи вже є —
+        // саме тому такі правки дозволені в опублікованій версії.
+        Assert.Equal(ChangeClass.Presentation, Classifier.Classify("ColumnDef", field, hasDocuments: false));
+        Assert.Equal(ChangeClass.Presentation, Classifier.Classify("ColumnDef", field, hasDocuments: true));
+    }
 
     [Theory]
     [InlineData("DataType")]
@@ -28,15 +35,45 @@ public sealed class ChangeClassifierTests
     [InlineData("LookupRegistryDefId")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Зміна_типу_точності_або_одиниці_класифікується_як_Guarded(string field)
-        => Assert.Fail("not implemented");
+    {
+        // Дані лишаються на місці, але їхнє ТЛУМАЧЕННЯ змінюється: ті самі
+        // 12500 в іншій одиниці — інше число у звіті. Тому потрібна стратегія
+        // міграції, а не проста заборона і не мовчазний дозвіл.
+        Assert.Equal(ChangeClass.Guarded, Classifier.Classify("ColumnDef", field, hasDocuments: true));
+        Assert.Equal(ChangeClass.Guarded, Classifier.Classify("ColumnDef", field, hasDocuments: false));
+
+        Assert.NotEqual(ChangeClass.Presentation, Classifier.Classify("ColumnDef", field, hasDocuments: true));
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Зміна_коду_колонки_за_наявності_документів_це_Breaking()
-        => Assert.Fail("not implemented");
+    {
+        // Комірка посилається на ColumnDef.Code. Перейменування розриває
+        // зв'язок наявних даних з описом, і жодна стратегія міграції цього
+        // не рятує — дані просто перестають знаходитися.
+        Assert.Equal(ChangeClass.Breaking, Classifier.Classify("ColumnDef", "Code", hasDocuments: true));
+
+        // Поки документів немає, посилатися на код ще нічому.
+        Assert.Equal(ChangeClass.Safe, Classifier.Classify("ColumnDef", "Code", hasDocuments: false));
+
+        // Те саме для ідентичності рядка і таблиці.
+        Assert.Equal(ChangeClass.Breaking, Classifier.Classify("RowDef", "RowKeyValue", hasDocuments: true));
+        Assert.Equal(ChangeClass.Breaking, Classifier.Classify("TableDef", "Code", hasDocuments: true));
+
+        // Видалення з документами — теж Breaking, попри soft delete (ФВ-7.6):
+        // комірки лишаються, а опису до них уже немає.
+        Assert.Equal(ChangeClass.Breaking, Classifier.ClassifyDeletion("ColumnDef", hasDocuments: true));
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Додавання_нової_колонки_це_Safe()
-        => Assert.Fail("not implemented");
+    {
+        // У нової колонки просто немає комірок — наявних даних це не зачіпає
+        // незалежно від того, чи є документи.
+        Assert.Equal(ChangeClass.Safe, Classifier.ClassifyAddition("ColumnDef"));
+        Assert.Equal(ChangeClass.Safe, Classifier.ClassifyAddition("RowDef"));
+        Assert.Equal(ChangeClass.Safe, Classifier.ClassifyAddition("SheetDef"));
+    }
 }

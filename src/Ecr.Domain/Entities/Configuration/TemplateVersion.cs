@@ -58,24 +58,57 @@ public sealed class TemplateVersion : Entity<int>
     /// </summary>
     /// <exception cref="DomainException">Версія вже опублікована.</exception>
     public void Publish(int publishedByUserId, DateTime utcNow)
-        => throw new NotImplementedException(
-            "TODO: перевірити Status == Draft (інакше DomainException ECR-TMPL-0409); " +
-            "виставити Status = Published, PublishedAt = utcNow, PublishedByUserId; " +
-            "PresentationRevision лишити 0.");
+    {
+        if (Status != TemplateVersionStatus.Draft)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Версію {Version} вже опубліковано або виведено з обігу (стан {Status}). " +
+                "Повторна публікація неможлива: опублікована версія структурно незмінна, " +
+                "а зміни вносяться клонуванням у нову версію (ФВ-7.1).");
+        }
+
+        Status = TemplateVersionStatus.Published;
+        PublishedAt = utcNow;
+        PublishedByUserId = publishedByUserId;
+
+        // PresentationRevision навмисно лишається 0: публікація не є
+        // презентаційною правкою, і ключ кешу свіжоопублікованої версії має
+        // бути v{id}:r0.
+    }
 
     /// <summary>
     /// Реєструє презентаційну правку. Викликається <b>після</b> успішного
     /// оновлення в БД, значення береться з <c>OUTPUT</c> (R-B7).
     /// </summary>
     public void ApplyPresentationRevision(int newRevision)
-        => throw new NotImplementedException(
-            "TODO: перевірити newRevision == PresentationRevision + 1; інакше DomainException " +
-            "(розбіжність означає паралельну правку, яку ми пропустили); присвоїти значення.");
+    {
+        if (newRevision != PresentationRevision + 1)
+        {
+            // Розбіжність означає, що між читанням і записом хтось інший уже
+            // інкрементував ревізію. Прийняти це значення — означало б
+            // видати за поточний стан той, якого ми не бачили, і ключ кешу
+            // почав би вказувати на неактуальну структуру.
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Очікувалася презентаційна ревізія {PresentationRevision + 1}, отримано {newRevision}. " +
+                "Розбіжність означає паралельну правку, яку ця сесія не бачила.");
+        }
+
+        PresentationRevision = newRevision;
+    }
 
     /// <summary>Перевіряє, чи допустима структурна зміна в поточному стані.</summary>
     /// <exception cref="DomainException">Версія структурно заморожена.</exception>
     public void EnsureStructurallyMutable()
-        => throw new NotImplementedException(
-            "TODO: якщо IsStructurallyFrozen — кинути DomainException з кодом ECR-TMPL-0409 " +
-            "і поясненням, що структурні зміни робляться через CloneFrom (ФВ-7.1).");
+    {
+        if (IsStructurallyFrozen)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Версія {Version} у стані {Status} структурно заморожена. " +
+                "Структурні зміни вносяться клонуванням у нову версію (ФВ-7.1); " +
+                "без клону вже подані документи мовчки змінили б свою структуру.");
+        }
+    }
 }
