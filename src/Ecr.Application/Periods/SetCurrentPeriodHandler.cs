@@ -1,7 +1,10 @@
 // src/Ecr.Application/Periods/SetCurrentPeriodHandler.cs
+using System.Text.Json;
+using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
-using Ecr.Application.Common;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Periods;
 
@@ -15,13 +18,53 @@ namespace Ecr.Application.Periods;
 /// закриття періоду.
 /// </remarks>
 public sealed class SetCurrentPeriodHandler(
-    IUnitOfWork uow, IAuditWriter audit, ICurrentUser currentUser, IClock clock)
+    IPeriodStore periods, IUnitOfWork uow, IAuditWriter audit, ICurrentUser currentUser, IClock clock)
 {
-    public Task HandleAsync(int projectId, int? pinnedPeriodId, string? reason, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: 1) pinnedPeriodId = null → режим Auto, веде PeriodStateJob;\n" +
-            "2) інакше режим Pinned: reason ОБОВ'ЯЗКОВИЙ, період має належати проєкту;\n" +
-            "3) запис у aud.StructureChange: хто, коли, з чого на що, чому;\n" +
-            "4) ⛔ жодних перевірок доступу на основі цього значення — ані тут, " +
-            "   ані деінде (ФВ-1.14).");
+    /// <summary>Фіксує поточний період або повертає автоматичний режим.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="pinnedPeriodId">Період; <c>null</c> — режим <c>Auto</c>.</param>
+    /// <param name="reason">Причина фіксації; обов'язкова при <c>Pinned</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(int projectId, int? pinnedPeriodId, string? reason, CancellationToken ct)
+    {
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати поточний період.");
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+                      ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт {projectId} не знайдено.");
+
+        var now = clock.UtcNow;
+        var before = project.CurrentPeriodId;
+
+        if (pinnedPeriodId is { } periodId)
+        {
+            // Причину вимагає домен; належність періоду проєкту — теж.
+            project.PinCurrentPeriod(periodId, reason ?? string.Empty, userId, now);
+        }
+        else
+        {
+            project.UnpinCurrentPeriod(userId, now);
+        }
+
+        // ⛔ Жодних перевірок доступу на основі цього значення — ані тут, ані
+        // деінде (ФВ-1.14). Тому в CellAccessContext поля CurrentPeriod немає
+        // за побудовою: забути правило неможливо, бо його нічим виразити.
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                now,
+                TemplateVersionId: project.TemplateVersionId,
+                EntityType: "Project.CurrentPeriod",
+                EntityId: project.Id,
+                ChangeClass: ChangeClass.Presentation,
+                Operation: pinnedPeriodId is null ? "Unpin" : "Pin",
+                OldJson: JsonSerializer.Serialize(new { currentPeriodId = before }),
+                NewJson: JsonSerializer.Serialize(new { currentPeriodId = project.CurrentPeriodId }),
+                ChangeReason: reason,
+                ChangedByUserId: userId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
 }

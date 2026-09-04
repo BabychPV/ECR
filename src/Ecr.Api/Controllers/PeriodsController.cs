@@ -21,10 +21,16 @@ public sealed class PeriodsController(ReopenPeriodHandler reopen) : ControllerBa
     [HttpPost("{id:int}/reopen")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public Task<IActionResult> Reopen(int id, [FromBody] ReopenPeriodRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Period.Reopen через IAccessDecisionService; делегувати " +
-            "reopen.HandleAsync(id, request.Reason, request.Until, ct); повернути 204.");
+    public async Task<IActionResult> Reopen(
+        int id, [FromBody] ReopenPeriodRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Право Period.Reopen перевіряє обробник: воно небезпечне, і рішення
+        // має ухвалюватися там само, де виконується дія.
+        await reopen.HandleAsync(id, request.Reason, request.Until, ct).ConfigureAwait(false);
+        return NoContent();
+    }
 }
 
 /// <summary>Запит на відкриття періоду.</summary>

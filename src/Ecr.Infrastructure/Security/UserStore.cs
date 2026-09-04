@@ -1,4 +1,6 @@
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
@@ -11,6 +13,17 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 {
     /// <summary>Код типової політики паролів із seed.</summary>
     private const string DefaultPolicyCode = "Default";
+
+    /// <summary>Стеля кількості ролей в одному зрізі.</summary>
+    /// <remarks>
+    /// Ролі — дані, а не enum (ФВ-6.6), тож їх кількість не обмежена схемою.
+    /// П'ятсот — та сама межа, що й <c>CursorRequest.MaxLimit</c>: більше
+    /// ролей на екрані все одно не читають.
+    /// </remarks>
+    private const int MaxRoles = 500;
+
+    /// <summary>Стеля кількості прав; каталог закритий і не зростає сам.</summary>
+    private const int MaxPermissions = 128;
 
     /// <inheritdoc />
     public Task<User?> FindBootstrapAdminAsync(CancellationToken ct)
@@ -71,6 +84,115 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // Навігація, а не UserId: користувача могли ще не зберегти, і тоді
         // ключ дорівнює нулю. EF підставить його сам при SaveChanges.
         db.RoleAssignments.Add(new RoleAssignment(roleId, user));
+    }
+
+    /// <inheritdoc />
+    public async Task<PagedResult<UserView>> ListAsync(
+        CursorRequest page, DateTime utcNow, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        var after = Cursor.Decode(page.Cursor);
+
+        // Беремо на один більше за сторінку: так видно, чи є наступна, без
+        // окремого COUNT по всій таблиці.
+        var rows = await db.Users
+            .AsNoTracking()
+            .Where(u => u.Id > after)
+            .OrderBy(u => u.Id)
+            .Take(page.Limit + 1)
+            .Select(u => new
+            {
+                u.Id, u.UserName, u.DisplayName, u.Provider,
+                u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.LockedUntil,
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var hasMore = rows.Count > page.Limit;
+        var items = rows.Take(page.Limit)
+            .Select(u => new UserView(
+                u.Id, u.UserName, u.DisplayName, u.Provider,
+                u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword,
+                u.LockedUntil is { } until && until > utcNow))
+            .ToList();
+
+        // ⛔ У проєкції немає ні PasswordHash, ні SecurityStamp — і не тому, що
+        // «забули додати»: перелік користувачів бачить адміністратор, а хеш не
+        // має покидати сховище взагалі (ФВ-6.11).
+        return new PagedResult<UserView>(
+            items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RoleView>> ListRolesAsync(CancellationToken ct)
+    {
+        // ⚠ Take стоїть навіть тут, де набір свідомо малий: ролей десятки,
+        // прав 38. Але «свідомо малий» — це властивість сьогоднішніх даних, а
+        // не запиту; запит без межі рано чи пізно зустріне таблицю, яка виросла.
+        var roles = await db.Roles
+            .AsNoTracking()
+            .OrderBy(r => r.Code)
+            .Take(MaxRoles)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var permissions = await db.RolePermissions
+            .AsNoTracking()
+            .Join(db.Permissions, rp => rp.PermissionCode, p => p.Id,
+                  (rp, p) => new { rp.RoleId, Code = p.Id, p.IsDangerous })
+            .Take(MaxRoles * MaxPermissions)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return roles
+            .Select(r =>
+            {
+                var mine = permissions.Where(p => p.RoleId == r.Id).ToList();
+
+                // Небезпечні показуються ОКРЕМО, а не тонуть у спільному
+                // списку: їх видають поіменно, і адміністратор має бачити, що
+                // саме він видає (ФВ-6.12, D-40).
+                return new RoleView(
+                    r.Id, r.Code, r.IsBuiltIn, r.IsActive,
+                    [.. mine.Select(p => p.Code).Order(StringComparer.Ordinal)],
+                    [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)]);
+            })
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(role);
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        db.Roles.Add(role);
+
+        // Ідентифікатор ролі потрібен для зв'язків, а IDENTITY заповнюється
+        // лише при збереженні.
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        foreach (var code in permissionCodes.Distinct(StringComparer.Ordinal))
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, code));
+        }
+
+        return role.Id;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> FilterDangerousAsync(
+        IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        return await db.Permissions
+            .AsNoTracking()
+            .Where(p => p.IsDangerous && permissionCodes.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />

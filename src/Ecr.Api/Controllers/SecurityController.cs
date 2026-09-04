@@ -1,3 +1,4 @@
+using Ecr.Application.Common;
 using Ecr.Application.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -10,38 +11,74 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1")]
 [Authorize]
 public sealed class SecurityController(
+    ListRolesHandler listRoles,
+    CreateRoleHandler createRole,
+    ListUsersHandler listUsers,
+    CreateUserHandler createUser,
     StartSimulationHandler startSimulation,
     EndSimulationHandler endSimulation,
-    ChangePasswordHandler changePassword) : ControllerBase
+    ChangePasswordHandler changePassword,
+    Ecr.Domain.Abstractions.IClock clock) : ControllerBase
 {
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
     [HttpGet("roles")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> ListRoles(CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: ролі з їхніми правами; небезпечні права (IsDangerous) позначати окремо — " +
-            "у складені ролі вони не входять навмисно (ФВ-6.12, D-40).");
+    public async Task<IActionResult> ListRoles(CancellationToken ct)
+        // Небезпечні права віддаються ОКРЕМИМ списком: у складені ролі вони не
+        // входять навмисно, і адміністратор має бачити різницю (ФВ-6.12, D-40).
+        => Ok(await listRoles.HandleAsync(ct).ConfigureAwait(false));
 
     /// <summary>Створює роль. Право <c>Security.ManageRoles</c>.</summary>
     [HttpPost("roles")]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    public Task<IActionResult> CreateRole([FromBody] CreateRoleRequest request, CancellationToken ct)
-        => throw new NotImplementedException("TODO: перевірити Security.ManageRoles; створити sec.Role.");
+    public async Task<IActionResult> CreateRole([FromBody] CreateRoleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var roleId = await createRole
+            .HandleAsync(request.Code, request.NameL10n, request.PermissionCodes, ct)
+            .ConfigureAwait(false);
+
+        return Created($"/api/v1/roles/{roleId}", new { roleId });
+    }
 
     /// <summary>Перелік користувачів. Право <c>Security.ManageUsers</c>.</summary>
     [HttpGet("users")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> ListUsers([FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: курсорна пагінація. ⚠ Хеш пароля і сіль не повертати ніколи (ФВ-6.11).");
+    public async Task<IActionResult> ListUsers(
+        [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
+    {
+        var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
+        if (!page.IsValid)
+        {
+            return BadRequest(new { error = $"limit поза межами 1..{CursorRequest.MaxLimit}" });
+        }
+
+        // ⛔ Хеш пароля і сіль не покидають сховище: у проєкції UserView їх
+        // немає за побудовою, а не «не додали» (ФВ-6.11).
+        return Ok(await listUsers.HandleAsync(page, clock.UtcNow, ct).ConfigureAwait(false));
+    }
 
     /// <summary>Створює користувача. Право <c>Security.ManageUsers</c>.</summary>
     [HttpPost("users")]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    public Task<IActionResult> CreateUser([FromBody] CreateUserRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: локальний користувач створюється з MustChangePassword = 1; " +
-            "доменний — за SID, без пароля взагалі.");
+    public async Task<IActionResult> CreateUser([FromBody] CreateUserRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var provider = string.Equals(request.Provider, "Windows", StringComparison.OrdinalIgnoreCase)
+            ? Ecr.Domain.Enums.AuthProvider.Windows
+            : Ecr.Domain.Enums.AuthProvider.Local;
+
+        var userId = await createUser
+            .HandleAsync(
+                request.UserName, request.DisplayName ?? request.UserName, provider,
+                request.Sid, request.InitialPassword, request.RoleCodes ?? [], ct)
+            .ConfigureAwait(false);
+
+        // ⛔ У відповіді немає ні пароля, ні його хеша — лише ідентифікатор.
+        return Created($"/api/v1/users/{userId}", new { userId });
+    }
 
     /// <summary>
     /// Починає сеанс симуляції. Право <c>Security.Simulate</c>.
@@ -133,7 +170,22 @@ public sealed record CreateRoleRequest(
 /// <param name="UserName">Ім'я входу.</param>
 /// <param name="Provider"><c>Windows</c> або <c>Local</c>.</param>
 /// <param name="Sid">SID доменного користувача; <c>null</c> для локального.</param>
-public sealed record CreateUserRequest(string UserName, string Provider, string? Sid);
+/// <param name="DisplayName">Ім'я для показу; типово збігається з іменем входу.</param>
+/// <param name="InitialPassword">Разовий пароль локального запису.</param>
+/// <param name="RoleCodes">Ролі, які призначити одразу.</param>
+/// <remarks>
+/// ⚠ Три останні поля додані понад форму <c>05h</c>: без пароля неможливо
+/// створити локальний запис, а без ролей новий користувач не має жодного
+/// права — і «створили, але не працює» виглядало б як дефект системи.
+/// Позиційний префікс контракту не змінений (<c>D3-18</c>).
+/// </remarks>
+public sealed record CreateUserRequest(
+    string UserName,
+    string Provider,
+    string? Sid,
+    string? DisplayName = null,
+    string? InitialPassword = null,
+    IReadOnlyList<string>? RoleCodes = null);
 
 /// <summary>Запит на початок симуляції.</summary>
 /// <param name="SubjectUserId">Чиїми очима дивимося.</param>

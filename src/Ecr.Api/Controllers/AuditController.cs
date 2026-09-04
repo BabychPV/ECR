@@ -1,3 +1,5 @@
+using Ecr.Application.Audit;
+using Ecr.Application.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,7 +13,7 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/audit")]
 [Authorize]
-public sealed class AuditController : ControllerBase
+public sealed class AuditController(GetCellChangesHandler cellChanges) : ControllerBase
 {
     /// <summary>
     /// Історія змін комірок. Право <c>Security.ViewAudit</c>.
@@ -25,12 +27,18 @@ public sealed class AuditController : ControllerBase
     [HttpGet("cells")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public Task<IActionResult> Cells(
+    public async Task<IActionResult> Cells(
         [FromQuery] DateTime from, [FromQuery] DateTime to,
         [FromQuery] long? documentId, [FromQuery] int limit, [FromQuery] string? cursor,
         CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Security.ViewAudit; вікно (from, to) обов'язкове і обмежене згори — " +
-            "без нього запит іде по всіх партиціях aud.CellChange; курсорна пагінація; " +
-            "автором зміни показувати UserId, а не SID.");
+    {
+        var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
+
+        // Вікно, його ширина і розмір сторінки перевіряються в обробнику:
+        // правило «без вікна запит іде по всіх партиціях» має діяти незалежно
+        // від того, звідки його викликали.
+        return Ok(await cellChanges
+            .HandleAsync(from, to, documentId, page, ct)
+            .ConfigureAwait(false));
+    }
 }

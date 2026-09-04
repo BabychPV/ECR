@@ -64,6 +64,20 @@ public static class DependencyInjection
         services.AddScoped<Security.StartSimulationHandler>();
         services.AddScoped<Security.EndSimulationHandler>();
 
+        // Безпека: ролі, користувачі, аудит (модулі 3.2, 3.9)
+        services.AddScoped<Security.ListRolesHandler>();
+        services.AddScoped<Security.CreateRoleHandler>();
+        services.AddScoped<Security.ListUsersHandler>();
+        services.AddScoped<Security.CreateUserHandler>();
+        services.AddScoped<Audit.GetCellChangesHandler>();
+        services.AddScoped<Projects.CloneProjectHandler>();
+
+        // Періоди (модуль 3.4)
+        services.AddScoped<Periods.BuildPeriodCalendarHandler>();
+        services.AddScoped<Periods.SetCurrentPeriodHandler>();
+        services.AddScoped<Periods.ReopenPeriodHandler>();
+        services.AddScoped<Periods.GetPeriodCalendarHandler>();
+
         // Робочий процес (модулі 3.4–3.6)
         services.AddScoped<Workflow.SubmitSheetHandler>();
         services.AddScoped<Workflow.ApproveSheetHandler>();

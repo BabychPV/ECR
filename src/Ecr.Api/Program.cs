@@ -24,7 +24,14 @@ builder.Services.AddEcrApplication();
 
 builder.Services.AddEcrAuthentication(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser, CurrentUser>();
+// ⚠ Конкретний CurrentUser реєструється ОКРЕМО, і той самий екземпляр
+// віддається за інтерфейсом. Контролери, яким архітектурне правило
+// дозволяє брати CurrentUser напряму (CellsController,
+// TemplateVersionsController), без цієї реєстрації просто не
+// створювалися б — і 500 отримували б усі їхні ендпоінти.
+builder.Services.AddScoped<CurrentUser>();
+builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
+    sp => sp.GetRequiredService<CurrentUser>());
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 

@@ -1,4 +1,5 @@
 using Ecr.Application.Periods;
+using Ecr.Application.Projects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,9 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class ProjectsController(
     BuildPeriodCalendarHandler buildCalendar,
-    SetCurrentPeriodHandler setCurrentPeriod) : ControllerBase
+    GetPeriodCalendarHandler getCalendar,
+    SetCurrentPeriodHandler setCurrentPeriod,
+    CloneProjectHandler cloneProject) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
@@ -36,9 +39,14 @@ public sealed class ProjectsController(
     /// <summary>Клонує проєкт разом із налаштуваннями. Право <c>Project.Manage</c>.</summary>
     [HttpPost("{id:int}/clone")]
     [ProducesResponseType(StatusCodes.Status201Created)]
-    public Task<IActionResult> Clone(int id, [FromBody] CloneProjectRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: клонувати налаштування і політику періодів; ДАНІ документів не клонувати.");
+    public async Task<IActionResult> Clone(
+        int id, [FromBody] CloneProjectRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var projectId = await cloneProject.HandleAsync(id, request.Code, ct).ConfigureAwait(false);
+        return Created($"/api/v1/projects/{projectId}", new { projectId });
+    }
 
     /// <summary>
     /// Встановлює поточний період проєкту. Право <c>Period.Configure</c>.
@@ -50,18 +58,32 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPut("{id:int}/current-period")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public Task<IActionResult> SetCurrentPeriod(int id, [FromBody] SetCurrentPeriodRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Period.Configure; делегувати " +
-            "setCurrentPeriod.HandleAsync(id, request.PinnedPeriodId, request.Reason, ct).");
+    public async Task<IActionResult> SetCurrentPeriod(
+        int id, [FromBody] SetCurrentPeriodRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await setCurrentPeriod
+            .HandleAsync(id, request.PinnedPeriodId, request.Reason, ct)
+            .ConfigureAwait(false);
+
+        return NoContent();
+    }
 
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:int}/periods")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> Periods(int id, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати buildCalendar.HandleAsync(id, ct); повернути періоди зі станом і межами " +
-            "в поясі майданчика, а не в UTC.");
+    public async Task<IActionResult> Periods(int id, CancellationToken ct)
+    {
+        // Календар добудовується перед читанням: проєкт міг бути створений до
+        // того, як задача станів відпрацювала, і порожній список періодів
+        // виглядав би як «проєкт зламаний». Виклик ідемпотентний — повторно
+        // нічого не створює.
+        await buildCalendar.HandleAsync(id, ct).ConfigureAwait(false);
+
+        // ⚠ Межі віддаються в поясі майданчика, а не в UTC (D-68).
+        return Ok(await getCalendar.HandleAsync(id, ct).ConfigureAwait(false));
+    }
 }
 
 /// <summary>Запит на створення проєкту.</summary>

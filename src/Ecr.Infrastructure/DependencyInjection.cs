@@ -67,6 +67,8 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
+        services.AddScoped<IPeriodStore, PeriodStore>();
+        services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped(typeof(IRepository<,>), typeof(Repository<,>));
 
         // BulkCellLoader працює власним з'єднанням (SqlBulkCopy), тому рядок

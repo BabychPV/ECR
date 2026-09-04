@@ -1,4 +1,6 @@
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 
@@ -12,6 +14,12 @@ public sealed class FakeUserStore : IUserStore
 
     /// <summary>Ролі, призначені через <see cref="GrantRoleAsync"/>.</summary>
     public List<(string UserName, string RoleCode)> Grants { get; } = [];
+
+    /// <summary>Ролі сховища.</summary>
+    public List<RoleView> Roles { get; } = [];
+
+    /// <summary>Коди прав, які вважаються небезпечними.</summary>
+    public HashSet<string> Dangerous { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Зафіксовані спроби входу.</summary>
     public List<LoginAttempt> Attempts { get; } = [];
@@ -76,6 +84,47 @@ public sealed class FakeUserStore : IUserStore
 
     /// <inheritdoc />
     public void RecordAttempt(LoginAttempt attempt) => Attempts.Add(attempt);
+
+    /// <inheritdoc />
+    public Task<PagedResult<UserView>> ListAsync(CursorRequest page, DateTime utcNow, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        var items = _users
+            .OrderBy(u => u.Id)
+            .Take(page.Limit)
+            .Select(u => new UserView(
+                u.Id, u.UserName, u.DisplayName, u.Provider,
+                u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.IsLockedOut(utcNow)))
+            .ToList();
+
+        return Task.FromResult(new PagedResult<UserView>(items, NextCursor: null, TotalCount: items.Count));
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<RoleView>> ListRolesAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<RoleView>>(Roles);
+
+    /// <inheritdoc />
+    public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(role);
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        var id = Roles.Count + 1;
+        Roles.Add(new RoleView(id, role.Code, role.IsBuiltIn, role.IsActive, [.. permissionCodes], []));
+        return Task.FromResult(id);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> FilterDangerousAsync(
+        IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        return Task.FromResult<IReadOnlyList<string>>(
+            [.. permissionCodes.Where(Dangerous.Contains)]);
+    }
 
     /// <inheritdoc />
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct) => Task.FromResult(Policy);

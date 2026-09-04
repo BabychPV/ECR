@@ -1,0 +1,60 @@
+using Ecr.Application.Errors;
+using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Documents;
+using Microsoft.EntityFrameworkCore;
+
+namespace Ecr.Infrastructure.Persistence;
+
+/// <summary>Реалізація <see cref="IPeriodStore"/> над <see cref="EcrDbContext"/>.</summary>
+public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
+{
+    /// <inheritdoc />
+    public async Task<Project?> FindProjectAsync(int projectId, CancellationToken ct)
+    {
+        var project = await db.Projects
+            .FirstOrDefaultAsync(p => p.Id == projectId, ct)
+            .ConfigureAwait(false);
+
+        if (project is null)
+        {
+            return null;
+        }
+
+        // Періоди завантажуються явно: календар звіряє наявні ключі, і
+        // порожня колекція означала б «періодів немає» — тобто побудову
+        // дублікатів на кожному виклику.
+        await db.Entry(project).Collection(p => p.Periods).LoadAsync(ct).ConfigureAwait(false);
+        return project;
+    }
+
+    /// <inheritdoc />
+    public async Task<PeriodPolicy> GetPolicyAsync(int periodPolicyId, CancellationToken ct)
+        => await db.PeriodPolicies
+            .FirstOrDefaultAsync(p => p.Id == periodPolicyId, ct)
+            .ConfigureAwait(false)
+           ?? throw new NotFoundException(
+               "ECR-PRD-0422",
+               $"Політику періодів {periodPolicyId} не знайдено. Виконайте seed перед створенням проєкту.");
+
+    /// <inheritdoc />
+    public Task<Period?> LockAsync(int periodId, CancellationToken ct)
+        // ⚠ UPDLOCK тримається до кінця транзакції: адміністративне відкриття і
+        // PeriodStateJob беруть той самий рядок і мусять серіалізуватися
+        // (ФВ-1.10a). ROWLOCK — щоб блокування не розповзалося на сторінку і не
+        // зупиняло сусідні проєкти.
+        => db.Periods
+            .FromSql($"""
+                SELECT * FROM doc.Period WITH (UPDLOCK, ROWLOCK) WHERE Id = {periodId}
+                """)
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    public void AddRange(IEnumerable<Period> periods) => db.Periods.AddRange(periods);
+
+    /// <inheritdoc />
+    public Task AddProjectAsync(Project project, CancellationToken ct)
+    {
+        db.Projects.Add(project);
+        return Task.CompletedTask;
+    }
+}

@@ -50,6 +50,21 @@ public interface IUserStore
     /// <summary>Призначає роль записові; застосовується разом із транзакцією.</summary>
     public Task GrantRoleAsync(User user, string roleCode, CancellationToken ct);
 
+    /// <summary>Сторінка облікових записів.</summary>
+    /// <remarks>⛔ Хеш пароля і <c>SecurityStamp</c> не покидають сховище (ФВ-6.11).</remarks>
+    public Task<Common.PagedResult<Security.UserView>> ListAsync(
+        Common.CursorRequest page, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>Ролі з їхніми правами.</summary>
+    public Task<IReadOnlyList<Security.RoleView>> ListRolesAsync(CancellationToken ct);
+
+    /// <summary>Створює роль із набором прав; повертає її ідентифікатор.</summary>
+    public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct);
+
+    /// <summary>Залишає з переліку лише **небезпечні** права (<c>ФВ-6.12</c>).</summary>
+    public Task<IReadOnlyList<string>> FilterDangerousAsync(
+        IReadOnlyList<string> permissionCodes, CancellationToken ct);
+
     /// <summary>Політика паролів запису або типова.</summary>
     /// <remarks>
     /// Повертає завжди щось: відсутня політика не має означати «без обмежень» —
