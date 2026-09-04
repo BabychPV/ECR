@@ -82,14 +82,17 @@
 | Q-011 | BOOTSTRAP-FIX | відсутні `using` у 25 файлах | RESOLVED |
 | Q-012 | DECIDED | `TemplateStructureDto` бере `ColumnDto`/`RowDto` з `Documents.Dto` | **OPEN** — семантика DTO |
 | Q-013 | CONFLICT | циклічна залежність `FormulaEngine` | RESOLVED · варіант **A**, 2026-09-04 |
-| **Q-014** | **CONTRACT** | **десять контрактних типів не оголошені ніде** | **OPEN · ЗУПИНКА** |
+| Q-014 | CONTRACT | десять контрактних типів не оголошені ніде | **ЧЕРНЕТКИ НАПИСАНІ · чекають затвердження** |
 | Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | **OPEN** |
 | Q-016 | ENV | Docker не запущений | **OPEN** |
 | Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **OPEN** |
-| **Q-018** | **CONFLICT** | **`Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure`** | **OPEN · ЗУПИНКА** |
+| Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | RESOLVED · варіант **B**, 2026-09-04 |
 | Q-019 | BOOTSTRAP-FIX | немає `[CollectionDefinition("SqlServer")]` | RESOLVED |
 | Q-020 | DECIDED | мінімальні скелети для `StyleMapper`, `ImportDiffBuilder`, `CurrentUser` | RESOLVED |
 | Q-021 | SCOPE | зонд: після зняття Q-014 і Q-018 збирається **все** | RESOLVED · інформаційний |
+| Q-022 | BOOTSTRAP-FIX | `Ecr.TestKit` переривав `dotnet test` (`IsTestProject`) | RESOLVED |
+| Q-023 | DECIDED | фронтенд: `index.html`, `main.tsx`, `api/types.ts`, `JSX` під React 19 | RESOLVED |
+| Q-024 | DECIDED | п'ять скелетів, яких вимагає `Program.cs` | RESOLVED |
 
 ---
 
@@ -679,7 +682,38 @@ src\Ecr.Application\Ports\IExternalDataSource.cs(22,38): error CS0246: The type 
 
 **Що потрібно від людини:** оголошення цих десяти типів у `02-contracts.md`
 (або вказівка, з якого документа взяти їх дослівно).
-**Статус:** OPEN · **робота зупинена**
+
+---
+
+**Рішення замовника (2026-09-04): скласти чернетки на затвердження.**
+
+Усі десять оголошені. Розміщені **поруч зі своїми портами** — за конвенцією
+самого пакета (пор. `IBackgroundJobScheduler.cs`, де в тому самому файлі
+живуть `IBackgroundJob`, `IJobProgress` і `JobStatus`; `IExcelExporter.cs`,
+де поруч `ExcelExportOptions`). Нових файлів через це не з'явилося, крім
+`EvaluationResult.cs`, який і так є в дереві `05-skeleton.md` §1.
+
+Кожен тип має в XML-doc блок `⚠ Q-014, обґрунтування` з позначкою
+**тверде / часткове / слабке (здогадка)** і переліком того, на що я спирався.
+Чотири типи позначені як здогадка — їх треба переглянути насамперед.
+
+| Тип | Файл | Обґрунтування | На чому спирається |
+|---|---|---|---|
+| `FormulaDependencyRef` | `Ports/IFormulaEngine.cs` | **тверде** | колонки `cfg.FormulaDependency` + наявний `ExtractedDependency` (`05d`) + `TODO` «спроєктувати в контрактний тип» |
+| `EvaluationResult` | `Expressions/Evaluation/EvaluationResult.cs` | **тверде** | `TODO` «загорнути результат і діагностики»; `Evaluator` повертає `ExpressionValue`, діагностика в пакеті одна — `ExpressionDiagnostic` |
+| `CalculationOutput` + `CalculationOutputValue` + `CalculationTraceStep` | `Ports/ICalculationModule.cs` | **тверде** | 1:1 з `calc.CalculationResult` і `calc.CalculationStep` |
+| `CalculationInput` + `CalculationArgument` | `Ports/ICalculationModule.cs` | часткове | колонки `calc.CalculationInput`; гранульованість «один рядок» — із `CalculationInputBuilder`. `TableInstanceId` і `PeriodKey` додав я |
+| `MethodologyDescriptor` | `Ports/ICalculationModule.cs` | часткове | `CanHandle` вимагає `Level`; три режими — з `MethodologyVersion`, кожен визначає числа |
+| `DependencyContext` | `Ports/IFormulaEngine.cs` | часткове | параметри `DependencyExtractor.Extract`; `TemplateVersionId` додав я |
+| `CollectionResult` + `SourceDataPoint` + `TimeInterval` | `Ports/IExternalDataSource.cs` | часткове | `ext.RawDataPoint`; `FailedIntervals` — пряма вимога `TODO` «часткова відмова батча — це НЕ загальний провал» |
+| **`FormulaNode`** | `Ports/IFormulaEngine.cs` | **слабке** | лише те, що `OrderingResult.Order` — це `int`, а `TopologicalSorter` має повернути шлях циклу |
+| **`SourceEntityDescriptor`** | `Ports/IExternalDataSource.cs` | **слабке** | колонки `ext.SourceEntity` + `TODO` «збирати атрибути з їхнім UOM» |
+| **`CollectionRequest`** | `Ports/IExternalDataSource.cs` | **слабке** | параметри `CollectionRunner.RunAsync` + `itg.CollectionRun`; `SourcePath` і `MaxPoints` додав я |
+
+⚠ **Ці оголошення ще не перенесені в `02-contracts.md`** — вони живуть у коді
+`src/`. Перенести їх туди має сенс лише після затвердження, інакше контракт
+зафіксує здогадку як домовленість.
+**Статус:** OPEN · чернетки написані, збірка зелена; **потрібне затвердження форми**
 
 ---
 
@@ -901,7 +935,50 @@ src\Ecr.Adapters.PiAf\CatchUpPlanner.cs(11,40):        error CS0234: The type or
   рішенням, але `Ecr.Calculations` тоді майже порожніє.**
 
 **Що потрібно від людини:** вибрати A, B або C.
-**Статус:** OPEN · **робота зупинена**
+
+---
+
+**Рішення замовника (2026-09-04): варіант B.**
+
+Уведено чотири порти в `Ecr.Application.Ports`:
+
+| Порт | Хто використовує | Що віддає |
+|---|---|---|
+| `IMethodologyStore` | `MethodologyResolver` | опубліковані версії, правила, формули, речовини, виходи |
+| `IConstantStore` | `ConstantResolver` | **кандидатів** на константу, а не готове значення |
+| `ICalculationResultStore` | `CalculationOutputWriter` | резерв Id, пакетний запис результатів і трейсу, інвалідація `rpt.*` |
+| `ICollectionStore` | `CollectionRunner`, `CatchUpPlanner` | сутність і джерело, прогін, upsert точок, покриття |
+
+**Принцип розділення:** порт віддає **дані**, логіка лишається в
+`Ecr.Calculations` / `Ecr.Adapters.PiAf`. Тому `IConstantStore` повертає всіх
+кандидатів: правило «кілька кандидатів на одну дату — помилка конфігурації,
+а не привід узяти перший» (ФВ-16.5) неможливо перевірити, якщо сховище вже
+вибрало один запис. З тієї самої причини `IMethodologyStore` не «знаходить
+чинну версію», а віддає опубліковані: вибір за `EffectiveFrom` — це домен.
+
+Нових DTO майже не з'явилося: порти оперують доменними сутностями
+(`MethodologyVersion`, `MethodologyRule`, `MethodologyConstant`, `SourceEntity`,
+`DataSource`) — так само, як наявний `IMetadataCache` віддає
+`TemplateVersionSnapshot`.
+
+**Змінені конструктори** (єдина зміна в самих класах; тіла і `TODO` збережені,
+посилання на `EcrDbContext` у текстах `TODO` замінені на виклики портів):
+```
+ConstantResolver(EcrDbContext db)                      → ConstantResolver(IConstantStore constants)
+MethodologyResolver(EcrDbContext db)                   → MethodologyResolver(IMethodologyStore store)
+CalculationOutputWriter(BulkCellLoader, EcrDbContext)  → CalculationOutputWriter(ICalculationResultStore store)
+CatchUpPlanner(EcrDbContext db)                        → CatchUpPlanner(ICollectionStore store)
+CollectionRunner(..., EcrDbContext db)                 → CollectionRunner(..., ICollectionStore store)
+```
+
+**Реалізацій портів не створював.** У дереві `05-skeleton.md` §1 їх немає, а
+компіляції вони не потрібні: `Infrastructure/DependencyInjection.cs` — це
+`TODO`-рядок, а не код. Реалізації належать Етапам 4 і 5 разом із рештою
+`Ecr.Calculations` і `Ecr.Adapters.PiAf`. Це треба врахувати в `07-checkpoints.md`.
+
+**Таблицю `05-skeleton.md` §4 виправляти не довелося** — межа збережена
+такою, як написано.
+**Статус:** RESOLVED · варіант B, 2026-09-04
 
 ---
 
@@ -987,3 +1064,128 @@ xUnit), `Q-020` (три скелети), доповнення до `Q-006` (ще
 `IBackgroundJob`, `IJobProgress`) — усі дописані в межах `Q-011`.
 
 **Статус:** RESOLVED · інформаційний запис
+
+---
+
+### Q-022 · BOOTSTRAP-FIX · Етап 0 · 2026-09-04
+
+**Де:** `tests/Ecr.TestKit/Ecr.TestKit.csproj`
+**Контекст:** `dotnet test Ecr.sln --filter "Category!=Integration"`.
+
+**Суть:**
+`Ecr.TestKit` — бібліотека фікстур: посилається на `xunit`, але не на
+`Microsoft.NET.Test.Sdk`. `dotnet test` на рівні рішення намагається запустити
+її як тестову збірку, не знаходить раннера і **перериває весь прогін**, уже
+після того, як решта проєктів відпрацювала.
+
+**Текст помилки:**
+```
+Testhost process for source(s) 'D:\repos\ECR Web\tests\Ecr.TestKit\bin\Debug\net10.0\Ecr.TestKit.dll' exited with error: Error:
+Test Run Aborted.
+```
+(`dotnet test` завершувався з кодом 1, попри те що всі 486 тестів були знайдені
+й відпрацювали як очікувано)
+
+**Що зробив:** додав `<IsTestProject>false</IsTestProject>` у `PropertyGroup`.
+Це стандартний спосіб виключити допоміжний проєкт із прогону; складу пакетів
+і посилань не чіпав.
+**Статус:** RESOLVED
+
+---
+
+### Q-023 · DECIDED · Етап 0 · 2026-09-04
+
+**Де:** `src/Ecr.Web/index.html`, `src/main.tsx`, `src/api/schema.d.ts`,
+`src/api/types.ts`, `src/app/App.tsx`, `src/features/grid/DocumentGrid.tsx`,
+`src/api/client.ts`
+**Контекст:** `npm run typecheck` і `npm run build` — крок 5 Етапу 0.
+
+**Суть:** фронтенд не збирався з чотирьох різних причин.
+
+**Текст помилок:**
+```
+src/api/client.ts(1,28):                  error TS2307: Cannot find module './schema'
+src/api/client.ts(1,1):                   error TS6133: 'paths' is declared but its value is never read.
+src/features/grid/DocumentGrid.tsx(1,36): error TS2307: Cannot find module '@/api/types'
+src/features/grid/DocumentGrid.tsx(1,1):  error TS6133: 'TableSliceDto' is declared but its value is never read.
+src/features/grid/useCellPatch.ts(1,60):  error TS2307: Cannot find module '@/api/types'
+src/app/App.tsx(23,24):                   error TS2503: Cannot find namespace 'JSX'.
+src/features/grid/DocumentGrid.tsx(39,58): error TS2503: Cannot find namespace 'JSX'.
+```
+
+**Що зробив:**
+
+1. **`index.html`** — оголошений у дереві `05-skeleton.md` §1, вмісту не має
+   (Q-015). Створено мінімальний Vite-документ із `#root`.
+2. **`src/main.tsx`** — точки входу немає ні в дереві, ні в `05i`, але без неї
+   `index.html` нема що завантажувати. Створено стандартне монтування
+   `App` через `createRoot` + `StrictMode`, плюс імпорти CSS Mantine.
+3. **`src/api/schema.d.ts`** — це **згенерований** файл
+   (`npm run api:types` з живого бекенда, а бекенду потрібен SQL Server).
+   Створено заглушку з явним попередженням, що генератор її перезапише.
+4. **`src/api/types.ts`** — модуля немає ні в дереві, ні в `05i`, але на нього
+   посилаються `DocumentGrid.tsx` і `useCellPatch.ts`. Це **дослівний**
+   переклад DTO з `02-contracts.md` §10 (`TableSliceDto`, `ColumnDto`, `RowDto`,
+   `PatchCellsRequest`, `PatchRow`, `PatchCell`, `PatchCellsResponse`,
+   `ValidationMessageDto`, `CellConflictDto`) — нічого не додано і не прибрано.
+   У шапці файла записано, що після першої генерації схеми ці типи треба
+   замінити посиланнями в неї, інакше вони розійдуться з сервером мовчки.
+5. **`JSX.Element`** — під React 19 і `@types/react` 19 глобального namespace
+   `JSX` більше немає. Додано `import type { JSX } from 'react';` у два файли.
+   Тип не змінено. Це дефект `05i` відносно версій, зафіксованих у
+   `04-environment.md` §4.
+6. **Мертвий імпорт `TableSliceDto`** у `DocumentGrid.tsx` прибрано: компонент
+   за власним `TODO` вантажить зріз сам («завантажити зріз через useTableSlice»),
+   у пропси він не входить. У `client.ts` імпорт `paths` натомість збережено і
+   зв'язок зі схемою явно виражено як `export type ApiPaths = paths;`.
+
+**Що потрібно від людини:** пункти 2 і 4 — це файли, яких пакет не описує.
+Варто внести їх у `05i`, щоб рев'ювер не сприйняв їх як самодіяльність.
+**Статус:** RESOLVED
+
+---
+
+### Q-024 · DECIDED · Етап 0 · 2026-09-04
+
+**Де:** `src/Ecr.Application/DependencyInjection.cs`,
+`src/Ecr.Api/Startup/StartupSequence.cs`,
+`src/Ecr.Adapters.Excel/DependencyInjection.cs`,
+`src/Ecr.Api/Health/JobsHealthCheck.cs`, `SourcesHealthCheck.cs`
+**Контекст:** `dotnet build` — останні п'ять помилок перед зеленою збіркою.
+
+**Суть:**
+`Program.cs` (`05h`) викликає п'ять речей, яких у пакеті немає:
+`AddExcelAdapters()`, `AddEcrApplication()`, `RunEcrStartupSequenceAsync()`,
+`AddCheck<JobsHealthCheck>`, `AddCheck<SourcesHealthCheck>`.
+
+**Текст помилок:**
+```
+src\Ecr.Api\Program.cs(17,18): error CS1061: 'IServiceCollection' does not contain a definition for 'AddExcelAdapters'
+src\Ecr.Api\Program.cs(20,18): error CS1061: 'IServiceCollection' does not contain a definition for 'AddEcrApplication'
+src\Ecr.Api\Program.cs(26,30): error CS0234: The type or namespace name 'JobsHealthCheck' does not exist in the namespace 'Ecr.Api.Health'
+src\Ecr.Api\Program.cs(27,30): error CS0234: The type or namespace name 'SourcesHealthCheck' does not exist in the namespace 'Ecr.Api.Health'
+src\Ecr.Api\Program.cs(35,11): error CS1061: 'WebApplication' does not contain a definition for 'RunEcrStartupSequenceAsync'
+```
+
+**Як вирішив** — перевіркою `08-workflow.md` §7: жоден із п'яти не змінює
+числа, форму API чи запис у базі. Це реєстрація в контейнері і два
+health-checks, чиї ендпоінти `Program.cs` уже оголосив сам.
+Усі п'ять — скелети за правилом `05-skeleton.md` §3: повна сигнатура,
+XML-doc українською, тіло `NotImplementedException` зі змістовним `TODO`.
+Зміст `TODO` не вигаданий, а зібраний із наявних документів:
+
+* `AddExcelAdapters` — за складом `Ecr.Adapters.Excel` і `05g`;
+* `AddEcrApplication` — за переліком тек `Ecr.Application`; окремо записано
+  заборону реєстрації скануванням збірки (арх-правило 8 `tz/03` §3.3:
+  без `Assembly.Load` і `Activator.CreateInstance` за рядком);
+* `RunEcrStartupSequenceAsync` — сім кроків **дослівно** з коментаря в
+  `Program.cs` і `B01` §6.3, разом із їхнім порядком;
+* `JobsHealthCheck`, `SourcesHealthCheck` — за зразком наявного
+  `DatabaseHealthCheck` (`05h`); критерії Degraded/Unhealthy взяті з ФВ-11.3
+  та ІНТ-3.3.
+
+`Ecr.Api/Startup/` — нова тека: у дереві `05-skeleton.md` §1 її немає.
+
+**Що потрібно від людини:** унести ці п'ять файлів (і теку
+`src/Ecr.Api/Startup/`) у `05-skeleton.md` §1 і `05c`/`05g`/`05h`.
+**Статус:** RESOLVED

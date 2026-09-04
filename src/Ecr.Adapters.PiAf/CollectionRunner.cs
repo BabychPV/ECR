@@ -15,21 +15,21 @@ public sealed class CollectionRunner(
     IEnumerable<IExternalDataSource> sources,
     SourceUnitConverter unitConverter,
     CatchUpPlanner catchUp,
-    Ecr.Infrastructure.Persistence.EcrDbContext db)
+    ICollectionStore store)
 {
     /// <summary>Виконує збір для сутності джерела.</summary>
     public Task RunAsync(int sourceEntityId, DateTime from, DateTime to, IJobProgress progress, CancellationToken ct)
         => throw new NotImplementedException(
             "TODO:\n" +
-            "1) створити itg.CollectionRun;\n" +
+            "1) створити прогін через store.StartRunAsync;\n" +
             "2) обрати адаптер за Transport джерела — вибір транспорту це НАЛАШТУВАННЯ, " +
             "   не гілка коду (ФВ-11.2);\n" +
-            "3) читати діапазон; upsert у ext.RawDataPoint за природним ключем " +
+            "3) читати діапазон; store.UpsertRawPointsAsync — upsert за природним ключем " +
             "   (SourceEntityId, SourcePath, Timestamp) — повторний запуск не дублює;\n" +
             "4) ⚠ сирі дані зберігати В ОДИНИЦІ ДЖЕРЕЛА; конверсія — на межі, через " +
             "   unitConverter, із записом у журнал (ФВ-16.9). Інакше повторний перерахунок " +
             "   з архіву дасть інший результат;\n" +
-            "5) записати itg.CollectionCoverage — за які інтервали дані є;\n" +
+            "5) store.WriteCoverageAsync — за які інтервали дані є;\n" +
             "6) при відмові джерела: зафіксувати ECR-INT-0503, поставити діапазон у catch-up " +
             "   і ЗАВЕРШИТИСЯ успішно — це затримка, не збій.");
 }

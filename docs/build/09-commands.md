@@ -1,9 +1,8 @@
 # 09 — Команди збірки і тестів
 
-> **Статус: перевірено частково (2026-09-04, ПК-2).** Команди, які вдалося
-> виконати, звірені й позначені в журналі §8. Решту перевірити неможливо, доки
-> не зняті блокери `Q-013` і `Q-014` — бекенд не збирається. Попередження
-> лишається до повної перевірки.
+> **Статус: перевірено на ПК-2 2026-09-04.** Кожну команду виконано; журнал §8
+> заповнено фактом. Неперевіреним лишається лише те, що потребує SQL Server
+> або Docker (§3, §4 і `Category=Integration`) — див. `Q-016` і кінець §8.
 >
 > Шляхи в цьому файлі — **від кореня репозиторію** (`D:/repos/ECR Web`),
 > сам пакет документації живе в `docs/` (`Q-001`).
@@ -157,33 +156,35 @@ git diff stage-1..HEAD --stat        # для рев'ю
 | 1b | `docker ps` | ❌ | Docker Desktop не запущений — `Q-016`, деградований режим |
 | 1c | `sqlcmd -S localhost -E -Q "..."` | ⬜ | не виконувалося: Етап 0 до БД не звертається (`04-environment.md` §2.1) |
 | 2 | `dotnet restore Ecr.sln` | ⚠ | працює **після** `Q-003` (4 відсутні `.csproj`) і `Q-004` (версії пакетів) |
-| 3 | `dotnet build Ecr.sln -c Debug` | ❌ | падає на `src/Ecr.Expressions/FormulaEngine.cs` — `Q-013`, `Q-014`. `Ecr.Domain` окремо: **0 errors, 0 warnings** |
-| 4 | `dotnet test Ecr.sln --filter "Category!=Integration"` | ⬜ | недосяжно: усі тестові проєкти залежать від `Ecr.TestKit` → `Ecr.Infrastructure` → `Ecr.Application` → `Ecr.Expressions` |
-| 5 | `dotnet test Ecr.sln --filter "Category=Integration"` | ⬜ | недосяжно + немає Docker (`Q-016`) |
-| 6 | `dotnet ef migrations add` | ⬜ | недосяжно: `Ecr.Infrastructure` не збирається |
-| 7 | `dotnet run --project src/Ecr.Api` | ⬜ | недосяжно |
+| 3 | `dotnet build Ecr.sln -c Debug` | ⚠ | **0 errors**; 907 попереджень — усі з правил, виведених зі списку блокуючих (`Q-006`) |
+| 3a | `dotnet build Ecr.sln -c Release` | ⚠ | **0 errors** |
+| 4 | `dotnet test Ecr.sln --filter "Category!=Integration"` | ⚠ | **486 знайдено, 486 failed, 0 passed** — очікувано. Працює після `Q-022` |
+| 5 | `dotnet test Ecr.sln --filter "Category=Integration"` | ⬜ | **61 тест знайдено**, не запускалися: немає Docker (`Q-016`) |
+| 6 | `dotnet ef migrations add` | ⬜ | не виконувалося: міграції створюються на Етапі 1 |
+| 7 | `dotnet run --project src/Ecr.Api` | ⬜ | не виконувалося: `RunEcrStartupSequenceAsync` — заглушка, потрібен SQL Server |
 | 8 | `npm install` | ✅ | у `src/Ecr.Web`; 362 пакети, версії з `04-environment.md` §4 **без правок**; 3 хв |
-| 9 | `npm run build` | ⬜ | недосяжно: немає `src/Ecr.Web/index.html` (`Q-015`) |
-| 10 | `npm run test` | ✅ | `npx vitest run` — **5 файлів, 23 тести, 23 failed** (`not implemented`) — саме те, чого вимагає Етап 0 |
-| 10a | `npm run typecheck` | ❌ | 7 помилок: немає згенерованого `src/api/schema.d.ts` і модуля `@/api/types`; `JSX` під React 19 — `Q-017` |
+| 9 | `npm run build` | ✅ | після `Q-023`; `825 modules transformed`, `dist/` зібрано за 2.6 с |
+| 10 | `npm run test` | ✅ | **5 файлів, 23 тести, 23 failed** (`not implemented`) — саме те, чого вимагає Етап 0 |
+| 10a | `npm run typecheck` | ✅ | 0 помилок після `Q-023` |
 
 Статуси: ⬜ не перевірено · ✅ працює · ⚠ працює з правкою · ❌ не працює.
 
-### Фактичні команди, що працюють сьогодні
+### Перевірений повний прогін
 
 ```bash
-# перевірка середовища
-dotnet --list-sdks && node -v && npm -v && git --version
-
-# бекенд: restore працює, build падає (Q-013, Q-014)
 dotnet restore Ecr.sln
-dotnet build src/Ecr.Domain/Ecr.Domain.csproj -c Debug   # єдиний, що зелений
-
-# фронтенд: працює повністю
-cd src/Ecr.Web
-npm install
-npx vitest run          # 23 тести, усі падають — очікувано
+dotnet build Ecr.sln -c Debug
+dotnet test  Ecr.sln -c Debug --no-build --filter "Category!=Integration"
+dotnet build Ecr.sln -c Release
+cd src/Ecr.Web && npm install && npm run typecheck && npm run test && npm run build
 ```
 
-**Попередження на початку файлу знімається після зняття `Q-013` і `Q-014`
-і повного проходу §6.**
+**Що ще не перевірено і чому:**
+
+| Команда | Чому |
+|---|---|
+| §3 цілком (`dotnet ef`, `sqlcmd`) | потрібен SQL Server; шість `.sql`-скриптів у пакеті відсутні (`Q-015`) |
+| §4 (`dotnet run --project src/Ecr.Api`) | послідовність старту — заглушка; застосунок навмисно не стартує без БД |
+| `--filter "Category=Integration"` | немає Docker (`Q-016`); 61 тест знайдено, але не запускався |
+| `npm run api:types` | генерує типи з **запущеного** бекенда; поки що `src/api/schema.d.ts` — заглушка (`Q-023`) |
+| `npm run lint` | ESLint встановлено, але конфігурації (`eslint.config.js`) у пакеті немає |

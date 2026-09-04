@@ -3,6 +3,10 @@
   <PropertyGroup>
     <RootNamespace>Ecr.TestKit</RootNamespace>
     <IsPackable>false</IsPackable>
+    <!-- Q-022: це бібліотека фікстур, а не тестовий проєкт. Без цього рядка
+         `dotnet test Ecr.sln` намагається запустити її як тестову збірку,
+         не знаходить раннера і завершує ВЕСЬ прогін через Test Run Aborted. -->
+    <IsTestProject>false</IsTestProject>
     <!-- XML-doc у тестових хелперах не вимагаємо -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>

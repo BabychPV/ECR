@@ -1,4 +1,4 @@
-import type { TableSliceDto } from '@/api/types';
+import type { JSX } from 'react';
 
 /** Властивості grid. */
 export interface DocumentGridProps {

@@ -5,8 +5,8 @@
 > файлу на слово — він перезапускає build і тести сам; розбіжність між записами
 > тут і фактом є критичним зауваженням.
 
-**Поточний етап:** Етап 0 (bootstrap) — **ЗАБЛОКОВАНО**
-**Останній тег:** `stage-0`
+**Поточний етап:** Етап 0 (bootstrap) — **ЗАВЕРШЕНО**, далі рев'ю з чистим контекстом
+**Останній тег:** `stage-0-verified`
 **Оновлено:** 2026-09-04
 
 ---
@@ -25,37 +25,44 @@
 ## Етап 0 — BOOTSTRAP
 
 - [x] Структура папок створена за деревом з `05-skeleton.md` — пакет документації перенесено в `docs/` (`Q-001`)
-- [!] Усі файли з `05-skeleton.md` створені без змін — створено 344; **41 файл дерева не має вмісту в `05a`…`05j`** (`Q-015`)
+- [x] Усі файли з `05-skeleton.md` створені без змін — 302 із секцій `05*`/`06*`, 32 дослівно з `02-contracts.md`,
+      8 із секцій «два файли під одним заголовком», 2 за `COPY FROM`.
+      **37 файлів дерева вмісту в пакеті не мають** і не створені навмисно (`Q-015`)
 - [x] Усі файли з `06-tests.md` створені без змін — разом із `06a`…`06e` і фікстурою `water-demo.json`
 - [x] `git init` + commit + тег `stage-0`
-- [x] `dotnet restore` — OK після виправлення версій (`Q-004`)
-- [x] `npm install` — OK, без правок версій (362 пакети)
-- [!] `dotnet build` — **FAILED**: `Q-013` (циклічна залежність `FormulaEngine`) і `Q-014` (10 неоголошених контрактних типів)
-- [!] `npm run build` — не запускався: немає `src/Ecr.Web/index.html` (`Q-015`)
-- [!] Тести запускаються і падають (`Assert.Fail`), раннер працює —
-      **frontend: 23 знайдено, 23 впали як очікувано ✅**;
-      **backend: не запускалися — усі тестові проєкти залежать від `Ecr.TestKit`,
-      який не збирається через `Q-013`/`Q-014`**
-- [x] `09-commands.md` оновлено реальними командами, журнал §8 заповнено (частково — те, що вдалося виконати)
-- [ ] commit + тег `stage-0-verified` — **не поставлено**: збірка червона
+- [x] `dotnet restore` — OK (після `Q-003`, `Q-004`)
+- [x] `npm install` — OK, версії з `04-environment.md` §4 **без правок**
+- [x] `dotnet build Ecr.sln` — **OK, 0 errors** (Debug і Release)
+- [x] `npm run build` — **OK**; `npm run typecheck` — 0 помилок
+- [x] Тести запускаються і падають (`Assert.Fail`), раннер працює
+- [x] `09-commands.md` оновлено реальними командами, журнал §8 заповнено
+- [x] commit + тег `stage-0-verified`
 - [x] Звіт показано, робота зупинена
 
-**BOOTSTRAP-FIX (кількість):** 8 (`Q-002`…`Q-008`, `Q-011`) + 4 `DECIDED` (`Q-001`, `Q-009`, `Q-010`, `Q-012`)
-**Знайдено тестів:** frontend 23 (23 failed, 0 passed). Backend — невідомо, збірка не дійшла.
+**BOOTSTRAP-FIX:** 11 (`Q-002`…`Q-008`, `Q-011`, `Q-019`, `Q-022`)
+**DECIDED:** 7 (`Q-001`, `Q-009`, `Q-010`, `Q-012`, `Q-020`, `Q-023`, `Q-024`)
+**Рішення замовника:** 3 — `Q-013` (варіант A), `Q-018` (варіант B), `Q-004` (мажор `NCalcSync`)
+**Відкрито на розгляд:** `Q-006` (18 правил аналізаторів), `Q-012` (семантика `RowDto`),
+`Q-014` (форма десяти типів — **чернетки чекають затвердження**), `Q-015` (37 файлів без вмісту),
+`Q-016` (немає Docker), `Q-017` (frontend поза Етапом 0)
 
-**Блокери, що зупинили етап:**
-- `Q-013` CONFLICT — `FormulaEngine` у `Ecr.Expressions` реалізує `IFormulaEngine`
-  з `Ecr.Application.Ports`, а `Ecr.Application` уже залежить від `Ecr.Expressions`.
-- `Q-014` CONTRACT — десять типів (`FormulaDependencyRef`, `DependencyContext`,
-  `FormulaNode`, `EvaluationResult`, `MethodologyDescriptor`, `CalculationInput`,
-  `CalculationOutput`, `SourceEntityDescriptor`, `CollectionRequest`,
-  `CollectionResult`) вживаються в портах, але не оголошені ніде в пакеті.
+### Знайдено тестів
 
-**Що зібралося:** `Ecr.Domain` — 0 errors, 0 warnings.
-**Що не зібралося:** `Ecr.Expressions` (і все, що за ним: `Application`,
-`Infrastructure`, `Calculations`, `Adapters.*`, `Api`, `tools/*`, усі `tests/*`).
+| Проєкт | Знайдено | Результат |
+|---|---:|---|
+| `Ecr.Expressions.Tests` | 142 | 142 failed |
+| `Ecr.Application.Tests` | 125 | 125 failed |
+| `Ecr.Domain.Tests` | 113 | 113 failed |
+| `Ecr.Infrastructure.Tests` | 41 | 41 failed |
+| `Ecr.Api.Tests` | 27 | 27 failed |
+| `Ecr.Architecture.Tests` | 23 | 23 failed |
+| `Ecr.Calculations.Tests` | 15 | 15 failed |
+| **backend разом** | **486** | **486 failed, 0 passed** — очікувано |
+| `Category=Integration` (окремо) | 61 | не запускалися: немає Docker (`Q-016`) |
+| `Ecr.Web` (vitest) | 23 | 23 failed — очікувано |
 
----
+**Разом 509 тестів знайдено, усі падають із `not implemented`.**
+Нуль знайдених тестів був би провалом етапу; цього не сталося.
 
 ## Етап 1 — Ядро метаданих і сховище
 
@@ -89,7 +96,8 @@
 |---|---|---|---|---|
 | `stage-0` | 2026-09-04 | — | — | 344 файли створені, ще не збиралося |
 | `stage-0-fixes` | 2026-09-04 | FAILED | — | BOOTSTRAP-FIX Q-002…Q-012; заблоковано Q-013, Q-014 |
-| `stage-0-verified` | | | | **не поставлено** — збірка червона |
+| `stage-0-fixes-2` | 2026-09-04 | FAILED | — | Q-013 (A), Q-019, Q-020; лишалися Q-014, Q-018 |
+| `stage-0-verified` | 2026-09-04 | OK | 509 знайдено, 509 failed | Q-014 (чернетки), Q-018 (B); Debug і Release зелені |
 | `stage-1` | | | | |
 | `stage-1-reviewed` | | | | |
 | `stage-2` | | | | |

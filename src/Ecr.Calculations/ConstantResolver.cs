@@ -1,3 +1,5 @@
+using Ecr.Application.Ports;
+
 namespace Ecr.Calculations;
 
 /// <summary>
@@ -9,7 +11,7 @@ namespace Ecr.Calculations;
 /// не є конверсіями одиниць і в <c>uom.Conversion</c> потрапити не можуть
 /// (ФВ-16.5). Це розмежування — головне, що не дає числам «попливти» глобально.
 /// </remarks>
-public sealed class ConstantResolver(Ecr.Infrastructure.Persistence.EcrDbContext db)
+public sealed class ConstantResolver(IConstantStore constants)
 {
     /// <summary>Значення константи з одиницею.</summary>
     /// <param name="methodologyVersionId">Версія методології.</param>
@@ -21,7 +23,8 @@ public sealed class ConstantResolver(Ecr.Infrastructure.Persistence.EcrDbContext
         int methodologyVersionId, string code, string? category, int? substanceEntryId,
         DateOnly onDate, CancellationToken ct)
         => throw new NotImplementedException(
-            "TODO: фільтр за версією і кодом; звузити за категорією і речовиною (точний збіг " +
+            "TODO: узяти кандидатів через constants.GetCandidatesAsync(methodologyVersionId, code); " +
+            "звузити за категорією і речовиною (точний збіг " +
             "виграє над загальним); з темпоральних вибрати той, чий інтервал ValidFrom..ValidTo " +
             "містить onDate. Кілька кандидатів на одну дату — помилка конфігурації, а не " +
             "привід узяти перший.");

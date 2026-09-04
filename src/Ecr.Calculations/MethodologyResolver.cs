@@ -7,12 +7,13 @@ namespace Ecr.Calculations;
 /// Підбирає версію методології, чинну на дату періоду, і зіставляє її з
 /// рядками документа за правилами (ФВ-13.3).
 /// </summary>
-public sealed class MethodologyResolver(Ecr.Infrastructure.Persistence.EcrDbContext db)
+public sealed class MethodologyResolver(IMethodologyStore store)
 {
     /// <summary>Знаходить чинну версію методології на дату.</summary>
     public Task<MethodologyDescriptor?> ResolveVersionAsync(int methodologyId, DateOnly onDate, CancellationToken ct)
         => throw new NotImplementedException(
-            "TODO: вибрати Published-версію з максимальним EffectiveFrom <= onDate. " +
+            "TODO: узяти версії через store.GetPublishedVersionsAsync(methodologyId); " +
+            "вибрати ту, що з максимальним EffectiveFrom <= onDate. " +
             "Якщо жодної — це не порожній результат, а помилка конфігурації: " +
             "методологія прив'язана, але не має чинної версії.");
 
@@ -20,7 +21,8 @@ public sealed class MethodologyResolver(Ecr.Infrastructure.Persistence.EcrDbCont
     public Task<IReadOnlyList<string>> MatchRowsAsync(
         int methodologyVersionId, long tableInstanceId, CancellationToken ct)
         => throw new NotImplementedException(
-            "TODO: застосувати MethodologyRule.MatchJson (предикат по колонках рядка) у порядку " +
+            "TODO: узяти правила через store.GetRulesAsync(methodologyVersionId); " +
+            "застосувати MethodologyRule.ConditionExpression (предикат по колонках рядка) у порядку " +
             "Priority; перший збіг виграє. Матриця покриття (ФВ-13.4) будується на тому самому " +
             "механізмі — вона показує, які рядки не закрилися жодним правилом.");
 }
