@@ -1,3 +1,5 @@
+using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
 
@@ -16,10 +18,35 @@ public sealed class PeriodAccessRuleTests
     [InlineData(12, false)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Правило_діє_лише_для_періодів_у_заданому_діапазоні(byte sequence, bool applies)
-        => Assert.Fail("not implemented");
+    {
+        var rule = Rule(from: 1, to: 3);
+
+        Assert.Equal(applies, rule.AppliesTo(sequence));
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Правило_без_меж_діє_для_всіх_періодів()
-        => Assert.Fail("not implemented");
+    {
+        var rule = Rule(from: null, to: null);
+
+        // Порожня межа означає «без обмеження», а не «жодного періоду».
+        // Протилежне прочитання зробило б правило без меж кнопкою «сховати все».
+        foreach (byte sequence in new byte[] { 1, 6, 12 })
+        {
+            Assert.True(rule.AppliesTo(sequence));
+        }
+    }
+
+    /// <summary>Правило з межами; поля закриті, тому виставляються рефлексією.</summary>
+    private static PeriodAccessRuleDef Rule(byte? from, byte? to)
+    {
+        var rule = new PeriodAccessRuleDef(templateVersionId: 1, OutOfWindowBehavior.ReadOnly);
+        Set(rule, nameof(PeriodAccessRuleDef.FromSequence), from);
+        Set(rule, nameof(PeriodAccessRuleDef.ToSequence), to);
+        return rule;
+    }
+
+    private static void Set(object target, string name, object? value)
+        => target.GetType().GetProperty(name)!.SetValue(target, value);
 }

@@ -76,22 +76,60 @@ public sealed class Project : Entity<int>
     /// Фіксує поточний період вручну. Причина обов'язкова: стан неочевидний
     /// і має бути видимим в UI.
     /// </summary>
+    /// <param name="periodId">Період, який фіксується поточним.</param>
+    /// <param name="reason">Причина; показується в UI поруч зі станом.</param>
+    /// <param name="userId">Хто зафіксував.</param>
+    /// <param name="utcNow">Момент операції.</param>
+    /// <exception cref="DomainException">Період чужий або причина порожня.</exception>
     public void PinCurrentPeriod(int periodId, string reason, int userId, DateTime utcNow)
-        => throw new NotImplementedException(
-            "TODO: перевірити, що period належить цьому проєкту і reason не порожній; " +
-            "виставити CurrentPeriodMode = Pinned, CurrentPeriodId, причину і аудит-поля.");
+    {
+        if (_periods.All(p => p.Id != periodId))
+        {
+            throw new DomainException(
+                "ECR-PRD-0422", $"Період {periodId} не належить проєкту {Code}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new DomainException("ECR-PRD-0422", "Причина фіксації поточного періоду обов'язкова.");
+        }
+
+        CurrentPeriodMode = CurrentPeriodMode.Pinned;
+        CurrentPeriodId = periodId;
+        CurrentPeriodPinnedReason = reason;
+        CurrentPeriodChangedAt = utcNow;
+        CurrentPeriodChangedByUserId = userId;
+    }
 
     /// <summary>Повертає автоматичне визначення поточного періоду.</summary>
+    /// <param name="userId">Хто зняв фіксацію.</param>
+    /// <param name="utcNow">Момент операції.</param>
     public void UnpinCurrentPeriod(int userId, DateTime utcNow)
-        => throw new NotImplementedException(
-            "TODO: CurrentPeriodMode = Auto; CurrentPeriodPinnedReason = null; " +
-            "CurrentPeriodId лишити — його перерахує PeriodStateJob.");
+    {
+        CurrentPeriodMode = CurrentPeriodMode.Auto;
+        CurrentPeriodPinnedReason = null;
+        CurrentPeriodChangedAt = utcNow;
+        CurrentPeriodChangedByUserId = userId;
+
+        // CurrentPeriodId лишається як є: до наступного прогону PeriodStateJob
+        // краще показувати останнє відоме значення, ніж порожнечу.
+    }
 
     /// <summary>Оновлює поточний період у режимі <c>Auto</c>. Викликає лише <c>PeriodStateJob</c>.</summary>
+    /// <param name="periodId">Обраний період; <c>null</c> — відкритих немає.</param>
+    /// <param name="utcNow">Момент операції.</param>
     public void SetCurrentPeriodAutomatically(int? periodId, DateTime utcNow)
-        => throw new NotImplementedException(
-            "TODO: якщо CurrentPeriodMode = Pinned — нічого не робити (ручний пін має пріоритет); " +
-            "інакше присвоїти CurrentPeriodId і CurrentPeriodChangedAt.");
+    {
+        // ⚠ Ручний пін має пріоритет над задачею: людина зафіксувала період
+        // свідомо і з причиною, і нічна задача не має права це скасувати.
+        if (CurrentPeriodMode == CurrentPeriodMode.Pinned)
+        {
+            return;
+        }
+
+        CurrentPeriodId = periodId;
+        CurrentPeriodChangedAt = utcNow;
+    }
 
     /// <summary>Перевіряє, що дата належить проєкту (ФВ-1.11).</summary>
     public bool ContainsDate(DateOnly date) => date >= PeriodStart && date <= PeriodEnd;
