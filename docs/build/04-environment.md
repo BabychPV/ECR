@@ -161,10 +161,26 @@ SELECT SERVERPROPERTY('Edition')             AS Edition,
 
 | Немає | Що робити | Наслідок |
 |---|---|---|
-| **Docker** | інтеграційні тести з трейтом `Category=Integration` не запускаються | партиціонування, `TRUNCATE PARTITIONS`, складені FK і RCSI **не перевірені** — записати в `questions.md` |
+| **Docker** | задати `ECR_TEST_SQL` — фікстура піде на локальний SQL Server замість контейнера | нічого не втрачається: інтеграційні тести виконуються повністю |
+| **Docker і SQL Server** | інтеграційні тести з трейтом `Category=Integration` не запускаються | партиціонування, `TRUNCATE PARTITIONS`, складені FK і RCSI **не перевірені** — записати в `questions.md` |
 | **SQL Server** | те саме + `Ecr.Api` не стартує | unit-тести і тести виразів працюють; решта — ні |
 | **Node.js** | Етап 6 (frontend) не виконується | backend не залежить від frontend |
 | **Інтернет** | `restore` неможливий | зупинка, запис у `questions.md` |
+
+### 5.1 Два рівноправні шляхи до SQL для інтеграційних тестів
+
+`SqlServerFixture` обирає сама, і жоден шлях не є «запасним» (`Q-062`):
+
+| `ECR_TEST_SQL` | Що робить фікстура |
+|---|---|
+| задана (рядок підключення до **сервера**) | працює на цьому інстансі, створюючи власну базу |
+| не задана | піднімає `mcr.microsoft.com/mssql/server:2022-latest` через Testcontainers |
+
+Розробник не зобов'язаний тримати Docker, CI не зобов'язаний мати SQL Server.
+Ім'я бази з `ECR_TEST_SQL` **ігнорується**: фікстура створює свою
+(`EcrTest_<збірка>`) і перестворює її з нуля при кожному прогоні, тож на чужий
+інстанс вона не впливає. Зіставлення задається явно —
+`Latin1_General_100_CI_AS_SC` (`02a` §1.0), а не успадковується від інстансу.
 
 **Тести за замовчуванням (`dotnet test`) мають бути зеленими без Docker.**
 Усе, що потребує реального SQL Server, позначене трейтом
@@ -190,7 +206,8 @@ SELECT SERVERPROPERTY('Edition')             AS Edition,
 | `ECR_Cache__DistributedProvider` | `SqlServer` | без Redis |
 | `ECR_ExternalSources__PiAf__SecretName` | `pi-af-service-account` | **лише ім'я секрету** |
 | `ECR_Bootstrap__Password` | одноразовий пароль | **лише перший старт** (`D-115`): застосунок створює локального адміністратора з `MustChangePassword = 1`. Якщо запис уже існує — змінна ігнорується. Після першого входу її прибирають |
-| `ECR_TEST_SQL` | `1` | вмикає інтеграційні тести проти локального SQL замість Testcontainers |
+| `ECR_TEST_SQL` | `Server=localhost\SQLEXPRESS;Integrated Security=true;TrustServerCertificate=true` | рядок підключення до **сервера** для інтеграційних тестів замість Testcontainers. ⚠ Саме рядок, а не `1`: фікстура підключається за ним, а базу створює свою |
+| `ECR_TEST_DB` | `EcrTest_Infrastructure` | перевизначає ім'я тестової бази. За замовчуванням — своє на кожну збірку тестів (`Q-055`) |
 
 > **`ECR_Bootstrap__Password` не має значення за замовчуванням і не потрапляє
 > нікуди, крім пам'яті процесу**: ні в seed, ні в `appsettings`, ні в лог

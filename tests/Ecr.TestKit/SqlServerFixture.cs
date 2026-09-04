@@ -124,7 +124,14 @@ public sealed class SqlServerFixture : IAsyncLifetime
                 END
                 """).ConfigureAwait(false);
 
-            await ExecuteAsync(connection, $"CREATE DATABASE [{DatabaseName}];").ConfigureAwait(false);
+            // COLLATE задається ЯВНО (02a §1.0, Q-061). Без цього тестова база
+            // успадковує зіставлення інстансу розробника, і поведінка
+            // унікальності бізнес-кодів стає властивістю чужої машини: на
+            // одному ноутбуці seed вставляється, на іншому падає.
+            await ExecuteAsync(
+                connection,
+                $"CREATE DATABASE [{DatabaseName}] COLLATE Latin1_General_100_CI_AS_SC;")
+                .ConfigureAwait(false);
         }
 
         var target = new SqlConnectionStringBuilder(serverConnection)

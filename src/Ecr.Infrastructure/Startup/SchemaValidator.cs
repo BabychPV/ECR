@@ -177,6 +177,27 @@ public sealed class SchemaValidator(
                 "Виконайте 06-rcsi.sql у вікні обслуговування.");
         }
 
+        // ⚠ Зіставлення бази перевіряється саме тут, а не в `01-filegroups.sql`:
+        // скрипт бачить лише той інстанс, де його запустили, а помилка виявиться
+        // на іншому (`Q-061`). Чутливе до регістру зіставлення тихо змінює
+        // ПОВЕДІНКУ УНІКАЛЬНОСТІ бізнес-кодів: `UQ_Template_Code` перестає
+        // вважати `ABC` і `abc` одним кодом, і той самий seed на двох інстансах
+        // дає різний результат. Це попередження, а не зупинка, з тієї ж
+        // причини, що й RCSI: змінити зіставлення бази застосунок не може.
+        var collation = await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT CAST(DATABASEPROPERTYEX(DB_NAME(), 'Collation') AS nvarchar(200)) AS Value")
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        if (collation.Count > 0 && collation[0] is { } name
+            && name.Contains("_CS", StringComparison.OrdinalIgnoreCase))
+        {
+            _warnings.Add(
+                $"Зіставлення бази {name} чутливе до регістру. " +
+                "Унікальність бізнес-кодів (UQ_Template_Code, UQ_Unit_Code, UQ_Role) " +
+                "працюватиме інакше, ніж на еталонному Latin1_General_100_CI_AS_SC (02a §1).");
+        }
+
         var now = clock.UtcNow;
         var currentKey = (now.Year * 100) + now.Month;
 

@@ -100,6 +100,18 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     public void Кластерний_індекс_CellValue_стиснений_сторінково()
         => Assert.Fail("not implemented");
 
+    // ⚠ Тест доданий після Q-060: сім сутностей без конфігурації EF лягали
+    // конвенцією в `dbo` з множинним іменем, і міграція створювала таблиці,
+    // яких у `02a-db-schema.md` немає. `SchemaValidator` цього не бачить —
+    // він звіряє список міграцій, а не форму схеми. Перевірка потрібна саме
+    // на розгорнутій базі: вона ловить і модель EF, і `.sql`-скрипти разом.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public void Міграція_не_створює_таблиць_поза_контрактними_схемами()
+        => Assert.Fail("not implemented");
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

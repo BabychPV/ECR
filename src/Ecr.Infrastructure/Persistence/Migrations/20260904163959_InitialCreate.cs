@@ -35,21 +35,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "doc");
 
             migrationBuilder.CreateTable(
-                name: "ApprovalRoutes",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    Code = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    NameL10n = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    IsActive = table.Column<bool>(type: "bit", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ApprovalRoutes", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "ApprovalState",
                 schema: "wf",
                 columns: table => new
@@ -293,77 +278,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "RegistryEntries",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    RegistryDefId = table.Column<int>(type: "int", nullable: false),
-                    Code = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    DisplayL10n = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    ValidFrom = table.Column<DateOnly>(type: "date", nullable: true),
-                    ValidTo = table.Column<DateOnly>(type: "date", nullable: true),
-                    IsActive = table.Column<bool>(type: "bit", nullable: false),
-                    IsDeleted = table.Column<bool>(type: "bit", nullable: false),
-                    ParentEntryId = table.Column<long>(type: "bigint", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_RegistryEntries", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "RegistryEntryLinks",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    RegistryRelationDefId = table.Column<int>(type: "int", nullable: false),
-                    FromEntryId = table.Column<long>(type: "bigint", nullable: false),
-                    ToEntryId = table.Column<long>(type: "bigint", nullable: false),
-                    PayloadJson = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_RegistryEntryLinks", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "RegistryExternalKeys",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    RegistryEntryId = table.Column<long>(type: "bigint", nullable: false),
-                    SystemCode = table.Column<string>(type: "nvarchar(max)", nullable: false),
-                    ExternalId = table.Column<string>(type: "nvarchar(max)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_RegistryExternalKeys", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "RegistryValues",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    RegistryEntryId = table.Column<long>(type: "bigint", nullable: false),
-                    RegistryFieldDefId = table.Column<int>(type: "int", nullable: false),
-                    ValueDecimal = table.Column<decimal>(type: "decimal(28,10)", precision: 28, scale: 10, nullable: true),
-                    ValueString = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ValueDate = table.Column<DateTime>(type: "datetime2(3)", nullable: true),
-                    ValueBool = table.Column<bool>(type: "bit", nullable: true),
-                    ValueRegistryEntryId = table.Column<long>(type: "bigint", nullable: true),
-                    UnitId = table.Column<int>(type: "int", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_RegistryValues", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Role",
                 schema: "sec",
                 columns: table => new
@@ -380,22 +294,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Role", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "RoleAssignments",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    RoleId = table.Column<int>(type: "int", nullable: false),
-                    UserId = table.Column<int>(type: "int", nullable: true),
-                    PrincipalSid = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    ScopeJson = table.Column<string>(type: "nvarchar(max)", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_RoleAssignments", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -559,27 +457,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ValidationRule", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "ApprovalSteps",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    ApprovalRouteId = table.Column<int>(type: "int", nullable: false),
-                    Ordinal = table.Column<int>(type: "int", nullable: false),
-                    RoleId = table.Column<int>(type: "int", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ApprovalSteps", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_ApprovalSteps_ApprovalRoutes_ApprovalRouteId",
-                        column: x => x.ApprovalRouteId,
-                        principalTable: "ApprovalRoutes",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -1317,9 +1194,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "wf");
 
             migrationBuilder.DropTable(
-                name: "ApprovalSteps");
-
-            migrationBuilder.DropTable(
                 name: "CalculationBinding",
                 schema: "cfg");
 
@@ -1360,27 +1234,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "sec");
 
             migrationBuilder.DropTable(
-                name: "RegistryEntries");
-
-            migrationBuilder.DropTable(
-                name: "RegistryEntryLinks");
-
-            migrationBuilder.DropTable(
-                name: "RegistryExternalKeys");
-
-            migrationBuilder.DropTable(
                 name: "RegistryFieldDef",
                 schema: "cfg");
 
             migrationBuilder.DropTable(
-                name: "RegistryValues");
-
-            migrationBuilder.DropTable(
                 name: "ResourceGrant",
                 schema: "sec");
-
-            migrationBuilder.DropTable(
-                name: "RoleAssignments");
 
             migrationBuilder.DropTable(
                 name: "RowDef",
@@ -1409,9 +1268,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             migrationBuilder.DropTable(
                 name: "ValidationRule",
                 schema: "cfg");
-
-            migrationBuilder.DropTable(
-                name: "ApprovalRoutes");
 
             migrationBuilder.DropTable(
                 name: "ColumnDef",

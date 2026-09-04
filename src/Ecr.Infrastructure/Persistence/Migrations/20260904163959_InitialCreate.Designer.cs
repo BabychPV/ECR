@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    [Migration("20260904131018_InitialCreate")]
+    [Migration("20260904163959_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -921,132 +921,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("ValidationRule", "cfg");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntry", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("DisplayL10n")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<long?>("ParentEntryId")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("RegistryDefId")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly?>("ValidFrom")
-                        .HasColumnType("date");
-
-                    b.Property<DateOnly?>("ValidTo")
-                        .HasColumnType("date");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RegistryEntries");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryEntryLink", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("FromEntryId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("PayloadJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("RegistryRelationDefId")
-                        .HasColumnType("int");
-
-                    b.Property<long>("ToEntryId")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RegistryEntryLinks");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryExternalKey", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("ExternalId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<long>("RegistryEntryId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("SystemCode")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RegistryExternalKeys");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Dictionaries.RegistryValue", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("RegistryEntryId")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("RegistryFieldDefId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("UnitId")
-                        .HasColumnType("int");
-
-                    b.Property<bool?>("ValueBool")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("ValueDate")
-                        .HasColumnType("datetime2(3)");
-
-                    b.Property<decimal?>("ValueDecimal")
-                        .HasPrecision(28, 10)
-                        .HasColumnType("decimal(28,10)");
-
-                    b.Property<long?>("ValueRegistryEntryId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("ValueString")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RegistryValues");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>
                 {
                     b.Property<int>("PeriodKeyValue")
@@ -1625,31 +1499,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("Role", "sec");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Security.RoleAssignment", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("PrincipalSid")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("RoleId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ScopeJson")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("UserId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RoleAssignments");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Security.User", b =>
                 {
                     b.Property<int>("Id")
@@ -1902,30 +1751,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalRoute", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("NameL10n")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ApprovalRoutes");
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalState", b =>
                 {
                     b.Property<long>("Id")
@@ -1991,28 +1816,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_ApprState_Reopen", "ReopenedAt IS NULL OR ReopenReason IS NOT NULL");
                         });
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalStep", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApprovalRouteId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Ordinal")
-                        .HasColumnType("int");
-
-                    b.Property<int>("RoleId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ApprovalSteps");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ColumnDef", b =>
@@ -2172,15 +1975,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_Unit_Dimension");
                 });
 
-            modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalStep", b =>
-                {
-                    b.HasOne("Ecr.Domain.Entities.Workflow.ApprovalRoute", null)
-                        .WithMany("Steps")
-                        .HasForeignKey("ApprovalRouteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryDef", b =>
                 {
                     b.Navigation("Fields");
@@ -2216,11 +2010,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Project", b =>
                 {
                     b.Navigation("Periods");
-                });
-
-            modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalRoute", b =>
-                {
-                    b.Navigation("Steps");
                 });
 #pragma warning restore 612, 618
         }

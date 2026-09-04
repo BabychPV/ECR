@@ -78,6 +78,33 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(EcrDbContext).Assembly);
 
+        // ⛔ Сім сутностей, у яких розбіжність зі схемою ще не вирішена
+        // (`Q-027` для шести, `Q-042` для `RoleAssignment`), свідомо вилучені
+        // з моделі.
+        //
+        // Без цього EF відображає їх КОНВЕНЦІЄЮ: множинне ім'я, схема `dbo` —
+        // і міграція створює сім таблиць, яких у `02a-db-schema.md` немає.
+        // Це найгірший з можливих станів: у базі з'являється те, чого контракт
+        // не описує, а `SchemaValidator` цього не бачить, бо звіряє список
+        // міграцій, а не форму схеми.
+        //
+        // Прив'язати їх до контрактних таблиць зараз теж не можна: у схемі є
+        // колонки `NOT NULL`, яких у сутностях немає взагалі
+        // (`wf.ApprovalRoute.TemplateVersionId`, `dic.RegistryEntry.Ordinal`),
+        // і будь-яке значення для них було б вигаданим.
+        //
+        // Кожна повертається в модель на своєму етапі разом із конфігурацією:
+        // `wf.*` і `sec.RoleAssignment` — Етап 3, `dic.*` — Етап 4.
+        // Тест `Міграція_не_створює_таблиць_поза_контрактними_схемами`
+        // стежить, щоб цей список не поповнювався мовчки.
+        modelBuilder.Ignore<ApprovalRoute>();
+        modelBuilder.Ignore<ApprovalStep>();
+        modelBuilder.Ignore<RegistryEntry>();
+        modelBuilder.Ignore<RegistryEntryLink>();
+        modelBuilder.Ignore<RegistryExternalKey>();
+        modelBuilder.Ignore<RegistryValue>();
+        modelBuilder.Ignore<RoleAssignment>();
+
         // ⚠ Каскадне видалення вимкнене скрізь за замовчуванням: у системі
         // діє soft delete (ФВ-7.6), бо на кожен запис хтось посилається —
         // комірки, аудит, формули. Каскад тут означав би тихе зникнення

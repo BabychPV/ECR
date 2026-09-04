@@ -114,6 +114,32 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         Assert.Equal("PAGE", compression);
     }
 
+    // ⚠ Тест доданий після Q-060: сім сутностей без конфігурації EF лягали
+    // конвенцією в `dbo` з множинним іменем, і міграція створювала таблиці,
+    // яких у `02a-db-schema.md` немає. `SchemaValidator` цього не бачить —
+    // він звіряє список міграцій, а не форму схеми. Перевірка потрібна саме
+    // на розгорнутій базі: вона ловить і модель EF, і `.sql`-скрипти разом.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Міграція_не_створює_таблиць_поза_контрактними_схемами()
+    {
+        // `__EFMigrationsHistory` — єдина дозволена таблиця в `dbo`: її кладе
+        // туди сам EF, і в контрактній схемі їй місця немає за побудовою.
+        var strays = await QueryAsync("""
+            SELECT s.name + N'.' + t.name
+            FROM sys.tables t
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            WHERE s.name NOT IN (N'cfg', N'doc', N'calc', N'rpt', N'ext', N'sec',
+                                 N'wf', N'dic', N'uom', N'arc', N'aud', N'itg', N'sys_ecr')
+              AND t.name <> N'__EFMigrationsHistory'
+            ORDER BY 1
+            """);
+
+        Assert.Empty(strays);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
