@@ -35,10 +35,27 @@ public sealed class PeriodContext
     public byte Sequence { get; }
 
     /// <summary>Днів у періоді згідно з <see cref="Mode"/>.</summary>
-    public int Days => throw new NotImplementedException(
-        "TODO: Actual → фактична кількість днів (End - Start + 1); " +
-        "Fixed365 → місяць як фактичний, але рік завжди 365; " +
-        "Fixed360 → місяць 30, рік 360. Перевіряється тестом на обидва режими (02c §7).");
+    /// <remarks>
+    /// ⚠ Це не косметика і не заокруглення «для зручності». Перерахунок у
+    /// <c>г/с</c> ділить на <see cref="Seconds"/>, тому 30 замість 31 змінює
+    /// КОЖНЕ число звіту — і виглядає як помилка формули, а не як різниця
+    /// конвенції (D-78).
+    /// </remarks>
+    public int Days => Mode switch
+    {
+        CalendarMode.Fixed360 => Months * 30,
+        CalendarMode.Fixed365 when Months == 12 => 365,
+        _ => End.DayNumber - Start.DayNumber + 1,
+    };
+
+    /// <summary>Скільки календарних місяців охоплює період.</summary>
+    /// <remarks>
+    /// Довжина фіксованого періоду рахується від МІСЯЦІВ, а не від фактичних
+    /// днів: інакше «рік = 360» довелося б задавати окремим правилом для
+    /// кожної тривалості, а квартал у <c>Fixed360</c> перестав би дорівнювати
+    /// трьом однаковим місяцям.
+    /// </remarks>
+    private int Months => ((End.Year - Start.Year) * 12) + End.Month - Start.Month + 1;
 
     /// <summary>Годин у періоді.</summary>
     public int Hours => Days * 24;
