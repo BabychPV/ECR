@@ -1,0 +1,236 @@
+{
+  "template": {
+    "code": "WATER_DEMO",
+    "version": "1.0.0.0",
+    "periodKind": "Monthly",
+    "sheets": [
+      {
+        "code": "Water_07",
+        "nameL10n": { "en": "Water Report", "ru": "Отчёт по воде", "kz": "Су есебі" },
+        "ordinal": 1,
+        "tables": [
+          {
+            "code": "Main",
+            "layoutKind": "MonthsInColumns",
+            "rowMode": "Fixed",
+            "columns": [
+              { "code": "RowLabel",  "dataType": "String",  "ordinal": 1, "isReadOnly": true },
+              { "code": "Permit",    "dataType": "Lookup",  "ordinal": 2, "lookupRegistry": "PERMIT" },
+              { "code": "WaterBody", "dataType": "Lookup",  "ordinal": 3, "lookupRegistry": "WATER_BODY", "cascadeFrom": "Permit" },
+              { "code": "Jan",       "dataType": "Decimal", "ordinal": 4, "precision": 18, "scale": 3, "unit": "m3", "isMonthColumn": true, "monthNumber": 1 },
+              { "code": "Feb",       "dataType": "Decimal", "ordinal": 5, "precision": 18, "scale": 3, "unit": "m3", "isMonthColumn": true, "monthNumber": 2 },
+              { "code": "Mar",       "dataType": "Decimal", "ordinal": 6, "precision": 18, "scale": 3, "unit": "m3", "isMonthColumn": true, "monthNumber": 3 },
+              { "code": "Total",     "dataType": "Formula", "ordinal": 7, "unit": "m3", "isReadOnly": true },
+              { "code": "Note",      "dataType": "String",  "ordinal": 8 }
+            ],
+            "rows": [
+              { "rowKey": "7001000", "ordinal": 1, "rowKind": "Group",   "labelL10n": { "en": "Surface water intake" } },
+              { "rowKey": "7001001", "ordinal": 2, "rowKind": "Item",    "labelL10n": { "en": "River A" },     "parent": "7001000" },
+              { "rowKey": "7001002", "ordinal": 3, "rowKind": "Item",    "labelL10n": { "en": "River B" },     "parent": "7001000" },
+              { "rowKey": "7001003", "ordinal": 4, "rowKind": "Item",    "labelL10n": { "en": "Reservoir C" }, "parent": "7001000" },
+              { "rowKey": "7001100", "ordinal": 5, "rowKind": "Group",   "labelL10n": { "en": "Groundwater intake" } },
+              { "rowKey": "7001101", "ordinal": 6, "rowKind": "Item",    "labelL10n": { "en": "Well 1" },      "parent": "7001100" },
+              { "rowKey": "7001102", "ordinal": 7, "rowKind": "Item",    "labelL10n": { "en": "Well 2" },      "parent": "7001100" },
+              { "rowKey": "7009000", "ordinal": 8, "rowKind": "Balance", "labelL10n": { "en": "TOTAL INTAKE" } },
+              { "rowKey": "7009900", "ordinal": 9, "rowKind": "Note",    "labelL10n": { "en": "Methodology note" } }
+            ],
+            "formulas": [
+              { "id": "F1", "scope": "Column", "column": "Total",
+                "expression": "SUM([Jan], [Feb], [Mar])" },
+              { "id": "F2", "scope": "Row", "row": "7009000",
+                "expression": "SUM([Main].[7001001:7001003].[{Month}]) + SUM([Main].[7001101:7001102].[{Month}])" }
+            ]
+          }
+        ]
+      },
+      {
+        "code": "Water_070",
+        "nameL10n": { "en": "Water consolidation" },
+        "ordinal": 2,
+        "tables": [
+          {
+            "code": "Rollup",
+            "layoutKind": "MonthsInColumns",
+            "rowMode": "Fixed",
+            "columns": [
+              { "code": "SourceKind", "dataType": "String",  "ordinal": 1 },
+              { "code": "Jan",        "dataType": "Formula", "ordinal": 2, "unit": "m3", "isMonthColumn": true, "monthNumber": 1 },
+              { "code": "Feb",        "dataType": "Formula", "ordinal": 3, "unit": "m3", "isMonthColumn": true, "monthNumber": 2 },
+              { "code": "Mar",        "dataType": "Formula", "ordinal": 4, "unit": "m3", "isMonthColumn": true, "monthNumber": 3 },
+              { "code": "TotalTons",  "dataType": "Formula", "ordinal": 5, "unit": "t" }
+            ],
+            "rows": [
+              { "rowKey": "C001", "ordinal": 1, "rowKind": "Item",    "labelL10n": { "en": "Surface" } },
+              { "rowKey": "C002", "ordinal": 2, "rowKind": "Item",    "labelL10n": { "en": "Ground" } },
+              { "rowKey": "C009", "ordinal": 3, "rowKind": "Balance", "labelL10n": { "en": "TOTAL" } }
+            ],
+            "formulas": [
+              { "id": "F3", "scope": "Row", "row": "C001",
+                "expression": "SUM([Water_07].[Main].[7001001:7001003].[{Month}])" },
+              { "id": "F4", "scope": "Row", "row": "C002",
+                "expression": "SUM([Water_07].[Main].[7001101:7001102].[{Month}])" },
+              { "id": "F5", "scope": "Row", "row": "C009",
+                "expression": "[C001].[{Month}] + [C002].[{Month}]" },
+              { "id": "F6", "scope": "Cell", "row": "C009", "column": "TotalTons",
+                "expression": "CONVERT(([Jan] + [Feb] + [Mar]) * CST.CST_WATER_DENSITY, 'kg', 't')" }
+            ]
+          }
+        ]
+      },
+      {
+        "code": "Waste_08",
+        "nameL10n": { "en": "Waste Report" },
+        "ordinal": 3,
+        "tables": [
+          {
+            "code": "Items",
+            "layoutKind": "Static",
+            "rowMode": "Dynamic",
+            "maxDynamicRows": 500,
+            "columns": [
+              { "code": "WasteType",  "dataType": "Lookup",  "ordinal": 1, "lookupRegistry": "WASTE_TYPE" },
+              { "code": "Amount",     "dataType": "Decimal", "ordinal": 2, "precision": 18, "scale": 3 },
+              { "code": "AmountUnit", "dataType": "Unit",    "ordinal": 3 },
+              { "code": "AmountKg",   "dataType": "Formula", "ordinal": 4, "unit": "kg", "isReadOnly": true }
+            ],
+            "rows": [],
+            "formulas": [
+              { "id": "F7",  "scope": "Column", "column": "AmountKg",
+                "expression": "CONVERT([Amount], [AmountUnit], 'kg')" }
+            ]
+          }
+        ]
+      }
+    ],
+    "periodAccessRules": [
+      { "sheet": "Waste_08", "fromSequence": 1, "toSequence": 3, "onOutOfWindow": "ReadOnly" }
+    ]
+  },
+
+  "registries": [
+    {
+      "code": "PERMIT",
+      "isTemporal": true,
+      "fields": [
+        { "code": "LimitM3",   "dataType": "Decimal", "unit": "m3" },
+        { "code": "Authority", "dataType": "String" }
+      ],
+      "entries": [
+        { "code": "P-001", "displayL10n": { "en": "Permit 001" }, "validFrom": "2026-01-01", "validTo": "2026-06-30",
+          "values": { "LimitM3": "150000.000", "Authority": "MinEco" } },
+        { "code": "P-002", "displayL10n": { "en": "Permit 002" }, "validFrom": "2026-04-01", "validTo": "2027-12-31",
+          "values": { "LimitM3": "220000.000", "Authority": "MinEco" } },
+        { "code": "P-003", "displayL10n": { "en": "Permit 003" }, "validFrom": "2025-01-01", "validTo": "2025-12-31",
+          "values": { "LimitM3": "90000.000", "Authority": "MinEco" } }
+      ]
+    },
+    {
+      "code": "WATER_BODY",
+      "isTemporal": false,
+      "fields": [],
+      "entries": [
+        { "code": "WB-A", "displayL10n": { "en": "River A" },       "parent": "P-001" },
+        { "code": "WB-B", "displayL10n": { "en": "River B" },       "parent": "P-001" },
+        { "code": "WB-C", "displayL10n": { "en": "Reservoir C" },   "parent": "P-002" },
+        { "code": "WB-W", "displayL10n": { "en": "Aquifer West" },  "parent": "P-002" }
+      ]
+    },
+    {
+      "code": "WASTE_TYPE",
+      "isTemporal": false,
+      "fields": [ { "code": "HazardClass", "dataType": "Int" } ],
+      "entries": [
+        { "code": "W-01", "displayL10n": { "en": "Drilling cuttings" }, "values": { "HazardClass": "4" } },
+        { "code": "W-02", "displayL10n": { "en": "Used oil" },          "values": { "HazardClass": "3" } }
+      ]
+    },
+    {
+      "code": "SUBSTANCE",
+      "isTemporal": false,
+      "fields": [],
+      "entries": [
+        { "code": "SUB-COD", "displayL10n": { "en": "COD" } },
+        { "code": "SUB-TSS", "displayL10n": { "en": "Total suspended solids" } }
+      ]
+    }
+  ],
+
+  "project": {
+    "code": "ECR-2026-DEMO",
+    "periodStart": "2026-01-01",
+    "periodEnd": "2026-12-31",
+    "periodKind": "Monthly",
+    "timeZoneId": "Central Asia Standard Time",
+    "periodPolicy": "ECR-Standard"
+  },
+
+  "document": {
+    "businessKey": "PLANT-A",
+    "periodKey": 202601,
+    "tables": {
+      "Water_07.Main": [
+        { "rowKey": "7001001", "cells": { "Permit": "P-001", "WaterBody": "WB-A", "Jan": "1200.500", "Feb": "1150.000", "Mar": "1300.250" } },
+        { "rowKey": "7001002", "cells": { "Permit": "P-001", "WaterBody": "WB-B", "Jan": "800.000",  "Mar": "950.750" } },
+        { "rowKey": "7001003", "cells": { "Permit": "P-002", "WaterBody": "WB-C", "Jan": "2000.000", "Feb": "2100.500", "Mar": { "isEmpty": true } } },
+        { "rowKey": "7001101", "cells": { "Permit": "P-002", "WaterBody": "WB-W", "Jan": "450.125",  "Feb": "460.000",  "Mar": "470.375" } },
+        { "rowKey": "7001102", "cells": { "Permit": "P-002", "WaterBody": "WB-W", "Jan": "300.000",  "Feb": "310.000",  "Mar": "320.000" } }
+      ],
+      "Waste_08.Items": [
+        { "rowKey": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "cells": { "WasteType": "W-01", "Amount": "12.500",   "AmountUnit": "t"  } },
+        { "rowKey": "b2c3d4e5f60718293a4b5c6d7e8f90a1", "cells": { "WasteType": "W-01", "Amount": "3400.000", "AmountUnit": "kg" } },
+        { "rowKey": "c3d4e5f60718293a4b5c6d7e8f90a1b2", "cells": { "WasteType": "W-02", "Amount": "250.000",  "AmountUnit": "kg" } }
+      ]
+    }
+  },
+
+  "methodology": {
+    "code": "WATER_DISCHARGE",
+    "version": "1.0.0.0",
+    "level": "Configuration",
+    "numericMode": "Legacy",
+    "calendarMode": "Actual",
+    "substances": ["SUB-COD", "SUB-TSS"],
+    "constants": [
+      { "code": "EF", "category": "default", "value": "0.250", "unit": "kg_per_m3", "substance": "SUB-COD" },
+      { "code": "EF", "category": "default", "value": "0.080", "unit": "kg_per_m3", "substance": "SUB-TSS" },
+      { "code": "CST_WATER_DENSITY", "value": "1000.000", "unit": "kg_per_m3" }
+    ],
+    "outputs": [
+      { "code": "tons", "unit": "t" },
+      { "code": "gsec", "unit": "g_per_s" }
+    ],
+    "formulas": [
+      { "code": "Volume", "expression": "@Jan + @Feb + @Mar" },
+      { "code": "MassKg", "expression": "!Volume * CST.EF" },
+      { "code": "tons",   "expression": "CONVERT(!MassKg, 'kg', 't')" },
+      { "code": "gsec",   "expression": "CONVERT(!MassKg, 'kg', 'g') / [Period].Seconds" }
+    ]
+  },
+
+  "expected": {
+    "Water_07.Main.Total": {
+      "7001001": "3650.750", "7001002": "1750.750", "7001003": "4100.500",
+      "7001101": "1380.500", "7001102": "930.000"
+    },
+    "Water_07.Main.7009000": {
+      "Jan": "4750.625", "Feb": "4020.500", "Mar": "3041.375", "Total": "11812.500"
+    },
+    "Water_070.Rollup": {
+      "C001": { "Jan": "4000.500", "Feb": "3250.500", "Mar": "2251.000" },
+      "C002": { "Jan": "750.125",  "Feb": "770.000",  "Mar": "790.375"  },
+      "C009": { "Jan": "4750.625", "Feb": "4020.500", "Mar": "3041.375", "TotalTons": "11812.500" }
+    },
+    "Waste_08.Items.AmountKg": {
+      "a1b2c3d4e5f60718293a4b5c6d7e8f90": "12500.000",
+      "b2c3d4e5f60718293a4b5c6d7e8f90a1": "3400.000",
+      "c3d4e5f60718293a4b5c6d7e8f90a1b2": "250.000"
+    },
+    "Waste_08.PredicateSum_W01": "15900.000",
+    "calculation": {
+      "7001001": {
+        "SUB-COD": { "tons": "0.912688", "gsec_Actual": "0.340774", "gsec_Fixed360": "0.352117" },
+        "SUB-TSS": { "tons": "0.292060" }
+      }
+    }
+  }
+}

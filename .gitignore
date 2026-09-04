@@ -1,0 +1,42 @@
+# .NET
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+artifacts/
+TestResults/
+coverage*.xml
+*.coverage
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Середовище
+.env
+.env.local
+appsettings.Local.json
+secrets.json
+
+# ОС та IDE
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# ⚠ Реальні дані НІКОЛИ не потрапляють у репозиторій:
+# на ПК-2 вони є, але це не привід їх комітити.
+data/
+*.xlsm
+*.bak
+*.dacpac
+!docs/**/*.md
+
+# Реальні дані з чинної системи (438 МБ: .xlsm, VBA, PI AF, SQL, SSRS) —
+# лежать локально на ПК-2, у репозиторій не потрапляють.
+source/

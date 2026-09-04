@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ecr.Calculations</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ecr.Domain\Ecr.Domain.csproj" />
+    <ProjectReference Include="..\Ecr.Application\Ecr.Application.csproj" />
+    <ProjectReference Include="..\Ecr.Expressions\Ecr.Expressions.csproj" />
+  </ItemGroup>
+
+  <!--
+    Microsoft.CodeAnalysis.CSharp.Scripting свідомо НЕ підключений:
+    рівень 2 драбини вмикається лише після дозволу ІБ (K-1). Пакет
+    додається разом із реалізацією, не наперед.
+  -->
+
+</Project>

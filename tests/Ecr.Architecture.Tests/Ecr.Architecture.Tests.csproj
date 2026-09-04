@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ecr.Architecture.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ecr.Domain\Ecr.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Application\Ecr.Application.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Expressions\Ecr.Expressions.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Infrastructure\Ecr.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Calculations\Ecr.Calculations.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Adapters.Excel\Ecr.Adapters.Excel.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Adapters.PiAf\Ecr.Adapters.PiAf.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Api\Ecr.Api.csproj" />
+    <ProjectReference Include="..\Ecr.TestKit\Ecr.TestKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="NetArchTest.Rules" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+</Project>

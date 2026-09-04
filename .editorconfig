@@ -1,0 +1,41 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+indent_style = space
+trim_trailing_whitespace = true
+
+[*.{cs,csx}]
+indent_size = 4
+dotnet_sort_system_directives_first = true
+csharp_using_directive_placement = outside_namespace:warning
+csharp_style_namespace_declarations = file_scoped:error
+csharp_prefer_braces = true:warning
+dotnet_style_require_accessibility_modifiers = always:warning
+
+# Забороняємо мовчазне ігнорування async
+dotnet_diagnostic.CS4014.severity = error
+dotnet_diagnostic.CS1998.severity = warning
+
+# Nullable
+dotnet_diagnostic.CS8600.severity = error
+dotnet_diagnostic.CS8602.severity = error
+dotnet_diagnostic.CS8603.severity = error
+dotnet_diagnostic.CS8618.severity = error
+
+# XML-doc на публічних членах (українською — 08-workflow §9)
+dotnet_diagnostic.CS1591.severity = warning
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.{ts,tsx,js,jsx,css,scss,html}]
+indent_size = 2
+
+[*.sql]
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false

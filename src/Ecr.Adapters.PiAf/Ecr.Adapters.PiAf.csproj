@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ecr.Adapters.PiAf</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ecr.Domain\Ecr.Domain.csproj" />
+    <ProjectReference Include="..\Ecr.Application\Ecr.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PI SQL Client — ODBC; System.Data.Odbc входить у BCL -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ecr.Domain</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    ⛔ ItemGroup із PackageReference тут не повинно з'явитися НІКОЛИ.
+    Домен не знає ані про EF Core, ані про ASP.NET, ані про PI AF.
+    Порушення ловить Ecr.Architecture.Tests.
+  -->
+
+</Project>
