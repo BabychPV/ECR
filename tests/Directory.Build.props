@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    Успадковує кореневий Directory.Build.props і додає послаблення, які
+    стосуються ВИКЛЮЧНО тестів (рев'ю Етапу 0, В-4). У src/ вони не діють.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!--
+      CA1707    — назви тестів українською з підкресленнями: це вимога
+                  08-workflow.md §9, а не недогляд.
+      xUnit1026 — [Theory] із параметром, який тіло-заглушка Assert.Fail
+                  ще не використовує. Зникне разом із заглушками.
+    -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CA1707;xUnit1026</WarningsNotAsErrors>
+  </PropertyGroup>
+
+</Project>

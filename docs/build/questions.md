@@ -73,26 +73,28 @@
 | Q-002 | BOOTSTRAP-FIX | `source/` (438 МБ реальних даних) у `.gitignore` | RESOLVED |
 | Q-003 | BOOTSTRAP-FIX | чотири `.csproj` оголошені в `.sln`, але відсутні в пакеті | RESOLVED |
 | Q-004 | BOOTSTRAP-FIX | версії пакетів: downgrade + вразливості | RESOLVED · мажор `NCalcSync 5→6` підтверджено 2026-09-04 |
-| Q-005 | BOOTSTRAP-FIX | `Entity<TId> : struct` проти `Permission : Entity<string>` | RESOLVED |
+| Q-005 | **CONTRACT** | `Entity<TId> : struct` проти `Permission : Entity<string>` | RESOLVED · перекваліфіковано за рев'ю (В-1) |
 | Q-006 | BOOTSTRAP-FIX | аналізатори ламають власний код пакета (18 правил) | **OPEN** — рішення про стиль |
 | Q-007 | BOOTSTRAP-FIX | `IRepository.cs` — пропущений `///` | RESOLVED |
 | Q-008 | BOOTSTRAP-FIX | `Ecr.Application → Ecr.Expressions` | RESOLVED |
 | Q-009 | DECIDED | namespace `ParseResult.cs` | RESOLVED |
 | Q-010 | DECIDED | секції на два файли, директиви `COPY FROM` | RESOLVED |
-| Q-011 | BOOTSTRAP-FIX | відсутні `using` у 25 файлах | RESOLVED |
+| Q-011 | BOOTSTRAP-FIX | відсутні `using` у 34 файлах | RESOLVED · доповнено за рев'ю (К-2) |
 | Q-012 | DECIDED | `TemplateStructureDto` бере `ColumnDto`/`RowDto` з `Documents.Dto` | **OPEN** — семантика DTO |
 | Q-013 | CONFLICT | циклічна залежність `FormulaEngine` | RESOLVED · варіант **A**, 2026-09-04 |
 | Q-014 | CONTRACT | десять контрактних типів не оголошені ніде | **ЧЕРНЕТКИ НАПИСАНІ · чекають затвердження** |
 | Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | **OPEN** |
 | Q-016 | ENV | Docker не запущений | **OPEN** |
 | Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **OPEN** |
-| Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | RESOLVED · варіант **B**, 2026-09-04 |
+| Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | напрям **B** затверджено; **форма 4 портів чекає затвердження** (В-2) |
 | Q-019 | BOOTSTRAP-FIX | немає `[CollectionDefinition("SqlServer")]` | RESOLVED |
 | Q-020 | DECIDED | мінімальні скелети для `StyleMapper`, `ImportDiffBuilder`, `CurrentUser` | RESOLVED |
 | Q-021 | SCOPE | зонд: після зняття Q-014 і Q-018 збирається **все** | RESOLVED · інформаційний |
 | Q-022 | BOOTSTRAP-FIX | `Ecr.TestKit` переривав `dotnet test` (`IsTestProject`) | RESOLVED |
 | Q-023 | DECIDED | фронтенд: `index.html`, `main.tsx`, `api/types.ts`, `JSX` під React 19 | RESOLVED |
 | Q-024 | DECIDED | п'ять скелетів, яких вимагає `Program.cs` | RESOLVED |
+| Q-025 | SCOPE | результат рев'ю Етапу 0 і що з ним зроблено | RESOLVED |
+| **Q-026** | **CONTRACT** | **`MethodologyRule`: сутність проти схеми БД** | **OPEN · потребує рішення** |
 
 ---
 
@@ -246,7 +248,16 @@ error NU1903: Package 'System.Security.Cryptography.Xml' 9.0.0 has a known high 
 
 ---
 
-### Q-005 · BOOTSTRAP-FIX · Етап 0 · 2026-09-04
+### Q-005 · CONTRACT · Етап 0 · 2026-09-04
+
+> **Перекваліфіковано за рев'ю Етапу 0 (В-1).** Спершу записано як
+> `BOOTSTRAP-FIX`, і робота пішла далі без зупинки. Це було неправильно:
+> секція `05b` має заголовок `CONTRACT: 02-contracts.md#conventions`, а
+> `Entity<TId>` — базовий тип **усіх** сутностей домену. Пом'якшення:
+> у самому `02-contracts.md` цього типу немає (він живе лише в `05b`),
+> тому формально це дефект скелета, а не тексту контракту, і зміна
+> є розширенням, яке нічого не ламає. Але тип запису мав бути `CONTRACT`
+> із зупинкою, а не `BOOTSTRAP-FIX`.
 
 **Де:** `src/Ecr.Domain/Abstractions/Entity.cs`,
 `src/Ecr.Domain/Entities/Security/Permission.cs`
@@ -508,6 +519,25 @@ The type or namespace name 'ICurrentUser' could not be found (are you missing a 
 | `ExpressionValueType` | `Ecr.Expressions.Ast` | 1 |
 
 Жодної сигнатури, жодного імені типу, жодного тіла методу не змінено.
+
+**Доповнення за рев'ю Етапу 0 (К-2).** Запис описував лише
+`Ecr.Application` і `Ecr.Expressions`, хоча тим самим виправленням було
+зачеплено ще **дев'ять** файлів. Рев'ювер знайшов їх скриптом — саме тому, що
+в журналі їх не було. Повний перелік:
+
+| Файл | Додано |
+|---|---|
+| `src/Ecr.Infrastructure/Caching/MetadataCache.cs` | `using Ecr.Infrastructure.Persistence;` |
+| `src/Ecr.Infrastructure/Security/AccessDecisionService.cs` | те саме |
+| `src/Ecr.Infrastructure/Security/SecurityStampValidator.cs` | те саме |
+| `src/Ecr.Infrastructure/Jobs/PeriodStateJob.cs` | те саме |
+| `src/Ecr.Infrastructure/Jobs/ArchiveJob.cs` | те саме |
+| `src/Ecr.Infrastructure/Startup/SchemaValidator.cs` | те саме |
+| `src/Ecr.Infrastructure/Startup/MetadataWarmup.cs` | те саме |
+| `src/Ecr.Infrastructure/Jobs/OrphanScanJob.cs` | `using Ecr.Application.Ports;` |
+| `src/Ecr.Application/Ports/ISimulationService.cs` | `using Ecr.Domain.Enums;` — знайдено вже **після** рев'ю, коли зняли послаблення `CS1574` (див. Q-025, В-4) |
+
+Разом за `Q-011`: **34 файли**, у кожному додано лише `using`.
 **Статус:** RESOLVED
 
 ---
@@ -784,7 +814,10 @@ src/Ecr.Web/               index.html                                           
 | `Ecr.Api/Auth/CurrentUser.cs` | створено скелет (`Q-020`) |
 | `Ecr.Expressions/Evaluation/EvaluationResult.cs` | **блокує** — це частина `Q-014` |
 
-Решта 37 збірку не ламають:
+Решта **33** збірку не ламають (41 оголошено в дереві − 8 створено:
+`StyleMapper`, `ImportDiffBuilder`, `CurrentUser` за `Q-020`; `index.html`
+за `Q-023`; `Excel/DependencyInjection.cs`, `JobsHealthCheck`,
+`SourcesHealthCheck` за `Q-024`; `EvaluationResult.cs` за `Q-014`):
 `UnitOfWork.cs` ніде не типізований (у DI він лише в тексті `TODO`);
 `Excel/DependencyInjection.cs` — `AddExcelAdapters()` згадується теж усередині
 рядка `TODO`, а не викликається; п'ять `Jobs/*` і `ReportSnapshotBuilder.cs`
@@ -978,7 +1011,16 @@ CollectionRunner(..., EcrDbContext db)                 → CollectionRunner(...,
 
 **Таблицю `05-skeleton.md` §4 виправляти не довелося** — межа збережена
 такою, як написано.
-**Статус:** RESOLVED · варіант B, 2026-09-04
+
+**Уточнення статусу за рев'ю Етапу 0 (В-2).** Замовник обрав **напрям**
+(«ввести порти»), а 15 сигнатур у чотирьох портах склав я. Найзмістовніша з
+них — `IConstantStore.GetCandidatesAsync`, яка навмисно повертає *кандидатів*,
+а не готове значення: від цього залежить, **де** перевіряється ФВ-16.5
+(«кілька кандидатів на одну дату — помилка конфігурації, а не привід узяти
+перший»). Форма цих портів визначає, які дані доходять до рушія розрахунку,
+тож затверджувати її треба нарівні з `Q-014`. У `02-contracts.md` порти
+свідомо не перенесені до затвердження.
+**Статус:** OPEN · напрям затверджено; **форма портів чекає затвердження**
 
 ---
 
@@ -1189,3 +1231,144 @@ XML-doc українською, тіло `NotImplementedException` зі зміс
 **Що потрібно від людини:** унести ці п'ять файлів (і теку
 `src/Ecr.Api/Startup/`) у `05-skeleton.md` §1 і `05c`/`05g`/`05h`.
 **Статус:** RESOLVED
+
+---
+
+### Q-025 · SCOPE · Етап 0 · 2026-09-04 — результат рев'ю Етапу 0
+
+**Де:** весь етап
+**Контекст:** рев'ю з чистим контекстом за `07-checkpoints.md` («ПРОМПТИ РЕВ'Ю»).
+Універсальний промпт написаний для Етапів 1–6, тому для Етапу 0 пункт 3
+інвертовано: `NotImplementedException` і `Assert.Fail` тут — вимога, а не дефект.
+
+**Вердикт рев'ювера: не PASS.** Вісім правок, усі в журналі й документації;
+правок у `src/` і `tests/` рев'ю не вимагало.
+
+#### Прийнято і виправлено
+
+| № | Зауваження | Що зроблено |
+|---|---|---|
+| К-1 | `09-commands.md` і `progress.md` брешуть про інтеграційні тести: «61 знайдено, не запускалися» | Перевірив сам: **119 знайдено, 119 запущено і впало** (`Ecr.Infrastructure.Tests` 116, `Ecr.Application.Tests` 3). Docker для них не потрібен: тіла — `Assert.Fail`, до `SqlServerFixture` виконання не доходить. Причина помилки: я рахував `--list-tests \| grep -c` замість того, щоб запустити. Числа виправлено в обох файлах |
+| К-2 | Дев'ять файлів із доданими `using` не описані в `Q-011` | `Q-011` доповнено повним переліком; разом 34 файли |
+| К-4 | Мовчазна правка тексту `TODO` в `MethodologyResolver.cs` приховала розбіжність сутності зі схемою | Текст повернуто до `MatchJson`, як у `05f`; відкрито **`Q-026`** |
+| В-1 | `Q-005` мав бути `CONTRACT`, а не `BOOTSTRAP-FIX` | Перекваліфіковано, з поясненням, чому це важливо |
+| В-2 | `Q-018` стоїть `RESOLVED`, хоча форму 15 сигнатур склав я | Статус → `OPEN`, «форма портів чекає затвердження», нарівні з `Q-014` |
+| В-4 | 18 послаблених правил; `CS1574/CS1580/CS1584` глушать зламані `<see cref>` | Знято `CS1574;CS1580;CS1584` — і **це одразу знайшло реальний дефект**: `ISimulationService.cs` посилався на `EditDenyReason.SimulationReadOnly` без `using Ecr.Domain.Enums;`. Виправлено, дописано в `Q-011`. `CA1707` і `xUnit1026` винесені в новий `tests/Directory.Build.props` і на `src/` більше не діють |
+| В-6 | Арифметика: «37 файлів без вмісту» і «BOOTSTRAP-FIX: 11» | Перевірив пофайлово: **33** і **10**. Виправлено в `progress.md` і `Q-015` |
+| В-7 | Повідомлення коміту `stage-0-verified` каже «тести зелені» | Для Етапу 0 зелений тест був би провалом. Історію не переписував (на неї вже посилається рев'ю); натомість тег `stage-0-reviewed` анотований із правильним формулюванням, а `progress.md` містить фактичні числа |
+
+#### Відхилено після перевірки
+
+**К-3 «`README.md` змінено без запису» — хибне спрацювання.** Перевірив
+побайтово: блок із `05a-skeleton-solution.md` і файл на диску **збігаються**.
+Рев'ювер, найпевніше, закрив блок на першій вкладеній огорожі ```` ``` ````
+(усередині `README.md` є вкладений блок ```` ```bash ````) і порівняв
+обрізану версію. Це варто мати на увазі майбутнім рев'ю: у `05a` є рівно один
+файл із вкладеною огорожею.
+
+#### Прийнято до відома, рішення за людиною
+
+`В-3` (`Q-014` блокує Етапи 2, 4, 5), `В-5` (`Q-013` і `Q-018` варто
+перепідтвердити письмово), `N-1`…`N-4` (порядок `using`, `eslint.config.js`).
+
+#### Що рев'ю підтвердило без зауважень
+
+Скелет відтворено дослівно (255 із 302 секцій побайтово; решта — виключно
+додані `using` і зафіксовані записами); контракти не змінені (27 із 34 блоків
+`02-contracts.md` побайтово, решта — лише **додавання**, жодного члена не
+прибрано); правила залежностей чисті; **жоден тест не втрачено, не послаблено
+і не пропущено** — 470 `[Fact]`, 19 `[Theory]`, 70 `[InlineData]` збігаються з
+`06a`…`06e` один в один, нуль `Skip`; заборонених пакетів немає; advisory
+`GHSA-3w5p-95mh-gq75` перевірено за першоджерелом і обґрунтування `Q-004`
+правдиве; реальні дані в репозиторій не потрапили.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-026 · CONTRACT · Етап 0 · 2026-09-04 · **потребує рішення**
+
+**Де:** `src/Ecr.Domain/Entities/Calculations/MethodologyRule.cs`
+проти `docs/build/02a-db-schema.md`, `CREATE TABLE calc.MethodologyRule`
+**Контекст:** знайдено рев'ю Етапу 0 (К-4).
+
+**Суть:**
+Доменна сутність і схема БД описують ту саму таблицю **несумісно**: поле
+предиката зветься по-різному, а обов'язкової колонки `Code`, яка входить в
+унікальний ключ, у сутності немає взагалі.
+
+**Цитати:**
+
+`02a-db-schema.md` рядок 1069:
+```sql
+CREATE TABLE calc.MethodologyRule
+(
+    Id                   int           IDENTITY(1,1) NOT NULL,
+    MethodologyVersionId int           NOT NULL,
+    Code                 nvarchar(64)  NOT NULL,
+    MatchJson            nvarchar(max) NOT NULL,
+    Priority             int           NOT NULL CONSTRAINT DF_MR_Prio DEFAULT(100),
+    IsActive             bit           NOT NULL CONSTRAINT DF_MR_Act  DEFAULT(1),
+    CONSTRAINT PK_MethodologyRule PRIMARY KEY (Id),
+    CONSTRAINT UQ_MethodologyRule UNIQUE (MethodologyVersionId, Code),
+    CONSTRAINT FK_MR_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id)
+);
+```
+
+`05b-skeleton-domain.md` рядок 2321 (створено дослівно):
+```csharp
+public MethodologyRule(int methodologyVersionId, string conditionExpression, int priority)
+{
+    MethodologyVersionId = methodologyVersionId;
+    ConditionExpression = conditionExpression;
+    Priority = priority;
+    IsActive = true;
+}
+...
+/// <summary>Умова діалекту методологій; посилається на реєстри й атрибути.</summary>
+public string ConditionExpression { get; private set; } = null!;
+```
+
+`05f-skeleton-calculations.md` рядки 108 і 152:
+```
+"2) підібрати методології ПРАВИЛАМИ (MethodologyRule.MatchJson), не жорстким списком;\n" +
+"TODO: застосувати MethodologyRule.MatchJson (предикат по колонках рядка) у порядку " +
+```
+
+**Розбіжності — дві, і обидві предметні:**
+
+1. **Ім'я поля.** Два джерела з трьох (`02a` і `05f`) кажуть `MatchJson`,
+   сутність каже `ConditionExpression`. Це не косметика: `MatchJson` натякає
+   на структурований предикат (JSON), `ConditionExpression` — на вираз
+   діалекту методологій, який розбирає наш парсер. Це **різні механізми
+   зіставлення** і різні місця, де перевіряється матриця покриття (ФВ-13.4).
+   Той самий тип `nvarchar(max)` обидва варіанти влаштовує, тому база
+   помилки не покаже — розбіжність вилізе як «правило не спрацювало».
+2. **Відсутнє поле `Code`.** У схемі воно `NOT NULL` і входить в
+   `UQ_MethodologyRule (MethodologyVersionId, Code)`. Сутність його не має,
+   тому створити валідний рядок через доменний конструктор **неможливо**.
+
+**Чому не вирішую сам** (`08-workflow.md` §7): і те, і те — запис у базі і
+механізм, за яким методологія добирає рядки документа, тобто **числа**.
+Вибір між `MatchJson` і `ConditionExpression` — це вибір формату
+конфігурації, а не назви змінної.
+
+**Що вже зробив:** повернув текст `TODO` у `MethodologyResolver.cs` до
+`MatchJson`, як у `05f`, і додав туди явну позначку `⚠ Q-026`, щоб розбіжність
+не загубилася. Сутність і схему **не чіпав**.
+
+**Що потрібно від людини:**
+1. Яке ім'я і який формат правильні — `MatchJson` (структурований предикат)
+   чи `ConditionExpression` (вираз діалекту методологій)?
+2. Чи потрібне полю `Code` місце в сутності (схема вимагає його `NOT NULL`
+   і в унікальному ключі)?
+
+**Додаткова обставина, яку я перевірив.** `MatchJson` є в схемі ще у двох
+таблицях — `cfg.TableRelationDef` (рядок 454) і `cfg.CalculationBinding`
+(рядок 543), — і в **обох** випадках відповідні сутності
+(`TableRelationDef.cs`, `CalculationBinding.cs`) мають поле саме `MatchJson`.
+Тобто `MethodologyRule` — єдине місце в пакеті, де узгодженість порушена.
+Це схиляє до того, що дефект у сутності, а не в схемі, але вибір усе одно
+не мій: `ConditionExpression` може бути свідомим рішенням саме для правил
+методологій, де предикат посилається на реєстри й атрибути.
+**Статус:** OPEN · блокує мапінг EF на Етапі 1 і зіставлення методологій на Етапі 4

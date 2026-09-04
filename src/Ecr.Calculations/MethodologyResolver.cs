@@ -22,7 +22,10 @@ public sealed class MethodologyResolver(IMethodologyStore store)
         int methodologyVersionId, long tableInstanceId, CancellationToken ct)
         => throw new NotImplementedException(
             "TODO: узяти правила через store.GetRulesAsync(methodologyVersionId); " +
-            "застосувати MethodologyRule.ConditionExpression (предикат по колонках рядка) у порядку " +
+            "застосувати MethodologyRule.MatchJson (предикат по колонках рядка) у порядку " +
             "Priority; перший збіг виграє. Матриця покриття (ФВ-13.4) будується на тому самому " +
-            "механізмі — вона показує, які рядки не закрилися жодним правилом.");
+            "механізмі — вона показує, які рядки не закрилися жодним правилом. " +
+            "⚠ Q-026: у сутності Ecr.Domain поле зветься ConditionExpression, а в схемі " +
+            "calc.MethodologyRule воно MatchJson, і там же є Code, якого в сутності немає. " +
+            "Розбіжність відкрита — не обирати варіант самому.");
 }

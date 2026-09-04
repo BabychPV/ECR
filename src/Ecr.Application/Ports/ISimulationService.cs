@@ -2,6 +2,7 @@
 namespace Ecr.Application.Ports;
 
 using Ecr.Application.Security;
+using Ecr.Domain.Enums;
 
 /// <summary>
 /// Симуляція «очима користувача» (<c>ФВ-6.16a</c>, <c>D-96</c>).
