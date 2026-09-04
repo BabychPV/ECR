@@ -84,4 +84,18 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
 
     /// <summary>Стеля вибірки періодів: рік має щонайбільше 12 (D-108).</summary>
     private const int MaxPeriods = 64;
+
+    /// <inheritdoc />
+    public async Task<PeriodBounds?> FindPeriodBoundsAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        var query =
+            from document in db.Documents.AsNoTracking()
+            join period in db.Periods.AsNoTracking()
+                on document.ProjectId equals period.ProjectId
+            where document.Id == documentId && period.PeriodKeyValue == periodKey
+            select new PeriodBounds(period.PeriodStart, period.PeriodEnd);
+
+        return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
 }

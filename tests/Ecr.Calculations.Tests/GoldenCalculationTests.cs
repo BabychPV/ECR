@@ -78,6 +78,25 @@ public sealed class GoldenCalculationTests
         // 912687.5 g / (31 × 86400 s) = 0.3407584… → 0.340758
         Assert.Equal(0.340758m, Value(output, CodEntry, "gsec"));
         Assert.Equal(Expected("SUB-COD", "gsec_Actual"), Value(output, CodEntry, "gsec"));
+
+        // ⛔ Та сама методологія, той самий PeriodKey — і КВАРТАЛЬНИЙ проєкт.
+        // 202601 у ньому означає перший квартал (90 днів), а не січень (31).
+        // Вивести це з ключа неможливо: `PeriodKey = Year*100 + Sequence`
+        // (R-A6), і Sequence — порядковий номер періоду, не місяць. Тлумачити
+        // його як місяць означало б поділити на 2 678 400 секунд замість
+        // 7 776 000 — усі г/с у звіті стали б утричі більшими, і жодна
+        // перевірка цього не побачила б: число лишається правдоподібним
+        // (ФВ-16.11a, D-112).
+        var quarterly = Substitute.For<IPeriodStore>();
+        quarterly.FindPeriodBoundsAsync(700, 202601, Arg.Any<CancellationToken>())
+                 .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 3, 31)));
+
+        var quarter = Value(await RunAsync(periods: quarterly), CodEntry, "gsec");
+
+        Assert.NotEqual(0.340758m, quarter);
+        Assert.Equal(
+            decimal.Round(912_687.5m / (90m * 86400m), 6, MidpointRounding.AwayFromZero),
+            quarter);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -183,14 +202,17 @@ public sealed class GoldenCalculationTests
     }
 
     private async Task<CalculationOutput> RunAsync(
-        CalendarMode calendar = CalendarMode.Actual, TraceLevel trace = TraceLevel.Full)
+        CalendarMode calendar = CalendarMode.Actual,
+        TraceLevel trace = TraceLevel.Full,
+        IPeriodStore? periods = null)
     {
         var module = new GenericCalculationModule(
             new RealFormulaEngine(),
             _store,
             new ConstantResolver(_constants),
             new CalendarContext(),
-            Units());
+            Units(),
+            periods ?? Periods());
 
         var descriptor = new MethodologyDescriptor(
             MethodologyId: 5,
@@ -218,6 +240,23 @@ public sealed class GoldenCalculationTests
             ]);
 
         return await module.ExecuteAsync(input, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Межі періоду 202601 — січень 2026, як їх задає календар проєкту.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Межі приходять зі сховища, а не виводяться з <c>PeriodKey</c>: для
+    /// квартального проєкту <c>202601</c> — це перший КВАРТАЛ, і поділ на 31
+    /// день замість 90 дав би <c>г/с</c> утричі більші (ФВ-16.11a).
+    /// </remarks>
+    private static IPeriodStore Periods()
+    {
+        var periods = Substitute.For<IPeriodStore>();
+        periods.FindPeriodBoundsAsync(700, 202601, Arg.Any<CancellationToken>())
+               .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+
+        return periods;
     }
 
     /// <summary>Довідник одиниць за <c>09-seed.sql</c> плюс похідна <c>g/s</c>.</summary>

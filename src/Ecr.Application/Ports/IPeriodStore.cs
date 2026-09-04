@@ -44,9 +44,35 @@ public interface IPeriodStore
     /// </remarks>
     public Task<IReadOnlyList<PeriodStateRef>> GetPeriodStatesAsync(
         int projectId, int? periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Межі періоду документа; <c>null</c> — такого періоду немає.
+    /// </summary>
+    /// <param name="documentId">Документ — через нього знаходиться проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Через ДОКУМЕНТ, а не просто за ключем: <c>PeriodKey</c> не унікальний
+    /// глобально, і <c>202601</c> у місячному проєкті — січень, а в
+    /// квартальному — перший квартал. Межі залежать від проєкту.
+    /// </remarks>
+    public Task<PeriodBounds?> FindPeriodBoundsAsync(
+        long documentId, int periodKey, CancellationToken ct);
 }
 
 /// <summary>Стан одного періоду.</summary>
 /// <param name="PeriodKey">Ключ періоду (R-A6).</param>
 /// <param name="State">Стан; <c>Closed</c> блокує перерахунок (ФВ-9.7).</param>
 public sealed record PeriodStateRef(int PeriodKey, Ecr.Domain.Enums.PeriodState State);
+
+/// <summary>Межі періоду — те, з чого рахується його тривалість.</summary>
+/// <param name="PeriodStart">Перший день.</param>
+/// <param name="PeriodEnd">Останній день.</param>
+/// <remarks>
+/// ⚠ Саме межі, а не <c>PeriodKey</c>. Вивести тривалість із ключа неможливо:
+/// <c>PeriodKey = Year*100 + Sequence</c> (R-A6), і для квартального проєкту
+/// <c>202602</c> — це другий КВАРТАЛ, а не лютий. Тлумачити <c>Sequence</c> як
+/// місяць означало б поділити на 28 днів замість 91 — усі <c>г/с</c> у звіті
+/// стали б утричі більшими (ФВ-16.11a, D-112).
+/// </remarks>
+public sealed record PeriodBounds(DateOnly PeriodStart, DateOnly PeriodEnd);

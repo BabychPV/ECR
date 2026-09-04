@@ -21,7 +21,8 @@ public sealed class GenericCalculationModule(
     IMethodologyStore methodologies,
     ConstantResolver constants,
     CalendarContext calendar,
-    IUnitCatalog unitCatalog) : ICalculationModule
+    IUnitCatalog unitCatalog,
+    IPeriodStore periods) : ICalculationModule
 {
     private UnitTable? _units;
     /// <inheritdoc />
@@ -64,7 +65,7 @@ public sealed class GenericCalculationModule(
         // сьогодні.
         var ordered = formulas.OrderBy(f => f.EvaluationOrder).ThenBy(f => f.Id).ToList();
 
-        var period = PeriodOf(version, input.PeriodKey);
+        var period = await PeriodAsync(version, input, ct).ConfigureAwait(false);
         var arguments = input.Arguments.ToDictionary(
             a => a.ArgumentCode, ToValue, StringComparer.OrdinalIgnoreCase);
 
@@ -307,19 +308,33 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>Календарний контекст періоду за режимом версії.</summary>
-    private Expressions.PeriodContext PeriodOf(
-        MethodologyDescriptor version, Domain.ValueObjects.PeriodKey periodKey)
+    /// <remarks>
+    /// ⛔ Межі беруться з <c>doc.Period</c>, а НЕ виводяться з
+    /// <c>PeriodKey</c>. Вивести їх із ключа неможливо:
+    /// <c>PeriodKey = Year*100 + Sequence</c> (R-A6), і для квартального
+    /// проєкту <c>202602</c> — це другий КВАРТАЛ. Тлумачити <c>Sequence</c> як
+    /// місяць означало б поділити на 28 днів замість 91: усі <c>г/с</c> у
+    /// звіті стали б утричі більшими, і жодна перевірка цього не побачила б —
+    /// число залишається правдоподібним (ФВ-16.11a, D-112).
+    /// </remarks>
+    private async Task<Expressions.PeriodContext> PeriodAsync(
+        MethodologyDescriptor version, CalculationInput input, CancellationToken ct)
     {
-        // PeriodKey = Year*100 + Sequence (R-A6). Місячний період — саме
-        // Sequence-й місяць року; інші гранулярності приходять із періоду
-        // проєкту і в цій точці ще не потрібні.
-        var year = periodKey.Value / 100;
-        var sequence = periodKey.Value % 100;
+        var bounds = await periods
+            .FindPeriodBoundsAsync(input.DocumentId, input.PeriodKey.Value, ct)
+            .ConfigureAwait(false)
+            ?? throw new Domain.Abstractions.DomainException(
+                "ECR-PRD-0404",
+                $"Періоду {input.PeriodKey.Value} для документа {input.DocumentId} не існує: "
+                + "тривалість обчислити нема з чого.");
 
-        var start = new DateOnly(year, sequence, 1);
-        var end = new DateOnly(year, sequence, DateTime.DaysInMonth(year, sequence));
+        // Sequence — порядковий номер періоду в році, і саме він, а не місяць:
+        // у квартальному проєкті їх чотири (R-A6, D-108).
+        var sequence = (byte)(input.PeriodKey.Value % 100);
 
-        return calendar.Build(start, end, version.CalendarMode, year, (byte)sequence);
+        return calendar.Build(
+            bounds.PeriodStart, bounds.PeriodEnd, version.CalendarMode,
+            input.PeriodKey.Value / 100, sequence);
     }
 
     /// <summary>Аргумент розрахунку як значення виразу.</summary>
