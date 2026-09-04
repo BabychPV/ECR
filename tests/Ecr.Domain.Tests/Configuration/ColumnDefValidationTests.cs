@@ -1,3 +1,4 @@
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -62,7 +63,30 @@ public sealed class ColumnDefValidationTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Колонка_типу_Unit_зберігає_посилання_на_одиницю()
-        => Assert.Fail("not implemented");
+    {
+        var column = Column(CellDataType.Unit, "AmountUnit");
+
+        // У комірці лежить ValueUnitId → uom.Unit(Id), а не текст «kg»
+        // (R-A4, ФВ-16.8). Символ одиниці локалізований і змінюваний;
+        // збережений рядок перетворив би історію на набір підписів, які
+        // залежать від мови інтерфейсу того, хто заповнював.
+        Assert.Null(column.ValidateValue(new CellValueData { ValueUnitId = 8 }));
+
+        Assert.Equal("ECR-CELL-0422", column.ValidateValue(new CellValueData { ValueString = "kg" }));
+        Assert.Equal("ECR-CELL-0422", column.ValidateValue(new CellValueData { ValueNumeric = 8m }));
+
+        // ⛔ Одиниця КОЛОНКИ такій колонці не задається: у неї одиниця на
+        // рядок, і колонкова означала б, що та сама комірка має дві одиниці
+        // одночасно — а котра з них правильна, з'ясувалося б на звірці.
+        var error = Assert.Throws<DomainException>(() => column.SetUnit(8));
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Null(column.UnitId);
+
+        // Звичайній числовій колонці — задається, і це норма (ФВ-16.1).
+        var numeric = Column(CellDataType.Decimal);
+        numeric.SetUnit(8);
+        Assert.Equal(8, numeric.UnitId);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

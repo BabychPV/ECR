@@ -103,7 +103,27 @@ public sealed class ColumnDef : Entity<int>
     }
 
     /// <summary>Одиниця, в якій зберігаються значення колонки (ФВ-16.1).</summary>
-    public void SetUnit(int unitId) => UnitId = unitId;
+    /// <param name="unitId">Одиниця з <c>uom.Unit</c>.</param>
+    /// <exception cref="DomainException">
+    /// Колонка типу <see cref="CellDataType.Unit"/> — <c>ECR-TMPL-0422</c>.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Колонці з одиницею НА РЯДОК одиниця колонки не задається (ФВ-16.8,
+    /// R-A4): це означало б, що та сама комірка має дві одиниці одночасно, а
+    /// котра з них правильна, з'ясувалося б на звірці.
+    /// </remarks>
+    public void SetUnit(int unitId)
+    {
+        if (DataType == CellDataType.Unit)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Колонка {Code} має тип Unit: одиниця задається на рядок "
+                + "(doc.CellValue.ValueUnitId), а не на колонку.");
+        }
+
+        UnitId = unitId;
+    }
 
     /// <summary>Значення за замовчуванням і формат відображення.</summary>
     public void SetPresentation(string? defaultValue, string? displayFormat, int? styleId)
