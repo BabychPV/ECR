@@ -1,6 +1,7 @@
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Security;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
@@ -39,6 +40,7 @@ public sealed class MethodologyPublishTests
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
 
     private readonly Methodology _methodology;
     private readonly MethodologyVersion _version;
@@ -48,6 +50,10 @@ public sealed class MethodologyPublishTests
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(Reviewer);
         _user.CorrelationId.Returns("test");
+
+        // Права видані обом учасникам: предмет цих тестів — правила
+        // публікації, а не доступ. Саме право перевіряє AccessDecisionTests.
+        _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Profile());
 
         _methodology = new Methodology(EcrCode.Create("WATER_DISCHARGE"), Text("Water"));
         _version = AddVersion(VersionId, "1.1.0.0");
@@ -231,8 +237,19 @@ public sealed class MethodologyPublishTests
         Assert.True(order["MassKg"] < order["gsec"], "MassKg має рахуватися до gsec");
     }
 
+    /// <summary>Профіль із небезпечним правом публікації методології.</summary>
+    private static AccessProfile Profile() => new()
+    {
+        CacheKey = "p",
+        UserId = Reviewer,
+        SecurityStamp = "s",
+        Permissions = new HashSet<string>(StringComparer.Ordinal) { "Calculation.Publish" },
+        Grants = new Dictionary<string, GrantLevel>(),
+        Denies = new HashSet<string>(),
+    };
+
     private PublishMethodologyHandler Handler()
-        => new(_module, _store, new RealFormulaEngine(), _uow, _audit, _user, _clock);
+        => new(_module, _store, new RealFormulaEngine(), _uow, _audit, _access, _user, _clock);
 
     private MethodologyVersion AddVersion(int id, string number)
     {

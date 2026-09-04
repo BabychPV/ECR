@@ -24,9 +24,19 @@ public sealed class PublishMethodologyHandler(
     IFormulaEngine formulaEngine,
     IUnitOfWork uow,
     IAuditWriter audit,
+    Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
 {
+    /// <summary>Право на публікацію методології (`02-contracts.md` §9).</summary>
+    /// <remarks>
+    /// ⚠ Право **небезпечне** (`sec.Permission.IsDangerous = 1`): вбудованим
+    /// ролям воно seed-ом не видається взагалі (ФВ-6.12, D-40). Публікація
+    /// методології змінює вже подані числа, і «випадково мати» таке право не
+    /// має ніхто.
+    /// </remarks>
+    public const string Permission = "Calculation.Publish";
+
     /// <summary>Публікує версію.</summary>
     /// <param name="methodologyVersionId">Версія-чернетка.</param>
     /// <param name="changeReason">Причина зміни; обов'язкова (ФВ-14.7).</param>
@@ -41,6 +51,10 @@ public sealed class PublishMethodologyHandler(
     public async Task<MethodologyPublicationDiff> HandleAsync(
         int methodologyVersionId, string changeReason, DateOnly? effectiveFrom, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не публікує методології.");
 

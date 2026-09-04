@@ -11,8 +11,22 @@ namespace Ecr.Application.Registries;
 
 /// <summary>Створення і зміна запису довідника (ФВ-8.6, ФВ-8.7).</summary>
 public sealed class UpsertRegistryEntryHandler(
-    IRegistryStore registries, IUnitOfWork uow, ICurrentUser currentUser, IClock clock)
+    IRegistryStore registries,
+    IUnitOfWork uow,
+    Security.IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IClock clock)
 {
+    /// <summary>
+    /// Право на зміну ДАНИХ довідника (`02-contracts.md` §9).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Registry.EditData</c> і <c>Registry.EditDefinition</c> — різні
+    /// права: змінювати значення і змінювати склад полів довідника може не
+    /// той самий користувач.
+    /// </remarks>
+    public const string Permission = "Registry.EditData";
+
     /// <summary>Створює або оновлює запис і повертає його ідентифікатор.</summary>
     /// <param name="dto">Опис запису.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -21,6 +35,10 @@ public sealed class UpsertRegistryEntryHandler(
     public async Task<long> HandleAsync(RegistryEntryUpsertDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
+
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");

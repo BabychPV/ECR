@@ -18,8 +18,16 @@ namespace Ecr.Application.Periods;
 /// закриття періоду.
 /// </remarks>
 public sealed class SetCurrentPeriodHandler(
-    IPeriodStore periods, IUnitOfWork uow, IAuditWriter audit, ICurrentUser currentUser, IClock clock)
+    IPeriodStore periods,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    Security.IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IClock clock)
 {
+    /// <summary>Право на налаштування періодів (`02-contracts.md` §9).</summary>
+    public const string Permission = "Period.Configure";
+
     /// <summary>Фіксує поточний період або повертає автоматичний режим.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="pinnedPeriodId">Період; <c>null</c> — режим <c>Auto</c>.</param>
@@ -27,6 +35,10 @@ public sealed class SetCurrentPeriodHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task HandleAsync(int projectId, int? pinnedPeriodId, string? reason, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Анонімний запит не може змінювати поточний період.");

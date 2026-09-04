@@ -14,12 +14,20 @@ namespace Ecr.Application.Registries;
 /// <c>Permit</c> — тисячі, і разом вони перетворили б відкриття конфігуратора
 /// на вивантаження всієї бази довідників.
 /// </remarks>
-public sealed class ListRegistriesHandler(IRegistryStore registries)
+public sealed class ListRegistriesHandler(
+    IRegistryStore registries, Security.IAccessDecisionService access, ICurrentUser currentUser)
 {
+    /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
+    public const string Permission = "Registry.View";
+
     /// <summary>Читає перелік.</summary>
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<RegistryDefDto>> HandleAsync(CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var definitions = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
 
         return definitions
@@ -65,9 +73,19 @@ public sealed class SwitchRegistrySourceHandler(
     IRegistryStore registries,
     IUnitOfWork uow,
     IAuditWriter audit,
+    Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
 {
+    /// <summary>
+    /// Право на зміну ВИЗНАЧЕННЯ довідника — не даних.
+    /// </summary>
+    /// <remarks>
+    /// Перемикання master змінює, чий перелік записів вважається істинним:
+    /// це рішення про сам довідник, а не правка значення в ньому.
+    /// </remarks>
+    public const string Permission = "Registry.EditDefinition";
+
     /// <summary>Перемикає master.</summary>
     /// <param name="registryCode">Код довідника.</param>
     /// <param name="kind">Нове джерело.</param>
@@ -76,6 +94,10 @@ public sealed class SwitchRegistrySourceHandler(
     /// <exception cref="BusinessRuleException">Є відкритий період — <c>ECR-REG-0422</c>.</exception>
     public async Task HandleAsync(string registryCode, RegistrySourceKind kind, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
 
@@ -147,8 +169,15 @@ public sealed class SwitchRegistrySourceHandler(
 /// </para>
 /// </remarks>
 public sealed class DeleteRegistryEntryHandler(
-    IRegistryStore registries, IUnitOfWork uow, ICurrentUser currentUser, IClock clock)
+    IRegistryStore registries,
+    IUnitOfWork uow,
+    Security.IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IClock clock)
 {
+    /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
+    public const string Permission = "Registry.EditData";
+
     /// <summary>Логічно видаляє запис, якщо на нього ніхто не посилається.</summary>
     /// <param name="registryEntryId">Запис.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -156,6 +185,10 @@ public sealed class DeleteRegistryEntryHandler(
     /// <exception cref="BusinessRuleException">На запис посилаються дані — <c>ECR-REG-0409</c>.</exception>
     public async Task HandleAsync(long registryEntryId, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
 

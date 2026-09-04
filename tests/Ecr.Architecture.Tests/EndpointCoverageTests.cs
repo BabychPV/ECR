@@ -67,6 +67,80 @@ public sealed partial class EndpointCoverageTests
         Assert.Empty(extra);
     }
 
+    // ⚠ Третій сторож того самого класу дефектів — «робота, якої ніхто не
+    // робить». Перші два: контейнер мусить СТВОРИТИ кожен контролер
+    // (`ContainerTests`) і кожен ендпоінт контракту мусить мати неспорожнілу
+    // реалізацію (вище). Цей ловить третій різновид: ендпоінт існує, працює —
+    // і не перевіряє права, яке контракт для нього оголосив.
+    //
+    // Саме так Етап 4 закрився першим проходом: усі дев'ять ендпоінтів
+    // довідників, одиниць і методологій мали лише `[Authorize]`, тобто
+    // будь-який автентифікований користувач міг редагувати довідники і
+    // публікувати методології. Тести проходили: вони перевіряли правила
+    // предметної області, а не доступ.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожне_право_з_таблиці_ендпоінтів_десь_перевіряється()
+    {
+        var declared = DeclaredPermissions();
+        Assert.NotEmpty(declared);
+
+        // Права перевіряються В ОБРОБНИКАХ, а не атрибутом контролера
+        // (архітектурне правило 7): доступ у ECR залежить від ресурсу, а
+        // атрибут бачить лише ім'я політики. Тому шукаємо саме в застосунку.
+        var application = SourceOf("Ecr.Application");
+
+        var unchecked_ = declared
+            .Where(permission => !application.Contains(
+                $"\"{permission}\"", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(unchecked_);
+    }
+
+    /// <summary>
+    /// Права, названі в таблиці ендпоінтів контракту, крім відкладених етапів.
+    /// </summary>
+    /// <remarks>
+    /// Етап відсіюється тим самим списком <see cref="DeferredStages"/>, що й
+    /// сама наявність ендпоінта: право не може перевірятися там, де ендпоінта
+    /// ще немає. Список зменшується разом із етапами.
+    /// </remarks>
+    private static HashSet<string> DeclaredPermissions()
+    {
+        var path = Path.Combine(SolutionRoot(), "docs", "build", "02-contracts.md");
+
+        return PermissionCell.Matches(File.ReadAllText(path))
+            .Where(m => !DeferredStages.Contains(
+                int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .Select(m => m.Groups[1].Value)
+            .Where(p => p.Contains('.', StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>Увесь текст вихідних файлів проєкту.</summary>
+    private static string SourceOf(string project)
+    {
+        var root = Path.Combine(SolutionRoot(), "src", project);
+
+        return string.Join(
+            '\n',
+            Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+                                        StringComparison.Ordinal)
+                            && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+                                           StringComparison.Ordinal))
+                .Select(File.ReadAllText));
+    }
+
+    [GeneratedRegex(
+        @"^\|\s*`(?:GET|POST|PUT|PATCH|DELETE)`\s*\|\s*`[^`]+`\s*\|\s*`([^`]+)`\s*\|\s*(\d)\s*\|",
+        RegexOptions.Multiline)]
+    private static partial Regex PermissionCell { get; }
+
     /// <summary>Рядок таблиці ендпоінтів контракту.</summary>
     private sealed record Endpoint(string Method, string Path, int Stage);
 

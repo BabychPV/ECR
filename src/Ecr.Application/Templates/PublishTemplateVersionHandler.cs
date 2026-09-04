@@ -18,10 +18,15 @@ public sealed class PublishTemplateVersionHandler(
     IFormulaEngine formulaEngine,
     IMetadataCache metadataCache,
     IUnitCatalog unitCatalog,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser,
     IAuditWriter audit,
     IUnitOfWork uow,
     IClock clock)
 {
+    /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
+    public const string Permission = "Template.Publish";
+
     /// <summary>Виконує публікацію.</summary>
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="userId">Хто публікує.</param>
@@ -31,6 +36,10 @@ public sealed class PublishTemplateVersionHandler(
     /// </exception>
     public async Task PublishAsync(int templateVersionId, int userId, CancellationToken ct)
     {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // Усі дванадцять перевірок із 02b §12 — синтаксис, резолвінг, типи,

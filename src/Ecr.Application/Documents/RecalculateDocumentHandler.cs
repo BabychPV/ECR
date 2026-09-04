@@ -15,17 +15,32 @@ namespace Ecr.Application.Documents;
 /// це прикладне рішення (яка задача, з яким payload, за яких умов), і в
 /// HTTP-шарі воно перетворило б контролер на другий прикладний шар.
 /// </remarks>
-public sealed class RecalculateDocumentHandler(IBackgroundJobScheduler jobs)
+public sealed class RecalculateDocumentHandler(
+    IBackgroundJobScheduler jobs,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
+    /// <summary>Право на запуск перерахунку (`02-contracts.md` §9).</summary>
+    public const string Permission = "Calculation.Recalculate";
+
     /// <summary>Ставить задачу в чергу і повертає її ідентифікатор.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<string> HandleAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
-        // ⚠ ЗАКРИТІ періоди АВТОМАТИЧНО не перераховуються ніколи (ФВ-9.7).
-        // Перевірка стану періоду з'являється разом із самим станом на Етапі 3
-        // (`doc.Period.State`); тут її свідомо немає, а не «забуто»: заглушка
-        // «період відкритий» була б гіршою за її відсутність.
-        => jobs.EnqueueAsync<IRecalculationJob>(
-            new { DocumentId = documentId, PeriodKey = periodKey.Value }, ct);
+    /// <remarks>
+    /// ⚠ ЗАКРИТІ періоди АВТОМАТИЧНО не перераховуються ніколи (ФВ-9.7) —
+    /// це перевіряє <c>RunCalculationHandler</c>, якому задача передає
+    /// керування. Тут — право і чергування.
+    /// </remarks>
+    public async Task<string> HandleAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        return await jobs
+            .EnqueueAsync<IRecalculationJob>(
+                new { DocumentId = documentId, PeriodKey = periodKey.Value }, ct)
+            .ConfigureAwait(false);
+    }
 }

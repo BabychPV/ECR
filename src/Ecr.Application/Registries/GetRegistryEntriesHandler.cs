@@ -19,8 +19,12 @@ public sealed class GetRegistryEntriesHandler(
     IRegistryStore registries,
     RegistryResolver resolver,
     IRegistryEntryCache cache,
+    Security.IAccessDecisionService access,
     ICurrentUser currentUser)
 {
+    /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
+    public const string Permission = "Registry.View";
+
     /// <summary>Читає записи довідника на дату.</summary>
     /// <param name="registryCode">Код довідника.</param>
     /// <param name="asOf">Дата періоду.</param>
@@ -30,6 +34,10 @@ public sealed class GetRegistryEntriesHandler(
     public async Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
         string registryCode, DateOnly asOf, long? parentEntryId, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)
             ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{registryCode}» не існує.");
 

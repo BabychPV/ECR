@@ -1,6 +1,8 @@
 using System.Reflection;
 using Ecr.Application.Errors;
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
@@ -40,6 +42,8 @@ public sealed class PublishTemplateVersionTests
     private readonly IFormulaEngine _formulas = Substitute.For<IFormulaEngine>();
     private readonly IMetadataCache _cache = Substitute.For<IMetadataCache>();
     private readonly IUnitCatalog _catalogue = Substitute.For<IUnitCatalog>();
+    private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -54,10 +58,23 @@ public sealed class PublishTemplateVersionTests
         // Порожній довідник за замовчуванням: решта тестів про одиниці не
         // говорить, і перевірка мусить їх пропускати, а не падати.
         _catalogue.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
+        // Право видане: предмет цих тестів — дванадцять перевірок публікації,
+        // а не доступ. Саме право стереже EndpointCoverageTests.
+        _user.UserId.Returns(9);
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "p",
+            UserId = 9,
+            SecurityStamp = "s",
+            Permissions = new HashSet<string>(StringComparer.Ordinal) { "Template.Publish" },
+            Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(),
+        });
     }
 
     private PublishTemplateVersionHandler Handler()
-        => new(_versions, _formulas, _cache, _catalogue, _audit, _uow, _clock);
+        => new(_versions, _formulas, _cache, _catalogue, _access, _user, _audit, _uow, _clock);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Коректна_версія_публікується()

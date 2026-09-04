@@ -242,7 +242,7 @@ public sealed class OrphanScanTests
     }
 
     private SetEntryValidityHandler Handler()
-        => new(_registries, _scanner, _uow, _audit, _user, _clock);
+        => new(_registries, _scanner, _uow, _audit, _access, _user, _clock);
 
     private GetTableSliceHandler Slice() => new(_rows, _cells, _metadata, _access);
 
@@ -257,7 +257,9 @@ public sealed class OrphanScanTests
         CacheKey = "p",
         UserId = 9,
         SecurityStamp = "s",
-        Permissions = new HashSet<string>(),
+        // Право на зміну довідників видане: предмет цих тестів — симетрія
+        // ознаки IsOrphaned, а не доступ.
+        Permissions = new HashSet<string>(StringComparer.Ordinal) { "Registry.EditData" },
         Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(),
     };

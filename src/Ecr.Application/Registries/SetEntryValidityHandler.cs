@@ -20,9 +20,13 @@ public sealed class SetEntryValidityHandler(
     IOrphanScanner scanner,
     IUnitOfWork uow,
     IAuditWriter audit,
+    Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
 {
+    /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
+    public const string Permission = "Registry.EditData";
+
     /// <summary>Змінює вікно і перераховує ознаку.</summary>
     /// <param name="registryEntryId">Запис довідника.</param>
     /// <param name="from">Початок вікна; <c>null</c> — без обмеження.</param>
@@ -33,6 +37,10 @@ public sealed class SetEntryValidityHandler(
     public async Task<int> HandleAsync(
         long registryEntryId, DateOnly? from, DateOnly? to, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
 

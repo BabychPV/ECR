@@ -16,9 +16,13 @@ public sealed class CreateDocumentHandler(
     IMetadataCache metadata,
     IDocumentStore documents,
     IUnitOfWork uow,
+    Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
 {
+    /// <summary>Право на створення документа (`02-contracts.md` §9).</summary>
+    public const string Permission = "Document.Create";
+
     /// <summary>Створює документ із заданим складом аркушів.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
@@ -29,6 +33,10 @@ public sealed class CreateDocumentHandler(
         int projectId, int templateVersionId, IReadOnlyList<int> sheetDefIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(sheetDefIds);
+
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(

@@ -13,8 +13,14 @@ namespace Ecr.Application.Calculations;
 /// Три осі версійності не змішуються: версія визначення, вікно дії і версія
 /// даних. Останньої тут немає взагалі — вона живе в довідниках.
 /// </remarks>
-public sealed class ListMethodologiesHandler(IMethodologyStore methodologies)
+public sealed class ListMethodologiesHandler(
+    IMethodologyStore methodologies,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
+    /// <summary>Право на читання методологій (`02-contracts.md` §9).</summary>
+    public const string Permission = "Calculation.View";
+
     /// <summary>Читає перелік.</summary>
     /// <param name="methodologyIds">Методології, які цікавлять.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -22,6 +28,10 @@ public sealed class ListMethodologiesHandler(IMethodologyStore methodologies)
         IReadOnlyList<int> methodologyIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(methodologyIds);
+
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
         var result = new List<MethodologyDto>(methodologyIds.Count);
 
@@ -84,8 +94,21 @@ public sealed class ListMethodologiesHandler(IMethodologyStore methodologies)
 /// вийде, до публікації.
 /// </summary>
 public sealed class SimulateMethodologyHandler(
-    ICalculationModule module, IMethodologyStore methodologies)
+    ICalculationModule module,
+    IMethodologyStore methodologies,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
+    /// <summary>
+    /// Право на симуляцію — <b>перегляд</b>, не публікація.
+    /// </summary>
+    /// <remarks>
+    /// Симуляція нічого не зберігає, тож вимагати від неї право публікації
+    /// означало б зробити недоступною саме ту перевірку, яку роблять ПЕРЕД
+    /// публікацією (ФВ-13.5).
+    /// </remarks>
+    public const string Permission = "Calculation.View";
+
     /// <summary>Проганяє версію на золотому наборі.</summary>
     /// <param name="methodologyVersionId">Версія, яку проганяємо.</param>
     /// <param name="periodKey">Період, на даних якого проганяємо.</param>
@@ -94,6 +117,10 @@ public sealed class SimulateMethodologyHandler(
     public async Task<SimulationResultDto> HandleAsync(
         int methodologyVersionId, int periodKey, CancellationToken ct)
     {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
         var methodology = await methodologies
             .FindByVersionAsync(methodologyVersionId, ct)
             .ConfigureAwait(false)

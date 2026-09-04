@@ -3,6 +3,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
+using Ecr.Application.Security;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
@@ -39,6 +40,7 @@ public sealed class RegistryResolverTests
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
 
     public RegistryResolverTests()
     {
@@ -46,7 +48,26 @@ public sealed class RegistryResolverTests
         _user.UserId.Returns(9);
         _user.Language.Returns("en");
         _user.CorrelationId.Returns("test");
+
+        // Права перевіряються в обробнику, а не атрибутом контролера
+        // (архітектурне правило 7). Тут вони видані: предмет цих тестів —
+        // правила довідників, а не доступ.
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
     }
+
+    /// <summary>Профіль із правами на довідники.</summary>
+    private static AccessProfile Profile() => new()
+    {
+        CacheKey = "p",
+        UserId = 9,
+        SecurityStamp = "s",
+        Permissions = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Registry.View", "Registry.EditData", "Registry.EditDefinition",
+        },
+        Grants = new Dictionary<string, GrantLevel>(),
+        Denies = new HashSet<string>(),
+    };
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Дозвіл_чинний_на_дату_періоду_потрапляє_у_список()
@@ -138,7 +159,7 @@ public sealed class RegistryResolverTests
         _registries.FindEntryAsync(101, Arg.Any<CancellationToken>()).Returns(entry);
         _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(17);
 
-        var handler = new DeleteRegistryEntryHandler(_registries, _uow, _user, _clock);
+        var handler = new DeleteRegistryEntryHandler(_registries, _uow, _access, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(101, CancellationToken.None));
@@ -169,7 +190,7 @@ public sealed class RegistryResolverTests
 
         var before = definition.DataRevision;
 
-        await new UpsertRegistryEntryHandler(_registries, _uow, _user, _clock).HandleAsync(
+        await new UpsertRegistryEntryHandler(_registries, _uow, _access, _user, _clock).HandleAsync(
             new RegistryEntryUpsertDto(
                 Id: 101, RegistryDefId: Permits, Code: "PERMIT_A",
                 Display: Text("Дозвіл A (перейменований)"),
@@ -191,7 +212,7 @@ public sealed class RegistryResolverTests
         _registries.FindDefinitionAsync("PERMITS", Arg.Any<CancellationToken>()).Returns(definition);
         _registries.HasOpenPeriodAsync(Arg.Any<CancellationToken>()).Returns(true);
 
-        var handler = new SwitchRegistrySourceHandler(_registries, _uow, _audit, _user, _clock);
+        var handler = new SwitchRegistrySourceHandler(_registries, _uow, _audit, _access, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync("PERMITS", RegistrySourceKind.External, CancellationToken.None));
