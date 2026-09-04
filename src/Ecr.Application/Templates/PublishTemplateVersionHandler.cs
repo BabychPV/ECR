@@ -34,7 +34,12 @@ public sealed class PublishTemplateVersionHandler(
 
         // Усі дванадцять перевірок із 02b §12 — синтаксис, резолвінг, типи,
         // ациклічність, розкриття діапазонів, сумісність одиниць.
-        var diagnostics = PublishChecks.Run(version, formulaEngine);
+        // ⚠ Контекст ТИПІВ передається явно: без нього перевірка №3 мовчки не
+        // виконувалася (Q-072). Контексту ОДИНИЦЬ немає й не може бути до
+        // Етапу 4 — він читає `uom.Unit` і розмірності, яких ще не існує;
+        // це видно з виклику, а не ховається в значенні за замовчуванням.
+        var diagnostics = PublishChecks.Run(
+            version, formulaEngine, new SnapshotTypeContext(PublishChecks.Snapshot(version)), unitContext: null);
 
         if (diagnostics.Count > 0)
         {

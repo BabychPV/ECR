@@ -112,6 +112,17 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     public void Міграція_не_створює_таблиць_поза_контрактними_схемами()
         => Assert.Fail("not implemented");
 
+    // ⚠ Тест доданий після Q-071 — і саме він мав би зловити сам Q-071.
+    // Попередній сторож перевіряв ЛИШЕ зворотний бік: що не створено зайвого.
+    // Питання «а чи створено все» не ставив ніхто, і `aud.SimulationSession`
+    // пролежала непоміченою від Q-049.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public void Кожна_таблиця_контрактної_схеми_існує_або_явно_відкладена()
+        => Assert.Fail("not implemented");
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

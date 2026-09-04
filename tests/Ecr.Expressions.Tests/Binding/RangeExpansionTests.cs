@@ -130,7 +130,10 @@ public sealed class RangeExpansionTests
         var sheet = builder.Sheet("Waste");
         var table = builder.Table(sheet, "Items", TableRowMode.Dynamic);
         builder.Column(table, "Amount");
-        builder.Column(table, "WasteType", CellDataType.String);
+        // ⚠ Саме Lookup, а не String: на String цей тест не ловив Q-072 —
+        // резолвер відхиляв БУДЬ-ЯКЕ посилання на Lookup-колонку, і законний
+        // предикат `[WHERE [WasteType] = 'W-01']` не проходив публікацію.
+        builder.Column(table, "WasteType", CellDataType.Lookup);
         var snapshot = builder.Build();
 
         var extractor = new DependencyExtractor(new ReferenceResolver(snapshot), Expander);

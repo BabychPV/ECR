@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Xunit;
@@ -138,6 +139,93 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
             """);
 
         Assert.Empty(strays);
+    }
+
+    // ⚠ Тест доданий після Q-071 — і саме він мав би зловити сам Q-071.
+    // Попередній сторож перевіряв ЛИШЕ зворотний бік: що не створено зайвого.
+    // Питання «а чи створено все» не ставив ніхто, і `aud.SimulationSession`
+    // пролежала непоміченою від Q-049 — скрипт, написаний рівно проти цього
+    // класу дефектів, перелічив шість таблиць на око і зробив п'ять.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кожна_таблиця_контрактної_схеми_існує_або_явно_відкладена()
+    {
+        var declared = ContractTables();
+        var existing = (await QueryAsync("""
+            SELECT s.name + N'.' + t.name
+            FROM sys.tables t
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            ORDER BY 1
+            """)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = declared.Except(existing, StringComparer.OrdinalIgnoreCase)
+                              .Except(Deferred, StringComparer.OrdinalIgnoreCase)
+                              .OrderBy(t => t, StringComparer.Ordinal)
+                              .ToList();
+
+        Assert.Empty(missing);
+
+        // Список відкладених має ЗМЕНШУВАТИСЯ. Таблиця, яку вже створили, але
+        // забули прибрати звідси, знову робить пропуск невидимим.
+        var stale = Deferred.Intersect(existing, StringComparer.OrdinalIgnoreCase).ToList();
+        Assert.Empty(stale);
+    }
+
+    /// <summary>
+    /// Таблиці, які свідомо ще не створюються, і етап, що їх принесе.
+    /// </summary>
+    /// <remarks>
+    /// Це не «дозволені винятки», а розклад: кожен етап прибирає свій блок, і
+    /// порожній список означає, що схема розгорнута повністю.
+    /// </remarks>
+    private static readonly string[] Deferred =
+    [
+        // Етап 3 — безпека і робочий процес
+        "sec.LoginAttempt", "sec.RoleAssignment", "sec.RolePermission",
+        "wf.ApprovalRoute", "wf.ApprovalStep", "wf.ValidationResult",
+
+        // Етап 4 — реєстри, одиниці, розрахунки
+        "dic.RegistryEntry", "dic.RegistryEntryLink", "dic.RegistryExternalKey", "dic.RegistryValue",
+        "calc.CalculationInput", "calc.CalculationResult", "calc.CalculationRun", "calc.CalculationStep",
+        "calc.Methodology", "calc.MethodologyConstant", "calc.MethodologyFormula",
+        "calc.MethodologyOutput", "calc.MethodologyRule", "calc.MethodologySubstance",
+        "calc.MethodologyVersion", "calc.ScriptVersion", "calc.SubmissionSnapshot",
+
+        // Етап 5 — інтеграція, звітність, архів
+        "arc.CalculationResult", "arc.CalculationStep", "arc.CellChange", "arc.CellValue",
+        "arc.TableInstance", "arc.TableRow",
+        "ext.CollectionSchedule", "ext.ConsistencyRule", "ext.DataSource", "ext.EntityFieldMap",
+        "ext.LegacyColumnMapping", "ext.LegacyRowMapping", "ext.LegacySheetMapping",
+        "ext.LegacyTableMapping", "ext.RawDataPoint", "ext.SourceEntity",
+        "itg.ArchiveRun", "itg.CollectionCoverage", "itg.CollectionRun",
+        "itg.JobProgress", "itg.MaintenanceRun",
+        "rpt.ReportDef", "rpt.ReportRow", "rpt.ReportSnapshot", "rpt.ReportVersion",
+
+        // Індекс IsIndexed-полів для фільтрів по документах; наповнює шлях запису.
+        "doc.DocumentIndexValue",
+    ];
+
+    /// <summary>Таблиці, оголошені в <c>02a-db-schema.md</c>.</summary>
+    private static List<string> ContractTables()
+    {
+        var path = Path.Combine(SolutionRoot(), "docs", "build", "02a-db-schema.md");
+        return Regex.Matches(File.ReadAllText(path), @"CREATE TABLE \[?([a-z_]+)\]?\.\[?(\w+)\]?")
+                    .Select(m => $"{m.Groups[1].Value}.{m.Groups[2].Value}")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+    }
+
+    private static string SolutionRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Ecr.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("Ecr.sln не знайдено вище за каталог збірки.");
     }
 
     [Fact]

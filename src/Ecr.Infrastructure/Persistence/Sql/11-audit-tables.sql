@@ -129,3 +129,32 @@ BEGIN
     );
 END
 GO
+
+-- ⚠ Додано 2026-09-04 (Q-071). Таблиця була в §12 схеми з самого початку, але
+-- у цей скрипт не потрапила: `Q-049` перелічив `aud.*` на око і пропустив
+-- одну з шести. Наслідок мовчазний і рівно того класу, проти якого скрипт
+-- писався — сеанс симуляції нема куди записати, а без запису «подивитися
+-- очима» стає способом безслідно переглянути чужі дані (D-96).
+--
+-- НЕ партиціонується, на відміну від решти `aud.*`: сеансів симуляції одиниці
+-- на місяць, і `ps_AuditByMonth` тут дав би порожні партиції без користі.
+IF OBJECT_ID(N'aud.SimulationSession', N'U') IS NULL
+BEGIN
+    CREATE TABLE aud.SimulationSession
+    (
+        Id             bigint       IDENTITY(1,1) NOT NULL,
+        ActorUserId    int          NOT NULL,   -- хто симулює
+        SubjectUserId  int          NOT NULL,   -- чиїми очима
+        Reason         nvarchar(1000) NOT NULL,
+        StartedAt      datetime2(3) NOT NULL,
+        EndedAt        datetime2(3) NULL,
+        CONSTRAINT PK_SimSession PRIMARY KEY (Id),
+        -- FK на sec.[User] тут доречні, на відміну від решти aud.*: сеансів
+        -- одиниці, а посилання на неіснуючого користувача зробило б журнал
+        -- симуляцій непридатним саме тоді, коли він потрібен.
+        CONSTRAINT FK_SimSession_Actor   FOREIGN KEY (ActorUserId)   REFERENCES sec.[User] (Id),
+        CONSTRAINT FK_SimSession_Subject FOREIGN KEY (SubjectUserId) REFERENCES sec.[User] (Id),
+        CONSTRAINT CK_SimSession_NotSelf CHECK (ActorUserId <> SubjectUserId)
+    );
+END
+GO

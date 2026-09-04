@@ -183,8 +183,9 @@ public static class PublishChecks
             ? table.Rows.FirstOrDefault(r => r.Id == rowId)?.RowKeyValue
             : null;
 
-    /// <summary>Знімок структури версії — для резолвера посилань.</summary>
-    private static TemplateVersionSnapshot Snapshot(TemplateVersion version)
+    /// <summary>Знімок структури версії — для резолвера посилань і типів.</summary>
+    /// <param name="version">Версія, що публікується.</param>
+    public static TemplateVersionSnapshot Snapshot(TemplateVersion version)
     {
         var columns = new Dictionary<int, ColumnDef>();
         var rows = new Dictionary<(int TableDefId, string RowKey), RowDef>();
