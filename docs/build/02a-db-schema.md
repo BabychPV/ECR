@@ -2371,7 +2371,7 @@ USING (VALUES
   (N'Document.Delete',          N'Document',    0), (N'Document.Import',      N'Document',    0),
   (N'Document.Export',          N'Document',    0), (N'Document.Reopen',      N'Document',    0),
   (N'Project.Manage',           N'Project',     0),
-  (N'Period.Configure',         N'Period',      0), (N'Period.Reopen',        N'Period',      0),
+  (N'Period.Configure',         N'Period',      0), (N'Period.Reopen',        N'Period',      1),
   (N'Calculation.View',         N'Calculation', 0), (N'Calculation.EditFormula',  N'Calculation', 0),
   (N'Calculation.EditConstant', N'Calculation', 0), (N'Calculation.EditRule',     N'Calculation', 0),
   (N'Calculation.EditScript',   N'Calculation', 1), (N'Calculation.Publish',      N'Calculation', 1),
@@ -2381,8 +2381,9 @@ USING (VALUES
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
-  (N'Security.ViewAudit',       N'Security',    0),
-  (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1)
+  (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
+  (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
+  (N'System.ManageLocalization', N'System',     0)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
