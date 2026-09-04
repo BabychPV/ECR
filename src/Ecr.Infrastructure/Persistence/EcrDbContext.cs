@@ -91,8 +91,17 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
         // значення потрібне ДО вставки, щоб завантажити TableRow і CellValue
         // одним проходом SqlBulkCopy (B02 §2.3). CACHE 1000 — компроміс між
         // круглими втратами при перезапуску і зверненнями до системних таблиць.
-        modelBuilder.HasSequence<long>("TableInstanceSeq", "doc").StartsAt(1).IncrementsBy(1);
-        modelBuilder.HasSequence<long>("TableRowSeq", "doc").StartsAt(1).IncrementsBy(1);
+        //
+        // Оголошуються лише для SQL Server. Це не умовна модель «під тести»:
+        // послідовність тут — фізичний об'єкт SQL Server, який читається через
+        // sp_sequence_get_range, і в провайдера без послідовностей (SQLite,
+        // на якому йдуть не-Integration тести) вона не має ні реалізації, ні
+        // сенсу — EF просто падає на CREATE SEQUENCE.
+        if (Database.IsSqlServer())
+        {
+            modelBuilder.HasSequence<long>("TableInstanceSeq", "doc").StartsAt(1).IncrementsBy(1);
+            modelBuilder.HasSequence<long>("TableRowSeq", "doc").StartsAt(1).IncrementsBy(1);
+        }
     }
 
     /// <inheritdoc />

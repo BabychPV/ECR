@@ -146,8 +146,10 @@
 | 1.2 `Ecr.Domain` — документи | входять у 58 | ✅ |
 | 1.7–1.9 `Ecr.Application` | 24 | ✅ |
 | 1.3 `Ecr.Infrastructure` — конвенції і 31 конфігурація | — | ✅ звірено з живою БД |
-| 1.4 міграція + `07-partition-tables.sql` | — | 🟡 міграція застосована і перевірена; лишилися seed і `SqlServerFixture` |
-| 1.5–1.6 `NormalizedCellStore`, `BulkCellLoader`, `MetadataCache` | 15 + 88 інтеграційних | ⬜ |
+| 1.4 міграція + `07`, `08`, `09-seed` | — | ✅ застосовано і перевірено на живій БД |
+| 1.4 seed і `SqlServerFixture` | — | ✅ фікстура піднімає базу наскрізь |
+| 1.5 `ICellStore` — `NormalizedCellStore`, `BulkCellLoader` | 6 + 3 | ✅ зелені на реальній БД |
+| 1.6 `IMetadataCache` — `MetadataCache` | 4 | ✅ зелені на реальній БД |
 | 1.10 `Ecr.Api` | 19 | ⬜ потребує запущеного застосунку і БД |
 | 1.11 `tools/Ecr.DataGen` | — | ⬜ |
 

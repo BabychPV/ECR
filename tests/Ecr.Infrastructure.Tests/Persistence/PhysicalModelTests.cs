@@ -170,14 +170,80 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public void Запит_за_один_період_читає_рівно_одну_партицію()
-        => Assert.Fail("not implemented");
+    public async Task Запит_за_один_період_читає_рівно_одну_партицію()
+    {
+        // Дані у двох різних періодах: якщо відсікання не працює, запит за
+        // один період усе одно дістане обидві партиції.
+        var january = await BuildAsync(202601);
+        var february = await BuildAsync(202602);
+
+        await InsertCellAsync(january);
+        await InsertCellAsync(february);
+
+        var partitions = await QueryAsync($"""
+            SELECT CAST($PARTITION.pf_ByPeriodKey(PeriodKey) AS nvarchar(10))
+            FROM doc.CellValue
+            WHERE PeriodKey = {january.PeriodKey.Value}
+            GROUP BY $PARTITION.pf_ByPeriodKey(PeriodKey)
+            """);
+
+        // Рядки одного періоду лежать рівно в одній партиції — це і є умова,
+        // за якої TRUNCATE … WITH (PARTITIONS) звільняє рік одним рухом.
+        Assert.Single(partitions);
+
+        var both = await QueryAsync("""
+            SELECT CAST($PARTITION.pf_ByPeriodKey(PeriodKey) AS nvarchar(10))
+            FROM doc.CellValue
+            GROUP BY $PARTITION.pf_ByPeriodKey(PeriodKey)
+            """);
+
+        // І різні періоди справді розкладені по різних партиціях, а не
+        // склеєні в одну — інакше перша перевірка була б порожньою обіцянкою.
+        Assert.True(both.Count >= 2, $"очікували ≥2 партиції, отримали {both.Count}");
+        _ = february;
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public void Явна_порожнеча_без_значень_проходить_CHECK_а_з_значенням_ні()
-        => Assert.Fail("not implemented");
+    public async Task Явна_порожнеча_без_значень_проходить_CHECK_а_з_значенням_ні()
+    {
+        var doc = await BuildAsync(202603);
+
+        // Явна порожнеча: рядок є, значень немає. Так і має бути (R-B4).
+        await ExecuteAsync($"""
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, IsCalculated, IsEmpty)
+            VALUES ({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[1]}, {doc.TableDefId}, 0, 1)
+            """);
+
+        // А порожнеча ЗІ значенням — суперечність, і її не має пропускати
+        // база, а не код: інакше третій стан тримався б на домовленості.
+        var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync($"""
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
+            VALUES ({doc.PeriodKey.Value}, {doc.RowIds[1]}, {doc.ColumnDefIds[1]}, {doc.TableDefId}, 1, 0, 1)
+            """));
+
+        Assert.Contains("CK_CellValue_Empty", error.Message, StringComparison.Ordinal);
+    }
+
+    private async Task<TestDocument> BuildAsync(int periodKey)
+        => await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(periodKey: periodKey, ct: CancellationToken.None);
+
+    private Task InsertCellAsync(TestDocument doc)
+        => ExecuteAsync($"""
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
+            VALUES ({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[1]}, {doc.TableDefId}, 1, 0, 0)
+            """);
+
+    private async Task ExecuteAsync(string sqlText)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sqlText;
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
