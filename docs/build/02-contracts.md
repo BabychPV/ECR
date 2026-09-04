@@ -1286,6 +1286,17 @@ public interface IJobProgress
 
 /// <summary>Стан фонової задачі.</summary>
 public sealed record JobStatus(string JobId, string State, int Percent, string? Message, string? Error);
+
+/// <summary>
+/// Маркер задачі перерахунку.
+/// </summary>
+/// <remarks>
+/// ⚠ Потрібен тому, що <see cref="IBackgroundJobScheduler.EnqueueAsync{TJob}"/>
+/// обмежений <c>where TJob : IBackgroundJob</c>, а конкретні задачі живуть в
+/// <c>Ecr.Infrastructure</c>, якого <c>Ecr.Application</c> не бачить і бачити
+/// не має. Маркер дає use-case назвати задачу, не знаючи її реалізації.
+/// </remarks>
+public interface IRecalculationJob : IBackgroundJob;
 ```
 
 ```csharp
@@ -1642,6 +1653,156 @@ public interface ICollectionStore
     Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
         int sourceEntityId, DateTime notBefore, CancellationToken ct);
 }
+```
+
+---
+
+
+
+> Уведений за `Q-032`: `R-B7` вимагає атомарного інкременту `PresentationRevision` одним statement із `OUTPUT`, а через `IRepository` це не виразити.
+
+```csharp
+// src/Ecr.Application/Ports/ITemplateVersionStore.cs
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Операції над версією шаблону, які неможливо виразити через
+/// <see cref="IRepository{T,TId}"/>, бо вони мусять бути атомарними в базі.
+/// </summary>
+/// <remarks>
+/// ⚠ Порт уведений за тією самою причиною, що й порти <c>Q-018</c>: обробник
+/// не має права знати про SQL, але <c>R-B7</c> вимагає саме атомарної
+/// операції.
+///
+/// <b>Чому не read-modify-write у застосунку.</b> Інстансів застосунку
+/// щонайменше два (<c>D-32</c>). Якби ревізію читали, додавали одиницю і
+/// записували, два одночасні патчі дали б однакове нове значення, і другий
+/// мовчки затер би перший — при цьому ключ кешу <c>v{id}:r{rev}</c> у клієнтів
+/// збігся б із застарілою структурою. Тому інкремент робиться одним
+/// <c>UPDATE … SET PresentationRevision = PresentationRevision + 1 OUTPUT
+/// inserted.PresentationRevision</c>, і застосунок дізнається результат, а не
+/// призначає його.
+/// </remarks>
+public interface ITemplateVersionStore
+{
+    /// <summary>
+    /// Інкрементує <c>PresentationRevision</c> одним statement і повертає
+    /// <b>нове</b> значення з <c>OUTPUT</c>.
+    /// </summary>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Нова ревізія.</returns>
+    Task<int> IncrementPresentationRevisionAsync(int templateVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Чи існують документи, прив'язані до цієї версії.
+    /// </summary>
+    /// <remarks>
+    /// Від відповіді залежить класифікація структурної зміни (ФВ-7.4):
+    /// та сама зміна коду колонки без документів <c>Safe</c>, з документами —
+    /// <c>Breaking</c> і відмова операції.
+    /// </remarks>
+    Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
+}
+```
+
+> Уведений за `Q-032`: `ICellStore` віддає **значення** комірок, а для звірки `baseVersion` потрібні **версії рядків** (`B04` §2.3). Розширювати `ICellStore` означало б змінити контракт.
+
+```csharp
+// src/Ecr.Application/Ports/IRowStore.cs
+namespace Ecr.Application.Ports;
+
+using Ecr.Domain.ValueObjects;
+
+/// <summary>
+/// Рядки таблиці документа: ідентичність, версія, створення.
+/// </summary>
+/// <remarks>
+/// ⚠ Порт додано, а не вбудовано в <see cref="ICellStore"/>: той віддає
+/// <b>значення</b> комірок, а тут потрібні <b>версії рядків</b>. Розширювати
+/// <c>ICellStore</c> означало б змінити контракт (`02-contracts.md` §5), тоді
+/// як додавання сусіднього порту нічого не ламає.
+///
+/// Без цього порту неможливо виконати найважчу вимогу запису: звірити
+/// <c>baseVersion</c> кожного зачепленого рядка і відхилити <b>весь</b> батч
+/// при розбіжності (B04 §2.3). Читати версії разом зі значеннями не можна —
+/// зріз повертає лише непорожні комірки, а рядок може бути зачеплений і
+/// таким, у якого всі комірки порожні.
+/// </remarks>
+public interface IRowStore
+{
+    /// <summary>
+    /// Ідентичність екземпляра таблиці: до якого документа і якої версії
+    /// шаблону він належить.
+    /// </summary>
+    /// <remarks>
+    /// Потрібно, бо <c>PatchCellsRequest</c> несе лише <c>TableInstanceId</c>,
+    /// а щоб резолвити коди колонок у <c>ColumnDefId</c>, обробнику потрібен
+    /// знімок структури — тобто <c>TemplateVersionId</c>. Класти його в запит
+    /// не можна: клієнт не має диктувати, за якою версією тлумачити дані.
+    /// </remarks>
+    Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
+
+    /// <summary>
+    /// Поточні версії рядків таблиці: <c>RowKey</c> → hex <c>rowversion</c>.
+    /// </summary>
+    /// <remarks>
+    /// Один виклик на батч, не на рядок: бюджет запису — 300 мс на 100 комірок,
+    /// і N запитів у нього не вкладаються.
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Ідентифікатори рядків за ключами: <c>RowKey</c> → <c>TableRow.Id</c>.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Створює рядок і повертає його <c>Id</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>Id</c> береться з <c>SEQUENCE</c> <b>до</b> вставки — це те, що
+    /// дозволяє вантажити <c>TableRow</c> і <c>CellValue</c> одним проходом
+    /// <c>SqlBulkCopy</c>. З <c>IDENTITY</c> довелося б вставляти рядки,
+    /// зчитувати ключі й лише потім комірки.
+    /// </remarks>
+    Task<long> CreateRowAsync(
+        long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct);
+
+    /// <summary>
+    /// Піднімає <c>ModifiedAt</c> зачеплених рядків.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме це змінює <c>RowVersion</c>. Забути — означає зламати
+    /// оптимістичне блокування <b>тихо</b>: наступний запис зі застарілою
+    /// <c>baseVersion</c> пройде як коректний, і чужа правка зникне без сліду
+    /// (B04 §2.4).
+    /// </remarks>
+    Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Збережені ознаки «осиротілості» рядків: <c>TableRow.Id</c> → <c>IsOrphaned</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме <b>читання збереженого поля</b>, а не обчислення. Перевіряти
+    /// чинність записів реєстру на кожен зріз означало б додати запит на
+    /// кожен рядок і вийти за бюджет 400 мс (ФВ-8.13, <c>D-98</c>).
+    /// Ознаку ставить <c>OrphanScanJob</c> уночі.
+    /// </remarks>
+    Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+}
+
+/// <summary>Ідентичність екземпляра таблиці.</summary>
+/// <param name="TableInstanceId">Екземпляр.</param>
+/// <param name="DocumentId">Документ, якому він належить.</param>
+/// <param name="TableDefId">Опис таблиці.</param>
+/// <param name="TemplateVersionId">Версія шаблону — ключ знімка метаданих.</param>
+/// <param name="PeriodKey">Період екземпляра; він же ключ партиції.</param>
+public sealed record TableInstanceRef(
+    long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey);
 ```
 
 ---
