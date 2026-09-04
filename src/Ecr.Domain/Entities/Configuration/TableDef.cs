@@ -51,4 +51,66 @@ public sealed class TableDef : Entity<int>
 
     /// <summary>Перемикає модель зберігання за результатом гейта Етапу 0.</summary>
     public void SwitchStorage(CellStorageMode mode) => StorageMode = mode;
+
+    /// <summary>
+    /// Стеля кількості динамічних рядків.
+    /// </summary>
+    /// <remarks>
+    /// Не формальність: зріз на 500×60 має бюджет 1.5 с, і таблиця, яка
+    /// непомітно виросла до тисяч рядків, вибиває його для всіх.
+    /// </remarks>
+    /// <exception cref="DomainException">Таблиця не динамічна або межа не додатна.</exception>
+    public void SetMaxDynamicRows(int? max)
+    {
+        if (max is { } m && m <= 0)
+        {
+            throw new DomainException("ECR-TMPL-0422", $"MaxDynamicRows має бути додатним; отримано {m}.");
+        }
+
+        if (max is not null && RowMode != TableRowMode.Dynamic)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"MaxDynamicRows має сенс лише для RowMode = Dynamic; у таблиці {Code} режим {RowMode}.");
+        }
+
+        MaxDynamicRows = max;
+    }
+
+    /// <summary>Додає колонку.</summary>
+    /// <exception cref="DomainException">Колонка з таким кодом уже є.</exception>
+    public void AddColumn(ColumnDef column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+
+        if (_columns.Any(c => string.Equals(c.Code, column.Code, StringComparison.Ordinal)))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409", $"Колонка з кодом {column.Code} у таблиці {Code} уже існує.");
+        }
+
+        _columns.Add(column);
+    }
+
+    /// <summary>Додає рядок фіксованої таблиці.</summary>
+    /// <exception cref="DomainException">Рядок із таким ключем уже є, або таблиця динамічна.</exception>
+    public void AddRow(RowDef row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        if (RowMode == TableRowMode.Dynamic)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Таблиця {Code} динамічна: її рядки створюються під час роботи, а не в шаблоні.");
+        }
+
+        if (_rows.Any(r => string.Equals(r.RowKeyValue, row.RowKeyValue, StringComparison.Ordinal)))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409", $"Рядок із ключем {row.RowKeyValue} у таблиці {Code} уже існує.");
+        }
+
+        _rows.Add(row);
+    }
 }

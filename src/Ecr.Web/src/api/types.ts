@@ -31,7 +31,10 @@ export interface RowDto {
   rowKind: string;
   label: string | null;
   rowVersion: string;
+  /** Присутній ключ зі значенням null — явна порожнеча; відсутній ключ — «не заповнювали» (R-B4). */
   cells: Record<string, unknown>;
+  /** Рядок посилається на запис реєстру, що втратив чинність (ФВ-8.13). Читання не блокує, Submit блокує. */
+  isOrphaned?: boolean;
 }
 
 /**

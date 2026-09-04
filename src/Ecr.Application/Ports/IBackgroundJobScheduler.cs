@@ -36,3 +36,14 @@ public interface IJobProgress
 
 /// <summary>Стан фонової задачі.</summary>
 public sealed record JobStatus(string JobId, string State, int Percent, string? Message, string? Error);
+
+/// <summary>
+/// Маркер задачі перерахунку.
+/// </summary>
+/// <remarks>
+/// ⚠ Потрібен тому, що <see cref="IBackgroundJobScheduler.EnqueueAsync{TJob}"/>
+/// обмежений <c>where TJob : IBackgroundJob</c>, а конкретні задачі живуть в
+/// <c>Ecr.Infrastructure</c>, якого <c>Ecr.Application</c> не бачить і бачити
+/// не має. Маркер дає use-case назвати задачу, не знаючи її реалізації.
+/// </remarks>
+public interface IRecalculationJob : IBackgroundJob;

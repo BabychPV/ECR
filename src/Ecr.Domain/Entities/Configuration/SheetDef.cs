@@ -40,6 +40,23 @@ public sealed class SheetDef : Entity<int>
     /// <summary>Змінює порядок — **презентаційна** операція, дозволена після публікації.</summary>
     public void Reorder(int ordinal) => Ordinal = ordinal;
 
+    /// <summary>Додає таблицю до аркуша.</summary>
+    /// <exception cref="DomainException">Таблиця з таким кодом уже є на аркуші.</exception>
+    public void AddTable(TableDef table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        if (_tables.Any(t => string.Equals(t.Code, table.Code, StringComparison.Ordinal)))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Таблиця з кодом {table.Code} на аркуші {Code} уже існує: код — це ідентичність, " +
+                "на нього посилаються вирази.");
+        }
+
+        _tables.Add(table);
+    }
+
     /// <summary>Логічне видалення: фізично запис лишається, бо на нього посилаються дані (ФВ-7.6).</summary>
     public void SoftDelete(int userId, DateTime utcNow)
     {

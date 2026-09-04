@@ -29,10 +29,24 @@ public sealed record ColumnDto(
     string? UnitSymbol);
 
 /// <summary>Рядок зі значеннями. Ключ у <paramref name="Cells"/> — код колонки.</summary>
+/// <param name="RowKey">Ідентичність рядка.</param>
+/// <param name="Ordinal">Позиція.</param>
+/// <param name="RowKind">Режим рядків таблиці.</param>
+/// <param name="Label">Підпис для фіксованих рядків.</param>
+/// <param name="RowVersion">Версія для оптимістичного блокування.</param>
+/// <param name="Cells">Значення; ключ — код колонки. Присутній ключ зі значенням
+/// <c>null</c> означає <b>явну порожнечу</b>, відсутній ключ — «не заповнювали» (R-B4).</param>
+/// <param name="IsOrphaned">
+/// Рядок посилається на запис реєстру, що втратив чинність (ФВ-8.13).
+/// ⚠ Читається зі збереженого поля <c>doc.TableRow.IsOrphaned</c>, а не
+/// обчислюється при читанні: перерахунок на кожен зріз не вкладається в
+/// бюджет 400 мс. Читання не блокує, <c>Submit</c> блокує.
+/// </param>
 public sealed record RowDto(
     string RowKey,
     int Ordinal,
     string RowKind,
     string? Label,
     string RowVersion,
-    IReadOnlyDictionary<string, object?> Cells);
+    IReadOnlyDictionary<string, object?> Cells,
+    bool IsOrphaned = false);

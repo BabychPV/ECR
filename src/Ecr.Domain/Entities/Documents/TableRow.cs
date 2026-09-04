@@ -32,6 +32,22 @@ public sealed class TableRow
 
     public int Ordinal { get; private set; }
     public bool IsDeleted { get; private set; }
+
+    /// <summary>
+    /// Рядок посилається на запис реєстру, який перестав бути чинним у цьому
+    /// періоді (ФВ-8.13, <c>D-98</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ознака <b>зберігається</b>, а не обчислюється при читанні: перерахунок
+    /// на кожен зріз убив би бюджет 400 мс. Її ставить нічна перевірка
+    /// інваріантів (ФВ-7.7) і перерахунок при зміні вікна дії запису реєстру.
+    /// Читання осиротілий рядок <b>не</b> блокує, <c>Submit</c> — блокує
+    /// (<c>ECR-SUB-4221</c>).
+    /// </remarks>
+    public bool IsOrphaned { get; private set; }
+
+    /// <summary>Коли рядок став осиротілим; <c>null</c>, якщо не є.</summary>
+    public DateTime? OrphanedAt { get; private set; }
     public DateTime ModifiedAt { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
@@ -40,6 +56,19 @@ public sealed class TableRow
 
     /// <summary>«Дотик» рядка при зміні його комірок.</summary>
     public void Touch(DateTime utcNow) => ModifiedAt = utcNow;
+
+    /// <summary>
+    /// Позначає рядок осиротілим або знімає позначку.
+    /// </summary>
+    /// <remarks>
+    /// Викликається <c>OrphanScanJob</c> (Етап 4), а не шляхом читання:
+    /// саме тому ознака є полем, а не обчисленням.
+    /// </remarks>
+    public void SetOrphaned(bool orphaned, DateTime utcNow)
+    {
+        IsOrphaned = orphaned;
+        OrphanedAt = orphaned ? utcNow : null;
+    }
 
     /// <summary>Логічне видалення рядка динамічної таблиці.</summary>
     public void SoftDelete(DateTime utcNow)
