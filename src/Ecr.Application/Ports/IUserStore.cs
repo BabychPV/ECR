@@ -34,8 +34,18 @@ public interface IUserStore
     /// </remarks>
     public Task<bool> HasActiveDomainAdminAsync(string permissionCode, CancellationToken ct);
 
+    /// <summary>Обліковий запис за SID каталогу.</summary>
+    public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct);
+
     /// <summary>Додає новий обліковий запис.</summary>
     public void Add(User user);
+
+    /// <summary>Фіксує спробу входу — вдалу чи ні.</summary>
+    /// <remarks>
+    /// Пишеться й для НЕІСНУЮЧОГО імені: інакше підбір імен не лишав би сліду
+    /// взагалі, а саме він і є першою фазою атаки.
+    /// </remarks>
+    public void RecordAttempt(LoginAttempt attempt);
 
     /// <summary>Призначає роль записові; застосовується разом із транзакцією.</summary>
     public Task GrantRoleAsync(User user, string roleCode, CancellationToken ct);

@@ -96,6 +96,26 @@ public sealed class User : Entity<int>
         return user;
     }
 
+    /// <summary>Заводить доменного користувача при першому вході (ФВ-6.2).</summary>
+    /// <param name="userName">Ім'я входу.</param>
+    /// <param name="displayName">Ім'я для показу.</param>
+    /// <param name="windowsSid">SID у каталозі.</param>
+    /// <param name="utcNow">Момент створення.</param>
+    /// <remarks>
+    /// Прав у нього немає жодних, поки адміністратор не призначить роль:
+    /// членство в домені — це ідентичність, а не повноваження.
+    /// </remarks>
+    public static User CreateDomain(string userName, string displayName, string windowsSid, DateTime utcNow)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(windowsSid);
+
+        return new User(userName, displayName, AuthProvider.Windows)
+        {
+            WindowsSid = windowsSid,
+            CreatedAt = utcNow,
+        };
+    }
+
     /// <summary>Змінює пароль і **обов'язково** крутить <c>SecurityStamp</c>.</summary>
     /// <param name="passwordHash">Готовий хеш; сам пароль сюди не потрапляє ніколи.</param>
     public void SetPassword(string passwordHash)
@@ -114,6 +134,16 @@ public sealed class User : Entity<int>
     /// <summary>Вимагає зміни пароля при наступному вході.</summary>
     /// <remarks>Ставиться bootstrap-запису і при адміністративному скиданні.</remarks>
     public void RequirePasswordChange() => MustChangePassword = true;
+
+    /// <summary>Робить усі поточні сесії недійсними негайно (ФВ-6.7).</summary>
+    /// <remarks>
+    /// ⚠ Викликається при КОЖНІЙ зміні ролей, грантів або стану запису.
+    /// <c>SecurityStamp</c> перевіряється на кожен запит, тому новий штамп —
+    /// це і є «відкликати доступ зараз», а не «коли скінчиться cookie».
+    /// Без нього відкликана роль жила б до кінця сесії, і побачити це було б
+    /// нізвідки: у логах усе виглядало б штатно.
+    /// </remarks>
+    public void RefreshSecurityStamp() => SecurityStamp = Guid.NewGuid().ToString("N");
 
     /// <summary>Чи заблокований запис на момент <paramref name="utcNow"/>.</summary>
     /// <param name="utcNow">Поточний момент.</param>

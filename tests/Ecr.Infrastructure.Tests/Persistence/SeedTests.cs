@@ -71,8 +71,34 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public void Небезпечні_права_не_потрапляють_у_вбудовані_ролі_автоматично()
-        => Assert.Fail("not implemented");
+    public async Task Небезпечні_права_не_потрапляють_у_вбудовані_ролі_автоматично()
+    {
+        // ⛔ Жодна вбудована роль не отримує небезпечного права з seed — навіть
+        // SystemAdministrator (ФВ-6.12, D-40). Право на симуляцію або відкриття
+        // періоду, видане розгортанням, не має автора в аудиті — а саме автор
+        // й потрібен, коли потім з'ясовують, звідки взялася можливість.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role       AS r ON r.Id   = rp.RoleId AND r.IsBuiltIn = 1
+            JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
+            WHERE p.IsDangerous = 1
+            """));
+
+        // ⚠ І водночас ролі НЕ порожні: роль без жодного права виглядає
+        // як робоча конфігурація і мовчки не працює — це той самий клас
+        // дефекту, що й «робота, якої ніхто не робить».
+        Assert.Equal(7, await ScalarAsync("""
+            SELECT COUNT(DISTINCT rp.RoleId)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            """));
+
+        // Симуляція — найпоказовіший випадок: вона дає чужі очі, а отже, чужі
+        // дані, і видаватися має поіменно.
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Security.Simulate'"));
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]

@@ -59,17 +59,29 @@ public static class DependencyInjection
         services.AddScoped<Security.EnsureBootstrapAdminHandler>();
         services.AddScoped<Security.DisableBootstrapAdminHandler>();
         services.AddScoped<Security.ChangePasswordHandler>();
+        services.AddScoped<Security.LoginHandler>();
+        services.AddScoped<Security.GetCurrentUserHandler>();
+        services.AddScoped<Security.StartSimulationHandler>();
+        services.AddScoped<Security.EndSimulationHandler>();
+
+        // Робочий процес (модулі 3.4–3.6)
+        services.AddScoped<Workflow.SubmitSheetHandler>();
+        services.AddScoped<Workflow.ApproveSheetHandler>();
+        services.AddScoped<Workflow.ReopenDocumentHandler>();
 
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
 
-        // ⚠ PatchCellsHandler і RecalculateDocumentHandler тут НЕ реєструються:
-        // обидва залежать від IBackgroundJobScheduler, реалізації якого ще
-        // немає — вибір Quartz/Hangfire упирається в допустимість LGPL (D-09),
-        // і це Етап 5. У Development контейнер перевіряється при побудові, тож
-        // «зареєструвати на майбутнє» означало б, що застосунок не стартує
-        // взагалі (`Q-051`).
+        // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з
+        // Етапу 3. Раніше їх не було через IBackgroundJobScheduler без
+        // реалізації (`Q-051`), і це виявилося гіршим за відсутність черги:
+        // без реєстрації DocumentsController не створювався взагалі, і 500
+        // отримували ВСІ його ендпоінти. Тепер планувальник зареєстрований як
+        // явна відмова ECR-SYS-0503 (QuartzJobScheduler без фабрики), а справжня
+        // черга приходить на Етапі 5 разом із рішенням щодо LGPL (D-09).
+        services.AddScoped<Documents.PatchCellsHandler>();
+        services.AddScoped<Documents.RecalculateDocumentHandler>();
 
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();

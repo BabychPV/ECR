@@ -112,6 +112,34 @@ public sealed class Period : Entity<int>
         StateChangedAt = utcNow;
     }
 
+    /// <summary>Переводить у цільовий стан, проходячи проміжні.</summary>
+    /// <param name="target">Цільовий стан.</param>
+    /// <param name="utcNow">Момент переходу.</param>
+    /// <remarks>
+    /// ⚠ Потрібно тому, що задача станів могла не працювати добу або тиждень —
+    /// після збою, перенесення або простою. Тоді періоду треба пройти
+    /// <c>Scheduled → Open → Grace</c> за один прогін. Прямий стрибок через
+    /// <see cref="TransitionTo"/> заборонений навмисно: саме він приховав би
+    /// помилку в розрахунку меж.
+    /// </remarks>
+    public void AdvanceTo(PeriodState target, DateTime utcNow)
+    {
+        if (State == target)
+        {
+            return;
+        }
+
+        if (State == PeriodState.Scheduled)
+        {
+            TransitionTo(PeriodState.Open, utcNow);
+        }
+
+        if (State != target)
+        {
+            TransitionTo(target, utcNow);
+        }
+    }
+
     /// <summary>Відкриває закритий період до вказаного моменту. Причина обов'язкова.</summary>
     /// <param name="until">До якого моменту діє тимчасове відкриття.</param>
     /// <param name="reason">Причина; зберігається і потрапляє в аудит.</param>

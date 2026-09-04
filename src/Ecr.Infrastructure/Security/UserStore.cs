@@ -39,7 +39,14 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             select user.Id).AnyAsync(ct);
 
     /// <inheritdoc />
+    public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
+        => db.Users.FirstOrDefaultAsync(u => u.WindowsSid == sid, ct);
+
+    /// <inheritdoc />
     public void Add(User user) => db.Users.Add(user);
+
+    /// <inheritdoc />
+    public void RecordAttempt(LoginAttempt attempt) => db.LoginAttempts.Add(attempt);
 
     /// <inheritdoc />
     public async Task GrantRoleAsync(User user, string roleCode, CancellationToken ct)

@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Ecr.Application.Security;
+using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
 
@@ -92,7 +94,51 @@ public sealed class ContractIntegrityTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Кожне_значення_EditDenyReason_повертається_хоча_б_одним_шляхом()
-        => Assert.Fail("not implemented");
+    {
+        // ⚠ Причина, яку не повертає жоден шлях, — гірше за її відсутність:
+        // вона є в контракті, клієнт готує для неї текст, а користувач цього
+        // тексту не побачить ніколи. Перевіряється саме ПОВЕДІНКА: кожен
+        // сценарій нижче проганяється через EditRules, і зібрані причини
+        // звіряються з переліком.
+        var profile = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Manage)
+            .Build();
+
+        var stranger = new AccessBuilder { UserId = 8 }.Build();
+
+        var simulation = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Manage)
+            .Build(simulation: true, simulatedFor: 42);
+
+        var produced = new HashSet<EditDenyReason>
+        {
+            EditDenyReason.None,
+
+            EditRules.CanEdit(simulation, AccessBuilder.Cell()).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(project: ProjectStatus.Archived)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(archiving: true)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(period: PeriodState.Scheduled)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(period: PeriodState.Closed)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(outOfWindow: true)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(sheet: DocumentStatus.Submitted)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(sheet: DocumentStatus.Approved)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(computed: true)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(columnReadOnly: true)).Reason,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(rowReadOnly: true)).Reason,
+            EditRules.CanEdit(stranger, AccessBuilder.Cell()).Reason,
+
+            // BusinessRule приходить не з доступу, а з валідації: подання з
+            // незакритими помилками (ФВ-5.19).
+            EditRules.CanSubmit(profile, AccessBuilder.Cell(), hasBlockingErrors: true).Reason,
+        };
+
+        var unreachable = Enum.GetValues<EditDenyReason>()
+            .Except(produced)
+            .Select(r => r.ToString())
+            .ToList();
+
+        Assert.Empty(unreachable);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

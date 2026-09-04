@@ -48,6 +48,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації
+app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль закриває все, крім його зміни
 app.UseAuthorization();
 
 app.MapControllers();

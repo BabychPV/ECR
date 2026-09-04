@@ -1,9 +1,11 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -144,6 +146,81 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public void Відмова_в_доступі_повертає_403_із_ПРИЧИНОЮ_у_розширеннях()
-        => Assert.Fail("not implemented");
+    public async Task Відмова_в_доступі_повертає_403_із_ПРИЧИНОЮ_у_розширеннях()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        // Користувач без жодного гранта: автентифікований, але нічого не може.
+        var (name, documentId) = await ArrangeAsync().ConfigureAwait(true);
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = LoginPassword }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{documentId}/submit", UriKind.Relative),
+            new { sheetDefId = 20, periodKey = 202601 }).ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{response.StatusCode}: {app.ErrorsText}");
+
+
+        var json = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+        // ⚠ «403» без причини змушує користувача йти до адміністратора, а того —
+        // до розробника. Причина в розширеннях і є відповіддю на питання
+        // «чому комірка сіра» (ФВ-6.8).
+        Assert.Equal(ErrorCodes.AccessDenied, json.GetProperty("errorCode").GetString());
+        Assert.Equal(
+            nameof(Ecr.Domain.Enums.EditDenyReason.NoGrant),
+            json.GetProperty("reason").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("correlationId").GetString()));
+    }
+
+    /// <summary>Пароль користувача сценаріїв; у відповіді не з'являється ніде.</summary>
+    private const string LoginPassword = "Contract-2026-Check!";
+
+    /// <summary>Локальний користувач без грантів і документ, який він не може подати.</summary>
+    private async Task<(string UserName, long DocumentId)> ArrangeAsync()
+    {
+        var name = $"nogrant_{Guid.NewGuid():N}"[..20];
+
+        await using var db = new Ecr.Infrastructure.Persistence.EcrDbContext(
+            new DbContextOptionsBuilder<Ecr.Infrastructure.Persistence.EcrDbContext>()
+                .UseSqlServer(sql.ConnectionString)
+                .Options);
+
+        var user = new Ecr.Domain.Entities.Security.User(
+            name, name, Ecr.Domain.Enums.AuthProvider.Local);
+        user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash(LoginPassword));
+        db.Users.Add(user);
+
+        var project = new Ecr.Domain.Entities.Documents.Project(
+            Ecr.Domain.ValueObjects.EcrCode.Create($"P{Guid.NewGuid():N}"[..12]),
+            new Ecr.Domain.ValueObjects.LocalizedText(
+                new Dictionary<string, string> { ["en"] = "Contract" }),
+            new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
+            templateVersionId: 1, Ecr.Domain.Enums.PeriodKind.Monthly,
+            periodPolicyId: 1, "Asia/Almaty");
+
+        db.Projects.Add(project);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        // Період відкритий: відмова має бути саме через ВІДСУТНІСТЬ ГРАНТА, а
+        // не через стан періоду — інакше тест перевіряв би не те, що заявляє.
+        var period = new Ecr.Domain.Entities.Documents.Period(
+            project.Id, new Ecr.Domain.ValueObjects.PeriodKey(202601), 1,
+            new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        period.AdvanceTo(Ecr.Domain.Enums.PeriodState.Open, DateTime.UtcNow);
+
+        var document = new Ecr.Domain.Entities.Documents.Document(
+            project.Id, $"DOC-{Guid.NewGuid():N}"[..20], user.Id, DateTime.UtcNow);
+
+        db.Periods.Add(period);
+        db.Documents.Add(document);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (name, document.Id);
+    }
 }

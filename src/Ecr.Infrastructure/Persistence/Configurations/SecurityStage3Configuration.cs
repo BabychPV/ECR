@@ -145,3 +145,34 @@ public sealed class ValidationResultConfiguration : IEntityTypeConfiguration<Val
                .HasDatabaseName("IX_ValidationResult_Doc");
     }
 }
+
+/// <summary>Конфігурація <see cref="SubmissionSnapshot"/>.</summary>
+/// <remarks>
+/// ⚠ Таблиця живе у схемі <c>calc</c>, але створюється на Етапі 3 разом із
+/// поданням: без неї подання неможливе, а без подання Етап 3 не закривається.
+/// Решта <c>calc.*</c> лишається на Етап 4 — вона про розрахунки, а не про
+/// робочий процес.
+/// </remarks>
+public sealed class SubmissionSnapshotConfiguration : IEntityTypeConfiguration<SubmissionSnapshot>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<SubmissionSnapshot> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("SubmissionSnapshot", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.MethodologyVersionsJson).IsRequired();
+        builder.Property(x => x.PayloadJson).IsRequired();
+        builder.Property(x => x.ContentHash).HasMaxLength(32).IsRequired();
+
+        builder.HasOne<Domain.Entities.Documents.Document>().WithMany()
+               .HasForeignKey(x => x.DocumentId).HasConstraintName("FK_SS_Doc");
+
+        // Зрізи накопичуються, і читають їх завжди по трійці «документ × аркуш
+        // × період» від найновішого (ФВ-9.17).
+        builder.HasIndex(x => new { x.DocumentId, x.SheetDefId, x.PeriodKey, x.SubmittedAt })
+               .IsDescending(false, false, false, true)
+               .HasDatabaseName("IX_SubmissionSnapshot_Sheet");
+    }
+}

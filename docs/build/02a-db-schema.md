@@ -2580,6 +2580,78 @@ WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsBuiltIn)
      VALUES (s.Code, N'{"en":"' + s.Code + N'"}', 1);
 GO
 
+-- ── Права вбудованих ролей ───────────────────────────────────────────────
+-- ⛔ НЕБЕЗПЕЧНІ права (IsDangerous = 1) сюди не потрапляють НІКОЛИ: фільтр
+-- нижче стоїть у самому MERGE, а не в переліку пар. Різниця принципова —
+-- перелік редагують руками і рано чи пізно допишуть у нього ще один рядок,
+-- а фільтр не забудеш (ФВ-6.12, D-40). Такі права адміністратор додає
+-- окремою свідомою дією, і в аудиті видно, хто це зробив.
+--
+-- ⚠ Без цього блоку жоден користувач не має ЖОДНОГО функціонального права —
+-- включно з тим, кого щойно зробили SystemAdministrator. Ролі без прав
+-- виглядають як робоча конфігурація і мовчки не працюють.
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES
+        -- Системний адміністратор: усе, крім небезпечного.
+        (N'SystemAdministrator', N'%'),
+
+        -- Адміністратор шаблонів: структура і те, що потрібно її перевірити.
+        (N'TemplateAdministrator', N'Template.%'),
+        (N'TemplateAdministrator', N'Registry.View'),
+        (N'TemplateAdministrator', N'Calculation.View'),
+        (N'TemplateAdministrator', N'Document.View'),
+        (N'TemplateAdministrator', N'System.ViewHealth'),
+
+        -- Адміністратор періодів: календар і проєкт, без структури.
+        (N'PeriodAdministrator', N'Period.%'),
+        (N'PeriodAdministrator', N'Project.Manage'),
+        (N'PeriodAdministrator', N'Document.View'),
+        (N'PeriodAdministrator', N'System.ViewHealth'),
+
+        -- Введення даних.
+        (N'DataEntry', N'Document.View'),
+        (N'DataEntry', N'Document.Create'),
+        (N'DataEntry', N'Document.Import'),
+        (N'DataEntry', N'Document.Export'),
+        (N'DataEntry', N'Registry.View'),
+        (N'DataEntry', N'Calculation.View'),
+        (N'DataEntry', N'Report.Export'),
+
+        -- Погоджувач: усе, що вміє DataEntry, плюс відповідальність за подане.
+        (N'Approver', N'Document.View'),
+        (N'Approver', N'Document.Export'),
+        (N'Approver', N'Document.Reopen'),
+        (N'Approver', N'Registry.View'),
+        (N'Approver', N'Calculation.View'),
+        (N'Approver', N'Report.%'),
+
+        -- Перегляд.
+        (N'Viewer', N'Document.View'),
+        (N'Viewer', N'Registry.View'),
+        (N'Viewer', N'Calculation.View'),
+        (N'Viewer', N'Report.ViewRegulatory'),
+        (N'Viewer', N'Report.Export'),
+
+        -- Аудитор: бачить усе і не змінює нічого.
+        (N'Auditor', N'Document.View'),
+        (N'Auditor', N'Registry.View'),
+        (N'Auditor', N'Calculation.View'),
+        (N'Auditor', N'Template.View'),
+        (N'Auditor', N'Integration.View'),
+        (N'Auditor', N'Report.ViewRegulatory'),
+        (N'Auditor', N'Security.ViewAudit'),
+        (N'Auditor', N'System.ViewHealth')
+    ) AS m (RoleCode, Pattern)
+    JOIN sec.Role       AS r ON r.Code = m.RoleCode
+    JOIN sec.Permission AS p ON p.Code LIKE m.Pattern
+    WHERE p.IsDangerous = 0
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+
 -- Політика періодів ECR
 MERGE doc.PeriodPolicy AS t USING (VALUES (N'ECR-Standard', 0, 15, 45, 45))
       AS s (Code, O, G, H, Y) ON t.Code = s.Code

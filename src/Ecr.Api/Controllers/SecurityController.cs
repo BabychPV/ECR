@@ -1,4 +1,5 @@
 using Ecr.Application.Security;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -55,19 +56,42 @@ public sealed class SecurityController(
     [HttpPost("security/simulation")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> StartSimulation([FromBody] StartSimulationRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Security.Simulate; симуляція себе → ECR-SIM-0422; " +
-            "делегувати startSimulation.HandleAsync(request.SubjectUserId, request.Reason, ct).");
+    public async Task<IActionResult> StartSimulation(
+        [FromBody] StartSimulationRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Право, симуляція себе і порожня причина перевіряються в обробнику:
+        // правило має діяти незалежно від того, звідки його викликали.
+        var sessionId = await startSimulation
+            .HandleAsync(request.SubjectUserId, request.Reason, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Клієнт зобов'язаний показувати банер увесь сеанс — саме тому
+        // відповідь несе і суб'єкта, і прапорець, а не лише ідентифікатор.
+        return Created($"/api/v1/security/simulation/{sessionId}", new
+        {
+            sessionId,
+            simulatedForUserId = request.SubjectUserId,
+            readOnly = true,
+        });
+    }
 
     /// <summary>Завершує власний сеанс симуляції.</summary>
+    /// <param name="sessionId">Сеанс.</param>
+    /// <param name="ct">Токен скасування.</param>
     [HttpDelete("security/simulation")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public Task<IActionResult> EndSimulation([FromQuery] long sessionId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: завершити ЛИШЕ власний сеанс; чужий — 403.");
+    public async Task<IActionResult> EndSimulation([FromQuery] long sessionId, CancellationToken ct)
+    {
+        // Чужий сеанс — 403 з обробника: обрив чужого сеансу псує чужий аудит.
+        await endSimulation.HandleAsync(sessionId, ct).ConfigureAwait(false);
+        return NoContent();
+    }
 
     /// <summary>Зміна власного пароля.</summary>
+    /// <param name="request">Чинний і новий пароль.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Доступна навіть під <c>MustChangePassword</c>, коли решта запитів
     /// відхиляється <c>ECR-PWD-0428</c> — інакше користувач не мав би способу
@@ -76,10 +100,26 @@ public sealed class SecurityController(
     [HttpPost("auth/change-password")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати changePassword.HandleAsync(request.CurrentPassword, request.NewPassword, ct). " +
-            "⚠ Ні старий, ні новий пароль не потрапляють у лог, трасування чи відповідь (ФВ-6.11).");
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ⛔ Ні старий, ні новий пароль не потрапляють у лог, трасування чи
+        // відповідь (ФВ-6.11): вони існують лише як аргументи цього виклику.
+        await changePassword
+            .HandleAsync(request.CurrentPassword, request.NewPassword, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ SecurityStamp у cookie застарів разом із паролем, і наступний запит
+        // отримав би 401 від SecurityStampMiddleware. Явний вихід зрозуміліший
+        // за раптову відмову на випадковому екрані.
+        await HttpContext
+            .SignOutAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme)
+            .ConfigureAwait(false);
+
+        return NoContent();
+    }
 }
 
 /// <summary>Запит на створення ролі.</summary>

@@ -73,6 +73,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<ApprovalState> ApprovalStates => Set<ApprovalState>();
     public DbSet<ValidationResult> ValidationResults => Set<ValidationResult>();
+    public DbSet<SubmissionSnapshot> SubmissionSnapshots => Set<SubmissionSnapshot>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)

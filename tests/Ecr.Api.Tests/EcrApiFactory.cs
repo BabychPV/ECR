@@ -30,6 +30,16 @@ public sealed class EcrApiFactory(SqlServerFixture sql) : WebApplicationFactory<
     /// </remarks>
     public ConcurrentQueue<string> ServerErrors { get; } = new();
 
+    /// <summary>
+    /// **Увесь** лог застосунку, а не лише помилки.
+    /// </summary>
+    /// <remarks>
+    /// Потрібен рівно для одного класу перевірок: секрет не має з'явитися в
+    /// журналі ЖОДНОГО рівня (ФВ-6.11). Перевіряти лише помилки означало б
+    /// пропустити найімовірніше місце витоку — Information від конвеєра.
+    /// </remarks>
+    public ConcurrentQueue<string> ServerLog { get; } = new();
+
     /// <summary>Серверні помилки одним рядком — для повідомлення асерту.</summary>
     public string ErrorsText => ServerErrors.IsEmpty
         ? "(сервер не записав жодної помилки)"
@@ -57,21 +67,29 @@ public sealed class EcrApiFactory(SqlServerFixture sql) : WebApplicationFactory<
         // треба знати: доменний вхід ЦИМИ тестами не покривається.
         Environment.SetEnvironmentVariable("ECR_Auth__EnableNegotiate", "false");
 
+        // ⚠ Кеш штампа вимкнений: інакше «негайно» в тесті означало б «через
+        // п'ять секунд», і перевірка відкликання прав або спала б, або стала б
+        // повільною і плавучою.
+        Environment.SetEnvironmentVariable("ECR_Auth__StampCacheSeconds", "0");
+
         builder.UseEnvironment("Development");
-        builder.ConfigureLogging(logging => logging.AddProvider(new CapturingLoggerProvider(ServerErrors)));
+        builder.ConfigureLogging(logging =>
+            logging.AddProvider(new CapturingLoggerProvider(ServerErrors, ServerLog)));
     }
 
-    private sealed class CapturingLoggerProvider(ConcurrentQueue<string> sink) : ILoggerProvider
+    private sealed class CapturingLoggerProvider(
+        ConcurrentQueue<string> errors, ConcurrentQueue<string> all) : ILoggerProvider
     {
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, sink);
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, errors, all);
 
         public void Dispose() { }
 
-        private sealed class CapturingLogger(string category, ConcurrentQueue<string> sink) : ILogger
+        private sealed class CapturingLogger(
+            string category, ConcurrentQueue<string> errors, ConcurrentQueue<string> all) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Error;
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
 
             public void Log<TState>(
                 LogLevel logLevel, EventId eventId, TState state, Exception? exception,
@@ -83,7 +101,14 @@ public sealed class EcrApiFactory(SqlServerFixture sql) : WebApplicationFactory<
                 }
 
                 ArgumentNullException.ThrowIfNull(formatter);
-                sink.Enqueue($"[{category}] {formatter(state, exception)}\n{exception}");
+
+                var line = $"[{category}] {formatter(state, exception)}\n{exception}";
+                all.Enqueue(line);
+
+                if (logLevel >= LogLevel.Error)
+                {
+                    errors.Enqueue(line);
+                }
             }
         }
     }

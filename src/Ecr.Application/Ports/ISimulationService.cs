@@ -19,6 +19,13 @@ public interface ISimulationService
     /// </summary>
     public Task<long> StartAsync(int actorUserId, int subjectUserId, string reason, CancellationToken ct);
 
+    /// <summary>Хто відкрив сеанс; <c>null</c> — сеансу немає або він уже закритий.</summary>
+    /// <remarks>
+    /// Потрібно, щоб завершити можна було ЛИШЕ власний сеанс: інакше один
+    /// адміністратор обриває чужий сеанс і псує його аудит.
+    /// </remarks>
+    public Task<int?> GetActorAsync(long sessionId, CancellationToken ct);
+
     public Task EndAsync(long sessionId, CancellationToken ct);
 
     /// <summary>

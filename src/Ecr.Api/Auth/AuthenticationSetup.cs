@@ -22,6 +22,14 @@ public static class AuthenticationSetup
     /// <summary>Claim з ідентифікатором користувача в нашій базі.</summary>
     public const string UserIdClaim = "ecr:uid";
 
+    /// <summary>Claim «пароль виданий разово» (ФВ-6.18).</summary>
+    /// <remarks>
+    /// ⚠ У cookie, а не запитом до бази на кожен запит. Прапорець знімається
+    /// лише зміною пароля, а вона крутить <c>SecurityStamp</c> — тобто стара
+    /// cookie з прапорцем перестає бути дійсною тієї ж миті.
+    /// </remarks>
+    public const string MustChangePasswordClaim = "ecr:mustchg";
+
     /// <summary>Налаштовує схеми автентифікації.</summary>
     public static IServiceCollection AddEcrAuthentication(this IServiceCollection services, IConfiguration configuration)
     {

@@ -187,7 +187,7 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         "calc.CalculationInput", "calc.CalculationResult", "calc.CalculationRun", "calc.CalculationStep",
         "calc.Methodology", "calc.MethodologyConstant", "calc.MethodologyFormula",
         "calc.MethodologyOutput", "calc.MethodologyRule", "calc.MethodologySubstance",
-        "calc.MethodologyVersion", "calc.ScriptVersion", "calc.SubmissionSnapshot",
+        "calc.MethodologyVersion", "calc.ScriptVersion",
 
         // Етап 5 — інтеграція, звітність, архів
         "arc.CalculationResult", "arc.CalculationStep", "arc.CellChange", "arc.CellValue",

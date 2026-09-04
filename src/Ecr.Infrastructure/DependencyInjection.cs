@@ -21,7 +21,7 @@ public static class DependencyInjection
     /// ⚠ Тут реєструється лише те, чиї реалізації **існують**. Порти етапів
     /// 2–5 (<c>ICollectionStore</c>, <c>IMethodologyStore</c>,
     /// <c>IConstantStore</c>, <c>ICalculationResultStore</c>,
-    /// <c>IOrphanScanner</c>, <c>ISimulationService</c>,
+    /// <c>IOrphanScanner</c>,
     /// <c>IRecalculationJob</c>, <c>IJobProgress</c>)
     /// не реєструються, бо реалізацій ще немає. Зареєструвати їх «на майбутнє»
     /// не можна: у Development контейнер перевіряється при побудові, і
@@ -66,6 +66,7 @@ public static class DependencyInjection
         services.AddScoped<ITemplateVersionStore, TemplateVersionStore>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();
+        services.AddScoped<IWorkflowStore, WorkflowStore>();
         services.AddScoped(typeof(IRepository<,>), typeof(Repository<,>));
 
         // BulkCellLoader працює власним з'єднанням (SqlBulkCopy), тому рядок
@@ -101,10 +102,18 @@ public static class DependencyInjection
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
         services.AddScoped<IUserStore, UserStore>();
+        services.AddScoped<ISimulationService, SimulationService>();
 
         // Каталог рядків інтерфейсу — Scoped через EcrDbContext; сам зріз
         // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).
         services.AddScoped<IUiStringCatalog, Localization.UiStringCatalogStore>();
+
+        // ⚠ Планувальник реєструється ЗАВЖДИ, хай навіть як відмова.
+        // Поки його не було, DocumentsController не міг бути створений через
+        // незарезольвлений RecalculateDocumentHandler — і кожен його ендпоінт
+        // відповідав 500, включно з поданням. Одна відсутня реєстрація вимикала
+        // цілий контролер, і видно це було лише на живому запиті.
+        services.AddSingleton<IBackgroundJobScheduler>(_ => new Jobs.QuartzJobScheduler());
 
         services.AddSingleton<ISqlCapabilities>(_ => new SqlCapabilitiesProbe());
         services.AddSingleton<IClock, SystemClock>();

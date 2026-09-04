@@ -1,8 +1,12 @@
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Security;
 
@@ -17,53 +21,374 @@ namespace Ecr.Infrastructure.Security;
 public sealed class AccessDecisionService(
     EcrDbContext db,
     IMetadataCache metadata,
-    Caching.AccessProfileCache profileCache) : IAccessDecisionService
+    Caching.AccessProfileCache profileCache,
+    IClock clock) : IAccessDecisionService
 {
     /// <inheritdoc />
-    public Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: зібрати ролі користувача, їхні функціональні права і ресурсні гранти; " +
-            "РОЗГОРНУТИ успадкування Project → Sheet → Table → Column у плоску мапу; " +
-            "окремо зібрати заборони (IsDeny) — вони виграють на будь-якому рівні (ФВ-6.6); " +
-            "ключ кешу = userId + securityStamp.");
+    public async Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
+    {
+        var account = await db.Users
+            .AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.SecurityStamp, u.IsActive })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (account is null || !account.IsActive)
+        {
+            // Вимкнений запис не має «профілю без прав»: порожній профіль
+            // виглядав би як звичайний користувач без грантів, а це різні речі
+            // і в UI, і в журналі.
+            throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Обліковий запис не існує або вимкнений.");
+        }
+
+        // Ключ кешу — користувач + штамп: зміна ролей крутить штамп, тому
+        // старий запис просто перестає адресуватися (ФВ-6.7).
+        return await profileCache
+            .GetOrCreateAsync(userId, account.SecurityStamp, token => LoadAsync(userId, account.SecurityStamp, token), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Збирає профіль із бази. Викликається лише при промаху кешу.</summary>
+    private async Task<AccessProfile> LoadAsync(int userId, string securityStamp, CancellationToken ct)
+    {
+        var today = DateOnly.FromDateTime(clock.UtcNow);
+
+        // ⚠ Строкові призначення враховуються тут, а не «десь у перевірці»:
+        // підміна на час відпустки має закінчитися сама, інакше її доводиться
+        // знімати руками — а того, хто мав би зняти, саме й немає на місці.
+        var roleIds = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.UserId == userId
+                        && (a.ValidFrom == null || a.ValidFrom <= today)
+                        && (a.ValidTo == null || a.ValidTo >= today))
+            .Select(a => a.RoleId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Призначення на AD-групу (PrincipalSid) сюди ще не входять:
+        // членство береться з токена входу, а не запитом до каталогу
+        // (ФВ-6.15a), і цей шлях з'явиться разом із доменним входом. Мовчазне
+        // «вважати, що груп немає» тут чесніше за вигаданий список, але це
+        // саме прогалина, а не рішення.
+        var permissions = roleIds.Count == 0
+            ? []
+            : await db.RolePermissions
+                .AsNoTracking()
+                .Where(rp => roleIds.Contains(rp.RoleId))
+                .Select(rp => rp.PermissionCode)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+        var rows = roleIds.Count == 0
+            ? []
+            : await db.ResourceGrants
+                .AsNoTracking()
+                .Where(g => roleIds.Contains(g.RoleId))
+                .Select(g => new { g.ResourceKind, g.ResourceId, g.Level, g.IsDeny })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+        var grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal);
+        var denies = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var row in rows)
+        {
+            var key = $"{row.ResourceKind}:{row.ResourceId}";
+
+            if (row.IsDeny)
+            {
+                denies.Add(key);
+                continue;
+            }
+
+            // Дві ролі на той самий ресурс — виграє ширший рівень: людина
+            // отримує суму своїх ролей, а не випадкову з них.
+            grants[key] = grants.TryGetValue(key, out var existing) && existing > row.Level
+                ? existing
+                : row.Level;
+        }
+
+        // ⛔ Успадкування Project → Sheet → Table → Column тут НЕ розгортається
+        // в мапу: його робить EditRules.Effective на кожному рішенні. Причина
+        // не в економії — розгорнута мапа зафіксувала б структуру шаблону на
+        // момент побудови профілю, і новий аркуш успадкував би права лише
+        // після перевходу користувача.
+        return new AccessProfile
+        {
+            CacheKey = Caching.AccessProfileCache.Key(userId, securityStamp),
+            UserId = userId,
+            SecurityStamp = securityStamp,
+            Permissions = permissions.ToHashSet(StringComparer.Ordinal),
+            Grants = grants,
+            Denies = denies,
+        };
+    }
 
     /// <inheritdoc />
-    public Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct)
-        => throw new NotImplementedException("TODO: рівень гранта на проєкт документа має бути >= Read.");
+    public async Task<EditDecision> CanReadDocumentAsync(
+        AccessProfile profile, long documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var projectId = await ProjectIdAsync(documentId, ct).ConfigureAwait(false);
+
+        // Читання не залежить ні від стану періоду, ні від статусу аркуша:
+        // закритий період і подана форма лишаються видимими — інакше звіт
+        // неможливо було б навіть переглянути після подання.
+        return profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read
+            ? EditDecision.Allow()
+            : EditDecision.Deny(EditDenyReason.NoGrant);
+    }
 
     /// <inheritdoc />
-    public Task<EditDecision> CanEditCellAsync(
+    public async Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO — порядок перевірок від найдешевшої до найдорожчої, повертати ПЕРШУ причину:\n" +
-            "1) Project.Status == Archived → ProjectArchived;\n" +
-            "2) Project.IsArchiving → ArchivingInProgress;\n" +
-            "3) Period.State: Scheduled → PeriodNotOpenYet, Closed → PeriodClosed;\n" +
-            "   ⚠ закритий період блокує ВСІХ, включно з Manage (02c A7);\n" +
-            "4) PeriodAccessRuleDef для аркуша й номера періоду → OutOfAccessWindow;\n" +
-            "5) ApprovalState аркуша: Submitted → DocumentSubmitted, Approved → DocumentApproved;\n" +
-            "   ⚠ Grace дає час на правки НЕПОДАНИХ документів, а не право змінити подану форму (D-67);\n" +
-            "6) ColumnDef.IsComputed → CalculatedCell; IsReadOnly → ColumnReadOnly;\n" +
-            "7) RowDef.IsReadOnly → RowReadOnly;\n" +
-            "8) profile.LevelFor(Column|Table|Sheet|Project) < Write → NoGrant;\n" +
-            "⚠ Project.CurrentPeriod у цьому ланцюгу НЕ бере участі: інакше «пін» став би " +
-            "прихованим правом редагувати закрите (D-77).");
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var context = await BuildContextAsync(
+            documentId, address.PeriodKey, sheetDefId: null, address.ColumnDefId, ct).ConfigureAwait(false);
+
+        return EditRules.CanEdit(profile, context);
+    }
 
     /// <inheritdoc />
-    public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
+    public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
         AccessProfile profile, long tableInstanceId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: обчислити спільні для зрізу умови ОДИН раз (проєкт, період, правила періодів, " +
-            "статус аркуша, грант на таблицю), далі пройтися по колонках і рядках у пам'яті. " +
-            "Поштучний виклик CanEditCellAsync у циклі — антипатерн: він не вкладається в бюджет.");
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var instance = await db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.Id == tableInstanceId)
+            .Select(t => new { t.DocumentId, t.TableDefId, t.PeriodKeyValue })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false)
+            ?? throw new NotFoundException("ECR-DOC-0404", $"Екземпляр таблиці {tableInstanceId} не знайдено.");
+
+        var periodKey = new PeriodKey(instance.PeriodKeyValue);
+
+        // ⚠ Спільні для зрізу умови рахуються ОДИН раз. Поштучний виклик
+        // CanEditCellAsync у циклі — антипатерн: на таблиці 500×60 це 30 000
+        // запитів, а на права відведено 50 мс на весь запит (ФВ-6.10).
+        var shared = await BuildContextAsync(
+            instance.DocumentId, periodKey, sheetDefId: null, columnDefId: 0, ct).ConfigureAwait(false);
+
+        var snapshot = await SnapshotAsync(instance.DocumentId, ct).ConfigureAwait(false);
+
+        var rows = await db.TableRows
+            .AsNoTracking()
+            .Where(r => r.TableInstanceId == tableInstanceId && !r.IsDeleted)
+            .Select(r => new { r.Id, r.RowKey })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var columns = snapshot.ColumnsById.Values
+            .Where(c => c.TableDefId == instance.TableDefId)
+            .ToList();
+
+        var result = new Dictionary<CellAddress, EditDecision>(rows.Count * columns.Count);
+
+        foreach (var row in rows)
+        {
+            var rowReadOnly = snapshot.RowsByKey.TryGetValue((instance.TableDefId, row.RowKey), out var def)
+                              && def.IsReadOnly;
+
+            foreach (var column in columns)
+            {
+                var context = shared with
+                {
+                    TableDefId = instance.TableDefId,
+                    ColumnDefId = column.Id,
+                    ColumnIsComputed = column.IsComputed,
+                    ColumnIsReadOnly = column.IsReadOnly,
+                    RowIsReadOnly = rowReadOnly,
+                };
+
+                result[new CellAddress(periodKey, row.Id, column.Id)] = EditRules.CanEdit(profile, context);
+            }
+        }
+
+        return result;
+    }
 
     /// <inheritdoc />
-    public Task<EditDecision> CanSubmitAsync(
+    public async Task<EditDecision> CanSubmitAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => throw new NotImplementedException("TODO: рівень >= Submit; немає незакритих Error валідації.");
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var context = await BuildContextAsync(documentId, periodKey, sheetDefId, columnDefId: 0, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ При поданні блокує БУДЬ-ЯКА помилка валідації будь-якого рівня
+        // (ФВ-5.19), на відміну від запису, де блокує лише коміркова (D-90):
+        // подана форма йде назовні цілком, і рядкова помилка в ній — це
+        // неправильний звіт.
+        var hasErrors = await db.ValidationResults
+            .AsNoTracking()
+            .Where(v => v.DocumentId == documentId && v.PeriodKey == periodKey.Value)
+            .OrderByDescending(v => v.RunAt)
+            .Select(v => v.ErrorCount)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false) > 0;
+
+        return EditRules.CanSubmit(profile, context, hasErrors);
+    }
 
     /// <inheritdoc />
-    public Task<EditDecision> CanApproveAsync(
+    public async Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => throw new NotImplementedException("TODO: рівень >= Approve; стан аркуша = Submitted.");
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var context = await BuildContextAsync(documentId, periodKey, sheetDefId, columnDefId: 0, ct)
+            .ConfigureAwait(false);
+
+        return EditRules.CanApprove(profile, context);
+    }
+
+    /// <summary>Збирає умови доступу з бази в один <see cref="CellAccessContext"/>.</summary>
+    /// <remarks>
+    /// ⛔ <c>Project.CurrentPeriod</c> у цей ланцюг НЕ входить: інакше «пін»
+    /// поточного періоду став би прихованим правом редагувати закрите (D-77).
+    /// </remarks>
+    private async Task<CellAccessContext> BuildContextAsync(
+        long documentId, PeriodKey periodKey, int? sheetDefId, int columnDefId, CancellationToken ct)
+    {
+        var document = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => new { d.ProjectId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false)
+            ?? throw new NotFoundException("ECR-DOC-0404", $"Документ {documentId} не знайдено.");
+
+        var project = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == document.ProjectId)
+            .Select(p => new { p.Status, p.IsArchiving, p.TemplateVersionId })
+            .FirstAsync(ct)
+            .ConfigureAwait(false);
+
+        // Стан періоду — ЗБЕРЕЖЕНЕ значення, а не функція від now() (ФВ-1.12).
+        var period = await db.Periods
+            .AsNoTracking()
+            .Where(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == periodKey.Value)
+            .Select(p => new { p.State, p.Sequence })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var sheetStatus = sheetDefId is { } sheet
+            ? await db.ApprovalStates
+                .AsNoTracking()
+                .Where(a => a.DocumentId == documentId
+                            && a.SheetDefId == sheet
+                            && a.PeriodKey == periodKey.Value)
+                .Select(a => (DocumentStatus?)a.Status)
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false)
+            : null;
+
+        // ⚠ Метадані читаються ЛИШЕ коли рішення справді про комірку.
+        // Подання і затвердження до колонок не звертаються, і зайвий похід у
+        // кеш шаблону тут не просто марний — він робить рішення про доступ
+        // залежним від того, чи завантажується структура, якої це рішення не
+        // стосується.
+        ColumnDef? column = null;
+        var tableDefId = 0;
+        var effectiveSheet = sheetDefId ?? 0;
+
+        if (columnDefId != 0)
+        {
+            var snapshot = await metadata.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
+            column = snapshot.ColumnsById.TryGetValue(columnDefId, out var found) ? found : null;
+            tableDefId = column?.TableDefId ?? 0;
+            effectiveSheet = sheetDefId ?? SheetOf(snapshot, tableDefId);
+        }
+
+        var outOfWindow = period is not null
+                          && await OutOfWindowAsync(
+                              project.TemplateVersionId, effectiveSheet, tableDefId, period.Sequence, ct)
+                              .ConfigureAwait(false);
+
+        return new CellAccessContext(
+            document.ProjectId,
+            effectiveSheet,
+            tableDefId,
+            columnDefId,
+
+            // Відсутній період трактується як Scheduled: «періоду ще немає» і
+            // «період не відкрито» для користувача — та сама відмова.
+            project.Status,
+            project.IsArchiving,
+            period?.State ?? PeriodState.Scheduled,
+            outOfWindow,
+            sheetStatus ?? DocumentStatus.Draft,
+            column?.IsComputed ?? false,
+            column?.IsReadOnly ?? false,
+            RowIsReadOnly: false);
+    }
+
+    /// <summary>Аркуш, якому належить таблиця.</summary>
+    private static int SheetOf(TemplateVersionSnapshot snapshot, int tableDefId)
+    {
+        foreach (var sheet in snapshot.Sheets)
+        {
+            foreach (var table in sheet.Tables)
+            {
+                if (table.Id == tableDefId)
+                {
+                    return sheet.Id;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>Чи виходить номер періоду за вікно доступу аркуша (ФВ-2.16).</summary>
+    private async Task<bool> OutOfWindowAsync(
+        int templateVersionId, int sheetDefId, int tableDefId, byte sequence, CancellationToken ct)
+    {
+        var rules = await db.PeriodAccessRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == templateVersionId
+                        && (r.SheetDefId == null || r.SheetDefId == sheetDefId)
+                        && (r.TableDefId == null || r.TableDefId == tableDefId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Правил немає — вікна немає: за замовчуванням доступні всі періоди.
+        // Зворотне («немає правила — заборонено») зробило б кожен новий аркуш
+        // недоступним, і ніхто б не зрозумів чому.
+        return rules.Count > 0 && rules.TrueForAll(r => !r.AppliesTo(sequence));
+    }
+
+    /// <summary>Проєкт документа.</summary>
+    private async Task<int> ProjectIdAsync(long documentId, CancellationToken ct)
+        => await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false)
+           ?? throw new NotFoundException("ECR-DOC-0404", $"Документ {documentId} не знайдено.");
+
+    /// <summary>Знімок структури шаблону документа.</summary>
+    private async Task<TemplateVersionSnapshot> SnapshotAsync(long documentId, CancellationToken ct)
+    {
+        var templateVersionId = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => p.TemplateVersionId)
+            .FirstAsync(ct)
+            .ConfigureAwait(false);
+
+        return await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+    }
 }

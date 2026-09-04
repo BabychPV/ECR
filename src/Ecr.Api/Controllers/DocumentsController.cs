@@ -100,17 +100,29 @@ public sealed class DocumentsController(
     [HttpPost("{id:long}/submit")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> Submit(long id, [FromBody] SheetWorkflowRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати submit.HandleAsync(id, request.SheetDefId, request.PeriodKey, ct).");
+    public async Task<IActionResult> Submit(
+        long id, [FromBody] SheetWorkflowRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await submit.HandleAsync(id, request.SheetDefId, request.PeriodKey, ct).ConfigureAwait(false);
+        return NoContent();
+    }
 
     /// <summary>Погодження або відхилення аркуша.</summary>
     [HttpPost("{id:long}/approve")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public Task<IActionResult> Approve(long id, [FromBody] ApproveSheetRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати approve.HandleAsync(id, request.SheetDefId, request.PeriodKey, " +
-            "request.Approved, request.Reason, ct).");
+    public async Task<IActionResult> Approve(
+        long id, [FromBody] ApproveSheetRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await approve
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, ct)
+            .ConfigureAwait(false);
+
+        return NoContent();
+    }
 
     /// <summary>
     /// Відкриває поданий документ. Право <c>Document.Reopen</c>.
@@ -123,9 +135,17 @@ public sealed class DocumentsController(
     [HttpPost("{id:long}/reopen")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> Reopen(long id, [FromBody] ReopenDocumentRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати reopen.HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, ct).");
+    public async Task<IActionResult> Reopen(
+        long id, [FromBody] ReopenDocumentRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await reopen
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, ct)
+            .ConfigureAwait(false);
+
+        return NoContent();
+    }
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]

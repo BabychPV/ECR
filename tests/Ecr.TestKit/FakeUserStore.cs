@@ -13,6 +13,9 @@ public sealed class FakeUserStore : IUserStore
     /// <summary>Ролі, призначені через <see cref="GrantRoleAsync"/>.</summary>
     public List<(string UserName, string RoleCode)> Grants { get; } = [];
 
+    /// <summary>Зафіксовані спроби входу.</summary>
+    public List<LoginAttempt> Attempts { get; } = [];
+
     /// <summary>Чи є в системі активний доменний адміністратор.</summary>
     public bool HasDomainAdmin { get; set; }
 
@@ -50,6 +53,10 @@ public sealed class FakeUserStore : IUserStore
         => Task.FromResult(HasDomainAdmin);
 
     /// <inheritdoc />
+    public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
+        => Task.FromResult(_users.Find(u => string.Equals(u.WindowsSid, sid, StringComparison.Ordinal)));
+
+    /// <inheritdoc />
     public void Add(User user)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -68,17 +75,16 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    public void RecordAttempt(LoginAttempt attempt) => Attempts.Add(attempt);
+
+    /// <inheritdoc />
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct) => Task.FromResult(Policy);
 
     /// <summary>Активний доменний користувач для сценаріїв входу.</summary>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="sid">SID у каталозі.</param>
     public static User DomainUser(string userName, string sid = "S-1-5-21-1")
-    {
-        var user = new User(userName, userName, AuthProvider.Windows);
-        typeof(User).GetProperty(nameof(User.WindowsSid))!.SetValue(user, sid);
-        return user;
-    }
+        => User.CreateDomain(userName, userName, sid, DateTime.UnixEpoch);
 
     /// <summary>Ідентифікатор присвоюється сховищем — так само, як IDENTITY у базі.</summary>
     private void AssignId(User user)
