@@ -29,5 +29,13 @@ public sealed class ApprovalRoute : Entity<int>
     public LocalizedText NameL10n { get; private set; } = null!;
     public bool IsActive { get; private set; }
 
+    /// <summary>Версія шаблону, до якої прив'язаний маршрут; <c>null</c> — спільний.</summary>
+    /// <remarks>
+    /// Необов'язкове навмисно: більшість маршрутів однакові для всіх версій,
+    /// і вимога вказувати версію означала б переоформлення маршрутів на кожну
+    /// публікацію шаблону.
+    /// </remarks>
+    public int? TemplateVersionId { get; private set; }
+
     public IReadOnlyList<ApprovalStep> Steps => _steps;
 }

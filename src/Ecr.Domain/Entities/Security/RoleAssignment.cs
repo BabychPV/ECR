@@ -23,14 +23,49 @@ public sealed class RoleAssignment : Entity<int>
         PrincipalSid = principalSid;
     }
 
+    /// <summary>Призначення на ще НЕ збереженого користувача.</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="user">Користувач.</param>
+    /// <remarks>
+    /// ⚠ Потрібно рівно для одного сценарію — створення bootstrap-адміністратора
+    /// разом із роллю в ОДНІЙ транзакції. З окремими збереженнями збій між
+    /// ними лишив би адміністратора без жодного права — і систему без входу,
+    /// бо повторний старт уже не створить запис (D-97).
+    /// </remarks>
+    public RoleAssignment(int roleId, User user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        RoleId = roleId;
+        User = user;
+    }
+
     public int RoleId { get; private set; }
 
     /// <summary>Призначення на особу. Взаємовиключне з <see cref="PrincipalSid"/>.</summary>
     public int? UserId { get; private set; }
+
+    /// <summary>Навігація на особу; потрібна лише для вставки разом із користувачем.</summary>
+    public User? User { get; private set; }
 
     /// <summary>SID AD-групи. Це **не** авторство — воно завжди `UserId` (D-86).</summary>
     public string? PrincipalSid { get; private set; }
 
     /// <summary>Область дії: проєкт, аркуш, період (ФВ-6.14).</summary>
     public string? ScopeJson { get; private set; }
+
+    /// <summary>Початок дії призначення; <c>null</c> — від завжди.</summary>
+    /// <remarks>
+    /// Строкове призначення — це підміна на час відпустки: без меж її доводиться
+    /// знімати руками, а того, хто мав би зняти, саме й немає на місці.
+    /// </remarks>
+    public DateOnly? ValidFrom { get; private set; }
+
+    /// <summary>Кінець дії; <c>null</c> — безстроково.</summary>
+    public DateOnly? ValidTo { get; private set; }
+
+    /// <summary>Чи діє призначення на вказану дату.</summary>
+    /// <param name="on">Дата у поясі майданчика.</param>
+    public bool IsEffectiveOn(DateOnly on)
+        => (ValidFrom is null || ValidFrom <= on) && (ValidTo is null || ValidTo >= on);
 }

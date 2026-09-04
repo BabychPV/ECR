@@ -22,7 +22,7 @@ public static class DependencyInjection
     /// 2–5 (<c>ICollectionStore</c>, <c>IMethodologyStore</c>,
     /// <c>IConstantStore</c>, <c>ICalculationResultStore</c>,
     /// <c>IOrphanScanner</c>, <c>ISimulationService</c>,
-    /// <c>IUiStringCatalog</c>, <c>IRecalculationJob</c>, <c>IJobProgress</c>)
+    /// <c>IRecalculationJob</c>, <c>IJobProgress</c>)
     /// не реєструються, бо реалізацій ще немає. Зареєструвати їх «на майбутнє»
     /// не можна: у Development контейнер перевіряється при побудові, і
     /// застосунок просто не стартував би.
@@ -100,6 +100,11 @@ public static class DependencyInjection
         services.AddScoped<Application.Security.IAccessDecisionService, AccessDecisionService>();
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
+        services.AddScoped<IUserStore, UserStore>();
+
+        // Каталог рядків інтерфейсу — Scoped через EcrDbContext; сам зріз
+        // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).
+        services.AddScoped<IUiStringCatalog, Localization.UiStringCatalogStore>();
 
         services.AddSingleton<ISqlCapabilities>(_ => new SqlCapabilitiesProbe());
         services.AddSingleton<IClock, SystemClock>();

@@ -147,6 +147,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         ConcurrencyConflictException e =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⚠ Каталог кодує HTTP у самому коді (`ECR-<ДОМЕН>-<HTTP><порядковий>`),
+        // і три коди виходять за межі 422. Розбирати номер із рядка було б
+        // спритно і крихко: `4223` — це 422, а `0503` — 503, і одна помилка в
+        // правилі розбору тихо переназначила б статус усьому каталогу.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PasswordChangeRequired =>
+            (StatusCodes.Status428PreconditionRequired, e.ErrorCode, e.Message, e.Details),
+
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.AccountLocked =>
+            (StatusCodes.Status423Locked, e.ErrorCode, e.Message, e.Details),
+
+        BusinessRuleException e when e.ErrorCode is ErrorCodes.Archiving or ErrorCodes.SourceUnavailable =>
+            (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 

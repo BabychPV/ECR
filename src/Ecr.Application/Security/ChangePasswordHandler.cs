@@ -1,7 +1,9 @@
 // src/Ecr.Application/Security/ChangePasswordHandler.cs
+using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
-using Ecr.Application.Common;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Security;
 
@@ -10,16 +12,75 @@ namespace Ecr.Application.Security;
 /// крутить <c>SecurityStamp</c> (ФВ-6.7).
 /// </summary>
 public sealed class ChangePasswordHandler(
-    IPasswordHasher hasher, IUnitOfWork uow, IAuditWriter audit, ICurrentUser currentUser, IClock clock)
+    IUserStore users,
+    IPasswordHasher hasher,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    ICurrentUser currentUser,
+    IClock clock)
 {
-    public Task HandleAsync(string currentPassword, string newPassword, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: 1) лише локальні облікові записи: доменний пароль не наш;\n" +
-            "2) перевірити поточний пароль — навіть при MustChangePassword;\n" +
-            "3) новий пароль за PasswordPolicy (довжина, блокування — ФВ-6.4a);\n" +
-            "4) user.SetPassword: знімає прапорець і крутить SecurityStamp, тому " +
-            "   всі інші сесії стають недійсними негайно;\n" +
-            "5) ⛔ ні поточний, ні новий пароль не логувати і не класти в " +
-            "   повідомлення помилки (ФВ-6.11) — це перевіряється тестом;\n" +
-            "6) в аудит — факт зміни без значень.");
+    /// <summary>Змінює пароль поточного користувача.</summary>
+    /// <param name="currentPassword">Чинний пароль.</param>
+    /// <param name="newPassword">Новий пароль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(string currentPassword, string newPassword, CancellationToken ct)
+    {
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати пароль.");
+
+        var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
+                   ?? throw new NotFoundException("ECR-AUTH-0401", "Обліковий запис не знайдено.");
+
+        // Доменний пароль живе в каталозі, і міняти його звідси означало б
+        // обіцяти те, чого система не робить.
+        if (user.Provider != AuthProvider.Local)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", "Пароль доменного облікового запису змінюється засобами домену.");
+        }
+
+        // ⚠ Чинний пароль перевіряється НАВІТЬ при MustChangePassword. Інакше
+        // будь-хто, хто дістався до сесії з разовим паролем, змінив би його на
+        // свій — і законний власник залишився б без доступу.
+        if (user.PasswordHash is null || !hasher.Verify(currentPassword, user.PasswordHash))
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Чинний пароль не підходить.");
+        }
+
+        var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
+        if (newPassword is null || newPassword.Length < policy.MinLength)
+        {
+            // ⚠ Код той самий, що й для «пароль треба змінити», і це навмисно:
+            // клієнт на нього показує ту саму форму зміни пароля, а стан
+            // системи не змінився — зміна досі потрібна (`Q-075`).
+            throw new BusinessRuleException(
+                "ECR-PWD-0428",
+                $"Новий пароль коротший за {policy.MinLength} символів.",
+                new Dictionary<string, object?> { ["minLength"] = policy.MinLength });
+        }
+
+        // SetPassword знімає прапорець і крутить SecurityStamp, тому всі інші
+        // сесії стають недійсними негайно.
+        user.SetPassword(hasher.Hash(newPassword));
+
+        var now = clock.UtcNow;
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                now,
+                "PasswordChanged",
+                TargetUserId: user.Id,
+                TargetRoleId: null,
+
+                // ⛔ В аудит іде ФАКТ зміни без значень: ні старого пароля, ні
+                // нового, ні хеша (ФВ-6.11). Аудит читають ширше коло людей,
+                // ніж базу.
+                DetailsJson: null,
+                ChangedByUserId: user.Id,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
 }

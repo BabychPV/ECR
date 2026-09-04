@@ -65,11 +65,14 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<RoleAssignment> RoleAssignments => Set<RoleAssignment>();
     public DbSet<ResourceGrant> ResourceGrants => Set<ResourceGrant>();
     public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
 
     // wf
     public DbSet<ApprovalRoute> ApprovalRoutes => Set<ApprovalRoute>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<ApprovalState> ApprovalStates => Set<ApprovalState>();
+    public DbSet<ValidationResult> ValidationResults => Set<ValidationResult>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -93,17 +96,16 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
         // (`wf.ApprovalRoute.TemplateVersionId`, `dic.RegistryEntry.Ordinal`),
         // і будь-яке значення для них було б вигаданим.
         //
-        // Кожна повертається в модель на своєму етапі разом із конфігурацією:
-        // `wf.*` і `sec.RoleAssignment` — Етап 3, `dic.*` — Етап 4.
+        // Кожна повертається в модель на своєму етапі разом із конфігурацією.
+        // `wf.ApprovalRoute`, `wf.ApprovalStep` і `sec.RoleAssignment` повернуті
+        // на Етапі 3 разом із бракуючими полями (`TemplateVersionId`,
+        // `IsOptional`, `ValidFrom`/`ValidTo`); `dic.*` — Етап 4.
         // Тест `Міграція_не_створює_таблиць_поза_контрактними_схемами`
         // стежить, щоб цей список не поповнювався мовчки.
-        modelBuilder.Ignore<ApprovalRoute>();
-        modelBuilder.Ignore<ApprovalStep>();
         modelBuilder.Ignore<RegistryEntry>();
         modelBuilder.Ignore<RegistryEntryLink>();
         modelBuilder.Ignore<RegistryExternalKey>();
         modelBuilder.Ignore<RegistryValue>();
-        modelBuilder.Ignore<RoleAssignment>();
 
         // ⚠ Каскадне видалення вимкнене скрізь за замовчуванням: у системі
         // діє soft delete (ФВ-7.6), бо на кожен запис хтось посилається —

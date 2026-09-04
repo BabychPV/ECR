@@ -1,6 +1,8 @@
 using Ecr.Application.Localization;
+using Ecr.Application.Ports;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Ecr.Api.Controllers;
 
@@ -31,30 +33,58 @@ public sealed class UiStringsController(
     /// підмінюється мовою за замовчуванням, а відсутній ключ повертається
     /// як сам ключ — порожній підпис у UI гірший за англійський.
     /// </remarks>
+    /// <param name="lang">Мова інтерфейсу.</param>
+    /// <param name="scope"><c>public</c> або <c>private</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
     [HttpGet("{lang}")]
     [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public Task<IActionResult> Get(string lang, [FromQuery] string scope, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: scope=public — анонімний; scope=private — вимагає автентифікації, " +
-            "інакше 401 (анонімний запит приватної області відхиляється, ФВ-14.2); " +
-            "делегувати get.HandleAsync(lang, publicOnly: scope == \"public\", ct); " +
-            "виставити ETag = revision ОБЛАСТІ; If-None-Match зі збігом → 304.");
+    public async Task<IActionResult> Get(string lang, [FromQuery] string scope, CancellationToken ct)
+    {
+        // Усе, крім явного "public", вважається приватним. Помилка в написанні
+        // має закривати каталог, а не відкривати його.
+        var publicOnly = string.Equals(scope, "public", StringComparison.OrdinalIgnoreCase);
+
+        // Анонімний запит приватної області відхиляється в обробнику (ФВ-14.2);
+        // тут лише умовний запит.
+        var catalog = await get.HandleAsync(lang, publicOnly, ct).ConfigureAwait(false);
+        var etag = GetUiStringsHandler.ETag(publicOnly, lang, catalog.Revision);
+
+        Response.Headers[HeaderNames.ETag] = etag;
+
+        if (UiStringResolver.IsNotModified(Request.Headers[HeaderNames.IfNoneMatch], etag))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        return Ok(catalog);
+    }
 
     /// <summary>Змінює рядок каталогу. Право <c>System.ManageLocalization</c>.</summary>
     /// <remarks>Будь-який запис інкрементує <c>Revision</c> — інакше клієнти не побачать зміни.</remarks>
+    /// <param name="lang">Мова.</param>
+    /// <param name="key">Ключ.</param>
+    /// <param name="request">Текст і область.</param>
+    /// <param name="ct">Токен скасування.</param>
     [HttpPut("{lang}/{key}")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> Set(string lang, string key, [FromBody] SetUiStringRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити System.ManageLocalization; делегувати " +
-            "set.HandleAsync(key, lang, request.Value, request.Scope, ct); повернути новий Revision.");
+    public async Task<IActionResult> Set(
+        string lang, string key, [FromBody] SetUiStringRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var revision = await set
+            .HandleAsync(key, lang, request.Value, (byte)request.Scope, ct)
+            .ConfigureAwait(false);
+
+        return Ok(new { revision });
+    }
 }
 
 /// <summary>Запит на зміну рядка каталогу.</summary>
 /// <param name="Value">Текст.</param>
 /// <param name="Scope">Область: 0 — публічна, 1 — приватна (<c>D-114</c>).</param>
-public sealed record SetUiStringRequest(string Value, byte Scope);
+public sealed record SetUiStringRequest(string Value, UiStringScope Scope);

@@ -22,4 +22,7 @@ public sealed class ApprovalStep : Entity<int>
 
     /// <summary>Роль за ідентифікатором, не за назвою.</summary>
     public int RoleId { get; private set; }
+
+    /// <summary>Крок можна пропустити.</summary>
+    public bool IsOptional { get; private set; }
 }

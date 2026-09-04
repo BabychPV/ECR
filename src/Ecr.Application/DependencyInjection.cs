@@ -55,6 +55,15 @@ public static class DependencyInjection
         services.AddScoped<ValidateDocumentHandler>();
         services.AddScoped<Templates.PublishTemplateVersionHandler>();
 
+        // Безпека (модулі 3.1–3.3)
+        services.AddScoped<Security.EnsureBootstrapAdminHandler>();
+        services.AddScoped<Security.DisableBootstrapAdminHandler>();
+        services.AddScoped<Security.ChangePasswordHandler>();
+
+        // Локалізація (модуль 3.7)
+        services.AddScoped<Localization.GetUiStringsHandler>();
+        services.AddScoped<Localization.SetUiStringHandler>();
+
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler тут НЕ реєструються:
         // обидва залежать від IBackgroundJobScheduler, реалізації якого ще
         // немає — вибір Quartz/Hangfire упирається в допустимість LGPL (D-09),

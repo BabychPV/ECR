@@ -182,10 +182,6 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     /// </remarks>
     private static readonly string[] Deferred =
     [
-        // Етап 3 — безпека і робочий процес
-        "sec.LoginAttempt", "sec.RoleAssignment", "sec.RolePermission",
-        "wf.ApprovalRoute", "wf.ApprovalStep", "wf.ValidationResult",
-
         // Етап 4 — реєстри, одиниці, розрахунки
         "dic.RegistryEntry", "dic.RegistryEntryLink", "dic.RegistryExternalKey", "dic.RegistryValue",
         "calc.CalculationInput", "calc.CalculationResult", "calc.CalculationRun", "calc.CalculationStep",
