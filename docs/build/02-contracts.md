@@ -2377,6 +2377,7 @@ public sealed record RowDto(
 | `08-system-tables.sql` | таблиці `sys_ecr.*`: `Language`, `SystemSetting`, `UiString`, `UiStringRevision` |
 | `09-seed.sql` | seed чистої БД — **єдиний скрипт, який виконує застосунок**, а не SQL Agent |
 | `10-triggers.sql` | тригери незмінності `TR_ColumnDef_Immutable`, `TR_RowDef_Immutable`, `TR_FormulaDef_Immutable` |
+| `11-audit-tables.sql` | таблиці `aud.*`: `CellChange`, `StructureChange`, `SecurityEvent`, `PublicationEvent`, `SimulationSession` |
 
 ⚠ `07` існує тому, що `ON ps_ByPeriodKey(PeriodKey)` — частина `CREATE TABLE`, а
 `migrationBuilder` цього не вміє: анотації для розміщення на схемі

@@ -51,8 +51,13 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Усі_унікальні_індекси_партиційованих_таблиць_містять_PeriodKey()
     {
-        // Унікальність без партиційного стовпця SQL Server або відхилить, або
-        // (гірше) зробить індекс невирівняним — і партиційні операції відпадуть.
+        // ⚠ Перевіряється СВІЙ партиційний стовпець кожного індексу, а не
+        // буквально PeriodKey: aud.* партиційовані за ChangedAt, і вимагати від
+        // них PeriodKey означало б перевіряти не той інваріант. Правильний
+        // інваріант один: унікальний індекс на партиційованій таблиці мусить
+        // містити стовпець, за яким її розрізано, — інакше SQL Server або
+        // відхилить його, або зробить невирівняним, і партиційні операції
+        // відпадуть.
         var offenders = await QueryAsync("""
             SELECT SCHEMA_NAME(t.schema_id) + N'.' + t.name + N'.' + i.name
             FROM sys.indexes i
@@ -62,9 +67,9 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
               AND ds.type_desc = N'PARTITION_SCHEME'
               AND NOT EXISTS (SELECT 1
                               FROM sys.index_columns ic
-                              JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
                               WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
-                                AND ic.is_included_column = 0 AND c.name = N'PeriodKey')
+                                AND ic.is_included_column = 0
+                                AND ic.partition_ordinal > 0)
             """);
 
         Assert.Empty(offenders);

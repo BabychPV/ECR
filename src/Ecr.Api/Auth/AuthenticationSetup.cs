@@ -16,18 +16,62 @@ namespace Ecr.Api.Auth;
 /// </remarks>
 public static class AuthenticationSetup
 {
+    /// <summary>Claim із <c>SecurityStamp</c>: перевіряється на кожен запит.</summary>
+    public const string SecurityStampClaim = "ecr:stamp";
+
+    /// <summary>Claim з ідентифікатором користувача в нашій базі.</summary>
+    public const string UserIdClaim = "ecr:uid";
+
     /// <summary>Налаштовує схеми автентифікації.</summary>
     public static IServiceCollection AddEcrAuthentication(this IServiceCollection services, IConfiguration configuration)
-        => throw new NotImplementedException(
-            "TODO:\n" +
-            "AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)\n" +
-            "  .AddCookie(o => { o.Cookie.Name = Auth:CookieName; o.Cookie.HttpOnly = true;\n" +
-            "      o.Cookie.SameSite = SameSiteMode.Strict;\n" +
-            "      o.Cookie.SecurePolicy = Auth:RequireHttps ? Always : SameAsRequest;\n" +
-            "      o.ExpireTimeSpan = TimeSpan.FromHours(Auth:SlidingHours);\n" +
-            "      o.SlidingExpiration = true;\n" +
-            "      o.Events.OnRedirectToLogin = 401 замість редиректу — це API, не MVC; })\n" +
-            "  .AddNegotiate();\n" +
-            "Обидва endpoint'и входу підписують ТУ САМУ cookie з тими самими claims — " +
-            "нижче рівня входу авторизація не знає, як користувач увійшов (ФВ-6.2).");
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var cookieName = configuration["Auth:CookieName"] ?? "ecr.session";
+        var requireHttps = configuration.GetValue("Auth:RequireHttps", defaultValue: true);
+        var slidingHours = configuration.GetValue("Auth:SlidingHours", defaultValue: 8);
+
+        var builder = services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(options =>
+            {
+                options.Cookie.Name = cookieName;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Strict;
+                options.Cookie.SecurePolicy = requireHttps
+                    ? CookieSecurePolicy.Always
+                    : CookieSecurePolicy.SameAsRequest;
+                options.ExpireTimeSpan = TimeSpan.FromHours(slidingHours);
+                options.SlidingExpiration = true;
+
+                // ⚠ Це API, а не MVC: редирект на сторінку входу перетворив би
+                // 401 на 302 з HTML, і клієнт побачив би «успіх» замість відмови.
+                options.Events.OnRedirectToLogin = context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return Task.CompletedTask;
+                };
+                options.Events.OnRedirectToAccessDenied = context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                };
+            });
+
+        // ⚠ Negotiate реєструється УМОВНО, і це не зручність для тестів.
+        // NegotiateHandler реалізує IAuthenticationRequestHandler, тобто його
+        // HandleRequestAsync виконується на КОЖЕН запит, а не лише на
+        // /api/v1/login/windows. Він вимагає IConnectionItemsFeature, якого
+        // немає ні в TestServer, ні в reverse-proxy без Kestrel/HTTP.sys, — і
+        // тоді 500 отримує будь-який запит, включно з /health/live (`Q-054`).
+        //
+        // За замовчуванням увімкнено: у проді за IIS він потрібен.
+        if (configuration.GetValue("Auth:EnableNegotiate", defaultValue: true))
+        {
+            builder.AddNegotiate();
+        }
+
+        services.AddAuthorization();
+        return services;
+    }
 }

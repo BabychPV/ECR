@@ -1,4 +1,3 @@
-using Ecr.Application.Ports;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecr.Adapters.PiAf;
@@ -7,14 +6,17 @@ namespace Ecr.Adapters.PiAf;
 public static class DependencyInjection
 {
     /// <summary>Додає обидва транспорти читання.</summary>
+    /// <remarks>
+    /// ⚠ Поки не реєструє нічого: <c>CollectionRunner</c> і
+    /// <c>CatchUpPlanner</c> залежать від <c>ICollectionStore</c>, чия
+    /// реалізація належить Етапу 5 (`Q-051`).
+    ///
+    /// ⚠ <c>IExternalDataSink</c> не реєструється ніколи — його не існує
+    /// (D-44): система читає із зовнішніх джерел і не пише в них.
+    /// </remarks>
     public static IServiceCollection AddPiAfAdapters(this IServiceCollection services)
-        => throw new NotImplementedException(
-            "TODO:\n" +
-            "AddScoped<IExternalDataSource, PiSqlClientDataSource>();\n" +
-            "AddScoped<IExternalDataSource, PiWebApiDataSource>();  // резолвиться як колекція\n" +
-            "AddScoped<CollectionRunner>();\n" +
-            "AddScoped<CatchUpPlanner>();\n" +
-            "AddScoped<SourceUnitConverter>();\n" +
-            "AddHttpClient<PiWebApiDataSource>(...) з таймаутом і politikою ретраїв;\n" +
-            "⚠ IExternalDataSink не реєструється — його не існує (D-44).");
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        return services;
+    }
 }

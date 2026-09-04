@@ -107,6 +107,7 @@ S="localhost"; DB="Ecr"; Q="src/Ecr.Infrastructure/Persistence/Sql"
 sqlcmd -S $S -d $DB -E -b -I -i $Q/01-filegroups.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/02-partitions.sql
 sqlcmd -S $S -d $DB -E -b -I -i artifacts/migration.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/11-audit-tables.sql   # ПЕРЕД 07: інакше aud.* лишиться на PRIMARY
 sqlcmd -S $S -d $DB -E -b -I -i $Q/07-partition-tables.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/08-system-tables.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/10-triggers.sql

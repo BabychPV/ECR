@@ -116,6 +116,14 @@
 | Q-046 | CONFLICT | `TR_ColumnDef_Immutable` падав на `ISNULL(tinyint, -1)` і не перевіряв нічого | RESOLVED · контракт виправлено |
 | Q-047 | DECIDED | `02-partitions.sql` єдиний не переживав повторного запуску | RESOLVED |
 | Q-048 | SCOPE | аудит, шостий прохід: перевірка поведінки, а не форми | RESOLVED |
+| Q-049 | CONFLICT | таблиці `aud.*` не створює ніхто — модуль 1.9 був нездійсненний | RESOLVED · `11-audit-tables.sql` |
+| Q-050 | DECIDED | вісім портів Етапу 1 без реалізацій: `Repository`, `RowStore`, `TemplateVersionStore`, `AuditWriter`, `SystemClock` | RESOLVED |
+| Q-051 | DECIDED | DI реєструє лише те, що резолвиться; решта — поіменно з причиною | RESOLVED |
+| Q-052 | CONFLICT | `DATABASEPROPERTYEX(…,'IsReadCommittedSnapshotOn')` не існує — health завжди кричав би | RESOLVED |
+| Q-053 | DECIDED | тести API: `EcrApiFactory`, власна колекція, конфігурація через змінні оточення | RESOLVED |
+| Q-054 | CONFLICT | `AddNegotiate()` виконується на кожен запит і вимагає `IConnectionItemsFeature` | RESOLVED · вимикається конфігурацією |
+| Q-055 | CONFLICT | дві бази ECR на одному інстансі були неможливі: фізичні імена файлів без імені бази | RESOLVED |
+| Q-056 | SCOPE | завершення Етапу 1: DI, модуль 1.10, модуль 1.11 | RESOLVED |
 | **Q-027** | **CONFLICT** | **22 сутності розходяться зі схемою БД** | **OPEN** · Етап 1 **не зачеплено** (`Q-028`), виконання за етапами 3–5 |
 
 ---
@@ -2908,5 +2916,276 @@ TRUNCATE TABLE doc.CellValue WITH (PARTITIONS (2));
 схема БД 6 із 6, дерево §1 — 0 відсутніх, імена тестів 491 = 491, коди помилок
 42 = 42, права ендпоінтів 25 із 25, маршрути 56 = 56, посилання `ФВ`/`D`/`R` —
 182 унікальних, неіснуючих 0, U+FFFD 0, межі шарів чисті.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-049 · CONFLICT · Етап 1 · 2026-09-04
+
+**Де:** `src/Ecr.Infrastructure/Persistence/Sql/11-audit-tables.sql` (новий)
+**Контекст:** реалізація `IAuditWriter` для модуля 1.9.
+
+**Суть:**
+Модуль 1.9 («аудит: `aud.CellChange` пакетним записом») **неможливо було
+завершити**: таблиць `aud.*` не створює ніхто. Сутностей у них немає навмисно —
+доступ іде через порт, — а чого немає в моделі EF, того міграція не створить.
+
+**Четвертий випадок того самого класу** після `Q-035` (партиційні схеми),
+`Q-041` (`sys_ecr`) і `Q-045` (тригери). Спільна риса: об'єкт описаний у
+`02a-db-schema.md`, згаданий у коді, і не створюється нічим.
+
+**Що зроблено:** `11-audit-tables.sql`, витягнутий дослівно з §12, під
+`IF OBJECT_ID(...) IS NULL`. Реалізовано `AuditWriter`: один багаторядковий
+`INSERT` на батч (13 параметрів × 150 рядків проти ліміту 2100), у **тій самій
+транзакції**, що й дані — журнал, який може розійтися з тим, що описує,
+доказом не є.
+
+⚠ `11` виконується **перед** `07-partition-tables.sql`: `07` переносить
+`aud.CellChange`, `StructureChange`, `SecurityEvent`, `PublicationEvent` на
+`ps_AuditByMonth`, і якщо таблиць ще немає, він мовчки їх пропускає.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-050 · DECIDED · Етап 1 · 2026-09-04
+
+**Де:** `Persistence/Repository.cs`, `RowStore.cs`, `TemplateVersionStore.cs`,
+`AuditWriter.cs`, `SystemClock.cs`, `Api/Health/HealthResponse.cs`,
+`tests/Ecr.Api.Tests/EcrApiFactory.cs`, `SqlServerCollection.cs`
+**Контекст:** DI не піднімався, бо реалізацій портів не існувало.
+
+**Суть:**
+Вісім портів Етапу 1 були оголошені й ніде не реалізовані: `IRepository`,
+`IUnitOfWork`, `IRowStore`, `ITemplateVersionStore`, `IAuditWriter`, `IClock`.
+Файлів для них немає в дереві `05-skeleton.md` §1 — оголошено лише інтерфейси.
+Без реалізацій `AddEcrInfrastructure` нічого не може зареєструвати, а без
+цього застосунок не стартує взагалі.
+
+**Що зроблено:** реалізації створені; кожен файл має в шапці позначку, що його
+немає в дереві §1. Найважливіше в них:
+
+* `TemplateVersionStore.IncrementPresentationRevisionAsync` — **один** statement
+  із `OUTPUT` (`R-B7`). «Прочитати → додати → записати» під паралельними
+  правками дає дві однакові ревізії, а ревізія це ключ кешу `v{id}:r{rev}`:
+  два різні знімки під одним ключем знайти потім практично неможливо.
+* `UnitOfWork` повертає обгортку, чий `DisposeAsync` **відкочує** незакомічену
+  транзакцію: під RCSI забута транзакція тримає версії в tempdb і псує життя
+  всій базі.
+* `Repository.GetAsync` кидає `NotFoundException` із кодом **за типом
+  сутності**. Загального коду «щось не знайдено» в каталозі немає навмисно, і
+  вигадувати його не можна; тип без коду дає `InvalidOperationException` —
+  це дефект коду, а не стан даних.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-051 · DECIDED · Етап 1 · 2026-09-04
+
+**Де:** `DependencyInjection.cs` × 5, `Api/Health/*`, `Api/Startup/StartupSequence.cs`
+**Контекст:** у Development контейнер перевіряється при побудові.
+
+**Суть:**
+Зареєструвати «на майбутнє» те, чиїх реалізацій немає, **неможливо**:
+`ValidateOnBuild` валить старт застосунку цілком. Тому реєструється лише те,
+що резолвиться, а решта названа поіменно з причиною.
+
+**Не зареєстровано і чому:**
+
+| Що | Чому |
+|---|---|
+| `ValidationEngine`, `PatchCellsHandler`, `ValidateDocumentHandler`, `PublishTemplateVersionHandler` | прямо чи через `ValidationEngine` залежать від `IFormulaEngine` — рушій виразів це Етап 2 |
+| `AddEcrCalculations` | оркестратор і резолвери залежать від `IMethodologyStore`, `IConstantStore`, `ICalculationResultStore` — Етап 4 |
+| `AddExcelAdapters`, `AddPiAfAdapters` | залежать від `ICollectionStore` та портів імпорту — Етап 5 |
+
+**Health-перевірки.** `JobsHealthCheck` і `SourcesHealthCheck` втратили
+залежності в конструкторі: перевірка, яку неможливо створити, валить увесь
+`/health/ready` винятком контейнера, і адміністратор бачить 500 без пояснень
+замість «підсистеми ще немає». Обидві повертають `Degraded` із вказанням етапу —
+сказати `Healthy` про підсистему, якої немає, гірше: саме так з'являються
+моніторинги, що мовчать роками.
+
+**Прогрів кешу** (крок 7 послідовності старту) не робиться: він має йти після
+валідації метаданих, а валідація спирається на рушій виразів. Прогріти зараз
+означало б закешувати структуру, яку ніхто не перевірив.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-052 · CONFLICT · Етап 1 · 2026-09-04
+
+**Де:** `SqlCapabilitiesProbe.cs`, `05e-skeleton-infrastructure.md`
+**Контекст:** `/health/db` повідомив `rcsi: false` на базі, де RCSI увімкнено.
+
+**Суть:**
+У скелеті стояло `DATABASEPROPERTYEX(DB_NAME(), 'IsReadCommittedSnapshotOn')`.
+**Такої властивості не існує.** Вона повертає `NULL`, а не помилку:
+
+```sql
+SELECT DATABASEPROPERTYEX(DB_NAME(),'IsReadCommittedSnapshotOn');  -- NULL
+SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name = DB_NAME();  -- 1
+```
+
+Наслідок був би тихим і постійним: `DatabaseHealthCheck` вважає вимкнений RCSI
+підставою для `Unhealthy`, тобто health повідомляв би про несправність на
+**кожному** розгортанні. Моніторинг, який завжди червоний, перестають читати.
+
+**Що зроблено:** читання з `sys.databases`. Додано тест-регресію
+`Health_db_повідомляє_стан_RCSI`.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-053 · DECIDED · Етап 1 · 2026-09-04
+
+**Де:** `tests/Ecr.Api.Tests/*`
+**Контекст:** модуль 1.10 — тести API.
+
+**Суть:**
+`06d` описує тести API без позначки `Integration` і без фікстури. Підняти
+застосунок без бази неможливо: послідовність старту першим кроком чекає
+з'єднання і без нього не стартує **навмисно** («працювати на невідповідній
+схемі гірше, ніж не працювати»). Тому:
+
+* `HealthTests`, `ErrorContractTests`, `ApiConventionTests` позначені
+  `Integration` і належать колекції `SqlServer`; **імена тестів не змінені**;
+* доданий `EcrApiFactory` — піднімає застосунок на базі фікстури в режимі
+  `Validate` (як у проді, `D-66`);
+* доданий власний `SqlServerCollection`: колекції xUnit живуть у межах збірки.
+
+⚠ `EcrApiFactory` конфігурує застосунок **змінними оточення**, а не
+`ConfigureAppConfiguration`. Причина не стильова: `Program.cs` сам додає
+`AddEnvironmentVariables(prefix: "ECR_")`, і це джерело перекриває
+`appsettings.json`, де `ConnectionStrings:Ecr` присутній **порожнім** (`Q-029`).
+In-memory джерело фікстури лягає раніше і програє порожньому рядку, а падає це
+аж у `SqlConnection` із «ConnectionString property has not been initialized».
+Заразом перевірка `IsNullOrWhiteSpace` у `AddEcrInfrastructure` тепер ловить
+порожній рядок там, де раніше ловила лише `null`.
+
+Фікстура API ще й **збирає серверні помилки в лог**: без цього невдалий тест
+показує голий 500, бо `ExceptionHandlingMiddleware` навмисно не віддає клієнту
+ні тексту винятку, ні стека.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-054 · CONFLICT · Етап 1 · 2026-09-04
+
+**Де:** `src/Ecr.Api/Auth/AuthenticationSetup.cs`
+**Контекст:** після реалізації автентифікації **кожен** запит у тестовому хості
+повертав 500, зокрема `/health/live`, який до бази не ходить.
+
+**Текст помилки:**
+```
+System.NotSupportedException: Negotiate authentication requires a server that
+supports IConnectionItemsFeature like Kestrel.
+   at Microsoft.AspNetCore.Authentication.Negotiate.NegotiateHandler.GetConnectionItems()
+   at ...AuthenticationMiddleware.Invoke(HttpContext context)
+```
+
+**Суть:**
+`AddNegotiate()` реєструє обробник, який реалізує
+`IAuthenticationRequestHandler`, тобто його `HandleRequestAsync` виконується на
+**кожен** запит, а не лише на `/api/v1/login/windows`. Він вимагає
+`IConnectionItemsFeature`, якого немає ні в `TestServer`, ні за
+reverse-proxy без Kestrel/HTTP.sys.
+
+Це та сама пастка, про яку попереджає документація самого файла («в IIS має
+бути увімкнено анонімний доступ»), але з іншого боку: справа не лише в
+налаштуванні IIS — сам обробник у конвеєрі скрізь.
+
+**Що зроблено:** `Auth:EnableNegotiate`, за замовчуванням `true` (у проді за
+IIS він потрібен). Тести вимикають його явно.
+
+⚠ **Наслідок, який треба знати:** доменний вхід цими тестами **не
+покривається**. `AuthenticationTests` — Етап 3, і там знадобиться або Kestrel,
+або окремий стенд.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-055 · CONFLICT · Етап 1 · 2026-09-04
+
+**Де:** `src/Ecr.Infrastructure/Persistence/Sql/01-filegroups.sql`,
+`tests/Ecr.TestKit/SqlServerFixture.cs`
+**Контекст:** повний прогін `dotnet test Ecr.sln` після появи другого
+інтеграційного проєкту.
+
+**Суть — два дефекти, які видно лише разом.**
+
+**1. Спільне ім'я бази.** `Ecr.Infrastructure.Tests` і `Ecr.Api.Tests`
+виконуються паралельно і обидва брали базу `EcrTest`. Фікстура однієї збірки
+скидала базу, з якою в цей момент працювала друга. Поодинці кожен проєкт
+зелений, разом — **97 падінь із нізвідки**. Виправлено: ім'я бази виводиться з
+каталогу збірки (`EcrTest_Infrastructure`, `EcrTest_Api`).
+
+**2. Фізичні імена файлів не містять імені бази.** І це вже не про тести:
+
+```
+Microsoft.Data.SqlClient.SqlException : One or more files listed in the
+statement could not be found or could not be initialized.
+```
+
+`01-filegroups.sql` створював файли `Ecr_hot.ndf`, `Ecr_archive.ndf`,
+`Ecr_audit.ndf`, `Ecr_idx.ndf` — **без прив'язки до бази**. Тобто **дві бази
+ECR на одному інстансі неможливі**: друга падає на зайнятому шляху. Dev і test
+на спільному сервері — звичайна ситуація, і виявилося б це на розгортанні.
+
+Виправлено: `@db + N'_' + f.LogicalName + N'.ndf'`. Блок у `02a-db-schema.md`
+синхронізовано.
+
+**Статус:** RESOLVED
+
+---
+
+### Q-056 · SCOPE · Етап 1 · 2026-09-04
+
+**Де:** увесь Етап 1
+**Контекст:** завершення етапу — DI, модуль 1.10, модуль 1.11.
+
+#### Що тепер працює
+
+Застосунок **стартує і відповідає**. Перевірено запуском, не збіркою:
+
+```
+/health/live            200
+/health/db              200 Healthy
+                        edition Express Edition (64-bit), effectiveMode Standard,
+                        rcsi true, filegroups 5, partitionsAhead 15, limitations 3
+/health/ready           200 Degraded (jobs і sources — Етап 5)
+/api/v1/templates       401 (а не редирект: це API, ФВ-6.1)
+/openapi/v1.json        200, 106 КБ
+```
+
+Послідовність старту виконує кроки B01 §6.3: очікування БД із повтором →
+звірка міграцій → `Validate`/`Migrate` → seed → визначення можливостей СУБД →
+перевірка запасу партицій.
+
+#### Модуль 1.11
+
+`Ecr.DataGen` генерує обсяг за профілем **реального** шаблону: 90 таблиць на
+документ, медіана 30 рядків із хвостом до 471, 7…60 колонок, 12 періодів.
+Розподіл рядків навмисно нерівномірний — у чинному шаблоні кілька таблиць на
+сотні рядків, і саме вони визначають найгірший випадок.
+
+`GateBenchmark` рахує п'ять із шести замірів гейта. **Замір №4 (повний цикл
+архівації року) не виконується**, і це написано прямо в результаті: він
+потребує заповненого архівного року і вікна обслуговування. «Пройдений гейт»
+не має означати неперевіреного.
+
+#### Тести
+
+```
+545 усього, 131 passed, 414 failed
+414 із 414 падінь — Assert.Fail("not implemented"); інших винятків 0
+```
+
+Було 118 passed. Приріст: 7 тестів тригерів, 13 тестів API.
 
 **Статус:** RESOLVED

@@ -1,3 +1,9 @@
+using Ecr.Application.Ports;
+using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Startup;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+
 namespace Ecr.Api.Startup;
 
 /// <summary>
@@ -12,21 +18,163 @@ namespace Ecr.Api.Startup;
 /// метаданих закешує невалідні метадані, а seed до міграцій впаде на
 /// відсутніх таблицях.
 /// </remarks>
-public static class StartupSequence
+public static partial class StartupSequence
 {
-    /// <summary>Виконує сім кроків старту в порядку, заданому B01 §6.3.</summary>
-    public static Task RunEcrStartupSequenceAsync(this WebApplication app)
-        => throw new NotImplementedException(
-            "TODO — порядок значущий (B01 §6.3):\n" +
-            "1) дочекатися БД із retry — стартувати без неї не можна;\n" +
-            "2) звірити застосовані міграції з очікуваними;\n" +
-            "3) ECR_Schema__StartupMode: Validate (прод) або Migrate (dev/test) — " +
-            "   у проді застосунок DDL-прав не має (D-66);\n" +
-            "4) ідемпотентний seed;\n" +
-            "5) валідація метаданих;\n" +
-            "6) прогрів кешу метаданих;\n" +
-            "7) перевірка запасу партицій — менше двох попереду це Degraded, " +
-            "   і дізнатися про це треба на старті, а не вночі під час архівації.\n" +
-            "⚠ Будь-який крок 1–5 упав → застосунок НЕ стартує: працювати на " +
-            "невідповідній схемі гірше, ніж не працювати.");
+    /// <summary>Скільки разів чекати на базу, перш ніж здатися.</summary>
+    private const int DatabaseRetries = 10;
+
+    /// <summary>Пауза між спробами.</summary>
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(3);
+
+    /// <summary>Виконує кроки старту в порядку, заданому B01 §6.3.</summary>
+    public static async Task RunEcrStartupSequenceAsync(this WebApplication app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Ecr.Startup");
+        await using var scope = app.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+
+        // 1) Дочекатися БД. Стартувати без неї не можна: застосунок без бази
+        //    не «частково працює», він не працює зовсім, і краще, щоб це було
+        //    видно як невдалий старт, а не як 500 на кожен запит.
+        await WaitForDatabaseAsync(db, logger).ConfigureAwait(false);
+
+        // 2–3) Схема. У проді застосунок DDL-прав не має (D-66), тому
+        //      Validate — це саме перевірка, а не тихе «домігруємо».
+        var mode = app.Configuration["Schema:StartupMode"] ?? "Validate";
+        await ApplySchemaModeAsync(db, mode, logger).ConfigureAwait(false);
+
+        // 4) Ідемпотентний seed. Без нього немає ні мов, ні прав, ні одиниць —
+        //    застосунок формально піднімається і не робить нічого.
+        await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        LogSeedDone(logger);
+
+        // 5) Можливості СУБД. Читаються один раз: редакція між запитами
+        //    не змінюється, а кожна перевірка коштує запиту.
+        var capabilities = scope.ServiceProvider.GetRequiredService<ISqlCapabilities>();
+        if (capabilities is SqlCapabilitiesProbe probe)
+        {
+            var connectionString = db.Database.GetConnectionString()
+                ?? throw new InvalidOperationException("У контексту немає рядка підключення.");
+            await probe.ProbeAsync(connectionString, Domain.Enums.SqlEditionMode.Auto, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            LogSqlMode(logger, probe.EditionName, probe.EffectiveMode, probe.IsReadCommittedSnapshotOn);
+
+            foreach (var limitation in probe.Limitations())
+            {
+                LogLimitation(logger, limitation);
+            }
+        }
+
+        // 6) Запас партицій. Дізнатися про це треба на старті, а не вночі
+        //    під час архівації, коли межі вже не вистачає.
+        var ahead = await PartitionsAheadAsync(db).ConfigureAwait(false);
+        if (ahead < 2)
+        {
+            LogFewPartitions(logger, ahead);
+        }
+
+        // ⚠ Прогрів кешу метаданих (крок 7 за B01 §6.3) тут ще не робиться:
+        // він має йти ПІСЛЯ валідації метаданих, а валідація спирається на
+        // рушій виразів — це Етап 2. Прогріти кеш зараз означало б закешувати
+        // структуру, яку ніхто не перевірив (`Q-051`).
+    }
+
+    private static async Task WaitForDatabaseAsync(EcrDbContext db, ILogger logger)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await db.Database.OpenConnectionAsync().ConfigureAwait(false);
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+                LogDatabaseReady(logger, attempt);
+                return;
+            }
+            catch (SqlException) when (attempt < DatabaseRetries)
+            {
+                LogDatabaseWaiting(logger, attempt, DatabaseRetries);
+                await Task.Delay(RetryDelay).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static async Task ApplySchemaModeAsync(EcrDbContext db, string mode, ILogger logger)
+    {
+        var pending = (await db.Database.GetPendingMigrationsAsync().ConfigureAwait(false)).ToList();
+
+        if (string.Equals(mode, "Migrate", StringComparison.OrdinalIgnoreCase))
+        {
+            if (pending.Count > 0)
+            {
+                LogApplyingMigrations(logger, pending.Count);
+                await db.Database.MigrateAsync().ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        // Validate. Працювати на невідповідній схемі гірше, ніж не працювати:
+        // запити мовчки повертатимуть не те, і виявиться це в звіті.
+        if (pending.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Схема БД застаріла: не застосовано міграцій — {pending.Count} " +
+                $"({string.Join(", ", pending)}). У режимі Validate застосунок не стартує.");
+        }
+
+        LogSchemaValid(logger);
+    }
+
+    private static async Task<int> PartitionsAheadAsync(EcrDbContext db)
+    {
+        var now = DateTime.UtcNow;
+        var currentKey = (now.Year * 100) + now.Month;
+
+        var result = await db.Database
+            .SqlQueryRaw<int>(
+                """
+                SELECT COUNT(*) AS Value
+                FROM sys.partition_range_values rv
+                JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+                WHERE pf.name = 'pf_ByPeriodKey' AND CAST(rv.value AS int) > {0}
+                """,
+                currentKey)
+            .ToListAsync().ConfigureAwait(false);
+
+        return result.Count > 0 ? result[0] : 0;
+    }
+
+    // ⚠ Логування через згенеровані делегати, а не через LogInformation(...):
+    // на старті це не про швидкість, а про правило (CA1848), яке в проєкті
+    // діє як помилка збірки. Заодно шаблони повідомлень стають типізованими
+    // і не розповзаються по коду в різних формулюваннях.
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: база доступна (спроба {Attempt}).")]
+    private static partial void LogDatabaseReady(ILogger logger, int attempt);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: база недоступна, спроба {Attempt} з {Total}.")]
+    private static partial void LogDatabaseWaiting(ILogger logger, int attempt, int total);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: застосовую {Count} міграцій.")]
+    private static partial void LogApplyingMigrations(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: схема відповідає моделі.")]
+    private static partial void LogSchemaValid(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
+    private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: SQL {Edition}, режим {Mode}, RCSI {Rcsi}.")]
+    private static partial void LogSqlMode(
+        ILogger logger, string edition, Domain.Enums.SqlEditionMode mode, bool rcsi);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Обмеження режиму: {Limitation}")]
+    private static partial void LogLimitation(ILogger logger, string limitation);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Старт: попереду лише {Ahead} партицій. Виконайте 04-partition-maintenance.sql.")]
+    private static partial void LogFewPartitions(ILogger logger, int ahead);
 }

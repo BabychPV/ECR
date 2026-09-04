@@ -63,9 +63,15 @@ SET @sql = NULL;
 SELECT @sql = STRING_AGG(
         CAST(N'ALTER DATABASE ' + QUOTENAME(@db) + N' ADD FILE (NAME = '
              + QUOTENAME(f.LogicalName, '''')
+             -- ⚠ Ім'я БАЗИ у фізичному імені файла обов'язкове. Без нього
+             -- дві бази ECR на одному інстансі неможливі: друга падає з
+             -- «One or more files listed in the statement could not be found
+             -- or could not be initialized», бо шлях уже зайнятий першою.
+             -- Це не лише про тести: dev і test на спільному сервері — це
+             -- звичайна ситуація (`Q-055`).
              + N', FILENAME = ' + QUOTENAME(
                    CASE WHEN f.UseArchivePath = 1 THEN @ArchivePath ELSE @DataPath END
-                   + f.LogicalName + N'.ndf', '''')
+                   + @db + N'_' + f.LogicalName + N'.ndf', '''')
              + N', SIZE = ' + CAST(sz.SizeMb AS nvarchar(10)) + N'MB'
              + N', FILEGROWTH = ' + CAST(sz.GrowthMb AS nvarchar(10)) + N'MB)'
              + N' TO FILEGROUP ' + QUOTENAME(f.FileGroup) + N';'

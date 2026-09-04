@@ -1,5 +1,8 @@
+using System.Text.Json;
+using Ecr.Api.Middleware;
 using Ecr.Application.Errors;
 using Ecr.Domain.Abstractions;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Ecr.Api.Errors;
 
@@ -10,19 +13,147 @@ namespace Ecr.Api.Errors;
 /// Клієнт має розрізняти причини **за кодом**, а не парсити текст: саме тому
 /// код стабільний, а повідомлення локалізоване і може змінюватися.
 /// </remarks>
-public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
+public sealed partial class ExceptionHandlingMiddleware(
+    RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
 {
+    private const string ProblemJson = "application/problem+json";
+
+    /// <summary>Налаштування серіалізації, спільні на весь застосунок.</summary>
+    /// <remarks>
+    /// <see cref="JsonSerializerOptions"/> кешує метадані типів усередині
+    /// себе. Створювати його на кожну помилку означає щоразу будувати цей кеш
+    /// наново — а помилки трапляються саме тоді, коли система під навантаженням.
+    /// </remarks>
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Необроблений виняток. CorrelationId={CorrelationId}")]
+    private partial void LogUnhandled(Exception exception, string correlationId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Запит відхилено: {Code} ({Status}). CorrelationId={CorrelationId}")]
+    private partial void LogRejected(string code, int status, string correlationId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Відповідь уже почалася, ProblemDetails не надіслано. CorrelationId={CorrelationId}")]
+    private partial void LogTooLate(string correlationId);
+
     /// <summary>Обробляє запит.</summary>
-    public Task InvokeAsync(HttpContext context)
-        => throw new NotImplementedException(
-            "TODO: try/catch навколо next(context); мапінг:\n" +
-            "  NotFoundException            → 404\n" +
-            "  AccessDeniedException        → 403, у Extensions2.reason — EditDenyReason\n" +
-            "  ConcurrencyConflictException → 409, у Extensions2.conflicts — перелік CellConflictDto\n" +
-            "  BusinessRuleException        → 422, у Extensions2 — деталі правила\n" +
-            "  DomainException              → 422 з ErrorCode\n" +
-            "  решта                        → 500 ECR-SYS-0500\n" +
-            "⚠ У відповідь на 500 НЕ включати текст винятку і стек: у логи — так, клієнту — " +
-            "лише CorrelationId. Пароль і секрети не логуються ніколи (ФВ-6.11) — " +
-            "це перевіряється окремим тестом.");
+    public async Task InvokeAsync(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        try
+        {
+            await next(context).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // Клієнт відвалився. Тіла відповіді ніхто не прочитає, а новий код
+            // помилки заради цього заводити не можна: каталог фіксований і
+            // звіряється аудитом (42 коди, вигаданих 0).
+            context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+        }
+        catch (Exception ex)
+        {
+            await WriteAsync(context, ex).ConfigureAwait(false);
+        }
+    }
+
+    private async Task WriteAsync(HttpContext context, Exception exception)
+    {
+        var correlationId = context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw)
+            ? raw as string ?? string.Empty
+            : string.Empty;
+
+        var (status, code, message, details) = Map(exception);
+
+        if (status >= StatusCodes.Status500InternalServerError)
+        {
+            // Стек іде В ЛОГ, і тільки туди. Клієнт отримує CorrelationId —
+            // цього досить, щоб знайти цей самий запис.
+            LogUnhandled(exception, correlationId);
+        }
+        else
+        {
+            LogRejected(code, status, correlationId);
+        }
+
+        if (context.Response.HasStarted)
+        {
+            // Відповідь уже пішла — переписати її неможливо. Мовчки це
+            // проковтнути гірше, ніж лишити слід у журналі.
+            LogTooLate(correlationId);
+            return;
+        }
+
+        var problem = new EcrProblemDetails
+        {
+            Status = status,
+            Title = code,
+            Detail = message,
+            Type = $"https://ecr.ncoc.kz/errors/{code}",
+            Instance = context.Request.Path,
+            ErrorCode = code,
+            CorrelationId = correlationId,
+            Extensions2 = details,
+        };
+
+        // Розширення дублюються в стандартний словник ProblemDetails: саме
+        // його бачить клієнт у JSON, окреме поле Extensions2 потрібне лише
+        // для типізованого доступу з коду.
+        problem.Extensions["errorCode"] = code;
+        problem.Extensions["correlationId"] = correlationId;
+        if (details is not null)
+        {
+            foreach (var (key, value) in details)
+            {
+                problem.Extensions[key] = value;
+            }
+        }
+
+        context.Response.Clear();
+        context.Response.StatusCode = status;
+        context.Response.ContentType = ProblemJson;
+
+        await JsonSerializer.SerializeAsync(
+            context.Response.Body,
+            problem,
+            SerializerOptions,
+            context.RequestAborted).ConfigureAwait(false);
+    }
+
+    /// <summary>Виняток → код відповіді, код помилки, повідомлення, подробиці.</summary>
+    /// <remarks>
+    /// ⚠ Для 500 повідомлення **стале і беззмістовне** навмисно: текст
+    /// винятку може містити імена об'єктів БД, фрагменти запитів, а в
+    /// найгіршому разі — значення параметрів. Це поверхня для розвідки, і
+    /// клієнту вона не потрібна (ФВ-6.11).
+    /// </remarks>
+    private static (int Status, string Code, string Message, IReadOnlyDictionary<string, object?>? Details) Map(
+        Exception exception) => exception switch
+    {
+        NotFoundException e =>
+            (StatusCodes.Status404NotFound, e.ErrorCode, e.Message, null),
+
+        // 401 і 403 розрізняє КОД, а не тип винятку: «не увійшов» і «увійшов,
+        // але не має права» — різні відповіді, і клієнт мусить їх розрізняти,
+        // бо на першу він показує форму входу, а на другу — повідомлення.
+        AccessDeniedException e when e.ErrorCode == ErrorCodes.Unauthorized =>
+            (StatusCodes.Status401Unauthorized, e.ErrorCode, e.Message, e.Details),
+
+        AccessDeniedException e =>
+            (StatusCodes.Status403Forbidden, e.ErrorCode, e.Message, e.Details),
+
+        ConcurrencyConflictException e =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
+        BusinessRuleException e =>
+            (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
+
+        DomainException e =>
+            (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, null),
+
+        _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
+              "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", null),
+    };
 }

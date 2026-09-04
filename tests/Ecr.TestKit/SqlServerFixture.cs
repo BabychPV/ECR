@@ -30,8 +30,8 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// </remarks>
     private const string LocalServerVariable = "ECR_TEST_SQL";
 
-    /// <summary>Ім'я тестової бази. Перевизначається <c>ECR_TEST_DB</c>.</summary>
-    private const string DefaultDatabaseName = "EcrTest";
+    /// <summary>Префікс імені тестової бази. Перевизначається <c>ECR_TEST_DB</c>.</summary>
+    private const string DatabaseNamePrefix = "EcrTest";
 
     private MsSqlContainer? _container;
 
@@ -39,12 +39,12 @@ public sealed class SqlServerFixture : IAsyncLifetime
     public string ConnectionString { get; private set; } = string.Empty;
 
     /// <summary>Ім'я тестової бази.</summary>
-    public string DatabaseName { get; private set; } = DefaultDatabaseName;
+    public string DatabaseName { get; private set; } = DefaultDatabaseName();
 
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
-        DatabaseName = Environment.GetEnvironmentVariable("ECR_TEST_DB") ?? DefaultDatabaseName;
+        DatabaseName = Environment.GetEnvironmentVariable("ECR_TEST_DB") ?? DefaultDatabaseName();
 
         var serverConnection = Environment.GetEnvironmentVariable(LocalServerVariable);
         if (string.IsNullOrWhiteSpace(serverConnection))
@@ -71,6 +71,34 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         // Локальний сервер лишається з базою: після невдалого прогону в неї
         // корисно зазирнути. Наступний запуск усе одно перестворює її з нуля.
+    }
+
+    /// <summary>
+    /// Ім'я бази — своє для КОЖНОЇ тестової збірки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Спільне ім'я було дефектом, і виявився він лише в повному прогоні:
+    /// `Ecr.Infrastructure.Tests` і `Ecr.Api.Tests` виконуються паралельно, і
+    /// фікстура однієї збірки скидала базу, з якою в цей момент працювала
+    /// друга. Поодинці кожен проєкт був зелений, разом — 97 падінь із нізвідки
+    /// (`Q-055`).
+    ///
+    /// Ім'я виводиться з каталогу збірки: `…/tests/Ecr.Api.Tests/bin/…` дає
+    /// `EcrTest_Api`.
+    /// </remarks>
+    private static string DefaultDatabaseName()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !directory.Name.EndsWith(".Tests", StringComparison.Ordinal))
+        {
+            directory = directory.Parent;
+        }
+
+        var suffix = directory?.Name
+            .Replace("Ecr.", string.Empty, StringComparison.Ordinal)
+            .Replace(".Tests", string.Empty, StringComparison.Ordinal);
+
+        return string.IsNullOrWhiteSpace(suffix) ? DatabaseNamePrefix : $"{DatabaseNamePrefix}_{suffix}";
     }
 
     /// <summary>Скидає і створює порожню базу; повертає рядок підключення до неї.</summary>
@@ -119,6 +147,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <item>міграції — форма таблиць;</item>
     /// <item>`07` — прив'язка партиційованих таблиць до схем. Пропустити його
     /// означає тестувати не ту фізичну модель, яка поїде в прод (`Q-035`);</item>
+    /// <item>`11` — таблиці `aud`, яких теж немає в моделі EF;</item>
     /// <item>`08` — таблиці `sys_ecr`, яких немає в моделі EF;</item>
     /// <item>`10` — тригери незмінності: `HasTrigger()` їх не створює;</item>
     /// <item>`06` — RCSI;</item>
@@ -137,6 +166,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
             await db.Database.MigrateAsync().ConfigureAwait(false);
         }
 
+        // ⚠ 11 ПЕРЕД 07: `07` переносить aud.* на ps_AuditByMonth, і якщо
+        // таблиць ще немає, він мовчки їх пропускає (`Q-049`).
+        await RunScriptAsync("11-audit-tables.sql").ConfigureAwait(false);
         await RunScriptAsync("07-partition-tables.sql").ConfigureAwait(false);
         await RunScriptAsync("08-system-tables.sql").ConfigureAwait(false);
 

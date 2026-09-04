@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Claims;
+using Ecr.Api.Middleware;
 using Ecr.Application.Common;
 
 namespace Ecr.Api.Auth;
@@ -13,26 +16,80 @@ namespace Ecr.Api.Auth;
 /// </remarks>
 public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 {
+    /// <summary>Мова за замовчуванням, коли її неможливо визначити.</summary>
+    private const string FallbackLanguage = "en";
+
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Береться саме <c>ecr:uid</c>, а не SID: у локального користувача SID
+    /// не існує взагалі, а автором дії в аудиті завжди має бути наш
+    /// <c>UserId</c> (D-37, D-86).
+    /// </remarks>
     public int? UserId
-        => throw new NotImplementedException(
-            "TODO: узяти claim із cookie-принципала; анонімний запит → null. " +
-            "SID доменного користувача НЕ підставляти — в аудиті має бути наш UserId (ФВ-6.2).");
+    {
+        get
+        {
+            var value = Principal?.FindFirstValue(AuthenticationSetup.UserIdClaim);
+            return int.TryParse(value, CultureInfo.InvariantCulture, out var id) ? id : null;
+        }
+    }
 
     /// <inheritdoc />
-    public string? UserName
-        => throw new NotImplementedException(
-            "TODO: claim ім'я користувача; використовується в аудиті і повідомленнях.");
+    public string? UserName => Principal?.FindFirstValue(ClaimTypes.Name);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Якщо ідентифікатора немає в <c>HttpContext.Items</c>, це означає, що
+    /// <see cref="CorrelationIdMiddleware"/> не відпрацював — тобто конвеєр
+    /// зібрано неправильно. Генерувати новий тут означало б приховати дефект:
+    /// у логах був би один ідентифікатор, у відповіді інший.
+    /// </remarks>
     public string CorrelationId
-        => throw new NotImplementedException(
-            "TODO: узяти з HttpContext.Items, куди його кладе CorrelationIdMiddleware; " +
-            "якщо його там немає — це дефект конвеєра, а не привід згенерувати новий.");
+    {
+        get
+        {
+            var context = accessor.HttpContext
+                ?? throw new InvalidOperationException(
+                    "ICurrentUser використано поза запитом: HttpContext немає.");
+
+            return context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw) && raw is string id
+                ? id
+                : throw new InvalidOperationException(
+                    "У HttpContext немає CorrelationId. CorrelationIdMiddleware має стояти " +
+                    "ПЕРШИМ у конвеєрі — див. Program.cs.");
+        }
+    }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Мова з профілю користувача, далі <c>Accept-Language</c>, далі мова за
+    /// замовчуванням. Самі тексти беруться з <c>IUiStringCatalog</c>, а не
+    /// хардкодом (D-95): додати мову має означати запис у реєстр, а не збірку.
+    /// </remarks>
     public string Language
-        => throw new NotImplementedException(
-            "TODO: мова з профілю користувача, далі Accept-Language, далі мова за замовчуванням. " +
-            "Тексти беруться з IUiStringCatalog, а не хардкодом (D-95).");
+    {
+        get
+        {
+            var profile = Principal?.FindFirstValue("ecr:lang");
+            if (!string.IsNullOrWhiteSpace(profile))
+            {
+                return profile;
+            }
+
+            var accept = accessor.HttpContext?.Request.Headers.AcceptLanguage.ToString();
+            if (string.IsNullOrWhiteSpace(accept))
+            {
+                return FallbackLanguage;
+            }
+
+            // Беремо перший тег без ваги: "ru-RU,ru;q=0.9,en;q=0.8" → "ru".
+            var first = accept.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                              .FirstOrDefault();
+            var tag = first?.Split(';')[0].Split('-')[0].Trim();
+            return string.IsNullOrWhiteSpace(tag) ? FallbackLanguage : tag.ToLowerInvariant();
+        }
+    }
+
+    private ClaimsPrincipal? Principal
+        => accessor.HttpContext?.User is { Identity.IsAuthenticated: true } user ? user : null;
 }
