@@ -1,3 +1,4 @@
+using Ecr.Application.Ports;
 using Ecr.Application.Units;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,32 +9,45 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/units")]
 [Authorize]
-public sealed class UnitsController(ConvertUnitHandler convert) : ControllerBase
+public sealed class UnitsController(ListUnitsHandler list, ConvertUnitHandler convert) : ControllerBase
 {
     /// <summary>Перелік одиниць із їхніми розмірностями.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Розмірність віддається разом із одиницею: без неї клієнт не може
+    /// перевірити нічого — ні того, що конверсія можлива, ні того, що
+    /// величини сумісні (ФВ-16.2).
+    /// </remarks>
     [HttpGet]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> List(CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: повернути uom.Unit разом із Dimension — без розмірності одиниця " +
-            "не дає клієнту нічого перевірити.");
+    [ProducesResponseType<IReadOnlyList<UnitRef>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<UnitRef>>> List(CancellationToken ct)
+        => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
 
     /// <summary>
     /// Конвертує значення між одиницями.
     /// </summary>
+    /// <param name="request">Значення і коди одиниць.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Конверсія можлива <b>лише в межах однієї розмірності</b>. Перехід
     /// «маса ↔ об'єм» — не конверсія, а контекстний коефіцієнт (щільність), і
     /// він живе в константах методології, а не в <c>uom.Conversion</c>
-    /// (ФВ-16.5, <c>D-75</c>). Спроба такої конверсії відхиляється
-    /// <c>ECR-UOM-4221</c>.
+    /// (ФВ-16.5, <c>D-75</c>).
     /// </remarks>
     [HttpPost("convert")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public Task<IActionResult> Convert([FromBody] ConvertUnitRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати convert.HandleAsync(request.Value, request.FromUnit, request.ToUnit, ct).");
+    public async Task<IActionResult> Convert(
+        [FromBody] ConvertUnitRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var value = await convert
+            .HandleAsync(request.Value, request.FromUnit, request.ToUnit, ct)
+            .ConfigureAwait(false);
+
+        return Ok(new { value, unit = request.ToUnit });
+    }
 }
 
 /// <summary>Запит на конверсію.</summary>

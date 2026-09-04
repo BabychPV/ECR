@@ -220,12 +220,22 @@ public sealed class GoldenCalculationTests
         return await module.ExecuteAsync(input, CancellationToken.None);
     }
 
-    /// <summary>Одиниці за <c>09-seed.sql</c> плюс похідна <c>g/s</c>.</summary>
-    private static UnitTable Units()
+    /// <summary>Довідник одиниць за <c>09-seed.sql</c> плюс похідна <c>g/s</c>.</summary>
+    private static IUnitCatalog Units()
     {
-        var units = UnitTable.Seed();
-        units.Add("g_per_s", dimension: 8, factorToBase: 0.001m);
-        return units;
+        var catalog = Substitute.For<IUnitCatalog>();
+        catalog.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kg"] = new(1, "kg", 1, 1m),
+                ["t"] = new(8, "t", 1, 1000m),
+                ["g"] = new(9, "g", 1, 0.001m),
+                ["m3"] = new(2, "m3", 2, 1m),
+                ["g_per_s"] = new(20, "g_per_s", 8, 0.001m),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
+
+        return catalog;
     }
 
     private static decimal Value(CalculationOutput output, long substance, string code)

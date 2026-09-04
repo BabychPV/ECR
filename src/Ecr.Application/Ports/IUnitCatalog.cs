@@ -39,4 +39,12 @@ public sealed record UnitCatalogSnapshot(
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код: <c>kg</c>, <c>t</c>, <c>m3</c>.</param>
 /// <param name="DimensionId">Розмірність; конверсія можлива лише в її межах.</param>
-public sealed record UnitRef(int Id, string Code, byte DimensionId);
+/// <param name="FactorToBase">Множник переходу до базової одиниці розмірності.</param>
+/// <param name="OffsetToBase">Зсув до базової; ненульовий лише в температури.</param>
+/// <remarks>
+/// ⚠ Множник і зсув входять у знімок, а не читаються окремо. Без них
+/// <c>CONVERT</c> у рантаймі множив би на одиницю і мовчки повертав те саме
+/// число: тонни лишалися б тоннами під виглядом кілограмів.
+/// </remarks>
+public sealed record UnitRef(
+    int Id, string Code, byte DimensionId, decimal FactorToBase = 1m, decimal OffsetToBase = 0m);

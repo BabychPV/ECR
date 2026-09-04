@@ -27,9 +27,6 @@ public sealed class MethodologyFormula : Entity<int>
     public string Code { get; private set; } = null!;
     public string Expression { get; private set; } = null!;
 
-    /// <summary>Оголошений список аргументів; токен поза ним — помилка публікації.</summary>
-    public string? ArgumentsJson { get; private set; }
-
     /// <summary>Топологічний порядок. Заповнюється при `Publish`, не користувачем.</summary>
     public int EvaluationOrder { get; private set; }
 
@@ -53,7 +50,4 @@ public sealed class MethodologyFormula : Entity<int>
     /// <param name="unitId">Одиниця з <c>uom.Unit</c>.</param>
     public void SetOutputUnit(int unitId) => OutputUnitId = unitId;
 
-    /// <summary>Задає оголошений список аргументів.</summary>
-    /// <param name="argumentsJson">JSON-масив імен; токен поза ним — помилка публікації.</param>
-    public void SetArguments(string? argumentsJson) => ArgumentsJson = argumentsJson;
 }

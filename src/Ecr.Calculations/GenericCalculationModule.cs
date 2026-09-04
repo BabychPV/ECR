@@ -21,8 +21,9 @@ public sealed class GenericCalculationModule(
     IMethodologyStore methodologies,
     ConstantResolver constants,
     CalendarContext calendar,
-    UnitTable units) : ICalculationModule
+    IUnitCatalog unitCatalog) : ICalculationModule
 {
+    private UnitTable? _units;
     /// <inheritdoc />
     public string Code => "generic";
 
@@ -72,8 +73,10 @@ public sealed class GenericCalculationModule(
         // ⛔ Для КОЖНОЇ речовини — власний прогін. Константи резолвляться за
         // речовиною, тому спільний контекст дав би всім речовинам коефіцієнт
         // тієї, яку порахували першою (ФВ-9.1).
+        // ⚠ Фільтра «активних» немає: речовина або входить у версію, або ні
+        // (`calc`-частина `Q-027`). «Вимкнена» речовина означала б, що версія
+        // рахує не те, що в ній записано.
         var targets = substances
-            .Where(s => s.IsActive)
             .OrderBy(s => s.Ordinal)
             .Cast<MethodologySubstance?>()
             .ToList();
@@ -90,6 +93,7 @@ public sealed class GenericCalculationModule(
             var resolved = await ResolveConstantsAsync(
                 version, ordered, substance?.SubstanceEntryId, period, ct).ConfigureAwait(false);
 
+            var units = await UnitsAsync(ct).ConfigureAwait(false);
             var context = new MethodologyEvaluationContext(period, arguments, resolved, units);
 
             foreach (var formula in ordered)
@@ -128,6 +132,31 @@ public sealed class GenericCalculationModule(
             trace.Steps
                 .Select(s => new CalculationTraceStep(s.Order, s.Code, s.Expression, s.Value, s.Error))
                 .ToList());
+    }
+
+    /// <summary>Довідник одиниць, прочитаний раз на прогін.</summary>
+    /// <remarks>
+    /// ⚠ Кешується в екземплярі модуля, який живе один прогін. Похід у базу на
+    /// кожну конверсію дав би мільйони запитів на річний перерахунок і сам
+    /// собою вибрав би бюджет 10 хвилин.
+    /// </remarks>
+    private async Task<UnitTable> UnitsAsync(CancellationToken ct)
+    {
+        if (_units is not null)
+        {
+            return _units;
+        }
+
+        var snapshot = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
+        var table = new UnitTable();
+
+        foreach (var unit in snapshot.Units.Values)
+        {
+            table.Add(unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
+        }
+
+        _units = table;
+        return table;
     }
 
     /// <summary>Обчислює одну формулу і фіксує крок у трейсі.</summary>

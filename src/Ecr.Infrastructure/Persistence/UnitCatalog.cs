@@ -27,7 +27,9 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
             .AsNoTracking()
             .OrderBy(u => u.Code)
             .Take(MaxUnits)
-            .Select(u => new UnitRow(u.Id, u.Code, u.DimensionId, u.NumeratorUnitId, u.DenominatorUnitId))
+            .Select(u => new UnitRow(
+                u.Id, u.Code, u.DimensionId, u.FactorToBase, u.OffsetToBase,
+                u.NumeratorUnitId, u.DenominatorUnitId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -44,7 +46,7 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
         _cached = new UnitCatalogSnapshot(
             units.ToDictionary(
                 u => u.Code,
-                u => new UnitRef(u.Id, u.Code, u.DimensionId),
+                u => new UnitRef(u.Id, u.Code, u.DimensionId, u.FactorToBase, u.OffsetToBase),
                 StringComparer.OrdinalIgnoreCase),
             derived);
 
@@ -58,5 +60,11 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
     /// половину інструкції без межі (`D1-08`).
     /// </remarks>
     private sealed record UnitRow(
-        int Id, string Code, byte DimensionId, int? NumeratorUnitId, int? DenominatorUnitId);
+        int Id,
+        string Code,
+        byte DimensionId,
+        decimal FactorToBase,
+        decimal OffsetToBase,
+        int? NumeratorUnitId,
+        int? DenominatorUnitId);
 }

@@ -35,6 +35,7 @@ public sealed class MethodologyPublishTests
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
+    private readonly ICalculationResultStore _results = Substitute.For<ICalculationResultStore>();
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -165,7 +166,7 @@ public sealed class MethodologyPublishTests
         _workflow.HasSubmittedSheetsAsync(1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(false);
 
-        var handler = new RunCalculationHandler(_periods, _workflow, _jobs, _user, _clock);
+        var handler = new RunCalculationHandler(_periods, _workflow, _results, _jobs, _uow, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(1, 202601, approval: null, CancellationToken.None));
@@ -236,7 +237,7 @@ public sealed class MethodologyPublishTests
     private MethodologyVersion AddVersion(int id, string number)
     {
         var version = new MethodologyVersion(
-            _methodology.Id, number, CalculationLevel.Configuration, Author, Now);
+            _methodology.Id, number, Domain.Enums.CalculationLevel.Configuration, Author, Now);
 
         typeof(Entity<int>).GetProperty(nameof(Entity<int>.Id))!.SetValue(version, id);
         _methodology.AddVersion(version);
@@ -254,7 +255,7 @@ public sealed class MethodologyPublishTests
         new("golden-7001001",
             new CalculationInput(
                 new MethodologyDescriptor(
-                    0, VersionId, "WATER_DISCHARGE", "1.1.0.0", CalculationLevel.Configuration,
+                    0, VersionId, "WATER_DISCHARGE", "1.1.0.0", Domain.Enums.CalculationLevel.Configuration,
                     NumericMode.Legacy, CalendarMode.Actual, TraceLevel.Off),
                 DocumentId: 700,
                 TableInstanceId: 500,

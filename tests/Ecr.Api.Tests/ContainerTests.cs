@@ -108,22 +108,17 @@ public sealed class ContainerTests(SqlServerFixture sql)
     /// </remarks>
     private static readonly HashSet<string> DeferredControllers = new(StringComparer.Ordinal)
     {
-        "MethodologiesController",   // Етап 4 — розрахунки
-        "RegistriesController",      // Етап 4 — реєстри
-        "UnitsController",           // Етап 4 — одиниці
+        // ⚠ Список ПОРОЖНІЙ: усі контролери створюються контейнером.
+        // Кожен етап прибирав свій рядок; порожній список означає, що
+        // застосунок піднімається цілком.
     };
 
     /// <summary>Обробники, реалізації яких належать пізнішим етапам.</summary>
     private static readonly HashSet<string> DeferredHandlers = new(StringComparer.Ordinal)
     {
-        // Етап 4 — реєстри, одиниці, розрахунки
-        "ConvertUnitHandler",
-        "GetRegistryEntriesHandler",
-        "UpsertRegistryEntryHandler",
-        "SetEntryValidityHandler",
-        "PublishMethodologyHandler",
-        "SimulateMethodologyHandler",
-        "RunCalculationHandler",
+        // ⚠ Список ПОРОЖНІЙ: усі обробники застосунку резолвляться. Останні
+        // сім прибрано на Етапі 4 разом із реалізаціями довідників, одиниць і
+        // розрахунків.
     };
 
     [Fact]
@@ -136,15 +131,10 @@ public sealed class ContainerTests(SqlServerFixture sql)
         string[] deferred =
         [
             "ICollectionStore",       // Етап 5
-            "IMethodologyStore",      // Етап 4
-            "IConstantStore",         // Етап 4
-            "ICalculationResultStore",// Етап 4
-            "IOrphanScanner",         // Етап 4
             "IReportSnapshotBuilder", // Етап 5
             "IExcelExporter",         // Етап 5
             "IExcelImporter",         // Етап 5
             "IExternalDataSource",    // Етап 5
-            "ICalculationModule",     // Етап 4
             "IJobProgress",           // Етап 5
             "IRecalculationJob",      // Етап 5
         ];

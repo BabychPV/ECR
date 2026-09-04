@@ -13,11 +13,12 @@ public sealed class MethodologyOutput : Entity<int>
 {
     private MethodologyOutput() { }
 
-    public MethodologyOutput(int methodologyVersionId, EcrCode code, int unitId)
+    public MethodologyOutput(int methodologyVersionId, EcrCode code, int unitId, int ordinal = 0)
     {
         MethodologyVersionId = methodologyVersionId;
         Code = code.Value;
         UnitId = unitId;
+        Ordinal = ordinal;
     }
 
     public int MethodologyVersionId { get; private set; }
@@ -26,6 +27,12 @@ public sealed class MethodologyOutput : Entity<int>
     /// <summary>Одиниця результату. Несумісна з формулою → відмова публікації.</summary>
     public int UnitId { get; private set; }
 
-    /// <summary>Формула, що дає цей вихід.</summary>
-    public int? MethodologyFormulaId { get; private set; }
+    /// <summary>Порядок у переліку виходів.</summary>
+    /// <remarks>
+    /// ⚠ Посилання на формулу тут НЕМАЄ (`calc`-частина `Q-027`): вихід
+    /// зв'язується з формулою за <see cref="Code"/>, як і всі інші посилання
+    /// в діалекті методологій. Числовий ключ додав би другий спосіб сказати те
+    /// саме — і місце, де вони розійдуться.
+    /// </remarks>
+    public int Ordinal { get; private set; }
 }

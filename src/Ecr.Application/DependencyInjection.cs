@@ -103,6 +103,12 @@ public static class DependencyInjection
         services.AddScoped<Registries.SetEntryValidityHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
+        services.AddScoped<Units.ConvertUnitHandler>();
+        services.AddScoped<Units.ListUnitsHandler>();
+        services.AddScoped<Calculations.ListMethodologiesHandler>();
+        services.AddScoped<Calculations.PublishMethodologyHandler>();
+        services.AddScoped<Calculations.SimulateMethodologyHandler>();
+        services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
 
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з

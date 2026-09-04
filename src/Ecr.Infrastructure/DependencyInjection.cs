@@ -18,9 +18,8 @@ public static class DependencyInjection
 
     /// <summary>Додає EF Core, сховища, кеш і безпеку.</summary>
     /// <remarks>
-    /// ⚠ Тут реєструється лише те, чиї реалізації **існують**. Порти етапів
-    /// 2–5 (<c>ICollectionStore</c>, <c>IMethodologyStore</c>,
-    /// <c>IConstantStore</c>, <c>ICalculationResultStore</c>,
+    /// ⚠ Тут реєструється лише те, чиї реалізації **існують**. Порти етапу 5
+    /// (<c>ICollectionStore</c>,
     /// <c>IRecalculationJob</c>, <c>IJobProgress</c>)
     /// не реєструються, бо реалізацій ще немає. Зареєструвати їх «на майбутнє»
     /// не можна: у Development контейнер перевіряється при побудові, і
@@ -73,6 +72,9 @@ public static class DependencyInjection
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
+        services.AddScoped<IMethodologyStore, MethodologyStore>();
+        services.AddScoped<IConstantStore, ConstantStore>();
+        services.AddScoped<ICalculationResultStore, CalculationResultStore>();
         services.AddScoped<IOrphanScanner, OrphanScanner>();
         services.AddScoped(typeof(IRepository<,>), typeof(Repository<,>));
 

@@ -56,10 +56,59 @@ public sealed class CalculationRun : Entity<long>
     /// </summary>
     public string? ModulesProfileJson { get; private set; }
 
+    /// <summary>Статус прогону, що зараз вважається актуальним (ФВ-9.11).</summary>
+    /// <remarks>
+    /// ⚠ «Актуальність» живе саме тут, а не на кожному результаті: у схемі
+    /// <c>calc.CalculationResult</c> колонки <c>IsCurrent</c> немає, і це
+    /// правильно — інакше перемикання означало б оновити десятки мільйонів
+    /// рядків замість одного (`calc`-частина `Q-027`).
+    /// </remarks>
+    public const string CurrentStatus = "Current";
+
+    /// <summary>Прогін завершився успішно, але вже не актуальний.</summary>
+    public const string SupersededStatus = "Superseded";
+
+    /// <summary>Чи є цей прогін актуальним джерелом чисел.</summary>
+    public bool IsCurrent => string.Equals(Status, CurrentStatus, StringComparison.Ordinal);
+
+    /// <summary>Фіксує завершення прогону.</summary>
+    /// <param name="status">"Succeeded" або "Failed".</param>
+    /// <param name="utcNow">Час завершення в UTC.</param>
+    /// <param name="profileJson">Профіль по модулях; пишеться завжди.</param>
+    /// <param name="errorMessage">Текст помилки при провалі.</param>
+    /// <remarks>
+    /// Перемикання актуальності — ОКРЕМА операція use-case (ФВ-9.11): сутність
+    /// не бачить інших прогонів і не може знати, котрий із них зараз чинний.
+    /// </remarks>
     public void Complete(string status, DateTime utcNow, string? profileJson, string? errorMessage)
-        => throw new NotImplementedException(
-            "TODO: зафіксувати статус ('Succeeded' | 'Failed'), час завершення, " +
-            "профіль по модулях і текст помилки. " +
-            "Перемикання IsCurrent на результатах — ОКРЕМА транзакція в use-case " +
-            "(ФВ-9.11), тут його немає: сутність не бачить інших прогонів.");
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+
+        Status = status;
+        FinishedAt = utcNow;
+
+        // ⚠ Профіль пишеться навіть при провалі: саме провальний прогін
+        // найцікавіше розглядати за часом — де він зупинився і що встиг.
+        ModulesProfileJson = profileJson;
+        ErrorMessage = errorMessage;
+    }
+
+    /// <summary>Робить прогін актуальним.</summary>
+    /// <exception cref="DomainException">Прогін ще не завершився.</exception>
+    public void MakeCurrent()
+    {
+        // ⛔ Незавершений прогін не може бути джерелом чисел: половина
+        // результатів уже є, половини ще немає, і звіт покаже суму, якої не
+        // існує в жодному стані системи.
+        if (FinishedAt is null)
+        {
+            throw new DomainException(
+                "ECR-CALC-0422", $"Прогін {Id} ще не завершився: актуальним його зробити не можна.");
+        }
+
+        Status = CurrentStatus;
+    }
+
+    /// <summary>Знімає актуальність — попередній прогін лишається читабельним.</summary>
+    public void Supersede() => Status = SupersededStatus;
 }

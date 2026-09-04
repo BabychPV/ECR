@@ -50,7 +50,7 @@ public sealed class CalculationOrchestratorTests
     {
         // Дві незалежні гілки: 10 → 11 і 20 → 21. Плюс 30, що не залежить ні
         // від чого і ні від кого — саме такий вузол найлегше загубити.
-        var levels = CalculationPlan.Build(
+        var batches = CalculationPlan.Build(
         [
             new CalculationNode(11, [10]),
             new CalculationNode(10, []),
@@ -59,13 +59,13 @@ public sealed class CalculationOrchestratorTests
             new CalculationNode(30, []),
         ]);
 
-        // ⚠ Незалежні гілки лягають в ОДИН рівень — саме це й дозволяє
+        // ⚠ Незалежні гілки лягають в ОДИН пакет — саме це й дозволяє
         // рахувати їх одночасно. Послідовний прогін у бюджет 10 хвилин не
         // вкладається (ПРД-13): базова лінія чинної системи — 20, тож
         // «не гірше» тут не працює.
-        Assert.Equal(2, levels.Count);
-        Assert.Equal([10, 20, 30], levels[0].MethodologyVersionIds);
-        Assert.Equal([11, 21], levels[1].MethodologyVersionIds);
+        Assert.Equal(2, batches.Count);
+        Assert.Equal([10, 20, 30], batches[0].MethodologyVersionIds);
+        Assert.Equal([11, 21], batches[1].MethodologyVersionIds);
 
         // ⛔ Цикл — відмова, а не «порахуємо як вийде»: порядок навмання дав
         // би числа, які змінюються між прогонами.

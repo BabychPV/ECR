@@ -5,13 +5,13 @@ using System.Text.Json;
 namespace Ecr.Application.Calculations;
 
 /// <summary>
-/// Розклад прогону: методології, розбиті на **рівні** залежностей.
+/// Розклад прогону: методології, розбиті на **пакети** залежностей.
 /// </summary>
 /// <remarks>
-/// ⚠ Рівень — це не «група для зручності», а те, що робить бюджет досяжним.
+/// ⚠ Пакет — це не «група для зручності», а те, що робить бюджет досяжним.
 /// Повний річний перерахунок має вкластися в 10 хвилин проти 20 у чинній
 /// системі (ПРД-13, D-63), тобто «не гірше» тут не працює. Методології одного
-/// рівня незалежні між собою за побудовою, отже виконуються паралельно;
+/// пакета незалежні між собою за побудовою, отже виконуються паралельно;
 /// послідовний прогін у бюджет не вкладається.
 /// <para>
 /// Клас **чистий**: жодного сховища, жодного часу. Розклад мусить бути
@@ -21,13 +21,13 @@ namespace Ecr.Application.Calculations;
 /// </remarks>
 public static class CalculationPlan
 {
-    /// <summary>Розбиває методології на рівні.</summary>
+    /// <summary>Розбиває методології на пакети.</summary>
     /// <param name="nodes">Методології з переліком тих, від яких вони залежать.</param>
-    /// <returns>Рівні в порядку виконання.</returns>
+    /// <returns>Пакети в порядку виконання.</returns>
     /// <exception cref="Errors.BusinessRuleException">
     /// Цикл у залежностях — <c>ECR-TMPL-4221</c>.
     /// </exception>
-    public static IReadOnlyList<CalculationLevel> Build(IReadOnlyList<CalculationNode> nodes)
+    public static IReadOnlyList<CalculationBatch> Build(IReadOnlyList<CalculationNode> nodes)
     {
         ArgumentNullException.ThrowIfNull(nodes);
 
@@ -35,7 +35,7 @@ public static class CalculationPlan
             n => n.MethodologyVersionId,
             n => new HashSet<int>(n.DependsOn.Where(d => nodes.Any(x => x.MethodologyVersionId == d))));
 
-        var levels = new List<CalculationLevel>();
+        var batches = new List<CalculationBatch>();
         var done = new HashSet<int>();
 
         while (pending.Count > 0)
@@ -58,7 +58,7 @@ public static class CalculationPlan
                     + string.Join(", ", pending.Keys.Order()));
             }
 
-            levels.Add(new CalculationLevel(levels.Count, ready));
+            batches.Add(new CalculationBatch(batches.Count, ready));
 
             foreach (var id in ready)
             {
@@ -67,7 +67,7 @@ public static class CalculationPlan
             }
         }
 
-        return levels;
+        return batches;
     }
 }
 
@@ -76,10 +76,18 @@ public static class CalculationPlan
 /// <param name="DependsOn">Версії, результати яких їй потрібні.</param>
 public sealed record CalculationNode(int MethodologyVersionId, IReadOnlyList<int> DependsOn);
 
-/// <summary>Рівень розкладу: методології, що виконуються одночасно.</summary>
-/// <param name="Ordinal">Номер рівня; нульовий не має залежностей.</param>
-/// <param name="MethodologyVersionIds">Версії цього рівня.</param>
-public sealed record CalculationLevel(int Ordinal, IReadOnlyList<int> MethodologyVersionIds);
+/// <summary>
+/// Пакет розкладу: методології, що виконуються одночасно.
+/// </summary>
+/// <remarks>
+/// ⚠ Названо «пакетом», а не «рівнем», навмисно: <c>CalculationLevel</c> у
+/// цій системі вже означає **рівень драбини виразності** (конфігурація,
+/// скрипт, модуль — ФВ-13.5). Два різні поняття під одним іменем читалися б
+/// як одне, і питання «якого рівня ця методологія» мало б дві відповіді.
+/// </remarks>
+/// <param name="Ordinal">Номер пакета; нульовий не має залежностей.</param>
+/// <param name="MethodologyVersionIds">Версії цього пакета.</param>
+public sealed record CalculationBatch(int Ordinal, IReadOnlyList<int> MethodologyVersionIds);
 
 /// <summary>
 /// Профіль прогону по модулях (<c>calc.CalculationRun.ModulesProfileJson</c>).

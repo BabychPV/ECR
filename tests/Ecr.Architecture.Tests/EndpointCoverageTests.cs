@@ -26,7 +26,7 @@ public sealed partial class EndpointCoverageTests
     /// Список має ЗМЕНШУВАТИСЯ. Етап, який уже зробили, але забули прибрати
     /// звідси, знову робить пропуск невидимим.
     /// </remarks>
-    private static readonly int[] DeferredStages = [4, 5];
+    private static readonly int[] DeferredStages = [5];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

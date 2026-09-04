@@ -1,3 +1,4 @@
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -74,6 +75,20 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<ApprovalState> ApprovalStates => Set<ApprovalState>();
     public DbSet<ValidationResult> ValidationResults => Set<ValidationResult>();
     public DbSet<SubmissionSnapshot> SubmissionSnapshots => Set<SubmissionSnapshot>();
+
+    // calc
+    public DbSet<Methodology> Methodologies => Set<Methodology>();
+    public DbSet<MethodologyVersion> MethodologyVersions => Set<MethodologyVersion>();
+    public DbSet<MethodologyFormula> MethodologyFormulas => Set<MethodologyFormula>();
+    public DbSet<MethodologyConstant> MethodologyConstants => Set<MethodologyConstant>();
+    public DbSet<MethodologySubstance> MethodologySubstances => Set<MethodologySubstance>();
+    public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
+    public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
+    public DbSet<ScriptVersion> ScriptVersions => Set<ScriptVersion>();
+    public DbSet<CalculationRun> CalculationRuns => Set<CalculationRun>();
+    public DbSet<CalculationResult> CalculationResults => Set<CalculationResult>();
+    public DbSet<CalculationInputRow> CalculationInputs => Set<CalculationInputRow>();
+    public DbSet<CalculationStep> CalculationSteps => Set<CalculationStep>();
 
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
