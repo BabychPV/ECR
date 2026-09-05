@@ -33,7 +33,7 @@ public sealed class SecurityController(
 
     /// <summary>Створює роль. Право <c>Security.ManageRoles</c>.</summary>
     [HttpPost("roles")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.RoleIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> CreateRole([FromBody] CreateRoleRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -42,7 +42,7 @@ public sealed class SecurityController(
             .HandleAsync(request.Code, request.NameL10n, request.PermissionCodes, ct)
             .ConfigureAwait(false);
 
-        return Created($"/api/v1/roles/{roleId}", new { roleId });
+        return Created($"/api/v1/roles/{roleId}", new Contracts.RoleIdResponse(roleId));
     }
 
     /// <summary>
@@ -98,7 +98,7 @@ public sealed class SecurityController(
 
     /// <summary>Створює користувача. Право <c>Security.ManageUsers</c>.</summary>
     [HttpPost("users")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.UserIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> CreateUser([FromBody] CreateUserRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -114,7 +114,7 @@ public sealed class SecurityController(
             .ConfigureAwait(false);
 
         // ⛔ У відповіді немає ні пароля, ні його хеша — лише ідентифікатор.
-        return Created($"/api/v1/users/{userId}", new { userId });
+        return Created($"/api/v1/users/{userId}", new Contracts.UserIdResponse(userId));
     }
 
     /// <summary>
@@ -148,7 +148,7 @@ public sealed class SecurityController(
     /// <c>Manage</c> (ФВ-6.16a).
     /// </remarks>
     [HttpPost("security/simulation")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.SimulationSessionResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> StartSimulation(
         [FromBody] StartSimulationRequest request, CancellationToken ct)
@@ -163,12 +163,9 @@ public sealed class SecurityController(
 
         // ⚠ Клієнт зобов'язаний показувати банер увесь сеанс — саме тому
         // відповідь несе і суб'єкта, і прапорець, а не лише ідентифікатор.
-        return Created($"/api/v1/security/simulation/{sessionId}", new
-        {
-            sessionId,
-            simulatedForUserId = request.SubjectUserId,
-            readOnly = true,
-        });
+        return Created(
+            $"/api/v1/security/simulation/{sessionId}",
+            new Contracts.SimulationSessionResponse(sessionId, request.SubjectUserId, ReadOnly: true));
     }
 
     /// <summary>Завершує власний сеанс симуляції.</summary>

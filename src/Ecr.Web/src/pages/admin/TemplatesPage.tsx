@@ -6,8 +6,10 @@ import { apiFetch } from '@/api/client';
 import type {
   CreateTemplateRequest,
   CreateTemplateVersionRequest,
+  TemplateIdResponse,
   TemplatePage,
   TemplateVersionSummary,
+  VersionIdResponse,
 } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -67,7 +69,7 @@ export function TemplatesPage(): JSX.Element {
    */
   const create = useMutation({
     mutationFn: () =>
-      apiFetch<{ templateId: number }>('/api/v1/templates', {
+      apiFetch<TemplateIdResponse>('/api/v1/templates', {
         method: 'POST',
         body: JSON.stringify({ code: code.trim(), nameL10n: name } satisfies CreateTemplateRequest),
       }),
@@ -91,7 +93,7 @@ export function TemplatesPage(): JSX.Element {
    */
   const createVersion = useMutation({
     mutationFn: (target: { templateId: number; cloneFrom: number | null }) =>
-      apiFetch<{ versionId: number }>(`/api/v1/templates/${target.templateId}/versions`, {
+      apiFetch<VersionIdResponse>(`/api/v1/templates/${target.templateId}/versions`, {
         method: 'POST',
         body: JSON.stringify({
           versionNumber: versionNumber.trim(),

@@ -36,7 +36,7 @@ public sealed class ReportsController(
     /// давали б різні числа без жодного сліду.
     /// </remarks>
     [HttpPost("{code}/build")]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> Build(
         string code, [FromBody] BuildSnapshotRequest request, CancellationToken ct)
     {
@@ -46,7 +46,7 @@ public sealed class ReportsController(
             .HandleAsync(code, request.ProjectId, request.PeriodKey, ct)
             .ConfigureAwait(false);
 
-        return Accepted(new { jobId });
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
 }
 

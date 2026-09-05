@@ -347,3 +347,41 @@ export type RegistryEntryUpsertDto = Schemas['RegistryEntryUpsertDto'];
 
 /** Ідентифікатор створеного або зміненого запису довідника. */
 export type RegistryEntryIdResponse = Schemas['RegistryEntryIdResponse'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Тіла відповідей на створення.
+//
+// ⛔ Чотирнадцять дій сервера повертали АНОНІМНИЙ об'єкт, тому в схемі на
+// їхньому місці лишалося порожнє тіло — і клієнту не було з чого зробити
+// псевдонім. Обхідним шляхом стала форма на місці виклику
+// (`apiFetch<{ projectId: number }>`), тобто рівно те, від чого захищає
+// `D-137`: помилка в назві поля дає `undefined` там, де компілятор обіцяв
+// число, і жоден тип цього не помітить (`A7-44`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Створений проєкт. */
+export type ProjectIdResponse = Schemas['ProjectIdResponse'];
+
+/** Створений шаблон. */
+export type TemplateIdResponse = Schemas['TemplateIdResponse'];
+
+/** Створена версія шаблону. */
+export type VersionIdResponse = Schemas['VersionIdResponse'];
+
+/** Створений документ. */
+export type DocumentIdResponse = Schemas['DocumentIdResponse'];
+
+/** Створена роль. */
+export type RoleIdResponse = Schemas['RoleIdResponse'];
+
+/** Створений користувач; ані пароля, ані хеша тут немає (`ФВ-6.11`). */
+export type UserIdResponse = Schemas['UserIdResponse'];
+
+/** Створений рядок динамічної таблиці. */
+export type RowKeyResponse = Schemas['RowKeyResponse'];
+
+/** Розпочатий сеанс симуляції разом із суб'єктом і прапорцем «лише читання». */
+export type SimulationSessionResponse = Schemas['SimulationSessionResponse'];
+
+/** Прийнята в чергу довга операція. */
+export type JobAcceptedResponse = Schemas['JobAcceptedResponse'];

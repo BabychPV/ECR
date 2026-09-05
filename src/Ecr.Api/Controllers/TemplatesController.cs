@@ -33,13 +33,13 @@ public sealed class TemplatesController(
 
     /// <summary>Створює шаблон. Право <c>Template.Edit</c>.</summary>
     [HttpPost]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.TemplateIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create([FromBody] CreateTemplateRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var templateId = await create.HandleAsync(request.Code, request.NameL10n, ct).ConfigureAwait(false);
-        return Created($"/api/v1/templates/{templateId}", new { templateId });
+        return Created($"/api/v1/templates/{templateId}", new Contracts.TemplateIdResponse(templateId));
     }
 
     /// <summary>Версії шаблону. Право <c>Template.View</c>.</summary>
@@ -51,7 +51,7 @@ public sealed class TemplatesController(
     /// <summary>Створює версію шаблону. Право <c>Template.Edit</c>.</summary>
     /// <remarks><c>CloneFromVersionId</c> задає клонування замість порожньої версії.</remarks>
     [HttpPost("{id:int}/versions")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.VersionIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> CreateVersion(
         int id, [FromBody] CreateTemplateVersionRequest request, CancellationToken ct)
     {
@@ -61,7 +61,7 @@ public sealed class TemplatesController(
             .HandleAsync(id, request.VersionNumber, request.CloneFromVersionId, ct)
             .ConfigureAwait(false);
 
-        return Created($"/api/v1/template-versions/{versionId}", new { versionId });
+        return Created($"/api/v1/template-versions/{versionId}", new Contracts.VersionIdResponse(versionId));
     }
 }
 

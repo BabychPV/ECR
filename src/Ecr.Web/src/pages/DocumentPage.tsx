@@ -8,7 +8,7 @@ import type {
   DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
-  ValidationMessageDto,
+  ValidationResultResponse,
 } from '@/api/types';
 import { DocumentGrid } from '@/features/grid/DocumentGrid';
 import { ExportButton } from '@/features/export/ExportButton';
@@ -61,7 +61,7 @@ export function DocumentPage(): JSX.Element {
 
   const validate = useMutation({
     mutationFn: () =>
-      apiFetch<{ messages: ValidationMessageDto[] }>(
+      apiFetch<ValidationResultResponse>(
         `/api/v1/documents/${documentId}/validate`,
         {
           method: 'POST',

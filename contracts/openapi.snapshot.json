@@ -731,6 +731,20 @@
         ],
         "type": "object"
       },
+      "DocumentIdResponse": {
+        "description": "Створений документ.",
+        "properties": {
+          "documentId": {
+            "description": "Ідентифікатор.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -1110,6 +1124,19 @@
           "columnCode",
           "reasonCode",
           "message"
+        ],
+        "type": "object"
+      },
+      "JobAcceptedResponse": {
+        "description": "Тіла відповідей, спільні для кількох контролерів.",
+        "properties": {
+          "jobId": {
+            "description": "Ідентифікатор фонової задачі для опитування стану.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId"
         ],
         "type": "object"
       },
@@ -1904,6 +1931,20 @@
         },
         "type": "object"
       },
+      "ProjectIdResponse": {
+        "description": "Створений проєкт.",
+        "properties": {
+          "projectId": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId"
+        ],
+        "type": "object"
+      },
       "ProjectStatus": {
         "description": "Стан проєкту: `Draft → Active → Archived`.",
         "enum": [
@@ -1980,6 +2021,31 @@
         "required": [
           "changeReason",
           "effectiveFrom"
+        ],
+        "type": "object"
+      },
+      "RecalculationAcceptedResponse": {
+        "description": "Прийнятий у чергу перерахунок.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "jobId": {
+            "description": "Задача.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період; перерахунок завжди адресує пару документ × період.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId",
+          "documentId",
+          "periodKey"
         ],
         "type": "object"
       },
@@ -2355,6 +2421,20 @@
           "Column"
         ]
       },
+      "RoleIdResponse": {
+        "description": "Створена роль.",
+        "properties": {
+          "roleId": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "roleId"
+        ],
+        "type": "object"
+      },
       "RoleView": {
         "description": "Роль із її правами.",
         "properties": {
@@ -2445,6 +2525,19 @@
           "label",
           "rowVersion",
           "cells"
+        ],
+        "type": "object"
+      },
+      "RowKeyResponse": {
+        "description": "Створений рядок динамічної таблиці.",
+        "properties": {
+          "rowKey": {
+            "description": "Ключ рядка; на нього посилаються формули й аудит.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowKey"
         ],
         "type": "object"
       },
@@ -2633,6 +2726,31 @@
           "outputs",
           "diffWithPublished",
           "trace"
+        ],
+        "type": "object"
+      },
+      "SimulationSessionResponse": {
+        "description": "Розпочатий сеанс симуляції.",
+        "properties": {
+          "readOnly": {
+            "description": "Завжди `true`: будь-який запис під симуляцією відхиляється.",
+            "type": "boolean"
+          },
+          "sessionId": {
+            "description": "Сеанс; ним же він і завершується.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "simulatedForUserId": {
+            "description": "Чиїми правами дивимося.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessionId",
+          "simulatedForUserId",
+          "readOnly"
         ],
         "type": "object"
       },
@@ -2977,6 +3095,20 @@
         ],
         "type": "object"
       },
+      "TemplateIdResponse": {
+        "description": "Створений шаблон.",
+        "properties": {
+          "templateId": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "templateId"
+        ],
+        "type": "object"
+      },
       "TemplateRowDto": {
         "description": "Рядок у СТРУКТУРІ шаблону — опис, а не дані.",
         "properties": {
@@ -3220,6 +3352,20 @@
         ],
         "type": "object"
       },
+      "UserIdResponse": {
+        "description": "Створений користувач.",
+        "properties": {
+          "userId": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId"
+        ],
+        "type": "object"
+      },
       "UserView": {
         "description": "Обліковий запис у переліку.",
         "properties": {
@@ -3346,6 +3492,20 @@
           "documentId",
           "periodKey",
           "messages"
+        ],
+        "type": "object"
+      },
+      "VersionIdResponse": {
+        "description": "Створена версія шаблону.",
+        "properties": {
+          "versionId": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId"
         ],
         "type": "object"
       }
@@ -3589,6 +3749,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -3737,6 +3914,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowKeyResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowKeyResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowKeyResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -3970,6 +4164,23 @@
         },
         "responses": {
           "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
             "description": "Accepted"
           }
         },
@@ -4207,6 +4418,23 @@
         },
         "responses": {
           "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationAcceptedResponse"
+                }
+              }
+            },
             "description": "Accepted"
           }
         },
@@ -5034,6 +5262,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -5151,6 +5396,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -5604,6 +5866,23 @@
         },
         "responses": {
           "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
             "description": "Accepted"
           }
         },
@@ -5674,6 +5953,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -5826,6 +6122,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationSessionResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationSessionResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationSessionResponse"
+                }
+              }
+            },
             "description": "Created"
           },
           "422": {
@@ -5932,6 +6245,23 @@
         },
         "responses": {
           "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
             "description": "Accepted"
           }
         },
@@ -5977,6 +6307,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -6264,6 +6611,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -6359,6 +6723,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },
@@ -6694,6 +7075,23 @@
         },
         "responses": {
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserIdResponse"
+                }
+              }
+            },
             "description": "Created"
           }
         },

@@ -39,7 +39,7 @@ public sealed class SourcesController(
     /// діапазон іде в catch-up, а прогін завершується успішно.
     /// </remarks>
     [HttpPost("{id:int}/collect")]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> Collect(int id, [FromBody] CollectRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -51,7 +51,7 @@ public sealed class SourcesController(
             .HandleAsync(id, request.FromUtc, request.ToUtc, ct)
             .ConfigureAwait(false);
 
-        return Accepted(new { jobId });
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
 }
 

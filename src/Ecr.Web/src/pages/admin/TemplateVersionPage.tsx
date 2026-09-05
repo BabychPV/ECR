@@ -3,7 +3,12 @@ import { Accordion, Badge, Button, Group, Modal, Table, Text, TextInput } from '
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { CloneVersionRequest, TemplateColumnDto, TemplateStructureDto } from '@/api/types';
+import type {
+  CloneVersionRequest,
+  TemplateColumnDto,
+  TemplateStructureDto,
+  VersionIdResponse,
+} from '@/api/types';
 import { PresentationEditor } from '@/features/templates/PresentationEditor';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -61,7 +66,7 @@ export function TemplateVersionPage(): JSX.Element {
    */
   const clone = useMutation({
     mutationFn: () =>
-      apiFetch<{ versionId: number }>(`/api/v1/template-versions/${id}/clone`, {
+      apiFetch<VersionIdResponse>(`/api/v1/template-versions/${id}/clone`, {
         method: 'POST',
         body: JSON.stringify({ newVersion: newVersion.trim() } satisfies CloneVersionRequest),
       }),

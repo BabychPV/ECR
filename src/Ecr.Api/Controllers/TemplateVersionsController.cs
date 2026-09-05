@@ -22,7 +22,7 @@ public sealed class TemplateVersionsController(
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
     [HttpPost("clone")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.VersionIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Clone(
         int id, [FromBody] CloneVersionRequest request, CancellationToken ct)
     {
@@ -32,7 +32,7 @@ public sealed class TemplateVersionsController(
             .CloneAsync(id, request.NewVersion, UserId, ct)
             .ConfigureAwait(false);
 
-        return Created($"/api/v1/template-versions/{versionId}", new { versionId });
+        return Created($"/api/v1/template-versions/{versionId}", new Contracts.VersionIdResponse(versionId));
     }
 
     /// <summary>

@@ -1,12 +1,38 @@
-﻿import type { JSX } from 'react';
-import { Badge, Group, SegmentedControl, Switch, Table, Text, Tooltip } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+﻿import { useState, type JSX } from 'react';
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  ScrollArea,
+  SegmentedControl,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+  Tooltip,
+} from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EcrApiError, apiFetch } from '@/api/client';
-import type { RoleView, SetAlertsRequest, UserPage } from '@/api/types';
+import { apiFetch } from '@/api/client';
+import type {
+  CreateRoleRequest,
+  CreateUserRequest,
+  RoleIdResponse,
+  RoleView,
+  SetAlertsRequest,
+  UserIdResponse,
+  UserPage,
+} from '@/api/types';
+import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { GrantsPanel } from '@/pages/admin/GrantsPanel';
+import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -28,6 +54,18 @@ export function SecurityPage(): JSX.Element {
   const [rawTab, setTab] = useUrlState('tab');
   const tab = rawTab ?? 'roles';
   const queryClient = useQueryClient();
+  const session = useSession();
+
+  const [creatingRole, setCreatingRole] = useState(false);
+  const [roleCode, setRoleCode] = useState('');
+  const [roleName, setRoleName] = useState<LocalizedValue>({});
+  const [rolePermissions, setRolePermissions] = useState<string[]>([]);
+
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [provider, setProvider] = useState('Windows');
+  const [sid, setSid] = useState('');
 
   // ⛔ Адресати алертів — ДАНІ, а не конфігурація (`D-125`). Перелік у змінних
   // оточення довелося б міняти розгортанням щоразу, коли хтось іде у
@@ -41,14 +79,82 @@ export function SecurityPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: (error) => {
-      // ⚠ Причина показується як є: «немає пошти» — це те, що людина може
-      // виправити, а «не вдалося» — ні.
-      notifications.show({
-        color: 'red',
-        message: error instanceof EcrApiError ? error.message : String(error),
-      });
+    // ⚠ Причина показується як є: «немає пошти» — це те, що людина може
+    // виправити, а «не вдалося» — ні.
+    onError: showApiError,
+  });
+
+  /**
+   * Створення ролі (`ФВ-6.3`).
+   *
+   * ⛔ Дії не було в інтерфейсі: сторож вважав `POST /roles` досяжним, бо
+   * клієнт читає `GET /roles` тією самою адресою (`A7-42`). Тобто матриця
+   * прав показувала ролі й не давала завести жодної нової — а рольова
+   * модель без цього зводиться до вбудованих ролей назавжди.
+   *
+   * ⚠ Права обираються з тих, що вже оголошені: вигадати право на клієнті
+   * не можна, сервер приймає лише коди з каталогу.
+   */
+  const createRole = useMutation({
+    mutationFn: () =>
+      apiFetch<RoleIdResponse>('/api/v1/roles', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: roleCode.trim(),
+          nameL10n: roleName,
+          permissionCodes: rolePermissions,
+        } satisfies CreateRoleRequest),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['roles'] });
+      setCreatingRole(false);
+      setRoleCode('');
+      setRoleName({});
+      setRolePermissions([]);
+      showDone(t('security.roleCreated'));
     },
+    onError: showApiError,
+  });
+
+  /**
+   * Заведення користувача.
+   *
+   * ⛔ Так само недосяжна дія (`A7-42`). Доменні користувачі з'являються
+   * після першого входу самі, а локальні — лише тут; без цього екрана
+   * локального облікового запису не існувало б узагалі.
+   *
+   * ⛔ Пароль тут НЕ вводиться. Локальний обліковий запис створюється
+   * сервером із разовим паролем і прапорцем `MustChangePassword`
+   * (`ФВ-6.18`): пароль, який знає той, хто його видав, — це не пароль.
+   */
+  const createUser = useMutation({
+    mutationFn: () =>
+      apiFetch<UserIdResponse>('/api/v1/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          userName: userName.trim(),
+          displayName: displayName.trim().length === 0 ? null : displayName.trim(),
+          provider,
+
+          // ⚠ SID потрібен саме доменному запису: за ним, а не за іменем,
+          // сервер упізнає користувача після перейменування в каталозі.
+          sid: provider === 'Windows' && sid.trim().length > 0 ? sid.trim() : null,
+
+          // ⛔ `null` означає «сервер видасть разовий сам». Поле пароля в
+          // цій формі означало б, що його хтось бачить і десь запише.
+          initialPassword: null,
+          roleCodes: null,
+        } satisfies CreateUserRequest),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['users'] });
+      setCreatingUser(false);
+      setUserName('');
+      setDisplayName('');
+      setSid('');
+      showDone(t('security.userCreated'));
+    },
+    onError: showApiError,
   });
 
   const roles = useQuery({
@@ -69,16 +175,33 @@ export function SecurityPage(): JSX.Element {
       <PageHeader
         title={t('security.title')}
         actions={
-          <SegmentedControl
-            size="xs"
-            value={tab}
-            onChange={setTab}
-            data={[
-              { value: 'roles', label: t('security.roles') },
-              { value: 'grants', label: t('security.grants') },
-              { value: 'users', label: t('security.users') },
-            ]}
-          />
+          <Group gap="xs">
+            <SegmentedControl
+              size="xs"
+              value={tab}
+              onChange={setTab}
+              data={[
+                { value: 'roles', label: t('security.roles') },
+                { value: 'grants', label: t('security.grants') },
+                { value: 'users', label: t('security.users') },
+              ]}
+            />
+
+            {/* ⚠ Кнопка створення належить ВКЛАДЦІ, а не екрану: «створити»
+                поруч із матрицею прав і поруч із переліком користувачів
+                означає різне, і одна кнопка на обидві була б загадкою. */}
+            {tab === 'roles' && can(session.data, 'Security.ManageRoles') && (
+              <Button size="xs" onClick={() => setCreatingRole(true)}>
+                {t('security.createRole')}
+              </Button>
+            )}
+
+            {tab === 'users' && can(session.data, 'Security.ManageUsers') && (
+              <Button size="xs" onClick={() => setCreatingUser(true)}>
+                {t('security.createUser')}
+              </Button>
+            )}
+          </Group>
         }
       />
 
@@ -216,6 +339,18 @@ export function SecurityPage(): JSX.Element {
                           {t('security.bootstrap')}
                         </Badge>
                       )}
+
+                      {/* ⛔ «Подивитися його правами» (`ФВ-6.16`). Бадж
+                          симуляції в шапці малювався від Етапу 7, а
+                          ввімкнути її не було чим: система вміла показати
+                          стан, у який не могла увійти (`A7-39`).
+
+                          ⚠ Себе симулювати не можна — сервер відмовить, і
+                          кнопки тут немає навмисно. */}
+                      {can(session.data, 'Security.Simulate') &&
+                        user.id !== session.data?.userId && (
+                          <StartSimulationButton userId={user.id} />
+                        )}
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -225,6 +360,128 @@ export function SecurityPage(): JSX.Element {
           )}
         </AsyncBoundary>
       )}
+
+      <Modal
+        opened={creatingRole}
+        onClose={() => setCreatingRole(false)}
+        title={t('security.createRole')}
+        size="lg"
+      >
+        <TextInput
+          label={t('security.roleCode')}
+          description={t('security.roleCodeHint')}
+          value={roleCode}
+          onChange={(event) => setRoleCode(event.currentTarget.value)}
+          data-autofocus
+        />
+
+        <LocalizedInput label={t('security.roleName')} value={roleName} onChange={setRoleName} />
+
+        <Text size="sm" mt="sm" fw={600}>
+          {t('security.permissions')}
+        </Text>
+        <Text size="xs" c="dimmed" mb="xs">
+          {t('security.permissionsHint')}
+        </Text>
+
+        {/* ⚠ Перелік — це права, ЯКІ ВЖЕ ОГОЛОШЕНІ в наявних ролях.
+            Вигадати право на клієнті не можна: сервер приймає лише коди з
+            каталогу, і показувати поле вільного вводу означало б обіцяти
+            те, що завершиться відмовою. */}
+        <ScrollArea h={220}>
+          <Stack gap="xs">
+            {permissions.map((permission) => (
+              <Checkbox
+                key={permission}
+                label={permission}
+                checked={rolePermissions.includes(permission)}
+                onChange={(event) =>
+                  setRolePermissions((current) =>
+                    event.currentTarget.checked
+                      ? [...current, permission]
+                      : current.filter((code) => code !== permission),
+                  )
+                }
+              />
+            ))}
+          </Stack>
+        </ScrollArea>
+
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setCreatingRole(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={roleCode.trim().length === 0 || !hasAnyText(roleName)}
+            loading={createRole.isPending}
+            onClick={() => createRole.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={creatingUser}
+        onClose={() => setCreatingUser(false)}
+        title={t('security.createUser')}
+      >
+        <Select
+          label={t('security.kind')}
+          description={t('security.kindHint')}
+          data={['Windows', 'Local']}
+          value={provider}
+          onChange={(value) => setProvider(value ?? 'Windows')}
+          allowDeselect={false}
+        />
+
+        <TextInput
+          mt="sm"
+          label={t('security.login')}
+          value={userName}
+          onChange={(event) => setUserName(event.currentTarget.value)}
+          data-autofocus
+        />
+
+        <TextInput
+          mt="sm"
+          label={t('security.name')}
+          value={displayName}
+          onChange={(event) => setDisplayName(event.currentTarget.value)}
+        />
+
+        {provider === 'Windows' && (
+          <TextInput
+            mt="sm"
+            label={t('security.sid')}
+            description={t('security.sidHint')}
+            value={sid}
+            onChange={(event) => setSid(event.currentTarget.value)}
+          />
+        )}
+
+        {/* ⛔ Поля пароля тут немає навмисно. Сервер видає разовий пароль
+            сам і ставить `MustChangePassword`: пароль, який знає той, хто
+            його видав, — це не пароль (`ФВ-6.18`). */}
+        {provider === 'Local' && (
+          <Text size="xs" c="dimmed" mt="sm">
+            {t('security.localHint')}
+          </Text>
+        )}
+
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setCreatingUser(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={userName.trim().length === 0}
+            loading={createUser.isPending}
+            onClick={() => createUser.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </Group>
+      </Modal>
     </>
   );
 }

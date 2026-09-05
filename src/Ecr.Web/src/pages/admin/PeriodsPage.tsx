@@ -7,6 +7,7 @@ import type {
   CreateProjectRequest,
   PagedProjects,
   PeriodCalendarDto,
+  ProjectIdResponse,
   ReopenPeriodRequest,
   SetCurrentPeriodRequest,
 } from '@/api/types';
@@ -102,7 +103,7 @@ export function PeriodsPage(): JSX.Element {
    */
   const create = useMutation({
     mutationFn: () =>
-      apiFetch<{ projectId: number }>('/api/v1/projects', {
+      apiFetch<ProjectIdResponse>('/api/v1/projects', {
         method: 'POST',
         body: JSON.stringify({
           code: code.trim(),
@@ -135,7 +136,7 @@ export function PeriodsPage(): JSX.Element {
    */
   const clone = useMutation({
     mutationFn: (id: number) =>
-      apiFetch<{ projectId: number }>(`/api/v1/projects/${id}/clone`, {
+      apiFetch<ProjectIdResponse>(`/api/v1/projects/${id}/clone`, {
         method: 'POST',
         body: JSON.stringify({ code: cloneCode.trim() } satisfies CloneProjectRequest),
       }),

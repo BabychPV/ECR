@@ -14,6 +14,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
@@ -115,9 +116,17 @@ export function AppLayout(): JSX.Element {
                 забув, що дивиться чужими правами, ухвалює рішення про чужий
                 доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
             {me.isSimulation && (
-              <Badge color="orange" variant="filled">
-                {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
-              </Badge>
+              <>
+                <Badge color="orange" variant="filled">
+                  {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
+                </Badge>
+
+                {/* ⛔ Вихід стоїть ПОРУЧ із баджем. Саме тут користувач
+                    помічає, що дивиться чужими правами, і саме тут має
+                    бути вихід: інакше єдиним способом завершити сеанс
+                    лишався б вихід із системи. */}
+                <EndSimulationButton />
+              </>
             )}
             <UserMenu userName={me.userName ?? '—'} />
           </Group>

@@ -70,7 +70,7 @@ public sealed class CellsController(
 
     /// <summary>Додає рядок у динамічну таблицю.</summary>
     [HttpPost("rows")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.RowKeyResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> CreateRow(
         long documentId, [FromBody] CreateRowRequest request, CancellationToken ct)
     {
@@ -87,7 +87,7 @@ public sealed class CellsController(
 
         return Created(
             $"/api/v1/documents/{documentId}/tables/{request.TableInstanceId}",
-            new { rowKey = rowKey.Value });
+            new Contracts.RowKeyResponse(rowKey.Value));
     }
 
     /// <summary>Профіль доступу поточного користувача.</summary>

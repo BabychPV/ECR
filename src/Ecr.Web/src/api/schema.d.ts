@@ -185,7 +185,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["DocumentIdResponse"];
+                        "text/json": components["schemas"]["DocumentIdResponse"];
+                        "text/plain": components["schemas"]["DocumentIdResponse"];
+                    };
                 };
             };
         };
@@ -299,7 +303,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RowKeyResponse"];
+                        "text/json": components["schemas"]["RowKeyResponse"];
+                        "text/plain": components["schemas"]["RowKeyResponse"];
+                    };
                 };
             };
         };
@@ -491,7 +499,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
                 };
             };
         };
@@ -696,7 +708,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RecalculationAcceptedResponse"];
+                        "text/json": components["schemas"]["RecalculationAcceptedResponse"];
+                        "text/plain": components["schemas"]["RecalculationAcceptedResponse"];
+                    };
                 };
             };
         };
@@ -1465,7 +1481,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ProjectIdResponse"];
+                        "text/json": components["schemas"]["ProjectIdResponse"];
+                        "text/plain": components["schemas"]["ProjectIdResponse"];
+                    };
                 };
             };
         };
@@ -1599,7 +1619,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ProjectIdResponse"];
+                        "text/json": components["schemas"]["ProjectIdResponse"];
+                        "text/plain": components["schemas"]["ProjectIdResponse"];
+                    };
                 };
             };
         };
@@ -1971,7 +1995,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
                 };
             };
         };
@@ -2033,7 +2061,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["RoleIdResponse"];
+                        "text/json": components["schemas"]["RoleIdResponse"];
+                        "text/plain": components["schemas"]["RoleIdResponse"];
+                    };
                 };
             };
         };
@@ -2157,7 +2189,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SimulationSessionResponse"];
+                        "text/json": components["schemas"]["SimulationSessionResponse"];
+                        "text/plain": components["schemas"]["SimulationSessionResponse"];
+                    };
                 };
                 /** @description Unprocessable Entity */
                 422: {
@@ -2280,7 +2316,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
                 };
             };
         };
@@ -2322,7 +2362,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["VersionIdResponse"];
+                        "text/json": components["schemas"]["VersionIdResponse"];
+                        "text/plain": components["schemas"]["VersionIdResponse"];
+                    };
                 };
             };
         };
@@ -2587,7 +2631,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["TemplateIdResponse"];
+                        "text/json": components["schemas"]["TemplateIdResponse"];
+                        "text/plain": components["schemas"]["TemplateIdResponse"];
+                    };
                 };
             };
         };
@@ -2656,7 +2704,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["VersionIdResponse"];
+                        "text/json": components["schemas"]["VersionIdResponse"];
+                        "text/plain": components["schemas"]["VersionIdResponse"];
+                    };
                 };
             };
         };
@@ -2947,7 +2999,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["UserIdResponse"];
+                        "text/json": components["schemas"]["UserIdResponse"];
+                        "text/plain": components["schemas"]["UserIdResponse"];
+                    };
                 };
             };
         };
@@ -3467,6 +3523,14 @@ export interface components {
             /** @description Ім'я для показу в шапці. */
             userName: null | string;
         };
+        /** @description Створений документ. */
+        DocumentIdResponse: {
+            /**
+             * Format: int64
+             * @description Ідентифікатор.
+             */
+            documentId: number;
+        };
         /** @description Дія над документом у межах одного періоду. */
         DocumentPeriodRequest: {
             /**
@@ -3639,6 +3703,11 @@ export interface components {
             message: string;
             reasonCode: string;
             rowKey: string;
+        };
+        /** @description Тіла відповідей, спільні для кількох контролерів. */
+        JobAcceptedResponse: {
+            /** @description Ідентифікатор фонової задачі для опитування стану. */
+            jobId: string;
         };
         /** @description Стан фонової задачі. */
         JobStatus: {
@@ -4000,6 +4069,14 @@ export interface components {
             title?: null | string;
             type?: null | string;
         };
+        /** @description Створений проєкт. */
+        ProjectIdResponse: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            projectId: number;
+        };
         /**
          * @description Стан проєкту: `Draft → Active → Archived`.
          * @enum {unknown}
@@ -4041,6 +4118,21 @@ export interface components {
              *     цією версією, а які — попередньою.
              */
             effectiveFrom: null | string;
+        };
+        /** @description Прийнятий у чергу перерахунок. */
+        RecalculationAcceptedResponse: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Задача. */
+            jobId: string;
+            /**
+             * Format: int32
+             * @description Період; перерахунок завжди адресує пару документ × період.
+             */
+            periodKey: number;
         };
         /** @description Опис довідника для конфігуратора і для клієнта. */
         RegistryDefDto: {
@@ -4226,6 +4318,14 @@ export interface components {
          * @enum {unknown}
          */
         ResourceKind: "Project" | "Sheet" | "Table" | "Column";
+        /** @description Створена роль. */
+        RoleIdResponse: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            roleId: number;
+        };
         /** @description Роль із її правами. */
         RoleView: {
             /** @description Код. */
@@ -4272,6 +4372,11 @@ export interface components {
             rowKind: string;
             /** @description Версія для оптимістичного блокування. */
             rowVersion: string;
+        };
+        /** @description Створений рядок динамічної таблиці. */
+        RowKeyResponse: {
+            /** @description Ключ рядка; на нього посилаються формули й аудит. */
+            rowKey: string;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {
@@ -4357,6 +4462,21 @@ export interface components {
             };
             /** @description Покроковий журнал; у симуляції завжди повний. */
             trace: string[];
+        };
+        /** @description Розпочатий сеанс симуляції. */
+        SimulationSessionResponse: {
+            /** @description Завжди `true`: будь-який запис під симуляцією відхиляється. */
+            readOnly: boolean;
+            /**
+             * Format: int64
+             * @description Сеанс; ним же він і завершується.
+             */
+            sessionId: number;
+            /**
+             * Format: int32
+             * @description Чиїми правами дивимося.
+             */
+            simulatedForUserId: number;
         };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {
@@ -4488,6 +4608,14 @@ export interface components {
             affectedDocumentCount: number;
             /** @description Зміни з класифікацією за ризиком (`ФВ-7.3`). */
             changes: components["schemas"]["TemplateChangeDto"][];
+        };
+        /** @description Створений шаблон. */
+        TemplateIdResponse: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            templateId: number;
         };
         /** @description Рядок у СТРУКТУРІ шаблону — опис, а не дані. */
         TemplateRowDto: {
@@ -4622,6 +4750,14 @@ export interface components {
              */
             offsetToBase: number;
         };
+        /** @description Створений користувач. */
+        UserIdResponse: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            userId: number;
+        };
         /** @description Обліковий запис у переліку. */
         UserView: {
             /** @description Ім'я для показу. */
@@ -4675,6 +4811,14 @@ export interface components {
              * @description Період, за який виконано перевірку.
              */
             periodKey: number;
+        };
+        /** @description Створена версія шаблону. */
+        VersionIdResponse: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            versionId: number;
         };
     };
     responses: never;

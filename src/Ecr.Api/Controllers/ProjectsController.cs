@@ -39,7 +39,7 @@ public sealed class ProjectsController(
     /// майданчика, і зміна поясу заднім числом зсунула б уже подану звітність.
     /// </remarks>
     [HttpPost]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.ProjectIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create([FromBody] CreateProjectRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -60,7 +60,7 @@ public sealed class ProjectsController(
                 ct)
             .ConfigureAwait(false);
 
-        return Created($"/api/v1/projects/{projectId}", new { projectId });
+        return Created($"/api/v1/projects/{projectId}", new Contracts.ProjectIdResponse(projectId));
     }
 
     /// <summary>
@@ -99,14 +99,14 @@ public sealed class ProjectsController(
 
     /// <summary>Клонує проєкт разом із налаштуваннями. Право <c>Project.Manage</c>.</summary>
     [HttpPost("{id:int}/clone")]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.ProjectIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Clone(
         int id, [FromBody] CloneProjectRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var projectId = await cloneProject.HandleAsync(id, request.Code, ct).ConfigureAwait(false);
-        return Created($"/api/v1/projects/{projectId}", new { projectId });
+        return Created($"/api/v1/projects/{projectId}", new Contracts.ProjectIdResponse(projectId));
     }
 
     /// <summary>

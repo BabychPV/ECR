@@ -62,7 +62,7 @@ public sealed class DocumentsController(
 
     /// <summary>Створює документ. Право <c>Document.Create</c>.</summary>
     [HttpPost]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    [ProducesResponseType<Contracts.DocumentIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Create([FromBody] CreateDocumentRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -71,7 +71,7 @@ public sealed class DocumentsController(
             .HandleAsync(request.ProjectId, request.TemplateVersionId, request.SheetDefIds, ct)
             .ConfigureAwait(false);
 
-        return Created($"/api/v1/documents/{documentId}", new { documentId });
+        return Created($"/api/v1/documents/{documentId}", new Contracts.DocumentIdResponse(documentId));
     }
 
     /// <summary>Документ і його аркуші. Право <c>Document.View</c>.</summary>
@@ -126,7 +126,7 @@ public sealed class DocumentsController(
     /// <summary>Перерахунок документа. Право <c>Calculation.Recalculate</c>.</summary>
     /// <remarks>Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.</remarks>
     [HttpPost("{id:long}/recalculate")]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<Contracts.RecalculationAcceptedResponse>(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> Recalculate(
         long id, [FromBody] DocumentPeriodRequest request, CancellationToken ct)
     {
@@ -137,7 +137,7 @@ public sealed class DocumentsController(
         var periodKey = request.PeriodKey;
         var jobId = await recalculate.HandleAsync(id, PeriodKey.Parse(periodKey), ct).ConfigureAwait(false);
 
-        return Accepted(new { jobId, documentId = id, periodKey });
+        return Accepted(new Contracts.RecalculationAcceptedResponse(jobId, id, periodKey));
     }
 
     /// <summary>Подання аркуша на погодження.</summary>
@@ -207,7 +207,7 @@ public sealed class DocumentsController(
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> Export(long id, [FromBody] ExportRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -223,7 +223,7 @@ public sealed class DocumentsController(
                 ct)
             .ConfigureAwait(false);
 
-        return Accepted(new { jobId });
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
 
     /// <summary>

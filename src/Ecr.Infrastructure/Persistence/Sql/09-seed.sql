@@ -581,7 +581,27 @@ USING (VALUES
     (N'periods.reopen',                  N'en', N'Reopen period', 1),
     (N'periods.reopenHint',              N'en', N'A closed period holds submitted reporting. The reason stays in the audit trail.', 1),
     (N'periods.reopened',                N'en', N'The period is open again.', 1),
-    (N'periods.reopenedUntil',           N'en', N'open until {until}', 1)
+    (N'periods.reopenedUntil',           N'en', N'open until {until}', 1),
+
+    -- Безпека: ролі, користувачі, перегляд чужими правами.
+    (N'security.createRole',             N'en', N'New role', 1),
+    (N'security.roleCreated',            N'en', N'The role has been created. Grants say which projects it opens.', 1),
+    (N'security.roleCode',               N'en', N'Code', 1),
+    (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', 1),
+    (N'security.roleName',               N'en', N'Name', 1),
+    (N'security.permissions',            N'en', N'Permissions', 1),
+    (N'security.permissionsHint',        N'en', N'What the role can do. Which projects it opens is a separate question — see Grants.', 1),
+    (N'security.createUser',             N'en', N'New user', 1),
+    (N'security.userCreated',            N'en', N'The user has been created.', 1),
+    (N'security.kindHint',               N'en', N'A domain account is recognised by its SID; a local one signs in with a password.', 1),
+    (N'security.sid',                    N'en', N'Domain SID', 1),
+    (N'security.sidHint',                N'en', N'The account is recognised by the SID, not by the name: renaming in the directory keeps it working.', 1),
+    (N'security.localHint',              N'en', N'A one-time password is issued by the server and must be changed at first sign-in.', 1),
+    (N'security.simulate',               N'en', N'View as', 1),
+    (N'security.simulateHint',           N'en', N'Read-only, and the session is recorded before any data is shown. Say why.', 1),
+    (N'security.simulationStarted',      N'en', N'You are now viewing with this user''s permissions. Nothing can be changed.', 1),
+    (N'security.simulationEnd',          N'en', N'Stop', 1),
+    (N'security.simulationEnded',        N'en', N'Back to your own permissions.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
