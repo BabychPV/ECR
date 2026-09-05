@@ -89,6 +89,15 @@ if (-not $SkipDeployment) {
     }
 }
 
+if (-not $SkipDeployment) {
+    # ⛔ Останнім кроком і навмисно: це єдина перевірка, яка запускає ЖИВИЙ
+    # процес і проходить шлях користувача цілком. Саме він ламався в семи
+    # місцях і не падав у жодному (`A7-25`…`A7-30`) при 616 зелених тестах.
+    Step 'Наскрізний сценарій' {
+        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke.ps1')
+    }
+}
+
 if (-not $SkipClient) {
     Push-Location $client
     try {

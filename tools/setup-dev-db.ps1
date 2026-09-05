@@ -34,7 +34,12 @@
 param(
     [string] $Server = 'localhost\SQLEXPRESS',
     [string] $Database = 'EcrDev',
-    [int] $Documents = 1
+    [int] $Documents = 1,
+
+    # ⚠ Пароль bootstrap задається ПАРАМЕТРОМ, бо він діє лише на першому
+    # старті (`D-115`): запис уже існує → змінна ігнорується. Скрипт, що
+    # викликає цей, мусить знати той самий пароль, інакше не увійде.
+    [string] $BootstrapPassword = 'Dev-Bootstrap-2026!'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -141,7 +146,7 @@ if ($Documents -gt 0) {
     Write-Host 'Перший старт: seed і bootstrap-адміністратор…'
 
     $env:ECR_ConnectionStrings__Ecr = $connection
-    $env:ECR_Bootstrap__Password = 'Dev-Bootstrap-2026!'
+    $env:ECR_Bootstrap__Password = $BootstrapPassword
     $env:ASPNETCORE_URLS = 'http://localhost:5099'
 
     # ⚠ Шлях береться В ЛАПКИ: у ньому є пробіл («ECR Web»), а Start-Process
@@ -195,6 +200,6 @@ Write-Host "База $Database готова." -ForegroundColor Green
 Write-Host ''
 Write-Host 'Змінні оточення для запуску:'
 Write-Host "  ECR_ConnectionStrings__Ecr = $connection"
-Write-Host '  ECR_Bootstrap__Password    = Dev-Bootstrap-2026!'
+Write-Host "  ECR_Bootstrap__Password    = $BootstrapPassword"
 Write-Host ''
-Write-Host 'Вхід: bootstrap / Dev-Bootstrap-2026! (пароль треба змінити при першому вході).'
+Write-Host "Вхід: bootstrap / $BootstrapPassword (пароль треба змінити при першому вході)."
