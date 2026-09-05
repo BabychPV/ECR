@@ -66,7 +66,23 @@ public sealed class GetTableSliceTests
         Denies = new HashSet<string>()
     };
 
-    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, _access);
+    /// <summary>
+    /// Довідник одиниць для зрізу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній навмисно: ці тести не про одиниці, і колонка без
+    /// одиниці має віддавати `null`, а не падати. Заповнений довідник
+    /// тут зробив би фікстуру обізнанішою за перевірку.
+    /// </remarks>
+    private static IUnitCatalog Units()
+    {
+        var catalogue = NSubstitute.Substitute.For<IUnitCatalog>();
+        catalogue.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
+        return catalogue;
+    }
+
+    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, Units(), _access);
 
     private void Cells(params CellRecord[] records)
         => _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(records);

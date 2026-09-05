@@ -11,6 +11,7 @@ import type {
   VersionIdResponse,
 } from '@/api/types';
 import { PresentationEditor } from '@/features/templates/PresentationEditor';
+import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -145,6 +146,11 @@ export function TemplateVersionPage(): JSX.Element {
             <Text size="xs" c="dimmed">
               r{version.presentationRevision}
             </Text>
+            {/* ⚠ Порівняння версій доступне за правом ПЕРЕГЛЯДУ: питання
+                «що зміниться» законне й для того, хто нічого не править —
+                саме з нього починається рішення про міграцію. */}
+            {can(session.data, 'Template.View') && <VersionDiff templateVersionId={id} />}
+
             {/* ⛔ Клон — єдиний спосіб змінити структуру після публікації
                 (`ФВ-7.1`). Кнопка є завжди, коли є право правити шаблони:
                 клонувати чернетку теж законно. */}

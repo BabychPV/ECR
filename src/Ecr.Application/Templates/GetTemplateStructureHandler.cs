@@ -11,7 +11,7 @@ namespace Ecr.Application.Templates;
 /// Ключ `v{id}:r{rev}` (ФВ-2.5) робить інвалідацію непотрібною: інша
 /// ревізія — інший ключ.
 /// </summary>
-public sealed class GetTemplateStructureHandler(IMetadataCache metadata)
+public sealed class GetTemplateStructureHandler(IMetadataCache metadata, IUnitCatalog units)
 {
     /// <summary>Повертає структуру версії.</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>
@@ -24,6 +24,12 @@ public sealed class GetTemplateStructureHandler(IMetadataCache metadata)
         // запиту ще до того, як почнеться читання даних.
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
+        // ⛔ Одиниці розв'язуються і тут: конфігуратор без позначень
+        // показував би «тип: Decimal» і жодної підказки, у чому саме
+        // вимірюється колонка (`ФВ-16.1`).
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        var symbolById = catalogue.Units.Values.ToDictionary(u => u.Id, u => u.Code);
+
         var sheets = snapshot.Sheets
             .OrderBy(s => s.Ordinal)
             .Select(sheet => new SheetDto(
@@ -31,21 +37,21 @@ public sealed class GetTemplateStructureHandler(IMetadataCache metadata)
                 sheet.Code,
                 sheet.NameL10n,
                 sheet.Ordinal,
-                [.. sheet.Tables.OrderBy(t => t.Ordinal).Select(Table)]))
+                [.. sheet.Tables.OrderBy(t => t.Ordinal).Select(table => Table(table, symbolById))]))
             .ToList();
 
         return new TemplateStructureDto(
             snapshot.TemplateVersionId, snapshot.PresentationRevision, sheets);
     }
 
-    private static TableDto Table(TableDef table)
+    private static TableDto Table(TableDef table, IReadOnlyDictionary<int, string> symbols)
         => new(
             table.Id,
             table.Code,
             table.LayoutKind,
             table.RowMode,
             table.MaxDynamicRows,
-            [.. table.Columns.OrderBy(c => c.Ordinal).Select(Column)],
+            [.. table.Columns.OrderBy(c => c.Ordinal).Select(c => Column(c, symbols))],
             [.. RowsOf(table)]);
 
     /// <summary>Рядки таблиці з розгорнутою ієрархією за ключами.</summary>
@@ -55,7 +61,7 @@ public sealed class GetTemplateStructureHandler(IMetadataCache metadata)
         return table.Rows.OrderBy(r => r.Ordinal).Select(r => Row(r, keysById));
     }
 
-    private static TemplateColumnDto Column(ColumnDef column)
+    private static TemplateColumnDto Column(ColumnDef column, IReadOnlyDictionary<int, string> symbols)
         => new(
             column.Id,
             column.Code,
@@ -70,7 +76,7 @@ public sealed class GetTemplateStructureHandler(IMetadataCache metadata)
             column.IsRequired,
             column.IsHidden,
             column.DisplayFormat,
-            UnitSymbol: null);
+            column.UnitId is { } unitId && symbols.TryGetValue(unitId, out var symbol) ? symbol : null);
 
     private static TemplateRowDto Row(RowDef row, Dictionary<int, string> keysById)
         => new(

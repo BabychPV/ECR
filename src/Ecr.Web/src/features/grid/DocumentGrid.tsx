@@ -513,7 +513,14 @@ function gridColumns(
 ): ColumnRegular[] {
   return slice.columns.map((column) => ({
     prop: column.code,
-    name: column.header,
+
+    // ⛔ Одиниця — В ЗАГОЛОВКУ, а не в підказці. Оператор дивиться на
+    // числа, а не на підказки, і «12» без одиниці — це або 12 кілограмів,
+    // або 12 тонн. Різниця в тисячу разів, і помічає її регулятор.
+    //
+    // ⚠ Поле приходило порожнім завжди: обидва обробники сервера віддавали
+    // `UnitSymbol: null` (`A7-47`). Тепер воно розв'язується з довідника.
+    name: column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`,
 
     // Збережена ширина цієї колонки для цього робочого місця (ФВ-14.29).
     size: widths[column.code] ?? DefaultColumnWidth,

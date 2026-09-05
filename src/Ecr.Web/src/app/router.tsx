@@ -50,6 +50,12 @@ const JobsPage = lazy(async () => ({ default: (await import('@/pages/admin/JobsP
 const SnapshotsPage = lazy(async () => ({
   default: (await import('@/pages/admin/SnapshotsPage')).SnapshotsPage,
 }));
+const AuditPage = lazy(async () => ({
+  default: (await import('@/pages/admin/AuditPage')).AuditPage,
+}));
+const UnitsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/UnitsPage')).UnitsPage,
+}));
 const UiStringsPage = lazy(async () => ({
   default: (await import('@/pages/admin/UiStringsPage')).UiStringsPage,
 }));
@@ -129,6 +135,8 @@ export const router = createBrowserRouter([
       { path: 'admin/sources', element: <SourcesPage /> },
       { path: 'admin/jobs', element: <JobsPage /> },
       { path: 'admin/snapshots', element: <SnapshotsPage /> },
+      { path: 'admin/audit', element: <AuditPage /> },
+      { path: 'admin/units', element: <UnitsPage /> },
       { path: 'admin/ui-strings', element: <UiStringsPage /> },
       { path: 'admin/health', element: <HealthPage /> },
     ],

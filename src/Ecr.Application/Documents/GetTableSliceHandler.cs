@@ -12,6 +12,7 @@ public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
     IMetadataCache metadata,
+    IUnitCatalog units,
     IAccessDecisionService access)
 {
     /// <summary>Читає зріз.</summary>
@@ -44,13 +45,27 @@ public sealed class GetTableSliceHandler(
         var orphans = await rowStore.GetOrphanFlagsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                     .ConfigureAwait(false);
 
+        // ⛔ Позначення одиниці РОЗВ'ЯЗУЄТЬСЯ, а не лишається порожнім.
+        // Тут стояло `UnitSymbol: null` — і поле, оголошене в контракті,
+        // ніколи не несло значення. Наслідок видно на кожному екрані:
+        // оператор бачить «12» і не знає, кілограми це чи тонни, а вся
+        // система побудована навколо того, що в кожного числа є одиниця
+        // (`ФВ-16.1`). Тонни під виглядом кілограмів — помилка в тисячу
+        // разів, і помічає її регулятор.
+        //
+        // ⚠ Довідник читається ОДИН раз на зріз і кешується сховищем:
+        // запит на колонку зробив би шістдесят походів у базу там, де
+        // бюджет усього зрізу — 1.5 с.
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        var symbolById = catalogue.Units.Values.ToDictionary(u => u.Id, u => u.Code);
+
         var columns = table.Columns
             .Where(c => !c.IsDeleted)
             .OrderBy(c => c.Ordinal)
             .Select(c => new ColumnDto(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
                 c.Ordinal, c.IsReadOnly, c.IsRequired, c.DisplayFormat, c.DefaultValue,
-                c.LookupRegistryDefId, c.UnitId, UnitSymbol: null,
+                c.LookupRegistryDefId, c.UnitId, SymbolOf(symbolById, c.UnitId),
                 c.Precision, c.Scale))
             .ToList();
 
@@ -98,6 +113,16 @@ public sealed class GetTableSliceHandler(
 
         return new TableSliceDto(tableInstanceId, instance.PeriodKey, columns, rows, permissions);
     }
+
+    /// <summary>Позначення одиниці колонки; <c>null</c> — колонка безрозмірна.</summary>
+    /// <remarks>
+    /// ⚠ Невідомий у довіднику ідентифікатор дає <c>null</c>, а не порожній
+    /// рядок: «одиниці немає» і «одиниця є, але ми її не знайшли» — різні
+    /// стани, і другий має бути видно як відсутність підпису, а не як
+    /// безрозмірну величину.
+    /// </remarks>
+    private static string? SymbolOf(Dictionary<int, string> symbols, int? unitId)
+        => unitId is { } id && symbols.TryGetValue(id, out var code) ? code : null;
 
     /// <summary>
     /// Розгортає типізоване значення в те, що піде клієнтові.

@@ -279,6 +279,9 @@ export type CloneVersionRequest = Schemas['CloneVersionRequest'];
 /** Виведення версії шаблону з обігу (`ФВ-7.8`). */
 export type DeprecateVersionRequest = Schemas['DeprecateVersionRequest'];
 
+/** Різниця двох версій шаблону разом із кількістю зачеплених документів. */
+export type TemplateDiffDto = Schemas['TemplateDiffDto'];
+
 /** Прогін методології без запису результату (`ФВ-13.5`). */
 export type SimulateMethodologyRequest = Schemas['SimulateMethodologyRequest'];
 
@@ -302,6 +305,21 @@ export type AffectedRowsResponse = Schemas['AffectedRowsResponse'];
 
 /** Мова інтерфейсу з реєстру (`ФВ-14.9`). */
 export type LanguageDto = Schemas['LanguageDto'];
+
+/** Одиниця вимірювання з довідника. */
+export type UnitRef = Schemas['UnitRef'];
+
+/** Запит на конверсію значення між одиницями. */
+export type ConvertUnitRequest = Schemas['ConvertUnitRequest'];
+
+/** Результат конверсії. */
+export type ConvertUnitResponse = Schemas['ConvertUnitResponse'];
+
+/** Зміна комірки в журналі аудиту. */
+export type CellChangeView = Schemas['CellChangeView'];
+
+/** Сторінка журналу змін. */
+export type CellChangePage = Schemas['PagedResultOfCellChangeView'];
 
 /**
  * Колонка у структурі шаблону — з **усіма** мовами заголовка.
