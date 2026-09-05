@@ -1,4 +1,4 @@
-import type { paths } from './schema';
+﻿import type { paths } from './schema';
 
 /**
  * Шляхи OpenAPI — основа типізованого клієнта.
@@ -94,6 +94,31 @@ export function setLoginRedirect(handler: (from: string) => void): void {
  * не пов'язує це з тим, що його сесія закінчилася.
  */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetchRaw(path, init, false);
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+/**
+ * Спільна частина: кореляція, cookie, розбір відмови.
+ *
+ * ⚠ Виділена не заради стислості, а тому, що інакше умовний запит довелося б
+ * писати повз неї — і він єдиний з усього клієнта не перенаправляв би на вхід
+ * при `401` і не мав би кореляції в журналі.
+ *
+ * ⛔ `allowNotModified` за замовчуванням НЕ вмикається: `304` без заголовка
+ * `If-None-Match` — це або кеш проксі, або помилка викликача, і мовчазне
+ * «даних немає» тут гірше за гучну відмову.
+ */
+async function apiFetchRaw(
+  path: string,
+  init: RequestInit | undefined,
+  allowNotModified: boolean,
+): Promise<Response> {
   const correlationId = newCorrelationId();
 
   const headers = new Headers(init?.headers);
@@ -114,15 +139,48 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     });
   }
 
+  if (allowNotModified && response.status === 304) {
+    return response;
+  }
+
   if (!response.ok) {
     throw new EcrApiError(await problemOf(response, correlationId));
   }
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
+  return response;
+}
 
-  return (await response.json()) as T;
+/** Відповідь умовного запиту: тіло і `ETag`, яким його позначив сервер. */
+export interface Conditional<T> {
+  body: T;
+  etag: string | null;
+}
+
+/**
+ * Умовний запит: `If-None-Match` і `304` як «не змінилося».
+ *
+ * ⛔ Окремий метод, а не гілка всередині `apiFetch`. `304` — не помилка і не
+ * дані: для `apiFetch` він `!response.ok`, тобто перетворився б на
+ * `EcrApiError('HTTP-304')`, і екран показав би червоне там, де сервер сказав
+ * «усе гаразд, у тебе вже є». Тип `| null` змушує викликача обробити цей
+ * випадок, а не дізнатися про нього з журналу.
+ *
+ * ⚠ Написаний тому, що обіцянка вже була: коментар у каталозі рядків описував
+ * `If-None-Match` і `304`, сервер їх реалізував і віддавав `ETag` — а клієнт
+ * жодного разу заголовка не надіслав. Кожне відкриття сторінки тягнуло повний
+ * каталог, і помітити це можна було лише в мережевій панелі.
+ */
+export async function apiFetchIfChanged<T>(
+  path: string,
+  etag: string | null,
+): Promise<Conditional<T> | null> {
+  const init: RequestInit = etag === null ? {} : { headers: { 'If-None-Match': etag } };
+
+  const response = await apiFetchRaw(path, init, true);
+
+  if (response.status === 304) return null;
+
+  return { body: (await response.json()) as T, etag: response.headers.get('ETag') };
 }
 
 /**

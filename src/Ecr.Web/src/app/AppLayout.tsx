@@ -1,9 +1,12 @@
-import { useEffect, type JSX } from 'react';
-import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Text } from '@mantine/core';
+﻿import { Suspense, useEffect, type JSX } from 'react';
+import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { can, useSession } from '@/shared/session/useSession';
 import { language, loadCatalog, t } from '@/shared/i18n';
+import { useCatalog } from '@/shared/i18n/useCatalog';
+import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
+import { UserMenu } from '@/shared/ui/UserMenu';
 
 /** Пункт навігації разом із правом, яке його відкриває. */
 interface NavItem {
@@ -36,6 +39,9 @@ export function AppLayout(): JSX.Element {
   const session = useSession();
   const location = useLocation();
 
+  // Перемальовує каркас і сторінку, коли приватний каталог доїхав.
+  useCatalog();
+
   const me = session.data;
 
   // Приватний каталог рядків тягнеться після входу і мовою профілю (D-114).
@@ -63,10 +69,19 @@ export function AppLayout(): JSX.Element {
       navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !opened } }}
       padding="md"
     >
+      {/* Одна область оголошень на весь застосунок (ФВ-14.19). */}
+      <RouteAnnouncer />
+
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
           <Group gap="sm">
-            <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+            <Burger
+              opened={opened}
+              onClick={toggle}
+              hiddenFrom="sm"
+              size="sm"
+              aria-label={t('nav.menu')}
+            />
             <Text fw={700}>ECR</Text>
           </Group>
 
@@ -79,7 +94,7 @@ export function AppLayout(): JSX.Element {
                 {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
               </Badge>
             )}
-            <Text size="sm">{me.userName ?? '—'}</Text>
+            <UserMenu userName={me.userName ?? '—'} />
           </Group>
         </Group>
       </AppShell.Header>
@@ -103,8 +118,38 @@ export function AppLayout(): JSX.Element {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Outlet />
+        {/*
+         * ⚠ Власна межа очікування, а не запасна. Без неї застосунок НЕ
+         * падає — `RouterProvider` має власну, — але її запасним вмістом є
+         * порожнеча: при завантаженні чанка маршруту область змісту просто
+         * зникає. Перевірено прибиранням цієї межі: сторінка рендериться, і
+         * саме тому дефект такого роду не помітили б у тесті.
+         *
+         * ⚠ Межа стоїть НАВКОЛО `<Outlet/>`, а не навколо всього застосунку:
+         * інакше кожен перехід гасив би шапку й навігацію разом зі змістом, і
+         * екран блимав би цілком там, де змінюється сама лише середина.
+         */}
+        <Suspense fallback={<RouteFallback />}>
+          <Outlet />
+        </Suspense>
       </AppShell.Main>
     </AppShell>
+  );
+}
+
+/**
+ * Заглушка на час завантаження чанка маршруту.
+ *
+ * ⚠ Скелет, а не спінер (`ФВ-14.25`): майже кожен екран системи — це заголовок
+ * і таблиця під ним, і показати саме цю форму чесніше, ніж крутити коло.
+ */
+function RouteFallback(): JSX.Element {
+  return (
+    <Stack gap="xs" aria-busy="true">
+      <Skeleton height={28} width="30%" radius="sm" />
+      <Skeleton height={24} radius="sm" />
+      <Skeleton height={24} radius="sm" />
+      <Skeleton height={24} radius="sm" />
+    </Stack>
   );
 }

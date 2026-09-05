@@ -1,4 +1,5 @@
-import { lazy } from 'react';
+﻿import { Suspense, lazy, type JSX } from 'react';
+import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './AppLayout';
 
@@ -48,8 +49,33 @@ const HealthPage = lazy(async () => ({
   default: (await import('@/pages/admin/HealthPage')).HealthPage,
 }));
 
+/**
+ * Межа очікування для маршрутів поза каркасом.
+ *
+ * ⚠ Сторінка входу рендериться поза `AppLayout`, тобто поза його `<Suspense>`.
+ * Власна межа тут не рятує від аварії — `RouterProvider` має свою, — вона
+ * задає, ЩО видно, поки вантажиться чанк. Без неї це порожній білий екран, а
+ * перше, що бачить кожен користувач системи, — саме ця сторінка.
+ *
+ * ⚠ Тут спінер, а не скелет: форма входу коротка й з'являється миттєво, а
+ * скелет із трьох смуг на весь екран виглядав би як зламана сторінка.
+ */
+function Chunk({ children }: { children: JSX.Element }): JSX.Element {
+  return (
+    <Suspense
+      fallback={
+        <Center h="100vh">
+          <Loader size="sm" />
+        </Center>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
 export const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
+  { path: '/login', element: <Chunk><LoginPage /></Chunk> },
   {
     path: '/',
     element: <AppLayout />,

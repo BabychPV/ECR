@@ -1,10 +1,11 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Button, Card, Center, Divider, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { loadCatalog, preferredLanguage, t } from '@/shared/i18n';
+import { useCatalog } from '@/shared/i18n/useCatalog';
 import { useEffect } from 'react';
 
 /**
@@ -20,6 +21,9 @@ export function LoginPage(): JSX.Element {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+
+  // Перемальовує сторінку, коли каталог доїхав (інакше видно самі ключі).
+  useCatalog();
 
   // Публічний каталог рядків тягнеться ДО входу: сторінка входу не може
   // показувати ключі замість написів (D-114).

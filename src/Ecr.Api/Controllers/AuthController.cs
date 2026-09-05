@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Security.Claims;
 using Ecr.Api.Auth;
 using Ecr.Application.Security;
@@ -69,6 +69,7 @@ public sealed class AuthController(
     /// <param name="ct">Токен скасування.</param>
     [HttpPost("logout")]
     [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Logout(CancellationToken ct)
     {
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)

@@ -1,4 +1,4 @@
-import { apiFetch } from '@/api/client';
+﻿import { apiFetchIfChanged } from '@/api/client';
 import type { UiStringCatalog } from '@/api/types';
 
 /**
@@ -30,6 +30,49 @@ export const DefaultLanguage: Language = 'en';
  */
 type Catalog = UiStringCatalog;
 
+/**
+ * Підписка на зміну каталогу.
+ *
+ * ⛔ Без неї завантажений каталог не потрапляє на екран. Каталог живе в
+ * модулі, а не в стані React: `loadCatalog` наповнює `loaded`, і React про це
+ * не дізнається ніколи — компонент лишається з тим, що встиг прочитати під час
+ * першого рендера, тобто **із самими ключами**.
+ *
+ * Дефект був живий і видимий кожному: сторінка входу показувала `login.title`
+ * і `login.submit`, доки користувач не натискав клавішу в полі — і саме тоді
+ * `useState` давав перерендер, а написи «раптом» з'являлися. Знайдено не
+ * тестом, а відкриттям сторінки в браузері: жоден компонентний тест цього не
+ * ловить, бо всі вони підставляють рядки самі.
+ */
+const catalogListeners = new Set<() => void>();
+let catalogVersion = 0;
+
+/** Позначає, що вміст каталогу змінився. */
+function bumpCatalog(): void {
+  catalogVersion += 1;
+  for (const listener of catalogListeners) listener();
+}
+
+/** Підписує слухача на зміни каталогу; повертає відписку. */
+export function subscribeCatalog(listener: () => void): () => void {
+  catalogListeners.add(listener);
+
+  return () => {
+    catalogListeners.delete(listener);
+  };
+}
+
+/**
+ * Версія каталогу.
+ *
+ * ⚠ Число, а не сам каталог: `useSyncExternalStore` порівнює знімок за
+ * посиланням, і повернення об'єкта, що збирається наново, дало б нескінченний
+ * цикл рендерів.
+ */
+export function catalogSnapshot(): number {
+  return catalogVersion;
+}
+
 const loaded = new Map<string, Catalog>();
 let current: Language = DefaultLanguage;
 
@@ -42,6 +85,17 @@ let current: Language = DefaultLanguage;
  */
 function storageKey(language: Language, scope: Scope, revision: string | number): string {
   return `uiStrings:${language}:${scope}:${revision}`;
+}
+
+/**
+ * Ключ збереженого `ETag`.
+ *
+ * ⚠ Окремо від ключа з ревізією: `ETag` — це рядок сервера
+ * (`"public-en-1"`), і збирати його на клієнті з ревізії означало б завести
+ * друге джерело правди про формат, який сервер може змінити.
+ */
+function etagKey(language: Language, scope: Scope): string {
+  return `uiStrings:${language}:${scope}:etag`;
 }
 
 /** Мова, обрана зараз. */
@@ -69,6 +123,7 @@ export function preferredLanguage(): Language {
 export function setLanguage(value: Language): void {
   current = value;
   safeSet('uiLanguage', value);
+  bumpCatalog();
 }
 
 /**
@@ -85,16 +140,30 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
   const cached = readCached(lang, scope);
   if (cached !== null) {
     loaded.set(cacheKey, cached);
+    bumpCatalog();
   }
 
   try {
-    const fresh = await apiFetch<Catalog>(
+    // ⚠ Умовний запит іде ЛИШЕ коли є що лишити при `304`. Без збереженого
+    // каталогу відповідь «не змінилося» означала б порожній інтерфейс — тобто
+    // рівно ту помилку, від якої кеш і рятує.
+    const fresh = await apiFetchIfChanged<Catalog>(
       `/api/v1/ui-strings/${encodeURIComponent(lang)}?scope=${scope}`,
+      cached === null ? null : safeGet(etagKey(lang, scope)),
     );
 
-    loaded.set(cacheKey, fresh);
-    safeSet(storageKey(lang, scope, fresh.revision), JSON.stringify(fresh));
-    safeSet(`uiStrings:${lang}:${scope}:revision`, String(fresh.revision));
+    if (fresh === null) {
+      // `304`: сервер підтвердив, що збережене — чинне.
+      current = lang;
+      bumpCatalog();
+      return;
+    }
+
+    loaded.set(cacheKey, fresh.body);
+    safeSet(storageKey(lang, scope, fresh.body.revision), JSON.stringify(fresh.body));
+    safeSet(`uiStrings:${lang}:${scope}:revision`, String(fresh.body.revision));
+    if (fresh.etag !== null) safeSet(etagKey(lang, scope), fresh.etag);
+    bumpCatalog();
   } catch {
     // ⚠ Недоступний каталог не робить застосунок непридатним: показуємо
     // збережений, а якщо його немає — самі ключі. Порожній екран був би
@@ -105,6 +174,7 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
   }
 
   current = lang;
+  bumpCatalog();
 }
 
 /**

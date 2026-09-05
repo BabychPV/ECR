@@ -1,4 +1,4 @@
--- ⚠ SET-опції задаються ЯВНО і першими.
+﻿-- ⚠ SET-опції задаються ЯВНО і першими.
 -- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`, а `SqlClient` — `ON`.
 -- Через це скрипт, який проходить у тестах (їх виконує SqlClient), падає в
 -- розгортанні (його виконує DBA через sqlcmd, `09-commands.md` §3) на будь-якій
@@ -300,6 +300,9 @@ USING (VALUES
     (N'common.cancel',     N'en', N'Cancel', 0),
     (N'common.retry',      N'en', N'Retry', 0),
     (N'common.loading',    N'en', N'Loading...', 0),
+    (N'state.errorTitle',                N'en', N'The request failed', 0),
+    (N'state.errorUnknown',              N'en', N'An unexpected error occurred. Retry; if it repeats, quote the code below to support.', 0),
+    (N'state.emptyTitle',                N'en', N'Nothing here yet', 0),
     (N'login.title',       N'en', N'Environmental Compliance Reporting', 0),
     (N'login.windows',     N'en', N'Sign in with Windows', 0),
     (N'login.or',          N'en', N'or', 0),
@@ -315,6 +318,7 @@ USING (VALUES
 
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),
+    (N'nav.menu',                        N'en', N'Menu', 1),
     (N'nav.documents',                   N'en', N'Documents', 1),
     (N'nav.templates',                   N'en', N'Templates', 1),
     (N'nav.registries',                  N'en', N'Registries', 1),
@@ -450,7 +454,15 @@ USING (VALUES
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),
     (N'health.title',                    N'en', N'Health', 1),
-    (N'health.database',                 N'en', N'Database', 1)
+    (N'health.database',                 N'en', N'Database', 1),
+    (N'profile.theme',                   N'en', N'Theme', 1),
+    (N'profile.themeAuto',               N'en', N'System', 1),
+    (N'profile.themeLight',              N'en', N'Light', 1),
+    (N'profile.themeDark',               N'en', N'Dark', 1),
+    (N'profile.density',                 N'en', N'Row height', 1),
+    (N'profile.densityCompact',          N'en', N'Compact', 1),
+    (N'profile.densityComfortable',      N'en', N'Comfortable', 1),
+    (N'profile.logout',                  N'en', N'Sign out', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

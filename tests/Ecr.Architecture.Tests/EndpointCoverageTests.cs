@@ -1,4 +1,4 @@
-// tests/Ecr.Architecture.Tests/EndpointCoverageTests.cs
+﻿// tests/Ecr.Architecture.Tests/EndpointCoverageTests.cs
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Ecr.TestKit;
@@ -339,6 +339,56 @@ public sealed partial class EndpointCoverageTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_відповідь_без_тіла_оголошена_своїм_кодом()
+    {
+        // ⛔ Десятий сторож. Дія повертає `NoContent()` (204) або `Accepted()`
+        // (202), але оголошує лише те, що вивів генератор за замовчуванням, —
+        // `200`. Схема OpenAPI при цьому виглядає цілком здорово, і саме тому
+        // розбіжність не видно: клієнт бачить «200 без тіла» і робить
+        // `response.json()` над порожньою відповіддю.
+        //
+        // ⚠ Знайдено не міркуванням, а спробою вийти з системи: `POST
+        // /api/v1/logout` повертав 204, а `schema.d.ts` обіцяв 200. Runtime
+        // рятувала окрема гілка `status === 204` в `apiFetch` — тобто клієнт
+        // уже не вірив власному контракту.
+        //
+        // ⚠ Розбір ПОМЕТОДНИЙ, а не підрахунком по файлу: контролер із двома
+        // діями, де одна оголошує 204 двічі, а друга не оголошує зовсім, дав
+        // би однакові суми — і сторож був би зеленим на дефекті.
+        var directory = Path.Combine(SolutionRoot(), "src", "Ecr.Api", "Controllers");
+
+        var offenders = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.cs"))
+        {
+            var text = WithoutComments(File.ReadAllText(file));
+
+            foreach (var action in ActionBlockRegex.Split(text).Skip(1))
+            {
+                var name = MethodNameRegex.Match(action) is { Success: true } m
+                    ? m.Groups[1].Value
+                    : "?";
+
+                if (action.Contains("return NoContent(", StringComparison.Ordinal)
+                    && !action.Contains("Status204NoContent", StringComparison.Ordinal))
+                {
+                    offenders.Add($"{Path.GetFileName(file)}.{name}: 204 не оголошено");
+                }
+
+                if (action.Contains("return Accepted(", StringComparison.Ordinal)
+                    && !action.Contains("Status202Accepted", StringComparison.Ordinal))
+                {
+                    offenders.Add($"{Path.GetFileName(file)}.{name}: 202 не оголошено");
+                }
+            }
+        }
+
+        Assert.Empty(offenders);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожен_порт_застосунку_названий_у_контракті()
@@ -400,6 +450,20 @@ public sealed partial class EndpointCoverageTests
 
         return BraceRegex.Replace(withoutInterpolation, "{p}");
     }
+
+    /// <summary>Початок дії контролера — атрибут маршруту.</summary>
+    /// <remarks>
+    /// Використовується для РОЗБИТТЯ файлу на дії: усе від одного
+    /// <c>[HttpGet]</c> до наступного належить одній дії разом із її
+    /// атрибутами. Простіший поділ по <c>public</c> розірвав би дію навпіл —
+    /// атрибути лишилися б у попередньому блоці.
+    /// </remarks>
+    [GeneratedRegex(@"(?=\n\s*\[Http(?:Get|Post|Put|Delete|Patch))")]
+    private static partial Regex ActionBlockRegex { get; }
+
+    /// <summary>Назва методу дії — щоб у звіті було видно, де саме дефект.</summary>
+    [GeneratedRegex(@"public\s+(?:async\s+)?[\w<>\[\], ?]+\s+(\w+)\s*\(")]
+    private static partial Regex MethodNameRegex { get; }
 
     [GeneratedRegex(@"//[^
 ]*")]

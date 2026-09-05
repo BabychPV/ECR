@@ -1,0 +1,122 @@
+import { createTheme, type MantineColorsTuple } from '@mantine/core';
+
+/**
+ * Основний колір.
+ *
+ * ⚠ НЕЙТРАЛЬНИЙ синій — це безпечний дефолт, а не рішення про фірмовий стиль:
+ * кольорів бренду NCOC у нас немає, і вигадувати їх не можна. Коли відповідь
+ * буде — міняється ЦЕЙ кортеж і більше нічого в усьому застосунку. Саме заради
+ * цього діє `ФВ-14.11`.
+ */
+const brand: MantineColorsTuple = [
+  '#eef3ff',
+  '#dce4f5',
+  '#b9c7e2',
+  '#94a8d0',
+  '#748dc1',
+  '#5f7cb8',
+  '#5474b4',
+  '#44639f',
+  '#39588f',
+  '#2d4b81',
+];
+
+/**
+ * Стани комірки: колір і ФОРМА (`ФВ-14.18`, `D-128`).
+ *
+ * ⛔ Колір тут — **другий** носій, не перший. Оператор із дальтонізмом (це ~8 %
+ * чоловіків) не розрізнить станів за самим фоном, а решта не розрізнить їх на
+ * поганому моніторі при бічному світлі. Тому кожен стан має ще й межу власного
+ * стилю, а найважчі — маркер.
+ *
+ * ⚠ Значення визначені для ОБОХ тем окремо, а не «інверсією»: `#fff8e1` у
+ * темній темі світиться, а не позначає.
+ *
+ * ⚠ Це не просто константи: `border` навмисно контрастніший за `light`/`dark`,
+ * бо саме він несе інформацію, коли фон зливається.
+ */
+export const cellState = {
+  /** Незбережена правка. */
+  dirty: { light: '#fff8e1', dark: '#3a3320', border: '#f0b429', marker: 'corner' },
+
+  /** Лише читання за описом шаблону або правами. */
+  readOnly: { light: '#f5f5f5', dark: '#2a2a2a', border: '#9e9e9e', marker: 'hatch' },
+
+  /** Рахує система: значення зміниться при наступному перерахунку. */
+  calculated: { light: '#eef6ff', dark: '#1e2a38', border: '#4a90d9', marker: 'formula' },
+
+  /** Рядок утратив посилання на реєстр (`ФВ-8.13`). */
+  orphaned: { light: '#fdecea', dark: '#3a2422', border: '#d93025', marker: 'warning' },
+
+  /** Значення округлене при вставці (`D-116`). */
+  rounded: { light: '#f3e8fd', dark: '#2e2438', border: '#8e5fd9', marker: 'dot' },
+} as const;
+
+/** Назва стану комірки. */
+export type CellStateName = keyof typeof cellState;
+
+/**
+ * Тема — **єдине джерело** всіх візуальних значень (`ФВ-14.11`, `D-126`).
+ *
+ * ⛔ У компонентах не буває жодного літерала: ні `#1a73e8`, ні `padding: 12px`,
+ * ні `font-size: 13px`. Причина не в чистоті: п'ятнадцять областей писалися в
+ * різний час, і без єдиного джерела вони розійдуться на п'ять відтінків сірого,
+ * а привести їх назад буде дорожче, ніж написати заново.
+ */
+export const theme = createTheme({
+  colors: { brand },
+  primaryColor: 'brand',
+  primaryShade: { light: 6, dark: 5 },
+
+  /**
+   * Системний стек (`ФВ-14.13`): уже завантажений, рендериться нативно і не
+   * додає жодного кілобайта. Корпоративного шрифту в замовника не питали.
+   */
+  fontFamily: '-apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif',
+  fontFamilyMonospace: '"Cascadia Mono", Consolas, "Courier New", monospace',
+
+  /** Три розміри тексту; основний — `sm` (`ФВ-14.13`). */
+  fontSizes: { xs: '11px', sm: '13px', md: '15px', lg: '17px', xl: '20px' },
+  lineHeights: { xs: '1.3', sm: '1.45', md: '1.5', lg: '1.5', xl: '1.5' },
+
+  /**
+   * Шкала кратна 4 (`ФВ-14.12`). Проміжних значень немає навмисно: око не
+   * бачить різниці між 13 і 14 пікселями, але бачить неузгодженість двох
+   * сусідніх панелей.
+   */
+  spacing: { xs: '4px', sm: '8px', md: '12px', lg: '16px', xl: '24px' },
+
+  radius: { xs: '2px', sm: '3px', md: '4px', lg: '6px', xl: '8px' },
+  defaultRadius: 'sm',
+
+  other: {
+    /**
+     * Рух ≤ 150 мс (`ФВ-14.27`, `D-129`). Довших значень у темі НЕМАЄ, щоб їх
+     * не було й у компонентах: оператор змінює маршрут двісті разів на день, і
+     * 300 мс анімації — це п'ять хвилин очікування за тиждень.
+     */
+    motionFast: '80ms',
+    motionBase: '150ms',
+
+    /**
+     * Дві щільності (`ФВ-14.14`, `D-131`). `compact` за замовчуванням — не
+     * економія, а відповідь на «скільки рядків я бачу без прокручування».
+     */
+    rowHeightCompact: 28,
+    rowHeightComfortable: 36,
+  },
+
+  components: {
+    Button: { defaultProps: { size: 'sm' } },
+    TextInput: { defaultProps: { size: 'sm' } },
+    Select: { defaultProps: { size: 'sm' } },
+    NumberInput: { defaultProps: { size: 'sm' } },
+    Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm' } },
+
+    // ⚠ Тривалість переходу задана ТУТ, а не в кожному діалозі: інакше перший
+    // же новий екран поставить свою.
+    Modal: { defaultProps: { transitionProps: { duration: 150 } } },
+    Drawer: { defaultProps: { transitionProps: { duration: 150 } } },
+    Tooltip: { defaultProps: { transitionProps: { duration: 80 } } },
+  },
+});

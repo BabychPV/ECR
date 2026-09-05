@@ -1,0 +1,81 @@
+/*
+ * ФВ-14.28, D-129. Вимикає рух ПОВНІСТЮ, не послаблює.
+ *
+ * ⛔ Саме вимикає. Для частини людей рух на екрані спричиняє нудоту; вони вже
+ * зробили цю системну налаштування, і наше завдання — не тлумачити її як
+ * «поменше анімації», а виконати.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * ФВ-14.19. Фокус видимий ЗАВЖДИ.
+ *
+ * ⛔ `outline: none` без заміни заборонений. Користувач клавіатури без кільця
+ * фокуса не знає, де він, — а `ФВ-14.4` вимагає повної роботи з клавіатури,
+ * тобто цей стан у нас основний, а не запасний.
+ *
+ * ⚠ `:focus-visible`, а не `:focus`: миша не має малювати кільце на кожному
+ * натисканні, інакше його навчаються ігнорувати.
+ */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--mantine-color-brand-6);
+  outline-offset: 2px;
+}
+
+/*
+ * ⚠ Кільце в темній темі яскравіше: на темному фоні той самий відтінок дає
+ * менший контраст, а `ФВ-14.17` вимагає ≥ 3:1 у КОЖНІЙ темі окремо.
+ */
+:root[data-mantine-color-scheme='dark']
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline-color: var(--mantine-color-brand-4);
+}
+
+/*
+ * ФВ-14.29. Заголовок таблиці й перша колонка закріплені при прокручуванні.
+ *
+ * ⚠ Клас, а не стиль у компоненті: таблиць у системі п'ятнадцять областей, і
+ * закріплення, написане в кожній окремо, розійдеться на другому екрані.
+ */
+.ecr-sticky-head thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--mantine-color-body);
+}
+
+.ecr-sticky-first tbody td:first-child,
+.ecr-sticky-first thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--mantine-color-body);
+}
+
+/* Кут перетину має перекривати обидва напрямки, інакше під ним видно дані. */
+.ecr-sticky-head.ecr-sticky-first thead th:first-child {
+  z-index: 3;
+}
+
+/*
+ * ФВ-14.30. Розмітка не ламається від довжини тексту.
+ *
+ * ⚠ Рядки приходять трьома мовами (`D-95`), і казахська й російська на 20–40 %
+ * довші за англійську. Обрізаємо з підказкою повного значення — фіксованої
+ * ширини в підписів немає.
+ */
+.ecr-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
