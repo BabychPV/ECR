@@ -98,6 +98,48 @@ public sealed class TemplateVersion : Entity<int>
         PresentationRevision = newRevision;
     }
 
+    /// <summary>
+    /// Виводить версію з обігу (<c>ФВ-7.8</c>): відкат без видалення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Версія **не видаляється**. На неї посилаються проєкти, подані форми,
+    /// зрізи звітності й аудит структурних змін; видалення розірвало б цей
+    /// ланцюг, а зміст відкату — «більше не використовувати», а не «стерти
+    /// сліди».
+    ///
+    /// ⛔ Стан <c>Deprecated</c> існував від Етапу 1 і був **недосяжним**:
+    /// <c>IsStructurallyFrozen</c> його враховував, публікація на нього
+    /// посилалася у тексті відмови, а перевести версію в нього не міг ніхто.
+    /// Тобто відкат опублікованої версії був неможливий у принципі.
+    ///
+    /// ⚠ Структурна заморозка ЛИШАЄТЬСЯ: виведена з обігу версія так само
+    /// незмінна. Проєкти, прив'язані до неї, працюють далі — інакше відкат
+    /// зупинив би заповнення форм посеред періоду (<c>ФВ-1.2</c>).
+    /// </remarks>
+    /// <param name="deprecatedByUserId">Хто виводить з обігу.</param>
+    /// <param name="utcNow">Момент операції.</param>
+    /// <exception cref="DomainException">Версія не опублікована.</exception>
+    public void Deprecate(int deprecatedByUserId, DateTime utcNow)
+    {
+        if (Status != TemplateVersionStatus.Published)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Вивести з обігу можна лише опубліковану версію; поточний стан {Status}. " +
+                "Чернетку виводити нема від чого — вона ще нікуди не потрапила.");
+        }
+
+        Status = TemplateVersionStatus.Deprecated;
+        DeprecatedAt = utcNow;
+        DeprecatedByUserId = deprecatedByUserId;
+    }
+
+    /// <summary>Момент виведення з обігу; <c>null</c> — версія в обігу.</summary>
+    public DateTime? DeprecatedAt { get; private set; }
+
+    /// <summary>Хто вивів версію з обігу.</summary>
+    public int? DeprecatedByUserId { get; private set; }
+
     /// <summary>Перевіряє, чи допустима структурна зміна в поточному стані.</summary>
     /// <exception cref="DomainException">Версія структурно заморожена.</exception>
     public void EnsureStructurallyMutable()

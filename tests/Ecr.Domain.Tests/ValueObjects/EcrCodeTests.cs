@@ -33,7 +33,11 @@ public sealed class EcrCodeTests
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Недопустимий_код_відхиляється(string code)
     {
-        Assert.Throws<ArgumentException>(() => EcrCode.Create(code));
+        // ⚠ Доменний виняток, а не `ArgumentException`: конвеєр мапить
+        // перший у 422 з кодом і поясненням, а другий — у 500 «Внутрішня
+        // помилка». Код є першим полем кожної форми створення, і аварія
+        // сервера замість підказки коштувала б дорого (`A7-46`).
+        Assert.Throws<Ecr.Domain.Abstractions.DomainException>(() => EcrCode.Create(code));
 
         // TryCreate не кидає, але й не створює: мовчазного «майже коду» бути не може.
         Assert.False(EcrCode.TryCreate(code, out var notCreated));
@@ -51,6 +55,6 @@ public sealed class EcrCodeTests
         Assert.Equal(exactly64, EcrCode.Create(exactly64).Value);
 
         Assert.Equal(65, tooLong.Length);
-        Assert.Throws<ArgumentException>(() => EcrCode.Create(tooLong));
+        Assert.Throws<Ecr.Domain.Abstractions.DomainException>(() => EcrCode.Create(tooLong));
     }
 }

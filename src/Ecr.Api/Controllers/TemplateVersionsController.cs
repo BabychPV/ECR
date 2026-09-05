@@ -54,6 +54,31 @@ public sealed class TemplateVersionsController(
         return NoContent();
     }
 
+    /// <summary>
+    /// Виводить версію з обігу. Право <c>Template.Publish</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відкат (<c>ФВ-7.8</c>) — це переведення в <c>Deprecated</c>, а НЕ
+    /// видалення: на версію посилаються проєкти, подані форми, зрізи й
+    /// аудит. Стан існував від Етапу 1 і був недосяжний — перевести
+    /// версію в нього не міг ніхто, тобто відкат був неможливий у
+    /// принципі, а єдиним «відкатом» лишалося видалення.
+    /// </remarks>
+    /// <param name="id">Версія.</param>
+    /// <param name="request">Причина відкату.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("deprecate")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Deprecate(
+        int id, [FromBody] DeprecateVersionRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await publish.DeprecateAsync(id, UserId, request.Reason, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
     /// <summary>Diff двох версій. Право <c>Template.View</c>.</summary>
     /// <remarks>Зіставлення за ідентичністю (<c>Code</c>, <c>RowKey</c>), не за позицією.</remarks>
     [HttpGet("diff/{otherId:int}")]
@@ -115,6 +140,14 @@ public sealed class TemplateVersionsController(
         ?? throw new Application.Errors.AccessDeniedException(
             Errors.ErrorCodes.Unauthorized, "Сесія не містить користувача.");
 }
+
+/// <summary>Запит на виведення версії з обігу.</summary>
+/// <param name="Reason">
+/// Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію
+/// більше не використовують» — питання, на яке через рік має бути
+/// відповідь.
+/// </param>
+public sealed record DeprecateVersionRequest(string Reason);
 
 /// <summary>Запит на клонування версії.</summary>
 /// <param name="NewVersion">Номер нової версії.</param>

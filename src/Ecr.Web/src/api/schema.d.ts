@@ -2376,6 +2376,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/deprecate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Виводить версію з обігу. Право `Template.Publish`.
+         * @description ⛔ Відкат (`ФВ-7.8`) — це переведення в `Deprecated`, а НЕ
+         *     видалення: на версію посилаються проєкти, подані форми, зрізи й
+         *     аудит. Стан існував від Етапу 1 і був недосяжний — перевести
+         *     версію в нього не міг ніхто, тобто відкат був неможливий у
+         *     принципі, а єдиним «відкатом» лишалося видалення.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["DeprecateVersionRequest"];
+                    "application/json": components["schemas"]["DeprecateVersionRequest"];
+                    "text/json": components["schemas"]["DeprecateVersionRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/diff/{otherId}": {
         parameters: {
             query?: never;
@@ -3522,6 +3584,13 @@ export interface components {
             userId: number;
             /** @description Ім'я для показу в шапці. */
             userName: null | string;
+        };
+        /** @description Запит на виведення версії з обігу. */
+        DeprecateVersionRequest: {
+            /** @description Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію
+             *     більше не використовують» — питання, на яке через рік має бути
+             *     відповідь. */
+            reason: string;
         };
         /** @description Створений документ. */
         DocumentIdResponse: {

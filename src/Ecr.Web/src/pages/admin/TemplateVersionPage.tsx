@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type {
   CloneVersionRequest,
+  DeprecateVersionRequest,
   TemplateColumnDto,
   TemplateStructureDto,
   VersionIdResponse,
@@ -14,6 +15,7 @@ import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -34,6 +36,7 @@ export function TemplateVersionPage(): JSX.Element {
 
   const [cloning, setCloning] = useState(false);
   const [newVersion, setNewVersion] = useState('');
+  const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
 
   const structure = useQuery({
@@ -83,6 +86,31 @@ export function TemplateVersionPage(): JSX.Element {
     onError: showApiError,
   });
 
+  /**
+   * Виведення версії з обігу (`ФВ-7.8`).
+   *
+   * ⛔ Це відкат БЕЗ видалення: на версію посилаються проєкти, подані
+   * форми, зрізи звітності й аудит. Стан `Deprecated` існував від Етапу 1
+   * і був недосяжний — перевести версію в нього не міг ніхто, тобто
+   * єдиним «відкатом» лишалося видалення.
+   *
+   * ⚠ Проєкти, прив'язані до цієї версії, працюють далі: інакше відкат
+   * зупинив би заповнення форм посеред періоду (`ФВ-1.2`).
+   */
+  const deprecate = useMutation({
+    mutationFn: (reason: string) =>
+      apiFetch(`/api/v1/template-versions/${id}/deprecate`, {
+        method: 'POST',
+        body: JSON.stringify({ reason } satisfies DeprecateVersionRequest),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-versions'] });
+      setDeprecating(false);
+      showDone(t('version.deprecated'));
+    },
+    onError: showApiError,
+  });
+
   // ⚠ Структура не несе статусу версії: його віддає перелік версій шаблону.
   // Тому кнопка публікації тут показується за правом, а сервер лишається
   // єдиним, хто вирішує, чи можна публікувати саме цю версію.
@@ -127,9 +155,23 @@ export function TemplateVersionPage(): JSX.Element {
             )}
 
             {editable && can(session.data, 'Template.Publish') && (
-              <Button size="xs" loading={publish.isPending} onClick={() => publish.mutate()}>
-                {t('version.publish')}
-              </Button>
+              <>
+                <Button size="xs" loading={publish.isPending} onClick={() => publish.mutate()}>
+                  {t('version.publish')}
+                </Button>
+
+                {/* ⚠ Право те саме, що на публікацію: вивести з обігу —
+                    рішення тієї самої ваги, що й випустити. Сервер
+                    відмовить, якщо версія ще чернетка. */}
+                <Button
+                  size="xs"
+                  variant="default"
+                  color="red"
+                  onClick={() => setDeprecating(true)}
+                >
+                  {t('version.deprecate')}
+                </Button>
+              </>
             )}
           </Group>
         }
@@ -214,6 +256,17 @@ export function TemplateVersionPage(): JSX.Element {
         templateVersionId={id}
         column={editing}
         onClose={() => setEditing(null)}
+      />
+
+      <ReasonModal
+        opened={deprecating}
+        title={t('version.deprecate')}
+        label={t('workflow.reason')}
+        description={t('version.deprecateHint')}
+        confirmLabel={t('version.deprecate')}
+        isPending={deprecate.isPending}
+        onConfirm={(reason) => deprecate.mutate(reason)}
+        onClose={() => setDeprecating(false)}
       />
 
       <Modal opened={cloning} onClose={() => setCloning(false)} title={t('version.clone')}>

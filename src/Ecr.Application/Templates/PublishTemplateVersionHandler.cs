@@ -100,6 +100,49 @@ public sealed class PublishTemplateVersionHandler(
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Виводить версію з обігу — відкат без видалення (<c>ФВ-7.8</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Версія **не видаляється**: на неї посилаються проєкти, подані форми,
+    /// зрізи звітності й аудит структурних змін. Зміст відкату — «більше не
+    /// брати в нові проєкти», а не «стерти сліди».
+    ///
+    /// ⛔ Право те саме, що на публікацію: вивести з обігу — рішення тієї
+    /// самої ваги, що й випустити. Окреме право тут означало б, що відкат
+    /// може зробити той, кому не довірили публікацію.
+    ///
+    /// ⚠ Проєкти, прив'язані до цієї версії, працюють далі (<c>ФВ-1.2</c>):
+    /// інакше відкат зупинив би заповнення форм посеред періоду.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="userId">Хто виводить з обігу.</param>
+    /// <param name="reason">Причина; потрапляє в журнал публікацій.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task DeprecateAsync(
+        int templateVersionId, int userId, string reason, CancellationToken ct)
+    {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        version.Deprecate(userId, clock.UtcNow);
+
+        await audit.WritePublicationEventAsync(
+            new PublicationEventRecord(
+                clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
+                ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
+            ct).ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // Ключ кешу не змінився — змінився СТАН версії, а структура ні. Але
+        // знімок несе і статус, і саме за ним конфігуратор вирішує, чи
+        // пропонувати версію в нових проєктах.
+        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
+    }
 }
 
 /// <summary>Проблема публікації у відповіді API.</summary>

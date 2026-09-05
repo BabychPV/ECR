@@ -23,7 +23,9 @@ public readonly partial record struct RowKey
     public static RowKey Create(string value)
         => TryCreate(value, out var key)
             ? key
-            : throw new ArgumentException($"RowKey '{value}' не відповідає шаблону {Pattern}.", nameof(value));
+            : throw new Abstractions.DomainException(
+                "ECR-CFG-0422",
+                $"Ключ рядка «{value}» недопустимий: він потрапляє у формули без екранування, тому дозволені лише літери, цифри й підкреслення.");
 
     public static bool TryCreate(string? value, out RowKey key)
     {

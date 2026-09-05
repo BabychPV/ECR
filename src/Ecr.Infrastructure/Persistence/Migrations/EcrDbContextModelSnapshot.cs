@@ -1376,6 +1376,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("CreatedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("DeprecatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("DeprecatedByUserId")
+                        .HasColumnType("int");
+
                     b.Property<int>("PresentationRevision")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")

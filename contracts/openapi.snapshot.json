@@ -731,6 +731,19 @@
         ],
         "type": "object"
       },
+      "DeprecateVersionRequest": {
+        "description": "Запит на виведення версії з обігу.",
+        "properties": {
+          "reason": {
+            "description": "Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію\r\nбільше не використовують» — питання, на яке через рік має бути\r\nвідповідь.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "DocumentIdResponse": {
         "description": "Створений документ.",
         "properties": {
@@ -6328,6 +6341,74 @@
           }
         },
         "summary": "Клонує версію. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/deprecate": {
+      "post": {
+        "description": "⛔ Відкат (`ФВ-7.8`) — це переведення в `Deprecated`, а НЕ\r\nвидалення: на версію посилаються проєкти, подані форми, зрізи й\r\nаудит. Стан існував від Етапу 1 і був недосяжний — перевести\r\nверсію в нього не міг ніхто, тобто відкат був неможливий у\r\nпринципі, а єдиним «відкатом» лишалося видалення.",
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeprecateVersionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeprecateVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeprecateVersionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Виводить версію з обігу. Право `Template.Publish`.",
         "tags": [
           "TemplateVersions"
         ]

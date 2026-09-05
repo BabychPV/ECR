@@ -408,6 +408,9 @@ CREATE TABLE cfg.TemplateVersion
     SourceWorkbookHash   varbinary(32) NULL,
     PublishedAt          datetime2(3)  NULL,
     PublishedByUserId    int           NULL,
+    -- Відкат (ФВ-7.8): версія переводиться в Deprecated, але не видаляється.
+    DeprecatedAt         datetime2(3)  NULL,
+    DeprecatedByUserId   int           NULL,
     CreatedAt            datetime2(3)  NOT NULL,
     CreatedByUserId      int           NOT NULL,
     CONSTRAINT PK_TemplateVersion PRIMARY KEY (Id),

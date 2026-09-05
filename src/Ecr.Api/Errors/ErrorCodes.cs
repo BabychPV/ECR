@@ -41,6 +41,17 @@ public static class ErrorCodes
     /// <summary><c>Sequence</c> поза діапазоном <c>1…12</c> (ФВ-1.5a, <c>D-108</c>).</summary>
     public const string PeriodSequenceOutOfRange = "ECR-PRD-4224";
 
+    /// <summary>
+    /// Код або ключ рядка не відповідає шаблону.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Це помилка ВВЕДЕННЯ, а не збою. Доки значеннєві об'єкти кидали
+    /// <c>ArgumentException</c>, конвеєр не впізнавав її і відповідав
+    /// <c>500</c> «Внутрішня помилка»: користувач, який набрав природну
+    /// форму коду з дефісом, бачив аварію сервера замість пояснення.
+    /// </remarks>
+    public const string InvalidCode = "ECR-CFG-0422";
+
     // Реєстри і одиниці
     public const string RegistryEntryNotFound = "ECR-REG-0404";
     public const string RegistryEntryInUse = "ECR-REG-0409";

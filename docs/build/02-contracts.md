@@ -2331,6 +2331,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-TMPL-4221` | 422 | цикл у графі формул |
 | `ECR-TMPL-4222` | 422 | посилання на неіснуючий аркуш/таблицю/колонку/рядок |
 | `ECR-TMPL-4223` | 422 | несумісні одиниці без явного `CONVERT` (ФВ-16.7) |
+| `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
@@ -2426,6 +2427,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/templates/{id}/versions` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/clone` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/publish` | `Template.Publish` | 1 |
+| `POST` | `/api/v1/template-versions/{id}/deprecate` | `Template.Publish` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/diff/{otherId}` | `Template.View` | 1 |
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |

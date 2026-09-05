@@ -276,6 +276,9 @@ export type SetValidityRequest = Schemas['SetValidityRequest'];
 /** Клонування версії шаблону. */
 export type CloneVersionRequest = Schemas['CloneVersionRequest'];
 
+/** Виведення версії шаблону з обігу (`ФВ-7.8`). */
+export type DeprecateVersionRequest = Schemas['DeprecateVersionRequest'];
+
 /** Прогін методології без запису результату (`ФВ-13.5`). */
 export type SimulateMethodologyRequest = Schemas['SimulateMethodologyRequest'];
 
