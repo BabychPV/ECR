@@ -430,11 +430,33 @@ public sealed class ExcelExporter(
         return result;
     }
 
-    /// <summary>Кладе карту книги в прихований аркуш.</summary>
+    /// <summary>
+    /// Кладе карту книги в прихований аркуш.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Карта пишеться ШМАТКАМИ по рядках: у комірку Excel не влазить більше
+    /// за 32 767 символів, а карта реального документа — це сотні кілобайт
+    /// (`A7-29`). Одне значення падало на кожному несинтетичному документі,
+    /// причому вже після побудови всієї книги.
+    ///
+    /// ⚠ Шматки йдуть у стовпець A по одному на рядок і збираються назад
+    /// простою склейкою. Ділити JSON по рядках-полях було б охайніше на
+    /// вигляд і крихкіше по суті: будь-яка зміна форми карти зламала б
+    /// зчитування старих книг.
+    /// </remarks>
     private static void WriteMap(XLWorkbook workbook, ExcelWorkbookMap map)
     {
         var sheet = workbook.Worksheets.Add(ExcelWorkbookMap.SheetName);
-        sheet.Cell(1, 1).Value = JsonSerializer.Serialize(map, MapOptions);
+        var json = JsonSerializer.Serialize(map, MapOptions);
+
+        for (var offset = 0; offset < json.Length; offset += ExcelWorkbookMap.ChunkSize)
+        {
+            var length = Math.Min(ExcelWorkbookMap.ChunkSize, json.Length - offset);
+
+            sheet.Cell((offset / ExcelWorkbookMap.ChunkSize) + 1, 1).Value =
+                json.Substring(offset, length);
+        }
+
         sheet.Hide();
     }
 

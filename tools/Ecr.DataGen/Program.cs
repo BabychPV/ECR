@@ -144,17 +144,35 @@ internal static class Program
         db.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
+        // ⛔ Межі періодів ОБЧИСЛЮЮТЬСЯ, а проєкт АКТИВУЄТЬСЯ. Без цього
+        // згенерований обсяг описує стан, у якому система не працює: період без
+        // меж калькулятор читає як «усе вже минуло» і оголошує закритим, а
+        // задача станів до чернетки взагалі не доходить (`A7-24`…`A7-26`).
+        //
+        // ⚠ Саме через це генератор і був небезпечним: він давав дані, на яких
+        // гейт вимірював систему, якої не буває.
+        var policy = await db.PeriodPolicies
+            .FirstAsync(p => p.Id == policyId)
+            .ConfigureAwait(false);
+
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
+
         for (var month = 1; month <= profile.PeriodsPerYear; month++)
         {
             var key = PeriodKey.Create(options.Year, month);
-            db.Add(new Period(
+            var period = new Period(
                 project.Id, key, (byte)month,
                 new DateOnly(options.Year, month, 1),
-                new DateOnly(options.Year, month, DateTime.DaysInMonth(options.Year, month))));
+                new DateOnly(options.Year, month, DateTime.DaysInMonth(options.Year, month)));
+
+            period.RecomputeBoundaries(policy, zone);
+            db.Add(period);
         }
 
+        project.Activate(now);
+
         await db.SaveChangesAsync().ConfigureAwait(false);
-        return new Scaffold(version.Id, project.Id, tables);
+        return new Scaffold(version.Id, project.Id, sheet.Id, tables);
     }
 
     /// <summary>
@@ -176,6 +194,14 @@ internal static class Program
     {
         var now = DateTime.UtcNow;
         var document = new Document(scaffold.ProjectId, $"DOC-{docIndex:D6}", 1, now);
+
+        // ⛔ Аркуш додається ОДРАЗУ. Документ без аркушів виглядає нормальним —
+        // `sheetCount` чесно показує нуль, — але експорт віддає порожню книгу, а
+        // подання нема чого подавати. Справжній шлях (`CreateDocumentHandler`)
+        // аркуші додає; генератор обходив його і давав дані, на яких половина
+        // сценаріїв не відтворюється.
+        document.IncludeSheet(scaffold.SheetDefId);
+
         db.Add(document);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
@@ -276,7 +302,8 @@ internal static class Program
 
     private static string Fmt(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 
-    private sealed record Scaffold(int TemplateVersionId, int ProjectId, IReadOnlyList<TableShape> Tables);
+    private sealed record Scaffold(
+        int TemplateVersionId, int ProjectId, int SheetDefId, IReadOnlyList<TableShape> Tables);
 
     private sealed record TableShape(int TableDefId, IReadOnlyList<int> ColumnIds, int Rows);
 

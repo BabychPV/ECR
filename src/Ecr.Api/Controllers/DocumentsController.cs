@@ -94,39 +94,48 @@ public sealed class DocumentsController(
     /// запису не заважають.
     /// </remarks>
     [HttpPost("{id:long}/validate")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> Validate(long id, [FromQuery] int periodKey, CancellationToken ct)
+
+    // ⛔ Тип відповіді оголошений явно, а тіло — іменований запис, а не
+    // анонімний об'єкт: в анонімного немає імені в схемі OpenAPI, тому
+    // згенерувати клієнтський тип ні з чого і клієнт описує його рукописно
+    // (`A7-16`, `A7-32`).
+    [ProducesResponseType<ValidationResultResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Validate(
+        long id, [FromBody] DocumentPeriodRequest request, CancellationToken ct)
     {
-        var messages = await validate.HandleAsync(id, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ⛔ Період БЕРЕТЬСЯ З ТІЛА і перевіряється. До `A7-28` він читався з
+        // рядка запиту, а клієнт надсилав його в тілі: параметр не зв'язувався,
+        // ставав нулем, і валідація йшла по неіснуючому періоду — відповідаючи
+        // «помилок немає». Зелений результат, який нічого не означає, гірший за
+        // помилку: на нього спираються, подаючи звітність.
+        var periodKey = request.PeriodKey;
+        var messages = await validate.HandleAsync(id, PeriodKey.Parse(periodKey), ct).ConfigureAwait(false);
 
         // Повертаються ВСІ рівні. Рішення «чи можна подавати» ухвалює клієнт
         // за наявністю Error, а не сервер за кодом відповіді: 200 тут означає
         // «перевірку виконано», а не «зауважень немає».
-        return Ok(new
-        {
-            documentId = id,
+        return Ok(new ValidationResultResponse(
+            id,
             periodKey,
-            messages = messages.Select(m => new
-            {
-                severity = m.Severity.ToString(),
-                ruleCode = m.RuleCode,
-                message = m.Message,
-                rowKey = m.RowKey,
-                columnCode = m.ColumnCode,
-                blocksSave = m.BlocksSave,
-            }),
-        });
+            [.. messages.Select(m => new ValidationMessageDto(
+                m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
     /// <summary>Перерахунок документа. Право <c>Calculation.Recalculate</c>.</summary>
     /// <remarks>Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.</remarks>
     [HttpPost("{id:long}/recalculate")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    public async Task<IActionResult> Recalculate(long id, [FromQuery] int periodKey, CancellationToken ct)
+    public async Task<IActionResult> Recalculate(
+        long id, [FromBody] DocumentPeriodRequest request, CancellationToken ct)
     {
         // Контролер лише делегує: рішення про чергу, payload і умови — у
         // прикладному шарі, інакше те саме правило почало б жити у двох місцях.
-        var jobId = await recalculate.HandleAsync(id, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var periodKey = request.PeriodKey;
+        var jobId = await recalculate.HandleAsync(id, PeriodKey.Parse(periodKey), ct).ConfigureAwait(false);
 
         return Accepted(new { jobId, documentId = id, periodKey });
     }
@@ -227,7 +236,11 @@ public sealed class DocumentsController(
     /// момент побудови.
     /// </remarks>
     [HttpGet("{id:long}/export/{exportId}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    // ⚠ Тут відповідь — ФАЙЛ, а не JSON, тому схеми в неї немає і бути не
+    // може. Форма `Type = typeof(FileResult)` каже це прямо; узагальнена
+    // `ProducesResponseType<T>` описувала б неіснуючий об'єкт.
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
+    [Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadExport(long id, string exportId, CancellationToken ct)
     {
@@ -242,7 +255,7 @@ public sealed class DocumentsController(
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>
     /// <remarks>Імпорт **завжди** через перегляд diff (ФВ-4.3): застосування — окремим викликом.</remarks>
     [HttpPost("{id:long}/import/preview")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Ports.ImportPreview>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
@@ -257,7 +270,7 @@ public sealed class DocumentsController(
 
     /// <summary>Застосування раніше переглянутого імпорту. Право <c>Document.Import</c>.</summary>
     [HttpPost("{id:long}/import/apply")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Documents.Dto.PatchCellsResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ImportApply(
         long id, [FromBody] ImportApplyRequest request, CancellationToken ct)
@@ -278,6 +291,10 @@ public sealed class DocumentsController(
 /// <param name="TemplateVersionId">Опублікована версія шаблону.</param>
 /// <param name="SheetDefIds">Аркуші, які входять у документ.</param>
 public sealed record CreateDocumentRequest(int ProjectId, int TemplateVersionId, IReadOnlyList<int> SheetDefIds);
+
+/// <summary>Дія над документом у межах одного періоду.</summary>
+/// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
+public sealed record DocumentPeriodRequest(int PeriodKey);
 
 /// <summary>Аркуш × період — адреса операції робочого процесу.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
@@ -313,3 +330,24 @@ public sealed record ExportRequest(
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>
 public sealed record ImportApplyRequest(string PreviewToken);
+
+/// <summary>Результат перевірки документа за період.</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="PeriodKey">Період, за який виконано перевірку.</param>
+/// <param name="Messages">Зауваження ВСІХ рівнів.</param>
+/// <remarks>
+/// ⚠ <c>200</c> означає «перевірку виконано», а не «зауважень немає»: рішення,
+/// чи можна подавати, ухвалює клієнт за наявністю рівня <c>Error</c>.
+/// </remarks>
+public sealed record ValidationResultResponse(
+    long DocumentId, int PeriodKey, IReadOnlyList<ValidationMessageDto> Messages);
+
+/// <summary>Одне зауваження перевірки.</summary>
+/// <param name="Severity">Рівень: <c>Error</c>, <c>Warning</c>, <c>Info</c>.</param>
+/// <param name="RuleCode">Код правила.</param>
+/// <param name="Message">Текст, уже локалізований.</param>
+/// <param name="RowKey">Рядок; <c>null</c> — зауваження до таблиці.</param>
+/// <param name="ColumnCode">Колонка; <c>null</c> — зауваження до рядка.</param>
+/// <param name="BlocksSave">Чи блокує збереження.</param>
+public sealed record ValidationMessageDto(
+    string Severity, string RuleCode, string Message, string? RowKey, string? ColumnCode, bool BlocksSave);

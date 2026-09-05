@@ -58,9 +58,20 @@ public sealed class PatchCellsHandler(
         // ОГОЛОШЕНИМ типом колонки: через HTTP усе приходить JsonElement-ом, і
         // здогадка за виглядом значення клала число в текст, а ідентифікатор
         // запису довідника — у ValueNumeric (`A7-01`).
+        //
+        // ⛔ Мапа будується ЛИШЕ з колонок ЦІЄЇ таблиці. Код колонки унікальний
+        // у межах таблиці, а не версії шаблону: у реальному шаблоні дев'яносто
+        // таблиць, і `C2` є майже в кожній. До `A7-27` тут стояло групування
+        // по всій версії з `g.First()` — тобто код резолвився в колонку
+        // ВИПАДКОВОЇ таблиці.
+        //
+        // ⚠ Найгірше в цьому те, що воно не завжди падає. `FK_CellValue_Column`
+        // перевіряє лише існування колонки, а не її належність таблиці: коли
+        // випадковий вибір потрапляв у наявний ідентифікатор, значення тихо
+        // лягало в ЧУЖУ таблицю — з правильним виглядом відповіді.
         var columnDefs = snapshot.ColumnsById.Values
-            .GroupBy(c => c.Code, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            .Where(c => c.TableDefId == instance.TableDefId)
+            .ToDictionary(c => c.Code, StringComparer.Ordinal);
 
         var columns = columnDefs.ToDictionary(p => p.Key, p => p.Value.Id, StringComparer.Ordinal);
 

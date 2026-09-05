@@ -284,6 +284,58 @@ public sealed class PatchCellsTests
         });
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Код_колонки_резолвиться_в_МЕЖАХ_таблиці_а_не_всієї_версії()
+    {
+        // ⛔ Коди колонок унікальні в межах ТАБЛИЦІ. У реальному шаблоні
+        // дев'яносто таблиць, і `Volume` є в багатьох; до `A7-27` мапа
+        // будувалася по всій версії з `GroupBy(...).First()`, тобто код
+        // резолвився в колонку ВИПАДКОВОЇ таблиці.
+        //
+        // ⚠ Найгірше те, що воно не завжди падає: `FK_CellValue_Column`
+        // перевіряє існування колонки, а не її належність таблиці. Коли
+        // випадковий вибір потрапляв у наявний ідентифікатор, значення тихо
+        // лягало в ЧУЖУ таблицю — з правильним виглядом відповіді.
+        const int OtherTableColumnId = 99;
+
+        var mine = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("Volume"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
+        SetId(mine, VolumeColumnId);
+
+        // Та сама назва колонки в ІНШІЙ таблиці тієї ж версії.
+        var alien = new ColumnDef(
+            tableDefId: 4, EcrCode.Create("Volume"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
+        SetId(alien, OtherTableColumnId);
+
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(
+                TemplateVersionId: 2, PresentationRevision: 0, Sheets: [],
+
+                // ⚠ Чужа колонка йде ПЕРШОЮ: саме її брав `First()`.
+                ColumnsById: new Dictionary<int, ColumnDef>
+                {
+                    [OtherTableColumnId] = alien,
+                    [VolumeColumnId] = mine,
+                },
+                RowsByKey: new Dictionary<(int, string), RowDef>()));
+
+        CellChangeSet? changes = null;
+        await _cells.ApplyAsync(
+            Arg.Do<CellChangeSet>(c => changes = c), Arg.Any<CancellationToken>());
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])),
+            CancellationToken.None);
+
+        Assert.NotNull(changes);
+
+        // Комірка адресується колонкою СВОЄЇ таблиці (TableDefId = 3).
+        Assert.Equal(VolumeColumnId, Assert.Single(changes.Upserts).Address.ColumnDefId);
+    }
+
     /// <summary>Додає таблицю з одним правилом валідації у знімок метаданих.</summary>
     private void WithRule(ValidationSeverity severity, byte scope, string expression)
     {

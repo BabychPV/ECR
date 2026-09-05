@@ -17,7 +17,8 @@ namespace Ecr.Api.Tests;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1 (`Q-053`): без нього жоден
 /// тест `Ecr.Api.Tests` не може підняти застосунок із реальною базою.
 /// </remarks>
-public sealed class EcrApiFactory(SqlServerFixture sql) : WebApplicationFactory<Program>
+public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 0)
+    : WebApplicationFactory<Program>
 {
     /// <summary>
     /// Помилки, які застосунок записав у лог під час прогону.
@@ -67,10 +68,17 @@ public sealed class EcrApiFactory(SqlServerFixture sql) : WebApplicationFactory<
         // треба знати: доменний вхід ЦИМИ тестами не покривається.
         Environment.SetEnvironmentVariable("ECR_Auth__EnableNegotiate", "false");
 
-        // ⚠ Кеш штампа вимкнений: інакше «негайно» в тесті означало б «через
-        // п'ять секунд», і перевірка відкликання прав або спала б, або стала б
-        // повільною і плавучою.
-        Environment.SetEnvironmentVariable("ECR_Auth__StampCacheSeconds", "0");
+        // ⚠ Кеш штампа типово вимкнений: інакше «негайно» в тесті означало б
+        // «через п'ять секунд», і перевірка відкликання прав або спала б, або
+        // стала б повільною і плавучою.
+        //
+        // ⛔ Але саме це вимкнення сховало `A7-21`: із живим кешем застосунок
+        // виходив із сеансу, який щойно створив, бо в кеші лишався штамп до
+        // зміни пароля. Фікстура вимикала механізм, який ламався, — тому
+        // значення тепер задається, і принаймні один тест бере його увімкненим.
+        Environment.SetEnvironmentVariable(
+            "ECR_Auth__StampCacheSeconds",
+            stampCacheSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         builder.UseEnvironment("Development");
         builder.ConfigureLogging(logging =>

@@ -109,6 +109,16 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // ⛔ І ОДИН РАЗ ОДРАЗУ. Стан періоду — функція від дати, а не подія:
+        // поки задача не спрацювала вперше, кожен період лишається в стані, у
+        // якому його створили. Після розгортання це означало, що система до
+        // години показує «період ще не відкрито» на кожну комірку — тобто не
+        // дає працювати, і причина, яку вона називає, неправдива (`A7-24`).
+        //
+        // ⚠ Те саме стосується будь-якого перезапуску посеред доби: пропущену
+        // межу періоду ніхто не наздоганяє, бо cron не має пам'яті.
+        await RunPeriodStateOnceAsync(scope.ServiceProvider).ConfigureAwait(false);
+
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.NotificationJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
@@ -143,6 +153,16 @@ public sealed partial class RecurringScheduleService(
 
     [LoggerMessage(
         Level = LogLevel.Information,
+        Message = "Старт: стани періодів вирівняно за датами.")]
+    private static partial void LogPeriodStateAligned(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Старт: вирівняти стани періодів не вдалося ({Reason}); повторить погодинна задача.")]
+    private static partial void LogPeriodStateFailed(ILogger logger, string reason);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
         Message = "Старт: постійні розклади поставлено, зокрема збору: {Count}.")]
     private static partial void LogSchedulesDone(ILogger logger, int count);
 
@@ -150,4 +170,39 @@ public sealed partial class RecurringScheduleService(
         Level = LogLevel.Critical,
         Message = "Старт: постійні розклади НЕ поставлено ({Reason}); застосунок зупиняється.")]
     private static partial void LogSchedulesFailed(ILogger logger, string reason);
+    /// <summary>
+    /// Виконує вирівнювання станів періодів негайно, у цьому ж процесі.
+    /// </summary>
+    /// <param name="provider">Область служб старту.</param>
+    /// <remarks>
+    /// ⚠ Не через планувальник, а прямим викликом: постановка «виконати зараз»
+    /// у Quartz — це ще один тригер, який треба чистити, і він виконався б уже
+    /// після того, як перший користувач відкрив документ.
+    ///
+    /// ⚠ Невдача тут НЕ валить старт, на відміну від постановки розкладів.
+    /// Різниця по суті: розклад, якого немає, мовчки не працює вічно; а це
+    /// разове вирівнювання, яке за годину повторить сама задача.
+    /// </remarks>
+    private async Task RunPeriodStateOnceAsync(IServiceProvider provider)
+    {
+        try
+        {
+            var job = provider.GetRequiredService<Infrastructure.Jobs.PeriodStateJob>();
+
+            await job.ExecuteAsync(null, new NullProgress(), CancellationToken.None).ConfigureAwait(false);
+
+            LogPeriodStateAligned(logger);
+        }
+        catch (Exception ex)
+        {
+            LogPeriodStateFailed(logger, ex.Message);
+        }
+    }
+
+    /// <summary>Прогрес, який нікуди не пише: разовий старт нікого не цікавить.</summary>
+    private sealed class NullProgress : IJobProgress
+    {
+        public Task ReportAsync(int percent, string? message, CancellationToken ct) => Task.CompletedTask;
+    }
+
 }

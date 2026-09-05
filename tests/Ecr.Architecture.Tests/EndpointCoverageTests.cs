@@ -268,6 +268,76 @@ public sealed partial class EndpointCoverageTests
         Assert.Empty(missing);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_сутність_яку_система_створює_має_чим_її_заповнити()
+    {
+        // ⛔ Сторож проти цілого класу дефектів: сутність існує в схемі й у
+        // домені, її ЧИТАЮТЬ — і не створює її ніщо. Система при цьому
+        // збирається, тести зелені, а працювати вона не може.
+        //
+        // Так жили одразу три: `doc.TableInstance` (`A7-30`) — документ,
+        // створений через API, не мав жодної таблиці; `sec.ResourceGrant`
+        // (`A7-22`) — користувач із усіма правами бачив порожній перелік
+        // проєктів; `ProjectStatus.Active` (`A7-25`) — проєкт лишався
+        // чернеткою назавжди, тому періоди не відкривалися ніколи.
+        //
+        // ⚠ Перевіряється саме наявність КОНСТРУЮВАННЯ поза тестами: `new T(`
+        // у `src`. Це груба ознака, і навмисно: тонша (граф викликів) ловила б
+        // те саме, але падала б на кожному рефакторингу.
+        string[] mustBeCreated =
+        [
+            "TableInstance",
+            "ResourceGrant",
+            "DocumentSheet",
+            "TableRow",
+            "Period",
+            "NotificationOutboxItem",
+        ];
+
+        var application = SourceOf("Ecr.Application");
+        var infrastructure = SourceOf("Ecr.Infrastructure");
+        var domain = SourceOf("Ecr.Domain");
+        var all = string.Join('\n', application, infrastructure, domain);
+
+        var never = mustBeCreated
+            .Where(type => !all.Contains($"new {type}(", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(never);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_успішна_відповідь_має_оголошений_тип()
+    {
+        // ⛔ Восьмий сторож. Ловить корінь `A7-16` і `A7-32`: дія повертає
+        // `200`, не називаючи ЧОГО. У схемі OpenAPI лишається порожня
+        // відповідь, згенерувати клієнтський тип ні з чого — і клієнт описує
+        // її рукописним інтерфейсом. Помилка в назві поля при цьому нічого не
+        // ламає: поле просто `undefined`, а компілятор обіцяв рядок.
+        //
+        // ⚠ Це підважує головний захід проти всього класу межових дефектів:
+        // «зробити межу компільовною». Одинадцять нетипізованих відповідей
+        // означали, що третина API лишається поза цим захистом.
+        var directory = Path.Combine(SolutionRoot(), "src", "Ecr.Api", "Controllers");
+
+        var offenders = Directory
+            .EnumerateFiles(directory, "*.cs")
+            .SelectMany(f => UntypedOkRegex
+                .Matches(WithoutComments(File.ReadAllText(f)))
+                .Select(_ => Path.GetFileName(f)))
+            .GroupBy(f => f, StringComparer.Ordinal)
+            .Select(g => $"{g.Key}: {g.Count()}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(offenders);
+    }
+
     /// <summary>Розбиває скрипт на пакети, що починаються заданим текстом.</summary>
     /// <param name="script">Текст скрипта.</param>
     /// <param name="start">Початок пакета, наприклад <c>MERGE sec.RolePermission</c>.</param>
@@ -334,6 +404,14 @@ public sealed partial class EndpointCoverageTests
     /// </remarks>
     [GeneratedRegex(@"const string [A-Za-z]*Permission[A-Za-z]* = ""([A-Za-z]+\.[A-Za-z]+)""")]
     private static partial Regex PermissionConstant { get; }
+
+    /// <summary>Оголошення <c>200</c> БЕЗ типу відповіді.</summary>
+    /// <remarks>
+    /// Узагальнена форма <c>[ProducesResponseType&lt;T&gt;(...)]</c> сюди не
+    /// підпадає: у ній одразу після <c>ProducesResponseType</c> стоїть <c>&lt;</c>.
+    /// </remarks>
+    [GeneratedRegex(@"ProducesResponseType\(StatusCodes\.Status200OK\)")]
+    private static partial Regex UntypedOkRegex { get; }
 
     /// <summary>Рядок каталогу в <c>09-seed.sql</c>.</summary>
     [GeneratedRegex(@"\(N'([^']+)',\s*N'[a-z]{2}'")]

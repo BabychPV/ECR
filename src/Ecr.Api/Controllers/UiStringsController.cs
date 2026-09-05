@@ -75,7 +75,7 @@ public sealed class UiStringsController(
     /// <param name="ct">Токен скасування.</param>
     [HttpPut("{lang}/{key}")]
     [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<UiStringRevisionResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Set(
         string lang, string key, [FromBody] SetUiStringRequest request, CancellationToken ct)
     {
@@ -85,7 +85,7 @@ public sealed class UiStringsController(
             .HandleAsync(key, lang, request.Value, (byte)request.Scope, ct)
             .ConfigureAwait(false);
 
-        return Ok(new { revision });
+        return Ok(new UiStringRevisionResponse(revision));
     }
 }
 
@@ -93,3 +93,7 @@ public sealed class UiStringsController(
 /// <param name="Value">Текст.</param>
 /// <param name="Scope">Область: 0 — публічна, 1 — приватна (<c>D-114</c>).</param>
 public sealed record SetUiStringRequest(string Value, UiStringScope Scope);
+
+/// <summary>Версія каталогу після запису.</summary>
+/// <param name="Revision">Версія; слугує <c>ETag</c>.</param>
+public sealed record UiStringRevisionResponse(int Revision);

@@ -20,12 +20,30 @@ public sealed class ResourceGrant : Entity<int>
 {
     private ResourceGrant() { }
 
-    public ResourceGrant(int roleId, ResourceKind resourceKind, int resourceId, GrantLevel level)
+    /// <summary>Створює грант.</summary>
+    /// <param name="roleId">Роль, якій він належить.</param>
+    /// <param name="resourceKind">Вид ресурсу.</param>
+    /// <param name="resourceId">Ідентифікатор ресурсу.</param>
+    /// <param name="level">Рівень доступу.</param>
+    /// <param name="isDeny">Явна заборона; перекриває будь-який дозвіл.</param>
+    /// <remarks>
+    /// ⛔ Заборона задається САМЕ ТУТ і більше ніде. До того, як з'явилося
+    /// керування грантами (`A7-22`), параметра не було зовсім: правило «IsDeny
+    /// виграє завжди» було реалізоване в читанні, а записати заборону не міг
+    /// ніхто — тобто половина правила існувала лише на папері.
+    ///
+    /// ⚠ Заборона з рівнем, вищим за <see cref="GrantLevel.None"/>, — не
+    /// помилка і не суперечність: рівень у забороні просто не читається.
+    /// Забороняти «частково» не можна за побудовою (ФВ-6.6).
+    /// </remarks>
+    public ResourceGrant(
+        int roleId, ResourceKind resourceKind, int resourceId, GrantLevel level, bool isDeny = false)
     {
         RoleId = roleId;
         ResourceKind = resourceKind;
         ResourceId = resourceId;
         Level = level;
+        IsDeny = isDeny;
     }
 
     public int RoleId { get; private set; }

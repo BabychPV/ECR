@@ -220,7 +220,15 @@ public sealed class ExcelImporter(
                 + "вивантажений цією системою.");
         }
 
-        var json = sheet.Cell(1, 1).GetString();
+        // ⚠ Карта складається з усіх непорожніх комірок стовпця A: експортер
+        // ріже її на шматки по 30 000 символів, бо в одну комірку більше за
+        // 32 767 Excel не приймає (`A7-29`). Книги, збережені до цього,
+        // читаються тим самим кодом: у них шматок рівно один.
+        var json = string.Concat(
+            sheet.Column(1)
+                .CellsUsed()
+                .OrderBy(c => c.Address.RowNumber)
+                .Select(c => c.GetString()));
 
         return (string.IsNullOrWhiteSpace(json)
                    ? null

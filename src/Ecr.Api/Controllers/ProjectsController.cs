@@ -16,11 +16,14 @@ public sealed class ProjectsController(
     BuildPeriodCalendarHandler buildCalendar,
     GetPeriodCalendarHandler getCalendar,
     SetCurrentPeriodHandler setCurrentPeriod,
-    CloneProjectHandler cloneProject) : ControllerBase
+    CloneProjectHandler cloneProject,
+    ActivateProjectHandler activate) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    // ⛔ Тип відповіді оголошений явно — інакше клієнт описує її рукописним
+    // інтерфейсом і помиляється в назві поля (`A7-16`, `A7-32`).
+    [ProducesResponseType<PagedResult<Ecr.Application.Projects.ProjectSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(
         [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
         // Видимість за AccessProfile — в обробнику: перелік проєктів, до яких
@@ -57,6 +60,22 @@ public sealed class ProjectsController(
             .ConfigureAwait(false);
 
         return Created($"/api/v1/projects/{projectId}", new { projectId });
+    }
+
+    /// <summary>
+    /// Активує проєкт. Право <c>Project.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього маршруту проєкт лишається чернеткою назавжди, періоди не
+    /// відкриваються і система не приймає жодного значення (`A7-25`).
+    /// </remarks>
+    [HttpPost("{id:int}/activate")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> Activate(int id, CancellationToken ct)
+    {
+        await activate.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>Клонує проєкт разом із налаштуваннями. Право <c>Project.Manage</c>.</summary>

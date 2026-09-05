@@ -12,6 +12,7 @@ public sealed class ApproveSheetHandler(
     IWorkflowStore workflow,
     IAccessDecisionService access,
     IUnitOfWork uow,
+    INotificationOutbox outbox,
     ICurrentUser currentUser,
     IClock clock)
 {
@@ -58,6 +59,14 @@ public sealed class ApproveSheetHandler(
         // ⛔ Статус ДОКУМЕНТА не чіпається: його немає (D-93). Зведений стан
         // рахується запитом по wf.ApprovalState, і скалярне поле рано чи пізно
         // показало б Approved там, де половина аркушів у Draft.
+
+        // Друга подія черги: затвердження аркуша (`A7-31`).
+        await outbox.EnqueueAsync(
+            "sheet.approved",
+            $"Аркуш {sheetDefId} документа {documentId} затверджено",
+            "Аркуш затверджено; подальші зміни потребують повернення в роботу.",
+            recipients: null,
+            ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

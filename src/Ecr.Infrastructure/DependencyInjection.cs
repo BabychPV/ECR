@@ -118,6 +118,7 @@ public static class DependencyInjection
         // Каталог рядків інтерфейсу — Scoped через EcrDbContext; сам зріз
         // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).
         services.AddScoped<IUiStringCatalog, Localization.UiStringCatalogStore>();
+        services.AddScoped<Application.Ports.INotificationOutbox, Integration.NotificationOutboxStore>();
 
         // ⚠ Планувальник тепер справжній. Quartz піднімається як hosted
         // service, а порт лишається тим самим: заміна на Hangfire, якщо ІБ

@@ -148,6 +148,63 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<int> EnsureTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ⚠ Аркуші документа — це і є перелік того, що в ньому заповнюють
+        // (ФВ-3.2). Таблиці беруться з тих аркушів, а не з усього шаблону:
+        // документ навмисно може містити частину.
+        var sheetIds = await db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => s.DocumentId == documentId)
+            .Select(s => s.SheetDefId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (sheetIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var tableDefIds = await db.TableDefs
+            .AsNoTracking()
+            .Where(t => sheetIds.Contains(t.SheetDefId) && !t.IsDeleted)
+            .Select(t => t.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var existing = await db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.DocumentId == documentId && t.PeriodKeyValue == periodKey.Value)
+            .Select(t => t.TableDefId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var missing = tableDefIds.Except(existing).Order().ToList();
+        if (missing.Count == 0)
+        {
+            return 0;
+        }
+
+        // ⚠ Ідентифікатори — з SEQUENCE і ОДНИМ діапазоном на весь набір:
+        // дев'яносто окремих звернень до послідовності коштували б дорожче за
+        // саму вставку (B02 §2.3).
+        var first = await bulk
+            .ReserveIdsAsync("doc.TableInstanceSeq", missing.Count, ct)
+            .ConfigureAwait(false);
+
+        var utcNow = clock.UtcNow;
+
+        for (var i = 0; i < missing.Count; i++)
+        {
+            db.TableInstances.Add(new TableInstance(periodKey, first + i, documentId, missing[i], utcNow));
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return missing.Count;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => await db.TableRows

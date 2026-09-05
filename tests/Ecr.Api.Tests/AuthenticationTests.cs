@@ -224,6 +224,50 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     }
 
     /// <summary>Створює локального користувача з відомим паролем.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Після_зміни_пароля_сеанс_працює_попри_живий_кеш_штампа()
+    {
+        var name = await ArrangeLocalUserAsync().ConfigureAwait(true);
+
+        // ⛔ Кеш УВІМКНЕНИЙ — інакше тест перевіряє не те, що ламалося.
+        // Решта тестів ставить 0, і саме тому `A7-21` жив: фікстура вимикала
+        // механізм, який давав хибну відмову.
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 30);
+        using var client = app.CreateClient();
+
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = Password }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        // Перший запит наповнює кеш штампом ДО зміни пароля.
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await client.GetAsync(new Uri("/api/v1/me", UriKind.Relative)).ConfigureAwait(true)).StatusCode);
+
+        const string Next = "Stamp-Cache-Check-2026!";
+
+        var change = await client.PostAsJsonAsync(
+            new Uri("/api/v1/auth/change-password", UriKind.Relative),
+            new { currentPassword = Password, newPassword = Next }).ConfigureAwait(true);
+        Assert.True(change.IsSuccessStatusCode, $"{change.StatusCode}: {app.ErrorsText}");
+
+        // ⛔ Ось воно: вхід успішний, а наступний запит отримував 401 «права
+        // змінилися». Користувача викидало на форму входу, він входив — і за
+        // наступним запитом опинявся там знову, усі п'ять секунд.
+        using var after = app.CreateClient();
+
+        var relogin = await after.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = Next }).ConfigureAwait(true);
+        Assert.True(relogin.IsSuccessStatusCode, $"{relogin.StatusCode}: {app.ErrorsText}");
+
+        var me = await after.GetAsync(new Uri("/api/v1/me", UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+    }
+
     private async Task<string> ArrangeLocalUserAsync()
     {
         var name = $"local_{Guid.NewGuid():N}"[..20];

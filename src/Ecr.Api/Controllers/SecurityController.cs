@@ -18,6 +18,8 @@ public sealed class SecurityController(
     StartSimulationHandler startSimulation,
     EndSimulationHandler endSimulation,
     ChangePasswordHandler changePassword,
+    Ecr.Application.Security.ListResourceGrantsHandler listGrants,
+    Ecr.Application.Security.ReplaceResourceGrantsHandler replaceGrants,
     Ecr.Domain.Abstractions.IClock clock) : ControllerBase
 {
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
@@ -40,6 +42,40 @@ public sealed class SecurityController(
             .ConfigureAwait(false);
 
         return Created($"/api/v1/roles/{roleId}", new { roleId });
+    }
+
+    /// <summary>
+    /// Ресурсні гранти ролі. Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цих двох маршрутів система не показує даних НІКОМУ (`A7-22`):
+    /// доступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант
+    /// не було чим. Права відповідають на питання «що людина вміє», гранти —
+    /// «до чого саме»; без другої відповіді перша нічого не відкриває.
+    /// </remarks>
+    [HttpGet("roles/{id:int}/grants")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListGrants(int id, CancellationToken ct)
+        => Ok(await listGrants.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Замінює набір грантів ролі цілком. Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на
+    /// питання «що покриває роль», і вона має бути видима одним поглядом.
+    /// Часткові правки лишають стан, у якому джерело доступу не відновлюється.
+    /// </remarks>
+    [HttpPut("roles/{id:int}/grants")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ReplaceGrants(
+        int id, [FromBody] ReplaceGrantsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await replaceGrants.HandleAsync(id, request.Grants, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>Перелік користувачів. Право <c>Security.ManageUsers</c>.</summary>
@@ -165,6 +201,11 @@ public sealed class SecurityController(
 /// <param name="PermissionCodes">Права, що входять у роль.</param>
 public sealed record CreateRoleRequest(
     string Code, IReadOnlyDictionary<string, string> NameL10n, IReadOnlyList<string> PermissionCodes);
+
+/// <summary>Запит на заміну набору ресурсних грантів ролі.</summary>
+/// <param name="Grants">Новий набір; порожній прибирає доступ ролі повністю.</param>
+public sealed record ReplaceGrantsRequest(
+    IReadOnlyList<Ecr.Application.Security.ResourceGrantDto> Grants);
 
 /// <summary>Запит на створення користувача.</summary>
 /// <param name="UserName">Ім'я входу.</param>

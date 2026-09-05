@@ -3,6 +3,7 @@ import { Badge, Group, Loader, SegmentedControl, Table, Text } from '@mantine/co
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { RoleView, UserPage } from '@/api/types';
+import { GrantsPanel } from '@/pages/admin/GrantsPanel';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
@@ -46,6 +47,7 @@ export function SecurityPage(): JSX.Element {
             onChange={setTab}
             data={[
               { value: 'roles', label: t('security.roles') },
+              { value: 'grants', label: t('security.grants') },
               { value: 'users', label: t('security.users') },
             ]}
           />
@@ -99,6 +101,11 @@ export function SecurityPage(): JSX.Element {
             </Table.Tbody>
           </Table>
         ))}
+
+      {/* ⛔ Гранти — окрема вкладка, а не колонка в матриці прав. Права
+          відповідають на питання «що людина вміє», гранти — «до чого саме»;
+          без другої відповіді перша не відкриває нічого (`A7-22`). */}
+      {tab === 'grants' && <GrantsPanel roles={roles.data ?? []} />}
 
       {tab === 'users' &&
         (users.isPending ? (

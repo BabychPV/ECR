@@ -62,6 +62,43 @@ public interface IUserStore
     public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct);
 
     /// <summary>Залишає з переліку лише **небезпечні** права (<c>ФВ-6.12</c>).</summary>
+    /// <summary>Ресурсні гранти ролі.</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Security.ResourceGrantDto>> ListGrantsAsync(int roleId, CancellationToken ct);
+
+    /// <summary>
+    /// Замінює набір ресурсних грантів ролі цілком.
+    /// </summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="grants">Новий набір; порожній прибирає всі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Саме ЗАМІНА, а не додавання: набір грантів — це відповідь на питання
+    /// «що покриває роль», і вона має бути повною. Часткові правки лишають
+    /// стан, у якому джерело доступу не відновлюється (ФВ-6.6).
+    /// </remarks>
+    public Task ReplaceGrantsAsync(
+        int roleId, IReadOnlyList<Security.ResourceGrantDto> grants, CancellationToken ct);
+
+    /// <summary>
+    /// Прокручує <c>SecurityStamp</c> усім носіям ролі.
+    /// </summary>
+    /// <param name="roleId">Роль, доступ якої змінився.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки сеансів довелося перевидати.</returns>
+    /// <remarks>
+    /// ⛔ Без цього зміна доступу не діє (`A7-23`). Профіль доступу кешується
+    /// на 30 хвилин під ключем «користувач + штамп», і припущення кешу
+    /// записане прямо в ньому: «зміна ролей або пароля змінює штамп». Для
+    /// ГРАНТІВ воно не виконувалося, тому виданий доступ не з'являвся, а
+    /// знятий — не зникав, і обидва по пів години.
+    ///
+    /// ⚠ Небезпечний бік саме другий. «Видали, але ще діє» — це доступ, який
+    /// адміністратор уже вважає закритим.
+    /// </remarks>
+    public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct);
+
     /// <summary>Коди прав із переданих, яких у каталозі НЕМАЄ.</summary>
     /// <param name="permissionCodes">Коди, які просять видати.</param>
     /// <param name="ct">Токен скасування.</param>

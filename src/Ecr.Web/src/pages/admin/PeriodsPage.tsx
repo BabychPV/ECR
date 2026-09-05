@@ -1,8 +1,10 @@
 import { useState, type JSX } from 'react';
-import { Badge, Loader, NumberInput, Table, Text } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
-import type { PeriodCalendarDto } from '@/api/types';
+import { Badge, Button, Group, Loader, Select, Table, Text } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { EcrApiError, apiFetch } from '@/api/client';
+import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
+import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
@@ -19,6 +21,16 @@ import { t } from '@/shared/i18n';
  */
 export function PeriodsPage(): JSX.Element {
   const [projectId, setProjectId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+  const session = useSession();
+
+  // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
+  // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
+  // відкриються періоди взагалі (`A7-25`).
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+  });
 
   const periods = useQuery({
     queryKey: ['periods', projectId],
@@ -26,22 +38,66 @@ export function PeriodsPage(): JSX.Element {
     enabled: projectId !== null,
   });
 
+  const selected = (projects.data?.items ?? []).find((p) => p.id === projectId);
+
+  const activate = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/projects/${id}/activate`, { method: 'POST' }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+      await queryClient.invalidateQueries({ queryKey: ['periods', projectId] });
+      notifications.show({ color: 'green', message: t('periods.activated') });
+    },
+    onError: (error) => {
+      notifications.show({
+        color: 'red',
+        message: error instanceof EcrApiError ? error.message : String(error),
+      });
+    },
+  });
+
   return (
     <>
       <PageHeader
         title={t('periods.title')}
         actions={
-          <NumberInput
-            size="xs"
-            w={160}
-            placeholder={t('periods.project')}
-            value={projectId ?? ''}
-            onChange={(value) => setProjectId(typeof value === 'number' ? value : null)}
-          />
+          <Group gap="xs">
+            <Select
+              size="xs"
+              w={260}
+              placeholder={t('periods.pickProject')}
+              data={(projects.data?.items ?? []).map((p) => ({
+                value: String(p.id),
+                label: `${p.code} · ${p.status}`,
+              }))}
+              value={projectId === null ? null : String(projectId)}
+              onChange={(value) => setProjectId(value === null ? null : Number(value))}
+            />
+
+            {/* ⛔ Кнопка є лише для чернетки. Доки проєкт не активований,
+                задача станів до нього не доходить, періоди лишаються
+                `Scheduled`, і система відмовляє в кожній комірці з причиною
+                «період ще не відкрито» — неправдивою (`A7-25`). */}
+            {selected?.status === 'Draft' && can(session.data, 'Project.Manage') && (
+              <Button
+                size="xs"
+                loading={activate.isPending}
+                onClick={() => activate.mutate(selected.id)}
+              >
+                {t('periods.activate')}
+              </Button>
+            )}
+          </Group>
         }
       />
 
+      <ErrorAlert error={projects.error} />
       <ErrorAlert error={periods.error} />
+
+      {selected?.status === 'Draft' && (
+        <Text c="orange" size="sm" mb="xs">
+          {t('periods.draftHint')}
+        </Text>
+      )}
 
       {projectId === null ? (
         <Text c="dimmed">{t('periods.pickProject')}</Text>

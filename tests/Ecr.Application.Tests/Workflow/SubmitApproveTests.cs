@@ -102,14 +102,41 @@ public sealed class SubmitApproveTests
         return periods[0];
     }
 
+    /// <summary>
+    /// Черга сповіщень для перевірок робочого процесу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Підставна, але НЕ порожня: подання й затвердження зобов'язані класти
+    /// подію в чергу тим самим комітом (`A7-31`), і перевірка цього має бути
+    /// можливою тут, а не лише в базі.
+    /// </remarks>
+    private readonly INotificationOutbox _outbox = Substitute.For<INotificationOutbox>();
+
     private SubmitSheetHandler Submit()
         => new(_cells, _rows, _workflow, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _uow, _user, _clock);
+               _uow, _outbox, _user, _clock);
 
-    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _user, _clock);
+    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _outbox, _user, _clock);
 
     private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock);
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Подання_кладе_подію_в_чергу_сповіщень()
+    {
+        // ⛔ `A7-31`. Черга `itg.NotificationOutbox`, відправник і задача, яка
+        // її розбирає, існували від Етапу 5 — а покласти в неї подію не міг
+        // НІХТО: у всій системі таблиця лише читалася. Жодне сповіщення не
+        // надсилалося ніколи, і дізнатися про це можна було тільки з мовчання.
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        await _outbox.Received(1).EnqueueAsync(
+            "sheet.submitted",
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Подання_аркуша_за_період_не_зачіпає_інші_аркуші()

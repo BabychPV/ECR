@@ -25,7 +25,8 @@ public sealed class AuditController(GetCellChangesHandler cellChanges) : Control
     /// піде по всіх партиціях.
     /// </remarks>
     [HttpGet("cells")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.CellChangeView>>(
+        StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Cells(
         [FromQuery] DateTime from, [FromQuery] DateTime to,

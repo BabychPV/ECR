@@ -35,7 +35,12 @@ public sealed class UnitsController(ListUnitsHandler list, ConvertUnitHandler co
     /// (ФВ-16.5, <c>D-75</c>).
     /// </remarks>
     [HttpPost("convert")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    // ⛔ Тип відповіді оголошений ЯВНО, а тіло — іменований запис, а не
+    // анонімний об'єкт. Інакше в схемі OpenAPI лишається порожня 200-ка,
+    // згенерувати клієнтський тип ні з чого, і клієнт описує відповідь
+    // рукописним інтерфейсом — з помилкою в назві поля, яку ніхто не
+    // побачить (`A7-16`, `A7-32`).
+    [ProducesResponseType<ConvertUnitResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Convert(
         [FromBody] ConvertUnitRequest request, CancellationToken ct)
@@ -46,7 +51,7 @@ public sealed class UnitsController(ListUnitsHandler list, ConvertUnitHandler co
             .HandleAsync(request.Value, request.FromUnit, request.ToUnit, ct)
             .ConfigureAwait(false);
 
-        return Ok(new { value, unit = request.ToUnit });
+        return Ok(new ConvertUnitResponse(value, request.ToUnit));
     }
 }
 
@@ -55,3 +60,8 @@ public sealed class UnitsController(ListUnitsHandler list, ConvertUnitHandler co
 /// <param name="FromUnit">Код вихідної одиниці.</param>
 /// <param name="ToUnit">Код цільової одиниці.</param>
 public sealed record ConvertUnitRequest(decimal Value, string FromUnit, string ToUnit);
+
+/// <summary>Результат конверсії одиниць.</summary>
+/// <param name="Value">Значення у цільовій одиниці.</param>
+/// <param name="Unit">Код цільової одиниці.</param>
+public sealed record ConvertUnitResponse(decimal Value, string Unit);

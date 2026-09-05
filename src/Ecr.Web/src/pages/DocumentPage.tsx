@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
 import type {
+  DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
   ExportRequest,
@@ -57,7 +58,12 @@ export function DocumentPage(): JSX.Element {
     mutationFn: () =>
       apiFetch<{ messages: ValidationMessageDto[] }>(
         `/api/v1/documents/${documentId}/validate`,
-        { method: 'POST', body: JSON.stringify({ periodKey }) },
+        {
+          method: 'POST',
+          // ⚠ Період — у ТІЛІ. До `A7-28` сервер читав його з рядка запиту, і
+          // валідація мовчки йшла по періоду 0, відповідаючи «помилок немає».
+          body: JSON.stringify({ periodKey } satisfies DocumentPeriodRequest),
+        },
       ),
     onSuccess: (result) => {
       const errors = result.messages.filter((message) => message.severity === 'Error');

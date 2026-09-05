@@ -51,8 +51,13 @@ public sealed class RegistriesController(
     /// користувач.
     /// </remarks>
     [HttpPost("{code}/entries")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status201Created)]
+    // ⛔ Тип відповіді оголошений ЯВНО, а тіло — іменований запис, а не
+    // анонімний об'єкт. Інакше в схемі OpenAPI лишається порожня 200-ка,
+    // згенерувати клієнтський тип ні з чого, і клієнт описує відповідь
+    // рукописним інтерфейсом — з помилкою в назві поля, яку ніхто не
+    // побачить (`A7-16`, `A7-32`).
+    [ProducesResponseType<RegistryEntryIdResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<RegistryEntryIdResponse>(StatusCodes.Status201Created)]
     public async Task<IActionResult> Upsert(
         string code, [FromBody] RegistryEntryUpsertDto dto, CancellationToken ct)
     {
@@ -65,7 +70,7 @@ public sealed class RegistriesController(
         // означає, чи з'явився новий Id, який тепер лежатиме в комірках.
         return isNew
             ? CreatedAtAction(nameof(Entries), new { code }, new { id })
-            : Ok(new { id });
+            : Ok(new RegistryEntryIdResponse(id));
     }
 
     /// <summary>
@@ -80,7 +85,7 @@ public sealed class RegistriesController(
     /// <c>Id</c>, і видалення зробило б історичні документи нечитабельними.
     /// </remarks>
     [HttpPost("{code}/entries/{id:long}/validity")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<AffectedRowsResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> SetValidity(
         string code, long id, [FromBody] SetValidityRequest request, CancellationToken ct)
     {
@@ -92,7 +97,7 @@ public sealed class RegistriesController(
 
         // Повертається кількість зачеплених рядків: той, хто звузив вікно, має
         // бачити масштаб наслідку, а не лише «ок».
-        return Ok(new { affectedRows = affected });
+        return Ok(new AffectedRowsResponse(affected));
     }
 }
 
@@ -100,3 +105,11 @@ public sealed class RegistriesController(
 /// <param name="From">Початок дії; <c>null</c> — без обмеження.</param>
 /// <param name="To">Кінець дії; <c>null</c> — без обмеження.</param>
 public sealed record SetValidityRequest(DateOnly? From, DateOnly? To);
+
+/// <summary>Ідентифікатор запису довідника.</summary>
+/// <param name="Id">Запис.</param>
+public sealed record RegistryEntryIdResponse(long Id);
+
+/// <summary>Скільки рядків зачепила операція.</summary>
+/// <param name="AffectedRows">Кількість.</param>
+public sealed record AffectedRowsResponse(int AffectedRows);

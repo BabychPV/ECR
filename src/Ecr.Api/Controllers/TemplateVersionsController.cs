@@ -70,7 +70,12 @@ public sealed class TemplateVersionsController(
     /// саме тому ключ кешу <c>v{id}:r{rev}</c> не потребує інвалідації.
     /// </remarks>
     [HttpPatch("presentation")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    // ⛔ Тип відповіді оголошений ЯВНО, а тіло — іменований запис, а не
+    // анонімний об'єкт. Інакше в схемі OpenAPI лишається порожня 200-ка,
+    // згенерувати клієнтський тип ні з чого, і клієнт описує відповідь
+    // рукописним інтерфейсом — з помилкою в назві поля, яку ніхто не
+    // побачить (`A7-16`, `A7-32`).
+    [ProducesResponseType<PresentationRevisionResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> PatchPresentation(
         int id, [FromBody] JsonElement patch, CancellationToken ct)
     {
@@ -80,7 +85,7 @@ public sealed class TemplateVersionsController(
 
         // Нова ревізія — це новий ключ кешу v{id}:r{rev}. Клієнт має її
         // отримати, інакше він і далі питатиме структуру за старим ключем.
-        return Ok(new { presentationRevision = revision });
+        return Ok(new PresentationRevisionResponse(revision));
     }
 
     /// <summary>Структура версії для клієнта. Право <c>Template.View</c>.</summary>
@@ -114,3 +119,7 @@ public sealed class TemplateVersionsController(
 /// <summary>Запит на клонування версії.</summary>
 /// <param name="NewVersion">Номер нової версії.</param>
 public sealed record CloneVersionRequest(string NewVersion);
+
+/// <summary>Нова ревізія презентаційного шару.</summary>
+/// <param name="PresentationRevision">Ревізія; входить у ключ кешу метаданих (D-16).</param>
+public sealed record PresentationRevisionResponse(int PresentationRevision);

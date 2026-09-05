@@ -43,8 +43,21 @@ public sealed class GetDocumentTablesHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        var key = PeriodKey.Parse(periodKey);
+
+        // ⛔ Екземпляри створюються ПЕРЕД читанням, при першому відкритті
+        // документа за цей період (`A7-30`). Доти їх не створював ніхто: у
+        // всій системі `doc.TableInstance` лише читався, і документ, створений
+        // через API, лишався без жодної таблиці назавжди.
+        //
+        // ⚠ Це запис на шляху читання — свідомо, за тією самою схемою, що й
+        // побудова календаря періодів: виклик ідемпотентний, а альтернатива
+        // (заводити тисячу рядків наперед на кожен документ) коштує більше й
+        // здебільшого дарма.
+        await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
+
         var instances = await rowStore
-            .GetTableInstancesAsync(documentId, new PeriodKey(periodKey), ct)
+            .GetTableInstancesAsync(documentId, key, ct)
             .ConfigureAwait(false);
 
         if (instances.Count == 0)

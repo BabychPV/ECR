@@ -1979,6 +1979,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
 | `ECR-CALC-0409` | 409 | публікація методології автором останньої правки (D-40) |
 | `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
+| `ECR-PRJ-0422` | 422 | активація проєкту, який уже не чернетка або не має періодів (`A7-25`) |
 | `ECR-CALC-4221` | 422 | перерахунок закритого періоду без окремого погодження (ФВ-9.7) |
 | `ECR-IMP-0422` | 422 | імпорт xlsx: структура файлу не відповідає шаблону |
 | `ECR-INT-0503` | 503 | зовнішнє джерело недоступне; збір перейде в catch-up |
@@ -2051,6 +2052,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
 | `GET` | `/api/v1/projects` | `Document.View` | 1 |
 | `POST` | `/api/v1/projects` | `Project.Manage` | 1 |
+| `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` | 3 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
@@ -2082,6 +2084,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |
+| `GET` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
+| `PUT` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |

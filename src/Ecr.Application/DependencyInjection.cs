@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<Templates.ListTemplateVersionsHandler>();
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();
+        services.AddScoped<Projects.ActivateProjectHandler>();
 
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();
@@ -75,6 +76,8 @@ public static class DependencyInjection
 
         // Безпека: ролі, користувачі, аудит (модулі 3.2, 3.9)
         services.AddScoped<Security.ListRolesHandler>();
+        services.AddScoped<Security.ListResourceGrantsHandler>();
+        services.AddScoped<Security.ReplaceResourceGrantsHandler>();
         services.AddScoped<Security.CreateRoleHandler>();
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();

@@ -38,7 +38,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PagedResultOfCellChangeView"];
+                        "application/json": components["schemas"]["PagedResultOfCellChangeView"];
+                        "text/json": components["schemas"]["PagedResultOfCellChangeView"];
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -528,23 +532,31 @@ export interface paths {
          */
         post: {
             parameters: {
-                query?: {
-                    periodKey?: number;
-                };
+                query?: never;
                 header?: never;
                 path: {
                     id: number;
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DocumentPeriodRequest"];
+                    "text/json": components["schemas"]["DocumentPeriodRequest"];
+                    "application/*+json": components["schemas"]["DocumentPeriodRequest"];
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ValidationResultResponse"];
+                        "application/json": components["schemas"]["ValidationResultResponse"];
+                        "text/json": components["schemas"]["ValidationResultResponse"];
+                    };
                 };
             };
         };
@@ -569,16 +581,20 @@ export interface paths {
          */
         post: {
             parameters: {
-                query?: {
-                    periodKey?: number;
-                };
+                query?: never;
                 header?: never;
                 path: {
                     id: number;
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DocumentPeriodRequest"];
+                    "text/json": components["schemas"]["DocumentPeriodRequest"];
+                    "application/*+json": components["schemas"]["DocumentPeriodRequest"];
+                };
+            };
             responses: {
                 /** @description Accepted */
                 202: {
@@ -869,7 +885,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                    };
                 };
                 /** @description Not Found */
                 404: {
@@ -877,9 +895,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "text/plain": components["schemas"]["ProblemDetails"];
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -927,7 +943,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ImportPreview"];
+                        "application/json": components["schemas"]["ImportPreview"];
+                        "text/json": components["schemas"]["ImportPreview"];
+                    };
                 };
             };
         };
@@ -969,7 +989,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PatchCellsResponse"];
+                        "application/json": components["schemas"]["PatchCellsResponse"];
+                        "text/json": components["schemas"]["PatchCellsResponse"];
+                    };
                 };
                 /** @description Conflict */
                 409: {
@@ -1306,7 +1330,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PagedResultOfProjectSummary"];
+                        "application/json": components["schemas"]["PagedResultOfProjectSummary"];
+                        "text/json": components["schemas"]["PagedResultOfProjectSummary"];
+                    };
                 };
             };
         };
@@ -1334,6 +1362,46 @@ export interface paths {
             responses: {
                 /** @description Created */
                 201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Активує проєкт. Право `Project.Manage`.
+         * @description ⛔ Без цього маршруту проєкт лишається чернеткою назавжди, періоди не
+         *     відкриваються і система не приймає жодного значення (`A7-25`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1589,14 +1657,22 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["RegistryEntryIdResponse"];
+                        "application/json": components["schemas"]["RegistryEntryIdResponse"];
+                        "text/json": components["schemas"]["RegistryEntryIdResponse"];
+                    };
                 };
                 /** @description Created */
                 201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["RegistryEntryIdResponse"];
+                        "application/json": components["schemas"]["RegistryEntryIdResponse"];
+                        "text/json": components["schemas"]["RegistryEntryIdResponse"];
+                    };
                 };
             };
         };
@@ -1646,7 +1722,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["AffectedRowsResponse"];
+                        "application/json": components["schemas"]["AffectedRowsResponse"];
+                        "text/json": components["schemas"]["AffectedRowsResponse"];
+                    };
                 };
             };
         };
@@ -1805,6 +1885,83 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/{id}/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ресурсні гранти ролі. Право `Security.ManageRoles`.
+         * @description ⛔ Без цих двох маршрутів система не показує даних НІКОМУ (`A7-22`):
+         *     доступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант
+         *     не було чим. Права відповідають на питання «що людина вміє», гранти —
+         *     «до чого саме»; без другої відповіді перша нічого не відкриває.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ResourceGrantDto"][];
+                        "application/json": components["schemas"]["ResourceGrantDto"][];
+                        "text/json": components["schemas"]["ResourceGrantDto"][];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює набір грантів ролі цілком. Право `Security.ManageRoles`.
+         * @description ⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на
+         *     питання «що покриває роль», і вона має бути видима одним поглядом.
+         *     Часткові правки лишають стан, у якому джерело доступу не відновлюється.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReplaceGrantsRequest"];
+                    "text/json": components["schemas"]["ReplaceGrantsRequest"];
+                    "application/*+json": components["schemas"]["ReplaceGrantsRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2419,7 +2576,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PresentationRevisionResponse"];
+                        "application/json": components["schemas"]["PresentationRevisionResponse"];
+                        "text/json": components["schemas"]["PresentationRevisionResponse"];
+                    };
                 };
             };
         };
@@ -2581,7 +2742,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["UiStringRevisionResponse"];
+                        "application/json": components["schemas"]["UiStringRevisionResponse"];
+                        "text/json": components["schemas"]["UiStringRevisionResponse"];
+                    };
                 };
             };
         };
@@ -2672,7 +2837,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ConvertUnitResponse"];
+                        "application/json": components["schemas"]["ConvertUnitResponse"];
+                        "text/json": components["schemas"]["ConvertUnitResponse"];
+                    };
                 };
                 /** @description Unprocessable Entity */
                 422: {
@@ -2697,6 +2866,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Скільки рядків зачепила операція. */
+        AffectedRowsResponse: {
+            /**
+             * Format: int32
+             * @description Кількість.
+             */
+            affectedRows: number;
+        };
         /** @description Запит на погодження аркуша. */
         ApproveSheetRequest: {
             /**
@@ -2743,6 +2920,57 @@ export interface components {
          * @enum {unknown}
          */
         CalendarMode: "Actual" | "Fixed365" | "Fixed360";
+        /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
+        CellChangeView: {
+            /**
+             * Format: date-time
+             * @description Момент зміни в UTC.
+             */
+            changedAt: string;
+            /**
+             * Format: int32
+             * @description Звітний період.
+             */
+            periodKey: number;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Ключ рядка — щоб журнал читався без join. */
+            rowKey: string;
+            /**
+             * Format: int32
+             * @description Колонка.
+             */
+            columnDefId: number;
+            /** @description Старе значення. */
+            oldValue: null | string;
+            /** @description Нове значення. */
+            newValue: null | string;
+            /**
+             * Format: int32
+             * @description Автор — <b>UserId</b>, не SID (R-A2, D-86).
+             */
+            changedByUserId: number;
+            /** @description Звідки зміна: правка, імпорт, перерахунок, міграція. */
+            origin: string;
+            /** @description Зміна в `Grace` або після `Reopen` (D-70). */
+            isLateEdit: boolean;
+        };
+        /** @description Конфлікт паралельного редагування. Повертається в
+         *     `Extensions2.conflicts` при `ECR-CELL-0409`.
+         *     «Перезаписати мовчки» не є опцією: користувач має побачити розбіжність. */
+        CellConflictDto: {
+            rowKey: string;
+            columnCode: string;
+            yourValue: unknown;
+            theirValue: unknown;
+            theirUser: string;
+            /** Format: date-time */
+            theirChangedAt: string;
+            currentVersion: string;
+        };
         /**
          * @description Клас структурної зміни (документ 10 «Еволюція схеми»).
          * @enum {unknown}
@@ -2823,6 +3051,16 @@ export interface components {
             fromUnit: string;
             /** @description Код цільової одиниці. */
             toUnit: string;
+        };
+        /** @description Результат конверсії одиниць. */
+        ConvertUnitResponse: {
+            /**
+             * Format: double
+             * @description Значення у цільовій одиниці.
+             */
+            value: number;
+            /** @description Код цільової одиниці. */
+            unit: string;
         };
         /** @description Запит на створення документа. */
         CreateDocumentRequest: {
@@ -2956,6 +3194,14 @@ export interface components {
              */
             simulatedForUserId: null | number;
         };
+        /** @description Дія над документом у межах одного періоду. */
+        DocumentPeriodRequest: {
+            /**
+             * Format: int32
+             * @description Період; `Рік*100 + Номер` (R-A6).
+             */
+            periodKey: number;
+        };
         /** @description Документ у переліку. */
         DocumentSummary: {
             /**
@@ -3021,6 +3267,10 @@ export interface components {
              */
             tableOrdinal: number;
         };
+        EntityTagHeaderValue: {
+            tag?: components["schemas"]["StringSegment"];
+            isWeak?: boolean;
+        };
         /** @description Запит на експорт. */
         ExportRequest: {
             /** @description Транслювати вирази в Excel-синтаксис (ФВ-4.2). */
@@ -3035,12 +3285,50 @@ export interface components {
              */
             periodKey: number;
         };
+        FileResult: {
+            contentType?: null | string;
+            fileDownloadName?: null | string;
+            /** Format: date-time */
+            lastModified?: null | string;
+            entityTag?: null | components["schemas"]["EntityTagHeaderValue"];
+            enableRangeProcessing?: boolean;
+        };
+        /**
+         * @description Рівень ресурсного гранта. Порядок значень значущий: більше = ширше.
+         * @enum {unknown}
+         */
+        GrantLevel: "None" | "Read" | "Write" | "Submit" | "Approve" | "Manage";
         /** Format: binary */
         IFormFile: string;
         /** @description Запит на застосування імпорту. */
         ImportApplyRequest: {
             /** @description Токен раніше побудованого diff. */
             previewToken: string;
+        };
+        /** @description Зміна, яку принесе імпорт. */
+        ImportChange: {
+            rowKey: string;
+            columnCode: string;
+            oldValue: unknown;
+            newValue: unknown;
+        };
+        /** @description Результат попереднього перегляду імпорту. */
+        ImportPreview: {
+            /** @description Токен для застосування; діє обмежений час. */
+            previewToken: string;
+            /** @description Комірки, які зміняться. */
+            changes: components["schemas"]["ImportChange"][];
+            /** @description Комірки, які буде відхилено, із причиною. */
+            rejected: components["schemas"]["ImportRejection"][];
+            /** @description Комірки, змінені іншим користувачем після відкриття. */
+            conflicts: components["schemas"]["CellConflictDto"][];
+        };
+        /** @description Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4). */
+        ImportRejection: {
+            rowKey: string;
+            columnCode: string;
+            reasonCode: string;
+            message: string;
         };
         /** @description Стан фонової задачі. */
         JobStatus: {
@@ -3185,9 +3473,35 @@ export interface components {
         NumericMode: "Legacy" | "Strict";
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfCellChangeView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["CellChangeView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfDocumentSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["DocumentSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfProjectSummary: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["ProjectSummary"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
@@ -3351,6 +3665,14 @@ export interface components {
          * @enum {unknown}
          */
         PeriodState: "Scheduled" | "Open" | "Grace" | "Closed";
+        /** @description Нова ревізія презентаційного шару. */
+        PresentationRevisionResponse: {
+            /**
+             * Format: int32
+             * @description Ревізія; входить у ключ кешу метаданих (D-16).
+             */
+            presentationRevision: number;
+        };
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
@@ -3358,6 +3680,37 @@ export interface components {
             status?: null | number;
             detail?: null | string;
             instance?: null | string;
+        };
+        /**
+         * @description Стан проєкту.
+         * @enum {unknown}
+         */
+        ProjectStatus: "Draft" | "Active" | "Grace" | "Closed" | "Archived";
+        /** @description Проєкт у переліку. */
+        ProjectSummary: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Код. */
+            code: string;
+            /** @description Стан проєкту. */
+            status: components["schemas"]["ProjectStatus"];
+            /** @description Пояс майданчика. */
+            timeZoneId: string;
+            /** @description Періодичність. */
+            periodKind: components["schemas"]["PeriodKind"];
+            /**
+             * Format: int32
+             * @description Поточний період — підказка UI, не правило доступу (D-77).
+             */
+            currentPeriodId: null | number;
+            /**
+             * Format: int32
+             * @description Скільки періодів у календарі.
+             */
+            periodCount: number;
         };
         /** @description Запит на публікацію версії методології. */
         PublishMethodologyRequest: {
@@ -3402,6 +3755,14 @@ export interface components {
             validFrom: null | string;
             /** Format: date */
             validTo: null | string;
+        };
+        /** @description Ідентифікатор запису довідника. */
+        RegistryEntryIdResponse: {
+            /**
+             * Format: int64
+             * @description Запис.
+             */
+            id: number;
         };
         /** @description Створення або оновлення запису довідника. */
         RegistryEntryUpsertDto: {
@@ -3483,6 +3844,11 @@ export interface components {
              */
             until: null | string;
         };
+        /** @description Запит на заміну набору ресурсних грантів ролі. */
+        ReplaceGrantsRequest: {
+            /** @description Новий набір; порожній прибирає доступ ролі повністю. */
+            grants: components["schemas"]["ResourceGrantDto"][];
+        };
         /** @description Зріз у переліку. */
         ReportSnapshotSummary: {
             /**
@@ -3522,6 +3888,25 @@ export interface components {
              */
             builtAt: string;
         };
+        /** @description Ресурсний грант у вигляді, придатному для передавання. */
+        ResourceGrantDto: {
+            /** @description Вид ресурсу: `Project`, `Sheet`, `Table`, `Column`. */
+            resourceKind: components["schemas"]["ResourceKind"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор ресурсу.
+             */
+            resourceId: number;
+            /** @description Рівень: `Read`…`Manage`. */
+            level: components["schemas"]["GrantLevel"];
+            /** @description Явна заборона; перекриває будь-який дозвіл (ФВ-6.6). */
+            isDeny: boolean;
+        };
+        /**
+         * @description Тип ресурсу, на який видається грант.
+         * @enum {unknown}
+         */
+        ResourceKind: "Project" | "Sheet" | "Table" | "Column";
         /** @description Роль із її правами. */
         RoleView: {
             /**
@@ -3683,6 +4068,15 @@ export interface components {
             /** @description Причина; потрапляє в `aud.SimulationSession`. */
             reason: string;
         };
+        StringSegment: {
+            buffer?: null | string;
+            /** Format: int32 */
+            offset?: number;
+            /** Format: int32 */
+            length?: number;
+            value?: null | string;
+            hasValue?: boolean;
+        };
         TableDto: {
             /** Format: int32 */
             id: number;
@@ -3834,6 +4228,14 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Версія каталогу після запису. */
+        UiStringRevisionResponse: {
+            /**
+             * Format: int32
+             * @description Версія; слугує `ETag`.
+             */
+            revision: number;
+        };
         /**
          * @description Область каталогу (`D-114`). Значення збігаються з
          *     `sys_ecr.UiString.Scope`.
@@ -3901,6 +4303,21 @@ export interface components {
             rowKey: null | string;
             /** @description Колонка; `null` — рівень рядка. */
             columnCode: null | string;
+        };
+        /** @description Результат перевірки документа за період. */
+        ValidationResultResponse: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /**
+             * Format: int32
+             * @description Період, за який виконано перевірку.
+             */
+            periodKey: number;
+            /** @description Зауваження ВСІХ рівнів. */
+            messages: components["schemas"]["ValidationMessageDto"][];
         };
     };
     responses: never;

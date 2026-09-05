@@ -167,6 +167,15 @@ export type JobStatus = Schemas['JobStatus'];
 // `userName` і отримував 400 на кожну спробу (`A7-09`).
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Сторінка проєктів. */
+export type PagedProjects = Schemas['PagedResultOfProjectSummary'];
+
+/** Проєкт у переліку. */
+export type ProjectSummary = Schemas['ProjectSummary'];
+
+/** Результат перевірки документа. */
+export type ValidationResultResponse = Schemas['ValidationResultResponse'];
+
 /** Каталог рядків інтерфейсу. */
 export type UiStringCatalog = Schemas['UiStringCatalog'];
 
@@ -184,6 +193,15 @@ export type ImportApplyRequest = Schemas['ImportApplyRequest'];
 
 /** Подання або затвердження аркуша. */
 export type SheetWorkflowRequest = Schemas['SheetWorkflowRequest'];
+
+/** Дія над документом у межах одного періоду: валідація, перерахунок. */
+export type DocumentPeriodRequest = Schemas['DocumentPeriodRequest'];
+
+/** Заміна набору ресурсних грантів ролі. */
+export type ReplaceGrantsRequest = Schemas['ReplaceGrantsRequest'];
+
+/** Ресурсний грант ролі. */
+export type ResourceGrantDto = Schemas['ResourceGrantDto'];
 
 /** Публікація версії методології. */
 export type PublishMethodologyRequest = Schemas['PublishMethodologyRequest'];

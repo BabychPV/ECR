@@ -40,6 +40,27 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
             : DefaultCacheLifetime;
 
     /// <summary>Чи актуальний штамп із cookie.</summary>
+    /// <param name="userId">Користувач із заявки.</param>
+    /// <param name="stampFromCookie">Штамп, записаний у cookie при вході.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Кеш тут **тільки пришвидшує згоду і ніколи не дає відмови**. Різниця
+    /// принципова, і до `A7-21` її не було: кеш зберігає ШТАМП, а зміна пароля
+    /// його прокручує. Одразу після зміни в кеші лежало старе значення, а в
+    /// щойно виданій cookie — нове; вони не збігалися, і застосунок виходив із
+    /// сеансу, який сам щойно створив. Користувач потрапляв на форму входу,
+    /// успішно входив і за наступним запитом опинявся там знову — і так усі
+    /// п'ять секунд.
+    ///
+    /// ⚠ Тому розбіжність не є вироком: вона коштує ОДНОГО читання
+    /// <c>sec.User</c>, після якого рішення ухвалюється за фактом. Дешевий шлях
+    /// лишається дешевим (збіг — без бази), а дорогий трапляється рівно тоді,
+    /// коли ціна помилки максимальна.
+    ///
+    /// ⚠ Вікно відкликання від цього не подовжується. Відкликана роль дає
+    /// протилежну картину: у кеші СТАРИЙ штамп, у cookie той самий старий, вони
+    /// збігаються — і доступ живе задокументовані п'ять секунд, як і задумано.
+    /// </remarks>
     public async Task<bool> IsCurrentAsync(int userId, string stampFromCookie, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(stampFromCookie))
@@ -50,23 +71,31 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
         var lifetime = CacheLifetime;
         var key = $"stamp:{userId}";
 
-        if (lifetime == TimeSpan.Zero || !cache.TryGetValue(key, out string? current))
+        if (lifetime > TimeSpan.Zero
+            && cache.TryGetValue(key, out string? cached)
+            && string.Equals(cached, stampFromCookie, StringComparison.Ordinal))
         {
-            current = await db.Users
-                .AsNoTracking()
-                .Where(u => u.Id == userId && u.IsActive)
-                .Select(u => u.SecurityStamp)
-                .FirstOrDefaultAsync(ct)
-                .ConfigureAwait(false);
+            return true;
+        }
 
-            if (lifetime > TimeSpan.Zero)
-            {
-                cache.Set(key, current, lifetime);
-            }
+        var current = await ReadStampAsync(userId, ct).ConfigureAwait(false);
+
+        if (lifetime > TimeSpan.Zero)
+        {
+            cache.Set(key, current, lifetime);
         }
 
         // Вимкнений користувач штампа не має — і це теж «не актуальний».
         return current is not null
             && string.Equals(current, stampFromCookie, StringComparison.Ordinal);
     }
+
+    /// <summary>Читає чинний штамп активного користувача.</summary>
+    private async Task<string?> ReadStampAsync(int userId, CancellationToken ct)
+        => await db.Users
+            .AsNoTracking()
+            .Where(u => u.Id == userId && u.IsActive)
+            .Select(u => u.SecurityStamp)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 }

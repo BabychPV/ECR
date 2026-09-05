@@ -144,3 +144,63 @@ public sealed class CreateProjectHandler(
         return project.Id;
     }
 }
+
+/// <summary>
+/// Активація проєкту: <c>Draft → Active</c>. Право <c>Project.Manage</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Обробник закриває `A7-25` — відсутність переходу, без якого система не
+/// працює взагалі. Проєкт створюється чернеткою, а <c>PeriodStateJob</c>
+/// обробляє лише активні: доки проєкт лишається чернеткою, жоден період не
+/// відкривається, і на кожній комірці стоїть «період ще не відкрито». Причина
+/// при цьому неправдива — за датами період відкритий.
+///
+/// ⚠ Активація вимагає, щоб у проєкті БУЛИ періоди. Активний проєкт без
+/// періодів — це та сама мовчазна непрацездатність, тільки на крок далі:
+/// відкривати нема чого, а стан каже, що все гаразд.
+/// </remarks>
+public sealed class ActivateProjectHandler(
+    IPeriodStore periods,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IClock clock)
+{
+    /// <summary>Право на активацію.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Активує проєкт.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Проєкту немає.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-PRJ-0422</c> — проєкт уже не чернетка або в ньому немає періодів.
+    /// </exception>
+    public async Task HandleAsync(int projectId, CancellationToken ct)
+    {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException("ECR-ROW-0404", $"Проєкту {projectId} не існує.");
+
+        if (project.Status != Domain.Enums.ProjectStatus.Draft)
+        {
+            throw new BusinessRuleException(
+                "ECR-PRJ-0422",
+                $"Активувати можна лише чернетку; проєкт у стані {project.Status}.");
+        }
+
+        if (project.Periods.Count == 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-PRJ-0422",
+                "У проєкті немає жодного періоду: активувати нічого.");
+        }
+
+        project.Activate(clock.UtcNow);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}

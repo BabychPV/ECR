@@ -131,6 +131,52 @@ public sealed class FakeUserStore : IUserStore
         return Task.FromResult(id);
     }
 
+    /// <summary>Ресурсні гранти за роллю.</summary>
+    /// <remarks>
+    /// ⚠ Фікстура тримає гранти так само, як їх тримає система: набором на
+    /// роль. Спокуса зробити «список на користувача» тут велика і хибна —
+    /// саме на роль вони й лягають (`UQ_ResourceGrant`).
+    /// </remarks>
+    public Dictionary<int, List<Ecr.Application.Security.ResourceGrantDto>> GrantsByRole { get; } = [];
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>> ListGrantsAsync(
+        int roleId, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>>(
+            GrantsByRole.TryGetValue(roleId, out var list) ? list : []);
+
+    /// <inheritdoc />
+    public Task ReplaceGrantsAsync(
+        int roleId, IReadOnlyList<Ecr.Application.Security.ResourceGrantDto> grants, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(grants);
+
+        GrantsByRole[roleId] = [.. grants];
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
+    {
+        var affected = Grants
+            .Where(g => string.Equals(g.RoleCode, RoleCodeById(roleId), StringComparison.Ordinal))
+            .Select(g => g.UserName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var user in _users.Where(u => affected.Contains(u.UserName, StringComparer.Ordinal)))
+        {
+            user.RefreshSecurityStamp();
+        }
+
+        return Task.FromResult(affected.Count);
+    }
+
+    /// <summary>Код ролі за ідентифікатором; порожньо, якщо ролі немає.</summary>
+    private string RoleCodeById(int roleId)
+        => Roles.FirstOrDefault(r => r.Id == roleId)?.Code ?? string.Empty;
+
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> FilterUnknownAsync(
         IReadOnlyList<string> permissionCodes, CancellationToken ct)

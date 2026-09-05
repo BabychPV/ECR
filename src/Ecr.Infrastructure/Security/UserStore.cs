@@ -228,6 +228,75 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>> ListGrantsAsync(
+        int roleId, CancellationToken ct)
+        => await db.ResourceGrants
+            .AsNoTracking()
+            .Where(g => g.RoleId == roleId)
+            .OrderBy(g => g.ResourceKind)
+            .ThenBy(g => g.ResourceId)
+            .Select(g => new Ecr.Application.Security.ResourceGrantDto(
+                g.ResourceKind, g.ResourceId, g.Level, g.IsDeny))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task ReplaceGrantsAsync(
+        int roleId, IReadOnlyList<Ecr.Application.Security.ResourceGrantDto> grants, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(grants);
+
+        // ⚠ Видалення і вставка йдуть ОДНИМ комітом обробника: між ними роль
+        // лишається без грантів, і чужий запит у цю мить побачив би порожній
+        // доступ. Тут немає власного SaveChanges саме тому.
+        var existing = await db.ResourceGrants
+            .Where(g => g.RoleId == roleId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.ResourceGrants.RemoveRange(existing);
+
+        foreach (var grant in grants)
+        {
+            db.ResourceGrants.Add(new ResourceGrant(
+                roleId, grant.ResourceKind, grant.ResourceId, grant.Level, grant.IsDeny));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
+    {
+        // ⚠ Носії беруться і за прямим призначенням, і за призначенням на
+        // групу AD: у другому випадку конкретних користувачів у таблиці немає,
+        // і їхні сеанси доводиться лишати на звичайну перевірку штампа.
+        // Прокрутити можна лише тих, кого система знає поіменно.
+        var userIds = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.RoleId == roleId && a.UserId != null)
+            .Select(a => a.UserId!.Value)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (userIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var users = await db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var user in users)
+        {
+            user.RefreshSecurityStamp();
+        }
+
+        return users.Count;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<string>> FilterUnknownAsync(
         IReadOnlyList<string> permissionCodes, CancellationToken ct)
     {
