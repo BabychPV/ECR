@@ -1,4 +1,4 @@
-# 05i — Скелет: `Ecr.Web` (React SPA)
+﻿# 05i — Скелет: `Ecr.Web` (React SPA)
 
 > Частина [`05-skeleton.md`](05-skeleton.md).
 > Обсяг і області — [`B21`](../reference/backend/B21-frontend-spec.md), з
@@ -34,7 +34,7 @@ MODULE: web | STAGE: 0
   "dependencies": {
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "react-router-dom": "7.1.1",
+    "react-router-dom": "7.18.3",
     "@mantine/core": "7.15.2",
     "@mantine/hooks": "7.15.2",
     "@mantine/dates": "7.15.2",
@@ -50,16 +50,16 @@ MODULE: web | STAGE: 0
   },
   "devDependencies": {
     "typescript": "5.7.2",
-    "vite": "6.0.7",
+    "vite": "6.4.3",
     "@vitejs/plugin-react": "4.3.4",
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",
-    "vitest": "2.1.8",
+    "vitest": "2.1.9",
     "@testing-library/react": "16.1.0",
     "@testing-library/user-event": "14.5.2",
     "jsdom": "25.0.1",
     "openapi-typescript": "7.5.0",
-    "eslint": "9.17.0",
+    "eslint": "9.39.5",
     "@typescript-eslint/eslint-plugin": "8.18.2",
     "@typescript-eslint/parser": "8.18.2"
   }
