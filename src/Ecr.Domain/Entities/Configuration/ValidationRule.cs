@@ -9,13 +9,31 @@ public sealed class ValidationRule : Entity<int>
 {
     private ValidationRule() { }
 
+    /// <param name="tableDefId">Таблиця, якій належить правило.</param>
+    /// <param name="code">Код правила; він же в повідомленні порушення.</param>
+    /// <param name="severity">Рівень: <c>Info</c>, <c>Warning</c>, <c>Error</c>.</param>
+    /// <param name="scope">0 Cell, 1 Row, 2 Table, 3 Document.</param>
+    /// <param name="expression">Предикат нашою мовою.</param>
+    /// <param name="message">Текст порушення мовами каталогу.</param>
+    /// <param name="columnDefId">
+    /// Колонка, до якої прив'язане правило; <c>null</c> — до всіх колонок
+    /// таблиці.
+    /// </param>
+    /// <remarks>
+    /// ⚠ <paramref name="columnDefId"/> зʼявився з аудиту: властивість
+    /// існувала, рушій валідації її читав — і не було
+    /// жодного способу її задати. Тобто гілка «правило лише для цієї
+    /// колонки» була недосяжна, і кожне коміркове правило застосовувалося
+    /// до всієї таблиці.
+    /// </remarks>
     public ValidationRule(int tableDefId, EcrCode code, ValidationSeverity severity, byte scope,
-                          string expression, LocalizedText message)
+                          string expression, LocalizedText message, int? columnDefId = null)
     {
         TableDefId = tableDefId;
         Code = code.Value;
         Severity = severity;
         Scope = scope;
+        ColumnDefId = columnDefId;
         Expression = expression;
         MessageL10n = message;
         IsActive = true;

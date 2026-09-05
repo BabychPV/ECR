@@ -71,6 +71,30 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
     public async Task<IReadOnlyList<string>> MatchRowsAsync(
         int methodologyVersionId, long tableInstanceId, CancellationToken ct)
     {
+        var matches = await MatchRowsWithRulesAsync(methodologyVersionId, tableInstanceId, ct)
+            .ConfigureAwait(false);
+
+        return [.. matches.Select(m => m.RowKey)];
+    }
+
+    /// <summary>
+    /// Те саме, але з <b>назвою правила</b>, яке рядок закрило.
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці документа.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Саме тут «перший збіг виграє» (<c>ФВ-13.4</c>) стає <b>видимим</b>.
+    /// Доки метод повертав самі ключі рядків, правило-переможець ніде не
+    /// з'являлося: порядок за <c>Priority</c> не міняв відповіді, і вимогу
+    /// неможливо було ані перевірити, ані порушити. Тепер видно, ЯКЕ
+    /// правило спрацювало, і це те, що показує матриця покриття
+    /// (<c>ФВ-13.9</c>) і чого бракує в поясненні розрахунку.
+    /// </remarks>
+    /// <returns>Пари «рядок → код правила», що його закрило.</returns>
+    public async Task<IReadOnlyList<RowRuleMatch>> MatchRowsWithRulesAsync(
+        int methodologyVersionId, long tableInstanceId, CancellationToken ct)
+    {
         var rules = await store.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         if (rules.Count == 0)
         {
@@ -96,7 +120,7 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
                     Text,
                     StringComparer.Ordinal));
 
-        var matched = new List<string>();
+        var matched = new List<RowRuleMatch>();
 
         foreach (var (rowKey, rowId) in rowIds)
         {
@@ -104,12 +128,15 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
                 ? found
                 : new Dictionary<string, string?>(StringComparer.Ordinal);
 
-            // Перший збіг виграє: правила вже впорядковані сховищем за
-            // Priority, і перебирати далі означало б дозволити останньому
-            // правилу мовчки перекрити виняток, поставлений першим.
-            if (rules.Any(rule => Matches(rule.MatchJson, values)))
+            // ⛔ ПЕРШИЙ збіг, а не «будь-який»: правила вже впорядковані
+            // сховищем за `Priority`, і перебирати далі означало б
+            // дозволити загальному правилу «вся таблиця» мовчки перекрити
+            // точніше, поставлене перед ним.
+            var winner = rules.FirstOrDefault(rule => Matches(rule.MatchJson, values));
+
+            if (winner is not null)
             {
-                matched.Add(rowKey);
+                matched.Add(new RowRuleMatch(rowKey, winner.Code));
             }
         }
 
@@ -167,3 +194,8 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
            ?? cell.Value.ValueRegistryEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
            ?? cell.Value.ValueBool?.ToString();
 }
+
+/// <summary>Рядок і правило, яке його закрило.</summary>
+/// <param name="RowKey">Ключ рядка документа.</param>
+/// <param name="RuleCode">Код правила-переможця (<c>ФВ-13.4</c>).</param>
+public sealed record RowRuleMatch(string RowKey, string RuleCode);

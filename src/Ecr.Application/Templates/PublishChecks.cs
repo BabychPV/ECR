@@ -206,4 +206,134 @@ public static class PublishChecks
         return new TemplateVersionSnapshot(
             version.Id, version.PresentationRevision, version.Sheets, columns, rows);
     }
+
+    /// <summary>
+    /// Перевіряє ПРАВИЛА версії: суперечливі рівні (<c>ФВ-5.10</c>) і
+    /// обов'язкові колонки без покриття (<c>ФВ-5.11</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обидві перевірки названі вимогами і не існували. Знайдено матрицею
+    /// трасування: вимоги лишалися непокритими, і спроба знайти для них тест
+    /// показала, що перевіряти нічого — <see cref="Run"/> дивиться лише на
+    /// формули. Наслідок точно той, від якого вимоги застерігають:
+    /// суперечність виявляється в рантаймі, коли оператор уже не може
+    /// зберегти рядок і не розуміє чому.
+    ///
+    /// ⚠ Окремий метод, а не гілка всередині <see cref="Run"/>: той потребує
+    /// рушія формул і контекстів типів, а ці дві перевірки — самої лише
+    /// структури. Зшити їх означало б вимагати рушій там, де він не потрібен.
+    /// </remarks>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <returns>Перелік проблем; порожній — правила несуперечливі.</returns>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckRules(TemplateVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        var diagnostics = new List<ExpressionDiagnostic>();
+
+        foreach (var table in version.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted))
+        {
+            CheckSeverityConflicts(table, diagnostics);
+            CheckRequiredCoverage(table, diagnostics);
+        }
+
+        return diagnostics;
+    }
+
+    /// <summary>
+    /// Правила з перетинними областями дії і різними рівнями (<c>ФВ-5.10</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Область дії — це пара «рівень області × колонка», а не сам предикат:
+    /// чи перетинаються УМОВИ двох правил, статично не з'ясувати. Але дві дії
+    /// на ту саму комірку з різними рівнями — суперечність незалежно від
+    /// умов: комірковий <c>Error</c> блокує запис, а <c>Warning</c> ні, і
+    /// оператор бачить пораду, якої не може виконати.
+    ///
+    /// ⚠ Правило без <c>ColumnDefId</c> накриває ВСІ колонки таблиці, тому
+    /// перетинається з кожним правилом тієї ж області.
+    /// </remarks>
+    private static void CheckSeverityConflicts(TableDef table, List<ExpressionDiagnostic> diagnostics)
+    {
+        var active = table.ValidationRules.Where(r => r.IsActive).ToList();
+
+        foreach (var scope in active.Select(r => r.Scope).Distinct())
+        {
+            var inScope = active.Where(r => r.Scope == scope).ToList();
+
+            foreach (var rule in inScope)
+            {
+                foreach (var other in inScope)
+                {
+                    // Пара розглядається один раз і лише в один бік: інакше
+                    // кожна суперечність приїхала б до користувача двічі.
+                    if (string.CompareOrdinal(rule.Code, other.Code) >= 0)
+                    {
+                        continue;
+                    }
+
+                    if (rule.Severity == other.Severity || !Overlap(rule, other))
+                    {
+                        continue;
+                    }
+
+                    diagnostics.Add(new ExpressionDiagnostic(
+                        ExpressionErrors.RuleConflict,
+                        $"Правила {rule.Code} ({rule.Severity}) і {other.Code} ({other.Severity}) "
+                        + $"діють на ту саму область таблиці {table.Code} з різними рівнями.",
+                        0,
+                        1));
+                }
+            }
+        }
+    }
+
+    /// <summary>Чи накривають два правила спільну колонку.</summary>
+    private static bool Overlap(ValidationRule left, ValidationRule right)
+        => left.ColumnDefId is null || right.ColumnDefId is null
+           || left.ColumnDefId == right.ColumnDefId;
+
+    /// <summary>
+    /// Обов'язкові колонки без правила і без формули (<c>ФВ-5.11</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Структурна перевірка обов'язковості спрацьовує НА ЗАПИСІ: явна
+    /// порожнеча в обов'язковій колонці відхиляється. Комірку, якої не
+    /// торкалися взагалі, вона не бачить — записи не було. Тому «обов'язкова»
+    /// без жодного правила рівня рядка, таблиці чи документа — це обіцянка
+    /// без виконавця: подання пройде з незаповненим полем.
+    ///
+    /// ⚠ Обчислювана колонка покриття не потребує: значення в ній з'являється
+    /// саме, і «не заповнено» для неї означало б помилку розрахунку.
+    /// </remarks>
+    private static void CheckRequiredCoverage(TableDef table, List<ExpressionDiagnostic> diagnostics)
+    {
+        var covered = table.ValidationRules
+            .Where(r => r.IsActive)
+            .Select(r => r.ColumnDefId)
+            .ToHashSet();
+
+        // Правило без колонки накриває таблицю цілком.
+        var coversEverything = covered.Contains(null);
+
+        var computed = table.Formulas
+            .Where(f => !f.IsDeleted)
+            .Select(f => f.ColumnDefId)
+            .ToHashSet();
+
+        foreach (var column in table.Columns.Where(c => !c.IsDeleted && c.IsRequired))
+        {
+            if (coversEverything || covered.Contains(column.Id) || computed.Contains(column.Id))
+            {
+                continue;
+            }
+
+            diagnostics.Add(new ExpressionDiagnostic(
+                ExpressionErrors.RequiredNotCovered,
+                $"Колонка {table.Code}.{column.Code} обов'язкова, але її не перевіряє жодне "
+                + "правило і не заповнює жодна формула: незаповнене значення не буде помічене.",
+                0,
+                1));
+        }
+    }
 }
