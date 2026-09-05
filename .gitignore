@@ -23,6 +23,11 @@ dist/
 appsettings.Local.json
 secrets.json
 
+# ⛔ launchSettings.json тримає рядок підключення і разовий пароль bootstrap.
+# Ні те, ні те не має потрапляти в репозиторій (D-11, ФВ-6.11), а сам файл
+# у кожного свій. Готує базу і друкує потрібні змінні tools/setup-dev-db.ps1.
+**/Properties/launchSettings.json
+
 # ОС та IDE
 .DS_Store
 Thumbs.db
