@@ -54,7 +54,22 @@ public sealed class BulkCellLoader(string connectionString, int batchSize)
 
         // TableLock: без нього SqlBulkCopy бере блокування рядків і втрачає
         // мінімальне журналювання — на мільйонах рядків це різниця в рази.
-        using var copy = new SqlBulkCopy(connection, SqlBulkCopyOptions.TableLock, externalTransaction: null)
+        //
+        // ⛔ CheckConstraints ОБОВ'ЯЗКОВИЙ. За замовчуванням SqlBulkCopy
+        // перевірок не робить і лишає зовнішні ключі НЕДОВІРЕНИМИ — тобто
+        // комірка з колонкою чужої таблиці пройшла б повз `FK_CellValue_Column`
+        // (`A7-27`), а оптимізатор після цього ігнорував би ключ на найгарячішій
+        // таблиці системи. Помічено на тому, що після генерації обсягу два
+        // ключі `doc.CellValue` ставали недовіреними, хоч розгортання лишало їх
+        // довіреними.
+        //
+        // ⚠ Ціна є: перевірка сповільнює завантаження. Але швидкість тут
+        // потрібна саме для того, щоб виміряти систему — а система з
+        // вимкненими обмеженнями це вже інша система.
+        using var copy = new SqlBulkCopy(
+            connection,
+            SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.CheckConstraints,
+            externalTransaction: null)
         {
             DestinationTableName = "doc.CellValue",
             BatchSize = batchSize,

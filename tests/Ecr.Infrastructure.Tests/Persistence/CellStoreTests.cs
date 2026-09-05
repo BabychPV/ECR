@@ -198,6 +198,32 @@ public sealed class CellStoreTests(SqlServerFixture sql)
         Assert.Contains("FK_CellValue_Column", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Масове_завантаження_теж_перевіряє_ключі()
+    {
+        // ⛔ `SqlBulkCopy` за замовчуванням перевірок НЕ робить і лишає зовнішні
+        // ключі недовіреними. Тобто масовий шлях запису пропускав би комірку в
+        // колонку чужої таблиці — те саме, що `A7-27`, тільки без жодного
+        // сліду, — а оптимізатор після цього ігнорував би ключ на найгарячішій
+        // таблиці системи.
+        //
+        // ⚠ Помічено не тестом, а спостереженням: після генерації обсягу два
+        // ключі `doc.CellValue` ставали недовіреними, хоч розгортання лишало
+        // їх довіреними. Тест закриває шлях, яким це прийшло.
+        var (doc, store) = await ArrangeAsync();
+        var alien = await AlienColumnIdAsync(doc.SheetDefId, doc.TableDefId, CancellationToken.None);
+
+        var record = new CellRecord(
+            new CellAddress(doc.PeriodKey, doc.RowIds[0], alien),
+            doc.TableDefId,
+            new CellValueData { ValueNumeric = 1m });
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => store.BulkInsertAsync([record], CancellationToken.None));
+    }
+
     /// <summary>
     /// Створює другу таблицю з колонкою і повертає її <c>ColumnDefId</c>.
     /// </summary>

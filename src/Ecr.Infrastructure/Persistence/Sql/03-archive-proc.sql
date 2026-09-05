@@ -12,12 +12,19 @@ GO
 -- src/Ecr.Infrastructure/Persistence/Sql/03-archive-proc.sql
 -- Виконується SQL Agent під окремим principal: у застосунку немає ані DDL-прав,
 -- ані права запису в arc.* (D-66, B01 §6.4).
--- Повертає структурні зовнішні ключі, зняті на час архівації.
+-- РУЧНИЙ ІНСТРУМЕНТ DBA. Штатний шлях його НЕ ПОТРЕБУЄ (`D-117`).
+--
+-- ⛔ Зі штатного шляху процедуру прибрано. Зняття і повернення ключів тепер
+-- відбувається в ОДНІЙ транзакції всередині `usp_ArchiveYear`, а DDL і
+-- `TRUNCATE` у SQL Server транзакційні: стану «`DROP` зафіксовано, `ADD` — ні»
+-- не буває. Ризик «схема без обмежень після збою», який я називав раніше,
+-- знімає не `CATCH`, а сама транзакція.
+--
+-- ⚠ Викликати вручну — лише якщо ключів немає з причини, якої транзакція не
+-- допускає: наприклад, їх зняли окремою командою під час розслідування.
 --
 -- ⚠ WITH CHECK, а не NOCHECK: недовірене обмеження оптимізатор ігнорує, і
--- «ключ є» перетворилося б на «ключ намальовано». Сканування коштує один раз
--- на рік і робиться у вікні низької активності, заради якого це вікно й існує
--- (D-24).
+-- «ключ є» перетворилося б на «ключ намальовано».
 CREATE OR ALTER PROCEDURE arc.usp_RestoreArchiveConstraints
 AS
 BEGIN
@@ -45,8 +52,70 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcChk bigint, @srcSum decimal(38,10);
-    DECLARE @dstCount bigint, @dstChk bigint, @dstSum decimal(38,10);
+    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcSum decimal(38,10);
+    DECLARE @dstCount bigint, @dstSum decimal(38,10);
+    DECLARE @p1 int, @p12 int, @range nvarchar(40), @sql nvarchar(600);
+    DECLARE @periods int = @ToPeriodKey - @FromPeriodKey + 1;
+
+    ------------------------------------------------------------------------
+    -- ЗАПОБІЖНИК 1. Партиція — ПО ПЕРІОДУ, а не по проєкту.
+    --
+    -- ⛔ `pf_ByPeriodKey` не знає про проєкти: `TRUNCATE ... WITH (PARTITIONS)`
+    --    звільняє період ЦІЛКОМ, разом із даними всіх проєктів. Тому
+    --    архівувати «рік одного проєкту», поки інший проєкт працює в тих
+    --    самих періодах, означає знищити його живі дані.
+    --
+    -- ⚠ Процедура приймає @ProjectId лише для журналу прогону; ФІЗИЧНО вона
+    --    архівує період для всіх. Без цієї перевірки різниця між тим і тим
+    --    виявилася б після того, як дані зникли.
+    ------------------------------------------------------------------------
+    IF EXISTS (
+        SELECT 1
+        FROM doc.Project AS p
+        WHERE p.Status <> 4                                   -- не Archived
+          AND EXISTS (SELECT 1 FROM doc.Period AS d
+                       WHERE d.ProjectId = p.Id
+                         AND d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey))
+    BEGIN
+        DECLARE @blockers nvarchar(400) = STUFF((
+            SELECT N', ' + p.Code
+            FROM doc.Project AS p
+            WHERE p.Status <> 4
+              AND EXISTS (SELECT 1 FROM doc.Period AS d
+                           WHERE d.ProjectId = p.Id
+                             AND d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+            FOR XML PATH(''), TYPE).value('.', 'nvarchar(400)'), 1, 2, N'');
+
+        DECLARE @msg nvarchar(600) =
+            N'Період ' + CAST(@FromPeriodKey AS nvarchar(10)) + N'..' +
+            CAST(@ToPeriodKey AS nvarchar(10)) +
+            N' використовують незаархівовані проєкти: ' + @blockers +
+            N'. Звільнення партиції знищило б їхні дані.';
+
+        THROW 50012, @msg, 1;
+    END;
+
+    ------------------------------------------------------------------------
+    -- ЗАПОБІЖНИК 2. Межі партицій для цього діапазону мусять існувати.
+    --
+    -- ⛔ `$PARTITION` для ключа ПОНАД останню межу повертає останню партицію.
+    --    Якщо межі на рік не створені, @p1 і @p12 зійдуться в одну — і
+    --    `TRUNCATE` зачепив би чужі дані. Це не теорія: саме через цю
+    --    властивість `D-108` обмежив Sequence до 12.
+    ------------------------------------------------------------------------
+    SET @p1  = $PARTITION.pf_ByPeriodKey(@FromPeriodKey);
+    SET @p12 = $PARTITION.pf_ByPeriodKey(@ToPeriodKey);
+
+    IF @p12 - @p1 <> @periods - 1
+    BEGIN
+        DECLARE @bounds nvarchar(400) =
+            N'Межі партицій для ' + CAST(@FromPeriodKey AS nvarchar(10)) + N'..' +
+            CAST(@ToPeriodKey AS nvarchar(10)) + N' не створені: очікувалося ' +
+            CAST(@periods AS nvarchar(10)) + N' партицій, знайдено ' +
+            CAST(@p12 - @p1 + 1 AS nvarchar(10)) + N'.';
+
+        THROW 50013, @bounds, 1;
+    END;
 
     INSERT INTO itg.ArchiveRun (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status)
     VALUES (@ProjectId, N'ToArchive', @FromPeriodKey, @ToPeriodKey, SYSUTCDATETIME(), N'Running');
@@ -54,45 +123,42 @@ BEGIN
 
     UPDATE doc.Project SET IsArchiving = 1 WHERE Id = @ProjectId;
 
-    -- Відновлення після збою: продовжуємо з партиції, на якій зупинилися (АРХ-3a)
-    SELECT @k = ISNULL(MAX(LastDonePeriodKey) + 1, @FromPeriodKey)
-    FROM itg.ArchiveRun
-    WHERE ProjectId = @ProjectId AND Direction = N'ToArchive' AND Status = N'Failed';
-
-    IF @k IS NULL OR @k < @FromPeriodKey SET @k = @FromPeriodKey;
-
-    -- 0. Зняття структурних зовнішніх ключів на час прогону.
-    --
-    -- ⛔ Це не обхід обмеження, а єдиний спосіб виконати вимогу. SQL Server
-    --    забороняє TRUNCATE і SWITCH на таблиці, на яку посилається FK, —
-    --    навіть якщо посилань уже немає. Архівація за D-24 мусить звільняти
-    --    партиції, а не видаляти рядки: DELETE на 108 млн роздув би журнал
-    --    транзакцій до розміру самих даних.
-    --
-    -- ⚠ Знімається РАЗ на прогін, а не на партицію: кожне зняття й повернення
-    --    коштує сканування, і робити його дванадцять разів замість одного
-    --    означало б витратити вікно обслуговування на метадані.
-    --
-    -- ⚠ Повернення — і в успіху, і в CATCH: схема без обмежень після збою
-    --    гірша за невдалу архівацію, бо наступний запис уже нічим не
-    --    перевіряється.
-    IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_CellValue_Row')
-        ALTER TABLE doc.CellValue DROP CONSTRAINT FK_CellValue_Row;
-    IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_TableRow_Instance')
-        ALTER TABLE doc.TableRow DROP CONSTRAINT FK_TableRow_Instance;
-
     BEGIN TRY
+
+    ------------------------------------------------------------------------
+    -- КРОК 1. Копія і звірка. ПОЗА транзакцією: довго і відновлювано.
+    --
+    -- ⚠ Ідемпотентність ЯВНА: цільові партиції arc.* спершу очищаються. Без
+    --    цього повторний запуск після збою кроку 2 подвоїв би архів — і сума
+    --    зійшлася б лише випадково.
+    ------------------------------------------------------------------------
+    SET @range = CAST(@p1 AS nvarchar(10)) + N' TO ' + CAST(@p12 AS nvarchar(10));
+
+    -- ⚠ Тут саме DELETE, а не TRUNCATE WITH (PARTITIONS): `arc.*` лежить на
+    -- окремій файловій групі колонстором і НЕ партиційована (`02a` §arc,
+    -- `D-23`). Партиційний TRUNCATE на ній падає, а TRUNCATE цілої таблиці
+    -- знищив би інші роки.
+    --
+    -- ⚠ Виконується лише коли є що прибирати: у звичайному прогоні це
+    -- перевірка існування, а не сканування. Ціна платиться лише на повторі
+    -- після збою — і саме там вона потрібна, бо без неї архів подвоївся б.
+    IF EXISTS (SELECT 1 FROM arc.CellValue
+                WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+    BEGIN
+        DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+    END;
+
+    SET @k = @FromPeriodKey;
 
     WHILE @k <= @ToPeriodKey
     BEGIN
-        -- 1. Три контрольні суми на джерелі
         SELECT @srcCount = COUNT_BIG(*),
-               @srcChk   = CHECKSUM_AGG(BINARY_CHECKSUM(*)),
                @srcSum   = ISNULL(SUM(ValueNumeric), 0)
         FROM doc.CellValue WHERE PeriodKey = @k;
 
-        -- 2. Копіювання. TABLOCK → мінімальне логування і прямий запис
-        --    у columnstore rowgroups.
+        -- TABLOCK → мінімальне логування і прямий запис у columnstore rowgroups.
         INSERT INTO arc.CellValue WITH (TABLOCK)
             (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
              ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
@@ -110,14 +176,12 @@ BEGIN
         SELECT PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt
         FROM doc.TableInstance WHERE PeriodKey = @k;
 
-        -- 3. Ті самі суми на приймачі
         SELECT @dstCount = COUNT_BIG(*),
-               @dstChk   = CHECKSUM_AGG(BINARY_CHECKSUM(*)),
                @dstSum   = ISNULL(SUM(ValueNumeric), 0)
         FROM arc.CellValue WHERE PeriodKey = @k;
 
-        -- 4. Розбіжність → СТОП. ДАНІ З ДЖЕРЕЛА НЕ ВИДАЛЯЮТЬСЯ —
-        --    це головне правило процедури.
+        -- ⛔ Розбіжність → СТОП. ДАНІ З ДЖЕРЕЛА НЕ ВИДАЛЯЮТЬСЯ — це головне
+        --    правило процедури, і крок 2 не починається взагалі.
         IF (@srcCount <> @dstCount OR @srcSum <> @dstSum)
         BEGIN
             INSERT INTO aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
@@ -131,45 +195,72 @@ BEGIN
 
             UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
             THROW 50010, N'Розбіжність контрольних сум при архівації.', 1;
-        END
-
-        -- 5. Збіг → звільнення партиції. TRUNCATE … WITH (PARTITIONS) звільняє
-        --    майже миттєво і мінімально логується; DELETE на 108 млн роздув би журнал.
-        --
-        -- ⚠ Порядок звільнення — від ДОЧІРНЬОЇ таблиці до батьківської:
-        --    комірки, рядки, екземпляри. Зворотний лишив би комірки, що
-        --    вказують у порожнечу.
-        --
-        -- ⛔ Зовнішні ключі знято ПЕРЕД циклом (див. крок 0) і повертаються
-        --    після нього: SQL Server забороняє і TRUNCATE, і SWITCH на
-        --    таблиці, на яку посилається FK — незалежно від того, чи є в ній
-        --    рядки. Без цього процедура падала б на першому ж запуску.
-        DECLARE @part int = $PARTITION.pf_ByPeriodKey(@k);
-        DECLARE @sql nvarchar(400);
-        SET @sql = N'TRUNCATE TABLE doc.CellValue    WITH (PARTITIONS (' + CAST(@part AS nvarchar(10)) + N'));';
-        EXEC sp_executesql @sql;
-        SET @sql = N'TRUNCATE TABLE doc.TableRow     WITH (PARTITIONS (' + CAST(@part AS nvarchar(10)) + N'));';
-        EXEC sp_executesql @sql;
-        SET @sql = N'TRUNCATE TABLE doc.TableInstance WITH (PARTITIONS (' + CAST(@part AS nvarchar(10)) + N'));';
-        EXEC sp_executesql @sql;
+        END;
 
         UPDATE itg.ArchiveRun
            SET RowsMoved = RowsMoved + @srcCount, LastDonePeriodKey = @k
          WHERE Id = @RunId;
 
         SET @k = @k + 1;
-    END
+    END;
+
+    ------------------------------------------------------------------------
+    -- КРОК 2. Звільнення партицій. ОДНА транзакція, атомарна (`D-117`).
+    --
+    -- ⛔ DDL і TRUNCATE у SQL Server ТРАНЗАКЦІЙНІ. Не буває стану, у якому
+    --    `DROP` зафіксовано, а `ADD` — ні: будь-який збій відкочує і ключі, і
+    --    дані. Саме тому `usp_RestoreArchiveConstraints` зі штатного шляху
+    --    прибрано — вона не має чого відновлювати.
+    --
+    -- ⚠ Поки транзакція триває, таблиці під Sch-M-блокуванням: писати в них
+    --    фізично неможливо. «Вікно без обмежень» — це вікно, у якому немає що
+    --    перевіряти.
+    --
+    -- ⚠ Порядок звільнення — від ДОЧІРНЬОЇ таблиці до батьківської: комірки,
+    --    рядки, екземпляри.
+    --
+    -- ⚠ `WITH CHECK` сканує doc.CellValue цілком (~108 млн рядків) і тримає
+    --    Sch-M: читачі, включно з SSRS, чекають. Вартість заміряти на DEV;
+    --    за порогом 30 хв — двофазний варіант із `D-117`.
+    ------------------------------------------------------------------------
+    BEGIN TRAN;
+
+        ALTER TABLE doc.CellValue DROP CONSTRAINT FK_CellValue_Row;
+        ALTER TABLE doc.TableRow  DROP CONSTRAINT FK_TableRow_Instance;
+
+        SET @sql = N'TRUNCATE TABLE doc.CellValue     WITH (PARTITIONS (' + @range + N'));';
+        EXEC sp_executesql @sql;
+        SET @sql = N'TRUNCATE TABLE doc.TableRow      WITH (PARTITIONS (' + @range + N'));';
+        EXEC sp_executesql @sql;
+        SET @sql = N'TRUNCATE TABLE doc.TableInstance WITH (PARTITIONS (' + @range + N'));';
+        EXEC sp_executesql @sql;
+
+        ALTER TABLE doc.TableRow WITH CHECK
+            ADD CONSTRAINT FK_TableRow_Instance FOREIGN KEY (PeriodKey, TableInstanceId)
+            REFERENCES doc.TableInstance (PeriodKey, Id);
+
+        ALTER TABLE doc.CellValue WITH CHECK
+            ADD CONSTRAINT FK_CellValue_Row FOREIGN KEY (PeriodKey, TableRowId)
+            REFERENCES doc.TableRow (PeriodKey, Id);
+
+    COMMIT;
 
     END TRY
     BEGIN CATCH
-        EXEC arc.usp_RestoreArchiveConstraints;
-        THROW;
-    END CATCH
+        -- ⚠ Відкат робить XACT_ABORT; тут лишається тільки зняти позначку і
+        -- підняти помилку далі. Ключі й дані повернула транзакція.
+        IF @@TRANCOUNT > 0 ROLLBACK;
 
-    EXEC arc.usp_RestoreArchiveConstraints;
+        UPDATE itg.ArchiveRun
+           SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), ErrorMessage = ERROR_MESSAGE()
+         WHERE Id = @RunId;
+
+        UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+        THROW;
+    END CATCH;
 
     UPDATE itg.ArchiveRun SET Status = N'Completed', FinishedAt = SYSUTCDATETIME() WHERE Id = @RunId;
-    UPDATE doc.Project SET IsArchiving = 0, Status = 4 WHERE Id = @ProjectId;
+    UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
 END;
 GO
 

@@ -156,6 +156,48 @@ PRINT N'Перенесено індексів: ' + CAST(@moved AS nvarchar(10))
     + N'; усього на схемах партиціонування: ' + CAST(@skipped AS nvarchar(10)) + N'.';
 GO
 
+-- ── Повернення довіри зовнішнім ключам ───────────────────────────────────
+--
+-- ⛔ Перебудова кластерного індексу через `DROP_EXISTING` знімає з зовнішніх
+-- ключів ознаку ДОВІРЕНОСТІ: перенесення таблиці на схему партиціонування
+-- пересоздає індекс, на який ключ посилається, і SQL Server більше не
+-- ручається, що дані йому відповідають.
+--
+-- ⚠ Наслідок тихий і подвійний. Оптимізатор недовірене обмеження ІГНОРУЄ —
+-- плани стають гіршими без жодної помилки. І `D-117` прямо розрізняє
+-- `WITH CHECK` від `NOCHECK` як «ключ є» проти «ключ намальовано»: після
+-- розгортання ми опинялися саме в другому стані, не знаючи про це.
+--
+-- ⚠ Тут це коштує нічого: скрипт виконується на порожніх таблицях одразу
+-- після міграцій. На заповненій базі та сама команда сканує все — і саме тому
+-- вона стоїть у розгортанні, а не в обслуговуванні.
+DECLARE @recheck nvarchar(max) = N'';
+
+SELECT @recheck = @recheck
+     + N'ALTER TABLE ' + QUOTENAME(SCHEMA_NAME(t.schema_id)) + N'.' + QUOTENAME(t.name)
+     + N' WITH CHECK CHECK CONSTRAINT ' + QUOTENAME(fk.name) + N';' + CHAR(10)
+FROM sys.foreign_keys AS fk
+JOIN sys.tables AS t ON t.object_id = fk.parent_object_id
+WHERE fk.is_not_trusted = 1
+  AND fk.is_disabled = 0
+  AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud');
+
+IF LEN(@recheck) > 0 EXEC sp_executesql @recheck;
+GO
+
+-- Перевірка: жоден зовнішній ключ гарячих схем не лишається недовіреним.
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.foreign_keys AS fk
+    JOIN sys.tables AS t ON t.object_id = fk.parent_object_id
+    WHERE fk.is_not_trusted = 1
+      AND fk.is_disabled = 0
+      AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud')
+)
+    THROW 50032, N'Частина зовнішніх ключів лишилася недовіреною: оптимізатор їх ігноруватиме.', 1;
+GO
+
 -- Перевірка: після скрипту жоден індекс партиційованої таблиці не має лежати
 -- поза своєю схемою. Якщо лишився — далі йти не можна, бо архівація
 -- «працюватиме» і не звільнятиме нічого.
