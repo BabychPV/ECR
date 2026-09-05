@@ -1,12 +1,12 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, Modal, Table, Text, TextInput, Textarea } from '@mantine/core';
+import { Badge, Button, Group, Modal, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { MethodologyDto, PublishMethodologyRequest } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -68,12 +68,18 @@ export function MethodologiesPage(): JSX.Element {
   return (
     <>
       <PageHeader title={t('methodologies.title')} />
-      <ErrorAlert error={methodologies.error} />
-
-      {methodologies.isPending ? (
-        <Loader />
-      ) : (
-        <Table striped>
+      <AsyncBoundary<MethodologyDto[]>
+        isPending={methodologies.isPending}
+        error={methodologies.error}
+        data={methodologies.data}
+        isEmpty={(all) => all.length === 0}
+        emptyTitle={t('methodologies.empty')}
+        emptyHint={t('methodologies.emptyHint')}
+        skeleton="table"
+        onRetry={() => void methodologies.refetch()}
+      >
+        {(all) => (
+        <Table striped className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('methodologies.code')}</Table.Th>
@@ -81,7 +87,7 @@ export function MethodologiesPage(): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(methodologies.data ?? []).map((methodology) => (
+            {all.map((methodology) => (
               <Table.Tr key={methodology.id}>
                 <Table.Td>
                   {localized(methodology.nameL10n)}{' '}
@@ -125,7 +131,8 @@ export function MethodologiesPage(): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
-      )}
+        )}
+      </AsyncBoundary>
 
       <Modal
         opened={publishing !== null}

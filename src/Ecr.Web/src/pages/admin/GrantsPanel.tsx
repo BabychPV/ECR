@@ -1,9 +1,10 @@
-import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, Loader, NumberInput, Select, Switch, Table, Text } from '@mantine/core';
+﻿import { useEffect, useState, type JSX } from 'react';
+import { Button, Group, NumberInput, Select, Switch, Table } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { ReplaceGrantsRequest, ResourceGrantDto, RoleView } from '@/api/types';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { t } from '@/shared/i18n';
 
 /**
@@ -61,7 +62,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
       <Group mb="sm" gap="xs">
         <Select
           size="xs"
-          w={260}
+          miw={200}
           placeholder={t('grants.pickRole')}
           data={roles.map((r) => ({ value: String(r.id), label: r.code }))}
           value={roleId === null ? null : String(roleId)}
@@ -90,12 +91,27 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         )}
       </Group>
 
-      {roleId === null ? (
-        <Text c="dimmed">{t('grants.pickRoleHint')}</Text>
-      ) : grants.isPending ? (
-        <Loader />
-      ) : (
-        <Table striped withTableBorder>
+      {/*
+       * ⚠ Перелік редагується як ЧЕРНЕТКА (`draft`), а завантажене значення
+       * лише наповнює її. Тому обгортка дивиться на запит, а таблиця малює
+       * чернетку: інакше щойно доданий рядок зникав би, доки не збережено.
+       *
+       * ⛔ Порожній стан НЕ ховає кнопку «додати»: роль без грантів — це
+       * звичайний початок роботи, а не збій. Ховати дію тут означало б
+       * зробити перший грант недосяжним (`A7-22`).
+       */}
+      <AsyncBoundary<ResourceGrantDto[]>
+        isPending={roleId !== null && grants.isPending}
+        error={grants.error}
+        data={roleId === null ? undefined : grants.data}
+        isEmpty={() => draft.length === 0}
+        emptyTitle={roleId === null ? t('grants.pickRole') : t('grants.empty')}
+        emptyHint={roleId === null ? t('grants.pickRoleHint') : t('grants.emptyHint')}
+        skeleton="table"
+        onRetry={() => void grants.refetch()}
+      >
+        {() => (
+        <Table striped withTableBorder className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('grants.kind')}</Table.Th>
@@ -111,7 +127,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 <Table.Td>
                   <Select
                     size="xs"
-                    w={130}
+                    miw={110}
                     data={['Project', 'Sheet', 'Table', 'Column']}
                     value={grant.resourceKind}
                     onChange={(value) =>
@@ -122,7 +138,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 <Table.Td>
                   <NumberInput
                     size="xs"
-                    w={110}
+                    miw={90}
                     value={grant.resourceId}
                     onChange={(value) =>
                       replace(index, {
@@ -135,7 +151,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 <Table.Td>
                   <Select
                     size="xs"
-                    w={130}
+                    miw={110}
                     data={['Read', 'Write', 'Submit', 'Approve', 'Manage']}
                     value={grant.level}
                     onChange={(value) =>
@@ -169,7 +185,8 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
-      )}
+        )}
+      </AsyncBoundary>
     </>
   );
 

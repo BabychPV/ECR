@@ -1,11 +1,11 @@
-import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, Select, Table, Text } from '@mantine/core';
+﻿import { useState, type JSX } from 'react';
+import { Badge, Button, Group, Select, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -63,7 +63,7 @@ export function PeriodsPage(): JSX.Element {
           <Group gap="xs">
             <Select
               size="xs"
-              w={260}
+              miw={220}
               placeholder={t('periods.pickProject')}
               data={(projects.data?.items ?? []).map((p) => ({
                 value: String(p.id),
@@ -90,8 +90,19 @@ export function PeriodsPage(): JSX.Element {
         }
       />
 
-      <ErrorAlert error={projects.error} />
-      <ErrorAlert error={periods.error} />
+      {/* Недоступний перелік проєктів лишає порожнім сам вибір — це треба
+          сказати, а не показати порожній Select. */}
+      <AsyncBoundary<PagedProjects>
+        isPending={projects.isPending}
+        error={projects.error}
+        data={projects.data}
+        isEmpty={(page) => page.items.length === 0}
+        emptyTitle={t('periods.noProjects')}
+        emptyHint={t('periods.noProjectsHint')}
+        onRetry={() => void projects.refetch()}
+      >
+        {() => null}
+      </AsyncBoundary>
 
       {selected?.status === 'Draft' && (
         <Text c="orange" size="sm" mb="xs">
@@ -99,12 +110,22 @@ export function PeriodsPage(): JSX.Element {
         </Text>
       )}
 
-      {projectId === null ? (
-        <Text c="dimmed">{t('periods.pickProject')}</Text>
-      ) : periods.isPending ? (
-        <Loader />
-      ) : (
-        <Table striped>
+      {/*
+       * ⚠ Доки проєкт не обрано, `data` — `undefined`: запиту ще не було, і
+       * обгортка каже саме це, а не «періодів немає».
+       */}
+      <AsyncBoundary<PeriodCalendarDto>
+        isPending={projectId !== null && periods.isPending}
+        error={periods.error}
+        data={projectId === null ? undefined : periods.data}
+        isEmpty={(calendar) => calendar.periods.length === 0}
+        emptyTitle={projectId === null ? t('periods.pickProject') : t('periods.noPeriods')}
+        emptyHint={projectId === null ? undefined : t('periods.noPeriodsHint')}
+        skeleton="table"
+        onRetry={() => void periods.refetch()}
+      >
+        {(calendar) => (
+        <Table striped className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('periods.key')}</Table.Th>
@@ -115,7 +136,7 @@ export function PeriodsPage(): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(periods.data?.periods ?? []).map((period) => (
+            {calendar.periods.map((period) => (
               <Table.Tr key={period.periodKey}>
                 <Table.Td>{period.periodKey}</Table.Td>
                 <Table.Td>{period.sequence}</Table.Td>
@@ -132,7 +153,8 @@ export function PeriodsPage(): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
-      )}
+        )}
+      </AsyncBoundary>
     </>
   );
 }

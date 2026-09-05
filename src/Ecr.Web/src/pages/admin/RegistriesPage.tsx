@@ -1,10 +1,10 @@
-import { useState, type JSX } from 'react';
-import { Badge, Group, Loader, Select, Table, Text } from '@mantine/core';
+﻿import { useState, type JSX } from 'react';
+import { Badge, Group, Select, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -41,7 +41,7 @@ export function RegistriesPage(): JSX.Element {
         actions={
           <Select
             size="xs"
-            w={280}
+            miw={220}
             placeholder={t('registries.pick')}
             value={code}
             onChange={setCode}
@@ -53,7 +53,22 @@ export function RegistriesPage(): JSX.Element {
         }
       />
 
-      <ErrorAlert error={registries.error ?? entries.error} />
+      {/*
+       * ⛔ Помилка переліку довідників показується ОКРЕМО від помилки записів:
+       * недоступний перелік лишає порожнім сам вибір, і мовчазна порожнеча в
+       * ньому виглядає як «довідників немає».
+       */}
+      <AsyncBoundary<RegistryDefDto[]>
+        isPending={registries.isPending}
+        error={registries.error}
+        data={registries.data}
+        isEmpty={(all) => all.length === 0}
+        emptyTitle={t('registries.empty')}
+        emptyHint={t('registries.emptyHint')}
+        onRetry={() => void registries.refetch()}
+      >
+        {() => null}
+      </AsyncBoundary>
 
       {selected !== undefined && (
         <Group gap="xs" mb="sm">
@@ -68,11 +83,24 @@ export function RegistriesPage(): JSX.Element {
         </Group>
       )}
 
-      {entries.isPending && code !== null ? (
-        <Loader />
-      ) : (
-        code !== null && (
-          <Table striped highlightOnHover>
+      {/*
+       * ⚠ Доки довідник не обрано, `data` — `undefined`, і обгортка показує
+       * порожній стан із підказкою «оберіть довідник». Це не «даних немає»:
+       * запиту ще не було, і сказати про це чесніше, ніж малювати порожню
+       * таблицю з заголовками.
+       */}
+      <AsyncBoundary<RegistryEntryDto[]>
+        isPending={code !== null && entries.isPending}
+        error={entries.error}
+        data={code === null ? undefined : entries.data}
+        isEmpty={(all) => all.length === 0}
+        emptyTitle={code === null ? t('registries.pick') : t('registries.noEntries')}
+        emptyHint={code === null ? t('registries.pickHint') : t('registries.noEntriesHint')}
+        skeleton="table"
+        onRetry={() => void entries.refetch()}
+      >
+        {(all) => (
+          <Table striped highlightOnHover className="ecr-sticky-head">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t('registries.code')}</Table.Th>
@@ -82,20 +110,18 @@ export function RegistriesPage(): JSX.Element {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(entries.data ?? []).map((entry) => (
+              {all.map((entry) => (
                 <Table.Tr key={entry.id}>
                   <Table.Td>{entry.code}</Table.Td>
                   <Table.Td>{entry.display}</Table.Td>
                   <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
-                  <Table.Td>
-                    {(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}
-                  </Table.Td>
+                  <Table.Td>{(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}</Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
           </Table>
-        )
-      )}
+        )}
+      </AsyncBoundary>
     </>
   );
 }

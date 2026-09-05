@@ -1,5 +1,5 @@
 ﻿import type { JSX } from 'react';
-import { Accordion, Badge, Button, Group, Loader, Table, Text } from '@mantine/core';
+import { Accordion, Badge, Button, Group, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -7,7 +7,7 @@ import { EcrApiError, apiFetch } from '@/api/client';
 import type { TemplateStructureDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -46,20 +46,33 @@ export function TemplateVersionPage(): JSX.Element {
     },
   });
 
-  if (structure.isPending) return <Loader />;
-  if (structure.isError || structure.data === undefined) {
-    return <ErrorAlert error={structure.error} />;
-  }
-
-  const version = structure.data;
-
   // ⚠ Структура не несе статусу версії: його віддає перелік версій шаблону.
   // Тому кнопка публікації тут показується за правом, а сервер лишається
   // єдиним, хто вирішує, чи можна публікувати саме цю версію.
   const editable = true;
 
   return (
-    <>
+    /*
+     * ⛔ Обгортка навколо ВСЬОГО екрана, включно із заголовком: заголовок
+     * містить номер версії, тобто теж дані. Показати шапку з порожнім місцем
+     * замість номера — це той самий стан «наче все гаразд» на недоступних
+     * даних (`ФВ-14.22`).
+     *
+     * ⚠ Версія без аркушів — окремий стан: опублікувати таку не можна, і
+     * дізнатися про це з відмови публікації гірше, ніж побачити на екрані.
+     */
+    <AsyncBoundary<TemplateStructureDto>
+      isPending={structure.isPending}
+      error={structure.error}
+      data={structure.data}
+      isEmpty={(version) => version.sheets.length === 0}
+      emptyTitle={t('version.empty')}
+      emptyHint={t('version.emptyHint')}
+      skeleton="form"
+      onRetry={() => void structure.refetch()}
+    >
+      {(version) => (
+      <>
       <PageHeader
         title={`${t('version.title')} ${version.templateVersionId}`}
         actions={
@@ -129,6 +142,8 @@ export function TemplateVersionPage(): JSX.Element {
             </Accordion.Item>
           ))}
       </Accordion>
-    </>
+      </>
+      )}
+    </AsyncBoundary>
   );
 }

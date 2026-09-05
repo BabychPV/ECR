@@ -12,6 +12,7 @@ import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
 import { buildRequest, cellEditKey, useCellPatch, type PendingEdit } from './useCellPatch';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { t } from '@/shared/i18n';
 
 /** Властивості grid. */
@@ -311,13 +312,25 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data, save, touchHistory],
   );
 
-  if (slice.isPending) return <Text>{t('grid.loading')}</Text>;
-
-  if (slice.isError || data === undefined) {
-    return <Alert color="red">{t('grid.loadFailed')}</Alert>;
-  }
-
   return (
+    /*
+     * ⛔ Чотири стани і тут (`ФВ-14.21`). Раніше зріз мав два: «вантажиться» і
+     * «не вдалося», а таблиця без жодного рядка малювалася як звичайна порожня
+     * сітка — тобто «даних немає» замість «шаблон не має рядків для цього
+     * періоду». Це найдорожчий екран системи, і саме на ньому різниця
+     * коштує найбільше.
+     */
+    <AsyncBoundary<TableSliceDto>
+      isPending={slice.isPending}
+      error={slice.error}
+      data={data}
+      isEmpty={(loaded) => loaded.columns.length === 0}
+      emptyTitle={t('grid.emptyTable')}
+      emptyHint={t('grid.emptyTableHint')}
+      skeleton="table"
+      onRetry={() => void slice.refetch()}
+    >
+      {() => (
     <Stack gap="xs" onPaste={onPaste} onCopy={onCopy} onKeyDown={onKeyDown}>
       <Group gap="xs" key={historyRevision}>
         <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
@@ -397,6 +410,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </List>
       </Modal>
     </Stack>
+      )}
+    </AsyncBoundary>
   );
 }
 

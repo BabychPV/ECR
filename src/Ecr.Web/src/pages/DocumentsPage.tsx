@@ -1,10 +1,10 @@
-﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, NumberInput, Table, Text } from '@mantine/core';
+import { useState, type JSX } from 'react';
+import { Badge, Button, Group, NumberInput, Table } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { DocumentPage } from '@/api/types';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -37,7 +37,7 @@ export function DocumentsPage(): JSX.Element {
         actions={
           <NumberInput
             size="xs"
-            w={150}
+            miw={120}
             placeholder={t('documents.period')}
             value={periodKey ?? ''}
             onChange={(value) => {
@@ -48,54 +48,65 @@ export function DocumentsPage(): JSX.Element {
         }
       />
 
-      <ErrorAlert error={query.error} />
-
-      {query.isPending ? (
-        <Loader />
-      ) : (
-        <>
-          <Table striped highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('documents.key')}</Table.Th>
-                <Table.Th>{t('documents.project')}</Table.Th>
-                <Table.Th>{t('documents.sheets')}</Table.Th>
-                <Table.Th>{t('documents.state')}</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {(query.data?.items ?? []).map((document) => (
-                <Table.Tr key={document.id}>
-                  <Table.Td>
-                    <Link to={`/documents/${document.id}`}>{document.businessKey}</Link>
-                  </Table.Td>
-                  <Table.Td>{document.projectId}</Table.Td>
-                  <Table.Td>{document.sheetCount}</Table.Td>
-                  <Table.Td>
-                    <Group gap="xs">
-                      {Object.entries(document.sheetStates).map(([sheet, state]) => (
-                        <Badge key={sheet} size="sm" variant="light">
-                          {sheet}: {state}
-                        </Badge>
-                      ))}
-                    </Group>
-                  </Table.Td>
+      {/*
+       * ⛔ Через `<AsyncBoundary>`, а не через `ErrorAlert` плюс `?? []`.
+       * Стара форма показувала невдалий запит і порожній перелік ОДНОЧАСНО:
+       * зверху червона смуга, під нею таблиця з заголовками і жодним рядком —
+       * тобто «даних немає» там, де сервер відмовив (`ФВ-14.22`).
+       */}
+      <AsyncBoundary<DocumentPage>
+        isPending={query.isPending}
+        error={query.error}
+        data={query.data}
+        isEmpty={(page) => page.items.length === 0}
+        emptyTitle={t('documents.empty')}
+        emptyHint={t('documents.emptyHint')}
+        skeleton="table"
+        onRetry={() => void query.refetch()}
+      >
+        {(page) => (
+          <>
+            <Table striped highlightOnHover className="ecr-sticky-head">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('documents.key')}</Table.Th>
+                  <Table.Th>{t('documents.project')}</Table.Th>
+                  <Table.Th>{t('documents.sheets')}</Table.Th>
+                  <Table.Th>{t('documents.state')}</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+              </Table.Thead>
+              <Table.Tbody>
+                {page.items.map((document) => (
+                  <Table.Tr key={document.id}>
+                    <Table.Td>
+                      <Link to={`/documents/${document.id}`}>{document.businessKey}</Link>
+                    </Table.Td>
+                    <Table.Td>{document.projectId}</Table.Td>
+                    <Table.Td>{document.sheetCount}</Table.Td>
+                    <Table.Td>
+                      <Group gap="xs">
+                        {Object.entries(document.sheetStates).map(([sheet, state]) => (
+                          <Badge key={sheet} size="sm" variant="light">
+                            {sheet}: {state}
+                          </Badge>
+                        ))}
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
 
-          {/* ⚠ Курсорна пагінація, а не offset: за місяць у проєкті тисячі
-              документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
-          {query.data?.nextCursor !== null && query.data !== undefined && (
-            <Button mt="md" variant="default" onClick={() => setCursor(query.data.nextCursor)}>
-              {t('documents.more')}
-            </Button>
-          )}
-
-          {(query.data?.items.length ?? 0) === 0 && <Text c="dimmed">{t('documents.empty')}</Text>}
-        </>
-      )}
+            {/* ⚠ Курсорна пагінація, а не offset: за місяць у проєкті тисячі
+                документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
+            {page.nextCursor !== null && (
+              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
+                {t('documents.more')}
+              </Button>
+            )}
+          </>
+        )}
+      </AsyncBoundary>
     </>
   );
 }

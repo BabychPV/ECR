@@ -1,11 +1,11 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Group, Loader, SegmentedControl, Switch, Table, Text, Tooltip } from '@mantine/core';
+import { Badge, Group, SegmentedControl, Switch, Table, Text, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { RoleView, SetAlertsRequest, UserPage } from '@/api/types';
 import { GrantsPanel } from '@/pages/admin/GrantsPanel';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -78,13 +78,19 @@ export function SecurityPage(): JSX.Element {
         }
       />
 
-      <ErrorAlert error={roles.error ?? users.error} />
-
-      {tab === 'roles' &&
-        (roles.isPending ? (
-          <Loader />
-        ) : (
-          <Table striped withTableBorder style={{ overflowX: 'auto' }}>
+      {tab === 'roles' && (
+        <AsyncBoundary<RoleView[]>
+          isPending={roles.isPending}
+          error={roles.error}
+          data={roles.data}
+          isEmpty={(all) => all.length === 0}
+          emptyTitle={t('security.noRoles')}
+          emptyHint={t('security.noRolesHint')}
+          skeleton="table"
+          onRetry={() => void roles.refetch()}
+        >
+          {(all) => (
+          <Table striped withTableBorder className="ecr-sticky-head ecr-sticky-first" style={{ overflowX: 'auto' }}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t('security.role')}</Table.Th>
@@ -96,7 +102,7 @@ export function SecurityPage(): JSX.Element {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(roles.data ?? []).map((role) => (
+              {all.map((role) => (
                 <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
                   <Table.Td>
                     {role.code}
@@ -124,18 +130,28 @@ export function SecurityPage(): JSX.Element {
               ))}
             </Table.Tbody>
           </Table>
-        ))}
+          )}
+        </AsyncBoundary>
+      )}
 
       {/* ⛔ Гранти — окрема вкладка, а не колонка в матриці прав. Права
           відповідають на питання «що людина вміє», гранти — «до чого саме»;
           без другої відповіді перша не відкриває нічого (`A7-22`). */}
       {tab === 'grants' && <GrantsPanel roles={roles.data ?? []} />}
 
-      {tab === 'users' &&
-        (users.isPending ? (
-          <Loader />
-        ) : (
-          <Table striped>
+      {tab === 'users' && (
+        <AsyncBoundary<UserPage>
+          isPending={users.isPending}
+          error={users.error}
+          data={users.data}
+          isEmpty={(page) => page.items.length === 0}
+          emptyTitle={t('security.noUsers')}
+          emptyHint={t('security.noUsersHint')}
+          skeleton="table"
+          onRetry={() => void users.refetch()}
+        >
+          {(page) => (
+          <Table striped className="ecr-sticky-head">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>{t('security.login')}</Table.Th>
@@ -146,7 +162,7 @@ export function SecurityPage(): JSX.Element {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(users.data?.items ?? []).map((user) => (
+              {page.items.map((user) => (
                 <Table.Tr key={user.id} opacity={user.isActive ? 1 : 0.5}>
                   <Table.Td>{user.userName}</Table.Td>
                   <Table.Td>{user.displayName}</Table.Td>
@@ -201,7 +217,9 @@ export function SecurityPage(): JSX.Element {
               ))}
             </Table.Tbody>
           </Table>
-        ))}
+          )}
+        </AsyncBoundary>
+      )}
     </>
   );
 }

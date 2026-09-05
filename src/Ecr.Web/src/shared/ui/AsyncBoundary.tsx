@@ -1,16 +1,6 @@
 ﻿import type { JSX, ReactNode } from 'react';
-import {
-  Alert,
-  Button,
-  Center,
-  Group,
-  Skeleton,
-  Stack,
-  Text,
-  Title,
-  VisuallyHidden,
-} from '@mantine/core';
-import { EcrApiError } from '@/api/client';
+import { Center, Skeleton, Stack, Text, Title, VisuallyHidden } from '@mantine/core';
+import { ErrorAlert } from './ErrorAlert';
 import { t } from '@/shared/i18n';
 
 /** Форма скелета: що саме зараз з'явиться. */
@@ -26,23 +16,31 @@ interface AsyncBoundaryProps<T> {
   /** Дані; `undefined` доки не завантажено. */
   readonly data: T | undefined;
 
+  /*
+   * ⚠ Усі необов'язкові пропи явно приймають `undefined`. Під
+   * `exactOptionalPropertyTypes` «поле відсутнє» і «поле є, воно `undefined`»
+   * — різні типи, а на межі компонента це розрізнення нічого не дає: виклик
+   * виду `emptyHint={x === null ? undefined : t('…')}` природний і читабельний,
+   * і забороняти його означало б змушувати розкладати виклик на два.
+   */
+
   /** Чи вважати наявні дані порожніми. */
-  readonly isEmpty?: (data: T) => boolean;
+  readonly isEmpty?: ((data: T) => boolean) | undefined;
 
   /** Заголовок порожнього стану: ЩО саме порожнє. */
-  readonly emptyTitle?: string;
+  readonly emptyTitle?: string | undefined;
 
   /** Пояснення: ЧОМУ порожньо і що з цим робити. */
-  readonly emptyHint?: string;
+  readonly emptyHint?: string | undefined;
 
   /** Дія порожнього стану; ховається, коли права немає. */
-  readonly emptyAction?: ReactNode;
+  readonly emptyAction?: ReactNode | undefined;
 
   /** Форма скелета замість спінера. */
-  readonly skeleton?: SkeletonShape;
+  readonly skeleton?: SkeletonShape | undefined;
 
   /** Повторити запит. */
-  readonly onRetry?: () => void;
+  readonly onRetry?: (() => void) | undefined;
 
   /** Вміст стану «дані». */
   readonly children: (data: T) => ReactNode;
@@ -63,6 +61,10 @@ interface AsyncBoundaryProps<T> {
  *
  * ⚠ Скелет замість спінера там, де відома розмітка (`ФВ-14.25`): він знімає
  * стрибок розмітки і показує, що саме зараз з'явиться.
+ *
+ * ⚠ Стан помилки малює `<ErrorAlert>` — той самий, що й у формах. Власна
+ * подача тут означала б, що на одному екрані код помилки показується, а на
+ * іншому ні.
  */
 export function AsyncBoundary<T>({
   isPending,
@@ -80,7 +82,7 @@ export function AsyncBoundary<T>({
   // лишає `data` порожнім, і перевірка порожнечі раніше показала б «даних
   // немає» там, де насправді сервер відмовив.
   if (error !== null && error !== undefined) {
-    return <ErrorState error={error} onRetry={onRetry} />;
+    return <ErrorAlert error={error} onRetry={onRetry} />;
   }
 
   if (isPending) {
@@ -97,49 +99,6 @@ export function AsyncBoundary<T>({
   }
 
   return <>{children(data)}</>;
-}
-
-/**
- * Стан помилки: що сталося, стабільний код, вихід (`ФВ-14.24`).
- *
- * ⛔ Тупикових екранів не буває. Без дії «повторити» користувач має єдиний
- * доступний хід — перезавантажити сторінку, і саме так він і зробить.
- */
-function ErrorState({
-  error,
-  onRetry,
-}: {
-  error: unknown;
-  onRetry: (() => void) | undefined;
-}): JSX.Element {
-  const apiError = error instanceof EcrApiError ? error : null;
-
-  return (
-    <Alert color="red" title={t('state.errorTitle')} role="alert">
-      <Stack gap="xs">
-        {/* ⚠ Текст СЕРВЕРА, а не власний узагальнений: «не вдалося
-            завантажити» не каже нічого, а «період закрито» каже все. */}
-        <Text size="sm">{apiError?.message ?? t('state.errorUnknown')}</Text>
-
-        {apiError !== null && (
-          // ⚠ Код і кореляція показуються ЗАВЖДИ: з ними звернення в підтримку
-          // займає хвилину, без них — листування. Ідентифікатор генерує клієнт
-          // (`CORRELATION_HEADER`), і це єдине, що зшиває скаргу з логом.
-          <Text size="xs" c="dimmed" ff="monospace">
-            {`${apiError.problem.errorCode} / ${apiError.problem.correlationId}`}
-          </Text>
-        )}
-
-        {onRetry !== undefined && (
-          <Group gap="xs">
-            <Button size="xs" variant="default" onClick={onRetry}>
-              {t('common.retry')}
-            </Button>
-          </Group>
-        )}
-      </Stack>
-    </Alert>
-  );
 }
 
 /**

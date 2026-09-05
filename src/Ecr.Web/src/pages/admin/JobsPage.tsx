@@ -1,9 +1,9 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Card, Group, Progress, Stack, Text, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -45,37 +45,51 @@ export function JobsPage(): JSX.Element {
           label={t('jobs.id')}
           value={input}
           onChange={(event) => setInput(event.currentTarget.value)}
-          w={420}
+          miw={280}
+          flex="1"
         />
         <Button onClick={() => setJobId(input.trim().length === 0 ? null : input.trim())}>
           {t('jobs.watch')}
         </Button>
       </Group>
 
-      <ErrorAlert error={job.error} />
-
-      {job.data !== undefined && (
+      {/*
+       * ⚠ Доки ідентифікатор не введено, `data` — `undefined`: обгортка каже
+       * «введіть ідентифікатор», а не «задачі немає». Невідомий ідентифікатор
+       * дає 404 і показується станом помилки з кодом — саме тому клієнт не
+       * малює вічний прогрес задачі, якої не існує.
+       */}
+      <AsyncBoundary<JobStatus>
+        isPending={jobId !== null && job.isPending}
+        error={job.error}
+        data={jobId === null ? undefined : job.data}
+        emptyTitle={t('jobs.pick')}
+        emptyHint={t('jobs.pickHint')}
+        onRetry={() => void job.refetch()}
+      >
+        {(status) => (
         <Card withBorder>
           <Stack gap="xs">
             <Group justify="space-between">
-              <Text fw={600}>{job.data.jobId}</Text>
-              <Badge color={stateColor(job.data.state)}>{job.data.state}</Badge>
+              <Text fw={600}>{status.jobId}</Text>
+              <Badge color={stateColor(status.state)}>{status.state}</Badge>
             </Group>
 
-            <Progress value={job.data.percent} animated={job.data.state === 'Running'} />
+            <Progress value={status.percent} animated={status.state === 'Running'} />
 
-            {job.data.message !== null && <Text size="sm">{job.data.message}</Text>}
+            {status.message !== null && <Text size="sm">{status.message}</Text>}
 
             {/* ⛔ Текст помилки — без стека (ФВ-6.11): стек виносить назовні
                 шляхи, імена і подекуди значення. */}
-            {job.data.error !== null && (
+            {status.error !== null && (
               <Text size="sm" c="red">
-                {job.data.error}
+                {status.error}
               </Text>
             )}
           </Stack>
         </Card>
-      )}
+        )}
+      </AsyncBoundary>
     </>
   );
 }

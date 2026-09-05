@@ -1,10 +1,10 @@
 ﻿import type { JSX } from 'react';
-import { Badge, Loader, Table } from '@mantine/core';
+import { Badge, Table } from '@mantine/core';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { TemplatePage, TemplateVersionSummary } from '@/api/types';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -41,25 +41,35 @@ export function TemplatesPage(): JSX.Element {
   return (
     <>
       <PageHeader title={t('templates.title')} />
-      <ErrorAlert error={templates.error ?? versionsError} />
-
-      {templates.isPending ? (
-        <Loader />
-      ) : (
-        <Table striped>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{t('templates.code')}</Table.Th>
-              <Table.Th>{t('templates.versions')}</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {items.map((template, index) => (
-              <Table.Tr key={template.id}>
-                <Table.Td>{template.code}</Table.Td>
-                <Table.Td>
-                  {(versionQueries[index]?.data ?? [])
-                    .map((version) => (
+      {/*
+       * ⛔ Помилка версій підмішана до помилки переліку навмисно. Інакше
+       * шаблони показувалися б, а колонка версій була б порожньою — тобто
+       * «версій немає» замість «версії не завантажилися» (ФВ-14.22).
+       */}
+      <AsyncBoundary<TemplatePage>
+        isPending={templates.isPending}
+        error={templates.error ?? versionsError}
+        data={templates.data}
+        isEmpty={(page) => page.items.length === 0}
+        emptyTitle={t('templates.empty')}
+        emptyHint={t('templates.emptyHint')}
+        skeleton="table"
+        onRetry={() => void templates.refetch()}
+      >
+        {(page) => (
+          <Table striped className="ecr-sticky-head">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{t('templates.code')}</Table.Th>
+                <Table.Th>{t('templates.versions')}</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {page.items.map((template, index) => (
+                <Table.Tr key={template.id}>
+                  <Table.Td>{template.code}</Table.Td>
+                  <Table.Td>
+                    {(versionQueries[index]?.data ?? []).map((version) => (
                       <Badge
                         key={version.id}
                         mr="xs"
@@ -71,12 +81,13 @@ export function TemplatesPage(): JSX.Element {
                         {version.version} · {version.status} · r{version.presentationRevision}
                       </Badge>
                     ))}
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </AsyncBoundary>
     </>
   );
 }

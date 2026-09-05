@@ -1,11 +1,11 @@
 ﻿import type { JSX } from 'react';
-import { Badge, Button, Group, Loader, Table, Text } from '@mantine/core';
+import { Badge, Button, Group, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
@@ -54,12 +54,18 @@ export function SourcesPage(): JSX.Element {
   return (
     <>
       <PageHeader title={t('sources.title')} />
-      <ErrorAlert error={sources.error} />
-
-      {sources.isPending ? (
-        <Loader />
-      ) : (
-        <Table striped highlightOnHover>
+      <AsyncBoundary<SourceEntityStatus[]>
+        isPending={sources.isPending}
+        error={sources.error}
+        data={sources.data}
+        isEmpty={(all) => all.length === 0}
+        emptyTitle={t('sources.empty')}
+        emptyHint={t('sources.emptyHint')}
+        skeleton="table"
+        onRetry={() => void sources.refetch()}
+      >
+        {(all) => (
+        <Table striped highlightOnHover className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('sources.entity')}</Table.Th>
@@ -70,7 +76,7 @@ export function SourcesPage(): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(sources.data ?? []).map((source) => (
+            {all.map((source) => (
               <Table.Tr key={source.id} opacity={source.isActive ? 1 : 0.5}>
                 <Table.Td>
                   {source.displayName ?? source.code}
@@ -121,7 +127,8 @@ export function SourcesPage(): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
-      )}
+        )}
+      </AsyncBoundary>
     </>
   );
 }
