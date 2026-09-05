@@ -230,3 +230,69 @@ export type CollectRequest = Schemas['CollectRequest'];
 
 /** Побудова зрізу звітності. */
 export type BuildSnapshotRequest = Schemas['BuildSnapshotRequest'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Дії, яких в інтерфейсі не було зовсім.
+//
+// ⛔ Не «нові можливості»: сервер умів їх від Етапу 3, а клієнт не мав до них
+// жодної кнопки (`A7-39`). Із сорока дій запису дев'ятнадцять не мали
+// споживача, і серед них — затвердження документа: без нього дані не стають
+// дійсними (`ФВ-5.14`) і не потрапляють у звіти для регулятора (`ФВ-10.11`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Затвердження або відхилення аркуша; при відхиленні причина обов'язкова. */
+export type ApproveSheetRequest = Schemas['ApproveSheetRequest'];
+
+/** Повернення аркуша в роботу; причина обов'язкова (`D-67`). */
+export type ReopenDocumentRequest = Schemas['ReopenDocumentRequest'];
+
+/** Повернення періоду; причина обов'язкова, `until` обмежує вікно. */
+export type ReopenPeriodRequest = Schemas['ReopenPeriodRequest'];
+
+/** Клонування проєкту з попереднього року (`ФВ-1.3`). */
+export type CloneProjectRequest = Schemas['CloneProjectRequest'];
+
+/** Фіксація поточного періоду проєкту. */
+export type SetCurrentPeriodRequest = Schemas['SetCurrentPeriodRequest'];
+
+/** Створення рядка динамічної таблиці (`ФВ-3.2`). */
+export type CreateRowRequest = Schemas['CreateRowRequest'];
+
+/** Перегляд імпорту: зміни, конфлікти, відхилення і токен застосування. */
+export type ImportPreview = Schemas['ImportPreview'];
+
+/** Одна зміна в переліку diff імпорту. */
+export type ImportChange = Schemas['ImportChange'];
+
+/** Відхилений рядок імпорту з причиною. */
+export type ImportRejection = Schemas['ImportRejection'];
+
+/** Початок сеансу перегляду чужими правами (`ФВ-6.16`). */
+export type StartSimulationRequest = Schemas['StartSimulationRequest'];
+
+/** Вікно чинності запису реєстру (`ФВ-8.5`). */
+export type SetValidityRequest = Schemas['SetValidityRequest'];
+
+/** Клонування версії шаблону. */
+export type CloneVersionRequest = Schemas['CloneVersionRequest'];
+
+/** Прогін методології без запису результату (`ФВ-13.5`). */
+export type SimulateMethodologyRequest = Schemas['SimulateMethodologyRequest'];
+
+/** Результат симуляції: виходи, розбіжність із опублікованим, трасування. */
+export type SimulationResultDto = Schemas['SimulationResultDto'];
+
+/** Зміна рядка інтерфейсу (`ФВ-14.9`). */
+export type SetUiStringRequest = Schemas['SetUiStringRequest'];
+
+/** Область видимості рядка каталогу: публічна чи приватна (`D-114`). */
+export type UiStringScope = Schemas['UiStringScope'];
+
+/** Нова ревізія каталогу після зміни рядка. */
+export type UiStringRevisionResponse = Schemas['UiStringRevisionResponse'];
+
+/** Нова ревізія презентаційного шару після патча. */
+export type PresentationRevisionResponse = Schemas['PresentationRevisionResponse'];
+
+/** Скільки записів зачепила зміна вікна чинності. */
+export type AffectedRowsResponse = Schemas['AffectedRowsResponse'];

@@ -3463,6 +3463,13 @@ export interface components {
         };
         /** @description Екземпляр таблиці разом з аркушем, якому він належить. */
         DocumentTableDto: {
+            /** @description Чи додає рядки користувач (`ФВ-3.2`). */
+            allowsDynamicRows: boolean;
+            /**
+             * Format: int32
+             * @description Стеля кількості рядків; `null` — без стелі.
+             */
+            maxDynamicRows: null | number;
             /** @description Код аркуша; він же ключ у `DocumentSummary.SheetStates`. */
             sheetCode: string;
             /**

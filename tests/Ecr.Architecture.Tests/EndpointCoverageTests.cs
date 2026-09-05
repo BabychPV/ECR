@@ -363,26 +363,133 @@ public sealed partial class EndpointCoverageTests
             .Select(d => (d.Method, Path: Placeholders(d.Path)))
             .ToHashSet();
 
-        var web = Path.Combine(SolutionRoot(), "src", "Ecr.Web", "src");
-
-        var used = Directory
-            .EnumerateFiles(web, "*.ts", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(web, "*.tsx", SearchOption.AllDirectories))
-            .Where(f => !f.Contains("schema.d.ts", StringComparison.Ordinal))
-            .SelectMany(f => ApiPathRegex.Matches(WithoutComments(File.ReadAllText(f)))
-                .Select(m => Placeholders(m.Groups[1].Value)))
-            .ToHashSet(StringComparer.Ordinal);
-
+        // ⛔ Порівнюється МЕТОД РАЗОМ ІЗ ШЛЯХОМ. Спершу сторож дивився на самі
+        // шляхи — і через це вважав досяжним `POST /registries/{code}/entries`
+        // лише тому, що клієнт ЧИТАЄ ту саму адресу. Тобто екран, який уміє
+        // показати довідник і не вміє завести в ньому запис, для сторожа
+        // виглядав повним. Читання не є споживачем запису.
+        var used = ClientCalls();
         var exempt = ServerOnlyActions();
 
         var unreachable = declared
-            .Where(d => !used.Contains(d.Path))
+            .Where(d => !used.Typed.Contains((d.Method, d.Path)) && !used.Unknown.Contains(d.Path))
             .Where(d => !exempt.Contains($"{d.Method} {d.Path}"))
             .Select(d => $"{d.Method} {d.Path}")
             .Order(StringComparer.Ordinal)
             .ToList();
 
-        Assert.Empty(unreachable);
+        // ⚠ Перелік у повідомленні ПОВНІСТЮ. `Assert.Empty` обрізає колекцію
+        // трьома крапками після п'ятого елемента, і побачити решту можна лише
+        // запустивши сторожа окремо з-під зневаджувача. Тут якраз той випадок,
+        // коли важливий саме весь список: він і є планом робіт.
+        Assert.True(
+            unreachable.Count == 0,
+            $"Дій сервера без споживача в інтерфейсі: {unreachable.Count}."
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, unreachable));
+    }
+
+    /// <summary>
+    /// Виклики API в коді клієнта: метод разом зі шляхом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Метод не оголошений окремим полем — він живе в об'єкті налаштувань
+    /// одразу після адреси (<c>{ method: 'POST' }</c>), а за замовчуванням
+    /// <c>fetch</c> робить <c>GET</c>. Тому читається вікно ПІСЛЯ адреси, і
+    /// вікно обрізається на наступній адресі: інакше сусідній запит на
+    /// відстані рядка приписав би свій метод попередньому.
+    ///
+    /// ⚠ <c>apiEnqueue</c> — завжди <c>POST</c>: він ставить довгу операцію в
+    /// чергу і не приймає методу. Впізнається за назвою ПЕРЕД адресою.
+    /// </remarks>
+    private static ClientCallSet ClientCalls()
+    {
+        var web = Path.Combine(SolutionRoot(), "src", "Ecr.Web", "src");
+
+        var typed = new HashSet<(string, string)>();
+        var unknown = new HashSet<string>(StringComparer.Ordinal);
+
+        var files = Directory
+            .EnumerateFiles(web, "*.ts", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(web, "*.tsx", SearchOption.AllDirectories))
+            .Where(f => !f.Contains("schema.d.ts", StringComparison.Ordinal));
+
+        foreach (var file in files)
+        {
+            var text = WithoutComments(File.ReadAllText(file));
+
+            foreach (Match match in ApiPathRegex.Matches(text))
+            {
+                var path = Placeholders(match.Groups[1].Value);
+                var method = MethodOf(text, match);
+
+                if (method is null)
+                {
+                    unknown.Add(path);
+                }
+                else
+                {
+                    typed.Add((method, path));
+                }
+            }
+        }
+
+        return new ClientCallSet(typed, unknown);
+    }
+
+    /// <summary>Виклики клієнта: з відомим методом і без нього.</summary>
+    /// <param name="Typed">Пари «метод + шлях», у яких метод видно з коду.</param>
+    /// <param name="Unknown">
+    /// Шляхи, які передані кудись далі — метод визначає та функція. Такий
+    /// шлях зараховується будь-якому методу: інакше сторож оголосив би
+    /// недосяжним те, до чого кнопка є, і його перестали б читати.
+    /// </param>
+    private sealed record ClientCallSet(
+        HashSet<(string Method, string Path)> Typed,
+        HashSet<string> Unknown);
+
+    /// <summary>
+    /// Метод HTTP, яким клієнт кличе цю адресу; <c>null</c> — з коду не видно.
+    /// </summary>
+    private static string? MethodOf(string text, Match address)
+    {
+        var start = address.Index + address.Length;
+
+        // Вікно до наступної адреси або 400 символів — що ближче: сусідній
+        // запит за рядок нижче інакше приписав би свій метод цьому.
+        var limit = Math.Min(start + 400, text.Length);
+        var next = text.IndexOf("/api/v1", start, StringComparison.Ordinal);
+        if (next >= 0 && next < limit)
+        {
+            limit = next;
+        }
+
+        var declared = MethodOptionRegex.Match(text[start..limit]);
+        if (declared.Success)
+        {
+            return declared.Groups[1].Value.ToUpperInvariant();
+        }
+
+        // Метод не названий — значення має те, ЩО саме кличуть.
+        var callee = CalleeRegex.Match(text[Math.Max(0, address.Index - 80)..address.Index]);
+        if (!callee.Success)
+        {
+            return null;
+        }
+
+        return callee.Groups[1].Value switch
+        {
+            // Ставить довгу операцію в чергу; методу не приймає взагалі.
+            "apiEnqueue" => "POST",
+
+            // Базовий клієнт без налаштувань — це `GET` за визначенням `fetch`.
+            "apiFetch" or "apiFetchIfChanged" or "apiFetchRaw" or "fetch" => "GET",
+
+            // Адреса пішла у власну функцію (форма входу віддає її своєму
+            // `submit`). Метод вирішує вона, і вгадувати його тут — гірше,
+            // ніж чесно сказати «не видно».
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -623,6 +730,14 @@ public sealed partial class EndpointCoverageTests
 
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
     private static partial Regex BlockCommentRegex { get; }
+
+    /// <summary>Кого кличуть з цією адресою — назва функції перед дужкою.</summary>
+    [GeneratedRegex(@"(\w+)\s*(?:<[^<>]*>)?\s*\(\s*$")]
+    private static partial Regex CalleeRegex { get; }
+
+    /// <summary>Метод у налаштуваннях запиту: <c>method: 'POST'</c>.</summary>
+    [GeneratedRegex(@"method:\s*'(get|post|put|patch|delete)'", RegexOptions.IgnoreCase)]
+    private static partial Regex MethodOptionRegex { get; }
 
     /// <summary>Адреса API в клієнтському коді.</summary>
     /// <remarks>

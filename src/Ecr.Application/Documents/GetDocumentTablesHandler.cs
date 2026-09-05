@@ -95,7 +95,18 @@ public sealed class GetDocumentTablesHandler(
                     table.Id,
                     table.Code,
                     table.NameL10n,
-                    table.Ordinal));
+                    table.Ordinal,
+
+                    // ⛔ Віддається ВІДПОВІДЬ домену, а не режим таблиці.
+                    // Клієнту потрібна кнопка «додати рядок», і питання, на
+                    // яке він відповідає, — «чи можна тут додавати». Віддати
+                    // `RowMode` означало б попросити клієнта скласти
+                    // `Dynamic || Mixed` самому, тобто завести ДРУГЕ
+                    // визначення того самого правила. Перше вже розійшлося
+                    // саме з собою всередині сервера, і коштувало це режиму
+                    // `Mixed` цілком.
+                    table.AllowsDynamicRows,
+                    table.MaxDynamicRows));
             }
         }
 
@@ -113,6 +124,8 @@ public sealed class GetDocumentTablesHandler(
 /// <param name="TableCode">Код таблиці.</param>
 /// <param name="TableNameL10n">Назва таблиці мовами каталогу.</param>
 /// <param name="TableOrdinal">Порядок таблиці в аркуші.</param>
+/// <param name="AllowsDynamicRows">Чи додає рядки користувач (<c>ФВ-3.2</c>).</param>
+/// <param name="MaxDynamicRows">Стеля кількості рядків; <c>null</c> — без стелі.</param>
 public sealed record DocumentTableDto(
     int SheetDefId,
     string SheetCode,
@@ -122,4 +135,6 @@ public sealed record DocumentTableDto(
     int TableDefId,
     string TableCode,
     Domain.ValueObjects.LocalizedText TableNameL10n,
-    int TableOrdinal);
+    int TableOrdinal,
+    bool AllowsDynamicRows,
+    int? MaxDynamicRows);

@@ -793,6 +793,18 @@
       "DocumentTableDto": {
         "description": "Екземпляр таблиці разом з аркушем, якому він належить.",
         "properties": {
+          "allowsDynamicRows": {
+            "description": "Чи додає рядки користувач (`ФВ-3.2`).",
+            "type": "boolean"
+          },
+          "maxDynamicRows": {
+            "description": "Стеля кількості рядків; `null` — без стелі.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "sheetCode": {
             "description": "Код аркуша; він же ключ у `DocumentSummary.SheetStates`.",
             "type": "string"
@@ -844,7 +856,9 @@
           "tableDefId",
           "tableCode",
           "tableNameL10n",
-          "tableOrdinal"
+          "tableOrdinal",
+          "allowsDynamicRows",
+          "maxDynamicRows"
         ],
         "type": "object"
       },

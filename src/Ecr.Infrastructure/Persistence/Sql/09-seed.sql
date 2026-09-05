@@ -342,7 +342,8 @@ USING (VALUES
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
     (N'document.export',                 N'en', N'Export to Excel', 1),
-    (N'document.exportQueued',           N'en', N'Export queued as job {job}.', 1),
+    (N'document.exportBuilding',         N'en', N'Building...', 1),
+    (N'document.exportReady',            N'en', N'Download the workbook', 1),
     (N'document.noSheets',               N'en', N'This document has no sheets for the selected period.', 1),
     (N'grid.loading',                    N'en', N'Loading the table...', 1),
     (N'grid.loadFailed',                 N'en', N'The table could not be loaded.', 1),
@@ -497,7 +498,45 @@ USING (VALUES
     (N'profile.density',                 N'en', N'Row height', 1),
     (N'profile.densityCompact',          N'en', N'Compact', 1),
     (N'profile.densityComfortable',      N'en', N'Comfortable', 1),
-    (N'profile.logout',                  N'en', N'Sign out', 1)
+    (N'profile.logout',                  N'en', N'Sign out', 1),
+
+    -- Робочий процес аркуша: подання, погодження, повернення в роботу.
+    --
+    -- ⛔ Цих рядків не було, бо не було й кнопок: до аудиту (`A7-39`)
+    -- затвердити документ через інтерфейс було неможливо, і робочий процес
+    -- обривався на поданні.
+    (N'workflow.approve',                N'en', N'Approve', 1),
+    (N'workflow.reject',                 N'en', N'Reject', 1),
+    (N'workflow.reopen',                 N'en', N'Return for edits', 1),
+    (N'workflow.recalculate',            N'en', N'Recalculate', 1),
+    (N'workflow.approved',               N'en', N'The sheet has been approved.', 1),
+    (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
+    (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
+    (N'workflow.recalcQueued',           N'en', N'Recalculation queued as job {job}.', 1),
+    (N'workflow.reason',                 N'en', N'Reason', 1),
+    (N'workflow.rejectTitle',            N'en', N'Reject the sheet', 1),
+    (N'workflow.rejectHint',             N'en', N'Say what has to be corrected: the author sees this text and nothing else.', 1),
+    (N'workflow.reopenTitle',            N'en', N'Return the sheet for edits', 1),
+    (N'workflow.reopenHint',             N'en', N'Submitted figures are about to change. The reason stays in the audit trail for good.', 1),
+
+    -- Імпорт із обов'язковим переглядом diff (модуль 6.10).
+    (N'import.pick',                     N'en', N'Import from Excel', 1),
+    (N'import.title',                    N'en', N'Review the import', 1),
+    (N'import.changes',                  N'en', N'{count} change(s)', 1),
+    (N'import.conflicts',                N'en', N'{count} conflict(s)', 1),
+    (N'import.rejected',                 N'en', N'{count} rejected', 1),
+    (N'import.blockedTitle',             N'en', N'This file cannot be applied as it is', 1),
+    (N'import.blockedHint',              N'en', N'Partial application is not allowed: fix the file or refresh the sheet and import again.', 1),
+    (N'import.noChanges',                N'en', N'The file matches the sheet: there is nothing to apply.', 1),
+    (N'import.row',                      N'en', N'Row', 1),
+    (N'import.column',                   N'en', N'Column', 1),
+    (N'import.was',                      N'en', N'Was', 1),
+    (N'import.becomes',                  N'en', N'Becomes', 1),
+    (N'import.reason',                   N'en', N'Reason', 1),
+    (N'import.apply',                    N'en', N'Apply', 1),
+    (N'import.applied',                  N'en', N'The import has been applied.', 1),
+
+    (N'grid.addRow',                     N'en', N'Add row', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

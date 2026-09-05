@@ -2,9 +2,9 @@
 import { Alert, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { ColumnDto, TableSliceDto } from '@/api/types';
+import type { ColumnDto, CreateRowRequest, TableSliceDto } from '@/api/types';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -14,6 +14,7 @@ import { cellKey, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
 import { buildRequest, cellEditKey, useCellPatch, type PendingEdit } from './useCellPatch';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { showApiError } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
 /** Властивості grid. */
@@ -26,6 +27,19 @@ export interface DocumentGridProps {
   periodKey: number;
   /** Чи доступне редагування на рівні всієї таблиці. */
   readOnly: boolean;
+
+  /**
+   * Чи додає рядки користувач.
+   *
+   * ⛔ Відповідь ДОМЕНУ, а не режим таблиці. Складати `Dynamic || Mixed` на
+   * клієнті означало б завести друге визначення того самого правила — і воно
+   * вже одного разу розійшлося саме з собою всередині сервера, коштувавши
+   * режиму `Mixed` цілком (`A7-41`).
+   */
+  allowsDynamicRows: boolean;
+
+  /** Стеля кількості рядків; `null` — без стелі. */
+  maxDynamicRows: number | null;
 }
 
 /** Рядок у моделі grid: значення за кодами колонок плюс службовий ключ. */
@@ -56,7 +70,8 @@ type GridRow = Record<string, unknown> & { __rowKey: string };
  * рівні API (B04 §2.3), і UI не має його імітувати.
  */
 export function DocumentGrid(props: DocumentGridProps): JSX.Element {
-  const { documentId, tableInstanceId, periodKey, readOnly } = props;
+  const { documentId, tableInstanceId, periodKey, readOnly, allowsDynamicRows, maxDynamicRows } =
+    props;
 
   const slice = useQuery({
     queryKey: ['table-slice', tableInstanceId, periodKey],
@@ -67,6 +82,31 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   });
 
   const { patch, isPending, conflicts } = useCellPatch(documentId);
+
+  /**
+   * Додавання рядка динамічної таблиці (`ФВ-3.2`).
+   *
+   * ⛔ До аудиту цієї дії в інтерфейсі не було зовсім: ендпоінт існував і
+   * працював, а динамічна таблиця лишалася порожньою назавжди — рядок у неї
+   * не міг додати ніхто (`A7-39`).
+   *
+   * ⚠ Ключ не задається: сервер видає GUID у форматі `N`. Просити ключ у
+   * користувача означало б віддати йому ідентичність рядка, на яку
+   * посилаються формули й аудит.
+   */
+  const addRow = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/v1/documents/${documentId}/rows`, {
+        method: 'POST',
+        body: JSON.stringify({ tableInstanceId, rowKey: null } satisfies CreateRowRequest),
+      }),
+    onSuccess: () => void slice.refetch(),
+
+    // ⚠ Стеля рядків і дублікат ключа приходять як `ECR-ROW-0409` з числом у
+    // тексті: «досягнуто межу динамічних рядків таблиці: 200». Це те, що
+    // людина може зрозуміти й погодити, а «не вдалося» — ні.
+    onError: showApiError,
+  });
   const history = useRef(new UndoStack(`${tableInstanceId}:${periodKey}`));
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
   const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
@@ -373,6 +413,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         >
           {t('grid.save', { count: pending.size })}
         </Button>
+
+        {/* ⛔ Кнопка є лише там, де рядки додає користувач, і зникає при
+            досягненні стелі. Показана в `Fixed` таблиці, вона обіцяла б те,
+            що сервер відхилить: склад рядків там заданий шаблоном, і «зайвий»
+            рядок зламав би і формули з діапазонами, і звірку з еталоном. */}
+        {allowsDynamicRows && !readOnly && (
+          <Button
+            size="xs"
+            variant="default"
+            loading={addRow.isPending}
+            disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
+            onClick={() => addRow.mutate()}
+          >
+            {t('grid.addRow')}
+          </Button>
+        )}
       </Group>
 
       {rounded.length > 0 && (

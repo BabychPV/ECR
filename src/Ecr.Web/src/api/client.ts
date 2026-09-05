@@ -123,7 +123,15 @@ async function apiFetchRaw(
 
   const headers = new Headers(init?.headers);
   headers.set(CORRELATION_HEADER, correlationId);
-  if (init?.body !== undefined && !headers.has('Content-Type')) {
+
+  // ⛔ `FormData` НЕ отримує `application/json`. Тип multipart несе межу
+  // (`boundary`), яку генерує сам браузер, і задати його заголовком
+  // неможливо: підписаний вручну `Content-Type` лишає тіло без межі, а
+  // сервер відповідає 415 на кожен файл. Імпорт із перегляду diff — єдине
+  // місце системи, яке надсилає файл, і саме тому помилка тут була б
+  // одноразовою і назавжди.
+  const body = init?.body;
+  if (body !== undefined && body !== null && !headers.has('Content-Type') && !isMultipart(body)) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -148,6 +156,20 @@ async function apiFetchRaw(
   }
 
   return response;
+}
+
+/**
+ * Чи формує браузер тип тіла сам.
+ *
+ * ⚠ `FormData` тут головний випадок, решта — та сама родина: для них
+ * підставлений заголовок або зайвий, або шкідливий.
+ */
+function isMultipart(body: BodyInit): boolean {
+  return (
+    (typeof FormData !== 'undefined' && body instanceof FormData) ||
+    (typeof Blob !== 'undefined' && body instanceof Blob) ||
+    (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams)
+  );
 }
 
 /** Відповідь умовного запиту: тіло і `ETag`, яким його позначив сервер. */

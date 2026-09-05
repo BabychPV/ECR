@@ -183,6 +183,109 @@ public sealed partial class PrincipleTests
         Assert.Empty(offenders);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "ФВ-5.16")]
+    public void Клієнтські_переходи_збігаються_з_доменом()
+    {
+        // ⛔ Клієнт вирішує, ЯКУ КНОПКУ показати, за таблицею станів
+        // (`features/workflow/transitions.ts`). Це неминуче: кнопка
+        // «Затвердити» на чернетці — обіцянка, якої стан аркуша не виконує.
+        // Але таблиця на клієнті — це копія машини станів домену, а копія
+        // розходиться з оригіналом мовчки: додали стан у `ApprovalState`,
+        // клієнт про нього не дізнався, і дія просто не має кнопки.
+        //
+        // ⚠ Саме так і виник `A7-39`, тільки в найгрубішому вигляді: кнопок
+        // не було зовсім. Тому сторож читає ОБИДВА файли і порівнює множини.
+        var domain = DomainTransitions();
+        var client = ClientTransitions();
+
+        Assert.Equal(domain.Keys.Order(StringComparer.Ordinal), client.Keys.Order(StringComparer.Ordinal));
+
+        var divergent = domain
+            .Where(pair => !pair.Value.SetEquals(client[pair.Key]))
+            .Select(pair =>
+                $"{pair.Key}: домен [{string.Join(", ", pair.Value.Order(StringComparer.Ordinal))}], "
+                + $"клієнт [{string.Join(", ", client[pair.Key].Order(StringComparer.Ordinal))}]")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(divergent);
+    }
+
+    /// <summary>
+    /// Дозволені стани кожного переходу за <c>ApprovalState</c>.
+    /// </summary>
+    /// <remarks>
+    /// Читається вартовий вираз на початку методу — саме він вирішує, чи
+    /// відмовити <c>ECR-DOC-0409</c>. Дві форми: <c>Status is not (A or B)</c>
+    /// і <c>Status != DocumentStatus.A</c>.
+    /// </remarks>
+    private static Dictionary<string, HashSet<string>> DomainTransitions()
+    {
+        var path = Path.Combine(
+            SolutionRoot(), "src", "Ecr.Domain", "Entities", "Workflow", "ApprovalState.cs");
+
+        Assert.True(File.Exists(path), $"Немає {path}: машину станів шукати ніде.");
+
+        var source = WithoutComments(File.ReadAllText(path));
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (Match method in TransitionMethodRegex.Matches(source))
+        {
+            var body = method.Groups["body"].Value;
+            var allowed = new HashSet<string>(StringComparer.Ordinal);
+
+            var negated = StatusIsNotRegex.Match(body);
+            if (negated.Success)
+            {
+                foreach (Match status in StatusValueRegex.Matches(negated.Groups[1].Value))
+                {
+                    allowed.Add(status.Groups[1].Value);
+                }
+            }
+            else
+            {
+                var single = StatusNotEqualRegex.Match(body);
+                Assert.True(
+                    single.Success,
+                    $"{method.Groups[1].Value}: не видно вартового виразу за станом — "
+                    + "або його немає, або форма змінилася і сторож осліп.");
+
+                allowed.Add(single.Groups[1].Value);
+            }
+
+            result[method.Groups[1].Value.ToLowerInvariant()] = allowed;
+        }
+
+        Assert.NotEmpty(result);
+
+        return result;
+    }
+
+    /// <summary>Дозволені стани кожного переходу за таблицею клієнта.</summary>
+    private static Dictionary<string, HashSet<string>> ClientTransitions()
+    {
+        var path = Path.Combine(
+            SolutionRoot(), "src", "Ecr.Web", "src", "features", "workflow", "transitions.ts");
+
+        Assert.True(File.Exists(path), $"Немає {path}: клієнт не має таблиці переходів.");
+
+        var source = WithoutComments(File.ReadAllText(path));
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (Match entry in ClientTransitionRegex.Matches(source))
+        {
+            result[entry.Groups[1].Value] =
+            [
+                .. StateLiteralRegex.Matches(entry.Groups[2].Value).Select(m => m.Groups[1].Value)
+            ];
+        }
+
+        return result;
+    }
+
     private static string WithoutComments(string source)
         => Regex.Replace(Regex.Replace(source, @"//[^\n]*", string.Empty), @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
 
@@ -214,6 +317,40 @@ public sealed partial class PrincipleTests
     /// <summary>Видалення проєкту або періоду в SQL.</summary>
     [GeneratedRegex(@"DELETE\s+(?:FROM\s+)?\[?doc\]?\.\[?(?:Project|Period)\]?", RegexOptions.IgnoreCase)]
     private static partial Regex DeleteProjectRegex { get; }
+
+    /// <summary>Метод переходу разом із тілом до наступного оголошення.</summary>
+    /// <remarks>
+    /// ⚠ Тіло береться ДО наступного оголошення, а не збалансованими дужками.
+    /// Балансування тут не працює: у повідомленнях відмов стоїть інтерполяція
+    /// <c>$"…{Status}"</c>, тобто фігурні дужки всередині рядка всередині
+    /// вкладеного блоку. Вираз із балансуванням на глибину два не збігався
+    /// НІ З ЧИМ — і сторож мовчав би, якби не перевірка на порожній результат.
+    /// </remarks>
+    [GeneratedRegex(
+        @"public void (Submit|Approve|Reject|Reopen)\([^)]*\)(?<body>.*?)(?=
+    public |\z)",
+        RegexOptions.Singleline)]
+    private static partial Regex TransitionMethodRegex { get; }
+
+    /// <summary>Вартовий вираз форми <c>Status is not (A or B)</c>.</summary>
+    [GeneratedRegex(@"Status\s+is\s+not\s*\(([^)]*)\)")]
+    private static partial Regex StatusIsNotRegex { get; }
+
+    /// <summary>Вартовий вираз форми <c>Status != DocumentStatus.A</c>.</summary>
+    [GeneratedRegex(@"Status\s*!=\s*DocumentStatus\.(\w+)")]
+    private static partial Regex StatusNotEqualRegex { get; }
+
+    /// <summary>Значення переліку станів усередині вартового виразу.</summary>
+    [GeneratedRegex(@"DocumentStatus\.(\w+)")]
+    private static partial Regex StatusValueRegex { get; }
+
+    /// <summary>Рядок таблиці переходів клієнта: <c>submit: ['Draft', …],</c>.</summary>
+    [GeneratedRegex(@"^\s*(submit|approve|reject|reopen):\s*\[([^\]]*)\]", RegexOptions.Multiline)]
+    private static partial Regex ClientTransitionRegex { get; }
+
+    /// <summary>Назва стану в масиві клієнта.</summary>
+    [GeneratedRegex(@"'(\w+)'")]
+    private static partial Regex StateLiteralRegex { get; }
 
     /// <summary>Власне рішення клієнта про роль або право.</summary>
     /// <remarks>

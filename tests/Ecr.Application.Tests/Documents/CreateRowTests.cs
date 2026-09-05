@@ -111,6 +111,48 @@ public sealed class CreateRowTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.2")]
+    public async Task Створення_рядка_у_Mixed_таблиці_дозволене()
+    {
+        // ⛔ `Mixed` — це «фіксовані рядки ПЛЮС можливість додавати свої», і
+        // саме так його розуміє домен: `TableDef.AllowsDynamicRows` повертає
+        // true для `Dynamic` і для `Mixed`, а прив'язка виразів на цю
+        // властивість спирається (`ReferenceResolver`).
+        //
+        // ⚠ Обробник же питав `RowMode != Dynamic` — тобто мав ВЛАСНЕ,
+        // вужче визначення того самого поняття. Наслідок: режим `Mixed`
+        // існував лише на папері — таблиця в ньому не приймала жодного
+        // рядка і поводилася як `Fixed`, а користувач бачив відмову з
+        // причиною «рядки задані шаблоном», неправдивою для цього режиму.
+        Arrange(TableRowMode.Mixed, maxRows: null);
+
+        var key = await Handler().HandleAsync(
+            700, TableInstance, requestedKey: null, Profile(), CancellationToken.None);
+
+        Assert.Equal(32, key.Value.Length);
+
+        await _rows.Received(1).CreateRowAsync(
+            TableInstance, Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.2")]
+    public async Task Стеля_рядків_діє_і_в_Mixed_таблиці()
+    {
+        // ⚠ Друга половина тієї самої розбіжності: домен не давав задати
+        // `MaxDynamicRows` для `Mixed`. Тобто режим, який дозволяє додавати
+        // рядки, був єдиним БЕЗ стелі — рівно там, де вона потрібна, бо до
+        // динамічних рядків додаються ще й фіксовані.
+        Arrange(TableRowMode.Mixed, maxRows: 2, "a", "b");
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            700, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Дублікат_RowKey_дає_ECR_ROW_0409()
     {
         Arrange(TableRowMode.Dynamic, maxRows: null, "7001001");

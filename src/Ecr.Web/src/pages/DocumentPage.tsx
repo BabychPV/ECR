@@ -1,18 +1,19 @@
 ﻿import type { JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import { apiFetch } from '@/api/client';
 import type {
   DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
-  ExportRequest,
-  SheetWorkflowRequest,
   ValidationMessageDto,
 } from '@/api/types';
 import { DocumentGrid } from '@/features/grid/DocumentGrid';
+import { ExportButton } from '@/features/export/ExportButton';
+import { ImportPanel } from '@/features/import/ImportPanel';
+import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -35,7 +36,6 @@ import { t } from '@/shared/i18n';
 export function DocumentPage(): JSX.Element {
   const { id } = useParams();
   const documentId = Number(id);
-  const queryClient = useQueryClient();
   const session = useSession();
 
   // ⛔ Період і аркуш — в адресі (`ФВ-14.29`). Посилання на документ без них
@@ -83,41 +83,6 @@ export function DocumentPage(): JSX.Element {
     },
   });
 
-  const submit = useMutation({
-    mutationFn: (sheetDefId: number) =>
-      apiFetch(`/api/v1/documents/${documentId}/submit`, {
-        method: 'POST',
-        body: JSON.stringify({ sheetDefId, periodKey } satisfies SheetWorkflowRequest),
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
-      notifications.show({ color: 'green', message: t('document.submitted') });
-    },
-    onError: (error) => {
-      // ⚠ Причина показується як є: Submit при осиротілих рядках
-      // (ECR-SUB-4221) — це не «помилка сервера», а перелік того, що треба
-      // виправити.
-      notifications.show({
-        color: 'red',
-        message: error instanceof EcrApiError ? error.message : String(error),
-      });
-    },
-  });
-
-  const exportBook = useMutation({
-    mutationFn: () =>
-      apiEnqueue(`/api/v1/documents/${documentId}/export`, {
-        includeFormulas: true,
-        includeStyles: true,
-        language: session.data?.language ?? 'en',
-        periodKey,
-      } satisfies ExportRequest),
-    onSuccess: (job) => {
-      // ⚠ Довга операція повертає 202 з jobId; прогрес видно на екрані задач.
-      notifications.show({ message: t('document.exportQueued', { job: job.jobId }) });
-    },
-  });
-
   const sheets = groupBySheet(tables.data ?? []);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
 
@@ -128,7 +93,12 @@ export function DocumentPage(): JSX.Element {
     active === undefined || summary.data === undefined
       ? ''
       : (summary.data.sheetStates[active.code] ?? 'Draft');
-  const readOnly = state === 'Submitted' || state === 'Approved';
+  // ⛔ Редагованість — питання ОДНОГО стану аркуша, і відповідає на нього
+  // таблиця переходів (`features/workflow/transitions.ts`), а не порівняння
+  // рядків тут. Порівняння на місці — це друга копія машини станів домену, і
+  // розійшлася б вона мовчки: `Rejected` виглядає як «не Draft», але
+  // редагувати відхилений аркуш і треба, інакше виправити зауваження нічим.
+  const readOnly = !isEditable(state);
 
   return (
     /*
@@ -169,15 +139,33 @@ export function DocumentPage(): JSX.Element {
             <Button size="xs" variant="default" loading={validate.isPending} onClick={() => validate.mutate()}>
               {t('document.validate')}
             </Button>
-            {can(session.data, 'Document.Export') && (
-              <Button size="xs" variant="default" loading={exportBook.isPending} onClick={() => exportBook.mutate()}>
-                {t('document.export')}
-              </Button>
+
+            {/* ⛔ Імпорт лише туди, куди можна писати. Кнопка над поданим
+                аркушем обіцяла б заміну чисел, яку сервер відхилить: подане
+                редагується лише після повернення в роботу (`ФВ-5.20a`). */}
+            {can(session.data, 'Document.Import') && !readOnly && (
+              <ImportPanel documentId={documentId} periodKey={periodKey} />
             )}
-            {active !== undefined && !readOnly && (
-              <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate(active.sheetDefId)}>
-                {t('document.submit')}
-              </Button>
+
+            {can(session.data, 'Document.Export') && (
+              <ExportButton
+                documentId={documentId}
+                periodKey={periodKey}
+                language={session.data?.language ?? 'en'}
+              />
+            )}
+
+            {/* ⛔ Увесь робочий процес аркуша — в одному компоненті. До аудиту
+                тут була сама лише кнопка «Подати», і на ній процес
+                закінчувався: затвердити документ через інтерфейс було
+                неможливо (`A7-39`). */}
+            {active !== undefined && (
+              <SheetActions
+                documentId={documentId}
+                sheetDefId={active.sheetDefId}
+                periodKey={periodKey}
+                state={state}
+              />
             )}
           </Group>
         }
@@ -204,6 +192,8 @@ export function DocumentPage(): JSX.Element {
             tableInstanceId={table.tableInstanceId}
             periodKey={periodKey}
             readOnly={readOnly}
+            allowsDynamicRows={table.allowsDynamicRows}
+            maxDynamicRows={table.maxDynamicRows}
           />
         </Stack>
       ))}

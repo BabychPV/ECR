@@ -69,11 +69,14 @@ public sealed class TableDef : Entity<int>
             throw new DomainException("ECR-TMPL-0422", $"MaxDynamicRows має бути додатним; отримано {m}.");
         }
 
-        if (max is not null && RowMode != TableRowMode.Dynamic)
+        // ⚠ Стеля має сенс скрізь, де рядки додає користувач, — тобто і в
+        // `Mixed`. Саме там вона потрібна найбільше: до динамічних рядків
+        // додаються ще й фіксовані, і бюджет читання зрізу вибирається швидше.
+        if (max is not null && !AllowsDynamicRows)
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"MaxDynamicRows має сенс лише для RowMode = Dynamic; у таблиці {Code} режим {RowMode}.");
+                $"MaxDynamicRows має сенс лише там, де рядки додає користувач; у таблиці {Code} режим {RowMode}.");
         }
 
         MaxDynamicRows = max;

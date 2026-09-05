@@ -33,10 +33,17 @@ public sealed class CreateRowHandler(
             ?? throw new Errors.NotFoundException(
                 "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
 
-        // 1. Рядок можна додати лише в динамічну таблицю. У Fixed склад рядків
-        //    заданий шаблоном, і поява «зайвого» зламала б і формули з
+        // 1. Рядок можна додати лише туди, де це дозволяє режим. У Fixed склад
+        //    рядків заданий шаблоном, і поява «зайвого» зламала б і формули з
         //    діапазонами, і звірку з еталоном.
-        if (table.RowMode != Domain.Enums.TableRowMode.Dynamic)
+        //
+        // ⛔ Питаємо ДОМЕН (`AllowsDynamicRows`), а не режим напряму. Тут
+        // стояло `RowMode != Dynamic` — власне, вужче визначення того самого
+        // поняття, і через нього режим `Mixed` не приймав жодного рядка:
+        // «фіксовані плюс свої» на практиці дорівнювало `Fixed`. Домен же
+        // вважає `Mixed` динамічним, і на це спирається прив'язка виразів —
+        // тобто два місця системи розуміли один режим по-різному.
+        if (!table.AllowsDynamicRows)
         {
             throw new Errors.BusinessRuleException(
                 "ECR-ROW-0409",
