@@ -1,4 +1,4 @@
-using Ecr.Domain.Enums;
+﻿using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
 
@@ -30,6 +30,7 @@ public sealed class PeriodContextTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.11")]
     public void Fixed360_дає_тридцять_днів_у_будь_якому_місяці()
     {
         // ⚠ Однакове число для всіх місяців — і є сенс режиму: місячні звіти
@@ -64,6 +65,7 @@ public sealed class PeriodContextTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.11a")]
     public void Секунди_періоду_це_дні_помножені_на_86400()
     {
         var january = Month(2026, 1, CalendarMode.Actual);

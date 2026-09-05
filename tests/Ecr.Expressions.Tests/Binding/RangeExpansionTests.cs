@@ -127,6 +127,7 @@ public sealed class RangeExpansionTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-7.6")]
+    [Trait("Requirement", "ФВ-2.3")]
     public void Для_динамічної_таблиці_діапазон_записується_предикатом_а_не_переліком()
     {
         var builder = new TemplateBuilder();

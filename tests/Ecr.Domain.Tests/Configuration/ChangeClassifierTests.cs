@@ -49,6 +49,7 @@ public sealed class ChangeClassifierTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-7.6")]
+    [Trait("Requirement", "ФВ-7.3")]
     public void Зміна_коду_колонки_за_наявності_документів_це_Breaking()
     {
         // Комірка посилається на ColumnDef.Code. Перейменування розриває

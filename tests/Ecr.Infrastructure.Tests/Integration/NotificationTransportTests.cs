@@ -62,6 +62,7 @@ public sealed class NotificationTransportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-12.5")]
     public async Task Порожній_перелік_адресатів_відхиляється()
     {
         var sender = Sender(("Smtp:Host", "smtp.example.local"), ("Smtp:From", "ecr@example.local"));

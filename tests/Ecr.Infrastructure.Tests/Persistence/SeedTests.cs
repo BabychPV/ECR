@@ -46,6 +46,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-14.9")]
+    [Trait("Requirement", "ФВ-2.2")]
     public async Task Створюються_три_мови_і_рівно_одна_за_замовчуванням()
     {
         Assert.Equal(3, await ScalarAsync("SELECT COUNT(*) FROM sys_ecr.Language"));
@@ -60,6 +61,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-14.9")]
+    [Trait("Requirement", "ФВ-6.15")]
     public async Task Створюються_усі_права_з_каталогу()
     {
         Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));

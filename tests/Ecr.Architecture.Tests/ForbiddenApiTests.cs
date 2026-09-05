@@ -37,6 +37,7 @@ public sealed class ForbiddenApiTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-11.5")]
     public void IExternalDataSink_не_існує_в_жодній_збірці()
     {
         // D-44: система ЧИТАЄ із зовнішніх джерел і не пише в них. Поява

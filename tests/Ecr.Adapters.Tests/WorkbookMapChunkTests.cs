@@ -1,4 +1,4 @@
-// tests/Ecr.Adapters.Tests/WorkbookMapChunkTests.cs
+﻿// tests/Ecr.Adapters.Tests/WorkbookMapChunkTests.cs
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
 using Ecr.TestKit;
@@ -33,6 +33,7 @@ public sealed class WorkbookMapChunkTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-4.3")]
     public void Довгий_текст_розкладений_по_рядках_збирається_назад()
     {
         // Модель того, що робить експортер і читає імпортер: без цього

@@ -84,6 +84,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-13.7")]
     public async Task Публікація_без_причини_зміни_відхиляється()
     {
         var error = await Assert.ThrowsAsync<DomainException>(
@@ -96,6 +97,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-14.7")]
     public async Task Публікація_без_дати_набуття_чинності_відхиляється()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -166,6 +168,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.4")]
     public async Task Перерахунок_закритого_періоду_потребує_окремого_погодження()
     {
         _periods.GetPeriodStatesAsync(1, 202601, Arg.Any<CancellationToken>())

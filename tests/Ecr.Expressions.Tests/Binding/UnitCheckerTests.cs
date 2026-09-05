@@ -35,6 +35,7 @@ public sealed class UnitCheckerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.7")]
     public void Додавання_величин_у_різних_одиницях_відхиляється_з_ECR_TMPL_4223()
     {
         var context = Context();
@@ -105,6 +106,7 @@ public sealed class UnitCheckerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.6")]
     public void Результат_несумісний_з_оголошеною_одиницею_колонки_відхиляється()
     {
         var context = Context();

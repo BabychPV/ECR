@@ -1,4 +1,4 @@
-using Ecr.Adapters.PiAf;
+﻿using Ecr.Adapters.PiAf;
 using Ecr.Application.Ports;
 using Ecr.TestKit;
 using Xunit;
@@ -20,6 +20,7 @@ public sealed class CatchUpPlannerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-11.3")]
     public void Порожнє_покриття_дає_одну_прогалину_на_весь_період()
     {
         var gaps = CatchUpPlanner.FindGaps([], From, From.AddDays(10));

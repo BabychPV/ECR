@@ -24,6 +24,7 @@ public sealed class ImportPreviewStoreTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-4.3")]
+    [Trait("Requirement", "ФВ-5.22")]
     public async Task Збережений_diff_читається_іншим_екземпляром_сховища()
     {
         // Два різні екземпляри — модель двох інстансів застосунку: той, що

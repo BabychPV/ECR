@@ -41,6 +41,7 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-11.7")]
     public void Зміна_UOM_атрибута_в_джерелі_зупиняє_збір()
     {
         var error = Assert.Throws<BusinessRuleException>(
@@ -51,6 +52,7 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
     public void Незнайома_одиниця_джерела_теж_зупиняє_збір()
     {
         // ⚠ Нерозпізнаний символ не можна вважати збігом: довести рівність
@@ -65,6 +67,7 @@ public sealed class SourceUnitConverterTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-16.12")]
+    [Trait("Requirement", "ФВ-16.10")]
     public void Збіг_оголошеної_і_фактичної_одиниці_збір_не_зупиняє()
         => SourceUnitConverter.EnsureDeclaredUnit(KilogramId, "KG", Catalog(), "tag");
 

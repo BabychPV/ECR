@@ -1,4 +1,4 @@
-using Ecr.Infrastructure.Persistence;
+﻿using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Xunit;
 
@@ -20,6 +20,7 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.8")]
     public async Task Задача_видима_одразу_після_постановки_а_не_лише_після_старту()
     {
         // ⚠ Саме цей розрив ловить тест: клієнт отримує 202 з jobId і одразу
@@ -41,6 +42,7 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.7")]
     public async Task Постановка_старт_прогрес_і_завершення_дають_один_запис_а_не_чотири()
     {
         await using var db = sql.CreateContext();
@@ -63,6 +65,7 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.4")]
     public async Task Провал_зберігає_текст_помилки_і_НЕ_виставляє_сто_відсотків()
     {
         // Задача, яка впала на сорока відсотках і показує сто, читається як

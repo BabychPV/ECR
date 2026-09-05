@@ -28,6 +28,7 @@ public sealed class PeriodAccessRuleTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-2.15")]
+    [Trait("Requirement", "ФВ-2.16")]
     public void Правило_без_меж_діє_для_всіх_періодів()
     {
         var rule = Rule(from: null, to: null);

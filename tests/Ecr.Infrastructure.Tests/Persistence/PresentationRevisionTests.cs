@@ -1,4 +1,4 @@
-using Ecr.Infrastructure.Caching;
+﻿using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -66,6 +66,7 @@ public sealed class PresentationRevisionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.4")]
     public async Task Ключ_кешу_змінюється_після_презентаційної_правки()
     {
         var doc = await BuildAsync();

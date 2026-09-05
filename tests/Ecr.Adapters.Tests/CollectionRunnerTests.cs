@@ -1,4 +1,4 @@
-using Ecr.Adapters.PiAf;
+﻿using Ecr.Adapters.PiAf;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
@@ -95,6 +95,7 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-11.2")]
     public async Task Незареєстрований_транспорт_відмовляє_зрозуміло()
     {
         var world = new World(transport: ExternalTransport.PiWebApi);
@@ -109,6 +110,7 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-12.1")]
     public async Task Вимкнена_сутність_джерела_відмовляє_а_не_мовчить()
     {
         var world = new World();

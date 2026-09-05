@@ -163,6 +163,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.17")]
     public async Task Комірка_з_колонкою_ЧУЖОЇ_таблиці_відхиляється_БАЗОЮ()
     {
         // ⛔ Це перевірка СХЕМИ, а не коду, і саме тому вона тут, а не в

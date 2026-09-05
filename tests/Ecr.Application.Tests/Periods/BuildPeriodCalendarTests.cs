@@ -14,6 +14,7 @@ public sealed class BuildPeriodCalendarTests
     [InlineData("Quarterly", 4)]
     [InlineData("Yearly", 1)]
     [Trait("Requirement", "ФВ-1.5")]
+    [Trait("Requirement", "ФВ-1.1")]
     public void Кількість_періодів_відповідає_періодичності(string kind, int expected)
     {
         var periodKind = Enum.Parse<PeriodKind>(kind);

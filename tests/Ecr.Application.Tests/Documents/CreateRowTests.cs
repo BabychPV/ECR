@@ -78,6 +78,7 @@ public sealed class CreateRowTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.2")]
     public async Task Перевищення_MaxDynamicRows_відхиляється()
     {
         Arrange(TableRowMode.Dynamic, maxRows: 2, "a", "b");

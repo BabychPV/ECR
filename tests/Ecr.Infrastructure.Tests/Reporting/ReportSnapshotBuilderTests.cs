@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuilderTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuilderTests.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
@@ -21,6 +21,7 @@ public sealed class ReportSnapshotBuilderTests
     private static readonly DateTime Now = new(2026, 4, 1, 10, 0, 0, DateTimeKind.Utc);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-5.7")]
     public void Статус_зрізу_успадковується_від_стану_даних()
     {
         // ⚠ Статус не задається окремо — він ВИВОДИТЬСЯ зі стану аркушів
@@ -43,6 +44,7 @@ public sealed class ReportSnapshotBuilderTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-10.2")]
     public void Чернеткові_зрізи_теж_потрапляють_у_rpt()
     {
         var draft = Snapshot(SnapshotStatus.Draft);
@@ -106,6 +108,7 @@ public sealed class ReportSnapshotBuilderTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-10.5")]
     public void Поданий_зріз_не_перебудовується_ніколи()
     {
         var snapshot = Snapshot(SnapshotStatus.Approved);
