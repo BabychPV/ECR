@@ -31,7 +31,9 @@ public sealed class MetadataWarmup(EcrDbContext db, IMetadataCache cache)
     {
         var versions = await db.Projects
             .AsNoTracking()
-            .Where(p => p.Status != Domain.Enums.ProjectStatus.Closed)
+            // Заархівовані пропускаємо: їхні метадані вже нікому не потрібні
+            // на старті. Стану `Closed` на рівні проєкту більше немає (`D-123`).
+            .Where(p => p.Status != Domain.Enums.ProjectStatus.Archived)
             .Select(p => p.TemplateVersionId)
             .Distinct()
             .Take(MaxVersions)

@@ -204,3 +204,64 @@ public sealed class ActivateProjectHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
+
+/// <summary>
+/// Позначає проєкт заархівованим. Право <c>Project.Manage</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Другий бік `A7-25`: стан <c>Archived</c> існував у переліку, і до нього
+/// не вів жоден перехід. Стан, якого не досягти, — це той самий дефект, що й
+/// <c>Active</c> без активації, тільки в кінці життєвого циклу.
+///
+/// ⚠ Дозволено лише коли ВСІ періоди закриті або заархівовані (`D-123`).
+/// Архівація проєкту з відкритим періодом означала б, що дані стають
+/// доступними лише для читання під руками того, хто їх заповнює.
+/// </remarks>
+public sealed class ArchiveProjectHandler(
+    IPeriodStore periods,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IClock clock)
+{
+    /// <summary>Право на архівацію.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Позначає проєкт заархівованим.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Проєкту немає.</exception>
+    /// <exception cref="ConcurrencyConflictException">
+    /// <c>ECR-PRD-0409</c> — є незакриті періоди; у подробицях їхній перелік.
+    /// </exception>
+    public async Task HandleAsync(int projectId, CancellationToken ct)
+    {
+        await Templates.ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException("ECR-ROW-0404", $"Проєкту {projectId} не існує.");
+
+        // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
+        // текстом: людині треба знати, які саме періоди закрити, а не що
+        // «щось відкрите».
+        var open = project.Periods
+            .Where(p => p.State is not (Domain.Enums.PeriodState.Closed))
+            .Select(p => p.PeriodKeyValue)
+            .Order()
+            .ToList();
+
+        if (open.Count > 0)
+        {
+            throw new ConcurrencyConflictException(
+                "ECR-PRD-0409",
+                $"Проєкт {projectId} має незакриті періоди: архівація неможлива.",
+                new Dictionary<string, object?> { ["periodKeys"] = open });
+        }
+
+        project.Archive(clock.UtcNow);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}

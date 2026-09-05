@@ -82,24 +82,49 @@ Write-Host "Створюю тимчасову базу $Database…"
 Invoke-Sql -Db 'master' -Query "IF DB_ID('$Database') IS NOT NULL DROP DATABASE [$Database]; CREATE DATABASE [$Database];"
 
 try {
-    # Порядок значущий і взятий з `09-commands.md` §3:
-    # `07` переносить таблиці на схеми партиціонування і тому йде ПІСЛЯ
-    # міграцій; `11` — ПЕРЕД `07`, інакше `aud.*` лишиться на PRIMARY.
-    Invoke-Script '01-filegroups.sql'
-    Invoke-Script '02-partitions.sql'
+    # ⛔ Перелік і порядок — з `09-commands.md` §3. `07` переносить таблиці на
+    # схеми партиціонування і тому йде ПІСЛЯ міграцій; `11` — ПЕРЕД `07`,
+    # інакше `aud.*` лишиться на PRIMARY; `06` — після того, як таблиці на
+    # місці, бо він бере базу в ексклюзивне користування.
+    $scripts = @(
+        '01-filegroups.sql'
+        '02-partitions.sql'
+        '<migration>'
+        '11-audit-tables.sql'
+        '07-partition-tables.sql'
+        '08-system-tables.sql'
+        '12-archive-tables.sql'
+        '13-cache-table.sql'
+        '03-archive-proc.sql'
+        '04-partition-maintenance.sql'
+        '05-rpt-views.sql'
+        '10-triggers.sql'
+        '06-rcsi.sql'
+    )
 
-    Write-Host '  migration.sql'
-    Invoke-Sql -Db $Database -File $migration
+    # ⛔ Сторож проти того, що вже сталося одного разу: `06-rcsi.sql` існував,
+    # був у документованому порядку — і не виконувався ЖОДНИМ розгортанням,
+    # бо перелік тут писався руками. База при цьому піднімалася без RCSI, і
+    # єдиним слідом був рядок `RCSI False` у логу старту.
+    #
+    # ⚠ `09-seed.sql` виконує сам застосунок (це DML, `02-contracts.md` §14),
+    # тому він єдиний легальний виняток.
+    $onDisk = Get-ChildItem -Path $sql -Filter '*.sql' | Select-Object -ExpandProperty Name
+    $missed = $onDisk | Where-Object { $_ -notin $scripts -and $_ -ne '09-seed.sql' }
 
-    Invoke-Script '11-audit-tables.sql'
-    Invoke-Script '07-partition-tables.sql'
-    Invoke-Script '08-system-tables.sql'
-    Invoke-Script '12-archive-tables.sql'
-    Invoke-Script '13-cache-table.sql'
-    Invoke-Script '03-archive-proc.sql'
-    Invoke-Script '04-partition-maintenance.sql'
-    Invoke-Script '05-rpt-views.sql'
-    Invoke-Script '10-triggers.sql'
+    if ($missed) {
+        throw "Скрипти є в дереві, але не виконуються: $($missed -join ', ')"
+    }
+
+    foreach ($name in $scripts) {
+        if ($name -eq '<migration>') {
+            Write-Host '  migration.sql'
+            Invoke-Sql -Db $Database -File $migration
+        }
+        else {
+            Invoke-Script $name
+        }
+    }
 
     Write-Host 'Розгортання пройшло під sqlcmd повністю.' -ForegroundColor Green
 }

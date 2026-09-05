@@ -57,7 +57,8 @@
               { "code": "Jan",        "dataType": "Formula", "ordinal": 2, "unit": "m3", "isMonthColumn": true, "monthNumber": 1 },
               { "code": "Feb",        "dataType": "Formula", "ordinal": 3, "unit": "m3", "isMonthColumn": true, "monthNumber": 2 },
               { "code": "Mar",        "dataType": "Formula", "ordinal": 4, "unit": "m3", "isMonthColumn": true, "monthNumber": 3 },
-              { "code": "TotalTons",  "dataType": "Formula", "ordinal": 5, "unit": "t" }
+              { "code": "Density",    "dataType": "Decimal", "ordinal": 5, "unit": "kg_per_m3" },
+              { "code": "TotalTons",  "dataType": "Formula", "ordinal": 6, "unit": "t" }
             ],
             "rows": [
               { "rowKey": "C001", "ordinal": 1, "rowKind": "Item",    "labelL10n": { "en": "Surface" } },
@@ -72,7 +73,7 @@
               { "id": "F5", "scope": "Row", "row": "C009",
                 "expression": "[C001].[{Month}] + [C002].[{Month}]" },
               { "id": "F6", "scope": "Cell", "row": "C009", "column": "TotalTons",
-                "expression": "CONVERT(([Jan] + [Feb] + [Mar]) * CST.CST_WATER_DENSITY, 'kg', 't')" }
+                "expression": "CONVERT(([Jan] + [Feb] + [Mar]) * [Density], 'kg', 't')" }
             ]
           }
         ]
@@ -174,6 +175,9 @@
         { "rowKey": "7001003", "cells": { "Permit": "P-002", "WaterBody": "WB-C", "Jan": "2000.000", "Feb": "2100.500", "Mar": { "isEmpty": true } } },
         { "rowKey": "7001101", "cells": { "Permit": "P-002", "WaterBody": "WB-W", "Jan": "450.125",  "Feb": "460.000",  "Mar": "470.375" } },
         { "rowKey": "7001102", "cells": { "Permit": "P-002", "WaterBody": "WB-W", "Jan": "300.000",  "Feb": "310.000",  "Mar": "320.000" } }
+      ],
+      "Water_070.Rollup": [
+        { "rowKey": "C009", "cells": { "Density": "1000.000" } }
       ],
       "Waste_08.Items": [
         { "rowKey": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "cells": { "WasteType": "W-01", "Amount": "12.500",   "AmountUnit": "t"  } },

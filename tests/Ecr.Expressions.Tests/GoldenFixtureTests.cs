@@ -93,26 +93,24 @@ public sealed class GoldenFixtureTests
         var months = Months.Sum(m => Number("Water_07", "Main", "7009000", m));
         Assert.Equal(11812.500m, months);
 
-        // ⛔ Вираз F6 із фікстури не розбирається ЖОДНИМ діалектом, і це не
-        // випадковість, а невирішена половина Q-066:
-        //   • `Template` не має `CST.` — шаблон, який знає про методології,
-        //     перестає бути переносним;
-        //   • `Methodology` не має `[Jan]` — методологія не читає комірки
-        //     документа безпосередньо.
-        // Формула лежить у таблиці шаблону, а написана мовою, якої немає.
-        // Записано як P-07; тут ця обставина ЗАФІКСОВАНА тестом, а не
-        // прихована пропуском.
-        const string fixtureExpression =
-            "CONVERT(([Jan] + [Feb] + [Mar]) * CST.CST_WATER_DENSITY, 'kg', 't')";
+        // ⚠ Раніше цей тест фіксував ЗЛАМАНИЙ стан: вираз F6 у фікстурі був
+        // написаний мовою, якої немає — `CST.` доступний лише методологіям, а
+        // `[Jan]` лише шаблонам, і він не розбирався жодним діалектом (`P-07`).
+        // Директива №01 закрила питання: щільність — звичайний стовпець
+        // документа `[Density]`, бо коефіцієнт залежить від речовини й умов і
+        // мусить бути видимим у даних, а не захованим у «конверсії м³ → т»
+        // (`ФВ-16.5`). Межа діалектів важливіша за одну фікстуру.
+        const string fixtureExpression = "CONVERT(([Jan] + [Feb] + [Mar]) * [Density], 'kg', 't')";
 
-        Assert.False(Expr.Parse(fixtureExpression, ExpressionDialect.Template).IsSuccess);
+        // ⛔ Тепер вираз мусить РОЗБИРАТИСЯ діалектом шаблонів — і не
+        // розбиратися діалектом методологій, бо `[Jan]` там немає й не буде.
+        Assert.True(Expr.Parse(fixtureExpression, ExpressionDialect.Template).IsSuccess);
         Assert.False(Expr.Parse(fixtureExpression, ExpressionDialect.Methodology).IsSuccess);
-        Assert.Contains(Workbook.SkippedFormulas, s => s.StartsWith("F6:", StringComparison.Ordinal));
 
-        // Число при цьому обчислюване, і саме воно предмет тесту. Щільність —
-        // звичайне значення документа: рекомендація Q-066 саме така, бо
-        // коефіцієнт залежить від речовини й умов і мусить бути видимим
-        // у даних, а не захованим у «конверсії м³ → т» (ФВ-16.5).
+        // ⚠ І жодна формула фікстури більше не пропускається: перелік
+        // пропущених має бути ПОРОЖНІЙ. Саме він приховував би повернення
+        // старої формули.
+        Assert.Empty(Workbook.SkippedFormulas);
         var context = Context("Water_07", "Main", "7009000");
         context.SetCell("Water_07", "Main", "7009000", "Density", ExpressionValue.Number(1000m));
 

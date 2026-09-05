@@ -110,9 +110,15 @@ sqlcmd -S $S -d $DB -E -b -I -i artifacts/migration.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/11-audit-tables.sql   # ПЕРЕД 07: інакше aud.* лишиться на PRIMARY
 sqlcmd -S $S -d $DB -E -b -I -i $Q/07-partition-tables.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/08-system-tables.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/12-archive-tables.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/13-cache-table.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/03-archive-proc.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/04-partition-maintenance.sql
+sqlcmd -S $S -d $DB -E -b -I -i $Q/05-rpt-views.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/10-triggers.sql
-sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql
-# 03, 04, 05 — з етапів 3–5: вони посилаються на calc.* і arc.*
+sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql   # останнім: бере базу в ексклюзивне користування
+# 12, 13, 03, 04, 05 додано за етапами 3–5; перелік звіряє tools/verify-sql-scripts.ps1,
+# який падає, якщо в теці є скрипт, якого немає в цьому порядку.
 # 09-seed.sql тут НЕМАЄ: seed виконує сам застосунок при старті (SeedRunner),
 # бо це DML, а не DDL. Запускати його вручну не треба і не можна двічі підряд
 # із різних місць — він ідемпотентний, але джерело має бути одне.

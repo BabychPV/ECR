@@ -36,13 +36,21 @@ public sealed class ArchiveJob(
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Проєкту {request.ProjectId} не існує.");
 
-        // ⛔ Архівувати можна лише ЗАКРИТИЙ проєкт, і лише після того, як сплив
-        // річний грейс (ФВ-1.9). Архівація відкритого року означала б, що дані
-        // зникають із-під рук того, хто їх зараз заповнює.
-        if (project.Status != ProjectStatus.Closed)
+        // ⛔ Фізична архівація йде лише для проєкту, ВЖЕ позначеного
+        // заархівованим, і лише після того, як сплив річний грейс (ФВ-1.9).
+        // Архівація відкритого року означала б, що дані зникають із-під рук
+        // того, хто їх зараз заповнює.
+        //
+        // ⚠ Два кроки навмисно різні: позначку ставить людина через
+        // `POST /api/v1/projects/{id}/archive` (перевіряючи, що всі періоди
+        // закриті), а фізичне перенесення в `arc.*` робить ця задача. Стан
+        // `Closed` на рівні проєкту прибрано (`D-123`): він мав сенс лише для
+        // періоду.
+        if (project.Status != ProjectStatus.Archived)
         {
             throw new InvalidOperationException(
-                $"Проєкт {request.ProjectId} у стані {project.Status}: архівувати можна лише закритий.");
+                $"Проєкт {request.ProjectId} у стані {project.Status}: "
+                + "фізична архівація йде лише для позначеного заархівованим.");
         }
 
         var grace = project.ClosedAt?.AddDays(project.YearGraceOffsetDays);

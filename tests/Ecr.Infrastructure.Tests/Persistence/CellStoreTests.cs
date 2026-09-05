@@ -158,6 +158,77 @@ public sealed class CellStoreTests(SqlServerFixture sql)
         Assert.Equal(records.Count, slice.Count);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Комірка_з_колонкою_ЧУЖОЇ_таблиці_відхиляється_БАЗОЮ()
+    {
+        // ⛔ Це перевірка СХЕМИ, а не коду, і саме тому вона тут, а не в
+        // прикладних тестах. `FK_CellValue_Column` складений (`D-84`):
+        // `(TableDefId, ColumnDefId) → cfg.ColumnDef (TableDefId, Id)`.
+        // Простий ключ на самому `ColumnDefId` пропустив би комірку в колонку
+        // чужої таблиці — і саме він був би коренем `A7-27`, якби існував.
+        //
+        // ⚠ Тест блокуючий за вимогою директиви: помилка адресації мусить
+        // падати на ключі бази, а не покладатися на те, що код не помилиться.
+        // Код теж перевіряється — окремо, у `PatchCellsTests`.
+        var (doc, _) = await ArrangeAsync();
+
+        // ⚠ Друга таблиця заводиться ТУТ: фікстура будує одну, а перевірка
+        // без чужої колонки не має сенсу — саме її відсутність і робила б тест
+        // зеленим ні про що.
+        var alien = await AlienColumnIdAsync(doc.SheetDefId, doc.TableDefId, CancellationToken.None);
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT doc.CellValue (PeriodKey, TableRowId, TableDefId, ColumnDefId, ValueNumeric, IsCalculated, IsEmpty)
+            VALUES (@p, @r, @t, @c, 1, 0, 0);
+            """;
+        command.Parameters.AddWithValue("@p", doc.PeriodKey.Value);
+        command.Parameters.AddWithValue("@r", doc.RowIds[0]);
+        command.Parameters.AddWithValue("@t", doc.TableDefId);
+        command.Parameters.AddWithValue("@c", alien);
+
+        var error = await Assert.ThrowsAsync<SqlException>(
+            () => command.ExecuteNonQueryAsync(CancellationToken.None));
+
+        Assert.Contains("FK_CellValue_Column", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Створює другу таблицю з колонкою і повертає її <c>ColumnDefId</c>.
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш, до якого належить нова таблиця.</param>
+    /// <param name="ownTableDefId">Таблиця документа — щоб не сплутати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<int> AlienColumnIdAsync(int sheetDefId, int ownTableDefId, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(ct);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DECLARE @t int;
+
+            INSERT cfg.TableDef (SheetDefId, Code, NameL10n, Ordinal, LayoutKind, RowMode, StorageMode, IsDeleted)
+            VALUES (@sheet, CONCAT(N'ALIEN', CAST(@own AS nvarchar(10))), N'{"en":"Alien"}', 99, 0, 0, 0, 0);
+
+            SET @t = SCOPE_IDENTITY();
+
+            INSERT cfg.ColumnDef (TableDefId, Code, HeaderL10n, Ordinal, DataType, IsReadOnly, IsRequired, IsHidden, IsDeleted)
+            VALUES (@t, N'ALIEN_COL', N'{"en":"Alien"}', 1, 1, 0, 0, 0, 0);
+
+            SELECT CAST(SCOPE_IDENTITY() AS int);
+            """;
+        command.Parameters.AddWithValue("@sheet", sheetDefId);
+        command.Parameters.AddWithValue("@own", ownTableDefId);
+
+        return (int)(await command.ExecuteScalarAsync(ct))!;
+    }
+
     private async Task<(TestDocument Document, ICellStore Store)> ArrangeAsync(int rowCount = 4)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);

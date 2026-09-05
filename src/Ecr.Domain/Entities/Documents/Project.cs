@@ -111,6 +111,33 @@ public sealed class Project : Entity<int>
     }
 
     /// <summary>
+    /// Позначає проєкт заархівованим.
+    /// </summary>
+    /// <param name="utcNow">Момент операції.</param>
+    /// <exception cref="InvalidOperationException">Проєкт не активний.</exception>
+    /// <remarks>
+    /// ⛔ Це ПОЗНАЧКА, а не перенесення даних: фізично в <c>arc.*</c> їх
+    /// переносить <c>ArchiveJob</c>, і робить це окремим свідомим кроком.
+    /// Об'єднати їх означало б, що натиснута кнопка одразу починає
+    /// багатогодинну операцію над мільйонами рядків.
+    ///
+    /// ⚠ Умову «всі періоди закриті» перевіряє обробник, а не домен: періоди
+    /// тут — навігація, яку могли не завантажити, і мовчазний дозвіл на
+    /// неповному графі гірший за перевірку в одному місці.
+    /// </remarks>
+    public void Archive(DateTime utcNow)
+    {
+        if (Status != ProjectStatus.Active)
+        {
+            throw new InvalidOperationException(
+                $"Заархівувати можна лише активний проєкт; стан {Status}.");
+        }
+
+        Status = ProjectStatus.Archived;
+        ClosedAt = utcNow;
+    }
+
+    /// <summary>
     /// Фіксує поточний період вручну. Причина обов'язкова: стан неочевидний
     /// і має бути видимим в UI.
     /// </summary>

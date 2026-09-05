@@ -17,7 +17,8 @@ public sealed class ProjectsController(
     GetPeriodCalendarHandler getCalendar,
     SetCurrentPeriodHandler setCurrentPeriod,
     CloneProjectHandler cloneProject,
-    ActivateProjectHandler activate) : ControllerBase
+    ActivateProjectHandler activate,
+    ArchiveProjectHandler archive) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
@@ -74,6 +75,24 @@ public sealed class ProjectsController(
     public async Task<IActionResult> Activate(int id, CancellationToken ct)
     {
         await activate.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Позначає проєкт заархівованим. Право <c>Project.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Це позначка, а не перенесення даних: фізично в <c>arc.*</c> їх
+    /// переносить окрема задача, і робить це свідомим кроком людини.
+    /// Дозволено лише коли всі періоди закриті (`D-123`).
+    /// </remarks>
+    [HttpPost("{id:int}/archive")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Archive(int id, CancellationToken ct)
+    {
+        await archive.HandleAsync(id, ct).ConfigureAwait(false);
 
         return NoContent();
     }

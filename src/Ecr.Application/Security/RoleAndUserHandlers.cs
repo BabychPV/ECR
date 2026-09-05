@@ -102,55 +102,44 @@ public sealed class CreateRoleHandler(
                 "ECR-AUTH-0403", $"Потрібне право {ListRolesHandler.Permission}.");
         }
 
-        // ⚠ Небезпечні права можна видати ЛИШЕ маючи їх самому. Інакше
-        // `Security.ManageRoles` перетворюється на право видати собі будь-що —
-        // тобто на єдине право, яке має значення (ФВ-6.12, D-40).
+        // ⛔ Правила «видати можна лише те, що маєш» більше НЕМАЄ (`D-121`,
+        // рішення замовника). Його не було й у пакеті: `ФВ-6.12` каже
+        // «видаються іменованим особам окремо» — і більше нічого.
         //
-        // ⛔ Єдиний виняток — bootstrap-адміністратор, і без нього правило
-        // не суворе, а замкнене на себе (`A7-17`). У щойно розгорнутій системі
-        // небезпечних прав не має НІХТО: seed не дає їх жодній
-        // вбудованій ролі навмисно. Значить, першого разу їх не може видати
-        // ніхто ніколи, і `Calculation.Publish`, `Integration.Manage`,
-        // `Security.Simulate`, `System.RunJob` лишаються недосяжними в
-        // будь-якому розгортанні.
+        // ⚠ Воно замикало коло. Bootstrap-запис вимикається автоматично,
+        // щойно з'являється доменний адміністратор (`D-97`). Після цього
+        // видати `Calculation.Publish` не міг уже НІХТО: у ролі
+        // `SystemAdministrator` небезпечних прав немає за seed, а правило
+        // забороняло видати те, чого не маєш. Той самий деадлок, що й `A7-17`,
+        // тільки на день пізніше.
         //
-        // ⚠ Виняток дає право ВИДАТИ, а не МАТИ: bootstrap-запис сам
-        // не отримує ні `Calculation.Publish`, ні `Security.Simulate` — він лише
-        // називає людину, яка їх матиме. Це дослівно те, чого вимагає
-        // ФВ-6.12: «видаються іменованим особам окремо». Сам виняток
-        // обмежений трьома гарантіями самого запису: він один
-        // (`UX_User_Bootstrap`), він міняє пароль при першому вході і він
-        // вимикається, щойно з'являється доменний адміністратор (ФВ-6.18).
-        var actor = await users.FindByIdAsync(userId, ct).ConfigureAwait(false);
-        var isBootstrap = actor?.IsBootstrapAdmin == true;
-
-        // ⛔ Невідомий код права до `A7-19` доходив до бази і повертався як
-        // порушення зовнішнього ключа, тобто `ECR-SYS-0500` «зверніться до
-        // адміністратора». Друкарська помилка в назві права — не внутрішня
-        // помилка системи, і людина має побачити, ЯКЕ саме право не існує.
-        var unknownPermissions = await users
-            .FilterUnknownAsync(permissionCodes, ct)
-            .ConfigureAwait(false);
-
-        if (unknownPermissions.Count > 0)
-        {
-            throw new NotFoundException(
-                "ECR-ROW-0404",
-                $"Прав не існує: {string.Join(", ", unknownPermissions)}.");
-        }
-
+        // ⚠ Захист «чотирьох очей» стоїть у точці ВИКОРИСТАННЯ, а не видачі:
+        // `Calculation.Publish` вимагає не бути автором останньої правки
+        // (`D-40`), `Period.Reopen` вимагає причини, симуляція пишеться в
+        // аудит. Дублювати його ще й тут — і було тим, що замикало коло.
+        //
+        // Натомість кожна видача небезпечного права — окремий запис у журналі
+        // безпеки: не заборона, а слід.
         var dangerous = await users.FilterDangerousAsync(permissionCodes, ct).ConfigureAwait(false);
-        var notHeld = isBootstrap ? [] : dangerous.Where(p => !profile.Has(p)).ToList();
-        if (notHeld.Count > 0)
-        {
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403",
-                "Небезпечні права не можна видати, не маючи їх самому.",
-                new Dictionary<string, object?> { ["permissions"] = notHeld });
-        }
 
         var role = new Role(EcrCode.Create(code), new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
         var roleId = await users.AddRoleAsync(role, permissionCodes, ct).ConfigureAwait(false);
+
+        // ⚠ Окремим записом і лише коли є що записувати: рядок «видано нуль
+        // небезпечних прав» у журналі безпеки — шум, який ховає справжні.
+        if (dangerous.Count > 0)
+        {
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow,
+                    "DangerousPermissionsGranted",
+                    TargetUserId: null,
+                    TargetRoleId: roleId,
+                    DetailsJson: JsonSerializer.Serialize(new { role = code, permissions = dangerous }),
+                    ChangedByUserId: userId,
+                    CorrelationId: null),
+                ct).ConfigureAwait(false);
+        }
 
         await audit.WriteSecurityEventAsync(
             new SecurityEventRecord(
