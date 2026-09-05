@@ -156,6 +156,7 @@ public sealed class CalculationOrchestratorTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.11")]
+    [Trait("Requirement", "ФВ-9.11a")]
     public async Task IsCurrent_перемикається_однією_транзакцією()
     {
         var profile = new ModuleProfile();

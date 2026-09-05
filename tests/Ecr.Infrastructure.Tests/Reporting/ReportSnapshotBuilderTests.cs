@@ -22,6 +22,7 @@ public sealed class ReportSnapshotBuilderTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-5.7")]
+    [Trait("Requirement", "ФВ-10.10")]
     public void Статус_зрізу_успадковується_від_стану_даних()
     {
         // ⚠ Статус не задається окремо — він ВИВОДИТЬСЯ зі стану аркушів
@@ -61,6 +62,7 @@ public sealed class ReportSnapshotBuilderTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-10.11")]
     public void Вʼюха_для_регулятора_віддає_лише_Approved_і_Submitted()
     {
         // Фільтр стоїть у ВʼЮСІ (`05-rpt-views.sql`: `s.Status IN (1, 2)`), а
@@ -109,6 +111,8 @@ public sealed class ReportSnapshotBuilderTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-10.5")]
+    [Trait("Requirement", "ФВ-5.14")]
+    [Trait("Requirement", "ФВ-9.17")]
     public void Поданий_зріз_не_перебудовується_ніколи()
     {
         var snapshot = Snapshot(SnapshotStatus.Approved);

@@ -49,6 +49,7 @@ public sealed class UiStringCatalogTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-14.9a")]
     public async Task Тексти_помилок_резолвляться_з_того_самого_каталогу()
     {
         var catalog = await Handler(userId: 5).HandleAsync("ru", publicOnly: true, CancellationToken.None);

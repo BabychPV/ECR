@@ -53,6 +53,7 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-12.8")]
     public async Task Успішний_збір_пише_покриття_і_завершує_прогін_успіхом()
     {
         var world = new World();
@@ -96,6 +97,7 @@ public sealed class CollectionRunnerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-11.2")]
+    [Trait("Requirement", "ФВ-13.17")]
     public async Task Незареєстрований_транспорт_відмовляє_зрозуміло()
     {
         var world = new World(transport: ExternalTransport.PiWebApi);

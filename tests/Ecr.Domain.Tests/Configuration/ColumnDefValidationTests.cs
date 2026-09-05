@@ -47,6 +47,7 @@ public sealed class ColumnDefValidationTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-8.8")]
+    [Trait("Requirement", "ФВ-8.3")]
     public void Lookup_колонка_вимагає_посилання_на_запис_реєстру_а_не_текст()
     {
         var column = Column(CellDataType.Lookup, "Substance");

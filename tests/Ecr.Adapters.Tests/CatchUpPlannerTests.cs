@@ -70,6 +70,7 @@ public sealed class CatchUpPlannerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-5.23")]
     public void Прогалини_повертаються_від_найстарішої()
     {
         var covered = new[]
@@ -88,6 +89,7 @@ public sealed class CatchUpPlannerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.15")]
     public void Покриття_поза_вікном_огляду_обрізається_а_не_ігнорується()
     {
         // Інтервал, що починається до вікна, покриває свою частину всередині:

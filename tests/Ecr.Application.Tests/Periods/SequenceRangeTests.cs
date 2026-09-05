@@ -38,6 +38,7 @@ public sealed class SequenceRangeTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.11")]
     public void Обмеження_діє_і_на_рівні_бази_а_не_лише_домену()
     {
         // Одного місця замало: дані потрапляють у doc.Period не тільки через

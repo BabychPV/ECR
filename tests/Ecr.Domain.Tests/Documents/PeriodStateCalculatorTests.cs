@@ -60,6 +60,7 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.7")]
     public void Після_завершення_періоду_і_до_HardClose_стан_Grace()
     {
         // 31 січня минуло, 20 лютого ще ні.
@@ -70,6 +71,7 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.8")]
     public void Після_HardClose_стан_Closed()
     {
         var state = Calculator.Calculate(January(), SiteMidnight(2026, 3, 1), Site);

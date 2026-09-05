@@ -68,6 +68,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-13.5")]
     public async Task Публікація_автором_останньої_правки_відхиляється_ECR_CALC_0409()
     {
         _user.UserId.Returns(Author);
@@ -152,6 +153,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.7")]
     public async Task Закриті_періоди_після_публікації_НЕ_перераховуються_автоматично()
     {
         await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);

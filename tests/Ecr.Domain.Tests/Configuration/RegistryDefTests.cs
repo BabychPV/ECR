@@ -47,6 +47,7 @@ public sealed class RegistryDefTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.1")]
     public void Перемикання_SourceKind_змінює_master()
     {
         var registry = Registry();

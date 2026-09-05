@@ -33,6 +33,7 @@ public sealed class ValidationEngineTests
                new LocalizedText(new Dictionary<string, string> { ["en"] = $"Порушено {code}" }));
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.8")]
     public void Комірковий_Error_блокує_запис()
     {
         var messages = Engine().ValidateCell(
@@ -48,6 +49,7 @@ public sealed class ValidationEngineTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.1")]
+    [Trait("Requirement", "ФВ-5.18")]
     public void Error_рівня_документа_блокує_Submit_але_не_запис()
     {
         var messages = Engine().ValidateScope(
@@ -67,6 +69,7 @@ public sealed class ValidationEngineTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.3")]
+    [Trait("Requirement", "ФВ-5.2")]
     public void Зламане_правило_дає_Warning_про_правило_а_не_Error_даних()
     {
         var messages = Engine().ValidateCell(

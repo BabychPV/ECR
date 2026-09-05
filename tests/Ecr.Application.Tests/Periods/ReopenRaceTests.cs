@@ -116,6 +116,7 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-5.20a")]
+    [Trait("Requirement", "ФВ-12.3")]
     public async Task Два_одночасні_Reopen_дають_один_результат()
     {
         var (documentId, periodId) = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);

@@ -55,6 +55,7 @@ public sealed partial class ConsistencyCheckJobTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.14")]
     public void Звіряє_архів_із_джерелом_за_контрольними_сумами()
     {
         var source = Source();
@@ -97,6 +98,7 @@ public sealed partial class ConsistencyCheckJobTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-10.8")]
     public void Не_чіпає_закриті_періоди()
     {
         var decision = OrphanScanPlan.Plan(

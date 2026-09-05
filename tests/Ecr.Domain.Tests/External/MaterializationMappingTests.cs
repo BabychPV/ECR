@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/External/MaterializationMappingTests.cs
+﻿// tests/Ecr.Domain.Tests/External/MaterializationMappingTests.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.TestKit;
@@ -19,6 +19,7 @@ public sealed class MaterializationMappingTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.11")]
     public void Мапінг_без_рядка_НЕ_матеріалізується_і_це_легально()
     {
         // ⚠ `null` означає рівно одне: точки лишаються сирими для звірки. Тег
@@ -32,6 +33,7 @@ public sealed class MaterializationMappingTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.10")]
     public void Рядок_без_агрегації_є_помилкою_конфігурації()
     {
         // ⛔ Пара нерозривна. Система не знає, чи величина миттєва
@@ -56,6 +58,7 @@ public sealed class MaterializationMappingTests
     [InlineData(AggregationKind.Max)]
     [InlineData(AggregationKind.Last)]
     [InlineData(AggregationKind.First)]
+    [Trait("Requirement", "ФВ-8.11")]
     public void Кожна_агрегація_переліку_зберігається_і_читається(AggregationKind kind)
     {
         // ⚠ Перевіряються ВСІ шість: `TransformCode` зберігається рядком, і
@@ -88,6 +91,7 @@ public sealed class MaterializationMappingTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.13")]
     public void Ключ_рядка_з_поля_джерела_НЕ_підтримується()
     {
         // ⛔ Варіанту «взяти ключ рядка з поля джерела» немає навмисно (`D-118`):
