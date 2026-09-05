@@ -248,7 +248,8 @@ USING (VALUES
     (N'err.ECR-AUTH-0401',     N'en', N'Sign in to continue.',              0),
     (N'err.ECR-AUTH-0403',     N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0423',     N'en', N'The account is locked.',            0),
-    (N'err.ECR-PWD-0428',      N'en', N'Password change is required.',      0)
+    (N'err.ECR-PWD-0428',      N'en', N'Password change is required.',      0),
+    (N'err.ECR-PWD-0422',      N'en', N'The new password does not meet the policy.', 0)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

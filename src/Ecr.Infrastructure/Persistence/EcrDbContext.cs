@@ -84,6 +84,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<MethodologyVersion> MethodologyVersions => Set<MethodologyVersion>();
     public DbSet<MethodologyFormula> MethodologyFormulas => Set<MethodologyFormula>();
     public DbSet<MethodologyConstant> MethodologyConstants => Set<MethodologyConstant>();
+
+    /// <summary>Тести методології: вхід, очікуваний вихід, допуск (ФВ-13.7).</summary>
+    public DbSet<MethodologyTestCaseEntity> MethodologyTestCases => Set<MethodologyTestCaseEntity>();
     public DbSet<MethodologySubstance> MethodologySubstances => Set<MethodologySubstance>();
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
@@ -116,6 +119,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<CollectionCoverage> CollectionCoverages => Set<CollectionCoverage>();
     public DbSet<ArchiveRun> ArchiveRuns => Set<ArchiveRun>();
     public DbSet<MaintenanceRun> MaintenanceRuns => Set<MaintenanceRun>();
+
+    /// <summary>Черга сповіщень; доставку виконує NotificationJob (P-13).</summary>
+    public DbSet<NotificationOutboxItem> NotificationOutbox => Set<NotificationOutboxItem>();
     public DbSet<JobProgress> JobProgresses => Set<JobProgress>();
 
     // doc — індекс фільтрів

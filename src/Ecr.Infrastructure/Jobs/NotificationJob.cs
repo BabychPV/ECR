@@ -16,19 +16,19 @@ namespace Ecr.Infrastructure.Jobs;
 /// подання документа все одно відбулося. Тому задача читає чергу подій, а не
 /// викликається зсередини use-case.
 ///
-/// ⚠ <b>Транспорт доставки поки відсутній свідомо (P-13).</b> У пакеті немає
-/// ні таблиці черги сповіщень, ні налаштувань пошти, ні правил «кому що»:
-/// <c>sec.User.Email</c> — єдине, що існує. Вигадати адресатів і шаблони
-/// означало б ухвалити за замовника рішення, яке видно лише тоді, коли лист
-/// прийшов не тому.
+/// ⚠ Задача робить дві речі: **зводить збої** в <c>itg.MaintenanceRun</c> і
+/// **відправляє чергу** <c>itg.NotificationOutbox</c>.
 /// <para>
-/// Тому задача робить ту частину, яка визначена однозначно: збирає збої за
-/// період від попереднього свого прогону і **записує зведення** в
-/// <c>itg.MaintenanceRun</c>, звідки його видно в обслуговуванні. Мовчазне
-/// «нічого не робимо, бо не вирішено» лишило б збої непоміченими взагалі.
+/// ⛔ Транспорт доставки лишається за замовником (`P-13`): правила «кому що
+/// надсилати» видно лише тоді, коли лист прийшов не тому. Поки відправника не
+/// зареєстровано, події <b>лишаються в черзі</b> зі станом <c>Pending</c>, і
+/// задача каже, скільки їх накопичилося. Мовчазна «успішна» доставка була б
+/// гіршою за її відсутність: події зникали б, а система рапортувала б про
+/// надіслані листи.
 /// </para>
 /// </remarks>
-public sealed class NotificationJob(EcrDbContext db, IClock clock) : IBackgroundJob
+public sealed class NotificationJob(EcrDbContext db, IClock clock, INotificationSender sender)
+    : IBackgroundJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "notification";
@@ -108,10 +108,93 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock) : IBackground
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        await progress.ReportAsync(80, "Відправка черги сповіщень", ct).ConfigureAwait(false);
+
+        var (sent, pending) = await FlushOutboxAsync(ct).ConfigureAwait(false);
+
         await progress
-            .ReportAsync(100, items.Count == 0 ? "Збоїв немає" : $"Збоїв у зведенні: {items.Count}", ct)
+            .ReportAsync(
+                100,
+                $"Збоїв у зведенні: {items.Count}; надіслано: {sent}; лишилося в черзі: {pending}",
+                ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Відправляє чергу сповіщень.
+    /// </summary>
+    /// <returns>Скільки надіслано і скільки лишилося.</returns>
+    /// <remarks>
+    /// ⚠ «Не налаштовано» і «не доставлено» — <b>різні стани</b>. Без
+    /// відправника події не позначаються невдалими: вони чекають, і саме тому
+    /// налаштування транспорту не потребує повторного створення подій.
+    /// </remarks>
+    private async Task<(int Sent, int Pending)> FlushOutboxAsync(CancellationToken ct)
+    {
+        var pending = await db.NotificationOutbox
+            .Where(n => n.State == "Pending")
+            .OrderBy(n => n.CreatedAt)
+            .Take(MaxOutboxPerRun)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (pending.Count == 0 || !sender.IsConfigured)
+        {
+            return (0, pending.Count);
+        }
+
+        var sent = 0;
+
+        foreach (var item in pending)
+        {
+            var recipients = (item.Recipients ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (recipients.Length == 0)
+            {
+                // ⛔ Подія без адресата не «надсилається нікуди»: вона
+                // позначається невдалою з причиною. Інакше вона зникла б, і
+                // ніхто не дізнався б, що політика адресатів не налаштована.
+                item.MarkFailed("Адресатів не визначено.", MaxAttempts);
+                continue;
+            }
+
+            try
+            {
+                await sender.SendAsync(recipients, item.Subject, item.Body, ct).ConfigureAwait(false);
+                item.MarkSent(clock.UtcNow);
+                sent++;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception error)
+            {
+                // ⛔ Текст без стека (ФВ-6.11): він видимий в інтерфейсі
+                // обслуговування.
+                item.MarkFailed(error.Message, MaxAttempts);
+            }
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return (sent, pending.Count - sent);
+    }
+
+    /// <summary>Скільки подій відправляти за один прогін.</summary>
+    /// <remarks>
+    /// Задача працює щогодини. Дві сотні листів за раз — це межа, за якою
+    /// поштовий сервер починає вважати нас розсилкою.
+    /// </remarks>
+    public const int MaxOutboxPerRun = 200;
+
+    /// <summary>Після скількох спроб перестати пробувати.</summary>
+    /// <remarks>
+    /// П'ять спроб — це п'ять годин. Довше означало б, що недоступна пошта
+    /// щогодини стукає в мертвий сервер тижнями.
+    /// </remarks>
+    public const int MaxAttempts = 5;
 
     /// <summary>Налаштування серіалізації зведення; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);

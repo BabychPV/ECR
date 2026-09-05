@@ -345,3 +345,30 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.Property(x => x.Error).HasColumnName("Error").HasMaxLength(2000);
     }
 }
+
+/// <summary>
+/// Конфігурація <see cref="NotificationOutboxItem"/> — черги сповіщень.
+/// </summary>
+/// <remarks>
+/// ⚠ Індекс за станом і часом: задача щогодини бере лише <c>Pending</c>, і без
+/// індексу вона сканувала б усю історію сповіщень, яка не видаляється.
+/// </remarks>
+public sealed class NotificationOutboxConfiguration : IEntityTypeConfiguration<NotificationOutboxItem>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<NotificationOutboxItem> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("NotificationOutbox", "itg");
+
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.EventCode).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Subject).HasMaxLength(400).IsRequired();
+        builder.Property(x => x.Recipients).HasMaxLength(4000);
+        builder.Property(x => x.State).HasMaxLength(20).IsRequired();
+        builder.Property(x => x.Error).HasMaxLength(1000);
+
+        builder.HasIndex(x => new { x.State, x.CreatedAt }).HasDatabaseName("IX_Outbox_State");
+    }
+}

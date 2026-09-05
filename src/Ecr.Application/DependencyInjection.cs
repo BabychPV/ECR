@@ -124,6 +124,7 @@ public static class DependencyInjection
         // Етап 5: обмін із Excel, звітність, інтеграція, стан задач.
         services.AddScoped<Documents.GetDocumentTablesHandler>();
         services.AddScoped<Documents.ExportDocumentHandler>();
+        services.AddScoped<Documents.DownloadExportHandler>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();

@@ -101,6 +101,44 @@ public sealed class MethodologyFormulaConfiguration : IEntityTypeConfiguration<M
     }
 }
 
+/// <summary>
+/// Конфігурація <see cref="MethodologyTestCaseEntity"/> — тестів методології.
+/// </summary>
+/// <remarks>
+/// ⚠ Таблиця додана після `P-08`: ФВ-13.7 прямо на неї посилалася, а в схемі
+/// її не було. Форма дослівно повторює ту, що описана в проблемі, — щоб
+/// рішення людини не довелося переписувати.
+/// </remarks>
+public sealed class MethodologyTestCaseConfiguration : IEntityTypeConfiguration<MethodologyTestCaseEntity>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyTestCaseEntity> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("TestCase", "calc", t => t.HasCheckConstraint(
+            "CK_TC_Tolerance", "Tolerance >= 0"));
+
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.InputJson).IsRequired();
+        builder.Property(x => x.ExpectedJson).IsRequired();
+        builder.Property(x => x.Tolerance).HasColumnType("decimal(28,10)").HasDefaultValue(0m);
+
+        // ⚠ Унікальність у межах ВЕРСІЇ, а не методології: тест належить
+        // конкретній версії, і клон версії має право змінити очікуване число.
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.Code })
+               .IsUnique()
+               .HasDatabaseName("UQ_TestCase");
+
+        // ⛔ Каскад навмисний: тест без версії не означає нічого, а версія
+        // видаляється лише разом із чернеткою методології.
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_TC_Version")
+               .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
 /// <summary>Конфігурація <see cref="MethodologyConstant"/> — контекстних коефіцієнтів.</summary>
 public sealed class MethodologyConstantConfiguration : IEntityTypeConfiguration<MethodologyConstant>
 {

@@ -70,6 +70,17 @@ public static class ErrorCodes
     /// </summary>
     public const string PasswordChangeRequired = "ECR-PWD-0428";
 
+    /// <summary>
+    /// Новий пароль не відповідає політиці.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код від <see cref="PasswordChangeRequired"/> (`P-01`). До
+    /// цього обидва стани — «ще не міняв» і «спробував невдало» — поверталися
+    /// як <c>ECR-PWD-0428</c>, і клієнт не міг їх розрізнити: він показував ту
+    /// саму форму, не пояснюючи, що саме не так із введеним паролем.
+    /// </remarks>
+    public const string PasswordPolicyViolated = "ECR-PWD-0422";
+
     // Імпорт та інтеграція
     public const string ImportStructureMismatch = "ECR-IMP-0422";
     public const string SourceUnavailable = "ECR-INT-0503";

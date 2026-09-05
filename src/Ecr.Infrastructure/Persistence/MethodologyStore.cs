@@ -108,14 +108,60 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⛔ Таблиці <c>calc.TestCase</c> у схемі немає, хоч ФВ-13.7 прямо на неї
-    /// посилається — це <c>P-08</c>. Поки її немає, набір порожній, і
-    /// публікація відхиляється як «без зеленого тесту» (ФВ-9.12). Це не
-    /// заглушка, що мовчить: відмова гучна, і причина названа.
+    /// ⚠ Тести читаються з <c>calc.TestCase</c> (`P-08`). Порожній набір і
+    /// далі означає «зеленого тесту немає», і публікація відхиляється
+    /// (ФВ-9.12) — але тепер це стан **даних**, а не відсутність таблиці.
+    /// <para>
+    /// ⛔ Зіпсований JSON тесту не мовчить: він робить тест **червоним**, а не
+    /// відсутнім. «Не змогли прочитати, отже все гаразд» — саме та підміна,
+    /// через яку публікація без перевірки виглядає як публікація з перевіркою.
+    /// </para>
     /// </remarks>
-    public Task<IReadOnlyList<MethodologyTestCase>> GetTestCasesAsync(
+    public async Task<IReadOnlyList<MethodologyTestCase>> GetTestCasesAsync(
         int methodologyVersionId, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<MethodologyTestCase>>([]);
+    {
+        var rows = await db.MethodologyTestCases
+            .AsNoTracking()
+            .Where(t => t.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(t => t.Code)
+            .Take(MaxTestCases)
+            .Select(t => new { t.Code, t.InputJson, t.ExpectedJson, t.Tolerance })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var result = new List<MethodologyTestCase>(rows.Count);
+
+        foreach (var row in rows)
+        {
+            var input = Deserialize<CalculationInput>(row.InputJson, row.Code, "вхід");
+            var expected = Deserialize<Dictionary<string, decimal>>(row.ExpectedJson, row.Code, "очікуваний вихід");
+
+            result.Add(new MethodologyTestCase(row.Code, input, expected, row.Tolerance));
+        }
+
+        return result;
+    }
+
+    /// <summary>Стеля вибірки тестів; сотня на версію — уже нетипово.</summary>
+    private const int MaxTestCases = 1_000;
+
+    /// <summary>Налаштування розбору тестів; спільні на всі виклики.</summary>
+    private static readonly System.Text.Json.JsonSerializerOptions TestCaseOptions =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>Розбирає JSON тесту або називає, що саме зіпсовано.</summary>
+    private static T Deserialize<T>(string json, string code, string part)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<T>(json, TestCaseOptions)
+                   ?? throw new InvalidOperationException($"Тест «{code}»: {part} порожній.");
+        }
+        catch (System.Text.Json.JsonException error)
+        {
+            throw new InvalidOperationException($"Тест «{code}»: {part} не читається.", error);
+        }
+    }
 }
 
 /// <summary>Реалізація <see cref="IConstantStore"/> над <see cref="EcrDbContext"/>.</summary>

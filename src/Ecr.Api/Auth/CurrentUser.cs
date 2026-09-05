@@ -39,6 +39,15 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
 
     /// <inheritdoc />
     /// <remarks>
+    /// ⚠ Читається <c>ClaimTypes.GroupSid</c> — саме те, що кладе в токен
+    /// Negotiate. У локального користувача таких заявок немає, і перелік
+    /// порожній: це не помилка, а нормальний стан (`P-02`).
+    /// </remarks>
+    public IReadOnlyList<string> GroupSids =>
+        Principal?.FindAll(ClaimTypes.GroupSid).Select(c => c.Value).ToArray() ?? [];
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Якщо ідентифікатора немає в <c>HttpContext.Items</c>, це означає, що
     /// <see cref="CorrelationIdMiddleware"/> не відпрацював — тобто конвеєр
     /// зібрано неправильно. Генерувати новий тут означало б приховати дефект:

@@ -1971,6 +1971,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-SIM-0403` | 403 | спроба запису в сеансі симуляції (`SimulationReadOnly`, ФВ-6.16a) |
 | `ECR-SIM-0422` | 422 | симуляція самого себе або без причини |
 | `ECR-PWD-0428` | 428 | потрібна зміна пароля: доки `MustChangePassword`, доступні лише зміна пароля і вихід (ФВ-6.18) |
+| `ECR-PWD-0422` | 422 | новий пароль не відповідає політиці; у `Extensions2` — які саме вимоги |
 | `ECR-REG-0404` | 404 | запис реєстру не знайдено |
 | `ECR-REG-0409` | 409 | видалення запису, на який посилаються дані (ФВ-8.6) |
 | `ECR-REG-0422` | 422 | перемикання `SourceKind` у відкритому періоді (ФВ-8.9) |
@@ -2067,6 +2068,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
+| `GET` | `/api/v1/documents/{id}/export/{exportId}` | `Document.Export` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/preview` | `Document.Import` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/apply` | `Document.Import` | 5 |
 | `GET` | `/api/v1/registries` | `Registry.View` | 4 |

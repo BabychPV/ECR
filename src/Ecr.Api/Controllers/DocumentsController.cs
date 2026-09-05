@@ -26,6 +26,7 @@ public sealed class DocumentsController(
     RecalculateDocumentHandler recalculate,
     GetDocumentTablesHandler tables,
     ExportDocumentHandler export,
+    DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
     ApplyImportHandler applyImport) : ControllerBase
 {
@@ -214,6 +215,28 @@ public sealed class DocumentsController(
             .ConfigureAwait(false);
 
         return Accepted(new { jobId });
+    }
+
+    /// <summary>
+    /// Віддає побудовану книгу. Право <c>Document.Export</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ідентифікатор експорту приходить у повідомленні прогресу задачі:
+    /// саме тому побудова повертає <c>202</c> з <c>jobId</c>, а не файл.
+    /// Книга живе годину — довше тримати немає сенсу, це знімок даних на
+    /// момент побудови.
+    /// </remarks>
+    [HttpGet("{id:long}/export/{exportId}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadExport(long id, string exportId, CancellationToken ct)
+    {
+        var content = await downloadExport.HandleAsync(exportId, ct).ConfigureAwait(false);
+
+        return File(
+            content,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"document-{id}-{exportId}.xlsx");
     }
 
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>

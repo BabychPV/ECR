@@ -1,6 +1,5 @@
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
-using Microsoft.Extensions.Caching.Distributed;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -11,23 +10,20 @@ namespace Ecr.Infrastructure.Jobs;
 /// Бюджет експорту — 10 с p95 (tz/08 §8.2), і це середнє: книга на 500×60×12
 /// будується довше за будь-який розумний HTTP-таймаут.
 ///
-/// ⚠ <b>Готовий файл кладеться в розподілений кеш під власним ключем</b>, а
-/// не віддається у відповідь. Ендпоінта, який його забирає, у контракті
-/// <b>немає</b> (проблема P-14): таблиця ендпоінтів `02-contracts.md` §9
-/// оголошує лише <c>POST …/export</c>, що повертає <c>202</c> з
-/// <c>jobId</c>. Тому файл зберігається, ключ повідомляється в прогресі, і
-/// щойн ендпоінт зʼявиться — його реалізація буде читанням цього ключа.
+/// ⚠ <b>Готовий файл кладеться у сховище експорту</b>, а не віддається у
+/// відповідь: операція фонова, і відповіді на неї вже ніхто не чекає.
+/// Забирає книгу окремий запит — <c>GET /api/v1/documents/{id}/export/{exportId}</c>
+/// (`P-14`).
+/// <para>
 /// Тримати файл у памʼяті задачі або писати в тимчасову теку інстансу було б
 /// гірше: у першому випадку він зникає разом із задачею, у другому — його не
 /// бачить інстанс, на який потрапить наступний запит.
+/// </para>
 /// </remarks>
-public sealed class ExcelExportJob(IExcelExporter exporter, IDistributedCache cache) : IExcelExportJob
+public sealed class ExcelExportJob(IExcelExporter exporter, IExportStore exports) : IExcelExportJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "excel-export";
-
-    /// <summary>Префікс ключа, під яким лежить готова книга.</summary>
-    public const string KeyPrefix = "ecr:export:";
 
     /// <summary>
     /// Скільки живе готовий файл.
@@ -57,16 +53,12 @@ public sealed class ExcelExportJob(IExcelExporter exporter, IDistributedCache ca
         using var buffer = new MemoryStream();
         await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
 
-        await cache
-            .SetAsync(
-                KeyPrefix + task.ExportId,
-                buffer.ToArray(),
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = Lifetime },
-                ct)
+        await exports
+            .SaveAsync(task.ExportId, buffer.ToArray(), Lifetime, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Ключ повідомляється в прогресі: це єдиний спосіб, у який клієнт
-        // сьогодні дізнається, що саме побудовано.
+        // ⚠ Ключ повідомляється в прогресі: саме за ним клієнт, побачивши
+        // завершення задачі, забирає книгу.
         await progress.ReportAsync(100, task.ExportId, ct).ConfigureAwait(false);
     }
 }

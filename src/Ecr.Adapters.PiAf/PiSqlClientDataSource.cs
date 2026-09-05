@@ -17,7 +17,7 @@ namespace Ecr.Adapters.PiAf;
 /// читання історії й довідників.
 /// </remarks>
 public sealed class PiSqlClientDataSource(
-    ICollectionStore store, ISecretProvider secrets) : IExternalDataSource
+    ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null) : IExternalDataSource
 {
     /// <summary>Стеля рядків каталогу за один обхід.</summary>
     /// <remarks>
@@ -37,15 +37,39 @@ public sealed class PiSqlClientDataSource(
     /// <c>[Master].[Element].[Element]</c> і <c>[Master].[Element].[Attribute]</c>,
     /// а не вигадані за аналогією.
     /// </remarks>
-    private const string CatalogQuery = """
+    public const string DefaultCatalogQuery = """
         SELECT e.Name AS ElementName, a.Name AS AttributeName, a.UOM AS Uom, a.Type AS DataType
         FROM [Master].[Element].[Attribute] a
         INNER JOIN [Master].[Element].[Element] e ON e.ID = a.ElementID
         ORDER BY e.Name, a.Name
         """;
 
+    /// <summary>Ключ конфігурації, яким запит каталогу можна перевизначити.</summary>
+    /// <remarks>
+    /// ⚠ Запити винесені в **налаштування** (`P-11`). Імена об'єктів звірені з
+    /// експортом чинного рішення, але точні колонки
+    /// <c>[Master].[Element].[Attribute]</c> перевірити ніде: живого PI SQL
+    /// Client у контурі розробки немає. Помилка в назві колонки — це не
+    /// архітектурна проблема, а один рядок; вимагати заради нього перезбирання
+    /// і релізу означало б, що зупинений збір чекає доби замість хвилини.
+    /// </remarks>
+    public const string CatalogQueryKey = "PiSqlClient:CatalogQuery";
+
+    /// <summary>Ключ конфігурації для запиту шаблона елемента.</summary>
+    public const string TemplateQueryKey = "PiSqlClient:TemplateQuery";
+
+    /// <summary>Ключ конфігурації для запиту значень.</summary>
+    /// <remarks>
+    /// ⚠ У шаблоні запиту доступні два заповнювачі: <c>{template}</c> і
+    /// <c>{attribute}</c>. Обидва підставляються **літералами** — RTQP
+    /// вимагає їх такими в заголовку таблиці значень, і параметр там не
+    /// парситься. Часові межі й ім'я елемента лишаються звичайними
+    /// параметрами <c>?</c>.
+    /// </remarks>
+    public const string ValueQueryKey = "PiSqlClient:ValueQuery";
+
     /// <summary>Шаблон елемента: потрібен, бо табличну функцію значень ним параметризують.</summary>
-    private const string TemplateQuery = """
+    public const string DefaultTemplateQuery = """
         SELECT e.Template AS Template
         FROM [Master].[Element].[Element] e
         WHERE e.Name = ?
@@ -63,7 +87,7 @@ public sealed class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         using var command = connection.CreateCommand();
-        command.CommandText = CatalogQuery;
+        command.CommandText = Query(CatalogQueryKey, DefaultCatalogQuery);
 
         var result = new List<SourceEntityDescriptor>();
 
@@ -214,12 +238,20 @@ public sealed class PiSqlClientDataSource(
         }
     }
 
+    /// <summary>Запит із конфігурації або типовий.</summary>
+    private string Query(string key, string fallback)
+    {
+        var configured = settings?.Find(key);
+
+        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+    }
+
     /// <summary>Шаблон елемента; <c>null</c> — елемента немає.</summary>
-    private static async Task<string?> TemplateAsync(
+    private async Task<string?> TemplateAsync(
         OdbcConnection connection, string element, CancellationToken ct)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = TemplateQuery;
+        command.CommandText = Query(TemplateQueryKey, DefaultTemplateQuery);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
 
         using var reader = await command
@@ -239,27 +271,30 @@ public sealed class PiSqlClientDataSource(
     /// <see cref="Literal"/>: подвоєння лапки і заборона керівних символів.
     /// Часові межі й ім'я елемента лишаються звичайними параметрами.
     /// </remarks>
-    private static string ValueQuery(string template, string attribute)
-        => string.Create(
-            CultureInfo.InvariantCulture,
-            $$"""
-            SELECT v.[Ts] AS Ts, v.[Val] AS Val, v.[Uom] AS Uom
-            FROM [Master].[Element].[Element] e
-            INNER JOIN [Master].[Element].[Value]
-            <
-                N'{{Literal(template)}}',
-                {
-                    N'{{Literal(attribute)}}',
-                    N'Ts',
-                    N'Val',
-                    N'Uom',
-                    NULL,
-                    NULL
-                }
-            > v ON e.ID = v.ElementID
-            WHERE e.Name = ? AND v.[Ts] >= ? AND v.[Ts] < ?
-            ORDER BY v.[Ts]
-            """);
+    private string ValueQuery(string template, string attribute)
+        => Query(ValueQueryKey, DefaultValueQuery)
+            .Replace("{template}", Literal(template), StringComparison.Ordinal)
+            .Replace("{attribute}", Literal(attribute), StringComparison.Ordinal);
+
+    /// <summary>Типовий запит значень; перевизначається через конфігурацію.</summary>
+    public const string DefaultValueQuery = """
+        SELECT v.[Ts] AS Ts, v.[Val] AS Val, v.[Uom] AS Uom
+        FROM [Master].[Element].[Element] e
+        INNER JOIN [Master].[Element].[Value]
+        <
+            N'{template}',
+            {
+                N'{attribute}',
+                N'Ts',
+                N'Val',
+                N'Uom',
+                NULL,
+                NULL
+            }
+        > v ON e.ID = v.ElementID
+        WHERE e.Name = ? AND v.[Ts] >= ? AND v.[Ts] < ?
+        ORDER BY v.[Ts]
+        """;
 
     /// <summary>Літерал для заголовка таблиці значень.</summary>
     private static string Literal(string value)

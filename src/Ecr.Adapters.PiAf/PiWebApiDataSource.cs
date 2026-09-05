@@ -208,16 +208,26 @@ public sealed class PiWebApiDataSource(
         }
     }
 
-    /// <summary>Ставить автентифікацію запиту.</summary>
+    /// <summary>
+    /// Схема автентифікації, названа в секреті джерела.
+    /// </summary>
     /// <remarks>
-    /// ⛔ Секрет береться за <b>іменем</b> (ФВ-6.11) і не логується — ні
-    /// значення, ні його довжина, ні факт збігу.
+    /// ⚠ Схема — це **налаштування**, а не гілка коду (`P-12`). Як саме
+    /// автентифікується PI Web API в конкретному контурі, з коду не видно:
+    /// Kerberos, Basic і Bearer однаково правдоподібні. Помилка тут не
+    /// проявляється як помилка — збір просто завжди отримує <c>401</c>,
+    /// потрапляє в наздоганяння і <b>завершується успішно</b>, рівно як
+    /// задумано для тимчасово недоступного джерела.
     /// <para>
-    /// Секрету може не бути, і це нормальний режим: у продуктиві доступ до AF
-    /// іде під обліковим записом служби через інтегровану автентифікацію
-    /// (D-34), яку виконує сам <c>HttpClient</c>. Порожній заголовок тут
-    /// кращий за вигаданий: підставлений <c>Basic</c> із порожнім паролем
-    /// отримав би 401 і виглядав би як недоступність джерела.
+    /// Тому значення секрету читається як <c>"схема значення"</c>:
+    /// <c>Basic dXNlcjpwYXNz</c>, <c>Bearer eyJ…</c>. Секрет без пробілу —
+    /// <c>Bearer</c> за замовчуванням; порожній секрет означає інтегровану
+    /// автентифікацію службового облікового запису (D-34), яку виконує сам
+    /// <c>HttpClient</c>.
+    /// </para>
+    /// <para>
+    /// ⛔ Значення секрету не логується — ні саме, ні його довжина, ні факт
+    /// збігу (ФВ-6.11).
     /// </para>
     /// </remarks>
     private void Authorize(HttpRequestMessage message, string secretName)
@@ -226,10 +236,19 @@ public sealed class PiWebApiDataSource(
 
         var secret = secrets.Find(secretName);
 
-        if (!string.IsNullOrEmpty(secret))
+        if (string.IsNullOrEmpty(secret))
         {
-            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", secret);
+            // Порожній заголовок кращий за вигаданий: підставлений `Basic` із
+            // порожнім паролем отримав би 401 і виглядав би як недоступність
+            // джерела.
+            return;
         }
+
+        var separator = secret.IndexOf(' ', StringComparison.Ordinal);
+
+        message.Headers.Authorization = separator > 0
+            ? new AuthenticationHeaderValue(secret[..separator], secret[(separator + 1)..])
+            : new AuthenticationHeaderValue("Bearer", secret);
     }
 
     private static bool Retryable(HttpStatusCode status)

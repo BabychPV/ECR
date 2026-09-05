@@ -19,8 +19,7 @@ public sealed class CalculationOrchestrator(
     MethodologyResolver resolver,
     IEnumerable<ICalculationModule> modules,
     CalculationInputBuilder inputBuilder,
-    CalculationOutputWriter outputWriter,
-    IRowStore rows) : ICalculationRunner
+    CalculationOutputWriter outputWriter) : ICalculationRunner
 {
     /// <summary>
     /// Скільки методологій одного пакета виконувати одночасно.

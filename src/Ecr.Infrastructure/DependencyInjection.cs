@@ -167,6 +167,12 @@ public static class DependencyInjection
         services.AddScoped<Jobs.PartitionCheckJob>();
         services.AddScoped<Jobs.NotificationJob>();
 
+        // ⛔ Відправник за замовчуванням НЕ доставляє і не вдає, що доставив:
+        // транспорт — рішення замовника (`P-13`). Реєстрація потрібна, щоб
+        // задача створювалася; вона бачить `IsConfigured = false` і лишає
+        // події в черзі.
+        services.AddSingleton<INotificationSender, Jobs.UnconfiguredNotificationSender>();
+
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
         // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би
@@ -193,6 +199,7 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IImportPreviewStore, ImportPreviewStore>();
+        services.AddScoped<IExportStore, ExportStore>();
 
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();

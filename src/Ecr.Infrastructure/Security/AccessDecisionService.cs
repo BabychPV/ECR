@@ -22,7 +22,8 @@ public sealed class AccessDecisionService(
     EcrDbContext db,
     IMetadataCache metadata,
     Caching.AccessProfileCache profileCache,
-    IClock clock) : IAccessDecisionService
+    IClock clock,
+    Application.Common.ICurrentUser currentUser) : IAccessDecisionService
 {
     /// <inheritdoc />
     public async Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
@@ -50,6 +51,28 @@ public sealed class AccessDecisionService(
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Сталий відбиток набору груп.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ SHA-256, а не <c>GetHashCode</c>: той рандомізований на кожен запуск
+    /// процесу, і ключ кешу мінявся б після кожного перезапуску — профіль
+    /// перебудовувався б щоразу, а два інстанси не бачили б кешу один одного.
+    /// </remarks>
+    private static string Fingerprint(IReadOnlyList<string> groupSids)
+    {
+        if (groupSids.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var joined = string.Join('|', groupSids.OrderBy(s => s, StringComparer.Ordinal));
+
+        return System.Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(joined)))[..16];
+    }
+
     /// <summary>Збирає профіль із бази. Викликається лише при промаху кешу.</summary>
     private async Task<AccessProfile> LoadAsync(int userId, string securityStamp, CancellationToken ct)
     {
@@ -58,21 +81,23 @@ public sealed class AccessDecisionService(
         // ⚠ Строкові призначення враховуються тут, а не «десь у перевірці»:
         // підміна на час відпустки має закінчитися сама, інакше її доводиться
         // знімати руками — а того, хто мав би зняти, саме й немає на місці.
+        // ⚠ Групи беруться З ТОКЕНА поточної сесії (ФВ-6.15a), і лише тоді,
+        // коли профіль будується для НЕЇ САМОЇ. Для чужого користувача —
+        // перегляд адміністратором, симуляція — токена в нас немає, і взяти
+        // чужі групи зі своєї сесії означало б показати не ті права (`P-02`).
+        var groupSids = userId == currentUser.UserId
+            ? currentUser.GroupSids
+            : [];
+
         var roleIds = await db.RoleAssignments
             .AsNoTracking()
-            .Where(a => a.UserId == userId
+            .Where(a => (a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
                         && (a.ValidFrom == null || a.ValidFrom <= today)
                         && (a.ValidTo == null || a.ValidTo >= today))
             .Select(a => a.RoleId)
             .Distinct()
             .ToListAsync(ct)
             .ConfigureAwait(false);
-
-        // ⛔ Призначення на AD-групу (PrincipalSid) сюди ще не входять:
-        // членство береться з токена входу, а не запитом до каталогу
-        // (ФВ-6.15a), і цей шлях з'явиться разом із доменним входом. Мовчазне
-        // «вважати, що груп немає» тут чесніше за вигаданий список, але це
-        // саме прогалина, а не рішення.
         var permissions = roleIds.Count == 0
             ? []
             : await db.RolePermissions
@@ -119,7 +144,7 @@ public sealed class AccessDecisionService(
         // після перевходу користувача.
         return new AccessProfile
         {
-            CacheKey = Caching.AccessProfileCache.Key(userId, securityStamp),
+            CacheKey = Caching.AccessProfileCache.Key(userId, securityStamp, Fingerprint(groupSids)),
             UserId = userId,
             SecurityStamp = securityStamp,
             Permissions = permissions.ToHashSet(StringComparer.Ordinal),

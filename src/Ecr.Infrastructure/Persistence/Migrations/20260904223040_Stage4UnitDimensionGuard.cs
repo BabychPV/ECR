@@ -29,7 +29,20 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             // SCHEMABINDING обов'язковий: без нього функцію можна зробити
             // недійсною, змінивши uom.Unit, і обмеження тихо перестало б
             // працювати — саме той клас дефекту, проти якого воно й стоїть.
+            //
+            // ⚠ Тіло загорнуте в EXEC, і це НЕ стиль (`A7-08`). `CREATE
+            // FUNCTION` має бути першою інструкцією пакета. `dotnet ef database
+            // update` виконує кожен Sql() окремо, і так воно й було; але
+            // `dotnet ef migrations script`, яким розгортає DBA
+            // (`09-commands.md` §3, `artifacts/migration.sql`), обгортає кожну
+            // міграцію в `IF NOT EXISTS (…) BEGIN … END` — і всередині цього
+            // блоку `CREATE FUNCTION` стає синтаксичною помилкою.
+            //
+            // ⛔ Наслідок був такий: міграції накочувалися з тулінгу і НЕ
+            // накочувалися документованим шляхом. Тести цього не бачили —
+            // вони ходять через `Migrate()`, а не через згенерований скрипт.
             migrationBuilder.Sql("""
+                EXEC(N'
                 CREATE FUNCTION uom.fnSameDimension (@from int, @to int)
                 RETURNS bit
                 WITH SCHEMABINDING
@@ -40,7 +53,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     FROM uom.Unit f CROSS JOIN uom.Unit t
                     WHERE f.Id = @from AND t.Id = @to;
                     RETURN ISNULL(@r, 0);
-                END;
+                END;');
                 """);
 
             // ISNULL(@r, 0) у функції означає: невідома одиниця теж не

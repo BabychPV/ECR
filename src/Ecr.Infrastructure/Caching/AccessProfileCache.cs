@@ -54,5 +54,22 @@ public sealed class AccessProfileCache(IMemoryCache memory)
     }
 
     /// <summary>Ключ запису; виділений, щоб форма ключа була в одному місці.</summary>
-    public static string Key(int userId, string securityStamp) => $"access:{userId}:{securityStamp}";
+    /// <summary>
+    /// Ключ профілю.
+    /// </summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="securityStamp">Штамп безпеки: зміна ролей робить сесію недійсною негайно.</param>
+    /// <param name="groupsFingerprint">
+    /// Відбиток груп із токена; порожньо — профіль будувався без групових
+    /// призначень.
+    /// </param>
+    /// <remarks>
+    /// ⚠ Відбиток груп входить у ключ обов'язково (`P-02`). Той самий
+    /// користувач має РІЗНІ профілі залежно від того, чи є в нас його токен:
+    /// власна сесія бачить ролі, призначені на AD-групу, а перегляд
+    /// адміністратором і симуляція — ні. Спільний ключ віддав би одному з них
+    /// профіль другого.
+    /// </remarks>
+    public static string Key(int userId, string securityStamp, string groupsFingerprint = "")
+        => $"access:{userId}:{securityStamp}:{groupsFingerprint}";
 }
