@@ -20,6 +20,7 @@ public sealed class SecurityController(
     ChangePasswordHandler changePassword,
     Ecr.Application.Security.ListResourceGrantsHandler listGrants,
     Ecr.Application.Security.ReplaceResourceGrantsHandler replaceGrants,
+    Ecr.Application.Security.SetReceivesAlertsHandler setAlerts,
     Ecr.Domain.Abstractions.IClock clock) : ControllerBase
 {
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
@@ -114,6 +115,26 @@ public sealed class SecurityController(
 
         // ⛔ У відповіді немає ні пароля, ні його хеша — лише ідентифікатор.
         return Created($"/api/v1/users/{userId}", new { userId });
+    }
+
+    /// <summary>
+    /// Вмикає або вимикає отримання алертів. Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Адресати алертів — дані, а не конфігурація (`D-125`): перелік у
+    /// змінних оточення довелося б міняти розгортанням щоразу, коли хтось іде
+    /// у відпустку.
+    /// </remarks>
+    [HttpPut("users/{id:int}/alerts")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> SetAlerts(
+        int id, [FromBody] SetAlertsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await setAlerts.HandleAsync(id, request.ReceivesAlerts, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>
@@ -237,3 +258,7 @@ public sealed record StartSimulationRequest(int SubjectUserId, string Reason);
 /// <param name="CurrentPassword">Поточний пароль.</param>
 /// <param name="NewPassword">Новий пароль.</param>
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+/// <summary>Запит на зміну отримання алертів.</summary>
+/// <param name="ReceivesAlerts">Чи отримує людина алерти про збої.</param>
+public sealed record SetAlertsRequest(bool ReceivesAlerts);

@@ -1,8 +1,9 @@
 import { useState, type JSX } from 'react';
-import { Badge, Group, Loader, SegmentedControl, Table, Text } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
-import type { RoleView, UserPage } from '@/api/types';
+import { Badge, Group, Loader, SegmentedControl, Switch, Table, Text, Tooltip } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { EcrApiError, apiFetch } from '@/api/client';
+import type { RoleView, SetAlertsRequest, UserPage } from '@/api/types';
 import { GrantsPanel } from '@/pages/admin/GrantsPanel';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -22,6 +23,29 @@ import { t } from '@/shared/i18n';
  */
 export function SecurityPage(): JSX.Element {
   const [tab, setTab] = useState('roles');
+  const queryClient = useQueryClient();
+
+  // ⛔ Адресати алертів — ДАНІ, а не конфігурація (`D-125`). Перелік у змінних
+  // оточення довелося б міняти розгортанням щоразу, коли хтось іде у
+  // відпустку, — і саме тому його б не міняли.
+  const alerts = useMutation({
+    mutationFn: (target: { id: number; value: boolean }) =>
+      apiFetch(`/api/v1/users/${target.id}/alerts`, {
+        method: 'PUT',
+        body: JSON.stringify({ receivesAlerts: target.value } satisfies SetAlertsRequest),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: (error) => {
+      // ⚠ Причина показується як є: «немає пошти» — це те, що людина може
+      // виправити, а «не вдалося» — ні.
+      notifications.show({
+        color: 'red',
+        message: error instanceof EcrApiError ? error.message : String(error),
+      });
+    },
+  });
 
   const roles = useQuery({
     queryKey: ['roles'],
@@ -118,6 +142,7 @@ export function SecurityPage(): JSX.Element {
                 <Table.Th>{t('security.name')}</Table.Th>
                 <Table.Th>{t('security.kind')}</Table.Th>
                 <Table.Th>{t('security.userState')}</Table.Th>
+                <Table.Th>{t('security.alerts')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -129,6 +154,26 @@ export function SecurityPage(): JSX.Element {
                     {/* Локальний і доменний вхід дають ту саму сесію; різниця
                         лише в тому, хто зберігає пароль. */}
                     <Badge variant="light">{user.provider}</Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    {/* ⛔ Без пошти перемикач ВИМКНЕНИЙ, а не «вмикається і
+                        мовчки не працює»: увімкнений адресат, якому нічого не
+                        надсилається, виглядає як налаштований (`D-125`). */}
+                    <Tooltip
+                      label={t('security.alertsNeedEmail')}
+                      disabled={user.email !== null && user.email !== ''}
+                    >
+                      <Switch
+                        size="xs"
+                        checked={user.receivesAlerts}
+                        disabled={
+                          user.email === null || user.email === '' || alerts.isPending
+                        }
+                        onChange={(event) =>
+                          alerts.mutate({ id: user.id, value: event.currentTarget.checked })
+                        }
+                      />
+                    </Tooltip>
                   </Table.Td>
                   <Table.Td>
                     <Group gap={4}>

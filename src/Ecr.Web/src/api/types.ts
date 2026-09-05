@@ -176,6 +176,9 @@ export type ProjectSummary = Schemas['ProjectSummary'];
 /** Результат перевірки документа. */
 export type ValidationResultResponse = Schemas['ValidationResultResponse'];
 
+/** Зміна отримання алертів. */
+export type SetAlertsRequest = Schemas['SetAlertsRequest'];
+
 /** Каталог рядків інтерфейсу. */
 export type UiStringCatalog = Schemas['UiStringCatalog'];
 

@@ -105,6 +105,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             {
                 u.Id, u.UserName, u.DisplayName, u.Provider,
                 u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.LockedUntil,
+                u.Email, u.ReceivesAlerts,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -114,7 +115,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .Select(u => new UserView(
                 u.Id, u.UserName, u.DisplayName, u.Provider,
                 u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword,
-                u.LockedUntil is { } until && until > utcNow))
+                u.LockedUntil is { } until && until > utcNow,
+                u.Email, u.ReceivesAlerts))
             .ToList();
 
         // ⛔ У проєкції немає ні PasswordHash, ні SecurityStamp — і не тому, що

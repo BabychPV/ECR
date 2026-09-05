@@ -98,6 +98,28 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock, INotification
 
         var items = collection.Concat(maintenance).Take(MaxDigestItems).ToList();
 
+        // ⛔ Нуль адресатів — не помилка, а СТАН, який має бути видно (`D-125`).
+        // Мовчазна система без адресатів і мовчазна система без збоїв ззовні
+        // однакові; різницю показує лише цей рядок.
+        //
+        // ⚠ Перевіряється навіть коли транспорт не налаштований: спершу
+        // виявиться, що писати нікому, і лише потім — що нічим.
+        var subscriberCount = await db.Users
+            .AsNoTracking()
+            .CountAsync(u => u.ReceivesAlerts && u.IsActive && u.Email != null, ct)
+            .ConfigureAwait(false);
+
+        if (subscriberCount == 0)
+        {
+            items.Add(new DigestItem(
+                "recipients",
+                "sec.User.ReceivesAlerts",
+                "None",
+                "Алерти нікому не надсилаються: жоден активний користувач не має "
+                + "увімкненого отримання алертів і заповненої пошти.",
+                now));
+        }
+
         // ⚠ Порожнє зведення теж записується, зі статусом «Succeeded».
         // Задача, що мовчить, коли все добре, і задача, що не запускалася,
         // ззовні виглядають однаково — а це різні стани.
@@ -105,6 +127,24 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock, INotification
             items.Count == 0 ? "Succeeded" : "Degraded",
             JsonSerializer.Serialize(new Digest(since, now, items.Count, items), Options),
             clock.UtcNow);
+
+        // ⛔ У чергу йдуть САМЕ ЗБОЇ і одним листом на прогін (`D-119`).
+        // Лист на кожну подію — шум; шум вимикають разом із корисними листами.
+        // Інформаційний рядок про відсутність адресатів у лист не потрапляє:
+        // писати нікому про те, що писати нікому, безглуздо.
+        var failures = items.Where(i => i.Kind != "recipients").ToList();
+
+        if (failures.Count > 0)
+        {
+            db.NotificationOutbox.Add(new Domain.Entities.Integration.NotificationOutboxItem(
+                "maintenance.failures",
+                $"ECR: збоїв за період — {failures.Count}",
+                string.Join(
+                    Environment.NewLine,
+                    failures.Select(f => $"[{f.Kind}] {f.Subject}: {f.Status}. {f.Details}")),
+                recipients: null,
+                now));
+        }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -143,19 +183,36 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock, INotification
             return (0, pending.Count);
         }
 
+        // ⚠ Адресати — ДАНІ, а не конфігурація (`D-125`): прапорець на
+        // користувачі з заповненою поштою. Список у змінних оточення довелося б
+        // міняти розгортанням щоразу, коли хтось іде у відпустку.
+        var subscribers = await db.Users
+            .AsNoTracking()
+            .Where(u => u.ReceivesAlerts && u.IsActive && u.Email != null)
+            .Select(u => u.Email!)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         var sent = 0;
 
         foreach (var item in pending)
         {
-            var recipients = (item.Recipients ?? string.Empty)
+            // ⚠ Адресати події перекривають загальних: подія може бути
+            // адресною (наприклад, автору), і тоді розсилати її всім — шум.
+            var explicitTo = (item.Recipients ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var recipients = explicitTo.Length > 0 ? explicitTo : [.. subscribers];
 
             if (recipients.Length == 0)
             {
                 // ⛔ Подія без адресата не «надсилається нікуди»: вона
                 // позначається невдалою з причиною. Інакше вона зникла б, і
-                // ніхто не дізнався б, що політика адресатів не налаштована.
-                item.MarkFailed("Адресатів не визначено.", MaxAttempts);
+                // ніхто не дізнався б, що адресатів не задано.
+                item.MarkFailed(
+                    "Адресатів не визначено: жоден активний користувач не має "
+                    + "увімкненого отримання алертів і пошти.",
+                    MaxAttempts);
                 continue;
             }
 

@@ -110,7 +110,8 @@ public sealed class FakeUserStore : IUserStore
             .Take(page.Limit)
             .Select(u => new UserView(
                 u.Id, u.UserName, u.DisplayName, u.Provider,
-                u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.IsLockedOut(utcNow)))
+                u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.IsLockedOut(utcNow),
+                u.Email, u.ReceivesAlerts))
             .ToList();
 
         return Task.FromResult(new PagedResult<UserView>(items, NextCursor: null, TotalCount: items.Count));

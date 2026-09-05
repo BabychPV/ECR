@@ -1415,6 +1415,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Позначає проєкт заархівованим. Право `Project.Manage`.
+         * @description ⚠ Це позначка, а не перенесення даних: фізично в `arc.*` їх
+         *     переносить окрема задача, і робить це свідомим кроком людини.
+         *     Дозволено лише коли всі періоди закриті (`D-123`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/clone": {
         parameters: {
             query?: never;
@@ -2027,6 +2079,53 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Вмикає або вимикає отримання алертів. Право `Security.ManageUsers`.
+         * @description ⚠ Адресати алертів — дані, а не конфігурація (`D-125`): перелік у
+         *     змінних оточення довелося б міняти розгортанням щоразу, коли хтось іде
+         *     у відпустку.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetAlertsRequest"];
+                    "text/json": components["schemas"]["SetAlertsRequest"];
+                    "application/*+json": components["schemas"]["SetAlertsRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3682,10 +3781,10 @@ export interface components {
             instance?: null | string;
         };
         /**
-         * @description Стан проєкту.
+         * @description Стан проєкту: `Draft → Active → Archived`.
          * @enum {unknown}
          */
-        ProjectStatus: "Draft" | "Active" | "Grace" | "Closed" | "Archived";
+        ProjectStatus: "Draft" | "Active" | "Archived";
         /** @description Проєкт у переліку. */
         ProjectSummary: {
             /**
@@ -3953,6 +4052,11 @@ export interface components {
              * @default false
              */
             isOrphaned: boolean;
+        };
+        /** @description Запит на зміну отримання алертів. */
+        SetAlertsRequest: {
+            /** @description Чи отримує людина алерти про збої. */
+            receivesAlerts: boolean;
         };
         /** @description Запит на зміну поточного періоду. */
         SetCurrentPeriodRequest: {
@@ -4290,6 +4394,10 @@ export interface components {
             mustChangePassword: boolean;
             /** @description Заблокований після невдалих спроб. */
             isLockedOut: boolean;
+            /** @description Пошта; без неї отримання алертів увімкнути не можна. */
+            email: null | string;
+            /** @description Чи отримує алерти про збої (`D-125`). */
+            receivesAlerts: boolean;
         };
         /** @description Повідомлення валідації. */
         ValidationMessageDto: {

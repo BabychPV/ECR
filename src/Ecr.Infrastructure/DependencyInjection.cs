@@ -172,7 +172,20 @@ public static class DependencyInjection
         // транспорт — рішення замовника (`P-13`). Реєстрація потрібна, щоб
         // задача створювалася; вона бачить `IsConfigured = false` і лишає
         // події в черзі.
-        services.AddSingleton<INotificationSender, Jobs.UnconfiguredNotificationSender>();
+        // ⚠ Відправник обирається ЗА КОНФІГУРАЦІЄЮ, а не прапорцем збірки:
+        // контур без пошти і контур із поштою — це те саме розгортання з
+        // різними змінними (`D-124`). Без `ECR_Smtp__Host` лишається
+        // «не налаштовано», і черга накопичує, замість тихо губити події.
+        var smtpHost = configuration["Smtp:Host"];
+
+        if (string.IsNullOrWhiteSpace(smtpHost))
+        {
+            services.AddSingleton<INotificationSender, Jobs.UnconfiguredNotificationSender>();
+        }
+        else
+        {
+            services.AddSingleton<INotificationSender, Integration.SmtpNotificationSender>();
+        }
 
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя

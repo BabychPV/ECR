@@ -36,6 +36,8 @@ public sealed record RoleView(
 /// <param name="IsBootstrapAdmin">Технічний запис первинного налаштування.</param>
 /// <param name="MustChangePassword">Пароль виданий разово.</param>
 /// <param name="IsLockedOut">Заблокований після невдалих спроб.</param>
+/// <param name="Email">Пошта; без неї отримання алертів увімкнути не можна.</param>
+/// <param name="ReceivesAlerts">Чи отримує алерти про збої (`D-125`).</param>
 public sealed record UserView(
     int Id,
     string UserName,
@@ -44,7 +46,9 @@ public sealed record UserView(
     bool IsActive,
     bool IsBootstrapAdmin,
     bool MustChangePassword,
-    bool IsLockedOut);
+    bool IsLockedOut,
+    string? Email,
+    bool ReceivesAlerts);
 
 /// <summary>Перелік ролей із правами. Право <c>Security.ManageRoles</c>.</summary>
 public sealed class ListRolesHandler(IUserStore users, IAccessDecisionService access, ICurrentUser currentUser)
@@ -315,5 +319,50 @@ public sealed class CreateUserHandler(
         await disableBootstrap.HandleAsync(ct).ConfigureAwait(false);
 
         return user.Id;
+    }
+}
+
+/// <summary>
+/// Вмикає або вимикає отримання алертів. Право <c>Security.ManageUsers</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Адресати алертів — **дані, а не конфігурація** (`D-125`). Перелік у
+/// змінних оточення довелося б міняти розгортанням щоразу, коли хтось іде у
+/// відпустку, — і саме тому його б не міняли.
+///
+/// ⚠ Нового права НЕ заводимо: керування користувачами і є те місце, де це
+/// вмикають. Зайве право — це ще один рядок у матриці, який ніхто не видасть.
+/// </remarks>
+public sealed class SetReceivesAlertsHandler(
+    IUserStore users, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+{
+    /// <summary>Право на зміну.</summary>
+    public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Змінює прапорець отримання алертів.</summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="value">Чи отримує.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Користувача немає.</exception>
+    /// <exception cref="Domain.Abstractions.DomainException">Увімкнено без пошти.</exception>
+    public async Task HandleAsync(int userId, bool value, CancellationToken ct)
+    {
+        var actorId = currentUser.UserId
+            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+
+        var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission))
+        {
+            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+        }
+
+        var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException("ECR-ROW-0404", $"Користувача {userId} не існує.");
+
+        // ⚠ Правило «без пошти не можна» живе в домені, а не тут: інакше його
+        // обійшов би будь-який інший шлях запису.
+        user.SetReceivesAlerts(value);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

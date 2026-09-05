@@ -115,27 +115,25 @@ public sealed class SubmitApproveTests
     private SubmitSheetHandler Submit()
         => new(_cells, _rows, _workflow, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _uow, _outbox, _user, _clock);
+               _uow, _user, _clock);
 
-    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _outbox, _user, _clock);
+    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _user, _clock);
 
     private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    public async Task Подання_кладе_подію_в_чергу_сповіщень()
+    public async Task Подання_НЕ_породжує_сповіщення()
     {
-        // ⛔ `A7-31`. Черга `itg.NotificationOutbox`, відправник і задача, яка
-        // її розбирає, існували від Етапу 5 — а покласти в неї подію не міг
-        // НІХТО: у всій системі таблиця лише читалася. Жодне сповіщення не
-        // надсилалося ніколи, і дізнатися про це можна було тільки з мовчання.
+        // ⛔ `D-119`, рішення замовника: події черги — лише ЗБОЇ. Лист про
+        // кожне подання це шум, а шум вимикають разом із корисними листами.
+        //
+        // ⚠ Тест лишається саме тому, що раніше тут стояла протилежна
+        // перевірка: без нього постановку події легко повернути «як було».
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
 
-        await _outbox.Received(1).EnqueueAsync(
-            "sheet.submitted",
-            Arg.Any<string>(),
-            Arg.Any<string>(),
-            Arg.Any<string?>(),
-            Arg.Any<CancellationToken>());
+        await _outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

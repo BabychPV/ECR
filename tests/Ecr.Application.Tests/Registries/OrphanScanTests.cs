@@ -247,8 +247,7 @@ public sealed class OrphanScanTests
     private GetTableSliceHandler Slice() => new(_rows, _cells, _metadata, _access);
 
     private SubmitSheetHandler Submit()
-        => new(_cells, _rows, _workflow, _access, validation: null!, _uow,
-               Substitute.For<INotificationOutbox>(), _user, _clock);
+        => new(_cells, _rows, _workflow, _access, validation: null!, _uow, _user, _clock);
 
     private static RegistryDef Definition()
         => new(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);

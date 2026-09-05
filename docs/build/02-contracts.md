@@ -2088,6 +2088,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
 | `PUT` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/users` | `Security.ManageUsers` | 3 |
+| `PUT` | `/api/v1/users/{id}/alerts` | `Security.ManageUsers` | 5 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |

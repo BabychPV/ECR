@@ -379,6 +379,8 @@ USING (VALUES
     (N'security.roles',                  N'en', N'Roles', 1),
     (N'security.users',                  N'en', N'Users', 1),
     (N'security.grants',                 N'en', N'Grants', 1),
+    (N'security.alerts',                 N'en', N'Alerts', 1),
+    (N'security.alertsNeedEmail',        N'en', N'Set an email address first: there is nowhere to send alerts.', 1),
     (N'grants.pickRole',                 N'en', N'Pick a role', 1),
     (N'grants.pickRoleHint',             N'en', N'Pick a role to see what it opens access to.', 1),
     (N'grants.add',                      N'en', N'Add grant', 1),

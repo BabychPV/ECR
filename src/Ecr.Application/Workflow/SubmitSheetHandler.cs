@@ -23,7 +23,6 @@ public sealed class SubmitSheetHandler(
     IAccessDecisionService access,
     Validation.ValidationEngine validation,
     IUnitOfWork uow,
-    INotificationOutbox outbox,
     ICurrentUser currentUser,
     IClock clock)
 {
@@ -91,21 +90,12 @@ public sealed class SubmitSheetHandler(
 
         state.Submit(userId, now);
 
-        // ⛔ Подія кладеться в чергу ТИМ САМИМ комітом (`A7-31`). До цього
-        // чергу читала задача, відправник був написаний, а покласти в неї
-        // подію не міг ніхто: у всій системі таблиця лише читалася, і жодне
-        // сповіщення не надсилалося ніколи.
+        // ⛔ Подання СПОВІЩЕННЯ НЕ ПОРОДЖУЄ (`D-119`). Тут раніше стояла
+        // постановка події в чергу — прибрано за рішенням замовника: лист про
+        // кожне подання це шум, а шум вимикають разом із корисними листами.
         //
-        // ⚠ Адресати — `null`: кому саме писати, вирішує політика при
-        // відправці (`P-13` лишається за замовником). Черга потрібна за
-        // будь-якої політики — без неї подія губиться між збереженням даних і
-        // відправкою листа.
-        await outbox.EnqueueAsync(
-            "sheet.submitted",
-            $"Аркуш {sheetDefId} документа {documentId} подано за період {periodKey}",
-            $"Аркуш подано {now:yyyy-MM-dd HH:mm} UTC користувачем {userId}.",
-            recipients: null,
-            ct).ConfigureAwait(false);
+        // ⚠ Події черги — лише ЗБОЇ: збір, архівація, стани періодів,
+        // перевищення бюджету перерахунку. Їх зводить `NotificationJob`.
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

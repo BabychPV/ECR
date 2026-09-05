@@ -29,6 +29,33 @@ public sealed class User : Entity<int>
     public string UserName { get; private set; } = null!;
     public string DisplayName { get; private set; } = null!;
     public string? Email { get; private set; }
+
+    /// <summary>
+    /// Чи отримує ця людина алерти про збої (<c>D-125</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Адресати — **дані, а не конфігурація**: список у змінних оточення
+    /// довелося б міняти розгортанням щоразу, коли хтось іде у відпустку.
+    ///
+    /// ⛔ Прапорець без пошти беззмістовний і тому заборонений: він виглядав би
+    /// як налаштований адресат, якому нічого не надсилається.
+    /// </remarks>
+    public bool ReceivesAlerts { get; private set; }
+
+    /// <summary>Вмикає або вимикає отримання алертів.</summary>
+    /// <param name="value">Чи отримує.</param>
+    /// <exception cref="Abstractions.DomainException">Увімкнено без пошти.</exception>
+    public void SetReceivesAlerts(bool value)
+    {
+        if (value && string.IsNullOrWhiteSpace(Email))
+        {
+            throw new Abstractions.DomainException(
+                "ECR-ROW-0422",
+                $"Користувач «{UserName}» не має пошти: вмикати отримання алертів немає куди.");
+        }
+
+        ReceivesAlerts = value;
+    }
     public AuthProvider Provider { get; private set; }
 
     /// <summary>Лише для доменних. Це **не** авторство, а зіставлення з каталогом.</summary>

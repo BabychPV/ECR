@@ -24,6 +24,10 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             "(Provider = 1 AND PasswordHash IS NOT NULL AND WindowsSid IS NULL)"));
         builder.HasKey(x => x.Id);
         builder.Property(x => x.UserName).HasMaxLength(200).IsRequired();
+
+        // ⚠ Значення за замовчуванням у БАЗІ, а не лише в моделі: рядки, що
+        // існували до появи колонки, мають отримати `0`, а не `NULL` (`D-125`).
+        builder.Property(x => x.ReceivesAlerts).HasDefaultValue(false);
         builder.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Email).HasMaxLength(320);
         builder.Property(x => x.Provider).HasConversion<byte>();
