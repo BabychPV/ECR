@@ -1,4 +1,4 @@
-namespace Ecr.TestKit;
+﻿namespace Ecr.TestKit;
 
 /// <summary>
 /// Константи трейтів. Дозволяють ганяти тести окремого етапу і відділяти
@@ -18,6 +18,7 @@ public static class TestCategories
     public const string Stage4 = "Stage4";
     public const string Stage5 = "Stage5";
     public const string Stage6 = "Stage6";
+    public const string Stage7 = "Stage7";
 
     /// <summary>Потребує реального SQL Server; не входить у прогін за замовчуванням.</summary>
     public const string Integration = "Integration";

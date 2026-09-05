@@ -1,4 +1,4 @@
-import tsParser from '@typescript-eslint/parser';
+﻿import tsParser from '@typescript-eslint/parser';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 
 /**
@@ -44,6 +44,65 @@ export default [
       // Порожній блок ловить `catch {}`, у якому забули пояснити, чому мовчимо.
       'no-empty': ['error', { allowEmptyCatch: false }],
       eqeqeq: ['error', 'always', { null: 'ignore' }],
+    },
+  },
+  {
+    /*
+     * ЕТАП 7, модуль 7.2: літералів кольору й відступу в компонентах немає
+     * (`ФВ-14.11`, `D-126`).
+     *
+     * ⛔ Правило, а не домовленість. П'ятнадцять областей писалися в різний
+     * час; без єдиного джерела вони розходяться на п'ять відтінків сірого, і
+     * привести їх назад коштує дорожче, ніж написати заново. Домовленість це
+     * не втримає: вона діє рівно доти, доки про неї пам'ятають.
+     *
+     * ⚠ Виняток один — `src/shared/theme/**`: саме там значенням і місце.
+     */
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/shared/theme/**', 'src/**/__tests__/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Будь-який шістнадцятковий колір у коді компонента.
+          selector: "Literal[value=/^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+          message:
+            'Колір задається лише темою (src/shared/theme/theme.ts) — ФВ-14.11. ' +
+            'У компоненті використовуйте токен: c="dimmed", color="red", var(--mantine-...).',
+        },
+        {
+          // Функціональні записи кольору — той самий літерал іншими словами.
+          selector: "Literal[value=/^(?:rgb|rgba|hsl|hsla)\\(/]",
+          message: 'Колір задається лише темою (src/shared/theme/theme.ts) — ФВ-14.11.',
+        },
+        {
+          /*
+           * Числовий відступ у пропі Mantine: `gap={4}`, `mt={12}`.
+           *
+           * ⚠ Шкала кратна 4 (`ФВ-14.12`), і саме тому числа заборонені
+           * навіть «правильні»: `gap={4}` і `gap="xs"` дають однаковий
+           * піксель сьогодні, але перше не переживе зміни шкали, а друге
+           * переживе. Проміжні значення (13, 14) шкала не має навмисно.
+           */
+          selector:
+            'JSXAttribute[name.name=/^(?:m|mt|mb|ml|mr|mx|my|p|pt|pb|pl|pr|px|py|gap)$/] > JSXExpressionContainer > Literal[raw=/^[0-9]+$/]',
+          message:
+            'Відступ береться зі шкали теми — ФВ-14.12: gap="xs" | "sm" | "md" | "lg" | "xl".',
+        },
+        {
+          /*
+           * Відступ, колір або шрифт усередині `style={{…}}`.
+           *
+           * ⚠ Заборонені саме ці властивості, а не сам `style`: `height:
+           * '70vh'` для сітки і `cursor: 'pointer'` для рядка таблиці токенами
+           * не задаються і задаватися не мають.
+           */
+          selector:
+            "JSXAttribute[name.name='style'] Property[key.name=/^(?:color|background|backgroundColor|borderColor|margin|marginTop|marginBottom|marginLeft|marginRight|padding|paddingTop|paddingBottom|paddingLeft|paddingRight|fontSize|fontFamily)$/]",
+          message:
+            'Колір, відступ і шрифт у style заборонені — ФВ-14.11: використовуйте пропи Mantine або токени теми.',
+        },
+      ],
     },
   },
   {

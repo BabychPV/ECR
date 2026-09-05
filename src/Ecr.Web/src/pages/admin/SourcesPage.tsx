@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Button, Group, Loader, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -85,7 +85,7 @@ export function SourcesPage(): JSX.Element {
                   {source.lastRun === null ? (
                     <Text c="dimmed">{t('sources.never')}</Text>
                   ) : (
-                    <Group gap={4}>
+                    <Group gap="xs">
                       <Badge
                         variant="light"
                         color={source.lastRun.status === 'Succeeded' ? 'green' : 'orange'}

@@ -68,7 +68,7 @@ export function KitchenSinkPage(): JSX.Element {
 
       <Group gap="lg" align="flex-end">
         <div>
-          <Text size="xs" c="dimmed" mb={4}>
+          <Text size="xs" c="dimmed" mb="xs">
             Тема
           </Text>
           <SegmentedControl
@@ -84,7 +84,7 @@ export function KitchenSinkPage(): JSX.Element {
         </div>
 
         <div>
-          <Text size="xs" c="dimmed" mb={4}>
+          <Text size="xs" c="dimmed" mb="xs">
             Щільність
           </Text>
           <SegmentedControl
@@ -218,7 +218,7 @@ export function KitchenSinkPage(): JSX.Element {
               isEmpty={(d) => d.length === 0}
             >
               {(d) => (
-                <Stack gap={2}>
+                <Stack gap="xs">
                   {d.map((key) => (
                     <Text key={key} size="sm">
                       {key}

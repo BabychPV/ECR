@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import {
   Button,
   Divider,
@@ -46,7 +46,7 @@ export function UserMenu({ userName }: { userName: string }): JSX.Element {
       <Menu.Dropdown>
         <Stack gap="xs" p="xs">
           <div>
-            <Text size="xs" c="dimmed" mb={4} id="ecr-theme-label">
+            <Text size="xs" c="dimmed" mb="xs" id="ecr-theme-label">
               {t('profile.theme')}
             </Text>
 
@@ -72,7 +72,7 @@ export function UserMenu({ userName }: { userName: string }): JSX.Element {
           </div>
 
           <div>
-            <Text size="xs" c="dimmed" mb={4} id="ecr-density-label">
+            <Text size="xs" c="dimmed" mb="xs" id="ecr-density-label">
               {t('profile.density')}
             </Text>
 

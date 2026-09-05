@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Ecr.TestKit;
 using Xunit;
@@ -96,10 +96,104 @@ public sealed class HealthTests(SqlServerFixture sql)
         Assert.DoesNotContain("db", body, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Форма_звіту_збігається_зі_спільним_зразком_який_читає_клієнт()
+    {
+        // ⛔ Це межа «сервер → клієнт», на якій ДВІЧІ жив `A7-04`: клієнт
+        // читав `entries` словником, сервер писав `checks` масивом, дашборд
+        // здоров'я відкривався порожнім — і виглядав точно як здорова система
+        // без перевірок. `Object.entries(undefined ?? {})` не падає.
+        //
+        // ⚠ `/health/*` — middleware, а не контролер: його немає в OpenAPI, і
+        // згенерувати клієнтський тип нема з чого. Тому форму тримає спільний
+        // зразок, який читають ОБИДВА боки: цей тест і `health.test.tsx`.
+        // Розійтися нишком вони більше не можуть.
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+        var live = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        var sample = JsonDocument.Parse(
+            await File.ReadAllTextAsync(TestFixtures.Path("health-response.json"))).RootElement;
+
+        // 1. Верхній рівень: ті самі поля, з тими самими типами.
+        Assert.Equal(JsonValueKind.String, live.GetProperty("status").ValueKind);
+        Assert.Equal(JsonValueKind.Number, live.GetProperty("totalDurationMs").ValueKind);
+        Assert.Equal(JsonValueKind.Array, live.GetProperty("checks").ValueKind);
+
+        // 2. Кожна перевірка має рівно ті поля, що й у зразку. Саме тут
+        //    ловиться перейменування `checks` → `entries` і навпаки.
+        var expected = sample.GetProperty("checks")[0]
+            .EnumerateObject()
+            .Select(p => p.Name)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var check in live.GetProperty("checks").EnumerateArray())
+        {
+            var actual = check.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToList();
+            Assert.Equal(expected, actual);
+        }
+
+        // 3. Перевірки знаходяться ЗА ІМЕНЕМ, не за позицією: порядок задає
+        //    контейнер, і покластися на нього означає зламатися від наступної
+        //    зареєстрованої перевірки.
+        var names = live.GetProperty("checks")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("name").GetString())
+            .ToList();
+
+        Assert.Contains("db", names);
+        Assert.Contains("jobs", names);
+        Assert.Contains("sources", names);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перевірки_задач_і_джерел_не_відповідають_заглушкою()
+    {
+        // ⛔ Обидві перевірки від ЕТАПУ 5 повертали `Degraded` із текстом
+        // «з'явиться на Етапі 5» — незалежно ні від чого. Етап 5 закритий,
+        // задач сім, збір працює, а `/health/ready` світився жовтим ЗАВЖДИ.
+        //
+        // ⚠ Моніторинг, який роками показує те саме, навчають ігнорувати —
+        // і справжню деградацію після цього не помічає ніхто. Перевірка, яка
+        // ніколи не змінює відповіді, не перевіряє нічого.
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+        var report = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        foreach (var name in new[] { "jobs", "sources" })
+        {
+            var check = report.GetProperty("checks")
+                .EnumerateArray()
+                .Single(c => string.Equals(c.GetProperty("name").GetString(), name, StringComparison.Ordinal));
+
+            var description = check.GetProperty("description").GetString() ?? string.Empty;
+
+            Assert.DoesNotContain("Етапі 5", description, StringComparison.Ordinal);
+            Assert.NotEmpty(check.GetProperty("data").EnumerateObject());
+
+            // Дані перевірки більше не «stage = 5», а щось вимірюване.
+            Assert.False(check.GetProperty("data").TryGetProperty("stage", out _));
+        }
+    }
+
     private static async Task<JsonElement> ReadDbDataAsync(HttpClient client)
     {
         var response = await client.GetAsync(new Uri("/health/db", UriKind.Relative));
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return json.RootElement.GetProperty("checks")[0].GetProperty("data");
+        // ⚠ ЗА ІМЕНЕМ, а не за позицією: порядок перевірок задає контейнер,
+        // і покластися на нього означає зламатися від наступної зареєстрованої.
+        return json.RootElement.GetProperty("checks")
+            .EnumerateArray()
+            .Single(c => string.Equals(c.GetProperty("name").GetString(), "db", StringComparison.Ordinal))
+            .GetProperty("data");
     }
 }

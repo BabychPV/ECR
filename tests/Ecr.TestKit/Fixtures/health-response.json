@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "Зразок відповіді /health/ready — СПІЛЬНИЙ для сервера і клієнта.",
+    "",
+    "⛔ Файл існує тому, що /health/* — це middleware, а не контролер: його",
+    "немає в OpenAPI, згенерувати тип нема з чого, і клієнт описує форму",
+    "руками. Саме на цій межі двічі жив A7-04: клієнт читав `entries`",
+    "словником, сервер писав `checks` масивом, і дашборд здоров'я відкривався",
+    "порожнім — так само, як здорова система з порожнім переліком.",
+    "",
+    "⚠ Тому зразок читають ОБИДВА боки. Серверний тест звіряє його з тим, що",
+    "справді пише HealthResponse.WriteAsync; клієнтський рендерить сторінку",
+    "саме на ньому. Розійтися нишком вони більше не можуть: щоб зламати межу,",
+    "довелося б змінити цей файл, а тоді впаде інший бік.",
+    "",
+    "Значення в `data` навмисно ті, що бувають насправді: редакція SQL Server,",
+    "RCSI і запас партицій — саме те, заради чого /health/db існує (АРХ-7 п. 5)."
+  ],
+  "status": "Degraded",
+  "totalDurationMs": 4.3182,
+  "checks": [
+    {
+      "name": "db",
+      "status": "Healthy",
+      "description": "База доступна.",
+      "durationMs": 3.6176,
+      "data": {
+        "edition": "Enterprise Developer Edition (64-bit)",
+        "effectiveMode": "Enterprise",
+        "majorVersion": 17,
+        "rcsi": true,
+        "archiveBatchSize": 2000000,
+        "partitionsAhead": 15
+      }
+    },
+    {
+      "name": "jobs",
+      "status": "Healthy",
+      "description": "Планувальник працює.",
+      "durationMs": 0.31,
+      "data": {
+        "jobs": 7,
+        "triggers": 7
+      }
+    },
+    {
+      "name": "sources",
+      "status": "Degraded",
+      "description": "Джерел із прогалиною в покритті: 1.",
+      "durationMs": 0.4,
+      "data": {
+        "activeSources": 2,
+        "failedSources": 0,
+        "sourcesWithGaps": 1
+      }
+    }
+  ]
+}

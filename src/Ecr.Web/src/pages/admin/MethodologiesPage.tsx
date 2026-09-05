@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Loader, Modal, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -90,9 +90,9 @@ export function MethodologiesPage(): JSX.Element {
                   </Text>
                 </Table.Td>
                 <Table.Td>
-                  <Group gap={4}>
+                  <Group gap="xs">
                     {methodology.versions.map((version) => (
-                      <Group key={version.id} gap={4}>
+                      <Group key={version.id} gap="xs">
                         <Badge variant={version.status === 'Published' ? 'filled' : 'light'}>
                           {version.versionNumber} · {version.level}
                           {version.effectiveFrom === null ? '' : ` · ${version.effectiveFrom}`}

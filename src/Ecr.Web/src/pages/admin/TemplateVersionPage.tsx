@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Accordion, Badge, Button, Group, Loader, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -93,7 +93,7 @@ export function TemplateVersionPage(): JSX.Element {
                     <Text fw={600} mt="sm">
                       {table.code} · {table.rowMode}
                     </Text>
-                    <Table striped withTableBorder mt={4}>
+                    <Table striped withTableBorder mt="xs">
                       <Table.Thead>
                         <Table.Tr>
                           <Table.Th>{t('version.column')}</Table.Th>
@@ -113,7 +113,7 @@ export function TemplateVersionPage(): JSX.Element {
                             <Table.Td>
                               {column.dataType}
                               {column.isReadOnly && (
-                                <Badge ml={4} size="xs" variant="light">
+                                <Badge ml="xs" size="xs" variant="light">
                                   {t('version.readOnly')}
                                 </Badge>
                               )}

@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Loader, NumberInput, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -72,7 +72,7 @@ export function DocumentsPage(): JSX.Element {
                   <Table.Td>{document.projectId}</Table.Td>
                   <Table.Td>{document.sheetCount}</Table.Td>
                   <Table.Td>
-                    <Group gap={4}>
+                    <Group gap="xs">
                       {Object.entries(document.sheetStates).map(([sheet, state]) => (
                         <Badge key={sheet} size="sm" variant="light">
                           {sheet}: {state}

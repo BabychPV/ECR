@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Loader, Table } from '@mantine/core';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -62,7 +62,7 @@ export function TemplatesPage(): JSX.Element {
                     .map((version) => (
                       <Badge
                         key={version.id}
-                        mr={4}
+                        mr="xs"
                         variant={version.status === 'Published' ? 'filled' : 'light'}
                         component={Link}
                         to={`/admin/templates/${template.id}/versions/${version.id}`}

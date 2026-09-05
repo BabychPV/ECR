@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Badge, Group, Loader, SegmentedControl, Switch, Table, Text, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -101,7 +101,7 @@ export function SecurityPage(): JSX.Element {
                   <Table.Td>
                     {role.code}
                     {role.isBuiltIn && (
-                      <Badge ml={4} size="xs" variant="light">
+                      <Badge ml="xs" size="xs" variant="light">
                         {t('security.builtIn')}
                       </Badge>
                     )}
@@ -110,7 +110,7 @@ export function SecurityPage(): JSX.Element {
                         вони не входять навмисно, і адміністратор має бачити
                         різницю (ФВ-6.12, D-40). */}
                     {role.dangerousPermissions.length > 0 && (
-                      <Badge ml={4} size="xs" color="red" variant="light">
+                      <Badge ml="xs" size="xs" color="red" variant="light">
                         {t('security.dangerous', { count: role.dangerousPermissions.length })}
                       </Badge>
                     )}
@@ -176,7 +176,7 @@ export function SecurityPage(): JSX.Element {
                     </Tooltip>
                   </Table.Td>
                   <Table.Td>
-                    <Group gap={4}>
+                    <Group gap="xs">
                       {/* ⚠ Разовий пароль і блокування видно в переліку:
                           «користувач не може увійти» найчастіше пояснюється
                           саме ними, а не правами. */}
