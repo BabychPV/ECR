@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Group, Select, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -6,6 +6,7 @@ import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -16,7 +17,7 @@ import { t } from '@/shared/i18n';
  * друге робить рядки документів осиротілими (ФВ-8.13).
  */
 export function RegistriesPage(): JSX.Element {
-  const [code, setCode] = useState<string | null>(null);
+  const [code, setCode] = useUrlState('code');
 
   const registries = useQuery({
     queryKey: ['registries'],

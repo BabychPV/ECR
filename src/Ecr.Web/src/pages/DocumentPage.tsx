@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,6 +17,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -37,8 +38,12 @@ export function DocumentPage(): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
 
-  const [periodKey, setPeriodKey] = useState<number>(currentPeriodKey);
-  const [sheet, setSheet] = useState<string | null>(null);
+  // ⛔ Період і аркуш — в адресі (`ФВ-14.29`). Посилання на документ без них
+  // відкриває інший період і інший аркуш, ніж той, про який ішлося.
+  const [urlPeriod, setUrlPeriod] = useUrlNumber('periodKey');
+  const [sheet, setSheet] = useUrlState('sheet');
+  const periodKey = urlPeriod ?? currentPeriodKey();
+  const setPeriodKey = setUrlPeriod;
 
   const summary = useQuery({
     queryKey: ['document', documentId, periodKey],

@@ -8,6 +8,7 @@ import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
+import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
@@ -81,6 +82,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
+  // ⚠ Ширини читаються ОДИН раз на таблицю і далі живуть у стані: читати
+  // `localStorage` на кожному рендері таблиці 500×60 означало б розбирати JSON
+  // при кожному натисканні клавіші.
+  const [widths, setWidths] = useState<Record<string, number>>(() =>
+    readWidths(tableInstanceId),
+  );
+
   const [historyRevision, setHistoryRevision] = useState(0);
   const touchHistory = useCallback(() => setHistoryRevision((value) => value + 1), []);
 
@@ -90,8 +98,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   useEffect(() => {
     history.current.rescope(`${tableInstanceId}:${periodKey}`);
     setPending(new Map());
+    setWidths(readWidths(tableInstanceId));
     touchHistory();
   }, [tableInstanceId, periodKey, touchHistory]);
+
+  /**
+   * Зміна ширини колонки.
+   *
+   * ⚠ Зберігається одразу, а не «при виході»: користувач закриє вкладку, і
+   * подія виходу не спрацює. Обсяг запису — кілька десятків байтів.
+   */
+  const onColumnResize = useCallback(
+    (event: { detail: unknown }) => {
+      const changed = widthsFromEvent(event.detail);
+      if (Object.keys(changed).length === 0) return;
+
+      saveWidths(tableInstanceId, changed);
+      setWidths((current) => ({ ...current, ...changed }));
+    },
+    [tableInstanceId],
+  );
 
   const data = slice.data;
 
@@ -106,8 +132,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   const columns = useMemo(
-    () => (data === undefined ? [] : gridColumns(data, readOnly, flags)),
-    [data, readOnly, flags],
+    () => (data === undefined ? [] : gridColumns(data, readOnly, flags, widths)),
+    [data, readOnly, flags, widths],
   );
   const rows = useMemo(() => (data === undefined ? [] : gridRows(data)), [data]);
 
@@ -380,6 +406,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         source={rows}
         readonly={readOnly}
         onAfteredit={onAfterEdit}
+        onAftercolumnresize={onColumnResize}
         style={{ height: '70vh' }}
       />
 
@@ -426,11 +453,14 @@ function gridColumns(
   slice: TableSliceDto,
   readOnly: boolean,
   flags: LocalCellFlags,
+  widths: Record<string, number>,
 ): ColumnRegular[] {
   return slice.columns.map((column) => ({
     prop: column.code,
     name: column.header,
-    size: 140,
+
+    // Збережена ширина цієї колонки для цього робочого місця (ФВ-14.29).
+    size: widths[column.code] ?? DefaultColumnWidth,
 
     // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
     // «сюди не вставиться» мають відповідати одним правилом.

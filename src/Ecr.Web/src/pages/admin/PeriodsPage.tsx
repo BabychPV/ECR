@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Button, Group, Select, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -20,7 +21,7 @@ import { t } from '@/shared/i18n';
  * номер періоду**, а не місяць: у квартальному проєкті їх чотири.
  */
 export function PeriodsPage(): JSX.Element {
-  const [projectId, setProjectId] = useState<number | null>(null);
+  const [projectId, setProjectId] = useUrlNumber('projectId');
   const queryClient = useQueryClient();
   const session = useSession();
 

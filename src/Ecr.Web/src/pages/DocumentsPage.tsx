@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Table } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -6,6 +6,7 @@ import { apiFetch } from '@/api/client';
 import type { DocumentPage } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -17,8 +18,11 @@ import { t } from '@/shared/i18n';
  * бадж «Draft», якому ніхто не зможе довіряти.
  */
 export function DocumentsPage(): JSX.Element {
-  const [periodKey, setPeriodKey] = useState<number | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+  // ⛔ Період і курсор — в АДРЕСІ (`ФВ-14.29`). Перелік документів за
+  // конкретний період — це те, що надсилають колезі; у локальному стані таке
+  // посилання вело б на порожній екран із проханням обрати період наново.
+  const [periodKey, setPeriodKey] = useUrlNumber('periodKey');
+  const [cursor, setCursor] = useUrlState('cursor');
 
   const query = useQuery({
     queryKey: ['documents', periodKey, cursor],

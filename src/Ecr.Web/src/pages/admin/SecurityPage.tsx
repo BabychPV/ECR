@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Group, SegmentedControl, Switch, Table, Text, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import type { RoleView, SetAlertsRequest, UserPage } from '@/api/types';
 import { GrantsPanel } from '@/pages/admin/GrantsPanel';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -22,7 +23,10 @@ import { t } from '@/shared/i18n';
  * жодного з них сервер не віддає, і обидві таблиці малювалися порожніми.
  */
 export function SecurityPage(): JSX.Element {
-  const [tab, setTab] = useState('roles');
+  // ⚠ Вкладка — теж в адресі: «подивись гранти цієї ролі» без неї означає
+  // «відкрий безпеку і перемкнись на другу вкладку».
+  const [rawTab, setTab] = useUrlState('tab');
+  const tab = rawTab ?? 'roles';
   const queryClient = useQueryClient();
 
   // ⛔ Адресати алертів — ДАНІ, а не конфігурація (`D-125`). Перелік у змінних

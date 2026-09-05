@@ -5,6 +5,7 @@ import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /** Як часто опитувати стан задачі, поки вона виконується. */
@@ -22,7 +23,10 @@ const PollMs = 1500;
  */
 export function JobsPage(): JSX.Element {
   const [input, setInput] = useState('');
-  const [jobId, setJobId] = useState<string | null>(null);
+  // ⛔ Ідентифікатор задачі — в адресі. Саме це посилання надсилають
+  // адміністраторові зі словами «подивись, чому впало»; без нього доводиться
+  // диктувати GUID голосом.
+  const [jobId, setJobId] = useUrlState('id');
 
   const job = useQuery({
     queryKey: ['job', jobId],
