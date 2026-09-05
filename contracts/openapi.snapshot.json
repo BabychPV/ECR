@@ -1149,6 +1149,29 @@
         "type": "object"
       },
       "JsonElement": {},
+      "LanguageDto": {
+        "description": "Мова інтерфейсу з реєстру.",
+        "properties": {
+          "code": {
+            "description": "Код мови, напр. `en`.",
+            "type": "string"
+          },
+          "isDefault": {
+            "description": "Чи це мова за замовчуванням; така рівно одна.",
+            "type": "boolean"
+          },
+          "nameNative": {
+            "description": "Назва мови нею самою: «Русский», «Қазақша».",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameNative",
+          "isDefault"
+        ],
+        "type": "object"
+      },
       "LocalLoginRequest": {
         "description": "Запит локального входу.",
         "properties": {
@@ -2733,7 +2756,7 @@
           },
           "columns": {
             "items": {
-              "$ref": "#/components/schemas/ColumnDto"
+              "$ref": "#/components/schemas/TemplateColumnDto"
             },
             "type": "array"
           },
@@ -2863,6 +2886,72 @@
           "changeClass",
           "oldValue",
           "newValue"
+        ],
+        "type": "object"
+      },
+      "TemplateColumnDto": {
+        "description": "Колонка в СТРУКТУРІ шаблону — опис для адміністратора.",
+        "properties": {
+          "code": {
+            "description": "Код колонки — ідентичність, у патчі не змінюється.",
+            "type": "string"
+          },
+          "dataType": {
+            "description": "Тип даних; змінюється лише клоном версії.",
+            "type": "string"
+          },
+          "displayFormat": {
+            "description": "Формат показу; презентаційне поле.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "headerL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Заголовок усіма мовами каталогу."
+          },
+          "id": {
+            "description": "Ідентифікатор; ним адресується презентаційний патч.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isHidden": {
+            "description": "Колонка прихована; презентаційне поле.",
+            "type": "boolean"
+          },
+          "isReadOnly": {
+            "description": "Колонка недоступна для введення.",
+            "type": "boolean"
+          },
+          "isRequired": {
+            "description": "Колонка обов'язкова.",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "description": "Порядок показу; презентаційне поле.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unitSymbol": {
+            "description": "Позначення одиниці, якщо задана.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "headerL10n",
+          "dataType",
+          "ordinal",
+          "isReadOnly",
+          "isRequired",
+          "isHidden",
+          "displayFormat",
+          "unitSymbol"
         ],
         "type": "object"
       },
@@ -4439,6 +4528,46 @@
         "summary": "Стан задачі за її ідентифікатором. Право `System.ViewHealth`.",
         "tags": [
           "Jobs"
+        ]
+      }
+    },
+    "/api/v1/languages": {
+      "get": {
+        "description": "Без права: перелік мов не є таємницею, а потрібен кожному екрану, що\r\nмає локалізовану назву. Анонімно теж не віддається — сторінка входу\r\nобирає мову з браузера і збереженого вибору, реєстр їй не потрібен.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LanguageDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LanguageDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LanguageDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Увімкнені мови в порядку показу.",
+        "tags": [
+          "Languages"
         ]
       }
     },
@@ -6703,6 +6832,9 @@
     },
     {
       "name": "Jobs"
+    },
+    {
+      "name": "Languages"
     },
     {
       "name": "Methodologies"

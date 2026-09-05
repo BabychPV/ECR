@@ -214,6 +214,47 @@ public sealed partial class PrincipleTests
         Assert.Empty(divergent);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "ФВ-7.2")]
+    public void Презентаційні_поля_мають_куди_записатися()
+    {
+        // ⛔ Два переліки того самого поняття в різних формах: домен вирішує,
+        // ЧИ дозволена зміна поля (`ChangeClassifier.PresentationFields`),
+        // сховище знає, В ЯКУ КОЛОНКУ її записати. Поле, дозволене доменом і
+        // невідоме сховищу, дає відмову `ECR-TMPL-0422` на правку, яку
+        // система вважає законною; зайве поле в сховищі — мертвий код, який
+        // виглядає як можливість.
+        //
+        // ⚠ Сторож існує тому, що перекіс тут уже коштував дорого: сховище
+        // не вміло записати НІЧОГО, і патч презентації мовчки не робив
+        // нічого — при п'яти зелених тестах (`A7-43`).
+        var allowed = Ecr.Domain.Services.ChangeClassifier.PresentationFields;
+
+        var store = File.ReadAllText(Path.Combine(
+            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "TemplateVersionStore.cs"));
+
+        var writable = PresentationEntryRegex
+            .Matches(store)
+            .Select(m => m.Groups[2].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.NotEmpty(writable);
+
+        var unwritable = allowed.Where(f => !writable.Contains(f)).Order(StringComparer.Ordinal).ToList();
+        Assert.True(
+            unwritable.Count == 0,
+            "Домен дозволяє змінити ці поля, а сховищу нікуди їх записати: "
+            + string.Join(", ", unwritable));
+
+        var undeclared = writable.Where(f => !allowed.Contains(f)).Order(StringComparer.Ordinal).ToList();
+        Assert.True(
+            undeclared.Count == 0,
+            "Сховище вміє записати поля, яких домен презентаційними не вважає: "
+            + string.Join(", ", undeclared));
+    }
+
     /// <summary>
     /// Дозволені стани кожного переходу за <c>ApprovalState</c>.
     /// </summary>
@@ -317,6 +358,10 @@ public sealed partial class PrincipleTests
     /// <summary>Видалення проєкту або періоду в SQL.</summary>
     [GeneratedRegex(@"DELETE\s+(?:FROM\s+)?\[?doc\]?\.\[?(?:Project|Period)\]?", RegexOptions.IgnoreCase)]
     private static partial Regex DeleteProjectRegex { get; }
+
+    /// <summary>Рядок білого списку сховища: <c>[("ColumnDef", "Ordinal")] = …</c>.</summary>
+    [GeneratedRegex("""\[\(\s*"(\w+)"\s*,\s*"(\w+)"\s*\)\]\s*=""")]
+    private static partial Regex PresentationEntryRegex { get; }
 
     /// <summary>Метод переходу разом із тілом до наступного оголошення.</summary>
     /// <remarks>

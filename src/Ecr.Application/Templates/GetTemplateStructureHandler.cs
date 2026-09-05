@@ -55,23 +55,21 @@ public sealed class GetTemplateStructureHandler(IMetadataCache metadata)
         return table.Rows.OrderBy(r => r.Ordinal).Select(r => Row(r, keysById));
     }
 
-    private static ColumnDto Column(ColumnDef column)
+    private static TemplateColumnDto Column(ColumnDef column)
         => new(
             column.Id,
             column.Code,
 
-            // Заголовок віддається вже вибраною мовою на межі API; тут —
-            // інваріантний, бо кеш спільний для всіх мов і зберігати в ньому
-            // копію на кожну мову означало б множити ключі без потреби.
-            column.HeaderL10n.Get("en") ?? column.Code,
+            // ⚠ Заголовок віддається ВСІМА мовами, а не однією. Екран
+            // структури — це редактор презентаційного шару, і правка підпису
+            // англійською не має стирати російський із казахським.
+            column.HeaderL10n,
             column.DataType.ToString(),
             column.Ordinal,
             column.IsReadOnly,
             column.IsRequired,
+            column.IsHidden,
             column.DisplayFormat,
-            column.DefaultValue,
-            column.LookupRegistryDefId,
-            column.UnitId,
             UnitSymbol: null);
 
     private static TemplateRowDto Row(RowDef row, Dictionary<int, string> keysById)

@@ -22,8 +22,44 @@ public sealed record SheetDto(
 public sealed record TableDto(
     int Id, string Code, TableLayoutKind LayoutKind, TableRowMode RowMode,
     int? MaxDynamicRows,
-    IReadOnlyList<ColumnDto> Columns,
+    IReadOnlyList<TemplateColumnDto> Columns,
     IReadOnlyList<TemplateRowDto> Rows);
+
+/// <summary>
+/// Колонка в СТРУКТУРІ шаблону — опис для адміністратора.
+/// </summary>
+/// <remarks>
+/// ⚠ Окремий тип від <see cref="ColumnDto"/> з тієї самої причини, що й
+/// <see cref="TemplateRowDto"/> від <see cref="RowDto"/> (`Q-012`). Той
+/// описує колонку в ЗРІЗІ документа й читається на кожне відкриття таблиці —
+/// 60 колонок на зріз, бюджет 400 мс. Тут же потрібен <b>увесь</b>
+/// локалізований заголовок: редактор презентаційного шару має показати
+/// наявні переклади, інакше правка підпису англійською мовчки стирала б
+/// російський і казахський (`ФВ-7.2`). Класти цей об'єкт у зріз означало б
+/// платити за нього на найгарячішому шляху системи заради екрана, який
+/// відкривають раз на місяць.
+/// </remarks>
+/// <param name="Id">Ідентифікатор; ним адресується презентаційний патч.</param>
+/// <param name="Code">Код колонки — ідентичність, у патчі не змінюється.</param>
+/// <param name="HeaderL10n">Заголовок усіма мовами каталогу.</param>
+/// <param name="DataType">Тип даних; змінюється лише клоном версії.</param>
+/// <param name="Ordinal">Порядок показу; презентаційне поле.</param>
+/// <param name="IsReadOnly">Колонка недоступна для введення.</param>
+/// <param name="IsRequired">Колонка обов'язкова.</param>
+/// <param name="IsHidden">Колонка прихована; презентаційне поле.</param>
+/// <param name="DisplayFormat">Формат показу; презентаційне поле.</param>
+/// <param name="UnitSymbol">Позначення одиниці, якщо задана.</param>
+public sealed record TemplateColumnDto(
+    int Id,
+    string Code,
+    LocalizedText HeaderL10n,
+    string DataType,
+    int Ordinal,
+    bool IsReadOnly,
+    bool IsRequired,
+    bool IsHidden,
+    string? DisplayFormat,
+    string? UnitSymbol);
 
 /// <summary>
 /// Рядок у СТРУКТУРІ шаблону — опис, а не дані.

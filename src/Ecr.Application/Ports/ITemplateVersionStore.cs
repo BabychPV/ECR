@@ -72,7 +72,40 @@ public interface ITemplateVersionStore
     /// <summary>Сторінка шаблонів.</summary>
     public Task<Common.PagedResult<TemplateSummary>> ListTemplatesAsync(
         Common.CursorRequest page, CancellationToken ct);
+
+    /// <summary>
+    /// Застосовує презентаційні зміни до структури версії.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього методу <c>PATCH …/presentation</c> був **переконливою
+    /// заглушкою**: він розбирав патч, класифікував кожну зміну, відхиляв
+    /// структурні, піднімав <c>PresentationRevision</c> і писав аудит — і не
+    /// змінював жодного поля. Тобто підпис колонки лишався старим, ключ кешу
+    /// ставав новим, і всі клієнти перечитували структуру, щоб побачити те
+    /// саме. П'ять тестів були зелені: вони перевіряли ревізію і аудит.
+    ///
+    /// ⚠ Дозволені поля — <b>білий список</b> у реалізації, а не назва поля
+    /// з запиту в тексті SQL. Клас зміни перевіряє обробник, але сховище не
+    /// має покладатися на чужу перевірку: назва поля приходить із мережі.
+    ///
+    /// ⚠ Кожен UPDATE обмежений ВЕРСІЄЮ. Ідентифікатор колонки теж приходить
+    /// із мережі, і без цієї умови патч однієї версії міняв би підписи в
+    /// будь-якій іншій.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія, якій належать сутності.</param>
+    /// <param name="changes">Зміни; усі мають бути презентаційними.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки рядків справді змінилося.</returns>
+    public Task<int> ApplyPresentationAsync(
+        int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct);
 }
+
+/// <summary>Одна презентаційна зміна.</summary>
+/// <param name="EntityType">Тип сутності: <c>ColumnDef</c>, <c>RowDef</c>, <c>SheetDef</c>, <c>TableDef</c>.</param>
+/// <param name="EntityId">Ідентифікатор сутності.</param>
+/// <param name="Field">Поле; має належати презентаційному шару.</param>
+/// <param name="Value">Нове значення в текстовому вигляді; <c>null</c> — стерти.</param>
+public sealed record PresentationChange(string EntityType, int EntityId, string Field, string? Value);
 
 /// <summary>Версія шаблону в переліку.</summary>
 /// <param name="Id">Ідентифікатор.</param>

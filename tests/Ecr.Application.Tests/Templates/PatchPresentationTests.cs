@@ -119,6 +119,46 @@ public sealed class PatchPresentationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-7.2")]
+    public async Task Патч_справді_міняє_поле_а_не_лише_піднімає_ревізію()
+    {
+        // ⛔ Найдорожчий різновид зеленого тесту — той, що перевіряє все
+        // навколо дії, крім самої дії. Тести цього файлу дивилися на ревізію
+        // і на аудит; обробник же розбирав патч, класифікував зміни, відхиляв
+        // структурні, піднімав ревізію, писав аудит — і **не змінював жодного
+        // поля**. Підпис колонки лишався старим, ключ кешу ставав новим, і всі
+        // клієнти перечитували структуру, щоб побачити те саме.
+        //
+        // ⚠ Аудит при цьому запевняв, що зміна відбулася: у `NewJson` лежало
+        // значення, якого в базі не було ніколи.
+        await Handler().PatchAsync(1, HeaderPatch, userId: 9, CancellationToken.None);
+
+        await _store.Received(1).ApplyPresentationAsync(
+            1,
+            Arg.Is<IReadOnlyList<PresentationChange>>(changes =>
+                changes.Count == 1
+                && changes[0].EntityType == "ColumnDef"
+                && changes[0].EntityId == 5
+                && changes[0].Field == "HeaderL10n"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Відхилений_патч_не_застосовує_нічого()
+    {
+        const string patch =
+            """[{"entityType":"ColumnDef","entityId":5,"field":"DataType","value":"Decimal"}]""";
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().PatchAsync(1, patch, userId: 9, CancellationToken.None));
+
+        // Класифікація йде ПЕРЕД будь-яким записом: інакше половина патча
+        // застосувалася б, а друга половина відхилилася.
+        await _store.DidNotReceive().ApplyPresentationAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<PresentationChange>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Зміна_Ordinal_не_впливає_на_результати_формул_із_діапазонами()
     {
         const string patch =

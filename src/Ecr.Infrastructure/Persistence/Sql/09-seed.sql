@@ -536,7 +536,52 @@ USING (VALUES
     (N'import.apply',                    N'en', N'Apply', 1),
     (N'import.applied',                  N'en', N'The import has been applied.', 1),
 
-    (N'grid.addRow',                     N'en', N'Add row', 1)
+    (N'grid.addRow',                     N'en', N'Add row', 1),
+
+    -- Шаблони: створення, версії, презентаційний шар.
+    (N'templates.create',                N'en', N'New template', 1),
+    (N'templates.created',               N'en', N'The template has been created.', 1),
+    (N'templates.name',                  N'en', N'Name', 1),
+    (N'templates.nameHint',              N'en', N'Shown to operators; a language left blank falls back to the default one.', 1),
+    (N'templates.codeHint',              N'en', N'The business key: projects refer to it, and it cannot be changed later.', 1),
+    (N'templates.newVersion',            N'en', N'New version', 1),
+    (N'templates.versionCreated',        N'en', N'The version has been created from the latest one.', 1),
+    (N'templates.versionNumber',         N'en', N'Version number', 1),
+    (N'templates.versionNumberHint',     N'en', N'Major.Minor.Patch.Build — the number says what kind of change this is.', 1),
+    (N'version.clone',                   N'en', N'Clone version', 1),
+    (N'version.cloneHint',               N'en', N'A published version is frozen: structural changes go into a clone, keeping codes and row keys.', 1),
+    (N'version.cloned',                  N'en', N'The clone is ready and open.', 1),
+    (N'version.presentation',            N'en', N'Appearance', 1),
+    (N'version.patched',                 N'en', N'Applied; the version is now at revision {revision}.', 1),
+    (N'version.headerHint',              N'en', N'The heading operators see above the column.', 1),
+    (N'version.displayFormat',           N'en', N'Display format', 1),
+    (N'version.displayFormatHint',       N'en', N'How the number is shown; it does not change the stored value.', 1),
+    (N'version.ordinal',                 N'en', N'Position', 1),
+    (N'version.ordinalHint',             N'en', N'Display order only: formulas do not depend on it.', 1),
+    (N'version.hidden',                  N'en', N'Hidden', 1),
+    (N'version.hiddenHint',              N'en', N'The column stays in the structure and keeps its data; operators do not see it.', 1),
+
+    -- Життєвий цикл проєкту і календар періодів.
+    (N'periods.create',                  N'en', N'New project', 1),
+    (N'periods.created',                 N'en', N'The project is created as a draft: activate it to open its periods.', 1),
+    (N'periods.code',                    N'en', N'Code', 1),
+    (N'periods.codeHint',                N'en', N'The business key: documents and reports refer to it and it cannot be changed later.', 1),
+    (N'periods.name',                    N'en', N'Name', 1),
+    (N'periods.kind',                    N'en', N'Reporting period', 1),
+    (N'periods.kindHint',                N'en', N'Defines the whole calendar; it cannot be changed once periods exist.', 1),
+    (N'periods.clone',                   N'en', N'Clone project', 1),
+    (N'periods.cloneHint',               N'en', N'Registries, settings and the sheet composition are copied. Data is not.', 1),
+    (N'periods.cloned',                  N'en', N'The clone is ready and selected.', 1),
+    (N'periods.archive',                 N'en', N'Archive', 1),
+    (N'periods.archived',                N'en', N'The project is archived. It is not deleted: submitted forms still refer to it.', 1),
+    (N'periods.current',                 N'en', N'current', 1),
+    (N'periods.pin',                     N'en', N'Make current', 1),
+    (N'periods.pinHint',                 N'en', N'The calendar stops choosing the current period by itself. Say why.', 1),
+    (N'periods.pinned',                  N'en', N'The current period is pinned.', 1),
+    (N'periods.reopen',                  N'en', N'Reopen period', 1),
+    (N'periods.reopenHint',              N'en', N'A closed period holds submitted reporting. The reason stays in the audit trail.', 1),
+    (N'periods.reopened',                N'en', N'The period is open again.', 1),
+    (N'periods.reopenedUntil',           N'en', N'open until {until}', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

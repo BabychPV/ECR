@@ -44,6 +44,19 @@ public interface IUiStringCatalog
     public Task<int> GetRevisionAsync(CancellationToken ct);
 
     /// <summary>
+    /// Мови, увімкнені в реєстрі (<c>sys_ecr.Language</c>), у порядку показу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перелік мов — ДАНІ, а не константа клієнта (<c>ФВ-14.9</c>,
+    /// <c>ФВ-2.2</c>): «додати мову = запис у реєстр, не збірка клієнта».
+    /// Доки цього методу не було, обіцянка лишалася невиконуваною з іншого
+    /// боку: сервер приймав переклад будь-якою мовою, а клієнт не мав де
+    /// дізнатися, які мови існують, — тобто поле локалізованої назви і
+    /// редактор перекладів довелося б зашити списком у бандл.
+    /// </remarks>
+    public Task<IReadOnlyList<LanguageDto>> ListLanguagesAsync(CancellationToken ct);
+
+    /// <summary>
     /// Записує рядок і **одним** statement піднімає версію каталогу.
     /// </summary>
     /// <remarks>
@@ -53,6 +66,12 @@ public interface IUiStringCatalog
     /// </remarks>
     public Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct);
 }
+
+/// <summary>Мова інтерфейсу з реєстру.</summary>
+/// <param name="Code">Код мови, напр. <c>en</c>.</param>
+/// <param name="NameNative">Назва мови нею самою: «Русский», «Қазақша».</param>
+/// <param name="IsDefault">Чи це мова за замовчуванням; така рівно одна.</param>
+public sealed record LanguageDto(string Code, string NameNative, bool IsDefault);
 
 /// <param name="LanguageCode">Мова зрізу.</param>
 /// <param name="Revision">Версія каталогу; слугує <c>ETag</c>.</param>

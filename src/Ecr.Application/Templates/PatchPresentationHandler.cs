@@ -63,6 +63,18 @@ public sealed class PatchPresentationHandler(
                 new Dictionary<string, object?> { ["structuralFields"] = violations });
         }
 
+        // ⛔ ЗМІНА ЗАСТОСОВУЄТЬСЯ. Цього рядка тут не було: обробник розбирав
+        // патч, класифікував кожну зміну, відхиляв структурні, піднімав
+        // ревізію і писав аудит — і не міняв жодного поля. Підпис колонки
+        // лишався старим, ключ кешу ставав новим, і всі клієнти перечитували
+        // структуру, щоб побачити те саме. Аудит при цьому запевняв, що зміна
+        // відбулася: у `NewJson` лежало значення, якого в базі не було.
+        //
+        // ⚠ ПЕРЕД інкрементом ревізії: якщо запис упаде, ключ кешу не має
+        // змінитися. Новий ключ на стару структуру — це те саме розходження,
+        // тільки навпаки.
+        await store.ApplyPresentationAsync(templateVersionId, changes, ct).ConfigureAwait(false);
+
         // Інкремент — атомарний statement із OUTPUT (R-B7). Застосунок не
         // призначає нову ревізію, а дізнається її: інстансів ≥ 2.
         var newRevision = await store.IncrementPresentationRevisionAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -98,10 +110,3 @@ public sealed class PatchPresentationHandler(
         }
     }
 }
-
-/// <summary>Одна презентаційна зміна в патчі.</summary>
-/// <param name="EntityType">Тип сутності: <c>ColumnDef</c>, <c>RowDef</c>, <c>SheetDef</c>, <c>TableDef</c>.</param>
-/// <param name="EntityId">Ідентифікатор сутності.</param>
-/// <param name="Field">Поле, яке змінюється.</param>
-/// <param name="Value">Нове значення в JSON-поданні.</param>
-public sealed record PresentationChange(string EntityType, int EntityId, string Field, string? Value);

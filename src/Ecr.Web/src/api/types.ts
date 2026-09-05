@@ -296,3 +296,54 @@ export type PresentationRevisionResponse = Schemas['PresentationRevisionResponse
 
 /** Скільки записів зачепила зміна вікна чинності. */
 export type AffectedRowsResponse = Schemas['AffectedRowsResponse'];
+
+/** Мова інтерфейсу з реєстру (`ФВ-14.9`). */
+export type LanguageDto = Schemas['LanguageDto'];
+
+/**
+ * Колонка у структурі шаблону — з **усіма** мовами заголовка.
+ *
+ * ⚠ Не `ColumnDto`: та описує колонку в зрізі документа і несе один
+ * локалізований рядок. Редактор презентації має бачити всі переклади, інакше
+ * правка англійського підпису стирала б решту (`ФВ-7.2`).
+ */
+export type TemplateColumnDto = Schemas['TemplateColumnDto'];
+
+/** Аркуш у структурі версії. */
+export type SheetDto = Schemas['SheetDto'];
+
+/** Таблиця у структурі версії. */
+export type TableDto = Schemas['TableDto'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Створення сутностей.
+//
+// ⛔ Сім дій створення були недосяжні (`A7-42`), і сторож їх не бачив: він
+// порівнював самі шляхи, тому `POST /templates` вважався покритим тим, що
+// клієнт ЧИТАЄ `GET /templates`. Система не мала способу завести ані проєкт,
+// ані шаблон, ані документ, ані користувача.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Створення шаблону. */
+export type CreateTemplateRequest = Schemas['CreateTemplateRequest'];
+
+/** Створення версії шаблону; `cloneFromVersionId` дає клон замість порожньої. */
+export type CreateTemplateVersionRequest = Schemas['CreateTemplateVersionRequest'];
+
+/** Створення проєкту разом із календарем періодів. */
+export type CreateProjectRequest = Schemas['CreateProjectRequest'];
+
+/** Створення документа зі складом аркушів (`ФВ-3.2`). */
+export type CreateDocumentRequest = Schemas['CreateDocumentRequest'];
+
+/** Створення ролі з набором прав. */
+export type CreateRoleRequest = Schemas['CreateRoleRequest'];
+
+/** Створення користувача; локальний пароль — разовий (`ФВ-6.18`). */
+export type CreateUserRequest = Schemas['CreateUserRequest'];
+
+/** Запис довідника: створення або зміна. */
+export type RegistryEntryUpsertDto = Schemas['RegistryEntryUpsertDto'];
+
+/** Ідентифікатор створеного або зміненого запису довідника. */
+export type RegistryEntryIdResponse = Schemas['RegistryEntryIdResponse'];

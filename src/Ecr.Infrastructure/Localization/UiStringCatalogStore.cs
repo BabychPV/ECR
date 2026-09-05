@@ -45,6 +45,32 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<LanguageDto>> ListLanguagesAsync(CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Лише увімкнені: вимкнена мова лишається в таблиці разом зі своїми
+        // перекладами, але пропонувати її в полі назви означало б заводити
+        // тексти, яких ніхто не побачить.
+        command.CommandText =
+            "SELECT Code, NameNative, IsDefault FROM sys_ecr.Language "
+            + "WHERE IsActive = 1 ORDER BY Ordinal;";
+
+        var result = new List<LanguageDto>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(new LanguageDto(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2)));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(write);

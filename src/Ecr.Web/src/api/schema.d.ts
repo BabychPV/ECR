@@ -972,6 +972,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Увімкнені мови в порядку показу.
+         * @description Без права: перелік мов не є таємницею, а потрібен кожному екрану, що
+         *     має локалізовану назву. Анонімно теж не віддається — сторінка входу
+         *     обирає мову з браузера і збереженого вибору, реєстр їй не потрібен.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LanguageDto"][];
+                        "text/json": components["schemas"]["LanguageDto"][];
+                        "text/plain": components["schemas"]["LanguageDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/login/local": {
         parameters: {
             query?: never;
@@ -3607,6 +3650,15 @@ export interface components {
             state: string;
         };
         JsonElement: unknown;
+        /** @description Мова інтерфейсу з реєстру. */
+        LanguageDto: {
+            /** @description Код мови, напр. `en`. */
+            code: string;
+            /** @description Чи це мова за замовчуванням; така рівно одна. */
+            isDefault: boolean;
+            /** @description Назва мови нею самою: «Русский», «Қазақша». */
+            nameNative: string;
+        };
         /** @description Запит локального входу. */
         LocalLoginRequest: {
             password: string;
@@ -4351,7 +4403,7 @@ export interface components {
         };
         TableDto: {
             code: string;
-            columns: components["schemas"]["ColumnDto"][];
+            columns: components["schemas"]["TemplateColumnDto"][];
             /** Format: int32 */
             id: number;
             layoutKind: components["schemas"]["TableLayoutKind"];
@@ -4395,6 +4447,35 @@ export interface components {
             newValue: null | string;
             /** @description Значення до зміни; `null` для `Added`. */
             oldValue: null | string;
+        };
+        /** @description Колонка в СТРУКТУРІ шаблону — опис для адміністратора. */
+        TemplateColumnDto: {
+            /** @description Код колонки — ідентичність, у патчі не змінюється. */
+            code: string;
+            /** @description Тип даних; змінюється лише клоном версії. */
+            dataType: string;
+            /** @description Формат показу; презентаційне поле. */
+            displayFormat: null | string;
+            /** @description Заголовок усіма мовами каталогу. */
+            headerL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор; ним адресується презентаційний патч.
+             */
+            id: number;
+            /** @description Колонка прихована; презентаційне поле. */
+            isHidden: boolean;
+            /** @description Колонка недоступна для введення. */
+            isReadOnly: boolean;
+            /** @description Колонка обов'язкова. */
+            isRequired: boolean;
+            /**
+             * Format: int32
+             * @description Порядок показу; презентаційне поле.
+             */
+            ordinal: number;
+            /** @description Позначення одиниці, якщо задана. */
+            unitSymbol: null | string;
         };
         /** @description Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,
          *     `RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б

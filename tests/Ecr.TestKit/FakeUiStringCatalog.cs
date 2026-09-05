@@ -56,6 +56,34 @@ public sealed class FakeUiStringCatalog : IUiStringCatalog
     public Task<int> GetRevisionAsync(CancellationToken ct) => Task.FromResult(Revision);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Мови беруться з ДОДАНИХ рядків, а не зі списку в підробці. Інакше
+    /// фікстура знала б більше за систему: тест «переклад казахською видно»
+    /// проходив би й тоді, коли казахської в каталозі немає жодного рядка.
+    /// Мова за замовчуванням названа одна — та сама, що в `UiStringResolver`.
+    /// </remarks>
+    public Task<IReadOnlyList<LanguageDto>> ListLanguagesAsync(CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<LanguageDto> languages =
+            [
+                .. _rows.Keys
+                    .Select(key => key.Language)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Order(StringComparer.OrdinalIgnoreCase)
+                    .Select(code => new LanguageDto(
+                        code,
+                        code,
+                        string.Equals(
+                            code, UiStringResolver.DefaultLanguage, StringComparison.OrdinalIgnoreCase)))
+            ];
+
+            return Task.FromResult(languages);
+        }
+    }
+
+    /// <inheritdoc />
     public Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(write);

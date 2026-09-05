@@ -199,6 +199,139 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
     }
 
+    /// <inheritdoc />
+    public async Task<int> ApplyPresentationAsync(
+        int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        var affected = 0;
+
+        foreach (var change in changes)
+        {
+            // ⛔ Білий список, а не назва поля із запиту в тексті SQL. Клас
+            // зміни перевіряє обробник, але сховище не має покладатися на
+            // чужу перевірку: і назва поля, і тип сутності приходять із
+            // мережі. Невідома пара — відмова, а не мовчазний пропуск:
+            // мовчання тут означало б «патч застосовано», коли не застосовано
+            // нічого, — рівно той дефект, від якого цей метод і з'явився.
+            if (!PresentationColumns.TryGetValue((change.EntityType, change.Field), out var sql))
+            {
+                throw new BusinessRuleException(
+                    "ECR-TMPL-0422",
+                    $"Поле {change.EntityType}.{change.Field} не належить презентаційному шару.");
+            }
+
+            await using var command = connection.CreateCommand();
+            if (db.Database.CurrentTransaction is { } tx)
+            {
+                command.Transaction = (SqlTransaction)tx.GetDbTransaction();
+            }
+
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("@id", change.EntityId);
+            command.Parameters.AddWithValue("@version", templateVersionId);
+            command.Parameters.AddWithValue("@value", (object?)change.Value ?? DBNull.Value);
+
+            var rows = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+            // ⚠ Нуль рядків — не «нічого не змінилося», а «сутності немає в
+            // ЦІЙ версії». Ідентифікатор приходить із мережі, і мовчазний
+            // нуль означав би, що патч чужої версії виглядає успішним.
+            if (rows == 0)
+            {
+                throw new NotFoundException(
+                    "ECR-TMPL-0404",
+                    $"{change.EntityType} {change.EntityId} не належить версії {templateVersionId}.");
+            }
+
+            affected += rows;
+        }
+
+        return affected;
+    }
+
+    /// <summary>
+    /// Дозволені презентаційні поля і те, як їх оновити.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Кожен <c>UPDATE</c> обмежений ВЕРСІЄЮ через ланцюг належності:
+    /// колонка → таблиця → аркуш → версія. Без цієї умови патч однієї версії
+    /// міняв би підписи в будь-якій іншій, і власник другої не дізнався б
+    /// про це ніяк.
+    ///
+    /// ⚠ Перелік збігається з <c>ChangeClassifier.PresentationFields</c> — і
+    /// це навмисне дублювання в іншій формі: там перелік НАЗВ для рішення
+    /// «чи дозволено», тут — відображення назви в колонку. Розбіжність між
+    /// ними ловить сторож <c>Презентаційні_поля_мають_куди_записатися</c>.
+    /// </remarks>
+    private static readonly Dictionary<(string Entity, string Field), string>
+        PresentationColumns = Build();
+
+    private static Dictionary<(string, string), string> Build()
+    {
+        const string columnScope = """
+            UPDATE c SET c.{0} = {1}
+            FROM   cfg.ColumnDef c
+            JOIN   cfg.TableDef t ON t.Id = c.TableDefId
+            JOIN   cfg.SheetDef s ON s.Id = t.SheetDefId
+            WHERE  c.Id = @id AND s.TemplateVersionId = @version;
+            """;
+
+        const string rowScope = """
+            UPDATE r SET r.{0} = {1}
+            FROM   cfg.RowDef r
+            JOIN   cfg.TableDef t ON t.Id = r.TableDefId
+            JOIN   cfg.SheetDef s ON s.Id = t.SheetDefId
+            WHERE  r.Id = @id AND s.TemplateVersionId = @version;
+            """;
+
+        const string tableScope = """
+            UPDATE t SET t.{0} = {1}
+            FROM   cfg.TableDef t
+            JOIN   cfg.SheetDef s ON s.Id = t.SheetDefId
+            WHERE  t.Id = @id AND s.TemplateVersionId = @version;
+            """;
+
+        const string sheetScope = """
+            UPDATE s SET s.{0} = {1}
+            FROM   cfg.SheetDef s
+            WHERE  s.Id = @id AND s.TemplateVersionId = @version;
+            """;
+
+        // ⚠ Значення приходить рядком і приводиться в SQL, а не в C#: тип
+        // колонки знає база, і `TRY_CONVERT` тут дав би тихий `NULL` замість
+        // відмови. Порожній рядок для числа — помилка виклику, і вона має
+        // бути гучною.
+        static string Text(string scope, string column) =>
+            string.Format(System.Globalization.CultureInfo.InvariantCulture, scope, column, "@value");
+
+        static string Int(string scope, string column) =>
+            string.Format(System.Globalization.CultureInfo.InvariantCulture, scope, column, "CONVERT(int, @value)");
+
+        static string Bit(string scope, string column) =>
+            string.Format(System.Globalization.CultureInfo.InvariantCulture, scope, column, "CONVERT(bit, @value)");
+
+        return new Dictionary<(string, string), string>()
+        {
+            [("ColumnDef", "HeaderL10n")] = Text(columnScope, "HeaderL10n"),
+            [("ColumnDef", "Ordinal")] = Int(columnScope, "Ordinal"),
+            [("ColumnDef", "DisplayFormat")] = Text(columnScope, "DisplayFormat"),
+            [("ColumnDef", "IsHidden")] = Bit(columnScope, "IsHidden"),
+            [("ColumnDef", "StyleId")] = Int(columnScope, "StyleId"),
+            [("RowDef", "LabelL10n")] = Text(rowScope, "LabelL10n"),
+            [("SheetDef", "NameL10n")] = Text(sheetScope, "NameL10n"),
+            [("SheetDef", "IsVisible")] = Bit(sheetScope, "IsVisible"),
+            [("TableDef", "NameL10n")] = Text(tableScope, "NameL10n"),
+        };
+    }
+
     /// <summary>Проставляє <c>ClonedFromVersionId</c> — поле з приватним сетером.</summary>
     private static void SetClonedFrom(TemplateVersion clone, int sourceVersionId)
         => typeof(TemplateVersion)

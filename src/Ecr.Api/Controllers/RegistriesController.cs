@@ -68,8 +68,12 @@ public sealed class RegistriesController(
 
         // 201 для нового запису, 200 для оновлення: різниця видима клієнтові й
         // означає, чи з'явився новий Id, який тепер лежатиме в комірках.
+        // ⚠ Один і той самий ІМЕНОВАНИЙ запис в обох гілках. Тут стояв
+        // анонімний `new { id }` для 201 — рівно те, від чого застерігає
+        // коментар вище: форма збігалася випадково, і перше ж перейменування
+        // поля розвело б 200 і 201 мовчки.
         return isNew
-            ? CreatedAtAction(nameof(Entries), new { code }, new { id })
+            ? CreatedAtAction(nameof(Entries), new { code }, new RegistryEntryIdResponse(id))
             : Ok(new RegistryEntryIdResponse(id));
     }
 
