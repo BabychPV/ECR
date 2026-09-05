@@ -157,6 +157,7 @@ public sealed class PatchCellsTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-4.4")]
     public async Task Заборонена_комірка_відхиляє_батч_із_причиною()
     {
         var address = new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId);
@@ -211,6 +212,7 @@ public sealed class PatchCellsTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.4")]
     public async Task Комірковий_Error_валідації_блокує_запис()
     {
         WithRule(ValidationSeverity.Error, scope: 0, "[Volume] >= 0");

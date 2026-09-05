@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Jobs/ConsistencyCheckJobTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Jobs/ConsistencyCheckJobTests.cs
 using System.Text.RegularExpressions;
 using Ecr.Application.Registries;
 using Ecr.Domain.Enums;
@@ -15,6 +15,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 public sealed partial class ConsistencyCheckJobTests
 {
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-7.7")]
     public void Виявляє_осиротілі_комірки()
     {
         var source = Source();
@@ -35,6 +36,7 @@ public sealed partial class ConsistencyCheckJobTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.7")]
     public void Виявляє_порушені_FK_у_гібридному_режимі()
     {
         var source = Source();

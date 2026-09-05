@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Security/ResourceGrantTests.cs
+﻿// tests/Ecr.Domain.Tests/Security/ResourceGrantTests.cs
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -59,6 +59,7 @@ public sealed class ResourceGrantTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.6")]
     public void Deny_на_проєкті_перекриває_Manage_на_аркуші()
     {
         var profile = Profile(
@@ -82,6 +83,7 @@ public sealed class ResourceGrantTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.13")]
     public void Рівні_упорядковані_від_None_до_Manage()
     {
         // Порядок значень значущий: перевірки пишуться як `>= Write`, і

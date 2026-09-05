@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cellStateClass, cellStateOf, type CellStateName } from '../cellState';
 import { roundToScale } from '../rounding';
@@ -112,13 +112,13 @@ describe('Розрізнення станів БЕЗ кольору (ФВ-14.18)
 });
 
 describe('Округлення при вставці (ФВ-9.16c, D-116)', () => {
-  it('значення, що вкладається в масштаб, не округлюється і не позначається', () => {
+  it('ФВ-9.16c: значення, що вкладається в масштаб, не округлюється і не позначається', () => {
     // ⛔ `null` тут значуще: позначка ставиться ЛИШЕ на змінені комірки,
     // інакше лічильник «округлено N значень» показував би всю таблицю.
     expect(roundToScale(12.34, column({ scale: 2 }))).toBeNull();
   });
 
-  it('зайві знаки округлюються до масштабу колонки', () => {
+  it('ФВ-9.16b: зайві знаки округлюються до масштабу колонки', () => {
     expect(roundToScale(12.3456, column({ scale: 2 }))).toBe(12.35);
   });
 

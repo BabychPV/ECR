@@ -95,6 +95,7 @@ public sealed class GetTableSliceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.10")]
     public async Task Права_перевіряються_одним_викликом_на_зріз()
     {
         Cells(Cell(Row1, new CellValueData { ValueNumeric = 1m }));

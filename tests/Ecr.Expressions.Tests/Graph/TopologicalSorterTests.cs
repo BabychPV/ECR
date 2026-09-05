@@ -67,6 +67,7 @@ public sealed class TopologicalSorterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.14")]
     public void Результат_містить_шлях_циклу_а_не_лише_прапорець()
     {
         // Ланцюг 5 → 4 → 3 не в циклі; цикл — 1 → 2 → 1.

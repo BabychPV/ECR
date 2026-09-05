@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Security/DangerousPermissionTests.cs
+﻿// tests/Ecr.Application.Tests/Security/DangerousPermissionTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -69,6 +69,7 @@ public sealed class DangerousPermissionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.24")]
     public async Task Видача_небезпечного_права_лишає_слід_в_аудиті()
     {
         await Handler().HandleAsync(

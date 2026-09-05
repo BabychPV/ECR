@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Workflow/ApprovalStateTests.cs
+﻿// tests/Ecr.Domain.Tests/Workflow/ApprovalStateTests.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -40,6 +40,7 @@ public sealed class ApprovalStateTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.12")]
     public void Перехід_Approved_у_Draft_можливий_лише_через_Reopen()
     {
         var state = Submitted();
@@ -67,6 +68,7 @@ public sealed class ApprovalStateTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.16")]
     public void Стан_одного_аркуша_не_зачіпає_інші_аркуші_періоду()
     {
         // ⚠ Стан живе на АРКУШ × ПЕРІОД (D-38). 24 аркуші рідко готові
@@ -83,6 +85,7 @@ public sealed class ApprovalStateTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.15")]
     public void Reject_вимагає_коментаря()
     {
         var state = Submitted();

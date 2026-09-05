@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Registries/OrphanScanTests.cs
+﻿// tests/Ecr.Application.Tests/Registries/OrphanScanTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Errors;
@@ -96,6 +96,7 @@ public sealed class OrphanScanTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.13")]
     public async Task Звуження_ValidTo_ставить_IsOrphaned()
     {
         // Дозвіл був чинним до кінця року; його закривають січнем — тобто
@@ -194,6 +195,7 @@ public sealed class OrphanScanTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.13a")]
     public async Task Читання_зрізу_ознаку_не_перераховує()
     {
         _rows.GetOrphanFlagsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())

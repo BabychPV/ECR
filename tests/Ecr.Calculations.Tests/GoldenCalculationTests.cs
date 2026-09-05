@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
@@ -43,6 +43,7 @@ public sealed class GoldenCalculationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.16")]
     public async Task Тонни_для_ХСК_збігаються_з_очікуваним_значенням_фікстури()
     {
         var output = await RunAsync();
@@ -161,6 +162,7 @@ public sealed class GoldenCalculationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.8")]
     public async Task Результати_пишуться_в_calc_а_не_в_doc_CellValue()
     {
         var cells = Substitute.For<ICellStore>();
@@ -181,6 +183,7 @@ public sealed class GoldenCalculationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.13")]
     public async Task Трейс_у_режимі_Off_не_пишеться_взагалі()
     {
         var off = await RunAsync(trace: TraceLevel.Off);

@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Dictionaries/RegistryEntryTests.cs
+﻿// tests/Ecr.Domain.Tests/Dictionaries/RegistryEntryTests.cs
 using System.Globalization;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
@@ -19,6 +19,7 @@ public sealed class RegistryEntryTests
     [InlineData("2026-06-30", true)]   // рівно ValidTo
     [InlineData("2025-12-31", false)]  // день до
     [InlineData("2026-07-01", false)]  // день після
+    [Trait("Requirement", "ФВ-8.5")]
     public void IsValidOn_включає_обидві_межі(string date, bool expected)
     {
         var entry = Entry();

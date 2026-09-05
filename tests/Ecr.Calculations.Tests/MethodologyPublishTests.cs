@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Security;
@@ -109,6 +109,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.6")]
     public async Task Публікація_формує_diff_РЕЗУЛЬТАТІВ_а_не_diff_коду()
     {
         // Попередня чинна версія з іншим календарним режимом і іншим числом.
@@ -205,6 +206,7 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.10")]
     public async Task Топологічний_порядок_формул_обчислюється_при_публікації()
     {
         var formulas = Formulas();

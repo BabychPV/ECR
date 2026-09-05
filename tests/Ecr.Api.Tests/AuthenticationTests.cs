@@ -137,6 +137,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.7")]
     public async Task Зміна_ролей_робить_поточну_сесію_недійсною_негайно()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);
@@ -231,6 +232,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.2")]
     public async Task Після_зміни_пароля_сеанс_працює_попри_живий_кеш_штампа()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);

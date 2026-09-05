@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+﻿import { describe, it, expect, beforeEach } from 'vitest';
 import {
   DefaultColumnWidth,
   readWidths,
@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 describe('Ширини колонок переживають перезавантаження (ФВ-14.29)', () => {
-  it('без збереженого значення ширини немає — колонка бере типову', () => {
+  it('ФВ-14.29: без збереженого значення ширини немає — колонка бере типову', () => {
     expect(readWidths(1)).toEqual({});
     expect(DefaultColumnWidth).toBeGreaterThan(0);
   });
@@ -76,7 +76,7 @@ describe('Розбір події зміни ширини', () => {
 });
 
 describe('Щільність переживає перезавантаження (ФВ-14.14)', () => {
-  it('за замовчуванням щільна', () => {
+  it('ФВ-14.14: за замовчуванням щільна', () => {
     expect(density()).toBe('compact');
   });
 

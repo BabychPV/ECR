@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { captureEdit, coerce } from '@/features/grid/edits';
 import { cellKey } from '@/features/grid/permissions';
@@ -53,7 +53,7 @@ function slice(
 }
 
 describe('Правка в grid', () => {
-  it('введене значення потрапляє в збереження разом із версією рядка', () => {
+  it('ФВ-3.6: введене значення потрапляє в збереження разом із версією рядка', () => {
     const captured = captureEdit(slice(), { columnCode: 'C1', rowKey: 'R1', raw: '12,5' });
 
     expect(captured).not.toBeNull();

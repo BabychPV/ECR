@@ -75,6 +75,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
     public async Task Небезпечні_права_не_потрапляють_у_вбудовані_ролі_автоматично()
     {
         // ⛔ Жодна СКЛАДЕНА вбудована роль не отримує небезпечного права з

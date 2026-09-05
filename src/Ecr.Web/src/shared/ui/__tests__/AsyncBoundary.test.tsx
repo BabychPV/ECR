@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import type { JSX, ReactNode } from 'react';
@@ -47,14 +47,14 @@ function boundary(props: {
 }
 
 describe('Чотири стани подання', () => {
-  it('очікування показує скелет, а не порожній екран', () => {
+  it('ФВ-14.25: очікування показує скелет, а не порожній екран', () => {
     show(boundary({ isPending: true, error: null, data: undefined }));
 
     expect(screen.getByRole('status', { busy: true })).toBeDefined();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('помилка НІКОЛИ не рендериться як порожній стан (A7-04)', () => {
+  it('ФВ-14.22: помилка НІКОЛИ не рендериться як порожній стан (A7-04)', () => {
     show(boundary({ isPending: false, error: refusal(), data: undefined }));
 
     const alert = screen.getByRole('alert');
@@ -80,7 +80,7 @@ describe('Чотири стани подання', () => {
     expect(screen.queryByText('Аркуш 1')).toBeNull();
   });
 
-  it('порожній стан пояснює і пропонує дію', () => {
+  it('ФВ-14.23: порожній стан пояснює і пропонує дію', () => {
     show(boundary({ isPending: false, error: null, data: { items: [] } }));
 
     expect(screen.getByText('У цьому проєкті ще немає документів')).toBeDefined();
@@ -108,7 +108,7 @@ describe('Чотири стани подання', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('дані показуються, коли вони є', () => {
+  it('ФВ-14.21: дані показуються, коли вони є', () => {
     show(boundary({ isPending: false, error: null, data: { items: ['Аркуш 1', 'Аркуш 2'] } }));
 
     expect(screen.getAllByRole('listitem')).toHaveLength(2);

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+﻿import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -63,7 +63,7 @@ describe('Найдовший рядок каталогу', () => {
     expect(longest?.value.length ?? 0).toBeGreaterThan(60);
   });
 
-  it('доходить до DOM цілим — його не ріже код', async () => {
+  it('ФВ-14.30: доходить до DOM цілим — його не ріже код', async () => {
     const longest = catalogValues().sort((a, b) => b.value.length - a.value.length)[0];
     expect(longest).toBeDefined();
 

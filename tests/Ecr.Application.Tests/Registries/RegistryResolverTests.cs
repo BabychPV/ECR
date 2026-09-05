@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Registries/RegistryResolverTests.cs
+﻿// tests/Ecr.Application.Tests/Registries/RegistryResolverTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -124,6 +124,7 @@ public sealed class RegistryResolverTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.4")]
     public void Каскад_звужує_список_водних_обєктів_за_обраним_дозволом()
     {
         var river = Entry(201, WaterBodies, "RIVER_1", ordinal: 1);
@@ -153,6 +154,7 @@ public sealed class RegistryResolverTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.6")]
     public async Task Запис_на_який_посилаються_дані_не_видаляється_ECR_REG_0409()
     {
         var entry = Entry(101, Permits, "PERMIT_A");
@@ -206,6 +208,7 @@ public sealed class RegistryResolverTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.9")]
     public async Task Перемикання_master_у_відкритому_періоді_відхиляється_ECR_REG_0422()
     {
         var definition = Definition();

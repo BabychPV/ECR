@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { HistoryLimit, UndoStack, type CellEdit } from '@/features/grid/undo';
 
 /**
@@ -22,7 +22,7 @@ describe('Undo/Redo', () => {
     expect(stack.canRedo).toBe(true);
   });
 
-  it('тримає щонайменше 50 кроків історії', () => {
+  it('ФВ-14.4: тримає щонайменше 50 кроків історії', () => {
     const stack = new UndoStack('t1');
 
     for (let i = 0; i < HistoryLimit + 10; i++) {

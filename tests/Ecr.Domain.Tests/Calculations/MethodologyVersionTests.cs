@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Calculations/MethodologyVersionTests.cs
+﻿// tests/Ecr.Domain.Tests/Calculations/MethodologyVersionTests.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
@@ -65,6 +65,7 @@ public sealed class MethodologyVersionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.12")]
     public void Публікація_без_зеленого_тесту_неможлива()
     {
         var version = Version();
@@ -112,6 +113,7 @@ public sealed class MethodologyVersionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.1")]
     public void Опублікована_версія_не_редагується()
     {
         var version = Version();
@@ -137,6 +139,7 @@ public sealed class MethodologyVersionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.9")]
     public void NumericMode_за_замовчуванням_Legacy()
     {
         var version = Version();

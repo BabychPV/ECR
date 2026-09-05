@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { evaluate, format, isError } from '@/shared/formula/evaluate';
@@ -26,7 +26,7 @@ const fixture = resolve(
 const cases = (JSON.parse(readFileSync(fixture, 'utf-8')) as { cases: EquivalenceCase[] }).cases;
 
 describe('Еквівалентність клієнт/сервер', () => {
-  it('спільний набір виразів дає ті самі результати, що й сервер', () => {
+  it('ФВ-14.5: спільний набір виразів дає ті самі результати, що й сервер', () => {
     // ⚠ Читається САМЕ той файл, що й серверним тестом. Копія набору на
     // клієнті розійшлася б із серверною при першій же правці — і обидва
     // тести лишалися б зеленими.

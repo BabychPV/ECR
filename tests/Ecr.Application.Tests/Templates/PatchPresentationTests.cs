@@ -101,6 +101,7 @@ public sealed class PatchPresentationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-7.2")]
     public async Task Успішний_патч_інкрементує_ревізію_і_записує_аудит()
     {
         await Handler().PatchAsync(1, HeaderPatch, userId: 9, CancellationToken.None);

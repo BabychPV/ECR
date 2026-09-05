@@ -16,6 +16,7 @@ public sealed class AuditTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.21")]
     public async Task Аудит_ста_комірок_пишеться_одним_запитом_а_не_ста()
     {
         var doc = await BuildAsync();
@@ -45,6 +46,7 @@ public sealed class AuditTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-3.9")]
     public async Task Автором_зміни_є_UserId_а_не_SID()
     {
         var doc = await BuildAsync();
@@ -114,6 +116,7 @@ public sealed class AuditTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.3")]
     public async Task Зміна_за_січень_у_березні_потрапляє_в_березневу_партицію_аудиту()
     {
         var doc = await BuildAsync(periodKey: 202601);

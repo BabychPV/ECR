@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.TestKit;
 using Xunit;
 
@@ -18,6 +18,7 @@ public sealed class RoundingTests
     [InlineData("1.2345", 2, "1.23")]
     [InlineData("1.2350", 2, "1.24")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.16a")]
     public void ROUND_округлює_від_нуля_а_не_до_парного(string value, int digits, string expected)
     {
         var actual = Expr.Number(

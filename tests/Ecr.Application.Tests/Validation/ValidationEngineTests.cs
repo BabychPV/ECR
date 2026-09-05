@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Validation/ValidationEngineTests.cs
+﻿// tests/Ecr.Application.Tests/Validation/ValidationEngineTests.cs
 using Ecr.Application.Ports;
 using Ecr.Application.Validation;
 using Ecr.Domain.Entities.Configuration;
@@ -47,6 +47,7 @@ public sealed class ValidationEngineTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.1")]
     public void Error_рівня_документа_блокує_Submit_але_не_запис()
     {
         var messages = Engine().ValidateScope(
@@ -65,6 +66,7 @@ public sealed class ValidationEngineTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.3")]
     public void Зламане_правило_дає_Warning_про_правило_а_не_Error_даних()
     {
         var messages = Engine().ValidateCell(
@@ -83,6 +85,7 @@ public sealed class ValidationEngineTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.5")]
     public void Результат_не_залежить_від_порядку_правил()
     {
         var a = Rule("A", ValidationSeverity.Error, scope: 0, "[Volume] >= 0");
@@ -102,6 +105,7 @@ public sealed class ValidationEngineTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.6")]
     public void Результат_валідації_переживає_перезавантаження()
     {
         var column = Column("Volume");

@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Security/PasswordHasherTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Security/PasswordHasherTests.cs
 using System.Diagnostics;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
@@ -14,6 +14,7 @@ public sealed class PasswordHasherTests
     private readonly PasswordHasher _hasher = new();
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.5")]
     public void Однаковий_пароль_дає_різні_хеші_через_різні_солі()
     {
         var first = _hasher.Hash(Password);
@@ -49,6 +50,7 @@ public sealed class PasswordHasherTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.4")]
     public void NeedsRehash_істинний_після_зміни_параметрів()
     {
         var current = _hasher.Hash(Password);
@@ -69,6 +71,7 @@ public sealed class PasswordHasherTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Пароль_не_потрапляє_в_текст_винятку()
     {
         var tooLong = new string('ж', 1024);

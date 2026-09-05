@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Security/SimulationTests.cs
+﻿// tests/Ecr.Application.Tests/Security/SimulationTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -42,6 +42,7 @@ public sealed class SimulationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.16a")]
     public async Task Запис_під_симуляцією_відхиляється_навіть_із_Manage()
     {
         await Start().HandleAsync(Subject, "перевірка скарги", CancellationToken.None);

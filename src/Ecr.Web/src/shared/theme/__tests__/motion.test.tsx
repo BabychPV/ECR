@@ -29,7 +29,7 @@ const routerSource = readFileSync(path.resolve(process.cwd(), 'src/app/router.ts
  * витрачає на те, щоб дивитися, як з'їжджає екран.
  */
 describe('Рух (ФВ-14.27, ФВ-14.28)', () => {
-  it('prefers-reduced-motion ВИМИКАЄ рух, а не послаблює', () => {
+  it('ФВ-14.28: prefers-reduced-motion ВИМИКАЄ рух, а не послаблює', () => {
     const block = css.slice(css.indexOf('prefers-reduced-motion'));
     const body = block.slice(0, block.indexOf('\n}\n'));
 
@@ -45,7 +45,7 @@ describe('Рух (ФВ-14.27, ФВ-14.28)', () => {
     expect(body).toContain('*::after');
   });
 
-  it('у темі немає тривалості понад 150 мс', () => {
+  it('ФВ-14.27: у темі немає тривалості понад 150 мс', () => {
     const durations = JSON.stringify(theme).match(/"?duration"?:\s*(\d+)/g) ?? [];
     const values = durations.map((d) => Number(d.replace(/\D/g, '')));
 
@@ -70,7 +70,7 @@ describe('Рух (ФВ-14.27, ФВ-14.28)', () => {
     expect(router.routes.length).toBeGreaterThan(0);
   });
 
-  it('кільце фокуса не ховається: outline: none без заміни немає', () => {
+  it('ФВ-14.19: кільце фокуса не ховається: outline: none без заміни немає', () => {
     // `ФВ-14.19`. Користувач клавіатури без кільця не знає, де він.
     expect(css).toContain(':focus-visible');
     expect(css).toContain('outline: 2px solid');

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cellKey, decide, guardOf } from '@/features/grid/permissions';
 
@@ -42,7 +42,7 @@ function slice(permissions: Record<string, string>, columns: ColumnDto[] = [colu
 }
 
 describe('Права по комірках', () => {
-  it('read-only комірки візуально відрізняються', () => {
+  it('ФВ-14.3: read-only комірки візуально відрізняються', () => {
     const decision = decide(slice({}), 'R1', column({ isReadOnly: true }));
 
     expect(decision.editable).toBe(false);
@@ -87,7 +87,7 @@ describe('Права по комірках', () => {
     }
   });
 
-  it('відсутність запису у словнику прав означає ДОЗВІЛ', () => {
+  it('ФВ-14.2: відсутність запису у словнику прав означає ДОЗВІЛ', () => {
     // Сервер віддає лише відхилення: словник на 500×60 із дозволами на кожну
     // комірку важив би більше за самі дані.
     expect(decide(slice({}), 'R1', column()).editable).toBe(true);

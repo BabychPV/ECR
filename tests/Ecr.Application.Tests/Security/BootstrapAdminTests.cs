@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Security/BootstrapAdminTests.cs
+﻿// tests/Ecr.Application.Tests/Security/BootstrapAdminTests.cs
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -70,6 +70,7 @@ public sealed class BootstrapAdminTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.18")]
     public void Доки_MustChangePassword_інші_запити_дають_ECR_PWD_0428()
     {
         var error = Assert.Throws<BusinessRuleException>(

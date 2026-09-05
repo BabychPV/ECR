@@ -75,7 +75,7 @@ describe('Дашборд здоров’я', () => {
     expect(await screen.findAllByText('Enterprise')).not.toHaveLength(0);
   });
 
-  it('невдалий запит НЕ виглядає як порожній дашборд (A7-04)', async () => {
+  it('ФВ-14.22: невдалий запит НЕ виглядає як порожній дашборд (A7-04)', async () => {
     respond(
       {
         title: 'Недоступно',

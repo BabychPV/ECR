@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Recalculation/RecalculationServiceTests.cs
+﻿// tests/Ecr.Application.Tests/Recalculation/RecalculationServiceTests.cs
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
@@ -46,6 +46,7 @@ public sealed class RecalculationServiceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-3.5")]
     public void Крос_аркушний_rollup_відкладається_а_не_рахується_синхронно()
     {
         var plan = new RecalculationPlan();
@@ -91,6 +92,7 @@ public sealed class RecalculationServiceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.5")]
     public void Повторний_прогін_на_тих_самих_даних_дає_ті_самі_числа()
     {
         var plan = new RecalculationPlan();

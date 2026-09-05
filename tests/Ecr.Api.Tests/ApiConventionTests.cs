@@ -181,6 +181,7 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-4.5")]
     public void Довга_операція_повертає_202_із_ідентифікатором_задачі()
     {
         // ⚠ Перевірка читає ВИХІДНИЙ КОД контролерів, а не рефлексію.

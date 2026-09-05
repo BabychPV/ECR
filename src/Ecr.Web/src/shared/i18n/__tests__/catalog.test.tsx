@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 describe('Каталог рядків інтерфейсу', () => {
-  it('показує напис, щойно каталог завантажено, без жодної взаємодії', async () => {
+  it('ФВ-14.9: показує напис, щойно каталог завантажено, без жодної взаємодії', async () => {
     catalog({ 'login.title': 'Environmental Compliance Reporting' });
 
     render(<Subscribed k="login.title" />);
@@ -100,7 +100,7 @@ describe('Каталог рядків інтерфейсу', () => {
     expect(t('nav.documents')).toBe('Documents');
   });
 
-  it('другий запит іде з If-None-Match і на 304 лишає збережене', async () => {
+  it('ФВ-14.9b: другий запит іде з If-None-Match і на 304 лишає збережене', async () => {
     catalog({ 'login.submit': 'Sign in' }, 9);
     await loadCatalog('en', 'public');
 

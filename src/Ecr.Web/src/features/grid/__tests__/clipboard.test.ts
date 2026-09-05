@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { parseClipboard, parseNumber, planPaste, toClipboard } from '@/features/grid/clipboard';
 
 /**
@@ -6,7 +6,7 @@ import { parseClipboard, parseNumber, planPaste, toClipboard } from '@/features/
  * grid-бібліотека не підходить.
  */
 describe('Вставка з буфера Excel', () => {
-  it('розбирає багатоклітинний буфер із табуляціями і переносами рядків', () => {
+  it('ФВ-3.3: розбирає багатоклітинний буфер із табуляціями і переносами рядків', () => {
     const matrix = parseClipboard('1\t2\t3\r\n4\t5\t6\r\n');
 
     expect(matrix).toEqual([
@@ -26,7 +26,7 @@ describe('Вставка з буфера Excel', () => {
     expect(parseNumber('')).toBeNull();
   });
 
-  it('вставка 500×60 не блокує UI довше за 200 мс', () => {
+  it('ФВ-14.4: вставка 500×60 не блокує UI довше за 200 мс', () => {
     const rows = Array.from({ length: 500 }, (_, r) =>
       Array.from({ length: 60 }, (_, c) => String(r * 60 + c)).join('\t'),
     ).join('\n');

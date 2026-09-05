@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { JSX, ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -11,7 +11,7 @@ function wrapper(initial: string) {
 }
 
 describe('Фільтр живе в адресі сторінки (ФВ-14.29)', () => {
-  it('початкове значення береться з адреси', () => {
+  it('ФВ-14.29: початкове значення береться з адреси', () => {
     const { result } = renderHook(() => useUrlState('code'), {
       wrapper: wrapper('/admin/registries?code=EQUIP'),
     });

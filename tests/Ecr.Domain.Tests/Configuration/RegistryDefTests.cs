@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Configuration/RegistryDefTests.cs
+﻿// tests/Ecr.Domain.Tests/Configuration/RegistryDefTests.cs
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -11,6 +11,7 @@ namespace Ecr.Domain.Tests.Configuration;
 public sealed class RegistryDefTests
 {
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.2")]
     public void Зміна_запису_інкрементує_DataRevision()
     {
         var registry = Registry();

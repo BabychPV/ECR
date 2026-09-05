@@ -52,7 +52,7 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     expect(contrast(token.dark.line, themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
   });
 
-  it('кільце фокуса контрастне в обох темах', () => {
+  it('ФВ-14.15: кільце фокуса контрастне в обох темах', () => {
     // `brand-6` у світлій, `brand-4` у темній — так задано в `motion.css`.
     expect(contrast('#5474b4', themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
     expect(contrast('#748dc1', themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
@@ -68,7 +68,7 @@ describe('Контраст токенів (ФВ-14.17)', () => {
 });
 
 describe('theme.ts і cell-states.css не розходяться', () => {
-  it.each(names)('значення стану «%s» однакові у двох джерелах', (name) => {
+  it.each(names)('ФВ-14.11: значення стану «%s» однакові у двох джерелах', (name) => {
     const token = cellState[name];
     const slug = kebab(name);
 

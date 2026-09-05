@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Calculations/CalculationOrchestratorTests.cs
+﻿// tests/Ecr.Application.Tests/Calculations/CalculationOrchestratorTests.cs
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -155,6 +155,7 @@ public sealed class CalculationOrchestratorTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.11")]
     public async Task IsCurrent_перемикається_однією_транзакцією()
     {
         var profile = new ModuleProfile();
