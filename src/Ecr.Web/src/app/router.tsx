@@ -12,6 +12,8 @@ import { AppLayout } from './AppLayout';
  * завантажує редактори, яких не відкриє.
  *
  * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52).
+ * `/admin/snapshots` — не виняток із цього правила, а його межа: там
+ * будують і бачать ЗРІЗ (`rpt.*`), який SSRS читає, а не сам звіт.
  */
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 const ChangePasswordPage = lazy(async () => ({
@@ -45,6 +47,12 @@ const SourcesPage = lazy(async () => ({
   default: (await import('@/pages/admin/SourcesPage')).SourcesPage,
 }));
 const JobsPage = lazy(async () => ({ default: (await import('@/pages/admin/JobsPage')).JobsPage }));
+const SnapshotsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/SnapshotsPage')).SnapshotsPage,
+}));
+const UiStringsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/UiStringsPage')).UiStringsPage,
+}));
 const HealthPage = lazy(async () => ({
   default: (await import('@/pages/admin/HealthPage')).HealthPage,
 }));
@@ -120,6 +128,8 @@ export const router = createBrowserRouter([
       { path: 'admin/periods', element: <PeriodsPage /> },
       { path: 'admin/sources', element: <SourcesPage /> },
       { path: 'admin/jobs', element: <JobsPage /> },
+      { path: 'admin/snapshots', element: <SnapshotsPage /> },
+      { path: 'admin/ui-strings', element: <UiStringsPage /> },
       { path: 'admin/health', element: <HealthPage /> },
     ],
   },

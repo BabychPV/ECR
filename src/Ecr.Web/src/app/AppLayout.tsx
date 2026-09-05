@@ -43,6 +43,12 @@ const Items: NavItem[] = [
   { path: '/admin/periods', labelKey: 'nav.periods', permission: 'Period.Manage' },
   { path: '/admin/sources', labelKey: 'nav.sources', permission: 'Integration.Manage' },
   { path: '/admin/jobs', labelKey: 'nav.jobs', permission: 'System.ViewHealth' },
+  { path: '/admin/snapshots', labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory' },
+  {
+    path: '/admin/ui-strings',
+    labelKey: 'nav.uiStrings',
+    permission: 'System.ManageLocalization',
+  },
   { path: '/admin/health', labelKey: 'nav.health', permission: 'System.ViewHealth' },
 ];
 

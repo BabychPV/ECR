@@ -1,9 +1,11 @@
-﻿import type { JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Table } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { DocumentPage } from '@/api/types';
+import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
+import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
@@ -23,6 +25,8 @@ export function DocumentsPage(): JSX.Element {
   // посилання вело б на порожній екран із проханням обрати період наново.
   const [periodKey, setPeriodKey] = useUrlNumber('periodKey');
   const [cursor, setCursor] = useUrlState('cursor');
+  const [creating, setCreating] = useState(false);
+  const session = useSession();
 
   const query = useQuery({
     queryKey: ['documents', periodKey, cursor],
@@ -39,16 +43,27 @@ export function DocumentsPage(): JSX.Element {
       <PageHeader
         title={t('documents.title')}
         actions={
-          <NumberInput
-            size="xs"
-            miw={120}
-            label={t('documents.period')}
-            value={periodKey ?? ''}
-            onChange={(value) => {
-              setPeriodKey(typeof value === 'number' ? value : null);
-              setCursor(null);
-            }}
-          />
+          <Group gap="xs" align="end">
+            <NumberInput
+              size="xs"
+              miw={120}
+              label={t('documents.period')}
+              value={periodKey ?? ''}
+              onChange={(value) => {
+                setPeriodKey(typeof value === 'number' ? value : null);
+                setCursor(null);
+              }}
+            />
+
+            {/* ⛔ Створення документа не мало в інтерфейсі жодної кнопки
+                (`A7-42`): система, уся суть якої — заповнення документів,
+                не давала створити перший. */}
+            {can(session.data, 'Document.Create') && (
+              <Button size="xs" onClick={() => setCreating(true)}>
+                {t('documents.create')}
+              </Button>
+            )}
+          </Group>
         }
       />
 
@@ -111,6 +126,8 @@ export function DocumentsPage(): JSX.Element {
           </>
         )}
       </AsyncBoundary>
+
+      <CreateDocumentModal opened={creating} onClose={() => setCreating(false)} />
     </>
   );
 }

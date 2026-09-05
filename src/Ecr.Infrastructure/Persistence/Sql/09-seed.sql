@@ -601,7 +601,66 @@ USING (VALUES
     (N'security.simulateHint',           N'en', N'Read-only, and the session is recorded before any data is shown. Say why.', 1),
     (N'security.simulationStarted',      N'en', N'You are now viewing with this user''s permissions. Nothing can be changed.', 1),
     (N'security.simulationEnd',          N'en', N'Stop', 1),
-    (N'security.simulationEnded',        N'en', N'Back to your own permissions.', 1)
+    (N'security.simulationEnded',        N'en', N'Back to your own permissions.', 1),
+
+    -- Створення документа.
+    (N'documents.create',                N'en', N'New document', 1),
+    (N'documents.created',               N'en', N'The document has been created.', 1),
+    (N'documents.version',               N'en', N'Template version', 1),
+    (N'documents.versionHint',           N'en', N'Only published versions: a draft has no frozen structure.', 1),
+    (N'documents.pickVersion',           N'en', N'Pick a version', 1),
+    (N'documents.sheetsHint',            N'en', N'Composition rules are checked by the server: a group may require all of its sheets, or exactly one.', 1),
+
+    -- Записи довідників і вікна чинності.
+    (N'registries.newEntry',             N'en', N'New entry', 1),
+    (N'registries.editEntry',            N'en', N'Edit', 1),
+    (N'registries.entryCreated',         N'en', N'The entry has been created.', 1),
+    (N'registries.entrySaved',           N'en', N'The entry has been saved.', 1),
+    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.', 1),
+    (N'registries.validFrom',            N'en', N'Valid from', 1),
+    (N'registries.validTo',              N'en', N'Valid to', 1),
+    (N'registries.validityHint',         N'en', N'This replaces deletion. Rows referring to the entry outside the window become orphaned and block submission.', 1),
+    (N'registries.validitySaved',        N'en', N'Saved. Rows affected: {count}.', 1),
+
+    -- Прогін методології.
+    (N'methodologies.simulate',          N'en', N'Simulate', 1),
+    (N'methodologies.simulatePeriodHint', N'en', N'Nothing is stored: this shows what publishing would produce.', 1),
+    (N'methodologies.run',               N'en', N'Run', 1),
+    (N'methodologies.outputs',           N'en', N'Outputs', 1),
+    (N'methodologies.output',            N'en', N'Output', 1),
+    (N'methodologies.value',             N'en', N'Value', 1),
+    (N'methodologies.diff',              N'en', N'Difference from published', 1),
+    (N'methodologies.trace',             N'en', N'Trace', 1),
+
+    -- Зрізи регламентної звітності.
+    (N'nav.snapshots',                   N'en', N'Report snapshots', 1),
+    (N'snapshots.title',                 N'en', N'Report snapshots', 1),
+    (N'snapshots.build',                 N'en', N'Build snapshot', 1),
+    (N'snapshots.buildHint',             N'en', N'A snapshot is immutable: building again creates a new one instead of overwriting.', 1),
+    (N'snapshots.queued',                N'en', N'Build queued as job {job}.', 1),
+    (N'snapshots.code',                  N'en', N'Report code', 1),
+    (N'snapshots.codeHint',              N'en', N'The report definition to build from; definitions are data, not code.', 1),
+    (N'snapshots.builtAt',               N'en', N'Built at', 1),
+    (N'snapshots.rows',                  N'en', N'Rows', 1),
+    (N'snapshots.status',                N'en', N'Status', 1),
+    (N'snapshots.hash',                  N'en', N'Content hash', 1),
+    (N'snapshots.current',               N'en', N'current', 1),
+    (N'snapshots.empty',                 N'en', N'No snapshots built yet', 1),
+    (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
+
+    -- Редактор рядків інтерфейсу.
+    (N'nav.uiStrings',                   N'en', N'Interface texts', 1),
+    (N'uiStrings.title',                 N'en', N'Interface texts', 1),
+    (N'uiStrings.language',              N'en', N'Language', 1),
+    (N'uiStrings.filter',                N'en', N'Filter by key', 1),
+    (N'uiStrings.key',                   N'en', N'Key', 1),
+    (N'uiStrings.original',              N'en', N'Default language', 1),
+    (N'uiStrings.translation',           N'en', N'Translation', 1),
+    (N'uiStrings.untranslated',          N'en', N'not translated', 1),
+    (N'uiStrings.edit',                  N'en', N'Edit', 1),
+    (N'uiStrings.saved',                 N'en', N'Saved; the catalogue is now at revision {revision}.', 1),
+    (N'uiStrings.empty',                 N'en', N'No keys match', 1),
+    (N'uiStrings.emptyHint',             N'en', N'The catalogue is filled from the default language; clear the filter to see everything.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

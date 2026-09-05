@@ -1,9 +1,14 @@
-﻿import type { JSX } from 'react';
-import { Badge, Group, Select, Table, Text } from '@mantine/core';
+﻿import { useState, type JSX } from 'react';
+import { Badge, Button, Group, Select, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
+import {
+  RegistryEntryEditor,
+  ValidityEditor,
+} from '@/features/registries/RegistryEntryEditor';
 import { localized } from '@/shared/i18n/localized';
+import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -18,6 +23,13 @@ import { t } from '@/shared/i18n';
  */
 export function RegistriesPage(): JSX.Element {
   const [code, setCode] = useUrlState('code');
+  const session = useSession();
+
+  // `undefined` — діалог закритий; `null` — новий запис; об'єкт — правка.
+  const [editing, setEditing] = useState<RegistryEntryDto | null | undefined>(undefined);
+
+  // Для якого запису правимо вікно чинності.
+  const [validity, setValidity] = useState<RegistryEntryDto | null>(null);
 
   const registries = useQuery({
     queryKey: ['registries'],
@@ -40,18 +52,29 @@ export function RegistriesPage(): JSX.Element {
       <PageHeader
         title={t('registries.title')}
         actions={
-          <Select
-            size="xs"
-            miw={220}
-            label={t('registries.title')}
-            placeholder={t('registries.pick')}
-            value={code}
-            onChange={setCode}
-            data={(registries.data ?? []).map((registry) => ({
-              value: registry.code,
-              label: `${localized(registry.nameL10n)} (${registry.code})`,
-            }))}
-          />
+          <Group gap="xs" align="end">
+            <Select
+              size="xs"
+              miw={220}
+              label={t('registries.title')}
+              placeholder={t('registries.pick')}
+              value={code}
+              onChange={setCode}
+              data={(registries.data ?? []).map((registry) => ({
+                value: registry.code,
+                label: `${localized(registry.nameL10n)} (${registry.code})`,
+              }))}
+            />
+
+            {/* ⛔ Заведення запису не мало кнопки (`A7-42`). Довідник без
+                записів — це колонка типу `Lookup`, яка не пропонує нічого,
+                тобто документ, який неможливо заповнити. */}
+            {selected !== undefined && can(session.data, 'Registry.EditData') && (
+              <Button size="xs" onClick={() => setEditing(null)}>
+                {t('registries.newEntry')}
+              </Button>
+            )}
+          </Group>
         }
       />
 
@@ -109,6 +132,7 @@ export function RegistriesPage(): JSX.Element {
                 <Table.Th>{t('registries.name')}</Table.Th>
                 <Table.Th>{t('registries.parent')}</Table.Th>
                 <Table.Th>{t('registries.validity')}</Table.Th>
+                <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -118,12 +142,53 @@ export function RegistriesPage(): JSX.Element {
                   <Table.Td>{entry.display}</Table.Td>
                   <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
                   <Table.Td>{(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}</Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" justify="flex-end">
+                      {can(session.data, 'Registry.EditData') && (
+                        <>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            onClick={() => setEditing(entry)}
+                          >
+                            {t('registries.editEntry')}
+                          </Button>
+
+                          {/* ⚠ Вікно чинності — окрема дія, і саме воно
+                              замінює видалення: запис, на який посилаються
+                              комірки, закривають датою (`ФВ-8.5`). */}
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            onClick={() => setValidity(entry)}
+                          >
+                            {t('registries.validity')}
+                          </Button>
+                        </>
+                      )}
+                    </Group>
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
           </Table>
         )}
       </AsyncBoundary>
+
+      {selected !== undefined && (
+        <RegistryEntryEditor
+          registry={selected}
+          entry={editing ?? null}
+          opened={editing !== undefined}
+          onClose={() => setEditing(undefined)}
+        />
+      )}
+
+      <ValidityEditor
+        registryCode={code ?? ''}
+        entry={validity}
+        onClose={() => setValidity(null)}
+      />
     </>
   );
 }
