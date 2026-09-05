@@ -157,6 +157,7 @@ export function DocumentPage(): JSX.Element {
             <NumberInput
               size="xs"
               miw={110}
+              label={t('documents.period')}
               value={periodKey}
               onChange={(value) => setPeriodKey(typeof value === 'number' ? value : periodKey)}
             />

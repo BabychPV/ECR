@@ -91,6 +91,24 @@ export default [
         },
         {
           /*
+           * ФВ-14.20: у поля має бути ПІДПИС, а не placeholder.
+           *
+           * ⛔ Правило написане тому, що `axe` цього не ловить: за його
+           * правилом `label` непорожній `placeholder` вважається достатнім
+           * ім'ям, і поле без підпису проходить перевірку доступності.
+           * Перевірено — прибраний `label` не завалив жодного маршруту.
+           *
+           * ⚠ А вимога саме про підпис: placeholder ЗНИКАЄ при введенні, і
+           * користувач, який відвернувся на секунду, більше не знає, що він
+           * заповнює. У формі на двадцять полів це не дрібниця.
+           */
+          selector:
+            "JSXOpeningElement[name.name=/^(TextInput|NumberInput|PasswordInput|Textarea|Select|MultiSelect|Autocomplete|DateInput|DatePickerInput|Checkbox|Switch|Radio)$/]:not(:has(JSXAttribute[name.name='label'])):not(:has(JSXAttribute[name.name='aria-label'])):not(:has(JSXAttribute[name.name='aria-labelledby']))",
+          message:
+            'Поле без підпису — ФВ-14.20: додайте label (placeholder не рахується: він зникає при введенні).',
+        },
+        {
+          /*
            * Відступ, колір або шрифт усередині `style={{…}}`.
            *
            * ⚠ Заборонені саме ці властивості, а не сам `style`: `height:

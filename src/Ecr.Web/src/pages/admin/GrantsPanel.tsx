@@ -63,6 +63,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         <Select
           size="xs"
           miw={200}
+          label={t('security.role')}
           placeholder={t('grants.pickRole')}
           data={roles.map((r) => ({ value: String(r.id), label: r.code }))}
           value={roleId === null ? null : String(roleId)}
@@ -125,9 +126,17 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             {draft.map((grant, index) => (
               <Table.Tr key={`${grant.resourceKind}:${grant.resourceId}:${index}`}>
                 <Table.Td>
+                  {/*
+                   * ⚠ Тут `aria-label`, а не `label`: підпис уже стоїть у
+                   * заголовку колонки і видно очима. Але читалка НЕ пов'язує
+                   * `<th>` з полем усередині `<td>` — для неї це просто
+                   * безіменний список, і без імені користувач чує «поле зі
+                   * списком» чотири рази підряд.
+                   */}
                   <Select
                     size="xs"
                     miw={110}
+                    aria-label={`${t('grants.kind')} ${index + 1}`}
                     data={['Project', 'Sheet', 'Table', 'Column']}
                     value={grant.resourceKind}
                     onChange={(value) =>
@@ -139,6 +148,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                   <NumberInput
                     size="xs"
                     miw={90}
+                    aria-label={`${t('grants.resource')} ${index + 1}`}
                     value={grant.resourceId}
                     onChange={(value) =>
                       replace(index, {
@@ -152,6 +162,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                   <Select
                     size="xs"
                     miw={110}
+                    aria-label={`${t('grants.level')} ${index + 1}`}
                     data={['Read', 'Write', 'Submit', 'Approve', 'Manage']}
                     value={grant.level}
                     onChange={(value) =>
@@ -165,6 +176,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                       None»: рівень і заборона — різні речі. */}
                   <Switch
                     size="xs"
+                    aria-label={`${t('grants.deny')} ${index + 1}`}
                     checked={grant.isDeny}
                     onChange={(event) =>
                       replace(index, { ...grant, isDeny: event.currentTarget.checked })

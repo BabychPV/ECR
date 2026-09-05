@@ -203,8 +203,12 @@ export function t(key: string, params?: Record<string, string | number>): string
 }
 
 function lookup(lang: Language, key: string): string | undefined {
+  // ⛔ `?.` і на `strings` теж. Каталог — це ВІДПОВІДЬ СЕРВЕРА, а не наш
+  // об'єкт: проксі, шлюз або застаріле збережене значення можуть віддати JSON
+  // без цього поля. Без захисту `t()` кидає виняток на першому ж написі, а
+  // виняток у рендері — це білий екран замість застосунку.
   return (
-    loaded.get(`${lang}:private`)?.strings[key] ?? loaded.get(`${lang}:public`)?.strings[key]
+    loaded.get(`${lang}:private`)?.strings?.[key] ?? loaded.get(`${lang}:public`)?.strings?.[key]
   );
 }
 

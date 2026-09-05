@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Table } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -38,7 +38,7 @@ export function DocumentsPage(): JSX.Element {
           <NumberInput
             size="xs"
             miw={120}
-            placeholder={t('documents.period')}
+            label={t('documents.period')}
             value={periodKey ?? ''}
             onChange={(value) => {
               setPeriodKey(typeof value === 'number' ? value : null);

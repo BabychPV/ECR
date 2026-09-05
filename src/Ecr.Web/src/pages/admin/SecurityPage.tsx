@@ -181,6 +181,7 @@ export function SecurityPage(): JSX.Element {
                     >
                       <Switch
                         size="xs"
+                        aria-label={`${t('security.alerts')} · ${user.userName}`}
                         checked={user.receivesAlerts}
                         disabled={
                           user.email === null || user.email === '' || alerts.isPending

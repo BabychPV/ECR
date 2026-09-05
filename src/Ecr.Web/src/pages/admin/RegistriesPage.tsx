@@ -42,6 +42,7 @@ export function RegistriesPage(): JSX.Element {
           <Select
             size="xs"
             miw={220}
+            label={t('registries.title')}
             placeholder={t('registries.pick')}
             value={code}
             onChange={setCode}

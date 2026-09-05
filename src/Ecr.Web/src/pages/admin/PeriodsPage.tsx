@@ -64,6 +64,7 @@ export function PeriodsPage(): JSX.Element {
             <Select
               size="xs"
               miw={220}
+              label={t('periods.project')}
               placeholder={t('periods.pickProject')}
               data={(projects.data?.items ?? []).map((p) => ({
                 value: String(p.id),
