@@ -113,7 +113,7 @@ public sealed class ReportSnapshot : Entity<long>
         int reportVersionId,
         int projectId,
         int? periodKey,
-        DocumentStatus status,
+        SnapshotStatus status,
         DateTime utcNow,
         int? builtByUserId)
     {
@@ -131,8 +131,17 @@ public sealed class ReportSnapshot : Entity<long>
     public string? ParametersJson { get; private set; }
     public long? CalculationRunId { get; private set; }
 
-    /// <summary>Статус ДАНИХ зрізу; регуляторна вʼюха бере лише два (D-65).</summary>
-    public DocumentStatus Status { get; private set; }
+    /// <summary>
+    /// Статус ДАНИХ зрізу; регуляторна вʼюха бере лише <c>Approved</c> і
+    /// <c>Submitted</c> (D-65).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий тип від <c>DocumentStatus</c>, і не з педантизму: у зрізі
+    /// немає стану <c>Rejected</c>. Відхилений аркуш повертається в роботу і
+    /// зрізу не дає взагалі — а спільний enum створив би стан, який неможливо
+    /// ні побудувати, ні пояснити.
+    /// </remarks>
+    public SnapshotStatus Status { get; private set; }
 
     /// <summary>Чи це поточний зріз для пари «версія × проєкт × період».</summary>
     public bool IsCurrent { get; private set; }
@@ -159,6 +168,37 @@ public sealed class ReportSnapshot : Entity<long>
 
     /// <summary>Робить зріз поточним.</summary>
     public void MakeCurrent() => IsCurrent = true;
+
+    /// <summary>
+    /// Перераховує статус за поточним станом аркушів.
+    /// </summary>
+    /// <param name="status">Статус, виведений із <c>wf.ApprovalState</c>.</param>
+    /// <exception cref="DomainException">Зріз уже поданий.</exception>
+    /// <remarks>
+    /// ⛔ Поданий зріз статусу не міняє: він іммутабельний (ФВ-9.17). Потреба
+    /// показати інші числа закривається НОВИМ зрізом, інакше звіт,
+    /// роздрукований учора, і той самий звіт сьогодні дали б різні числа без
+    /// жодного сліду.
+    /// </remarks>
+    public void RefreshStatus(SnapshotStatus status)
+    {
+        if (Status == SnapshotStatus.Submitted)
+        {
+            throw new DomainException(
+                "ECR-RPT-0409",
+                $"Зріз {Id} поданий: його статус не змінюється, потрібен новий зріз.");
+        }
+
+        Status = status;
+    }
+
+    /// <summary>Позначає зріз поданим — після цього він іммутабельний.</summary>
+    /// <param name="userId">Хто подав.</param>
+    public void MarkSubmitted(int userId)
+    {
+        Status = SnapshotStatus.Submitted;
+        BuiltByUserId = BuiltByUserId ?? userId;
+    }
 
     /// <summary>Знімає поточність — попередній зріз лишається читабельним.</summary>
     /// <remarks>

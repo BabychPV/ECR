@@ -199,8 +199,16 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await new SeedRunner(seedDb).RunAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
-    /// <summary>Створює контекст на тестову базу.</summary>
-    private EcrDbContext CreateContext()
+    /// <summary>
+    /// Створює контекст на тестову базу.
+    /// </summary>
+    /// <remarks>
+    /// Публічний навмисно: інтеграційні тести, що перевіряють сховища,
+    /// потребують справжнього контексту на справжню схему. Будувати його в
+    /// кожному тесті руками означало б мати десяток місць, де налаштування
+    /// розійдуться з фікстурою.
+    /// </remarks>
+    public EcrDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<EcrDbContext>()
             .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))

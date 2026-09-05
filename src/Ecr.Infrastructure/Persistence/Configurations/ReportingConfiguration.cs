@@ -56,7 +56,7 @@ public sealed class ReportSnapshotConfiguration : IEntityTypeConfiguration<Repor
 
         builder.ToTable("ReportSnapshot", "rpt");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Status).HasDefaultValue(Domain.Enums.DocumentStatus.Draft);
+        builder.Property(x => x.Status).HasDefaultValue(Domain.Enums.SnapshotStatus.Draft);
         builder.Property(x => x.IsCurrent).HasDefaultValue(false);
         builder.Property(x => x.RowCount).HasColumnName("RowCount").HasDefaultValue(0);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
