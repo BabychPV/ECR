@@ -80,9 +80,24 @@ public sealed class BootstrapAdminTests
         // Дозволені рівно чотири напрямки. Каталог рядків серед них не з
         // поблажливості: без нього екран зміни пароля показав би сирі ключі
         // замість підписів полів.
+        //
+        // ⛔ Шляхи тут — СПРАВЖНІ маршрути контролерів. До `A7-14` і перелік,
+        // і цей тест писали `/api/v1/auth/logout` та `/api/v1/auth/me`, яких
+        // не існує: тест підтверджував, що ворота пропускають вигаданий шлях,
+        // і мовчав про те, що справжній вони закривають. Що ці шляхи існують,
+        // окремо стежить архітектурний сторож.
         PasswordChangeGate.Ensure(true, "/api/v1/auth/change-password");
-        PasswordChangeGate.Ensure(true, "/api/v1/auth/logout");
+        PasswordChangeGate.Ensure(true, "/api/v1/logout");
         PasswordChangeGate.Ensure(true, "/api/v1/ui-strings/en?scope=public");
+
+        // ⚠ `/me` — теж дозволений: саме з нього клієнт дізнається, що треба
+        // на зміну пароля. Закритий, він робить вхід нескінченним колом.
+        PasswordChangeGate.Ensure(true, "/api/v1/me");
+
+        // А ось те, чого немає, ворота НЕ пропускають — інакше помилка в
+        // переліку знову лишилася б непоміченою.
+        Assert.Throws<BusinessRuleException>(
+            () => PasswordChangeGate.Ensure(true, "/api/v1/auth/logout"));
 
         // Без прапорця не блокується нічого.
         PasswordChangeGate.Ensure(false, "/api/v1/documents/7");

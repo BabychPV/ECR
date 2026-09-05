@@ -157,3 +157,39 @@ export type ReportSnapshotSummary = Schemas['ReportSnapshotSummary'];
 
 /** Стан фонової задачі. */
 export type JobStatus = Schemas['JobStatus'];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Тіла запитів.
+//
+// ⛔ Так само згенеровані. До наскрізного аудиту екрани складали їх
+// об'єктними літералами «за здоровим глуздом», і сторож адрес їх не бачив:
+// адреса була правильна, а поле — ні. Вхід надсилав `login` замість
+// `userName` і отримував 400 на кожну спробу (`A7-09`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Каталог рядків інтерфейсу. */
+export type UiStringCatalog = Schemas['UiStringCatalog'];
+
+/** Локальний вхід. */
+export type LocalLoginRequest = Schemas['LocalLoginRequest'];
+
+/** Зміна власного пароля. */
+export type ChangePasswordRequest = Schemas['ChangePasswordRequest'];
+
+/** Запит на експорт документа. */
+export type ExportRequest = Schemas['ExportRequest'];
+
+/** Запит на застосування імпорту. */
+export type ImportApplyRequest = Schemas['ImportApplyRequest'];
+
+/** Подання або затвердження аркуша. */
+export type SheetWorkflowRequest = Schemas['SheetWorkflowRequest'];
+
+/** Публікація версії методології. */
+export type PublishMethodologyRequest = Schemas['PublishMethodologyRequest'];
+
+/** Запуск збору з джерела. */
+export type CollectRequest = Schemas['CollectRequest'];
+
+/** Побудова зрізу звітності. */
+export type BuildSnapshotRequest = Schemas['BuildSnapshotRequest'];

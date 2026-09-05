@@ -25,8 +25,11 @@ public sealed class RunCalculationHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
-    /// <summary>Право на перерахунок закритого періоду (ФВ-9.7).</summary>
-    public const string RecalculateClosedPermission = "Calculation.RecalculateClosed";
+    // ⛔ Константи `RecalculateClosedPermission` тут більше немає (`A7-20`).
+    // Вона оголошувала право `Calculation.RecalculateClosed`, якого немає в
+    // каталозі `sec.Permission` і не було в контракті: видати його не міг
+    // ніхто, а перевіряти його ніде й не пробували. Правило ФВ-9.7 тримається
+    // не правом, а ПОГОДЖЕННЯМ (`approval` нижче) — і саме тому працює.
 
     /// <summary>Ставить прогін у чергу і повертає ідентифікатор задачі.</summary>
     /// <param name="projectId">Проєкт.</param>

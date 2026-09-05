@@ -135,7 +135,8 @@ GO
 
 MERGE sec.Role AS t
 USING (VALUES (N'SystemAdministrator'), (N'TemplateAdministrator'), (N'PeriodAdministrator'),
-              (N'DataEntry'), (N'Approver'), (N'Viewer'), (N'Auditor')) AS s (Code)
+              (N'DataEntry'), (N'Approver'), (N'Viewer'), (N'Auditor'),
+              (N'BootstrapAdministrator')) AS s (Code)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsBuiltIn)
      VALUES (s.Code, N'{"en":"' + s.Code + N'"}', 1);
@@ -213,6 +214,36 @@ ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
 
+-- ── Роль первинного налаштування ─────────────────────────────────────────
+-- ⛔ ЄДИНЕ місце, де небезпечне право видається seed-ом, і воно свідоме.
+-- Фільтр вище (`IsDangerous = 0`) залишає систему без жодного способу
+-- призначити першого адміністратора: `Security.ManageUsers` небезпечне за
+-- визначенням, а прямих прав на користувача в моделі немає — тільки через
+-- роль. Без цього блоку щойно розгорнута система не налаштовується взагалі:
+-- bootstrap-запис входить і не може створити нікого (`A7-13`).
+--
+-- ⚠ Виняток обмежений із трьох боків, і саме тому він припустимий:
+--   * роль отримує РІВНО ДВА права — керування користувачами й ролями, тобто
+--     передати систему людям і більше нічого: ані даних, ані методологій;
+--   * носій рівно один — bootstrap-запис (`UX_User_Bootstrap`), локальний,
+--     з обов'язковою зміною пароля при першому вході;
+--   * він вимикається автоматично, щойно з'являється доменний адміністратор
+--     із тим самим правом (ФВ-6.18, D-97).
+--
+-- ⚠ Сім звичайних вбудованих ролей правила НЕ порушують: небезпечні права їм
+-- додає людина окремою дією, видимою в аудиті (ФВ-6.12, D-40).
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES (N'Security.ManageUsers'), (N'Security.ManageRoles')) AS m (Code)
+    JOIN sec.Permission AS p ON p.Code = m.Code
+    CROSS JOIN sec.Role AS r
+    WHERE r.Code = N'BootstrapAdministrator'
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+
 -- Політика періодів ECR
 MERGE doc.PeriodPolicy AS t USING (VALUES (N'ECR-Standard', 0, 15, 45, 45))
       AS s (Code, O, G, H, Y) ON t.Code = s.Code
@@ -229,27 +260,165 @@ WHEN NOT MATCHED THEN INSERT (Id, Revision, ModifiedAt)
      VALUES (s.Id, s.Rev, SYSUTCDATETIME());
 GO
 
--- Мінімальний ПУБЛІЧНИЙ набір (Scope = 0) мовою за замовчуванням.
--- Без нього перший запуск покаже сирі ключі на сторінці входу — першому,
--- що бачить будь-хто. Решта ключів додається разом із областями UI.
+-- Каталог рядків інтерфейсу мовою за замовчуванням.
+--
+-- ⛔ Тут ВЕСЬ набір ключів, які просить клієнт, а не «мінімальний». До `A7-12`
+-- у seed були самі лише публічні рядки — та й ті під ключами `auth.*`,
+-- яких клієнт не просить. Застосунок малював технічні ключі: кнопка
+-- з написом `login.submit`, колонка `periods.grace`. Ключ без значення
+-- показується як є (це навмисно — порожня кнопка гірша), тому дефект не
+-- падав і не логувався: він просто був видимий усім.
+--
+-- ⚠ Область — це ВИДИМІСТЬ, а не рубрика, і ключ має рівно одну
+-- (`PK_UiString ([Key], LanguageCode)`). Спільні ключі (`app.*`, `common.*`,
+-- `err.*`) лежать у публічній: «Зберегти» і текст помилки не є
+-- таємницею, а приватна область віддається разом із ними.
+--
+-- ⚠ Переклади іншими мовами — дані реєстру, а не збірки (D-95): вони
+-- заводяться через `PUT /api/v1/ui-strings/{lang}/{key}` і сюди не потрапляють.
 MERGE sys_ecr.UiString AS t
 USING (VALUES
-    (N'auth.title',            N'en', N'Environmental Compliance Reporting', 0),
-    (N'auth.windows',          N'en', N'Sign in with Windows',              0),
-    (N'auth.local',            N'en', N'Sign in with account',              0),
-    (N'auth.userName',         N'en', N'User name',                         0),
-    (N'auth.password',         N'en', N'Password',                          0),
-    (N'auth.submit',           N'en', N'Sign in',                           0),
-    (N'auth.mustChange',       N'en', N'Change your password to continue',  0),
-    (N'common.save',           N'en', N'Save',                              0),
-    (N'common.cancel',         N'en', N'Cancel',                            0),
-    (N'common.retry',          N'en', N'Retry',                             0),
-    (N'common.loading',        N'en', N'Loading…',                          0),
-    (N'err.ECR-AUTH-0401',     N'en', N'Sign in to continue.',              0),
-    (N'err.ECR-AUTH-0403',     N'en', N'You do not have permission for this action.', 0),
-    (N'err.ECR-AUTH-0423',     N'en', N'The account is locked.',            0),
-    (N'err.ECR-PWD-0428',      N'en', N'Password change is required.',      0),
-    (N'err.ECR-PWD-0422',      N'en', N'The new password does not meet the policy.', 0)
+    (N'app.loading',       N'en', N'Loading...', 0),
+    (N'common.save',       N'en', N'Save', 0),
+    (N'common.cancel',     N'en', N'Cancel', 0),
+    (N'common.retry',      N'en', N'Retry', 0),
+    (N'common.loading',    N'en', N'Loading...', 0),
+    (N'login.title',       N'en', N'Environmental Compliance Reporting', 0),
+    (N'login.windows',     N'en', N'Sign in with Windows', 0),
+    (N'login.or',          N'en', N'or', 0),
+    (N'login.user',        N'en', N'User name', 0),
+    (N'login.password',    N'en', N'Password', 0),
+    (N'login.submit',      N'en', N'Sign in', 0),
+    (N'login.hint',        N'en', N'Use your Windows account, or the local account issued to you.', 0),
+    (N'err.ECR-AUTH-0401', N'en', N'Sign in to continue.', 0),
+    (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
+    (N'err.ECR-AUTH-0423', N'en', N'The account is locked.', 0),
+    (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
+    (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
+
+    -- Приватна область: усе, що видно лише після входу.
+    (N'app.simulating',                  N'en', N'Viewing as {user}', 1),
+    (N'nav.documents',                   N'en', N'Documents', 1),
+    (N'nav.templates',                   N'en', N'Templates', 1),
+    (N'nav.registries',                  N'en', N'Registries', 1),
+    (N'nav.methodologies',               N'en', N'Methodologies', 1),
+    (N'nav.security',                    N'en', N'Security', 1),
+    (N'nav.periods',                     N'en', N'Periods', 1),
+    (N'nav.sources',                     N'en', N'Sources', 1),
+    (N'nav.jobs',                        N'en', N'Jobs', 1),
+    (N'nav.health',                      N'en', N'Health', 1),
+    (N'documents.title',                 N'en', N'Documents', 1),
+    (N'documents.key',                   N'en', N'Key', 1),
+    (N'documents.project',               N'en', N'Project', 1),
+    (N'documents.period',                N'en', N'Period', 1),
+    (N'documents.sheets',                N'en', N'Sheets', 1),
+    (N'documents.state',                 N'en', N'State', 1),
+    (N'documents.empty',                 N'en', N'No documents for this period.', 1),
+    (N'documents.more',                  N'en', N'Load more', 1),
+    (N'document.validate',               N'en', N'Validate', 1),
+    (N'document.validationClean',        N'en', N'Validation passed with no errors.', 1),
+    (N'document.validationErrors',       N'en', N'Validation found {count} error(s).', 1),
+    (N'document.submit',                 N'en', N'Submit', 1),
+    (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
+    (N'document.export',                 N'en', N'Export to Excel', 1),
+    (N'document.exportQueued',           N'en', N'Export queued as job {job}.', 1),
+    (N'document.noSheets',               N'en', N'This document has no sheets for the selected period.', 1),
+    (N'grid.loading',                    N'en', N'Loading the table...', 1),
+    (N'grid.loadFailed',                 N'en', N'The table could not be loaded.', 1),
+    (N'grid.undo',                       N'en', N'Undo', 1),
+    (N'grid.redo',                       N'en', N'Redo', 1),
+    (N'grid.save',                       N'en', N'Save ({count})', 1),
+    (N'grid.edit',                       N'en', N'Edit {column}', 1),
+    (N'grid.paste',                      N'en', N'Paste {count} cell(s)', 1),
+    (N'grid.conflictTitle',              N'en', N'Someone changed these cells', 1),
+    (N'grid.conflictHint',               N'en', N'{count} cell(s) were changed by another user. Review them before saving again.', 1),
+    (N'grid.rejectedTitle',              N'en', N'Some cells were not saved', 1),
+    (N'grid.rejectedHint',               N'en', N'The cells below are read-only for you. Nothing from this paste was saved.', 1),
+    (N'grid.unknownColumn',              N'en', N'There is no column {column} in this table.', 1),
+    (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
+    (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
+    (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),
+    (N'deny.OutOfAccessWindow',          N'en', N'The access window for this period and your role has already closed.', 1),
+    (N'deny.DocumentSubmitted',          N'en', N'The document is submitted: it must be returned for rework first.', 1),
+    (N'deny.DocumentApproved',           N'en', N'The document is approved: it must be returned for rework first.', 1),
+    (N'deny.ColumnReadOnly',             N'en', N'The column is read-only by the template definition.', 1),
+    (N'deny.RowReadOnly',                N'en', N'The row is read-only by the template definition.', 1),
+    (N'deny.CalculatedCell',             N'en', N'The system computes this cell: its value changes on the next recalculation.', 1),
+    (N'deny.ProjectArchived',            N'en', N'The project is archived: the data is read-only.', 1),
+    (N'deny.ArchivingInProgress',        N'en', N'Archiving is running: writing is temporarily unavailable.', 1),
+    (N'deny.BusinessRule',               N'en', N'A domain rule blocks this change.', 1),
+    (N'deny.SimulationReadOnly',         N'en', N'Permission simulation: writing is disabled regardless of permissions.', 1),
+    (N'deny.Unknown',                    N'en', N'Editing is blocked: {reason}.', 1),
+    (N'password.title',                  N'en', N'Change password', 1),
+    (N'password.current',                N'en', N'Current password', 1),
+    (N'password.next',                   N'en', N'New password', 1),
+    (N'password.repeat',                 N'en', N'Repeat the new password', 1),
+    (N'password.submit',                 N'en', N'Change password', 1),
+    (N'password.mismatch',               N'en', N'The two entries do not match.', 1),
+    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', 1),
+    (N'templates.title',                 N'en', N'Templates', 1),
+    (N'templates.code',                  N'en', N'Code', 1),
+    (N'templates.versions',              N'en', N'Versions', 1),
+    (N'version.title',                   N'en', N'Template version', 1),
+    (N'version.publish',                 N'en', N'Publish', 1),
+    (N'version.published',               N'en', N'The version has been published.', 1),
+    (N'version.column',                  N'en', N'Column', 1),
+    (N'version.type',                    N'en', N'Type', 1),
+    (N'version.unit',                    N'en', N'Unit', 1),
+    (N'version.readOnly',                N'en', N'read-only', 1),
+    (N'registries.title',                N'en', N'Registries', 1),
+    (N'registries.pick',                 N'en', N'Pick a registry', 1),
+    (N'registries.code',                 N'en', N'Code', 1),
+    (N'registries.name',                 N'en', N'Name', 1),
+    (N'registries.parent',               N'en', N'Parent', 1),
+    (N'registries.fields',               N'en', N'Fields', 1),
+    (N'registries.validity',             N'en', N'Valid', 1),
+    (N'registries.hierarchical',         N'en', N'hierarchical', 1),
+    (N'registries.temporal',             N'en', N'time-bound', 1),
+    (N'methodologies.title',             N'en', N'Methodologies', 1),
+    (N'methodologies.code',              N'en', N'Code', 1),
+    (N'methodologies.versions',          N'en', N'Versions', 1),
+    (N'methodologies.publish',           N'en', N'Publish', 1),
+    (N'methodologies.published',         N'en', N'The version has been published.', 1),
+    (N'methodologies.publishTitle',      N'en', N'Publish methodology version', 1),
+    (N'methodologies.reason',            N'en', N'Reason for the change', 1),
+    (N'methodologies.reasonHint',        N'en', N'Recorded in the change log: it explains why past numbers were recalculated.', 1),
+    (N'methodologies.effectiveFrom',     N'en', N'Effective from', 1),
+    (N'methodologies.effectiveFromHint', N'en', N'Periods from this date on are calculated by this version; earlier ones keep the previous.', 1),
+    (N'security.title',                  N'en', N'Security', 1),
+    (N'security.roles',                  N'en', N'Roles', 1),
+    (N'security.users',                  N'en', N'Users', 1),
+    (N'security.role',                   N'en', N'Role', 1),
+    (N'security.name',                   N'en', N'Name', 1),
+    (N'security.login',                  N'en', N'Login', 1),
+    (N'security.kind',                   N'en', N'Kind', 1),
+    (N'security.userState',              N'en', N'State', 1),
+    (N'security.builtIn',                N'en', N'built-in', 1),
+    (N'security.dangerous',              N'en', N'{count} dangerous permission(s)', 1),
+    (N'security.bootstrap',              N'en', N'bootstrap', 1),
+    (N'security.lockedOut',              N'en', N'locked out', 1),
+    (N'security.mustChangePassword',     N'en', N'must change password', 1),
+    (N'periods.title',                   N'en', N'Periods', 1),
+    (N'periods.pickProject',             N'en', N'Pick a project', 1),
+    (N'periods.project',                 N'en', N'Project', 1),
+    (N'periods.key',                     N'en', N'Period', 1),
+    (N'periods.sequence',                N'en', N'Sequence', 1),
+    (N'periods.range',                   N'en', N'Range', 1),
+    (N'periods.state',                   N'en', N'State', 1),
+    (N'periods.grace',                   N'en', N'Grace until', 1),
+    (N'sources.title',                   N'en', N'Sources', 1),
+    (N'sources.entity',                  N'en', N'Entity', 1),
+    (N'sources.transport',               N'en', N'Transport', 1),
+    (N'sources.lastRun',                 N'en', N'Last run', 1),
+    (N'sources.gap',                     N'en', N'Gaps', 1),
+    (N'sources.never',                   N'en', N'never', 1),
+    (N'sources.collect',                 N'en', N'Collect', 1),
+    (N'sources.queued',                  N'en', N'Collection queued as job {job}.', 1),
+    (N'jobs.title',                      N'en', N'Jobs', 1),
+    (N'jobs.id',                         N'en', N'Job id', 1),
+    (N'jobs.watch',                      N'en', N'Watch', 1),
+    (N'health.title',                    N'en', N'Health', 1),
+    (N'health.database',                 N'en', N'Database', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

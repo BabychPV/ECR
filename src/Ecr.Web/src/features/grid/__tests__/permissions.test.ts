@@ -59,8 +59,12 @@ describe('Права по комірках', () => {
     const decision = decide(slice({ [cellKey('R1', 'C1')]: 'PeriodClosed' }), 'R1', column());
 
     expect(decision.reason).toBe('PeriodClosed');
-    expect(decision.hint).toContain('Період закрито');
-    expect(decision.hint).not.toBe('недоступно');
+
+    // ⚠ Перевіряється НАЗВАНА причина, а не конкретний текст: тексти живуть у
+    // каталозі на сервері (D-95), і тест, який їх повторює, ламався б від
+    // кожної правки формулювання, нічого при цьому не захищаючи.
+    expect(decision.hint).toContain('PeriodClosed');
+    expect(decision.hint).not.toBe(decide(slice({ [cellKey('R1', 'C1')]: 'NoGrant' }), 'R1', column()).hint);
   });
 
   it('редагування забороненої комірки не надсилає запит на сервер', async () => {
@@ -99,6 +103,9 @@ describe('Права по комірках', () => {
     // ⚠ І не видає її за «немає права»: підмінити невідому причину знайомою
     // означає збрехати користувачеві про те, чому комірка сіра.
     expect(decision.reason).toBeNull();
+
+    // ⚠ Причина серверa доходить до користувача навіть без перекладу: інакше
+    // нова назва перетворюється на беззмістовне «недоступно».
     expect(decision.hint).toContain('СутоНоваПричина');
   });
 

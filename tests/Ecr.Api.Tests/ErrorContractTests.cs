@@ -43,18 +43,26 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var client = app.CreateClient();
 
-        // Ендпоінт, реалізація якого ще кидає NotImplementedException:
-        // конвеєр має перетворити будь-який виняток на problem+json.
-        var response = await client.GetAsync(new Uri("/api/v1/templates/1/versions", UriKind.Relative));
+        // ⛔ Запит іде ПІД КОРИСТУВАЧЕМ. Раніше тест ходив анонімно і на 401
+        // виходив достроково з коментарем «це теж коректна поведінка» — тобто
+        // не перевіряв нічого і був зелений завжди. Анонімний запит зупиняє
+        // автентифікація ще до конвеєра помилок, з порожнім тілом.
+        var (userName, _) = await ArrangeAsync().ConfigureAwait(true);
+
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName, password = LoginPassword }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        // Шаблона з таким номером немає — конвеєр має перетворити відмову
+        // обробника на problem+json із кодом.
+        var response = await client.GetAsync(new Uri("/api/v1/templates/999999/versions", UriKind.Relative));
         var body = await response.Content.ReadAsStringAsync();
 
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            return;   // авторизація спрацювала раніше — це теж коректна поведінка
-        }
+        Assert.False(string.IsNullOrWhiteSpace(body), $"Порожнє тіло на {response.StatusCode}: {app.ErrorsText}");
 
         var json = JsonDocument.Parse(body).RootElement;
-        Assert.Equal("ECR-SYS-0500", json.GetProperty("errorCode").GetString());
+        Assert.StartsWith("ECR-", json.GetProperty("errorCode").GetString(), StringComparison.Ordinal);
         Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("correlationId").GetString()));
     }
 

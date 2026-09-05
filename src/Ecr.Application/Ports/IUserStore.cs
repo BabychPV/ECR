@@ -62,6 +62,17 @@ public interface IUserStore
     public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct);
 
     /// <summary>Залишає з переліку лише **небезпечні** права (<c>ФВ-6.12</c>).</summary>
+    /// <summary>Коди прав із переданих, яких у каталозі НЕМАЄ.</summary>
+    /// <param name="permissionCodes">Коди, які просять видати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Питається саме про НЕВІДОМІ, а не про відомі: відповідь — це вже
+    /// готовий перелік для повідомлення користувачеві, і його не треба
+    /// вираховувати відніманням на кожному виклику.
+    /// </remarks>
+    public Task<IReadOnlyList<string>> FilterUnknownAsync(
+        IReadOnlyList<string> permissionCodes, CancellationToken ct);
+
     public Task<IReadOnlyList<string>> FilterDangerousAsync(
         IReadOnlyList<string> permissionCodes, CancellationToken ct);
 

@@ -58,6 +58,30 @@ public static partial class StartupSequence
         await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
 
+        // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
+        //     зареєстрований, покритий тестами) і НЕ ВИКЛИКАВСЯ (`A7-10`):
+        //     у щойно розгорнутій системі не було жодного користувача, і
+        //     увійти не міг ніхто. Ані збірка, ані 597 тестів цього не
+        //     бачили — обробник перевірявся напряму, а старт його не звав.
+        //
+        //     ⚠ Йде ПІСЛЯ seed: роль `Administrator` створює саме seed, і
+        //     без неї видати її нікому.
+        var bootstrap = scope.ServiceProvider
+            .GetRequiredService<Application.Security.EnsureBootstrapAdminHandler>();
+
+        await bootstrap
+            .HandleAsync(app.Configuration["Bootstrap:Password"], CancellationToken.None)
+            .ConfigureAwait(false);
+
+        // ⚠ Попередження ВИДИМІ. «Увійти буде нікому» — це стан, про який
+        // адміністратор має дізнатися зі старту, а не зі скарги користувача.
+        foreach (var warning in bootstrap.Warnings)
+        {
+            LogBootstrapWarning(logger, warning);
+        }
+
+        LogBootstrapOutcome(logger, bootstrap.LastOutcome);
+
         // 5) Можливості СУБД. Читаються один раз: редакція між запитами
         //    не змінюється, а кожна перевірка коштує запиту.
         var capabilities = scope.ServiceProvider.GetRequiredService<ISqlCapabilities>();
@@ -186,6 +210,13 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Warning}")]
+    private static partial void LogBootstrapWarning(ILogger logger, string warning);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: bootstrap-адміністратор — {Outcome}.")]
+    private static partial void LogBootstrapOutcome(
+        ILogger logger, Application.Security.BootstrapAdmin.Outcome outcome);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: прогріто версій шаблонів: {Count}.")]
     private static partial void LogWarmupDone(ILogger logger, int count);

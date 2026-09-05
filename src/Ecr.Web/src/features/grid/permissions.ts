@@ -1,4 +1,5 @@
 import type { ColumnDto, TableSliceDto } from '@/api/types';
+import { t } from '@/shared/i18n';
 
 /**
  * Права по комірках приходять **із сервера** і показуються, а не вгадуються.
@@ -48,26 +49,31 @@ export interface CellDecision {
 const Editable: CellDecision = { editable: true, reason: null, hint: '' };
 
 /**
- * Тексти причин.
+ * Ключі текстів причин.
  *
  * ⚠ Підказка називає ПРИЧИНУ, а не «недоступно». Користувач, який бачить сіру
  * комірку без пояснення, іде до адміністратора, а той — до розробника; це
  * дорожче за будь-який рядок тексту.
+ *
+ * ⛔ Тут КЛЮЧІ, а не тексти. До `A7-12` таблиця містила готові українські
+ * рядки — тобто словник у бандлі, який D-95 забороняє прямо: додати мову
+ * означало б перезібрати клієнт. Значення приходять із каталогу разом з
+ * рештою інтерфейсу.
  */
 const Hints: Record<DenyReason, string> = {
-  NoGrant: 'Немає права редагувати цю комірку.',
-  PeriodNotOpenYet: 'Період ще не відкрито: заповнення почнеться з дати відкриття.',
-  PeriodClosed: 'Період закрито: зміни потребують окремого погодження.',
-  OutOfAccessWindow: 'Вікно доступу до цього періоду для вашої ролі вже закрилося.',
-  DocumentSubmitted: 'Документ подано: спершу потрібне повернення в роботу.',
-  DocumentApproved: 'Документ затверджено: зміни потребують повернення в роботу.',
-  ColumnReadOnly: 'Колонка доступна лише для читання за описом шаблону.',
-  RowReadOnly: 'Рядок доступний лише для читання за описом шаблону.',
-  CalculatedCell: 'Комірку рахує система: значення зміниться при наступному перерахунку.',
-  ProjectArchived: 'Проєкт заархівовано: дані доступні лише для читання.',
-  ArchivingInProgress: 'Триває архівація: запис тимчасово недоступний.',
-  BusinessRule: 'Зміну блокує правило предметної області.',
-  SimulationReadOnly: 'Сеанс симуляції прав: запис вимкнено незалежно від прав (ФВ-6.16a).',
+  NoGrant: 'deny.NoGrant',
+  PeriodNotOpenYet: 'deny.PeriodNotOpenYet',
+  PeriodClosed: 'deny.PeriodClosed',
+  OutOfAccessWindow: 'deny.OutOfAccessWindow',
+  DocumentSubmitted: 'deny.DocumentSubmitted',
+  DocumentApproved: 'deny.DocumentApproved',
+  ColumnReadOnly: 'deny.ColumnReadOnly',
+  RowReadOnly: 'deny.RowReadOnly',
+  CalculatedCell: 'deny.CalculatedCell',
+  ProjectArchived: 'deny.ProjectArchived',
+  ArchivingInProgress: 'deny.ArchivingInProgress',
+  BusinessRule: 'deny.BusinessRule',
+  SimulationReadOnly: 'deny.SimulationReadOnly',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
@@ -98,7 +104,7 @@ export function decide(slice: TableSliceDto, rowKey: string, column: ColumnDto):
   const reason = reasonOf(permission);
 
   return reason === null
-    ? { editable: false, reason: null, hint: `Редагування заборонено: ${permission}.` }
+    ? { editable: false, reason: null, hint: t('deny.Unknown', { reason: permission }) }
     : deny(reason);
 }
 
@@ -115,7 +121,10 @@ function reasonOf(permission: string): DenyReason | null {
 }
 
 function deny(reason: DenyReason): CellDecision {
-  return { editable: false, reason, hint: Hints[reason] };
+  // ⚠ Текст береться в момент рішення, а не при завантаженні модуля: каталог
+  // приходить із сервера пізніше за імпорти, і таблиця, обчислена наперед,
+  // назавжди зафіксувала б самі ключі.
+  return { editable: false, reason, hint: t(Hints[reason]) };
 }
 
 /**
@@ -129,7 +138,7 @@ export function guardOf(slice: TableSliceDto): (rowKey: string, columnCode: stri
 
   return (rowKey, columnCode) => {
     const column = columns.get(columnCode);
-    if (column === undefined) return 'Колонки немає в цій таблиці.';
+    if (column === undefined) return t('grid.unknownColumn', { column: columnCode });
 
     const decision = decide(slice, rowKey, column);
 

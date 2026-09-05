@@ -3,7 +3,7 @@ import { Badge, Button, Group, Loader, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
-import type { SourceEntityStatus } from '@/api/types';
+import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -36,7 +36,7 @@ export function SourcesPage(): JSX.Element {
       return apiEnqueue(`/api/v1/sources/${id}/collect`, {
         fromUtc: from.toISOString(),
         toUtc: to.toISOString(),
-      });
+      } satisfies CollectRequest);
     },
     onSuccess: (job) => {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його

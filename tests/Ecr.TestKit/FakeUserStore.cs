@@ -21,6 +21,21 @@ public sealed class FakeUserStore : IUserStore
     /// <summary>Коди прав, які вважаються небезпечними.</summary>
     public HashSet<string> Dangerous { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Каталог відомих прав.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній набір означає «тест не моделює каталог», і тоді невідомих
+    /// прав немає за визначенням. Це свідома поблажливість: більшість тестів
+    /// перевіряє не існування коду, а поведінку навколо нього.
+    ///
+    /// ⛔ Але саме такі поблажливості й приховали `A7-13`: фікстура вміла
+    /// більше за справжню систему, тести були зелені, а розгортання падало.
+    /// Тому тест, який перевіряє реакцію на невідоме право, зобов'язаний
+    /// наповнити цей набір — інакше він нічого не перевіряє.
+    /// </remarks>
+    public HashSet<string> Permissions { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Зафіксовані спроби входу.</summary>
     public List<LoginAttempt> Attempts { get; } = [];
 
@@ -114,6 +129,18 @@ public sealed class FakeUserStore : IUserStore
         var id = Roles.Count + 1;
         Roles.Add(new RoleView(id, role.Code, role.IsBuiltIn, role.IsActive, [.. permissionCodes], []));
         return Task.FromResult(id);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> FilterUnknownAsync(
+        IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        return Task.FromResult<IReadOnlyList<string>>(
+            Permissions.Count == 0
+                ? []
+                : [.. permissionCodes.Distinct(StringComparer.Ordinal).Where(c => !Permissions.Contains(c))]);
     }
 
     /// <inheritdoc />

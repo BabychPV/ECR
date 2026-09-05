@@ -17,8 +17,22 @@ public static class BootstrapAdmin
     /// <summary>Ім'я запису; фіксоване, щоб його було видно в аудиті.</summary>
     public const string UserName = "bootstrap";
 
-    /// <summary>Роль, яку отримує запис при створенні.</summary>
-    public const string RoleCode = "Administrator";
+    /// <summary>
+    /// Роль, яку отримує запис при створенні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це <b>окрема</b> роль, а не <c>SystemAdministrator</c>. Причина в
+    /// правилі seed-а: жодна звичайна вбудована роль не отримує небезпечних
+    /// прав (ФВ-6.12, D-40), а <see cref="AdminPermission"/> саме таке. Тому
+    /// <c>SystemAdministrator</c> не вміє створити користувача, і bootstrap із
+    /// цією роллю входив би в систему, якої не може налаштувати.
+    ///
+    /// ⛔ Назва мусить дослівно збігатися з роллю в <c>09-seed.sql</c>. До
+    /// `A7-13` тут стояло <c>Administrator</c> — роль, якої seed не створює
+    /// ніколи; старт падав уже після того, як усі тести проходили, бо в
+    /// тестах роль створювала фікстура.
+    /// </remarks>
+    public const string RoleCode = "BootstrapAdministrator";
 
     /// <summary>Право, за яким доменний користувач вважається адміністратором.</summary>
     public const string AdminPermission = "Security.ManageUsers";

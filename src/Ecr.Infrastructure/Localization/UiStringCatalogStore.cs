@@ -163,15 +163,18 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         SqlConnection connection, string languageCode, UiStringScope? scope, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = scope is null
-            ? "SELECT [Key], Value FROM sys_ecr.UiString WHERE LanguageCode = @lang;"
-            : "SELECT [Key], Value FROM sys_ecr.UiString WHERE LanguageCode = @lang AND Scope = @scope;";
+
+        // ⛔ `Private` — це НЕ «рядки з позначкою Private», а «все, що видно
+        // після входу», тобто разом із публічними. Точна рівність `Scope = 1`
+        // (як було до `A7-12`) означала, що після перезавантаження сторінки вже
+        // авторизованим користувачем зникали `common.save` і тексти помилок:
+        // публічний каталог у цьому сценарії ніхто не запитує, а продублювати
+        // ключ у двох областях не дає `PK_UiString ([Key], LanguageCode)`.
+        command.CommandText = scope is UiStringScope.Public
+            ? "SELECT [Key], Value FROM sys_ecr.UiString WHERE LanguageCode = @lang AND Scope = 0;"
+            : "SELECT [Key], Value FROM sys_ecr.UiString WHERE LanguageCode = @lang;";
 
         command.Parameters.AddWithValue("@lang", languageCode);
-        if (scope is not null)
-        {
-            command.Parameters.AddWithValue("@scope", (byte)scope.Value);
-        }
 
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);

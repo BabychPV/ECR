@@ -1,9 +1,9 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, Modal, Table, Text, Textarea } from '@mantine/core';
+import { Badge, Button, Group, Loader, Modal, Table, Text, TextInput, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
-import type { MethodologyDto } from '@/api/types';
+import type { MethodologyDto, PublishMethodologyRequest } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -13,16 +13,25 @@ import { t } from '@/shared/i18n';
 /**
  * Конфігуратор методологій: версії, публікація, симуляція.
  *
- * ⛔ Публікація потребує **причини** і **зеленого тесту** (ФВ-9.12), а автор
- * останньої правки опублікувати не може (D-40). Форма вимагає причини не з
- * ввічливості: без неї журнал змін методології показує «щось змінилося», і
- * через рік ніхто не пояснить, чому число за минулий рік перерахувалося.
+ * ⛔ Публікація потребує **причини**, **дати набуття чинності** і **зеленого
+ * тесту** (ФВ-9.12), а автор останньої правки опублікувати не може (D-40).
+ * Форма вимагає причини не з ввічливості: без неї журнал змін методології
+ * показує «щось змінилося», і через рік ніхто не пояснить, чому число за
+ * минулий рік перерахувалося.
+ *
+ * ⛔ Поле дати з'явилося після `A7-11`. Діалог збирав саму лише причину, а
+ * сервер відхиляє публікацію без дати (`ECR-CALC-0422`) ПЕРШОЮ ж перевіркою —
+ * тобто кнопка «Опублікувати» не спрацьовувала жодного разу. Дата не має
+ * значення за замовчуванням саме тому, що вона визначає, ЯКІ ПЕРІОДИ
+ * перерахуються: підставити «сьогодні» мовчки означало б обрати межу
+ * перерахунку за користувача.
  */
 export function MethodologiesPage(): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
   const [publishing, setPublishing] = useState<{ id: number; versionId: number } | null>(null);
   const [reason, setReason] = useState('');
+  const [effectiveFrom, setEffectiveFrom] = useState('');
 
   const methodologies = useQuery({
     queryKey: ['methodologies'],
@@ -30,15 +39,22 @@ export function MethodologiesPage(): JSX.Element {
   });
 
   const publish = useMutation({
-    mutationFn: (target: { id: number; versionId: number; reason: string }) =>
+    mutationFn: (target: { id: number; versionId: number; reason: string; from: string }) =>
       apiFetch(`/api/v1/methodologies/${target.id}/versions/${target.versionId}/publish`, {
         method: 'POST',
-        body: JSON.stringify({ changeReason: target.reason }),
+        body: JSON.stringify({
+          changeReason: target.reason,
+          // ⚠ `date` дає рівно `YYYY-MM-DD` — форму `DateOnly` сервера. Через
+          // `Date` тут проходити не можна: `toISOString()` переводить у UTC і
+          // ввечері зсуває дату на добу назад.
+          effectiveFrom: target.from,
+        } satisfies PublishMethodologyRequest),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['methodologies'] });
       setPublishing(null);
       setReason('');
+      setEffectiveFrom('');
       notifications.show({ color: 'green', message: t('methodologies.published') });
     },
     onError: (error) => {
@@ -125,12 +141,23 @@ export function MethodologiesPage(): JSX.Element {
           autosize
         />
 
+        <TextInput
+          mt="sm"
+          type="date"
+          label={t('methodologies.effectiveFrom')}
+          description={t('methodologies.effectiveFromHint')}
+          value={effectiveFrom}
+          onChange={(event) => setEffectiveFrom(event.currentTarget.value)}
+        />
+
         <Button
           mt="md"
-          disabled={reason.trim().length === 0}
+          disabled={reason.trim().length === 0 || effectiveFrom.length === 0}
           loading={publish.isPending}
           onClick={() => {
-            if (publishing !== null) publish.mutate({ ...publishing, reason });
+            if (publishing !== null) {
+              publish.mutate({ ...publishing, reason, from: effectiveFrom });
+            }
           }}
         >
           {t('methodologies.publish')}

@@ -1,4 +1,5 @@
 import { apiFetch } from '@/api/client';
+import type { UiStringCatalog } from '@/api/types';
 
 /**
  * Локалізація (D-11, D-95, ФВ-14.9).
@@ -19,17 +20,27 @@ export type Scope = 'public' | 'private';
 /** Мова, якою показувати, коли в користувача не задано іншої. */
 export const DefaultLanguage: Language = 'en';
 
-interface Catalog {
-  language: Language;
-  revision: string;
-  strings: Record<string, string>;
-}
+/**
+ * Форма каталогу — **згенерована**, а не описана тут.
+ *
+ * ⛔ Рукописний інтерфейс чекав поля `language`, а сервер віддає
+ * `languageCode` (`A7-16`). Поле не читалося, тож нічого не ламалося — тип
+ * просто описував неіснуючу відповідь, і будь-яка спроба ним скористатися
+ * дала б `undefined` у місці, де компілятор обіцяв рядок.
+ */
+type Catalog = UiStringCatalog;
 
 const loaded = new Map<string, Catalog>();
 let current: Language = DefaultLanguage;
 
-/** Ключ кешу в localStorage. */
-function storageKey(language: Language, scope: Scope, revision: string): string {
+/**
+ * Ключ кешу в localStorage.
+ *
+ * ⚠ Ревізія — ЧИСЛО (`int` на сервері), і в ключі вона рядок лише тому, що
+ * ключі localStorage — рядки. Читається вона звідти теж рядком, тому
+ * порівнювати їх треба у вигляді рядка, а не числа.
+ */
+function storageKey(language: Language, scope: Scope, revision: string | number): string {
   return `uiStrings:${language}:${scope}:${revision}`;
 }
 
@@ -83,13 +94,13 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
 
     loaded.set(cacheKey, fresh);
     safeSet(storageKey(lang, scope, fresh.revision), JSON.stringify(fresh));
-    safeSet(`uiStrings:${lang}:${scope}:revision`, fresh.revision);
+    safeSet(`uiStrings:${lang}:${scope}:revision`, String(fresh.revision));
   } catch {
     // ⚠ Недоступний каталог не робить застосунок непридатним: показуємо
     // збережений, а якщо його немає — самі ключі. Порожній екран був би
     // гіршим за екран із технічними назвами.
     if (cached === null) {
-      loaded.set(cacheKey, { language: lang, revision: '', strings: {} });
+      loaded.set(cacheKey, { languageCode: lang, revision: 0, strings: {} });
     }
   }
 
@@ -104,10 +115,17 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
  * інтерфейс, а `document.submit` — як невідкладений переклад.
  */
 export function t(key: string, params?: Record<string, string | number>): string {
-  const template =
-    lookup(current, key) ?? lookup(DefaultLanguage, key) ?? key;
+  const template = lookup(current, key) ?? lookup(DefaultLanguage, key);
 
-  if (params === undefined) return template;
+  if (params === undefined) return template ?? key;
+
+  // ⛔ Коли перекладу немає, підставляти нема куди — а значення втрачати не
+  // можна: `deny.Unknown` без своєї причини перетворюється на те саме
+  // «недоступно», проти якого ця підказка й існує. Тому запасний варіант
+  // показує ключ РАЗОМ зі значеннями.
+  if (template === undefined) {
+    return `${key} (${Object.entries(params).map(([k, v]) => `${k}=${String(v)}`).join(', ')})`;
+  }
 
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
     name in params ? String(params[name]) : match,

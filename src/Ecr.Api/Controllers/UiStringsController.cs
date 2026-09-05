@@ -38,7 +38,12 @@ public sealed class UiStringsController(
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{lang}")]
     [AllowAnonymous]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+
+    // ⛔ Тип відповіді оголошений явно. Без нього в схемі OpenAPI лишалася
+    // порожня 200-ка, клієнт описував каталог рукописним інтерфейсом і
+    // помилявся в назві поля: чекав `language`, а сервер віддає `languageCode`
+    // (`A7-16`). Помилка нічого не ламала — і саме тому жила.
+    [ProducesResponseType<Ecr.Application.Ports.UiStringCatalog>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Get(string lang, [FromQuery] string scope, CancellationToken ct)

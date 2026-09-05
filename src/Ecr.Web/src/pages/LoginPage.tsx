@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Card, Center, Divider, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import type { LocalLoginRequest } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { loadCatalog, preferredLanguage, t } from '@/shared/i18n';
 import { useEffect } from 'react';
@@ -26,6 +27,10 @@ export function LoginPage(): JSX.Element {
     void loadCatalog(preferredLanguage(), 'public');
   }, []);
 
+  // ⚠ Поле зветься `userName`, а не `login`: так називає його
+  // `LocalLoginRequest`. До наскрізного аудиту клієнт надсилав `login`, і
+  // сервер відповідав 400 «The UserName field is required» — вхід не
+  // працював узагалі (`A7-09`).
   async function submit(path: string, body?: unknown): Promise<void> {
     setBusy(true);
     setError(null);
@@ -78,7 +83,7 @@ export function LoginPage(): JSX.Element {
           <Button
             variant="default"
             loading={busy}
-            onClick={() => void submit('/api/v1/login/local', { login, password })}
+            onClick={() => void submit('/api/v1/login/local', { userName: login, password } satisfies LocalLoginRequest)}
           >
             {t('login.submit')}
           </Button>

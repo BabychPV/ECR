@@ -105,8 +105,42 @@ public sealed class CreateRoleHandler(
         // ⚠ Небезпечні права можна видати ЛИШЕ маючи їх самому. Інакше
         // `Security.ManageRoles` перетворюється на право видати собі будь-що —
         // тобто на єдине право, яке має значення (ФВ-6.12, D-40).
+        //
+        // ⛔ Єдиний виняток — bootstrap-адміністратор, і без нього правило
+        // не суворе, а замкнене на себе (`A7-17`). У щойно розгорнутій системі
+        // небезпечних прав не має НІХТО: seed не дає їх жодній
+        // вбудованій ролі навмисно. Значить, першого разу їх не може видати
+        // ніхто ніколи, і `Calculation.Publish`, `Integration.Manage`,
+        // `Security.Simulate`, `System.RunJob` лишаються недосяжними в
+        // будь-якому розгортанні.
+        //
+        // ⚠ Виняток дає право ВИДАТИ, а не МАТИ: bootstrap-запис сам
+        // не отримує ні `Calculation.Publish`, ні `Security.Simulate` — він лише
+        // називає людину, яка їх матиме. Це дослівно те, чого вимагає
+        // ФВ-6.12: «видаються іменованим особам окремо». Сам виняток
+        // обмежений трьома гарантіями самого запису: він один
+        // (`UX_User_Bootstrap`), він міняє пароль при першому вході і він
+        // вимикається, щойно з'являється доменний адміністратор (ФВ-6.18).
+        var actor = await users.FindByIdAsync(userId, ct).ConfigureAwait(false);
+        var isBootstrap = actor?.IsBootstrapAdmin == true;
+
+        // ⛔ Невідомий код права до `A7-19` доходив до бази і повертався як
+        // порушення зовнішнього ключа, тобто `ECR-SYS-0500` «зверніться до
+        // адміністратора». Друкарська помилка в назві права — не внутрішня
+        // помилка системи, і людина має побачити, ЯКЕ саме право не існує.
+        var unknownPermissions = await users
+            .FilterUnknownAsync(permissionCodes, ct)
+            .ConfigureAwait(false);
+
+        if (unknownPermissions.Count > 0)
+        {
+            throw new NotFoundException(
+                "ECR-ROW-0404",
+                $"Прав не існує: {string.Join(", ", unknownPermissions)}.");
+        }
+
         var dangerous = await users.FilterDangerousAsync(permissionCodes, ct).ConfigureAwait(false);
-        var notHeld = dangerous.Where(p => !profile.Has(p)).ToList();
+        var notHeld = isBootstrap ? [] : dangerous.Where(p => !profile.Has(p)).ToList();
         if (notHeld.Count > 0)
         {
             throw new AccessDeniedException(
@@ -206,6 +240,33 @@ public sealed class CreateUserHandler(
         {
             throw new BusinessRuleException(
                 "ECR-ROW-0409", $"Користувач з іменем «{userName}» уже існує.");
+        }
+
+        // ⛔ Ролі перевіряються ТУТ і ДО створення чого-небудь. Сховище
+        // виходить із того, що роль приходить із seed, і на невідому кидає
+        // «виконайте seed» — вірно для старту й безглуздо для запиту людини:
+        // друкарська помилка в коді ролі поверталася як `ECR-SYS-0500`
+        // «зверніться до адміністратора» (`A7-18`), хоча адміністратор — це
+        // якраз той, хто її щойно зробив.
+        //
+        // ⚠ Перевірка перед створенням, а не всередині циклу: інакше друга
+        // роль із помилкою лишила б користувача створеним із першою.
+        if (roleCodes.Count > 0)
+        {
+            var known = (await users.ListRolesAsync(ct).ConfigureAwait(false))
+                .Select(r => r.Code)
+                .ToHashSet(StringComparer.Ordinal);
+
+            var unknown = roleCodes.Where(code => !known.Contains(code)).ToList();
+            if (unknown.Count > 0)
+            {
+                // ⚠ Саме `NotFoundException`: статус відповіді береться з ТИПУ
+                // винятку, а не з коду. `BusinessRuleException` дав би 422 при
+                // коді `...0404` — відповідь, що суперечить сама собі.
+                throw new NotFoundException(
+                    "ECR-ROW-0404",
+                    $"Ролей не існує: {string.Join(", ", unknown)}.");
+            }
         }
 
         var now = clock.UtcNow;

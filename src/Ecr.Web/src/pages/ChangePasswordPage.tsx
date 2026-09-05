@@ -3,6 +3,7 @@ import { Button, Card, Center, PasswordInput, Stack, Text, Title } from '@mantin
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import type { ChangePasswordRequest } from '@/api/types';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { t } from '@/shared/i18n';
@@ -32,7 +33,9 @@ export function ChangePasswordPage(): JSX.Element {
     try {
       await apiFetch('/api/v1/auth/change-password', {
         method: 'POST',
-        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+        body: JSON.stringify(
+          { currentPassword: current, newPassword: next } satisfies ChangePasswordRequest,
+        ),
       });
 
       // Профіль перечитується: саме він несе прапорець MustChangePassword,

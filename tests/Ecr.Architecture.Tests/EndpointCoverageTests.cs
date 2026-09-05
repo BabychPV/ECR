@@ -151,6 +151,132 @@ public sealed partial class EndpointCoverageTests
         Assert.Empty(missing);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожен_рядок_якого_просить_клієнт_є_в_каталозі()
+    {
+        var web = Path.Combine(SolutionRoot(), "src", "Ecr.Web", "src");
+        Assert.True(Directory.Exists(web), $"Немає {web}.");
+
+        var seed = File.ReadAllText(
+            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+
+        var seeded = SeedKeyRegex.Matches(seed)
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.NotEmpty(seeded);
+
+        var missing = Directory
+            .EnumerateFiles(web, "*.ts*", SearchOption.AllDirectories)
+            .Where(f => !f.Contains("__tests__", StringComparison.Ordinal))
+            .SelectMany(f => UiKeyRegex.Matches(WithoutComments(File.ReadAllText(f)))
+                .Select(m => new { File = Path.GetFileName(f), Key = m.Groups[1].Value }))
+            .Where(u => !seeded.Contains(u.Key))
+            .Select(u => $"{u.Key} ({u.File})")
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Роль_і_право_bootstrap_адміністратора_існують_у_seed()
+    {
+        var seed = File.ReadAllText(
+            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+
+        // ⛔ Тест дивиться на SEED, а не на фікстуру. До `A7-13` обробник
+        // видавав роль `Administrator`, якої seed не створює; фікстура
+        // створювала її сама, тести були зелені, а старт розгорнутої системи
+        // падав із «Роль відсутня» — тобто перевірялося рівно те, що ніде не
+        // виконується.
+        Assert.Contains($"N'{Ecr.Application.Security.BootstrapAdmin.RoleCode}'", seed, StringComparison.Ordinal);
+
+        // Право, за яким система вважає, що доменний адміністратор з'явився:
+        // без нього bootstrap-запис не вимкнеться ніколи.
+        Assert.Contains(
+            $"N'{Ecr.Application.Security.BootstrapAdmin.AdminPermission}'", seed, StringComparison.Ordinal);
+
+        // ⚠ Мало оголосити роль — вона має отримати саме це право. Роль без
+        // прав виглядає як робоча конфігурація і мовчки нічого не дозволяє.
+        //
+        // Береться БЛОК цілком, а не текст після назви ролі: усередині одного
+        // MERGE перелік прав стоїть перед умовою на роль, і зріз «уперед від
+        // назви» бачив би порожнечу там, де все на місці.
+        var grant = Blocks(seed, "MERGE sec.RolePermission")
+            .SingleOrDefault(b => b.Contains(
+                $"N'{Ecr.Application.Security.BootstrapAdmin.RoleCode}'", StringComparison.Ordinal));
+
+        Assert.NotNull(grant);
+        Assert.Contains(Ecr.Application.Security.BootstrapAdmin.AdminPermission, grant, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожен_дозволений_шлях_воріт_зміни_пароля_існує_на_сервері()
+    {
+        var server = Implemented().Keys
+            .Select(k => Placeholders(k.Path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.NotEmpty(server);
+
+        // ⛔ Ворота порівнюють шлях запиту з переліком ПРЕФІКСІВ. Префікс, що
+        // не веде на жоден маршрут, нічого не дозволяє — і мовчки: `A7-14`
+        // саме так закрив систему для власника разового пароля, бо всі чотири
+        // записи вказували на `/api/v1/auth/...`, якого немає.
+        var missing = Ecr.Application.Security.PasswordChangeGate.AllowedPaths
+            .Where(allowed => !server.Any(
+                path => path.StartsWith(allowed, StringComparison.OrdinalIgnoreCase)))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожне_право_яке_вимагає_обробник_існує_в_каталозі()
+    {
+        var seed = File.ReadAllText(
+            Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+
+        var catalogue = Blocks(seed, "MERGE sec.Permission").Single();
+
+        // ⛔ Право, оголошене константою, але відсутнє в каталозі, не можна
+        // видати НІКОМУ: `sec.RolePermission` посилається на `sec.Permission`
+        // зовнішнім ключем. Ендпоінт із таким правом закритий назавжди, і
+        // жоден тест цього не бачить — обробник просто відмовляє, як і має.
+        //
+        // Саме так жила `Calculation.RecalculateClosed` (`A7-20`): константа
+        // була, каталогу — ні, а правило трималося зовсім на іншому.
+        var missing = PermissionConstant
+            .Matches(SourceOf("Ecr.Application"))
+            .Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .Where(code => !catalogue.Contains($"N'{code}'", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
+    /// <summary>Розбиває скрипт на пакети, що починаються заданим текстом.</summary>
+    /// <param name="script">Текст скрипта.</param>
+    /// <param name="start">Початок пакета, наприклад <c>MERGE sec.RolePermission</c>.</param>
+    private static IEnumerable<string> Blocks(string script, string start)
+        => script
+            .Split(start, StringSplitOptions.None)
+            .Skip(1)
+            .Select(part => part.Split("\nGO", StringSplitOptions.None)[0]);
+
     /// <summary>Прибирає коментарі перед пошуком адрес.</summary>
     /// <remarks>
     /// ⚠ Інакше сторож ловить власні пояснення: коментар «до аудиту клієнт бив
@@ -190,6 +316,28 @@ public sealed partial class EndpointCoverageTests
 
     [GeneratedRegex(@"\{[^{}]*\}")]
     private static partial Regex BraceRegex { get; }
+
+    /// <summary>Виклик <c>t('ключ')</c> у клієнті.</summary>
+    /// <remarks>
+    /// ⚠ Символ перед <c>t</c> обов'язковий: без нього вираз ловить <c>it(</c>
+    /// із тестів і оголошує назву тесту незнайденим ключем інтерфейсу.
+    /// Крапка в ключі відсіює решту однобуквених функцій.
+    /// </remarks>
+    [GeneratedRegex(@"[^A-Za-z0-9_$]t\('([a-zA-Z][A-Za-z0-9]*\.[A-Za-z0-9-]+)'")]
+    private static partial Regex UiKeyRegex { get; }
+
+    /// <summary>Оголошення права константою в застосунку.</summary>
+    /// <remarks>
+    /// Береться саме КОНСТАНТА, а не будь-який рядок виду <c>A.B</c>: у коді
+    /// повно назв типів і методів тієї самої форми, і сторож на них ловив би
+    /// власний шум замість дефекту.
+    /// </remarks>
+    [GeneratedRegex(@"const string [A-Za-z]*Permission[A-Za-z]* = ""([A-Za-z]+\.[A-Za-z]+)""")]
+    private static partial Regex PermissionConstant { get; }
+
+    /// <summary>Рядок каталогу в <c>09-seed.sql</c>.</summary>
+    [GeneratedRegex(@"\(N'([^']+)',\s*N'[a-z]{2}'")]
+    private static partial Regex SeedKeyRegex { get; }
 
     // ⚠ Четвертий сторож того самого класу дефектів. Три попередні дивляться
     // всередину сервера; цей — на межу «сервер → клієнт», де тести обох боків

@@ -1,4 +1,5 @@
 using Ecr.Infrastructure.Persistence;
+using Ecr.Application.Security;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -73,29 +74,55 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Небезпечні_права_не_потрапляють_у_вбудовані_ролі_автоматично()
     {
-        // ⛔ Жодна вбудована роль не отримує небезпечного права з seed — навіть
-        // SystemAdministrator (ФВ-6.12, D-40). Право на симуляцію або відкриття
-        // періоду, видане розгортанням, не має автора в аудиті — а саме автор
-        // й потрібен, коли потім з'ясовують, звідки взялася можливість.
-        Assert.Equal(0, await ScalarAsync("""
+        // ⛔ Жодна СКЛАДЕНА вбудована роль не отримує небезпечного права з
+        // seed — навіть SystemAdministrator (ФВ-6.12, D-40). Право на
+        // симуляцію або відкриття періоду, видане розгортанням, не має автора
+        // в аудиті — а саме автор й потрібен, коли потім з'ясовують, звідки
+        // взялася можливість.
+        Assert.Equal(0, await ScalarAsync($"""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
             JOIN sec.Role       AS r ON r.Id   = rp.RoleId AND r.IsBuiltIn = 1
             JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
             WHERE p.IsDangerous = 1
+              AND r.Code <> N'{BootstrapAdmin.RoleCode}'
+            """));
+
+        // ⚠ Виняток рівно один і названий. Він не послаблення правила, а його
+        // умова: у щойно розгорнутій системі небезпечних прав не має ніхто,
+        // тому без цієї ролі їх ніхто й ніколи не видасть уперше (`A7-17`).
+        // Носій — bootstrap-запис: один на систему, з обов'язковою зміною
+        // пароля, вимикається появою доменного адміністратора (ФВ-6.18).
+        Assert.Equal(2, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'{BootstrapAdmin.RoleCode}'
+            """));
+
+        // ⛔ І рівно ДВА — керування користувачами й ролями. Роль первинного
+        // налаштування передає систему людям; вона не рахує, не публікує і не
+        // дивиться чужими очима.
+        Assert.Equal(0, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'{BootstrapAdmin.RoleCode}'
+              AND rp.PermissionCode NOT IN (N'Security.ManageUsers', N'Security.ManageRoles')
             """));
 
         // ⚠ І водночас ролі НЕ порожні: роль без жодного права виглядає
         // як робоча конфігурація і мовчки не працює — це той самий клас
         // дефекту, що й «робота, якої ніхто не робить».
-        Assert.Equal(7, await ScalarAsync("""
+        Assert.Equal(8, await ScalarAsync("""
             SELECT COUNT(DISTINCT rp.RoleId)
             FROM sec.RolePermission AS rp
             JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
             """));
 
         // Симуляція — найпоказовіший випадок: вона дає чужі очі, а отже, чужі
-        // дані, і видаватися має поіменно.
+        // дані, і видаватися має поіменно. Її не має НІХТО, включно з роллю
+        // первинного налаштування.
         Assert.Equal(0, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Security.Simulate'"));
     }

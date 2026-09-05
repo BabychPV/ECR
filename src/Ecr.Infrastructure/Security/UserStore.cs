@@ -171,6 +171,52 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
         // Ідентифікатор ролі потрібен для зв'язків, а IDENTITY заповнюється
         // лише при збереженні.
+        //
+        // ⛔ Через це роль і її права зберігаються ДВОМА записами, і без
+        // спільної транзакції невдача на другому лишає роль без жодного права
+        // (`A7-19`). Порожня роль виглядає як робоча конфігурація, займає свою
+        // назву — і повторити створення вже не можна.
+        //
+        // ⛔ Транзакцію відкриває СТРАТЕГІЯ ВИКОНАННЯ, а не `BeginTransaction`
+        // напряму: з'єднання налаштоване на повтори транзієнтних збоїв, і
+        // `SqlServerRetryingExecutionStrategy` відмовляється працювати з
+        // транзакцією, відкритою повз неї. Ручна транзакція тут падала з
+        // `InvalidOperationException` на кожному створенні ролі.
+        //
+        // ⚠ Стратегія повторює ВЕСЬ блок, тому обидва збереження і коміт
+        // мусять бути всередині: інакше повтор дописав би права до ролі,
+        // створеної попередньою спробою.
+        if (db.Database.CurrentTransaction is not null)
+        {
+            // Обробник уже відкрив ширшу транзакцію — вкладена зламала б її
+            // межі, а атомарність і так забезпечена зовнішньою.
+            await SaveRoleAsync(role, permissionCodes, ct).ConfigureAwait(false);
+
+            return role.Id;
+        }
+
+        var strategy = db.Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database
+                .BeginTransactionAsync(ct)
+                .ConfigureAwait(false);
+
+            await SaveRoleAsync(role, permissionCodes, ct).ConfigureAwait(false);
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+
+        return role.Id;
+    }
+
+    /// <summary>Зберігає роль і її права двома записами.</summary>
+    /// <param name="role">Роль; після першого збереження має ідентифікатор.</param>
+    /// <param name="permissionCodes">Коди прав.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task SaveRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         foreach (var code in permissionCodes.Distinct(StringComparer.Ordinal))
@@ -178,7 +224,25 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             db.RolePermissions.Add(new RolePermission(role.Id, code));
         }
 
-        return role.Id;
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> FilterUnknownAsync(
+        IReadOnlyList<string> permissionCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(permissionCodes);
+
+        var known = await db.Permissions
+            .AsNoTracking()
+            .Where(p => permissionCodes.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. permissionCodes
+            .Distinct(StringComparer.Ordinal)
+            .Where(code => !known.Contains(code, StringComparer.Ordinal))];
     }
 
     /// <inheritdoc />

@@ -4,7 +4,13 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
-import type { DocumentSummary, DocumentTableDto, ValidationMessageDto } from '@/api/types';
+import type {
+  DocumentSummary,
+  DocumentTableDto,
+  ExportRequest,
+  SheetWorkflowRequest,
+  ValidationMessageDto,
+} from '@/api/types';
 import { DocumentGrid } from '@/features/grid/DocumentGrid';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
@@ -70,7 +76,7 @@ export function DocumentPage(): JSX.Element {
     mutationFn: (sheetDefId: number) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId, periodKey }),
+        body: JSON.stringify({ sheetDefId, periodKey } satisfies SheetWorkflowRequest),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
@@ -94,7 +100,7 @@ export function DocumentPage(): JSX.Element {
         includeStyles: true,
         language: session.data?.language ?? 'en',
         periodKey,
-      }),
+      } satisfies ExportRequest),
     onSuccess: (job) => {
       // ⚠ Довга операція повертає 202 з jobId; прогрес видно на екрані задач.
       notifications.show({ message: t('document.exportQueued', { job: job.jobId }) });

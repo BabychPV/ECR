@@ -838,6 +838,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/export/{exportId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Віддає побудовану книгу. Право `Document.Export`.
+         * @description ⚠ Ідентифікатор експорту приходить у повідомленні прогресу задачі:
+         *     саме тому побудова повертає `202` з `jobId`, а не файл.
+         *     Книга живе годину — довше тримати немає сенсу, це знімок даних на
+         *     момент побудови.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                    exportId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/import/preview": {
         parameters: {
             query?: never;
@@ -2455,7 +2509,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["UiStringCatalog"];
+                        "application/json": components["schemas"]["UiStringCatalog"];
+                        "text/json": components["schemas"]["UiStringCatalog"];
+                    };
                 };
                 /** @description Not Modified */
                 304: {
@@ -3763,6 +3821,19 @@ export interface components {
          * @enum {unknown}
          */
         TraceLevel: "Off" | "ErrorsOnly" | "Full";
+        UiStringCatalog: {
+            /** @description Мова зрізу. */
+            languageCode: string;
+            /**
+             * Format: int32
+             * @description Версія каталогу; слугує `ETag`.
+             */
+            revision: number;
+            /** @description Ключ → текст, уже з розгорнутим fallback. */
+            strings: {
+                [key: string]: string;
+            };
+        };
         /**
          * @description Область каталогу (`D-114`). Значення збігаються з
          *     `sys_ecr.UiString.Scope`.
