@@ -74,11 +74,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     props;
 
   const slice = useQuery({
+    // ⚠ Період лишається в КЛЮЧІ КЕШУ, але не в адресі. Екземпляр таблиці
+    // існує на кожен період окремо (R-A6), тобто `tableInstanceId` уже
+    // визначає період однозначно — і сервер бере його звідти.
     queryKey: ['table-slice', tableInstanceId, periodKey],
+
+    // ⛔ `?periodKey=` тут був, і сервер його НЕ ЧИТАВ: у дії немає такого
+    // параметра взагалі. Шкоди він не завдавав лише випадково — бо
+    // збігався з періодом екземпляра. Але виглядав як обіцянка: читач
+    // припускав, що період можна задати, а інший період мовчки дав би ті
+    // самі дані (`A7-48`). Ловить це сторож параметрів запиту.
     queryFn: () =>
-      apiFetch<TableSliceDto>(
-        `/api/v1/documents/${documentId}/tables/${tableInstanceId}?periodKey=${periodKey}`,
-      ),
+      apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
 
   const { patch, isPending, conflicts } = useCellPatch(documentId);
