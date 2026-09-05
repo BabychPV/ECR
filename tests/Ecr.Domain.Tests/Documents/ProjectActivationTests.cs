@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Documents/ProjectActivationTests.cs
+﻿// tests/Ecr.Domain.Tests/Documents/ProjectActivationTests.cs
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -27,6 +27,7 @@ public sealed class ProjectActivationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-1.4")]
     public void Новий_проєкт_є_чернеткою_і_активується()
     {
         var project = Project();

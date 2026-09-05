@@ -1,4 +1,4 @@
-using Ecr.Domain.Abstractions;
+﻿using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
@@ -17,6 +17,7 @@ public sealed class TemplateVersionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.1")]
     public void Нова_версія_створюється_у_стані_Draft_з_нульовою_ревізією()
     {
         var version = Draft();
@@ -63,6 +64,7 @@ public sealed class TemplateVersionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.8")]
     public void Опублікована_версія_структурно_заморожена()
     {
         var version = Draft();

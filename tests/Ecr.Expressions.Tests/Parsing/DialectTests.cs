@@ -1,4 +1,4 @@
-// tests/Ecr.Expressions.Tests/Parsing/DialectTests.cs
+﻿// tests/Ecr.Expressions.Tests/Parsing/DialectTests.cs
 using Ecr.Domain.Enums;
 using Ecr.Expressions;
 using Ecr.TestKit;
@@ -20,6 +20,7 @@ public sealed class DialectTests
     [InlineData("@Arg")]
     [InlineData("CST.DENSITY")]
     [InlineData("!OtherFormula")]
+    [Trait("Requirement", "ФВ-9.5")]
     public void Конструкції_методологій_заборонені_в_діалекті_шаблонів(string token)
     {
         var template = Expr.Parse(token, ExpressionDialect.Template);

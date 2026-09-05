@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Documents/CellValueTests.cs
+﻿// tests/Ecr.Domain.Tests/Documents/CellValueTests.cs
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -41,6 +41,7 @@ public sealed class CellValueTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.0")]
     public void ToData_віддає_рівно_те_що_записано()
     {
         var written = new CellValueData

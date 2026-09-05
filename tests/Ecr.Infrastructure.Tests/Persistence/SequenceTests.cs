@@ -1,4 +1,4 @@
-using Ecr.Infrastructure.Persistence;
+﻿using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Xunit;
@@ -16,6 +16,7 @@ public sealed class SequenceTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-3.10")]
     public async Task Резервування_діапазону_повертає_безперервні_ідентифікатори()
     {
         var loader = new BulkCellLoader(sql.ConnectionString, 1000);

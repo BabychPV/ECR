@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -107,6 +107,7 @@ public sealed class CellValueReaderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Текст_у_числовій_колонці_відхиляється_а_не_стає_нулем()
     {
         var error = Assert.Throws<BusinessRuleException>(
@@ -122,6 +123,7 @@ public sealed class CellValueReaderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Порожнє_значення_означає_стерти_а_не_записати_порожнечу()
     {
         // R-B4: `value: null` — стерти; явна порожнеча — окремий прапорець.
@@ -130,6 +132,7 @@ public sealed class CellValueReaderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Розгортання_дає_валідації_число_а_не_JsonElement()
     {
         // Без цього правило «обсяг більший за нуль» не падало б, а мовчки

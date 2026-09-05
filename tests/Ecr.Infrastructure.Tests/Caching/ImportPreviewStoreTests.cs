@@ -1,4 +1,4 @@
-using Ecr.Infrastructure.Caching;
+﻿using Ecr.Infrastructure.Caching;
 using Ecr.TestKit;
 using Microsoft.Extensions.Caching.SqlServer;
 using Microsoft.Extensions.Options;
@@ -23,6 +23,7 @@ public sealed class ImportPreviewStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-4.3")]
     public async Task Збережений_diff_читається_іншим_екземпляром_сховища()
     {
         // Два різні екземпляри — модель двох інстансів застосунку: той, що

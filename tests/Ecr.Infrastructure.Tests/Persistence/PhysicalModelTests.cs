@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Xunit;
@@ -363,6 +363,7 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.5")]
     public async Task Конверсію_між_різними_розмірностями_неможливо_вставити_в_таблицю()
     {
         // Об'єм → маса: саме той перехід, який потребує щільності.

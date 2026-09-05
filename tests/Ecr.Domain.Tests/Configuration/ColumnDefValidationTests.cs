@@ -1,4 +1,4 @@
-using Ecr.Domain.Abstractions;
+﻿using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -46,6 +46,7 @@ public sealed class ColumnDefValidationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-8.8")]
     public void Lookup_колонка_вимагає_посилання_на_запис_реєстру_а_не_текст()
     {
         var column = Column(CellDataType.Lookup, "Substance");
@@ -62,6 +63,7 @@ public sealed class ColumnDefValidationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-2.4")]
     public void Колонка_типу_Unit_зберігає_посилання_на_одиницю()
     {
         var column = Column(CellDataType.Unit, "AmountUnit");
@@ -90,6 +92,7 @@ public sealed class ColumnDefValidationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-16.1")]
     public void Запис_в_обчислену_колонку_відхиляється_з_ECR_CELL_4221()
     {
         foreach (var type in new[] { CellDataType.Formula, CellDataType.Calculated })
@@ -106,6 +109,7 @@ public sealed class ColumnDefValidationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-16.1")]
     public void Число_з_більшою_кількістю_знаків_ніж_Scale_відхиляється()
     {
         var column = Column(CellDataType.Decimal);

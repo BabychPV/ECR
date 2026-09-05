@@ -64,11 +64,13 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Збіг_оголошеної_і_фактичної_одиниці_збір_не_зупиняє()
         => SourceUnitConverter.EnsureDeclaredUnit(KilogramId, "KG", Catalog(), "tag");
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Джерело_без_UOM_збір_не_зупиняє()
     {
         // Порівнювати нема з чим: джерело одиниці не повідомило. Це не
@@ -90,6 +92,7 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.12")]
     public void Конверсія_на_межі_іде_через_доменний_конвертер()
     {
         var result = Converter().Convert(2.5m, TonneId, "t", KilogramId, Catalog());
@@ -99,11 +102,13 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.3")]
     public void Тотожна_конверсія_значення_не_змінює()
         => Assert.Equal(7m, Converter().Convert(7m, KilogramId, "kg", KilogramId, Catalog()));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.3")]
     public void Різні_розмірності_на_межі_відмовляють_а_не_вгадують()
     {
         // ⛔ м³ у кг не переводяться: коефіцієнт залежить від речовини й умов
@@ -114,6 +119,7 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.3")]
     public void Одиниці_поза_довідником_дають_відмову_а_не_множення_на_одиницю()
     {
         var error = Assert.Throws<BusinessRuleException>(

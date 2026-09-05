@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Periods/SequenceRangeTests.cs
+﻿// tests/Ecr.Application.Tests/Periods/SequenceRangeTests.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -26,6 +26,7 @@ public sealed class SequenceRangeTests
 
     [Theory] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [InlineData(0)] [InlineData(13)] [InlineData(99)]
+    [Trait("Requirement", "ФВ-1.5a")]
     public void Значення_поза_межами_дають_ECR_PRD_4224(byte sequence)
     {
         var error = Assert.Throws<DomainException>(() => PeriodCalendar.KeyFor(2026, sequence));

@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Jobs/PeriodStateJobTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Jobs/PeriodStateJobTests.cs
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -69,6 +69,7 @@ public sealed class PeriodStateJobTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.12")]
     public void Стан_є_збереженим_значенням_а_не_функцією_від_now()
     {
         var periods = Periods();

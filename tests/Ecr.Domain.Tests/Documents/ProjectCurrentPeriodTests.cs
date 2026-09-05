@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -37,6 +37,7 @@ public sealed class ProjectCurrentPeriodTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.13")]
     public void Новий_проєкт_має_режим_Auto()
     {
         var project = Make(out _);

@@ -1,4 +1,4 @@
-// tests/Ecr.Api.Tests/AuthenticationTests.cs
+﻿// tests/Ecr.Api.Tests/AuthenticationTests.cs
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -37,6 +37,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.1")]
     public async Task Локальний_вхід_видає_ту_саму_cookie_що_й_доменний()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);
@@ -78,6 +79,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.1")]
     public async Task Невірний_пароль_і_неіснуючий_користувач_дають_однакову_відповідь()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);
@@ -100,6 +102,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.4a")]
     public async Task Після_N_невдалих_спроб_обліковий_запис_блокується()
     {
         var name = await ArrangeLocalUserAsync().ConfigureAwait(true);
@@ -210,6 +213,7 @@ public sealed class AuthenticationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.11")]
     public async Task Анонімний_запит_до_захищеного_ендпоінта_дає_401_а_не_редирект()
     {
         using var app = new EcrApiFactory(sql);

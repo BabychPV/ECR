@@ -1,4 +1,4 @@
-// tests/Ecr.Expressions.Tests/Binding/UnitCheckerTests.cs
+﻿// tests/Ecr.Expressions.Tests/Binding/UnitCheckerTests.cs
 using Ecr.Expressions.Binding;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
@@ -53,6 +53,7 @@ public sealed class UnitCheckerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.4")]
     public void Додавання_після_явного_CONVERT_проходить()
     {
         var context = Context();
@@ -76,6 +77,7 @@ public sealed class UnitCheckerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.2")]
     public void Ділення_маси_на_час_дає_похідну_одиницю_масової_витрати()
     {
         var context = Context();

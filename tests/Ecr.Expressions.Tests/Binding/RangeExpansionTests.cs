@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Configuration;
+﻿using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
@@ -49,6 +49,7 @@ public sealed class RangeExpansionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-0.2")]
     public void Зміна_Ordinal_після_публікації_НЕ_змінює_результат_формули()
     {
         var (_, table) = FixedTable();
@@ -110,6 +111,7 @@ public sealed class RangeExpansionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-7.6")]
     public void Видалені_рядки_не_потрапляють_у_розкритий_діапазон()
     {
         var (_, table) = FixedTable();
@@ -124,6 +126,7 @@ public sealed class RangeExpansionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-7.6")]
     public void Для_динамічної_таблиці_діапазон_записується_предикатом_а_не_переліком()
     {
         var builder = new TemplateBuilder();

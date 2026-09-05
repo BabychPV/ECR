@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Configuration;
+﻿using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
@@ -17,6 +17,7 @@ public sealed class PeriodAccessRuleTests
     [InlineData(4, false)]
     [InlineData(12, false)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-2.15")]
     public void Правило_діє_лише_для_періодів_у_заданому_діапазоні(byte sequence, bool applies)
     {
         var rule = Rule(from: 1, to: 3);
@@ -26,6 +27,7 @@ public sealed class PeriodAccessRuleTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-2.15")]
     public void Правило_без_меж_діє_для_всіх_періодів()
     {
         var rule = Rule(from: null, to: null);

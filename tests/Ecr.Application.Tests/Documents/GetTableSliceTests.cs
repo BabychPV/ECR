@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Documents/GetTableSliceTests.cs
+﻿// tests/Ecr.Application.Tests/Documents/GetTableSliceTests.cs
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -75,6 +75,7 @@ public sealed class GetTableSliceTests
         => new(new CellAddress(new PeriodKey(Period), rowId, VolumeId), TableDefId: 3, value);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.8")]
     public async Task Порожні_комірки_не_повертаються()
     {
         // У сховищі є лише одна матеріалізована комірка. Другої не існує —

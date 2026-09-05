@@ -1,4 +1,4 @@
-using Ecr.Application.Common;
+﻿using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -131,6 +131,7 @@ public sealed class PatchCellsTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.7")]
     public async Task Конфлікт_в_одному_рядку_відхиляє_весь_батч_із_переліком_конфліктів()
     {
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())

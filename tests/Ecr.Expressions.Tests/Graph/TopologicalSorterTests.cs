@@ -1,4 +1,4 @@
-using Ecr.Expressions.Graph;
+﻿using Ecr.Expressions.Graph;
 using Ecr.TestKit;
 using Xunit;
 
@@ -14,6 +14,7 @@ public sealed class TopologicalSorterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
     public void Залежності_обчислюються_раніше_за_залежні_формули()
     {
         // 3 залежить від 2, 2 — від 1. Порядок обчислення: 1, 2, 3.
@@ -33,6 +34,7 @@ public sealed class TopologicalSorterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
     public void Цикл_із_двох_формул_виявляється()
     {
         var graph = new DependencyGraph();

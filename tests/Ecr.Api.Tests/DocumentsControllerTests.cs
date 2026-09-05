@@ -1,4 +1,4 @@
-// tests/Ecr.Api.Tests/DocumentsControllerTests.cs
+﻿// tests/Ecr.Api.Tests/DocumentsControllerTests.cs
 using System.Net;
 using System.Reflection;
 using System.Text.Json;
@@ -34,6 +34,7 @@ public sealed class DocumentsControllerTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.14")]
     public void Права_перевіряються_в_обробнику_а_не_атрибутом_контролера()
     {
         // ⚠ [Authorize(Policy = "Document.Create")] виглядає охайно і руйнує
@@ -57,6 +58,7 @@ public sealed class DocumentsControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
     public async Task Помилка_повертається_як_ProblemDetails_із_кодом()
     {
         using var app = new EcrApiFactory(sql);

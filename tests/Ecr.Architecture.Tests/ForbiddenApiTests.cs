@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Ecr.TestKit;
 using Xunit;
 
@@ -134,6 +134,7 @@ public sealed class ForbiddenApiTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Секрети_не_читаються_з_конфігурації_напряму_а_лише_за_іменем()
     {
         // ФВ-6.11, D-11: у appsettings.json лежать лише ІМЕНА секретів, самі

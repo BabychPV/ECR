@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
@@ -88,6 +88,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.11")]
     public async Task Внутрішня_помилка_не_розкриває_стек_і_текст_винятку()
     {
         using var app = new EcrApiFactory(sql);
@@ -105,6 +106,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Усі_коди_з_каталогу_мають_унікальні_значення()
     {
         var codes = typeof(ErrorCodes)
@@ -154,6 +156,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.8")]
     public async Task Відмова_в_доступі_повертає_403_із_ПРИЧИНОЮ_у_розширеннях()
     {
         using var app = new EcrApiFactory(sql);

@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs
+﻿// tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs
 using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -32,6 +32,7 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-1.10a")]
     public async Task Одночасні_Reopen_і_закриття_серіалізуються()
     {
         var (documentId, periodId) = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
@@ -69,6 +70,7 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.20a")]
     public async Task Програвший_бачить_актуальний_стан_і_відмовляє_з_причиною()
     {
         var (documentId, periodId) = await ArrangeAsync(PeriodState.Grace).ConfigureAwait(true);
@@ -113,6 +115,7 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.20a")]
     public async Task Два_одночасні_Reopen_дають_один_результат()
     {
         var (documentId, periodId) = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);

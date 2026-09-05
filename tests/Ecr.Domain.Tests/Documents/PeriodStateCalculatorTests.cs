@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Documents;
+﻿using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
@@ -41,6 +41,7 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
     public void До_дати_відкриття_період_у_стані_Scheduled()
     {
         var state = Calculator.Calculate(January(), SiteMidnight(2025, 12, 20), Site);
@@ -78,6 +79,7 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
     public void Reopen_повертає_період_у_Grace_до_вказаного_моменту()
     {
         var period = January();
@@ -103,6 +105,7 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-0.6")]
     public void Межі_рахуються_у_поясі_майданчика_а_не_в_UTC()
     {
         var period = January();

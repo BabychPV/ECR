@@ -1,4 +1,4 @@
-using Ecr.Domain.Abstractions;
+﻿using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Units;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
@@ -26,6 +26,7 @@ public sealed class UnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.3")]
     public void Конверсія_в_ту_саму_одиницю_повертає_значення_без_змін()
     {
         var kg = Make("kg", Mass, isBase: true, factor: 1m, id: 1);
@@ -98,6 +99,7 @@ public sealed class UnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.5")]
     public void Конверсія_кубометрів_у_кілограми_неможлива_бо_це_контекстний_коефіцієнт()
     {
         var cubicMetre = Make("m3", Volume, isBase: true, factor: 1m, id: 2);
@@ -117,6 +119,7 @@ public sealed class UnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.5")]
     public void Конверсія_не_втрачає_точності_на_decimal()
     {
         var gram = Make("g", Mass, isBase: false, factor: 0.001m, id: 9);

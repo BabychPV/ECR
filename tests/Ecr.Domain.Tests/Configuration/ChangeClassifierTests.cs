@@ -1,4 +1,4 @@
-using Ecr.Domain.Enums;
+﻿using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.TestKit;
 using Xunit;
@@ -20,6 +20,7 @@ public sealed class ChangeClassifierTests
     [InlineData("DisplayFormat")]
     [InlineData("IsHidden")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-7.4")]
     public void Презентаційні_поля_класифікуються_як_Presentation(string field)
     {
         // Презентація лишається презентацією і тоді, коли документи вже є —
@@ -47,6 +48,7 @@ public sealed class ChangeClassifierTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-7.6")]
     public void Зміна_коду_колонки_за_наявності_документів_це_Breaking()
     {
         // Комірка посилається на ColumnDef.Code. Перейменування розриває
@@ -68,6 +70,7 @@ public sealed class ChangeClassifierTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-7.6")]
     public void Додавання_нової_колонки_це_Safe()
     {
         // У нової колонки просто немає комірок — наявних даних це не зачіпає

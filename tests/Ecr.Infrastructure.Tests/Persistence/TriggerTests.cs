@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Configuration;
+﻿using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -26,6 +26,7 @@ public sealed class TriggerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.1")]
     public async Task Зміна_типу_колонки_опублікованої_версії_відхиляється_тригером()
     {
         var doc = await PublishedAsync();
@@ -43,6 +44,7 @@ public sealed class TriggerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.1")]
     public async Task Зміна_підпису_колонки_опублікованої_версії_дозволена()
     {
         var doc = await PublishedAsync();
@@ -60,6 +62,7 @@ public sealed class TriggerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.1")]
     public async Task Зміна_Ordinal_опублікованої_версії_дозволена()
     {
         var doc = await PublishedAsync();
@@ -75,6 +78,7 @@ public sealed class TriggerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.5")]
     public async Task Зміна_RowKey_опублікованої_версії_відхиляється()
     {
         var doc = await PublishedAsync();

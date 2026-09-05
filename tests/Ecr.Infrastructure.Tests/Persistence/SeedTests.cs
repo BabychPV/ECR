@@ -1,4 +1,4 @@
-using Ecr.Infrastructure.Persistence;
+﻿using Ecr.Infrastructure.Persistence;
 using Ecr.Application.Security;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -24,6 +24,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.17")]
     public async Task Повторний_запуск_не_створює_дублікатів()
     {
         var before = await CountsAsync();
@@ -44,6 +45,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9")]
     public async Task Створюються_три_мови_і_рівно_одна_за_замовчуванням()
     {
         Assert.Equal(3, await ScalarAsync("SELECT COUNT(*) FROM sys_ecr.Language"));
@@ -57,6 +59,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9")]
     public async Task Створюються_усі_права_з_каталогу()
     {
         Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
@@ -130,6 +133,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.2")]
     public async Task Кожна_розмірність_має_рівно_одну_базову_одиницю()
     {
         // Базові розмірності (1..7) мають базову одиницю; похідні (8..11) —
@@ -148,6 +152,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.2")]
     public async Task Похідні_одиниці_посилаються_на_чисельник_і_знаменник()
     {
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
@@ -166,6 +171,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.2")]
     public async Task Множники_базових_одиниць_відповідають_фікстурі()
     {
         // ⚠ FactorToBase наявних одиниць МІНЯТИ ЗАБОРОНЕНО: на них спираються

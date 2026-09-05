@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
@@ -85,6 +85,7 @@ public sealed class GoldenFixtureTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.5")]
     public void F6_конверсія_кубометрів_у_тонни_через_щільність()
     {
         // (4750.625 + 4020.500 + 3041.375) m3 = 11812.500 m3
@@ -127,6 +128,7 @@ public sealed class GoldenFixtureTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-16.8")]
     public void F7_одиниця_на_рядок_приводить_тонни_і_кілограми_до_спільної_одиниці()
     {
         // Колонка `AmountUnit` має dataType = Unit: одиниця лежить у КОЖНІЙ

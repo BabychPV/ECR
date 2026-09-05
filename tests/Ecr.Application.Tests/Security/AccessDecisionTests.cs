@@ -1,4 +1,4 @@
-using Ecr.Application.Security;
+﻿using Ecr.Application.Security;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
@@ -202,6 +202,7 @@ public sealed class AccessDecisionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.14")]
     public void Поточний_період_проєкту_НЕ_впливає_на_рішення_про_доступ()
     {
         // ⚠ У CellAccessContext поточного періоду немає ЗА ПОБУДОВОЮ — саме
@@ -261,6 +262,7 @@ public sealed class AccessDecisionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-0.5")]
     public void Відмова_повертає_ПРИЧИНУ_а_не_просто_заборону()
     {
         // Користувач має розуміти, чому комірка сіра, інакше він піде до

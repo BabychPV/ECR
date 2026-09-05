@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Ecr.Application.Errors;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
@@ -190,6 +190,7 @@ public sealed class PublishTemplateVersionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-2.9")]
     public async Task Відповідь_містить_УСІ_проблеми_а_не_лише_першу()
     {
         Structure("SUM([Apr])", "SUM([May])", "SUM([Jun])");

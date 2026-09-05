@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Ecr.TestKit;
 using NetArchTest.Rules;
 using Xunit;
@@ -126,6 +126,7 @@ public sealed class LayerRulesTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.14")]
     public void Правило_7_перевірка_ролей_робиться_лише_через_IAccessDecisionService()
     {
         // ⚠ `User.IsInRole` і `[Authorize(Roles=…)]` бачать лише ім'я ролі, а
@@ -144,6 +145,7 @@ public sealed class LayerRulesTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.14")]
     public void Правило_8_у_результатних_типах_немає_float_і_double()
     {
         // D-30: порядок додавання float змінює результат, і звірка з еталоном

@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Periods/BuildPeriodCalendarTests.cs
+﻿// tests/Ecr.Application.Tests/Periods/BuildPeriodCalendarTests.cs
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.TestKit;
@@ -13,6 +13,7 @@ public sealed class BuildPeriodCalendarTests
     [InlineData("Monthly", 12)]
     [InlineData("Quarterly", 4)]
     [InlineData("Yearly", 1)]
+    [Trait("Requirement", "ФВ-1.5")]
     public void Кількість_періодів_відповідає_періодичності(string kind, int expected)
     {
         var periodKind = Enum.Parse<PeriodKind>(kind);
@@ -31,6 +32,7 @@ public sealed class BuildPeriodCalendarTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.5")]
     public void PeriodKey_рахується_як_рік_на_сто_плюс_послідовність()
     {
         var periods = PeriodCalendar.Build(

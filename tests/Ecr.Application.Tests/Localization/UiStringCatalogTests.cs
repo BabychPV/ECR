@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Localization/UiStringCatalogTests.cs
+﻿// tests/Ecr.Application.Tests/Localization/UiStringCatalogTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Localization;
@@ -25,6 +25,7 @@ public sealed class UiStringCatalogTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-0.4")]
     public async Task Відсутній_переклад_підмінюється_мовою_за_замовчуванням()
     {
         var catalog = await Handler(userId: 5).HandleAsync("ru", publicOnly: true, CancellationToken.None);

@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
@@ -85,6 +85,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-3.8")]
     public async Task Незаповнені_комірки_не_створюються_і_не_повертаються()
     {
         var (doc, store) = await ArrangeAsync();
@@ -109,6 +110,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-3.8")]
     public async Task Читання_зрізу_виконує_один_запит_а_не_запит_на_рядок()
     {
         var (doc, store) = await ArrangeAsync();

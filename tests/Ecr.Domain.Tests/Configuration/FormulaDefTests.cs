@@ -1,4 +1,4 @@
-// tests/Ecr.Domain.Tests/Configuration/FormulaDefTests.cs
+﻿// tests/Ecr.Domain.Tests/Configuration/FormulaDefTests.cs
 using System.Reflection;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -53,6 +53,7 @@ public sealed class FormulaDefTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-3.4")]
     public void Токен_поза_оголошеним_списком_аргументів_дає_помилку_публікації()
     {
         var formula = Formula("@FuelConsumption * CST.EF_CO2");

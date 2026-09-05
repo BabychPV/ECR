@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Periods/TimeZoneImmutabilityTests.cs
+﻿// tests/Ecr.Application.Tests/Periods/TimeZoneImmutabilityTests.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -30,6 +30,7 @@ public sealed class TimeZoneImmutabilityTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.1a")]
     public void Після_відкриття_першого_періоду_зміна_дає_ECR_PRD_0409()
     {
         var project = ProjectBuilder.Project();

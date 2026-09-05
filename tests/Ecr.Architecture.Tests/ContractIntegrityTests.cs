@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.RegularExpressions;
 using Ecr.Application.Security;
 using Ecr.Domain.Enums;
@@ -31,6 +31,7 @@ public sealed class ContractIntegrityTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-5.19")]
     public void Кожен_порт_має_рівно_одну_реалізацію_окрім_явно_множинних()
     {
         var ports = SourceTree.Production("Ecr.Application")
@@ -93,6 +94,7 @@ public sealed class ContractIntegrityTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.19")]
     public void Кожне_значення_EditDenyReason_повертається_хоча_б_одним_шляхом()
     {
         // ⚠ Причина, яку не повертає жоден шлях, — гірше за її відсутність:
@@ -142,6 +144,7 @@ public sealed class ContractIntegrityTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-5.19")]
     public void Кожен_ендпоінт_із_таблиці_бюджету_має_метрику()
     {
         // Правило контракту (`02-contracts.md` §11): операція з таблиці

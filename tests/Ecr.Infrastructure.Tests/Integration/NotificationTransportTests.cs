@@ -1,4 +1,4 @@
-// tests/Ecr.Infrastructure.Tests/Integration/NotificationTransportTests.cs
+﻿// tests/Ecr.Infrastructure.Tests/Integration/NotificationTransportTests.cs
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Integration;
 using Ecr.TestKit;
@@ -25,6 +25,7 @@ public sealed class NotificationTransportTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Без_Host_відправник_НЕ_налаштований()
     {
         // ⚠ «Не налаштовано» і «не доставлено» — різні стани. Перший лишає
@@ -37,6 +38,7 @@ public sealed class NotificationTransportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.11")]
     public void Із_Host_відправник_налаштований()
     {
         var sender = Sender(("Smtp:Host", "smtp.example.local"));
@@ -46,6 +48,7 @@ public sealed class NotificationTransportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.11")]
     public async Task Ненелаштований_відправник_КИДАЄ_а_не_вдає_успіх()
     {
         // ⛔ Мовчазний успіх тут — найгірше з можливого: черга спорожніла б, а
@@ -86,6 +89,7 @@ public sealed class NotificationTransportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-12.4a")]
     public async Task Недоступний_сервер_дає_ВИНЯТОК_щоб_подія_лишилася_в_черзі()
     {
         // ⛔ Головна перевірка `D-124`. Виняток мусить дійти до задачі: саме

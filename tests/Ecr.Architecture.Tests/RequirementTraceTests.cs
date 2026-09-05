@@ -28,6 +28,7 @@ public sealed partial class RequirementTraceTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "ФВ-9.16c")]
     public void Кожна_вимога_має_тест_або_явне_звільнення()
     {
         var declared = Declared();

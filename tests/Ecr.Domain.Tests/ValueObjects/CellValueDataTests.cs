@@ -1,4 +1,4 @@
-using Ecr.Domain.ValueObjects;
+﻿using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Xunit;
 
@@ -63,6 +63,7 @@ public sealed class CellValueDataTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.8")]
     public void Явна_порожнеча_і_відсутність_комірки_це_різні_стани()
     {
         // «Заповнили порожнім» — комірка існує, позначена явно і КОРЕКТНА.

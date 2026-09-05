@@ -1,4 +1,4 @@
-using Ecr.Application.Errors;
+﻿using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
@@ -44,6 +44,7 @@ public sealed class PatchPresentationTests
         """[{"entityType":"ColumnDef","entityId":5,"field":"HeaderL10n","value":"{\"en\":\"Volume, m3\"}"}]""";
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.7")]
     public async Task Зміна_підпису_опублікованої_версії_проходить()
     {
         var revision = await Handler().PatchAsync(1, HeaderPatch, userId: 9, CancellationToken.None);
