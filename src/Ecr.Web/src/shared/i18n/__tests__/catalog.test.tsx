@@ -1,7 +1,7 @@
 ﻿import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { JSX } from 'react';
-import { loadCatalog, t } from '@/shared/i18n';
+import { catalogSnapshot, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 
 /**
@@ -52,7 +52,9 @@ describe('Каталог рядків інтерфейсу', () => {
     catalog({ 'login.title': 'Environmental Compliance Reporting' });
 
     render(<Subscribed k="login.title" />);
-    expect(screen.getByRole('heading').textContent).toBe('login.title');
+    // ⚠ У кутових дужках (`D-138`): голий ключ на екрані виглядає майже
+    // правдоподібно, і саме тому `A7-33` прожила так довго.
+    expect(screen.getByRole('heading').textContent).toBe('⟦login.title⟧');
 
     await act(async () => {
       await loadCatalog('en', 'public');
@@ -75,7 +77,27 @@ describe('Каталог рядків інтерфейсу', () => {
 
     // ⚠ Негативна перевірка обов'язкова: без неї попередній тест був би
     // зеленим навіть якби React перемальовував усе сам, і сторож не сторожив би.
-    expect(screen.getByRole('heading').textContent).toBe('login.windows');
+    expect(screen.getByRole('heading').textContent).toBe('⟦login.windows⟧');
+  });
+
+  it('ФВ-14.9c: на 304 ідентичність каталогу в сторі не змінюється', async () => {
+    catalog({ 'nav.documents': 'Documents' }, 11);
+    await loadCatalog('en', 'public');
+
+    const before = catalogSnapshot();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(null, { status: 304 }))),
+    );
+
+    await loadCatalog('en', 'public');
+
+    // ⛔ Версія НЕ зросла. Інакше `useSyncExternalStore` перемалював би все
+    // дерево на кожному відкритті сторінки — і виграш умовного запиту зник би
+    // рівно там, де він мав бути.
+    expect(catalogSnapshot()).toBe(before);
+    expect(t('nav.documents')).toBe('Documents');
   });
 
   it('другий запит іде з If-None-Match і на 304 лишає збережене', async () => {

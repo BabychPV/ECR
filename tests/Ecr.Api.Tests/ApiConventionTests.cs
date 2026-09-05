@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using Ecr.TestKit;
@@ -33,6 +33,36 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
         Assert.True(json.TryGetProperty("openapi", out _));
         Assert.True(json.TryGetProperty("paths", out var paths));
         Assert.NotEmpty(paths.EnumerateObject());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9c")]
+    public async Task Умовний_запит_каталогу_віддає_304_із_порожнім_тілом()
+    {
+        // ⛔ Тіло має бути ПОРОЖНЄ. `304` із тілом — це весь каталог, надісланий
+        // ще раз під виглядом «не змінилося»: клієнт його не читає, а трафік і
+        // час на серіалізацію витрачені. Саме заради цього умовний запит і
+        // існує (`A7-34`).
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var path = new Uri("/api/v1/ui-strings/en?scope=public", UriKind.Relative);
+
+        var first = await client.GetAsync(path);
+        first.EnsureSuccessStatusCode();
+
+        var etag = first.Headers.ETag?.ToString();
+        Assert.False(string.IsNullOrWhiteSpace(etag), "Сервер не віддав ETag — умовний запит неможливий.");
+
+        using var conditional = new HttpRequestMessage(HttpMethod.Get, path);
+        conditional.Headers.TryAddWithoutValidation("If-None-Match", etag);
+
+        var second = await client.SendAsync(conditional);
+
+        Assert.Equal(System.Net.HttpStatusCode.NotModified, second.StatusCode);
+        Assert.Empty(await second.Content.ReadAsStringAsync());
     }
 
     [Fact]

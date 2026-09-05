@@ -1,9 +1,21 @@
 ﻿import { Suspense, useEffect, type JSX } from 'react';
-import { AppShell, Badge, Burger, Group, NavLink, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
+import {
+  AppShell,
+  Badge,
+  Burger,
+  Center,
+  Group,
+  Loader,
+  NavLink,
+  ScrollArea,
+  Skeleton,
+  Stack,
+  Text,
+} from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { can, useSession } from '@/shared/session/useSession';
-import { language, loadCatalog, t } from '@/shared/i18n';
+import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UserMenu } from '@/shared/ui/UserMenu';
@@ -51,7 +63,20 @@ export function AppLayout(): JSX.Element {
     void loadCatalog(me.language.length > 0 ? me.language : language(), 'private');
   }, [me]);
 
-  if (session.isPending) return <Text p="md">{t('app.loading')}</Text>;
+  // ⛔ Ані профіль, ані приватний каталог іще не приїхали — тексту немає.
+  // `t('app.loading')` тут показав би `⟦app.loading⟧`: цей ключ живе в
+  // ПУБЛІЧНІЙ області, якої на цьому шляху ніхто не вантажив (`D-138`).
+  const catalogReady =
+    me === undefined ||
+    isCatalogResolved(me.language.length > 0 ? me.language : language(), 'private');
+
+  if (session.isPending || !catalogReady) {
+    return (
+      <Center p="md">
+        <Loader size="sm" />
+      </Center>
+    );
+  }
 
   if (session.isError || me === undefined) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;

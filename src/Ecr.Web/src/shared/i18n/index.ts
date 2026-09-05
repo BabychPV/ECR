@@ -98,6 +98,22 @@ function etagKey(language: Language, scope: Scope): string {
   return `uiStrings:${language}:${scope}:etag`;
 }
 
+/**
+ * Чи розв'язано каталог для мови й області (`D-138`).
+ *
+ * ⛔ Оболонка не має права малювати текст, доки це не так. Інакше перший кадр
+ * складається з позначених ключів — `⟦login.title⟧` замість назви системи, —
+ * і користувач бачить його щоразу, поки йде запит. Стан завантаження чесніший
+ * і коштує ті самі мілісекунди (`ФВ-14.21`).
+ *
+ * ⚠ «Розв'язано» означає САМЕ спробу, що завершилася: невдалий запит теж
+ * лишає порожній каталог у `loaded` і теж розв'язує цю обіцянку — інакше
+ * недоступний сервер вішав би сторінку входу назавжди.
+ */
+export function isCatalogResolved(lang: Language, scope: Scope): boolean {
+  return loaded.has(`${lang}:${scope}`);
+}
+
 /** Мова, обрана зараз. */
 export function language(): Language {
   return current;
@@ -137,8 +153,16 @@ export function setLanguage(value: Language): void {
 export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
   const cacheKey = `${lang}:${scope}`;
 
+  // ⚠ Збережене підставляється ЛИШЕ якщо в пам'яті ще нічого немає. Інакше
+  // кожне повторне завантаження тієї самої мови перестворювало б об'єкт і
+  // піднімало версію — тобто перемальовувало все дерево дарма ще ДО того, як
+  // сервер відповість `304`.
+  //
+  // ⚠ Свіжіше значення, покладене в сховище іншою вкладкою, при цьому
+  // пропускається — і це нормально: мережевий запит нижче однаково принесе
+  // актуальне, а `ETag` не збігся б.
   const cached = readCached(lang, scope);
-  if (cached !== null) {
+  if (cached !== null && !loaded.has(cacheKey)) {
     loaded.set(cacheKey, cached);
     bumpCatalog();
   }
@@ -153,9 +177,20 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
     );
 
     if (fresh === null) {
-      // `304`: сервер підтвердив, що збережене — чинне.
-      current = lang;
-      bumpCatalog();
+      // ⛔ `304`: сервер підтвердив, що збережене — чинне. Вміст НЕ
+      // перестворюється, і версія НЕ зростає, якщо мова та сама: інакше
+      // React перемалював би все дерево дарма, і виграш умовного запиту
+      // зникав би рівно там, де він мав бути — на кожному відкритті
+      // сторінки (`D-136`, директива №04 §3.3).
+      //
+      // ⚠ Ідентичність об'єкта в `loaded` зберігається саме тому, що ми його
+      // не чіпаємо: `readCached` уже поклав його на початку, а тут немає
+      // жодного `set`.
+      if (current !== lang) {
+        current = lang;
+        bumpCatalog();
+      }
+
       return;
     }
 
@@ -173,33 +208,76 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
     }
   }
 
-  current = lang;
-  bumpCatalog();
+  // ⚠ Версія зростає лише разом зі зміною мови: усі шляхи, що змінюють ВМІСТ,
+  // уже покликали `bumpCatalog` самі. Зайвий виклик тут перетворив би кожне
+  // завантаження каталогу на зайвий перерендер усього дерева.
+  if (current !== lang) {
+    current = lang;
+    bumpCatalog();
+  }
 }
+
+/**
+ * Позначка відсутнього рядка (`D-138`).
+ *
+ * ⛔ Голий ключ показувати НЕ МОЖНА. `login.title` на екрані виглядає майже
+ * правдоподібно — як технічна назва, як щось «так і задумано»; саме тому
+ * `A7-33` прожила до живого запуску, хоч була видима кожному. Кутові дужки
+ * роблять пропуск помітним з першого погляду і з будь-якої відстані.
+ */
+const Missing = { open: '⟦', close: '⟧' } as const;
+
+/** Ключі, про які вже поскаржилися: щоб не залити консоль на кожному рендері. */
+const reported = new Set<string>();
 
 /**
  * Повертає переклад за ключем із завантаженого каталогу.
  *
- * ⚠ Ланцюг запасних варіантів: мова → мова за замовчуванням → **сам ключ**.
- * Порожнеча не показується ніколи: кнопка без напису виглядає як зламаний
- * інтерфейс, а `document.submit` — як невідкладений переклад.
+ * ⚠ Ланцюг запасних варіантів: мова → мова за замовчуванням → **позначений
+ * ключ**. Порожнеча не показується ніколи: кнопка без напису виглядає як
+ * зламаний інтерфейс.
  */
 export function t(key: string, params?: Record<string, string | number>): string {
   const template = lookup(current, key) ?? lookup(DefaultLanguage, key);
 
-  if (params === undefined) return template ?? key;
-
-  // ⛔ Коли перекладу немає, підставляти нема куди — а значення втрачати не
-  // можна: `deny.Unknown` без своєї причини перетворюється на те саме
-  // «недоступно», проти якого ця підказка й існує. Тому запасний варіант
-  // показує ключ РАЗОМ зі значеннями.
   if (template === undefined) {
-    return `${key} (${Object.entries(params).map(([k, v]) => `${k}=${String(v)}`).join(', ')})`;
+    report(key);
+
+    // ⛔ Значення параметрів не губляться: `deny.Unknown` без своєї причини
+    // перетворюється на те саме «недоступно», проти якого ця підказка й існує.
+    const detail =
+      params === undefined
+        ? key
+        : `${key} (${Object.entries(params)
+            .map(([name, value]) => `${name}=${String(value)}`)
+            .join(', ')})`;
+
+    return `${Missing.open}${detail}${Missing.close}`;
   }
+
+  if (params === undefined) return template;
 
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
     name in params ? String(params[name]) : match,
   );
+}
+
+/**
+ * Скаржиться в консоль — лише в режимі розробки і лише раз на ключ.
+ *
+ * ⚠ У збірці для розгортання мовчить: користувачеві консоль не показують, а
+ * шум у ній заважає діагностувати справжні помилки.
+ */
+function report(key: string): void {
+  if (!import.meta.env.DEV || reported.has(key)) return;
+
+  reported.add(key);
+  console.error(`Немає рядка інтерфейсу: ${key} (мова ${current}).`);
+}
+
+/** Скидає перелік поскаржених ключів — для тестів. */
+export function resetMissingReports(): void {
+  reported.clear();
 }
 
 function lookup(lang: Language, key: string): string | undefined {

@@ -1,10 +1,21 @@
 ﻿import { useState, type JSX } from 'react';
-import { Button, Card, Center, Divider, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
+import {
+  Button,
+  Card,
+  Center,
+  Divider,
+  Loader,
+  PasswordInput,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { loadCatalog, preferredLanguage, t } from '@/shared/i18n';
+import { isCatalogResolved, loadCatalog, preferredLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { useEffect } from 'react';
 
@@ -54,6 +65,17 @@ export function LoginPage(): JSX.Element {
     } finally {
       setBusy(false);
     }
+  }
+
+  // ⛔ Доки каталог не розв'язано, тексту НЕМАЄ. Перший кадр із позначеними
+  // ключами (`⟦login.title⟧`) бачив би кожен користувач при кожному відкритті
+  // сторінки — а це рівно те, чим була `A7-33`, тільки коротше (`D-138`).
+  if (!isCatalogResolved(preferredLanguage(), 'public')) {
+    return (
+      <Center h="100vh">
+        <Loader size="sm" />
+      </Center>
+    );
   }
 
   return (

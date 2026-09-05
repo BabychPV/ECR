@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+﻿import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -98,7 +98,7 @@ describe('Дашборд здоров’я', () => {
     respond({ status: 'Healthy', totalDurationMs: 1, checks: [] });
     show();
 
-    expect(await screen.findByText('health.noChecks')).toBeDefined();
+    expect(await screen.findByText('⟦health.noChecks⟧')).toBeDefined();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
