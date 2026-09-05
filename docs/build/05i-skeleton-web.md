@@ -54,7 +54,7 @@ MODULE: web | STAGE: 0
     "@vitejs/plugin-react": "4.3.4",
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",
-    "vitest": "2.1.9",
+    "vitest": "5.0.0",
     "@testing-library/react": "16.1.0",
     "@testing-library/user-event": "14.5.2",
     "jsdom": "25.0.1",
