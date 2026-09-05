@@ -50,18 +50,23 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
     public async Task Розбіжність_контрольних_сум_зупиняє_процес()
     {
         var doc = await DocumentAsync(202602);
-        await CellAsync(doc, 100m);
+        await CellAsync(doc, 100.123456m);
 
-        // Підкидаємо в архів зайвий рядок того самого періоду: суми не зійдуться.
-        await ExecuteAsync($"""
-            INSERT INTO arc.CellValue
-                (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
-            VALUES ({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[2]},
-                    {doc.TableDefId}, 999, 0, 0)
-            """);
+        // ⚠ Розбіжність вводиться зменшенням МАСШТАБУ колонки архіву:
+        // скопійовані значення округляться, `SUM` розійдеться, а `COUNT`
+        // збіжиться — тобто спрацює саме перевірка сум, а не кількості.
+        //
+        // ⛔ Підкинути зайвий рядок в архів більше не можна: крок 1 тепер
+        // ідемпотентний і очищає цільовий діапазон перед копіюванням
+        // (`D-117`), інакше повторний запуск після збою подвоїв би архів.
+        await ExecuteAsync(
+            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,2) NULL;");
 
         var error = await Assert.ThrowsAsync<SqlException>(
             () => ArchiveAsync(doc.ProjectId, 202602, 202602));
+
+        await ExecuteAsync(
+            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,10) NULL;");
 
         // ⛔ Процес ЗУПИНЯЄТЬСЯ. Продовжити «бо майже збіглося» означало б
         // видалити джерело під архів, у якому чогось бракує.
@@ -77,19 +82,25 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
     public async Task При_розбіжності_дані_джерела_лишаються_на_місці()
     {
         var doc = await DocumentAsync(202603);
-        await CellAsync(doc, 100m);
+        await CellAsync(doc, 100.123456m);
 
         var before = await CountAsync("doc.CellValue", doc.PeriodKey.Value);
 
-        await ExecuteAsync($"""
-            INSERT INTO arc.CellValue
-                (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
-            VALUES ({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[2]},
-                    {doc.TableDefId}, 999, 0, 0)
-            """);
+        // ⚠ Розбіжність вводиться зменшенням МАСШТАБУ колонки архіву:
+        // скопійовані значення округляться, `SUM` розійдеться, а `COUNT`
+        // збіжиться — тобто спрацює саме перевірка сум, а не кількості.
+        //
+        // ⛔ Підкинути зайвий рядок в архів більше не можна: крок 1 тепер
+        // ідемпотентний і очищає цільовий діапазон перед копіюванням
+        // (`D-117`), інакше повторний запуск після збою подвоїв би архів.
+        await ExecuteAsync(
+            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,2) NULL;");
 
         await Assert.ThrowsAsync<SqlException>(
             () => ArchiveAsync(doc.ProjectId, 202603, 202603));
+
+        await ExecuteAsync(
+            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,10) NULL;");
 
         // ⛔ ГОЛОВНЕ ПРАВИЛО процедури: джерело не видаляється, поки суми не
         // збіглися. Саме воно відрізняє відновлювану операцію від такої, що
@@ -104,27 +115,36 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Обрив_посередині_дозволяє_продовжити_з_наступної_партиції()
+    public async Task Повторний_прогін_після_збою_НЕ_подвоює_архів()
     {
-        var first = await DocumentAsync(202604);
-        await CellAsync(first, 10m);
+        var doc = await DocumentAsync(202604);
+        await CellAsync(doc, 10m);
 
-        await ArchiveAsync(first.ProjectId, 202604, 202604);
+        var source = await CountAsync("doc.CellValue", doc.PeriodKey.Value);
 
-        var run = await LastRunAsync(first.ProjectId);
+        // ⚠ Механізм відновлення ЗМІНИВСЯ разом із `D-117`, і це не спрощення.
+        // Раніше процедура продовжувала з партиції, на якій зупинилася
+        // (`LastDonePeriodKey`), бо зняття ключів жило поза транзакцією і
+        // повторний прохід був дорогим. Тепер крок 2 атомарний: партиції або
+        // звільнені всі, або жодна. Тому відновлення — це просто ПОВТОРНИЙ
+        // ЗАПУСК, а гарантія, яку треба перевіряти, інша: він не подвоює архів.
+        //
+        // ⛔ Ідемпотентність тут не побічний ефект, а умова: без очищення
+        // цільового діапазону перед копіюванням другий прогін дав би подвійні
+        // рядки в архіві — і суми зійшлися б лише випадково.
+        await ArchiveAsync(doc.ProjectId, 202604, 202604);
 
-        // ⚠ LastDonePeriodKey — не діагностика, а те, що робить архівацію
-        // ВІДНОВЛЮВАНОЮ (АРХ-3a, D-24). Повторний запуск продовжує з
-        // наступної партиції, а не починає спочатку: рік — це десятки
-        // мільйонів рядків, і другий прохід не вкладеться у вікно.
-        Assert.Equal(202604, run.LastDone);
+        var afterFirst = await CountAsync("arc.CellValue", doc.PeriodKey.Value);
+        Assert.Equal(source, afterFirst);
 
-        // Процедура читає саме це поле при відновленні.
-        var script = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "03-archive-proc.sql"));
+        // Другий прогін на тому самому діапазоні: джерело вже порожнє, архів
+        // має лишитися рівно таким самим.
+        await ArchiveAsync(doc.ProjectId, 202604, 202604);
 
-        Assert.Contains("MAX(LastDonePeriodKey) + 1", script, StringComparison.Ordinal);
-        Assert.Contains("Status = N'Failed'", script, StringComparison.Ordinal);
+        Assert.Equal(afterFirst, await CountAsync("arc.CellValue", doc.PeriodKey.Value));
+
+        var run = await LastRunAsync(doc.ProjectId);
+        Assert.Equal("Completed", run.Status);
     }
 
     [Fact]
@@ -263,10 +283,36 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
                     {doc.TableDefId}, {value.ToString(CultureInfo.InvariantCulture)}, 0, 0)
             """);
 
-    private Task ArchiveAsync(int projectId, int from, int to)
-        => ExecuteAsync(
+    /// <summary>
+    /// Виконує архівацію так, як її виконує система.
+    /// </summary>
+    /// <param name="projectId">Проєкт, від імені якого йде прогін.</param>
+    /// <param name="from">Перший період.</param>
+    /// <param name="to">Останній період.</param>
+    /// <remarks>
+    /// ⛔ Проєкти в цьому діапазоні спершу позначаються заархівованими — саме
+    /// цього тепер вимагає процедура (`D-117`). Партиція йде по періоду й не
+    /// знає про проєкти: звільнити її, поки в тих самих періодах працює інший
+    /// проєкт, означає знищити його живі дані.
+    ///
+    /// ⚠ Фікстура робить це ТИМ САМИМ переходом, що й система
+    /// (`POST /projects/{id}/archive` → `Status = Archived`), а не в обхід:
+    /// стан, до якого система не дійде сама, — це знахідка, не зручність
+    /// (`08-workflow.md` §7).
+    /// </remarks>
+    private async Task ArchiveAsync(int projectId, int from, int to)
+    {
+        await ExecuteAsync(
+            $"""
+            UPDATE doc.Project SET Status = 4
+             WHERE Id IN (SELECT DISTINCT ProjectId FROM doc.Period
+                           WHERE PeriodKey BETWEEN {from} AND {to});
+            """).ConfigureAwait(false);
+
+        await ExecuteAsync(
             $"EXEC arc.usp_ArchiveYear @ProjectId = {projectId}, "
-            + $"@FromPeriodKey = {from}, @ToPeriodKey = {to}");
+            + $"@FromPeriodKey = {from}, @ToPeriodKey = {to}").ConfigureAwait(false);
+    }
 
     private Task<int> CountAsync(string table, int periodKey)
         => ScalarAsync<int>($"SELECT COUNT(*) FROM {table} WHERE PeriodKey = {periodKey}");

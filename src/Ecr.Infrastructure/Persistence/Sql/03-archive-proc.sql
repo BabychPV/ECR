@@ -134,6 +134,32 @@ BEGIN
     ------------------------------------------------------------------------
     SET @range = CAST(@p1 AS nvarchar(10)) + N' TO ' + CAST(@p12 AS nvarchar(10));
 
+    ------------------------------------------------------------------------
+    -- ⛔ «Вже заархівовано» — окремий випадок, і без нього ідемпотентність
+    --    ЗНИЩУЄ архів. Якщо джерело порожнє, а в архіві рядки є, то рік уже
+    --    перенесено: очищення цілі й копіювання з порожнього джерела
+    --    залишило б порожній архів, а прогін звітував би про успіх.
+    --
+    -- ⚠ Знайдено тестом на повторний прогін — саме тим, який я написав, щоб
+    --    перевірити ідемпотентність. Різниця між «повторити після збою» і
+    --    «повторити після успіху» тут не косметична: у першому випадку
+    --    джерело на місці, у другому його вже немає.
+    ------------------------------------------------------------------------
+    IF NOT EXISTS (SELECT 1 FROM doc.CellValue
+                    WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       AND EXISTS (SELECT 1 FROM arc.CellValue
+                    WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+    BEGIN
+        UPDATE itg.ArchiveRun
+           SET Status = N'Completed', FinishedAt = SYSUTCDATETIME(),
+               LastDonePeriodKey = @ToPeriodKey,
+               ErrorMessage = N'Період уже заархівовано: джерело порожнє, архів на місці.'
+         WHERE Id = @RunId;
+
+        UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+        RETURN;
+    END;
+
     -- ⚠ Тут саме DELETE, а не TRUNCATE WITH (PARTITIONS): `arc.*` лежить на
     -- окремій файловій групі колонстором і НЕ партиційована (`02a` §arc,
     -- `D-23`). Партиційний TRUNCATE на ній падає, а TRUNCATE цілої таблиці
@@ -142,8 +168,16 @@ BEGIN
     -- ⚠ Виконується лише коли є що прибирати: у звичайному прогоні це
     -- перевірка існування, а не сканування. Ціна платиться лише на повторі
     -- після збою — і саме там вона потрібна, бо без неї архів подвоївся б.
+    -- ⚠ Перевіряються ВСІ три таблиці, а не лише `arc.CellValue`: невдалий
+    -- прогін міг лягти між вставками і лишити рядки в `arc.TableRow` без
+    -- жодної комірки. Перевірка по одній таблиці пропустила б їх, і повторний
+    -- прогін подвоїв би саме те, чого не видно в сумах.
     IF EXISTS (SELECT 1 FROM arc.CellValue
                 WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.TableRow
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.TableInstance
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
     BEGIN
         DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
