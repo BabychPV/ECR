@@ -231,12 +231,27 @@ async function problemOf(response: Response, correlationId: string): Promise<Ecr
     if (body.type !== undefined) problem.type = body.type;
     if (body.detail !== undefined) problem.detail = body.detail;
 
-    // Розширення приходять як `extensions2` (`02-contracts.md` §7): у
-    // ProblemDetails ключ `extensions` зайнятий самим форматом.
-    const extensions = (body['extensions2'] ?? body['extensions']) as
-      | Record<string, unknown>
-      | undefined;
-    if (extensions !== undefined) problem.extensions2 = extensions;
+    // ⛔ Розширення лежать ПЛОСКО у верхньому рівні тіла — так вимагає
+    // `application/problem+json` (RFC 9457 §3.2: члени-розширення є полями
+    // верхнього рівня), і саме так їх пише сервер:
+    // `problem.Extensions["conflicts"] = …`.
+    //
+    // Тут був дефект тієї самої родини, що й `A7-34`…`A7-36`: клієнт шукав їх
+    // у полі `extensions2`, якого в тілі немає взагалі. Наслідок мовчазний і
+    // дорогий — `EcrApiError.conflicts` ЗАВЖДИ повертав порожній масив, тому
+    // при конфлікті паралельного редагування grid показував «хтось змінив ці
+    // комірки: 0» або не показував нічого. Користувач бачив відмову без
+    // жодної підказки, ЩО саме розійшлося (`ФВ-14.24`).
+    //
+    // ⚠ Беремо все, що не належить самому формату: перелік стандартних полів
+    // закритий (RFC 9457 §3.1), решта — розширення за визначенням.
+    const standard = new Set(['type', 'title', 'status', 'detail', 'instance']);
+    const extensions: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (!standard.has(key)) extensions[key] = value;
+    }
+
+    if (Object.keys(extensions).length > 0) problem.extensions2 = extensions;
 
     return problem;
   } catch {

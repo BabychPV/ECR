@@ -121,6 +121,20 @@ if (-not $SkipClient) {
             $global:LASTEXITCODE = 0
         }
 
+        # ⛔ Типи клієнта РЕГЕНЕРУЮТЬСЯ зі знімка контракту і мають збігтися з
+        # тим, що в репозиторії (D-137). Розбіжність означає, що знімок
+        # оновили, а типи — ні: рівно той стан, у якому клієнт описує форму
+        # відповіді сам і розходиться з сервером мовчки (`A7-36`).
+        Step 'Типи клієнта зі знімка' {
+            & npm.cmd run api:types
+            if ($LASTEXITCODE -ne 0) { return }
+
+            & git -C $root diff --exit-code -- 'src/Ecr.Web/src/api/schema.d.ts'
+            if ($LASTEXITCODE -ne 0) {
+                throw 'schema.d.ts розійшовся зі знімком OpenAPI — перегенеруй і закоміть.'
+            }
+        }
+
         Step 'Типи клієнта' { & npm.cmd run typecheck }
         Step 'Стиль клієнта' { & npm.cmd run lint }
         Step 'Тести клієнта' { & npm.cmd run test }

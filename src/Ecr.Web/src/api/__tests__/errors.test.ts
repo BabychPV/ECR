@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   CORRELATION_HEADER,
   EcrApiError,
@@ -49,15 +49,22 @@ describe('Обробка помилок API', () => {
     expect((error as EcrApiError).problem.correlationId).toBe('abc-123');
   });
 
-  it('конфлікт розпізнається за кодом і містить перелік розбіжностей', async () => {
+  it('ФВ-14.24: конфлікт розпізнається за кодом і містить перелік розбіжностей', async () => {
+    // ⛔ Тіло — рівно те, що пише сервер: розширення лежать ПЛОСКО у верхньому
+    // рівні (RFC 9457 §3.2), а не всередині поля `extensions2`.
+    //
+    // До цього фікстура загортала `conflicts` в `extensions2` — форму, якої
+    // сервер не надсилає ніколи. Тест був зелений, а справжній шлях зламаний:
+    // `error.conflicts` завжди повертав порожній масив, і при конфлікті
+    // паралельного редагування grid не показував ані чиєї правки, ані якої.
+    // Це та сама межа, що й у `A7-34`…`A7-36`, і той самий механізм —
+    // **фікстура знала більше за систему**.
     respond(409, {
       title: 'Конфлікт',
       status: 409,
       errorCode: 'ECR-CELL-0409',
       correlationId: 'cid',
-      extensions2: {
-        conflicts: [{ rowKey: 'R1', columnCode: 'C1', theirUser: 'ivanov' }],
-      },
+      conflicts: [{ rowKey: 'R1', columnCode: 'C1', theirUser: 'ivanov' }],
     });
 
     const error = (await apiFetch('/api/v1/cells').catch((e: unknown) => e)) as EcrApiError;
@@ -152,5 +159,41 @@ describe('Обробка помилок API', () => {
     // з серверним журналом інакше, ніж пошуком за часом серед тисяч записів.
     expect(headers.get(CORRELATION_HEADER)).toBeTruthy();
     expect(init?.credentials).toBe('include');
+  });
+});
+
+describe('Розширення помилки лежать плоско (RFC 9457 §3.2)', () => {
+  it('стандартні поля формату розширеннями не вважаються', async () => {
+    respond(422, {
+      type: 'about:blank',
+      title: 'Не пройшло',
+      status: 422,
+      detail: 'Подробиця',
+      instance: '/api/v1/x',
+      errorCode: 'ECR-CELL-0422',
+      correlationId: 'cid-2',
+    });
+
+    const error = (await apiFetch('/api/v1/x').catch((e: unknown) => e)) as EcrApiError;
+
+    // ⚠ Перелік стандартних полів закритий (RFC 9457 §3.1), решта —
+    // розширення за визначенням. Але `title`/`detail`/`instance` НЕ мають
+    // потрапити в розширення: інакше вони показувалися б як подробиці коду.
+    const extensions = error.problem.extensions2 ?? {};
+
+    expect(Object.keys(extensions)).not.toContain('title');
+    expect(Object.keys(extensions)).not.toContain('detail');
+    expect(Object.keys(extensions)).not.toContain('instance');
+    expect(Object.keys(extensions)).toContain('errorCode');
+  });
+
+  it('відсутність розширень не створює порожнього словника', async () => {
+    respond(500, { title: 'Внутрішня помилка', status: 500 });
+
+    const error = (await apiFetch('/api/v1/x').catch((e: unknown) => e)) as EcrApiError;
+
+    // ⚠ Під `exactOptionalPropertyTypes` «поля немає» і «поле є, воно
+    // порожнє» — різні стани, і в журналі вони виглядають по-різному.
+    expect(error.problem.extensions2).toBeUndefined();
   });
 });

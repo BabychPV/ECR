@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Ecr.Api.Health;
@@ -31,23 +31,25 @@ public static class HealthResponse
 
         context.Response.ContentType = "application/json; charset=utf-8";
 
-        var payload = new
-        {
-            status = report.Status.ToString(),
-            totalDurationMs = report.TotalDuration.TotalMilliseconds,
-            checks = report.Entries.Select(e => new
-            {
-                name = e.Key,
-                status = e.Value.Status.ToString(),
-                description = e.Value.Description,
-                durationMs = e.Value.Duration.TotalMilliseconds,
+        // ⛔ НАЗВАНИЙ тип, а не анонімний об'єкт. Анонімний неможливо описати в
+        // OpenAPI: у схемі його немає, згенерувати клієнтський тип нема з чого,
+        // і клієнт пише свій — саме звідси `A7-04`/`A7-36`, коли сервер писав
+        // `checks`, а клієнт читав `entries`, і дашборд відкривався порожнім.
+        var payload = new HealthReportDto(
+            report.Status.ToString(),
+            report.TotalDuration.TotalMilliseconds,
+            report.Entries
+                .Select(e => new HealthCheckDto(
+                    e.Key,
+                    e.Value.Status.ToString(),
+                    e.Value.Description,
+                    e.Value.Duration.TotalMilliseconds,
 
-                // ⚠ Виняток НЕ віддається клієнту: у ньому бувають імена
-                // об'єктів БД і фрагменти запитів. Клієнту — сам факт, у логи —
-                // подробиці (ФВ-6.11).
-                data = e.Value.Data,
-            }),
-        };
+                    // ⚠ Виняток НЕ віддається клієнту: у ньому бувають імена
+                    // об'єктів БД і фрагменти запитів. Клієнту — сам факт, у
+                    // логи — подробиці (ФВ-6.11).
+                    e.Value.Data))
+                .ToList());
 
         return JsonSerializer.SerializeAsync(context.Response.Body, payload, Options, context.RequestAborted);
     }

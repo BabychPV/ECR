@@ -1,4 +1,4 @@
-using Ecr.Api.Auth;
+﻿using Ecr.Api.Auth;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.Api.Startup;
@@ -72,6 +72,10 @@ builder.Services.AddOpenApi(options =>
 {
     options.AddSchemaTransformer<Ecr.Api.Startup.DictionarySchemaTransformer>();
     options.AddSchemaTransformer<Ecr.Api.Startup.NumericSchemaTransformer>();
+
+    // ⛔ `/health/*` — middleware, а не контролер: генератор його не бачить,
+    // і саме тому клієнт описував відповідь руками — звідси `A7-04`/`A7-36`.
+    options.AddDocumentTransformer<Ecr.Api.Startup.HealthDocumentTransformer>();
 });
 
 // ⚠ Теги розділяють перевірки за призначенням: /health/live не має права

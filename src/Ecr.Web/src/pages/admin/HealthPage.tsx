@@ -1,36 +1,11 @@
-import type { JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { Badge, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { HealthReport } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-/**
- * Одна перевірка у звіті.
- *
- * ⛔ Форма описана руками, і це виняток, а не правило: `/health/*` — не
- * контролер, а middleware, тому його немає в OpenAPI і згенерувати тип нема з
- * чого. Саме через це тут двічі жив `A7-04`: опис не збігався з відповіддю, і
- * ніщо про це не сказало.
- *
- * ⚠ Тому нижче — `checks` МАСИВОМ із полем `name`, точно як пише
- * `HealthResponse.WriteAsync`, і тест `health.test.tsx` тримає обидві форми
- * поруч на зразку справжньої відповіді сервера.
- */
-interface HealthCheck {
-  name: string;
-  status: string;
-  description: string | null;
-  durationMs: number;
-  data: Record<string, unknown>;
-}
-
-interface HealthReport {
-  status: string;
-  totalDurationMs: number;
-  checks: HealthCheck[];
-}
 
 /**
  * Операційний дашборд.

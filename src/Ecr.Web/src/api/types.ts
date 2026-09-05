@@ -1,4 +1,4 @@
-import type { components } from './schema';
+﻿import type { components } from './schema';
 
 /**
  * DTO клієнта — **псевдоніми згенерованих типів**, а не їхня копія.
@@ -181,6 +181,22 @@ export type SetAlertsRequest = Schemas['SetAlertsRequest'];
 
 /** Каталог рядків інтерфейсу. */
 export type UiStringCatalog = Schemas['UiStringCatalog'];
+
+/**
+ * Звіт перевірок здоров'я.
+ *
+ * ⛔ Тепер теж ПСЕВДОНІМ згенерованого типу. `/health/*` — middleware, а не
+ * контролер, тому генератор його не бачив, і клієнт описував відповідь руками:
+ * чекав `entries` словником, коли сервер писав `checks` масивом. Дашборд
+ * відкривався порожнім і виглядав як здорова система (`A7-04`, `A7-36`).
+ *
+ * Шлях і схема додані в документ окремим трансформером (`D-137`), і `entries`
+ * тут — помилка компіляції.
+ */
+export type HealthReport = Schemas['HealthReportDto'];
+
+/** Одна перевірка у звіті здоров'я. */
+export type HealthCheck = Schemas['HealthCheckDto'];
 
 /** Локальний вхід. */
 export type LocalLoginRequest = Schemas['LocalLoginRequest'];

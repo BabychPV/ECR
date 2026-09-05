@@ -59,7 +59,7 @@ export default [
      * ⚠ Виняток один — `src/shared/theme/**`: саме там значенням і місце.
      */
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/shared/theme/**', 'src/**/__tests__/**'],
+    ignores: ['src/shared/theme/**', 'src/**/__tests__/**', 'src/api/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -88,6 +88,26 @@ export default [
             'JSXAttribute[name.name=/^(?:m|mt|mb|ml|mr|mx|my|p|pt|pb|pl|pr|px|py|gap)$/] > JSXExpressionContainer > Literal[raw=/^[0-9]+$/]',
           message:
             'Відступ береться зі шкали теми — ФВ-14.12: gap="xs" | "sm" | "md" | "lg" | "xl".',
+        },
+        {
+          /*
+           * D-137: форму відповіді сервера описує ЛИШЕ згенерований
+           * `schema.d.ts`.
+           *
+           * ⛔ `A7-34`, `A7-35` і `A7-36` — не три помилки, а три прояви
+           * одного: клієнт мав власні рукописні типи відповідей, і ніщо не
+           * звіряло їх із тим, що сервер справді віддає. Розбіжності не видно
+           * в жодному з двох файлів окремо — лише МІЖ ними.
+           *
+           * ⚠ Псевдонім (`type XDto = Schemas['XDto']`) дозволений: він не
+           * оголошує форми, а коротко називає вже оголошену. Заборонені саме
+           * ІНТЕРФЕЙСИ і псевдоніми з літералом об'єкта.
+           */
+          selector:
+            "TSInterfaceDeclaration[id.name=/(Response|Dto|Payload)$/], TSTypeAliasDeclaration[id.name=/(Response|Dto|Payload)$/] > TSTypeLiteral",
+          message:
+            'Форму відповіді сервера описує лише згенерований schema.d.ts — D-137. ' +
+            'Використайте псевдонім: type XDto = Schemas["XDto"].',
         },
         {
           /*
