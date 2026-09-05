@@ -66,8 +66,14 @@ public sealed class ImportDiffBuilder(ICellStore cellStore, IRowStore rowStore)
             .ConfigureAwait(false);
 
         var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
-        var values = current.ToDictionary(
-            c => (byRowId.GetValueOrDefault(c.Address.TableRowId), c.Address.ColumnDefId));
+
+        // ⚠ Комірки рядків поза переліком ключів відкидаються, а не зводяться
+        // до спільного ключа з порожнім RowKey: два такі рядки дали б
+        // однаковий ключ і `ToDictionary` упав би на дублікаті — посеред
+        // перегляду імпорту, на даних, які виглядають звичайними.
+        var values = current
+            .Where(c => byRowId.ContainsKey(c.Address.TableRowId))
+            .ToDictionary(c => (byRowId[c.Address.TableRowId], c.Address.ColumnDefId));
 
         var columnsById = table.Columns.ToDictionary(c => c.Id);
 

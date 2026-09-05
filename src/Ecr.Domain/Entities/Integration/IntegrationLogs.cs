@@ -286,6 +286,37 @@ public sealed class JobProgress
     public DateTime UpdatedAt { get; private set; }
     public string? Error { get; private set; }
 
+    /// <summary>
+    /// Ставить стан «у черзі».
+    /// </summary>
+    /// <param name="utcNow">Момент постановки в UTC.</param>
+    /// <remarks>
+    /// ⚠ Запис зʼявляється вже при ПОСТАНОВЦІ, а не при запуску. Інакше між
+    /// відповіддю <c>202</c> з <c>jobId</c> і фактичним стартом задачі стан
+    /// не існує — і клієнт, який опитує його одразу, отримує <c>404</c> на
+    /// задачу, яку щойно прийняли.
+    /// </remarks>
+    public void Queue(DateTime utcNow)
+    {
+        State = "Queued";
+        Percent = 0;
+        Message = null;
+        Error = null;
+        UpdatedAt = utcNow;
+    }
+
+    /// <summary>Ставить стан «виконується».</summary>
+    /// <param name="utcNow">Момент старту в UTC.</param>
+    public void Begin(DateTime utcNow)
+    {
+        State = "Running";
+        Percent = 0;
+        Message = null;
+        Error = null;
+        StartedAt = utcNow;
+        UpdatedAt = utcNow;
+    }
+
     /// <summary>Оновлює прогрес.</summary>
     /// <param name="percent">Відсоток 0…100.</param>
     /// <param name="message">Що зараз відбувається.</param>

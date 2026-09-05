@@ -148,7 +148,10 @@ public sealed class PiSqlClientDataSource(
 
         // Повний батч означає, що хвіст діапазону лишився непрочитаним —
         // і покриття за нього писати не можна.
-        var truncated = points.Count >= request.MaxPoints;
+        // ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
+        // «набрали стелю» була б істинною завжди, і points[^1] упало б на
+        // порожньому списку — на діапазоні, у якому просто немає даних.
+        var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
 
         return new CollectionResult(
             points,
@@ -170,7 +173,23 @@ public sealed class PiSqlClientDataSource(
     private async Task<OdbcConnection> OpenAsync(
         Domain.Entities.External.DataSource source, CancellationToken ct)
     {
-        var builder = new OdbcConnectionStringBuilder(source.Endpoint);
+        OdbcConnectionStringBuilder builder;
+
+        try
+        {
+            builder = new OdbcConnectionStringBuilder(source.Endpoint);
+        }
+        catch (ArgumentException ex)
+        {
+            // ⛔ Зіпсований рядок з'єднання — це недоступне джерело з погляду
+            // збору, а не необроблений виняток десь у надрах. Інакше в
+            // журналі прогону лежало б «ArgumentException» без натяку, що
+            // правити треба поле Endpoint у конфігурації джерела.
+            throw new BusinessRuleException(
+                SourceUnavailable,
+                $"Рядок з'єднання джерела {source.Code} не читається: {ex.Message}",
+                new Dictionary<string, object?> { ["dataSource"] = source.Code });
+        }
 
         if (secrets.Find(source.SecretName) is { } secret)
         {

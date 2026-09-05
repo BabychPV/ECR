@@ -120,7 +120,10 @@ public sealed class PiWebApiDataSource(
             // ⚠ Повний батч означає, що джерело віддало рівно стелю — і хвіст
             // діапазону лишився непрочитаним. Мовчазне «зібрано» тут дало б
             // дірку, позначену як покриття.
-            var truncated = points.Count >= request.MaxPoints;
+            // ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
+        // «набрали стелю» була б істинною завжди, і points[^1] упало б на
+        // порожньому списку — на діапазоні, у якому просто немає даних.
+        var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
 
             return new CollectionResult(
                 points,

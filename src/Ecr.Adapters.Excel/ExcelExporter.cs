@@ -102,9 +102,12 @@ public sealed class ExcelExporter(
 
             worksheet.Columns().AdjustToContents();
 
-            // Заморожені області: заголовок першої таблиці лишається видимим.
-            // Без цього таблиця на п'ятсот рядків гортається наосліп.
-            worksheet.SheetView.FreezeRows(FirstRow);
+            // ⚠ Заморожується рядок ЗАГОЛОВКА першої таблиці, а не перший
+            // рядок аркуша: у першому лежить назва таблиці, і замороження по
+            // ньому лишало б видимою назву, а не підписи колонок — тобто саме
+            // те, заради чого це роблять.
+            var firstHeader = blocks.FirstOrDefault(b => b.SheetName == name)?.HeaderRow ?? FirstRow;
+            worksheet.SheetView.FreezeRows(firstHeader);
         }
 
         if (options.IncludeFormulas)
@@ -190,7 +193,14 @@ public sealed class ExcelExporter(
             .ToList();
 
         var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
-        var values = cells.ToDictionary(c => (byRowId.GetValueOrDefault(c.Address.TableRowId), c.Address.ColumnDefId));
+
+        // ⚠ Комірки рядків, яких немає в переліку ключів, ВІДКИДАЮТЬСЯ, а не
+        // зводяться до спільного ключа з порожнім RowKey. Інакше дві такі
+        // комірки давали б однаковий ключ — і `ToDictionary` падав би на
+        // дублікаті посеред експорту, на даних, які виглядають звичайними.
+        var values = cells
+            .Where(c => byRowId.ContainsKey(c.Address.TableRowId))
+            .ToDictionary(c => (byRowId[c.Address.TableRowId], c.Address.ColumnDefId));
 
         var rowRefs = new List<ExcelRowRef>(keys.Count);
 

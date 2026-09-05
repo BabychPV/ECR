@@ -25,7 +25,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public sealed class QuartzJobScheduler(
     ISchedulerFactory? schedulerFactory = null,
-    IJobProgressStore? progress = null) : IBackgroundJobScheduler
+    IJobProgressStore? progress = null,
+    Ecr.Domain.Abstractions.IClock? clock = null) : IBackgroundJobScheduler
 {
     private const string UnavailableCode = "ECR-SYS-0503";
 
@@ -70,6 +71,18 @@ public sealed class QuartzJobScheduler(
             .Build();
 
         var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
+
+        // ⚠ Запис прогресу створюється ДО постановки, а не при старті задачі.
+        // Клієнт отримує 202 з jobId і одразу починає опитувати стан; без
+        // цього рядка він отримав би 404 на задачу, яку щойно прийняли, і
+        // вирішив би, що вона загубилася.
+        if (progress is not null && clock is not null)
+        {
+            await progress
+                .QueueAsync(jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct)
+                .ConfigureAwait(false);
+        }
+
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
 
         return jobId;

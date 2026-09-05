@@ -8,22 +8,32 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 {
     /// <inheritdoc />
-    public async Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct)
+    public Task QueueAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct)
+        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Queue(utcNow), ct);
+
+    /// <inheritdoc />
+    public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct)
+        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Begin(utcNow), ct);
+
+    /// <summary>Створює або оновлює запис прогресу.</summary>
+    /// <remarks>
+    /// Повторний виклик із тим самим ідентифікатором — це перезапуск після
+    /// збою, а не друга задача: запис оновлюється, а не дублюється.
+    /// </remarks>
+    private async Task UpsertAsync(
+        string jobId, string jobCode, DateTime utcNow, Action<JobProgress> apply, CancellationToken ct)
     {
-        var existing = await db.JobProgresses
+        var entry = await db.JobProgresses
             .FirstOrDefaultAsync(p => p.JobId == jobId, ct)
             .ConfigureAwait(false);
 
-        // Повторний старт того самого ідентифікатора — це перезапуск після
-        // збою, а не друга задача: запис оновлюється, а не дублюється.
-        if (existing is null)
+        if (entry is null)
         {
-            db.JobProgresses.Add(new JobProgress(jobId, jobCode, utcNow));
+            entry = new JobProgress(jobId, jobCode, utcNow);
+            db.JobProgresses.Add(entry);
         }
-        else
-        {
-            existing.Report(0, null, utcNow);
-        }
+
+        apply(entry);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }

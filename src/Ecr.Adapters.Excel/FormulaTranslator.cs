@@ -5,6 +5,14 @@ using Ecr.Expressions.Parsing;
 
 namespace Ecr.Adapters.Excel;
 
+// ⚠ CA1822 (методи можна зробити статичними) вимкнено свідомо. Обидва класи
+// названі КОНСТРУКТОРОМ `ExcelExporter` у контракті пакета (`05g` §1) і
+// живуть у контейнері як співавтори. Статичні методи зробили б параметри
+// конструктора зайвими — і контракт, і можливість підмінити поведінку в
+// тестах зникли б заради економії, якої не існує: обидва класи без стану і
+// створюються один раз як Singleton.
+#pragma warning disable CA1822
+
 /// <summary>
 /// Транслює наші вирази в синтаксис Excel і назад.
 /// </summary>
@@ -309,3 +317,4 @@ public sealed class FormulaTranslator
     private static string Normalize(string address)
         => address.Replace("$", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
 }
+#pragma warning restore CA1822

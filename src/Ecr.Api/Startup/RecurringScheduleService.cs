@@ -45,13 +45,40 @@ public sealed partial class RecurringScheduleService(
     {
         // Постановка відкладається до ApplicationStarted: до цього моменту
         // планувальник ще не піднято, а решта hosted-сервісів ще стартує.
-        lifetime.ApplicationStarted.Register(() => _ = ScheduleAsync());
+        lifetime.ApplicationStarted.Register(() => _ = ScheduleSafelyAsync());
 
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>
+    /// Ставить розклади і <b>зупиняє застосунок</b>, якщо не вдалося.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Виняток тут не можна ані проковтнути, ані лишити незавершеною
+    /// задачею. Постановка йде з коллбека <c>ApplicationStarted</c>, який
+    /// нічого не чекає: невдача перетворилася б на unobserved task, застосунок
+    /// працював би далі — і вночі мовчазно не відбувалася б жодна перевірка.
+    /// Дізналися б про це через місяць по відсутніх зрізах.
+    /// <para>
+    /// Тому провал зупиняє застосунок: він одразу видимий і не дає працювати
+    /// системі, у якої половина механізмів вимкнена без попередження.
+    /// </para>
+    /// </remarks>
+    private async Task ScheduleSafelyAsync()
+    {
+        try
+        {
+            await ScheduleAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            LogSchedulesFailed(logger, ex.Message);
+            lifetime.StopApplication();
+        }
+    }
 
     /// <summary>
     /// Ставить постійні розклади.
@@ -118,4 +145,9 @@ public sealed partial class RecurringScheduleService(
         Level = LogLevel.Information,
         Message = "Старт: постійні розклади поставлено, зокрема збору: {Count}.")]
     private static partial void LogSchedulesDone(ILogger logger, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Critical,
+        Message = "Старт: постійні розклади НЕ поставлено ({Reason}); застосунок зупиняється.")]
+    private static partial void LogSchedulesFailed(ILogger logger, string reason);
 }
