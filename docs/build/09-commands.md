@@ -117,6 +117,10 @@ sqlcmd -S $S -d $DB -E -b -I -i $Q/04-partition-maintenance.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/05-rpt-views.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/10-triggers.sql
 sqlcmd -S $S -d $DB -E -b -I -i $Q/06-rcsi.sql   # останнім: бере базу в ексклюзивне користування
+
+# Регламент обслуговування — ОКРЕМО і один раз, під обліковим записом DBA:
+# скрипт створює завдання SQL Agent у msdb, а не об'єкти в базі (D-66).
+sqlcmd -S $S -d $DB -E -b -I -i $Q/14-agent-jobs.sql
 # 12, 13, 03, 04, 05 додано за етапами 3–5; перелік звіряє tools/verify-sql-scripts.ps1,
 # який падає, якщо в теці є скрипт, якого немає в цьому порядку.
 # 09-seed.sql тут НЕМАЄ: seed виконує сам застосунок при старті (SeedRunner),
