@@ -122,11 +122,13 @@ public static class DependencyInjection
         services.AddScoped<Documents.RecalculateDocumentHandler>();
 
         // Етап 5: обмін із Excel, звітність, інтеграція, стан задач.
+        services.AddScoped<Documents.GetDocumentTablesHandler>();
         services.AddScoped<Documents.ExportDocumentHandler>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();
         services.AddScoped<Reporting.BuildReportSnapshotHandler>();
+        services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.GetJobStatusHandler>();
 

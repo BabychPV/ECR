@@ -84,22 +84,28 @@ public sealed class AuthController(
     /// </remarks>
     [HttpGet("me")]
     [Authorize]
+    [ProducesResponseType<CurrentUserDto>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Me(CancellationToken ct)
     {
         var view = await currentUserHandler.HandleAsync(ct).ConfigureAwait(false);
 
+        // ⚠ Тип названий ЯВНО, а не анонімним об'єктом. Анонімний тип OpenAPI
+        // не описує, клієнт не може бути типізованим — і саме так з'явилася
+        // розбіжність `displayName` проти `userName`, через яку в шапці не
+        // показувалося ім'я користувача (`A7-05`).
+        //
         // Прапорець «пароль виданий разово» — стан СЕСІЇ, а не профілю прав:
         // він живе в cookie і знімається лише зміною пароля.
-        return Ok(new
-        {
+        return Ok(new CurrentUserDto(
             view.UserId,
             view.UserName,
             view.Language,
-            mustChangePassword = MustChangePassword,
+            MustChangePassword,
             view.Permissions,
             view.Grants,
             view.Denies,
-        });
+            view.IsSimulation,
+            view.SimulatedForUserId));
     }
 
     /// <summary>Чи стоїть вимога змінити пароль у поточній cookie.</summary>
@@ -144,3 +150,24 @@ public sealed class AuthController(
 
 /// <summary>Запит локального входу.</summary>
 public sealed record LocalLoginRequest(string UserName, string Password);
+
+/// <summary>Профіль поточного користувача для клієнта.</summary>
+/// <param name="UserId">Ідентифікатор.</param>
+/// <param name="UserName">Ім'я для показу в шапці.</param>
+/// <param name="Language">Мова інтерфейсу з профілю.</param>
+/// <param name="MustChangePassword">Разовий пароль: доки не змінено, доступні лише зміна і вихід (ФВ-6.18).</param>
+/// <param name="Permissions">Функціональні права; за ними ховаються кнопки.</param>
+/// <param name="Grants">Ресурсні гранти: <c>"{ResourceKind}:{Id}"</c> → рівень.</param>
+/// <param name="Denies">Явні заборони; <c>IsDeny</c> перемагає завжди.</param>
+/// <param name="IsSimulation">Сеанс симуляції «очима користувача» (ФВ-6.16a).</param>
+/// <param name="SimulatedForUserId">Кого симулюють; <c>null</c> — не симуляція.</param>
+public sealed record CurrentUserDto(
+    int UserId,
+    string? UserName,
+    string Language,
+    bool MustChangePassword,
+    IReadOnlyList<string> Permissions,
+    IReadOnlyDictionary<string, string> Grants,
+    IReadOnlyList<string> Denies,
+    bool IsSimulation,
+    int? SimulatedForUserId);

@@ -2065,6 +2065,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
+| `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/preview` | `Document.Import` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/apply` | `Document.Import` | 5 |
@@ -2082,6 +2083,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |

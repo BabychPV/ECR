@@ -3,24 +3,11 @@ import { Badge, Button, Group, Loader, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import type { SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface SourceEntityDto {
-  id: number;
-  code: string;
-  displayName: string | null;
-  entityPath: string | null;
-  /** `PiWebApi` або `PiSqlClient` — транспорт джерела (ФВ-11.2). */
-  transport: string;
-  isActive: boolean;
-  /** Останній прогін збору; `null` — не збирали жодного разу. */
-  lastRun: { finishedAt: string | null; status: string; pointsRetrieved: number } | null;
-  /** Найстаріша непокрита прогалина; `null` — покриття суцільне. */
-  oldestGap: string | null;
-}
 
 /**
  * Конфігуратор джерел і ручний запуск збору.
@@ -38,7 +25,7 @@ export function SourcesPage(): JSX.Element {
 
   const sources = useQuery({
     queryKey: ['sources'],
-    queryFn: () => apiFetch<SourceEntityDto[]>('/api/v1/sources'),
+    queryFn: () => apiFetch<SourceEntityStatus[]>('/api/v1/sources'),
   });
 
   const collect = useMutation({

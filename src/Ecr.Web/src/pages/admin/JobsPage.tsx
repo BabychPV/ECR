@@ -2,19 +2,10 @@ import { useState, type JSX } from 'react';
 import { Badge, Button, Card, Group, Progress, Stack, Text, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { JobStatus } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-/** Стан задачі; форма з `IBackgroundJobScheduler.JobStatus`. */
-interface JobStatus {
-  jobId: string;
-  /** `Queued`, `Running`, `Succeeded`, `Failed`, `Cancelled`. */
-  state: string;
-  percent: number;
-  message: string | null;
-  error: string | null;
-}
 
 /** Як часто опитувати стан задачі, поки вона виконується. */
 const PollMs = 1500;

@@ -11,13 +11,19 @@ namespace Ecr.Application.Security;
 /// <param name="Permissions">Функціональні права.</param>
 /// <param name="Grants">Ресурсні гранти: <c>"{ResourceKind}:{Id}"</c> → рівень.</param>
 /// <param name="Denies">Явні заборони.</param>
+/// <param name="IsSimulation">
+/// Сеанс симуляції «очима користувача» (ФВ-6.16a).
+/// </param>
+/// <param name="SimulatedForUserId">Кого симулюють; <c>null</c> — не симуляція.</param>
 public sealed record CurrentUserView(
     int UserId,
     string? UserName,
     string Language,
     IReadOnlyList<string> Permissions,
     IReadOnlyDictionary<string, string> Grants,
-    IReadOnlyList<string> Denies);
+    IReadOnlyList<string> Denies,
+    bool IsSimulation,
+    int? SimulatedForUserId);
 
 /// <summary>
 /// Компактна проєкція профілю доступу для клієнта.
@@ -44,7 +50,13 @@ public sealed class GetCurrentUserHandler(IAccessDecisionService access, ICurren
             currentUser.Language,
             [.. profile.Permissions.OrderBy(p => p, StringComparer.Ordinal)],
             profile.Grants.ToDictionary(g => g.Key, g => g.Value.ToString(), StringComparer.Ordinal),
-            [.. profile.Denies.OrderBy(d => d, StringComparer.Ordinal)]);
+            [.. profile.Denies.OrderBy(d => d, StringComparer.Ordinal)],
+
+            // ⚠ Ознака симуляції йде клієнтові ОБОВ'ЯЗКОВО. Адміністратор,
+            // який забув, що дивиться чужими правами, ухвалює рішення про
+            // чужий доступ, бачачи не свої можливості (ФВ-6.16a).
+            profile.IsSimulation,
+            profile.SimulatedForUserId);
     }
 
     /// <summary>Рівень гранта на проєкт — для швидкої перевірки на клієнті.</summary>

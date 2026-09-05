@@ -24,6 +24,7 @@ public sealed class DocumentsController(
     ApproveSheetHandler approve,
     ReopenDocumentHandler reopen,
     RecalculateDocumentHandler recalculate,
+    GetDocumentTablesHandler tables,
     ExportDocumentHandler export,
     PreviewImportHandler previewImport,
     ApplyImportHandler applyImport) : ControllerBase
@@ -36,7 +37,7 @@ public sealed class DocumentsController(
     /// з половиною аркушів у <c>Draft</c>.
     /// </remarks>
     [HttpGet]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.DocumentSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(
         [FromQuery] int limit,
         [FromQuery] string? cursor,
@@ -74,7 +75,7 @@ public sealed class DocumentsController(
 
     /// <summary>Документ і його аркуші. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:long}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Ports.DocumentSummary>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Get(long id, [FromQuery] int? periodKey, CancellationToken ct)
     {
@@ -179,6 +180,20 @@ public sealed class DocumentsController(
 
         return NoContent();
     }
+
+    /// <summary>
+    /// Таблиці документа за період. Право <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Grid читає і пише за <c>TableInstanceId</c>, а екземпляр існує <b>на
+    /// кожен період окремо</b> (R-A6). Ані <c>DocumentSummary</c>, ані
+    /// структура версії шаблону його не несуть: перша описує документ,
+    /// друга — опис таблиць, а не їхні екземпляри (`A7-05`).
+    /// </remarks>
+    [HttpGet("{id:long}/tables")]
+    [ProducesResponseType<IReadOnlyList<DocumentTableDto>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Tables(long id, [FromQuery] int periodKey, CancellationToken ct)
+        => Ok(await tables.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]

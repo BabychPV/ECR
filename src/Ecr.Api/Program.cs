@@ -37,8 +37,30 @@ builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
 // `EcrMetrics` існував і не викликався жодного разу (аудит Етапу 5).
 builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
 builder.Services.AddScoped<Ecr.Api.Observability.BudgetMetricsFilter>();
-builder.Services.AddControllers(options =>
-    options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>());
+builder.Services
+    .AddControllers(options => options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>())
+    .AddJsonOptions(options =>
+    {
+        // ⚠ Переліки йдуть ІМЕНАМИ, а не числами. За замовчуванням
+        // System.Text.Json пише `1`, і клієнт отримує статус версії,
+        // стан періоду й рівень методології як безіменні числа: показати їх
+        // користувачеві не можна, порівняти зі значенням — теж (`A7-07`).
+        //
+        // ⛔ Числа ще й НЕСТАБІЛЬНІ як контракт: вставка нового члена в
+        // середину переліку мовчки змінює значення всіх наступних, і клієнт
+        // починає показувати «Approved» там, де сервер має на увазі
+        // «Submitted». Ім'я такого не вміє.
+        options.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+
+// ⚠ Ті самі налаштування — і для генератора OpenAPI. Він читає JSON-опції
+// мінімальних API (`Microsoft.AspNetCore.Http.Json`), а не MVC: без цього
+// рядка сервер віддавав би імена, а схема описувала б числа — і згенерований
+// клієнт розходився б із дійсністю в протилежний бік.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(
+        new System.Text.Json.Serialization.JsonStringEnumConverter()));
 // ⚠ Постійні розклади ставить hosted service, а не крок старту: планувальник
 // Quartz стає придатним лише після ApplicationStarted. Без цієї реєстрації
 // вночі мовчазно не відбувалася б жодна перевірка.
@@ -47,7 +69,10 @@ builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
 // об'єкт без дозволених властивостей, і згенерований клієнт не може покласти
 // в комірку жодного значення (див. DictionarySchemaTransformer).
 builder.Services.AddOpenApi(options =>
-    options.AddSchemaTransformer<Ecr.Api.Startup.DictionarySchemaTransformer>());
+{
+    options.AddSchemaTransformer<Ecr.Api.Startup.DictionarySchemaTransformer>();
+    options.AddSchemaTransformer<Ecr.Api.Startup.NumericSchemaTransformer>();
+});
 
 // ⚠ Теги розділяють перевірки за призначенням: /health/live не має права
 // торкатися БД — його опитує оркестратор, і повільна база не привід

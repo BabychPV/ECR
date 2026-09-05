@@ -22,7 +22,7 @@ public sealed class ReportsController(
     /// відрізняються лише цим.
     /// </remarks>
     [HttpGet("snapshots")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.ReportSnapshotSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Snapshots(
         [FromQuery] int? projectId, [FromQuery] int? periodKey, CancellationToken ct)
         => Ok(await snapshots.HandleAsync(projectId, periodKey, ct).ConfigureAwait(false));

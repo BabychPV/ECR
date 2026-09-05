@@ -103,6 +103,127 @@ public sealed partial class EndpointCoverageTests
         Assert.Empty(unchecked_);
     }
 
+    // ⚠ П'ятий сторож. Ловить те, чого не бачить ніхто: клієнт викликає
+    // адресу, якої на сервері немає. Серверні тести про TypeScript не знають,
+    // клієнтські ходять у замокнений fetch — і обидва зелені, поки екран у
+    // браузері показує помилку на кожне відкриття.
+    //
+    // Саме так жила `A7-03`: п'ять екранів били в неіснуючі маршрути
+    // (`/api/v1/cells` замість `/api/v1/documents/{id}/cells`,
+    // `/api/v1/auth/login` замість `/api/v1/login/local`, `GET /api/v1/sources`,
+    // якого не існувало взагалі).
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_адреса_яку_викликає_клієнт_існує_на_сервері()
+    {
+        var web = Path.Combine(SolutionRoot(), "src", "Ecr.Web", "src");
+        Assert.True(Directory.Exists(web), $"Немає {web}.");
+
+        var server = Implemented().Keys
+            .Select(k => Placeholders(k.Path))
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Здоров'я віддає не контролер, а конвеєр — у таблиці ендпоінтів його
+        // немає за побудовою (`02-contracts.md` §12).
+        string[] health = ["/health/live", "/health/ready", "/health/db"];
+
+        var missing = Directory
+            .EnumerateFiles(web, "*.ts*", SearchOption.AllDirectories)
+
+            // Згенерована схема містить усі серверні шляхи за визначенням:
+            // звіряти її саму з собою немає сенсу.
+            .Where(f => !f.EndsWith("schema.d.ts", StringComparison.Ordinal))
+
+            // ⚠ Тести клієнта ходять у ЗАМОКНЕНИЙ fetch: адреса там — довільний
+            // рядок, і вимагати від неї існування на сервері означало б
+            // забороняти перевіряти обробку помилок на вигаданому шляху.
+            .Where(f => !f.Contains("__tests__", StringComparison.Ordinal))
+            .SelectMany(f => ApiPathRegex.Matches(WithoutComments(File.ReadAllText(f)))
+                .Select(m => new { File = Path.GetFileName(f), Path = Placeholders(m.Groups[1].Value) }))
+            .Where(c => !server.Contains(c.Path) && !health.Contains(c.Path))
+            .Select(c => $"{c.Path} ({c.File})")
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
+    /// <summary>Прибирає коментарі перед пошуком адрес.</summary>
+    /// <remarks>
+    /// ⚠ Інакше сторож ловить власні пояснення: коментар «до аудиту клієнт бив
+    /// у `/api/v1/cells`» виглядає для регулярного виразу так само, як виклик.
+    /// Тест, який падає на розповіді про вже виправлений дефект, навчають
+    /// ігнорувати.
+    /// </remarks>
+    private static string WithoutComments(string source)
+        => BlockCommentRegex.Replace(LineCommentRegex.Replace(source, string.Empty), string.Empty);
+
+    /// <summary>Зводить шаблон і інтерполяцію до однакового заповнювача.</summary>
+    /// <remarks>
+    /// Сервер пише <c>{documentId}</c>, клієнт — <c>${documentId}</c> або
+    /// <c>${encodeURIComponent(code)}</c>. Порівнювати їх дослівно означало б
+    /// оголосити розбіжністю кожен шлях із параметром.
+    /// </remarks>
+    private static string Placeholders(string path)
+    {
+        var withoutQuery = path.Split('?')[0].TrimEnd('/');
+        var withoutInterpolation = InterpolationRegex.Replace(withoutQuery, "{p}");
+
+        return BraceRegex.Replace(withoutInterpolation, "{p}");
+    }
+
+    [GeneratedRegex(@"//[^
+]*")]
+    private static partial Regex LineCommentRegex { get; }
+
+    [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
+    private static partial Regex BlockCommentRegex { get; }
+
+    [GeneratedRegex(@"['""`](/(?:api/v1|health)/[^'""`\s]*)['""`]")]
+    private static partial Regex ApiPathRegex { get; }
+
+    [GeneratedRegex(@"\$\{(?:[^{}]|\{[^{}]*\})*\}")]
+    private static partial Regex InterpolationRegex { get; }
+
+    [GeneratedRegex(@"\{[^{}]*\}")]
+    private static partial Regex BraceRegex { get; }
+
+    // ⚠ Четвертий сторож того самого класу дефектів. Три попередні дивляться
+    // всередину сервера; цей — на межу «сервер → клієнт», де тести обох боків
+    // сліпі за побудовою: серверні не знають про TypeScript, клієнтські
+    // підставляють власні рядки замість серверних.
+    //
+    // Саме так до аудиту Етапу 7 жила `A7-02`: клієнт знав п'ять причин
+    // заборони з тринадцяти, і три з них були написані інакше, ніж на сервері
+    // (`ReadOnlyColumn` проти `ColumnReadOnly`). Тому кожна сіра комірка
+    // пояснювалася користувачеві однаково — «немає права», — навіть коли
+    // причина була в закритому періоді.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_причина_заборони_має_підказку_на_клієнті()
+    {
+        var client = Path.Combine(
+            SolutionRoot(), "src", "Ecr.Web", "src", "features", "grid", "permissions.ts");
+
+        Assert.True(File.Exists(client), $"Немає {client}: клієнт не читає причин заборони.");
+
+        var text = File.ReadAllText(client);
+
+        // `None` — це дозвіл, а не причина: підказки він не потребує.
+        var missing = Enum.GetNames<Ecr.Domain.Enums.EditDenyReason>()
+            .Where(name => !string.Equals(name, "None", StringComparison.Ordinal))
+            .Where(name => !text.Contains($"{name}:", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
     /// <summary>
     /// Права, названі в таблиці ендпоінтів контракту, крім відкладених етапів.
     /// </summary>

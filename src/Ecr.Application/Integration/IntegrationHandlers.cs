@@ -62,6 +62,36 @@ public sealed class CollectFromSourceHandler(
 public sealed record CollectionTask(int SourceEntityId, DateTime? FromUtc, DateTime? ToUtc);
 
 /// <summary>
+/// Перелік сутностей збору. Право <c>Integration.Manage</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ Ендпоінт додано після аудиту (`A7-03`): екран конфігуратора викликав
+/// <c>GET /api/v1/sources</c>, якого не існувало, і завжди показував помилку.
+/// Таблиця ендпоінтів контракту оголошувала лише запуск збору — але вимога
+/// ФВ-13.13 («імена обираються зі списку, а не вводяться руками») без
+/// переліку невиконувана.
+/// </remarks>
+public sealed class ListSourceEntitiesHandler(
+    ICollectionStore sources,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
+    public const string Permission = "Integration.Manage";
+
+    /// <summary>Віддає сутності разом зі станом останнього прогону і прогалиною.</summary>
+    /// <param name="ct">Скасування.</param>
+    public async Task<IReadOnlyList<SourceEntityStatus>> HandleAsync(CancellationToken ct)
+    {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        return await sources.ListSourceEntitiesAsync(ct).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
 /// Стан фонової задачі. Право <c>System.ViewHealth</c>.
 /// </summary>
 /// <remarks>

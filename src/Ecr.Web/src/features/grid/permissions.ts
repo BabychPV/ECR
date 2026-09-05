@@ -9,14 +9,33 @@ import type { ColumnDto, TableSliceDto } from '@/api/types';
  * дозволить. Обидва випадки виглядають як помилка системи, а не як права.
  */
 
-/** Чому комірку не можна редагувати. */
+/**
+ * Чому комірку не можна редагувати.
+ *
+ * ⛔ Перелік **дослівно повторює** `Ecr.Domain.Enums.EditDenyReason`, і це
+ * перевіряє архітектурний тест
+ * `Кожна_причина_заборони_має_підказку_на_клієнті`. До аудиту (`A7-02`) тут
+ * було п'ять власних назв, з яких три не збігалися з серверними
+ * (`ReadOnlyColumn` проти `ColumnReadOnly`, `Calculated` проти
+ * `CalculatedCell`, вигаданий `Orphaned`). Наслідок: **жодна** причина не
+ * розпізнавалася, усі падали в запасний варіант, і користувач на кожну сіру
+ * комірку бачив «немає права» — навіть коли причина була в закритому періоді
+ * або в поданому документі.
+ */
 export type DenyReason =
-  | 'Calculated'
-  | 'ReadOnlyColumn'
-  | 'NoPermission'
+  | 'NoGrant'
+  | 'PeriodNotOpenYet'
   | 'PeriodClosed'
+  | 'OutOfAccessWindow'
   | 'DocumentSubmitted'
-  | 'Orphaned';
+  | 'DocumentApproved'
+  | 'ColumnReadOnly'
+  | 'RowReadOnly'
+  | 'CalculatedCell'
+  | 'ProjectArchived'
+  | 'ArchivingInProgress'
+  | 'BusinessRule'
+  | 'SimulationReadOnly';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -36,12 +55,19 @@ const Editable: CellDecision = { editable: true, reason: null, hint: '' };
  * дорожче за будь-який рядок тексту.
  */
 const Hints: Record<DenyReason, string> = {
-  Calculated: 'Комірку рахує система: значення зміниться при наступному перерахунку.',
-  ReadOnlyColumn: 'Колонка доступна лише для читання за описом шаблону.',
-  NoPermission: 'Немає права редагувати цю комірку.',
+  NoGrant: 'Немає права редагувати цю комірку.',
+  PeriodNotOpenYet: 'Період ще не відкрито: заповнення почнеться з дати відкриття.',
   PeriodClosed: 'Період закрито: зміни потребують окремого погодження.',
+  OutOfAccessWindow: 'Вікно доступу до цього періоду для вашої ролі вже закрилося.',
   DocumentSubmitted: 'Документ подано: спершу потрібне повернення в роботу.',
-  Orphaned: 'Рядок посилається на запис реєстру, що втратив чинність.',
+  DocumentApproved: 'Документ затверджено: зміни потребують повернення в роботу.',
+  ColumnReadOnly: 'Колонка доступна лише для читання за описом шаблону.',
+  RowReadOnly: 'Рядок доступний лише для читання за описом шаблону.',
+  CalculatedCell: 'Комірку рахує система: значення зміниться при наступному перерахунку.',
+  ProjectArchived: 'Проєкт заархівовано: дані доступні лише для читання.',
+  ArchivingInProgress: 'Триває архівація: запис тимчасово недоступний.',
+  BusinessRule: 'Зміну блокує правило предметної області.',
+  SimulationReadOnly: 'Сеанс симуляції прав: запис вимкнено незалежно від прав (ФВ-6.16a).',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
@@ -58,38 +84,34 @@ export function cellKey(rowKey: string, columnCode: string): string {
  */
 export function decide(slice: TableSliceDto, rowKey: string, column: ColumnDto): CellDecision {
   if (column.dataType === 'Formula' || column.dataType === 'Calculated') {
-    return deny('Calculated');
+    return deny('CalculatedCell');
   }
 
-  if (column.isReadOnly) return deny('ReadOnlyColumn');
+  if (column.isReadOnly) return deny('ColumnReadOnly');
 
   const permission = slice.cellPermissions[cellKey(rowKey, column.code)];
 
   // ⚠ Відсутність запису — це ДОЗВІЛ. Сервер віддає лише відхилення: словник
   // на 500×60 із дозволами на кожну комірку важив би більше за самі дані.
-  if (permission === undefined || permission === 'Allow') return Editable;
+  if (permission === undefined || permission === 'None') return Editable;
 
-  return deny(reasonOf(permission));
+  const reason = reasonOf(permission);
+
+  return reason === null
+    ? { editable: false, reason: null, hint: `Редагування заборонено: ${permission}.` }
+    : deny(reason);
 }
 
-/** Причина, яку віддав сервер; невідома трактується як відсутність права. */
-function reasonOf(permission: string): DenyReason {
-  switch (permission) {
-    case 'PeriodClosed':
-      return 'PeriodClosed';
-    case 'DocumentSubmitted':
-      return 'DocumentSubmitted';
-    case 'Calculated':
-      return 'Calculated';
-    case 'Orphaned':
-      return 'Orphaned';
-    case 'ReadOnlyColumn':
-      return 'ReadOnlyColumn';
-    default:
-      // ⛔ Невідома причина НЕ означає «можна». Нова причина на сервері
-      // інакше відкривала б редагування там, де його щойно заборонили.
-      return 'NoPermission';
-  }
+/**
+ * Причина, яку віддав сервер.
+ *
+ * ⛔ Невідома назва НЕ означає «можна» і не означає «немає права»: це нова
+ * причина, якої клієнт ще не знає. Показати замість неї «немає права» —
+ * збрехати користувачеві; тому запасний варіант має власний текст, а
+ * архітектурний тест не дає переліку розійтися з сервером.
+ */
+function reasonOf(permission: string): DenyReason | null {
+  return permission in Hints ? (permission as DenyReason) : null;
 }
 
 function deny(reason: DenyReason): CellDecision {

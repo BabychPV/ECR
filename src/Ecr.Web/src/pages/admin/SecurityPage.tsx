@@ -2,25 +2,10 @@ import { useState, type JSX } from 'react';
 import { Badge, Group, Loader, SegmentedControl, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { RoleView, UserPage } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface RoleDto {
-  id: number;
-  code: string;
-  name: string;
-  permissions: string[];
-}
-
-interface UserDto {
-  id: number;
-  login: string;
-  displayName: string;
-  isActive: boolean;
-  isLocal: boolean;
-  roles: string[];
-}
 
 /**
  * Адміністрування безпеки: ролі, матриця прав, користувачі.
@@ -29,18 +14,22 @@ interface UserDto {
  * користувача рахує сервер і віддає в `/me`: складати їх тут означало б
  * другу реалізацію правил, яка рано чи пізно покаже дозвіл там, де сервер
  * відмовить.
+ *
+ * ⛔ Форми беруться зі згенерованої схеми. До аудиту (`A7-05`) екран оголошував
+ * власні `RoleDto` і `UserDto` з полями `name`, `login`, `isLocal` і `roles` —
+ * жодного з них сервер не віддає, і обидві таблиці малювалися порожніми.
  */
 export function SecurityPage(): JSX.Element {
   const [tab, setTab] = useState('roles');
 
   const roles = useQuery({
     queryKey: ['roles'],
-    queryFn: () => apiFetch<RoleDto[]>('/api/v1/roles'),
+    queryFn: () => apiFetch<RoleView[]>('/api/v1/roles'),
   });
 
   const users = useQuery({
     queryKey: ['users'],
-    queryFn: () => apiFetch<{ items: UserDto[] }>('/api/v1/users?limit=200'),
+    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=200'),
     enabled: tab === 'users',
   });
 
@@ -82,8 +71,24 @@ export function SecurityPage(): JSX.Element {
             </Table.Thead>
             <Table.Tbody>
               {(roles.data ?? []).map((role) => (
-                <Table.Tr key={role.id}>
-                  <Table.Td>{role.name}</Table.Td>
+                <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
+                  <Table.Td>
+                    {role.code}
+                    {role.isBuiltIn && (
+                      <Badge ml={4} size="xs" variant="light">
+                        {t('security.builtIn')}
+                      </Badge>
+                    )}
+
+                    {/* ⚠ Небезпечні права показуються ОКРЕМО: у складені ролі
+                        вони не входять навмисно, і адміністратор має бачити
+                        різницю (ФВ-6.12, D-40). */}
+                    {role.dangerousPermissions.length > 0 && (
+                      <Badge ml={4} size="xs" color="red" variant="light">
+                        {t('security.dangerous', { count: role.dangerousPermissions.length })}
+                      </Badge>
+                    )}
+                  </Table.Td>
                   {permissions.map((permission) => (
                     <Table.Td key={permission}>
                       {role.permissions.includes(permission) ? '✓' : ''}
@@ -105,28 +110,39 @@ export function SecurityPage(): JSX.Element {
                 <Table.Th>{t('security.login')}</Table.Th>
                 <Table.Th>{t('security.name')}</Table.Th>
                 <Table.Th>{t('security.kind')}</Table.Th>
-                <Table.Th>{t('security.userRoles')}</Table.Th>
+                <Table.Th>{t('security.userState')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {(users.data?.items ?? []).map((user) => (
                 <Table.Tr key={user.id} opacity={user.isActive ? 1 : 0.5}>
-                  <Table.Td>{user.login}</Table.Td>
+                  <Table.Td>{user.userName}</Table.Td>
                   <Table.Td>{user.displayName}</Table.Td>
                   <Table.Td>
                     {/* Локальний і доменний вхід дають ту саму сесію; різниця
                         лише в тому, хто зберігає пароль. */}
-                    <Badge variant="light">
-                      {user.isLocal ? t('security.local') : t('security.domain')}
-                    </Badge>
+                    <Badge variant="light">{user.provider}</Badge>
                   </Table.Td>
                   <Table.Td>
                     <Group gap={4}>
-                      {user.roles.map((role) => (
-                        <Badge key={role} size="sm" variant="outline">
-                          {role}
+                      {/* ⚠ Разовий пароль і блокування видно в переліку:
+                          «користувач не може увійти» найчастіше пояснюється
+                          саме ними, а не правами. */}
+                      {user.mustChangePassword && (
+                        <Badge size="sm" color="orange" variant="light">
+                          {t('security.mustChangePassword')}
                         </Badge>
-                      ))}
+                      )}
+                      {user.isLockedOut && (
+                        <Badge size="sm" color="red" variant="light">
+                          {t('security.lockedOut')}
+                        </Badge>
+                      )}
+                      {user.isBootstrapAdmin && (
+                        <Badge size="sm" variant="outline">
+                          {t('security.bootstrap')}
+                        </Badge>
+                      )}
                     </Group>
                   </Table.Td>
                 </Table.Tr>

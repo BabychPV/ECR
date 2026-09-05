@@ -74,12 +74,12 @@ export function AppLayout(): JSX.Element {
             {/* ⚠ Сеанс симуляції видно ЗАВЖДИ і помітно: адміністратор, який
                 забув, що дивиться чужими правами, ухвалює рішення про чужий
                 доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
-            {me.simulation !== null && (
+            {me.isSimulation && (
               <Badge color="orange" variant="filled">
-                {t('app.simulating', { name: me.simulation.targetName })}
+                {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
               </Badge>
             )}
-            <Text size="sm">{me.displayName}</Text>
+            <Text size="sm">{me.userName ?? '—'}</Text>
           </Group>
         </Group>
       </AppShell.Header>

@@ -69,4 +69,47 @@ public interface ICollectionStore
     /// </remarks>
     public Task<IReadOnlyList<EntityFieldMap>> GetFieldMapsAsync(
         int sourceEntityId, CancellationToken ct);
+    /// <summary>
+    /// Перелік сутностей збору з ознаками здоров'я.
+    /// </summary>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Перелік потрібен конфігуратору: імена сутностей джерела <b>обираються
+    /// зі списку</b>, а не вводяться руками (ФВ-13.13). Друкарська помилка в
+    /// шляху AF виявляється не при налаштуванні, а через місяць порожнім
+    /// збором.
+    /// <para>
+    /// ⚠ Разом із кожною сутністю віддається <b>найстаріша непокрита
+    /// прогалина</b>. Ознака здоров'я інтеграції — журнал покриття, а не тиша
+    /// (ІНТ-3.3): джерело, яке щоночі успішно віддає нуль точок, і джерело,
+    /// яке віддає дані, у переліку останніх прогонів виглядають однаково.
+    /// </para>
+    /// </remarks>
+    public Task<IReadOnlyList<SourceEntityStatus>> ListSourceEntitiesAsync(CancellationToken ct);
 }
+
+/// <summary>Сутність збору разом зі станом останнього прогону.</summary>
+/// <param name="Id">Ідентифікатор сутності.</param>
+/// <param name="Code">Код у джерелі.</param>
+/// <param name="DisplayName">Підпис для конфігуратора.</param>
+/// <param name="EntityPath">Шлях в ієрархії джерела.</param>
+/// <param name="Transport">Транспорт джерела (ФВ-11.2).</param>
+/// <param name="IsActive">Чи ввімкнено збір.</param>
+/// <param name="LastRun">Останній прогін; <c>null</c> — не збирали жодного разу.</param>
+/// <param name="OldestGap">Початок найстарішої непокритої прогалини; <c>null</c> — покриття суцільне.</param>
+public sealed record SourceEntityStatus(
+    int Id,
+    string Code,
+    string? DisplayName,
+    string? EntityPath,
+    string Transport,
+    bool IsActive,
+    CollectionRunStatus? LastRun,
+    DateTime? OldestGap);
+
+/// <summary>Підсумок прогону збору.</summary>
+/// <param name="FinishedAt">Коли завершився; <c>null</c> — ще виконується.</param>
+/// <param name="Status">Статус: <c>Succeeded</c>, <c>Degraded</c>, <c>Failed</c>.</param>
+/// <param name="PointsRetrieved">Скільки точок отримано.</param>
+public sealed record CollectionRunStatus(DateTime? FinishedAt, string Status, int PointsRetrieved);
+

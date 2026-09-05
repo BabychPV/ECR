@@ -13,8 +13,23 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/sources")]
 [Authorize]
-public sealed class SourcesController(CollectFromSourceHandler collect) : ControllerBase
+public sealed class SourcesController(
+    ListSourceEntitiesHandler list, CollectFromSourceHandler collect) : ControllerBase
 {
+    /// <summary>
+    /// Перелік сутностей збору. Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Разом із кожною сутністю віддається найстаріша непокрита прогалина.
+    /// Ознака здоров'я інтеграції — журнал покриття, а не тиша (ІНТ-3.3):
+    /// джерело, яке щоночі успішно віддає нуль точок, і джерело, яке віддає
+    /// дані, у переліку прогонів виглядають однаково.
+    /// </remarks>
+    [HttpGet]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.SourceEntityStatus>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> List(CancellationToken ct)
+        => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
+
     /// <summary>
     /// Запускає збір для сутності джерела. Право <c>Integration.Manage</c>.
     /// </summary>

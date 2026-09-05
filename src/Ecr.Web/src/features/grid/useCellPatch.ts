@@ -93,10 +93,14 @@ export function useCellPatch(documentId: number): {
       setConflicts([]);
 
       try {
-        const response = await apiFetch<PatchCellsResponse>('/api/v1/cells', {
-          method: 'PATCH',
-          body: JSON.stringify(request),
-        });
+        // ⚠ Адреса несе ДОКУМЕНТ, а не лише екземпляр таблиці: маршрут
+        // контракту — `PATCH /api/v1/documents/{documentId}/cells`. До аудиту
+        // клієнт бив у `/api/v1/cells`, якого не існує, і збереження не
+        // працювало взагалі (`A7-03`).
+        const response = await apiFetch<PatchCellsResponse>(
+          `/api/v1/documents/${documentId}/cells`,
+          { method: 'PATCH', body: JSON.stringify(request) },
+        );
 
         // ⚠ Версії оновлюються З ВІДПОВІДІ. Без цього наступний патч піде зі
         // старим `baseVersion` і отримає 409 на власних змінах — конфлікт із

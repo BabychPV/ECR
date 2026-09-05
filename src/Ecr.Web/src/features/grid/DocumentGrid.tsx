@@ -58,7 +58,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     queryKey: ['table-slice', tableInstanceId, periodKey],
     queryFn: () =>
       apiFetch<TableSliceDto>(
-        `/api/v1/tables/${tableInstanceId}/slice?periodKey=${periodKey}`,
+        `/api/v1/documents/${documentId}/tables/${tableInstanceId}?periodKey=${periodKey}`,
       ),
   });
 

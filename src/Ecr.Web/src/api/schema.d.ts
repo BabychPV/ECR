@@ -23,8 +23,8 @@ export interface paths {
                 query?: {
                     from?: string;
                     to?: string;
-                    documentId?: number | string;
-                    limit?: number | string;
+                    documentId?: number;
+                    limit?: number;
                     cursor?: string;
                 };
                 header?: never;
@@ -200,7 +200,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["CurrentUserDto"];
+                        "application/json": components["schemas"]["CurrentUserDto"];
+                        "text/json": components["schemas"]["CurrentUserDto"];
+                    };
                 };
             };
         };
@@ -398,10 +402,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    limit?: number | string;
+                    limit?: number;
                     cursor?: string;
-                    projectId?: number | string;
-                    periodKey?: number | string;
+                    projectId?: number;
+                    periodKey?: number;
                 };
                 header?: never;
                 path?: never;
@@ -414,7 +418,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PagedResultOfDocumentSummary"];
+                        "application/json": components["schemas"]["PagedResultOfDocumentSummary"];
+                        "text/json": components["schemas"]["PagedResultOfDocumentSummary"];
+                    };
                 };
             };
         };
@@ -461,7 +469,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    periodKey?: number | string;
+                    periodKey?: number;
                 };
                 header?: never;
                 path: {
@@ -476,7 +484,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["DocumentSummary"];
+                        "application/json": components["schemas"]["DocumentSummary"];
+                        "text/json": components["schemas"]["DocumentSummary"];
+                    };
                 };
                 /** @description Not Found */
                 404: {
@@ -517,7 +529,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: {
-                    periodKey?: number | string;
+                    periodKey?: number;
                 };
                 header?: never;
                 path: {
@@ -558,7 +570,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: {
-                    periodKey?: number | string;
+                    periodKey?: number;
                 };
                 header?: never;
                 path: {
@@ -730,6 +742,54 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Таблиці документа за період. Право `Document.View`.
+         * @description ⚠ Grid читає і пише за `TableInstanceId`, а екземпляр існує <b>на
+         *     кожен період окремо</b> (R-A6). Ані `DocumentSummary`, ані
+         *     структура версії шаблону його не несуть: перша описує документ,
+         *     друга — опис таблиць, а не їхні екземпляри (`A7-05`).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["DocumentTableDto"][];
+                        "application/json": components["schemas"]["DocumentTableDto"][];
+                        "text/json": components["schemas"]["DocumentTableDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -949,7 +1009,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Методології, які цікавлять. */
-                    ids?: (number | string)[];
+                    ids?: number[];
                 };
                 header?: never;
                 path?: never;
@@ -1178,7 +1238,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    limit?: number | string;
+                    limit?: number;
                     cursor?: string;
                 };
                 header?: never;
@@ -1346,7 +1406,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PeriodCalendarDto"];
+                        "application/json": components["schemas"]["PeriodCalendarDto"];
+                        "text/json": components["schemas"]["PeriodCalendarDto"];
+                    };
                 };
             };
         };
@@ -1416,7 +1480,7 @@ export interface paths {
                     /** @description Дата періоду. */
                     asOf?: string;
                     /** @description Обраний батьківський запис для каскаду. */
-                    parentEntryId?: number | string;
+                    parentEntryId?: number;
                 };
                 header?: never;
                 path: {
@@ -1554,8 +1618,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    projectId?: number | string;
-                    periodKey?: number | string;
+                    projectId?: number;
+                    periodKey?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1568,7 +1632,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["ReportSnapshotSummary"][];
+                        "application/json": components["schemas"]["ReportSnapshotSummary"][];
+                        "text/json": components["schemas"]["ReportSnapshotSummary"][];
+                    };
                 };
             };
         };
@@ -1649,7 +1717,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["RoleView"][];
+                        "application/json": components["schemas"]["RoleView"][];
+                        "text/json": components["schemas"]["RoleView"][];
+                    };
                 };
             };
         };
@@ -1696,7 +1768,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    limit?: number | string;
+                    limit?: number;
                     cursor?: string;
                 };
                 header?: never;
@@ -1710,7 +1782,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PagedResultOfUserView"];
+                        "application/json": components["schemas"]["PagedResultOfUserView"];
+                        "text/json": components["schemas"]["PagedResultOfUserView"];
+                    };
                 };
             };
         };
@@ -1803,7 +1879,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Сеанс. */
-                    sessionId?: number | string;
+                    sessionId?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1882,6 +1958,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перелік сутностей збору. Право `Integration.Manage`.
+         * @description ⚠ Разом із кожною сутністю віддається найстаріша непокрита прогалина.
+         *     Ознака здоров'я інтеграції — журнал покриття, а не тиша (ІНТ-3.3):
+         *     джерело, яке щоночі успішно віддає нуль точок, і джерело, яке віддає
+         *     дані, у переліку прогонів виглядають однаково.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["SourceEntityStatus"][];
+                        "application/json": components["schemas"]["SourceEntityStatus"][];
+                        "text/json": components["schemas"]["SourceEntityStatus"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{id}/collect": {
         parameters: {
             query?: never;
@@ -1943,7 +2063,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    limit?: number | string;
+                    limit?: number;
                     cursor?: string;
                 };
                 header?: never;
@@ -1957,7 +2077,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["PagedResultOfTemplateSummary"];
+                        "application/json": components["schemas"]["PagedResultOfTemplateSummary"];
+                        "text/json": components["schemas"]["PagedResultOfTemplateSummary"];
+                    };
                 };
             };
         };
@@ -2017,7 +2141,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "text/plain": components["schemas"]["TemplateVersionSummary"][];
+                        "application/json": components["schemas"]["TemplateVersionSummary"][];
+                        "text/json": components["schemas"]["TemplateVersionSummary"][];
+                    };
                 };
             };
         };
@@ -2517,37 +2645,51 @@ export interface components {
              * Format: int32
              * @description Аркуш.
              */
-            sheetDefId: number | string;
+            sheetDefId: number;
             /**
              * Format: int32
              * @description Період.
              */
-            periodKey: number | string;
+            periodKey: number;
             /** @description `true` — погодити, `false` — відхилити. */
             approved: boolean;
             /** @description Причина; обов'язкова при відхиленні. */
             reason: null | string;
         };
+        /**
+         * @description Провайдер автентифікації. Нижче рівня входу не використовується.
+         * @enum {unknown}
+         */
+        AuthProvider: "Windows" | "Local";
         /** @description Запит на побудову зрізу. */
         BuildSnapshotRequest: {
             /**
              * Format: int32
              * @description Проєкт.
              */
-            projectId: number | string;
+            projectId: number;
             /**
              * Format: int32
              * @description Період.
              */
-            periodKey: number | string;
+            periodKey: number;
         };
-        /** @description Рівень драбини виразності для методології (ФВ-9.2). */
-        CalculationLevel: number;
-        /** @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
-         *     числа при перерахунку в г/с і т/рік. */
-        CalendarMode: number;
-        /** @description Клас структурної зміни (документ 10 «Еволюція схеми»). */
-        ChangeClass: number;
+        /**
+         * @description Рівень драбини виразності для методології (ФВ-9.2).
+         * @enum {unknown}
+         */
+        CalculationLevel: "Configuration" | "Script" | "Module";
+        /**
+         * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
+         *     числа при перерахунку в г/с і т/рік.
+         * @enum {unknown}
+         */
+        CalendarMode: "Actual" | "Fixed365" | "Fixed360";
+        /**
+         * @description Клас структурної зміни (документ 10 «Еволюція схеми»).
+         * @enum {unknown}
+         */
+        ChangeClass: "Presentation" | "Safe" | "Guarded" | "Breaking";
         /** @description Запит на зміну пароля. */
         ChangePasswordRequest: {
             /** @description Поточний пароль. */
@@ -2565,6 +2707,21 @@ export interface components {
             /** @description Номер нової версії. */
             newVersion: string;
         };
+        /** @description Підсумок прогону збору. */
+        CollectionRunStatus: {
+            /**
+             * Format: date-time
+             * @description Коли завершився; `null` — ще виконується.
+             */
+            finishedAt: null | string;
+            /** @description Статус: `Succeeded`, `Degraded`, `Failed`. */
+            status: string;
+            /**
+             * Format: int32
+             * @description Скільки точок отримано.
+             */
+            pointsRetrieved: number;
+        };
         /** @description Запит на збір. */
         CollectRequest: {
             /**
@@ -2581,20 +2738,20 @@ export interface components {
         /** @description Опис колонки для клієнта. */
         ColumnDto: {
             /** Format: int32 */
-            id: number | string;
+            id: number;
             code: string;
             header: string;
             dataType: string;
             /** Format: int32 */
-            ordinal: number | string;
+            ordinal: number;
             isReadOnly: boolean;
             isRequired: boolean;
             displayFormat: null | string;
             defaultValue: null | string;
             /** Format: int32 */
-            lookupRegistryDefId: null | number | string;
+            lookupRegistryDefId: null | number;
             /** Format: int32 */
-            unitId: null | number | string;
+            unitId: null | number;
             unitSymbol: null | string;
         };
         /** @description Запит на конверсію. */
@@ -2603,7 +2760,7 @@ export interface components {
              * Format: double
              * @description Значення; `decimal`, бо `float` заборонений (`D-30`).
              */
-            value: number | string;
+            value: number;
             /** @description Код вихідної одиниці. */
             fromUnit: string;
             /** @description Код цільової одиниці. */
@@ -2615,14 +2772,14 @@ export interface components {
              * Format: int32
              * @description Проєкт.
              */
-            projectId: number | string;
+            projectId: number;
             /**
              * Format: int32
              * @description Опублікована версія шаблону.
              */
-            templateVersionId: number | string;
+            templateVersionId: number;
             /** @description Аркуші, які входять у документ. */
-            sheetDefIds: (number | string)[];
+            sheetDefIds: number[];
         };
         /** @description Запит на створення проєкту. */
         CreateProjectRequest: {
@@ -2640,17 +2797,17 @@ export interface components {
              * Format: int32
              * @description Звітний рік; типово поточний.
              */
-            year?: null | number | string;
+            year?: null | number;
             /**
              * Format: int32
              * @description Версія шаблону, за якою заповнюються документи.
              */
-            templateVersionId?: null | number | string;
+            templateVersionId?: null | number;
             /**
              * Format: int32
              * @description Політика зсувів періодів.
              */
-            periodPolicyId?: null | number | string;
+            periodPolicyId?: null | number;
         };
         /** @description Запит на створення ролі. */
         CreateRoleRequest: {
@@ -2669,7 +2826,7 @@ export interface components {
              * Format: int64
              * @description Екземпляр таблиці.
              */
-            tableInstanceId: number | string;
+            tableInstanceId: number;
             /** @description Бажаний ключ; `null` — згенерувати GUID. */
             rowKey: null | string;
         };
@@ -2690,7 +2847,7 @@ export interface components {
              * Format: int32
              * @description Версія-джерело; `null` — порожня версія.
              */
-            cloneFromVersionId: null | number | string;
+            cloneFromVersionId: null | number;
         };
         /** @description Запит на створення користувача. */
         CreateUserRequest: {
@@ -2707,6 +2864,105 @@ export interface components {
             /** @description Ролі, які призначити одразу. */
             roleCodes?: null | string[];
         };
+        /**
+         * @description Режим визначення поточного періоду проєкту (D-77).
+         * @enum {unknown}
+         */
+        CurrentPeriodMode: "Auto" | "Pinned";
+        /** @description Профіль поточного користувача для клієнта. */
+        CurrentUserDto: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            userId: number;
+            /** @description Ім'я для показу в шапці. */
+            userName: null | string;
+            /** @description Мова інтерфейсу з профілю. */
+            language: string;
+            /** @description Разовий пароль: доки не змінено, доступні лише зміна і вихід (ФВ-6.18). */
+            mustChangePassword: boolean;
+            /** @description Функціональні права; за ними ховаються кнопки. */
+            permissions: string[];
+            /** @description Ресурсні гранти: `"{ResourceKind}:{Id}"` → рівень. */
+            grants: {
+                [key: string]: string;
+            };
+            /** @description Явні заборони; `IsDeny` перемагає завжди. */
+            denies: string[];
+            /** @description Сеанс симуляції «очима користувача» (ФВ-6.16a). */
+            isSimulation: boolean;
+            /**
+             * Format: int32
+             * @description Кого симулюють; `null` — не симуляція.
+             */
+            simulatedForUserId: null | number;
+        };
+        /** @description Документ у переліку. */
+        DocumentSummary: {
+            /**
+             * Format: int64
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /** @description Бізнес-ключ, унікальний у межах проєкту. */
+            businessKey: string;
+            /**
+             * Format: date-time
+             * @description Момент створення.
+             */
+            createdAt: string;
+            /**
+             * Format: int32
+             * @description Скільки аркушів у складі.
+             */
+            sheetCount: number;
+            /** @description Стан робочого процесу: аркуш → статус. */
+            sheetStates: {
+                [key: string]: string;
+            };
+        };
+        /** @description Екземпляр таблиці разом з аркушем, якому він належить. */
+        DocumentTableDto: {
+            /**
+             * Format: int32
+             * @description Аркуш; ним подають і затверджують.
+             */
+            sheetDefId: number;
+            /** @description Код аркуша; він же ключ у `DocumentSummary.SheetStates`. */
+            sheetCode: string;
+            /** @description Назва аркуша мовами каталогу. */
+            sheetNameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Порядок аркуша.
+             */
+            sheetOrdinal: number;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці — саме його читає й пише grid.
+             */
+            tableInstanceId: number;
+            /**
+             * Format: int32
+             * @description Опис таблиці.
+             */
+            tableDefId: number;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /** @description Назва таблиці мовами каталогу. */
+            tableNameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Порядок таблиці в аркуші.
+             */
+            tableOrdinal: number;
+        };
         /** @description Запит на експорт. */
         ExportRequest: {
             /** @description Транслювати вирази в Excel-синтаксис (ФВ-4.2). */
@@ -2719,7 +2975,7 @@ export interface components {
              * Format: int32
              * @description Період вивантаження (R-A6).
              */
-            periodKey: number | string;
+            periodKey: number;
         };
         /** Format: binary */
         IFormFile: string;
@@ -2733,7 +2989,7 @@ export interface components {
             jobId: string;
             state: string;
             /** Format: int32 */
-            percent: number | string;
+            percent: number;
             message: null | string;
             error: null | string;
         };
@@ -2766,7 +3022,7 @@ export interface components {
              * Format: int32
              * @description Ідентифікатор.
              */
-            id: number | string;
+            id: number;
             /** @description Код методології. */
             code: string;
             /** @description Назва мовами каталогу. */
@@ -2791,12 +3047,12 @@ export interface components {
              * Format: int32
              * @description Версія, яку публікують.
              */
-            methodologyVersionId: number | string;
+            methodologyVersionId: number;
             /**
              * Format: int32
              * @description Попередня чинна; `null` — перша версія.
              */
-            previousVersionId: null | number | string;
+            previousVersionId: null | number;
             /** @description Зміна арифметичного режиму. */
             numeric: components["schemas"]["MethodologyModeChange"];
             /** @description Зміна календарної конвенції. */
@@ -2816,22 +3072,22 @@ export interface components {
              * Format: int32
              * @description Речовина; `null` — вихід без речовини.
              */
-            substanceEntryId: null | number | string;
+            substanceEntryId: null | number;
             /**
              * Format: double
              * @description Значення попередньої версії; `null` — виходу не було.
              */
-            before: null | number | string;
+            before: null | number;
             /**
              * Format: double
              * @description Значення нової версії.
              */
-            after: number | string;
+            after: number;
             /**
              * Format: double
              * @description Відносна зміна; `null`, якщо порівнювати нема з чим або було нуль.
              */
-            relativeChange?: null | number | string;
+            relativeChange?: null | number;
         };
         /** @description Версія методології. */
         MethodologyVersionDto: {
@@ -2839,7 +3095,7 @@ export interface components {
              * Format: int32
              * @description Ідентифікатор версії.
              */
-            id: number | string;
+            id: number;
             /** @description Номер версії. */
             versionNumber: string;
             /** @description Чернетка, опублікована чи виведена з обігу. */
@@ -2863,9 +3119,51 @@ export interface components {
             /** @description Скільки писати в `calc.CalculationStep`. */
             traceLevel: components["schemas"]["TraceLevel"];
         };
-        /** @description Арифметичний режим версії методології (ФВ-9.9). `Legacy` відтворює
-         *     арифметику чинної системи побітово і використовується лише заради сумісності. */
-        NumericMode: number;
+        /**
+         * @description Арифметичний режим версії методології (ФВ-9.9). `Legacy` відтворює
+         *     арифметику чинної системи побітово і використовується лише заради сумісності.
+         * @enum {unknown}
+         */
+        NumericMode: "Legacy" | "Strict";
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfDocumentSummary: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["DocumentSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfTemplateSummary: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["TemplateSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfUserView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["UserView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
         /** @description Зміна однієї комірки. Три різні операції (R-B4):
          *     значення — записати; `Value = null` — стерти (рядок видаляється);
          *     `IsEmpty = true` — явна порожнеча; поле відсутнє в запиті — не чіпати. */
@@ -2887,12 +3185,12 @@ export interface components {
              * Format: int64
              * @description Екземпляр таблиці.
              */
-            tableInstanceId: number | string;
+            tableInstanceId: number;
             /**
              * Format: int32
              * @description Ключ періоду.
              */
-            periodKey: number | string;
+            periodKey: number;
             /** @description Джерело зміни: `UserEdit`, `Import`, `Recalculation`. */
             origin: string;
             /** @description Рядки зі змінами. */
@@ -2904,7 +3202,7 @@ export interface components {
              * Format: int32
              * @description Скільки комірок записано.
              */
-            appliedCells: number | string;
+            appliedCells: number;
             /** @description Нові версії зачеплених рядків: `RowKey` → hex. */
             rowVersions: {
                 [key: string]: string;
@@ -2922,11 +3220,84 @@ export interface components {
             /** @description Зміни комірок. */
             cells: components["schemas"]["PatchCell"][];
         };
+        /** @description Календар проєкту. */
+        PeriodCalendarDto: {
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /** @description Пояс майданчика, у якому пораховані межі. */
+            timeZoneId: string;
+            /** @description Періодичність. */
+            periodKind: components["schemas"]["PeriodKind"];
+            /** @description Автоматичний вибір чи закріплений період. */
+            currentPeriodMode: components["schemas"]["CurrentPeriodMode"];
+            /** @description Періоди в порядку зростання `PeriodKey`. */
+            periods: components["schemas"]["PeriodDto"][];
+        };
+        /** @description Період у календарі проєкту. */
+        PeriodDto: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор періоду.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description `Year*100 + Sequence`; він же ключ партиції.
+             */
+            periodKey: number;
+            /**
+             * Format: int32
+             * @description Рік.
+             */
+            year: number;
+            /**
+             * Format: int32
+             * @description Порядковий номер у році: `1…12` для місячних, `1…4` для квартальних.
+             */
+            sequence: number;
+            /** @description Стан; обчислює `PeriodStateJob`, а не запит. */
+            state: components["schemas"]["PeriodState"];
+            /**
+             * Format: date-time
+             * @description Початок періоду в поясі майданчика.
+             */
+            startsAt: string;
+            /**
+             * Format: date-time
+             * @description Кінець періоду в поясі майданчика, виключно.
+             */
+            endsAt: string;
+            /**
+             * Format: date-time
+             * @description Кінець пільгового вікна; після нього період закривається.
+             */
+            graceEndsAt: null | string;
+            /** @description Чи є періодом за замовчуванням для UI. */
+            isCurrent: boolean;
+            /**
+             * Format: date-time
+             * @description Якщо період відкрито повторно — до якого моменту.
+             */
+            reopenedUntil: null | string;
+        };
+        /**
+         * @description Гранулярність періоду проєкту.
+         * @enum {unknown}
+         */
+        PeriodKind: "Monthly" | "Quarterly" | "Yearly" | "Custom";
+        /**
+         * @description Стан звітного періоду. Обчислює `PeriodStateJob`, а не запит.
+         * @enum {unknown}
+         */
+        PeriodState: "Scheduled" | "Open" | "Grace" | "Closed";
         ProblemDetails: {
             type?: null | string;
             title?: null | string;
             /** Format: int32 */
-            status?: null | number | string;
+            status?: null | number;
             detail?: null | string;
             instance?: null | string;
         };
@@ -2947,7 +3318,7 @@ export interface components {
              * Format: int32
              * @description Ідентифікатор визначення.
              */
-            id: number | string;
+            id: number;
             /** @description Код довідника. */
             code: string;
             /** @description Назва мовами каталогу. */
@@ -2964,11 +3335,11 @@ export interface components {
          *     перейменування не змінює історичні дані. */
         RegistryEntryDto: {
             /** Format: int64 */
-            id: number | string;
+            id: number;
             code: string;
             display: string;
             /** Format: int64 */
-            parentEntryId: null | number | string;
+            parentEntryId: null | number;
             /** Format: date */
             validFrom: null | string;
             /** Format: date */
@@ -2980,12 +3351,12 @@ export interface components {
              * Format: int64
              * @description `null` — створення нового запису; інакше — оновлення наявного.
              */
-            id: null | number | string;
+            id: null | number;
             /**
              * Format: int32
              * @description Довідник, до якого належить запис.
              */
-            registryDefId: number | string;
+            registryDefId: number;
             /** @description Стабільний код; не змінюється при перейменуванні (`ФВ-8.8`). */
             code: string;
             /** @description Локалізована назва для показу. */
@@ -2994,7 +3365,7 @@ export interface components {
              * Format: int64
              * @description Батьківський запис в ієрархії; `null` — корінь.
              */
-            parentEntryId: null | number | string;
+            parentEntryId: null | number;
             /** @description Значення полів: код поля → значення відповідного типу. */
             values: {
                 [key: string]: unknown;
@@ -3006,7 +3377,7 @@ export interface components {
              * Format: int32
              * @description Ідентифікатор поля.
              */
-            id: number | string;
+            id: number;
             /** @description Код поля. */
             code: string;
             /** @description Підпис мовами каталогу. */
@@ -3022,12 +3393,12 @@ export interface components {
              * Format: int32
              * @description Довідник-джерело для полів-посилань.
              */
-            lookupRegistryDefId: null | number | string;
+            lookupRegistryDefId: null | number;
             /**
              * Format: int32
              * @description Одиниця для числових полів; `null` — безрозмірне.
              */
-            unitId: null | number | string;
+            unitId: null | number;
         };
         /** @description Запит на відкриття поданого документа. */
         ReopenDocumentRequest: {
@@ -3035,12 +3406,12 @@ export interface components {
              * Format: int32
              * @description Аркуш.
              */
-            sheetDefId: number | string;
+            sheetDefId: number;
             /**
              * Format: int32
              * @description Період.
              */
-            periodKey: number | string;
+            periodKey: number;
             /** @description Причина; обов'язкова. */
             reason: string;
         };
@@ -3054,6 +3425,63 @@ export interface components {
              */
             until: null | string;
         };
+        /** @description Зріз у переліку. */
+        ReportSnapshotSummary: {
+            /**
+             * Format: int64
+             * @description Ідентифікатор зрізу.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Версія звіту.
+             */
+            reportVersionId: number;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /**
+             * Format: int32
+             * @description Період; `null` — увесь рік проєкту.
+             */
+            periodKey: null | number;
+            /** @description Статус даних зрізу (D-65). */
+            status: string;
+            /** @description Чи це поточний зріз для пари «версія × проєкт × період». */
+            isCurrent: boolean;
+            /**
+             * Format: int32
+             * @description Скільки рядків.
+             */
+            rowCount: number;
+            /** @description Контрольна сума вмісту в hex; `null` — не рахувалася. */
+            contentHash: null | string;
+            /**
+             * Format: date-time
+             * @description Коли побудовано.
+             */
+            builtAt: string;
+        };
+        /** @description Роль із її правами. */
+        RoleView: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Код. */
+            code: string;
+            /** @description Вбудована роль із seed: видаленню не підлягає. */
+            isBuiltIn: boolean;
+            /** @description Чи діє. */
+            isActive: boolean;
+            /** @description Права ролі. */
+            permissions: string[];
+            /** @description Небезпечні права серед них — показуються окремо, бо їх видають поіменно. */
+            dangerousPermissions: string[];
+        };
         /** @description Рядок зі значеннями. Ключ у Cells — код колонки. */
         RowDto: {
             /** @description Ідентичність рядка. */
@@ -3062,7 +3490,7 @@ export interface components {
              * Format: int32
              * @description Позиція.
              */
-            ordinal: number | string;
+            ordinal: number;
             /** @description Режим рядків таблиці. */
             rowKind: string;
             /** @description Підпис для фіксованих рядків. */
@@ -3089,7 +3517,7 @@ export interface components {
              * Format: int32
              * @description Закріплений період; `null` — режим `Auto`.
              */
-            pinnedPeriodId: null | number | string;
+            pinnedPeriodId: null | number;
             /** @description Причина закріплення; потрапляє в аудит. */
             reason: null | string;
         };
@@ -3115,11 +3543,11 @@ export interface components {
         };
         SheetDto: {
             /** Format: int32 */
-            id: number | string;
+            id: number;
             code: string;
             nameL10n: components["schemas"]["LocalizedText"];
             /** Format: int32 */
-            ordinal: number | string;
+            ordinal: number;
             tables: components["schemas"]["TableDto"][];
         };
         /** @description Аркуш × період — адреса операції робочого процесу. */
@@ -3128,12 +3556,12 @@ export interface components {
              * Format: int32
              * @description Аркуш.
              */
-            sheetDefId: number | string;
+            sheetDefId: number;
             /**
              * Format: int32
              * @description Період.
              */
-            periodKey: number | string;
+            periodKey: number;
         };
         /** @description Запит на симуляцію. */
         SimulateMethodologyRequest: {
@@ -3141,27 +3569,51 @@ export interface components {
              * Format: int32
              * @description Версія, яку проганяємо.
              */
-            methodologyVersionId: number | string;
+            methodologyVersionId: number;
             /**
              * Format: int32
              * @description Період, на даних якого проганяємо.
              */
-            periodKey: number | string;
+            periodKey: number;
         };
         /** @description Результат прогону методології **без запису** (`ФВ-13.5`): що вийде, якщо
          *     опублікувати. */
         SimulationResultDto: {
             /** @description Код виходу → значення й одиниця. */
             outputs: {
-                [key: string]: number | string;
+                [key: string]: number;
             };
             /** @description Різниця з чинною опублікованою версією. Порожня — версія нічого не змінює;
              *     саме це і треба бачити перед публікацією (`ФВ-9.6`). */
             diffWithPublished: {
-                [key: string]: number | string;
+                [key: string]: number;
             };
             /** @description Покроковий журнал; у симуляції завжди повний. */
             trace: string[];
+        };
+        /** @description Сутність збору разом зі станом останнього прогону. */
+        SourceEntityStatus: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор сутності.
+             */
+            id: number;
+            /** @description Код у джерелі. */
+            code: string;
+            /** @description Підпис для конфігуратора. */
+            displayName: null | string;
+            /** @description Шлях в ієрархії джерела. */
+            entityPath: null | string;
+            /** @description Транспорт джерела (ФВ-11.2). */
+            transport: string;
+            /** @description Чи ввімкнено збір. */
+            isActive: boolean;
+            lastRun: null | components["schemas"]["CollectionRunStatus"];
+            /**
+             * Format: date-time
+             * @description Початок найстарішої непокритої прогалини; `null` — покриття суцільне.
+             */
+            oldestGap: null | string;
         };
         /** @description Запит на початок симуляції. */
         StartSimulationRequest: {
@@ -3169,33 +3621,39 @@ export interface components {
              * Format: int32
              * @description Чиїми очима дивимося.
              */
-            subjectUserId: number | string;
+            subjectUserId: number;
             /** @description Причина; потрапляє в `aud.SimulationSession`. */
             reason: string;
         };
         TableDto: {
             /** Format: int32 */
-            id: number | string;
+            id: number;
             code: string;
             layoutKind: components["schemas"]["TableLayoutKind"];
             rowMode: components["schemas"]["TableRowMode"];
             /** Format: int32 */
-            maxDynamicRows: null | number | string;
+            maxDynamicRows: null | number;
             columns: components["schemas"]["ColumnDto"][];
             rows: components["schemas"]["TemplateRowDto"][];
         };
-        /** @description Розкладка таблиці: як періоди лягають на структуру. */
-        TableLayoutKind: number;
-        /** @description Спосіб формування рядків таблиці. */
-        TableRowMode: number;
+        /**
+         * @description Розкладка таблиці: як періоди лягають на структуру.
+         * @enum {unknown}
+         */
+        TableLayoutKind: "MonthsInColumns" | "MonthsInRows" | "Static" | "PerPeriodInstance";
+        /**
+         * @description Спосіб формування рядків таблиці.
+         * @enum {unknown}
+         */
+        TableRowMode: "Fixed" | "Dynamic" | "Mixed";
         /** @description Зріз таблиці для grid. Порожні комірки не передаються — клієнт бере
          *     `DefaultValue` з опису колонки (ФВ-3.8).
          *     Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2). */
         TableSliceDto: {
             /** Format: int64 */
-            tableInstanceId: number | string;
+            tableInstanceId: number;
             /** Format: int32 */
-            periodKey: number | string;
+            periodKey: number;
             columns: components["schemas"]["ColumnDto"][];
             rows: components["schemas"]["RowDto"][];
             cellPermissions: {
@@ -3224,7 +3682,7 @@ export interface components {
              * Format: int32
              * @description Скільки документів прив'язано до вихідної версії.
              */
-            affectedDocumentCount: number | string;
+            affectedDocumentCount: number;
         };
         /** @description Рядок у СТРУКТУРІ шаблону — опис, а не дані. */
         TemplateRowDto: {
@@ -3234,7 +3692,7 @@ export interface components {
              * Format: int32
              * @description Порядок відображення; презентаційне поле.
              */
-            ordinal: number | string;
+            ordinal: number;
             /** @description Вид рядка: `Item`, `Group`, `Balance`, `Note`. */
             rowKind: string;
             /** @description Локалізований підпис. */
@@ -3248,44 +3706,117 @@ export interface components {
          *     ключем `v{id}:r{rev}` (`ФВ-2.5`). */
         TemplateStructureDto: {
             /** Format: int32 */
-            templateVersionId: number | string;
+            templateVersionId: number;
             /** Format: int32 */
-            presentationRevision: number | string;
+            presentationRevision: number;
             sheets: components["schemas"]["SheetDto"][];
         };
-        /** @description Стан версії шаблону. */
-        TemplateVersionStatus: number;
-        /** @description Рівень деталізації трейсу розрахунку (ЗБР-3). */
-        TraceLevel: number;
-        /** @description Область каталогу (`D-114`). Значення збігаються з
-         *     `sys_ecr.UiString.Scope`. */
-        UiStringScope: number;
+        /** @description Шаблон у переліку. */
+        TemplateSummary: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Код. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Скільки версій має шаблон.
+             */
+            versionCount: number;
+        };
+        /**
+         * @description Стан версії шаблону.
+         * @enum {unknown}
+         */
+        TemplateVersionStatus: "Draft" | "Published" | "Deprecated";
+        /** @description Версія шаблону в переліку. */
+        TemplateVersionSummary: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Номер версії. */
+            version: string;
+            /** @description Стан: чернетка, опублікована, застаріла. */
+            status: components["schemas"]["TemplateVersionStatus"];
+            /**
+             * Format: int32
+             * @description Ревізія презентаційного шару; частина ключа кешу.
+             */
+            presentationRevision: number;
+            /**
+             * Format: int32
+             * @description Версія-джерело, якщо це клон.
+             */
+            clonedFromVersionId: null | number;
+            /**
+             * Format: date-time
+             * @description Момент публікації.
+             */
+            publishedAt: null | string;
+        };
+        /**
+         * @description Рівень деталізації трейсу розрахунку (ЗБР-3).
+         * @enum {unknown}
+         */
+        TraceLevel: "Off" | "ErrorsOnly" | "Full";
+        /**
+         * @description Область каталогу (`D-114`). Значення збігаються з
+         *     `sys_ecr.UiString.Scope`.
+         * @enum {unknown}
+         */
+        UiStringScope: "Public" | "Private";
         /** @description Одиниця довідника. */
         UnitRef: {
             /**
              * Format: int32
              * @description Ідентифікатор.
              */
-            id: number | string;
+            id: number;
             /** @description Код: `kg`, `t`, `m3`. */
             code: string;
             /**
              * Format: uint8
              * @description Розмірність; конверсія можлива лише в її межах.
              */
-            dimensionId: number | string;
+            dimensionId: number;
             /**
              * Format: double
              * @description Множник переходу до базової одиниці розмірності.
              * @default 1
              */
-            factorToBase: number | string;
+            factorToBase: number;
             /**
              * Format: double
              * @description Зсув до базової; ненульовий лише в температури.
              * @default 0
              */
-            offsetToBase: number | string;
+            offsetToBase: number;
+        };
+        /** @description Обліковий запис у переліку. */
+        UserView: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Ім'я входу. */
+            userName: string;
+            /** @description Ім'я для показу. */
+            displayName: string;
+            /** @description Провайдер входу. */
+            provider: components["schemas"]["AuthProvider"];
+            /** @description Чи діє запис. */
+            isActive: boolean;
+            /** @description Технічний запис первинного налаштування. */
+            isBootstrapAdmin: boolean;
+            /** @description Пароль виданий разово. */
+            mustChangePassword: boolean;
+            /** @description Заблокований після невдалих спроб. */
+            isLockedOut: boolean;
         };
         /** @description Повідомлення валідації. */
         ValidationMessageDto: {

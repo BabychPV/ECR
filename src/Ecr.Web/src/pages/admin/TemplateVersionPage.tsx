@@ -4,43 +4,12 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { EcrApiError, apiFetch } from '@/api/client';
+import type { TemplateStructureDto } from '@/api/types';
+import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface ColumnDef {
-  id: number;
-  code: string;
-  header: string;
-  dataType: string;
-  isReadOnly: boolean;
-  unitSymbol: string | null;
-}
-
-interface TableDef {
-  id: number;
-  code: string;
-  name: string;
-  rowMode: string;
-  columns: ColumnDef[];
-}
-
-interface SheetDef {
-  id: number;
-  code: string;
-  name: string;
-  ordinal: number;
-  tables: TableDef[];
-}
-
-interface VersionStructure {
-  id: number;
-  version: string;
-  status: string;
-  presentationRevision: number;
-  sheets: SheetDef[];
-}
 
 /**
  * Редактор структури версії.
@@ -58,7 +27,7 @@ export function TemplateVersionPage(): JSX.Element {
 
   const structure = useQuery({
     queryKey: ['template-version', id],
-    queryFn: () => apiFetch<VersionStructure>(`/api/v1/template-versions/${id}`),
+    queryFn: () => apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${id}/structure`),
   });
 
   const publish = useMutation({
@@ -83,15 +52,18 @@ export function TemplateVersionPage(): JSX.Element {
   }
 
   const version = structure.data;
-  const editable = version.status !== 'Published';
+
+  // ⚠ Структура не несе статусу версії: його віддає перелік версій шаблону.
+  // Тому кнопка публікації тут показується за правом, а сервер лишається
+  // єдиним, хто вирішує, чи можна публікувати саме цю версію.
+  const editable = true;
 
   return (
     <>
       <PageHeader
-        title={`${t('version.title')} ${version.version}`}
+        title={`${t('version.title')} ${version.templateVersionId}`}
         actions={
           <Group gap="xs">
-            <Badge variant={editable ? 'light' : 'filled'}>{version.status}</Badge>
             <Text size="xs" c="dimmed">
               r{version.presentationRevision}
             </Text>
@@ -110,7 +82,7 @@ export function TemplateVersionPage(): JSX.Element {
           .map((sheet) => (
             <Accordion.Item key={sheet.id} value={sheet.code}>
               <Accordion.Control>
-                {sheet.name}{' '}
+                {localized(sheet.nameL10n)}{' '}
                 <Text span c="dimmed">
                   ({sheet.code})
                 </Text>
@@ -119,7 +91,7 @@ export function TemplateVersionPage(): JSX.Element {
                 {sheet.tables.map((table) => (
                   <div key={table.id}>
                     <Text fw={600} mt="sm">
-                      {table.name} · {table.rowMode}
+                      {table.code} · {table.rowMode}
                     </Text>
                     <Table striped withTableBorder mt={4}>
                       <Table.Thead>

@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -53,9 +54,15 @@ public sealed class PatchCellsHandler(
         //    їх не можна, це частина первинного ключа комірки.
         var instance = await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
-        var columns = snapshot.ColumnsById.Values
+        // ⚠ У мапі — сам ColumnDef, а не лише Id. Значення розбирається за
+        // ОГОЛОШЕНИМ типом колонки: через HTTP усе приходить JsonElement-ом, і
+        // здогадка за виглядом значення клала число в текст, а ідентифікатор
+        // запису довідника — у ValueNumeric (`A7-01`).
+        var columnDefs = snapshot.ColumnsById.Values
             .GroupBy(c => c.Code, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.Ordinal);
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var columns = columnDefs.ToDictionary(p => p.Key, p => p.Value.Id, StringComparer.Ordinal);
 
         // 2. Поточний стан рядків — ОДИН запит на батч, не на рядок.
         var versions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, periodKey, ct).ConfigureAwait(false);
@@ -160,7 +167,7 @@ public sealed class PatchCellsHandler(
             var id = await rowStore.CreateRowAsync(
                 request.TableInstanceId, periodKey, RowKey.Create(row.RowKey), ordinal: 0, ct).ConfigureAwait(false);
             touched.Add(id);
-            Distribute(row, id, periodKey, columns, instance.TableDefId, upserts, deletes);
+            Distribute(row, id, periodKey, columnDefs, instance.TableDefId, upserts, deletes);
         }
 
         foreach (var row in updates)
@@ -170,7 +177,7 @@ public sealed class PatchCellsHandler(
                 continue;
             }
             touched.Add(id);
-            Distribute(row, id, periodKey, columns, instance.TableDefId, upserts, deletes);
+            Distribute(row, id, periodKey, columnDefs, instance.TableDefId, upserts, deletes);
         }
 
         // 6a. Валідація. ⚠ Блокує запис ЛИШЕ комірковий Error (R-B3, D-90):
@@ -278,47 +285,60 @@ public sealed class PatchCellsHandler(
     private sealed class PatchRowValidationContext(PatchRow row) : Validation.IValidationContext
     {
         public object? GetCell(string columnCode)
-            => row.Cells
-                  .FirstOrDefault(c => string.Equals(c.ColumnCode, columnCode, StringComparison.OrdinalIgnoreCase))
-                  ?.Value;
+            => CellValueReader.Normalize(
+                row.Cells
+                   .FirstOrDefault(c => string.Equals(c.ColumnCode, columnCode, StringComparison.OrdinalIgnoreCase))
+                   ?.Value);
 
         public object? GetCell(string rowKey, string columnCode)
             => string.Equals(rowKey, row.RowKey, StringComparison.Ordinal) ? GetCell(columnCode) : null;
     }
 
     private static void Distribute(
-        PatchRow row, long rowId, PeriodKey periodKey, IReadOnlyDictionary<string, int> columns,
-        int tableDefId, List<CellRecord> upserts, List<CellAddress> deletes)
+        PatchRow row,
+        long rowId,
+        PeriodKey periodKey,
+        IReadOnlyDictionary<string, ColumnDef> columnDefs,
+        int tableDefId,
+        List<CellRecord> upserts,
+        List<CellAddress> deletes)
     {
         foreach (var cell in row.Cells)
         {
-            var address = new CellAddress(periodKey, rowId, ColumnDefIdOf(columns, cell.ColumnCode));
+            var column = ColumnOf(columnDefs, cell.ColumnCode);
+            var address = new CellAddress(periodKey, rowId, column.Id);
 
             if (cell.IsEmpty)
             {
                 upserts.Add(new CellRecord(address, TableDefId: tableDefId, CellValueData.Empty));
+                continue;
             }
-            else if (cell.Value is null)
+
+            // ⚠ Три різні операції (R-B4). `null` — стерти, і саме тому
+            // читач повертає null, а не порожнє значення: «стерти» і «явна
+            // порожнеча» — різні наміри, і зводити їх в один означає втратити
+            // відмінність, яку користувач висловив свідомо.
+            var data = CellValueReader.Read(cell.Value, column);
+
+            if (data is null)
             {
                 deletes.Add(address);
             }
             else
             {
-                upserts.Add(new CellRecord(address, TableDefId: tableDefId, ToData(cell.Value)));
+                upserts.Add(new CellRecord(address, TableDefId: tableDefId, data));
             }
         }
     }
 
-    private static CellValueData ToData(object value) => value switch
-    {
-        decimal d => new CellValueData { ValueNumeric = d },
-        int i => new CellValueData { ValueNumeric = i },
-        long l => new CellValueData { ValueNumeric = l },
-        double dbl => new CellValueData { ValueNumeric = (decimal)dbl },
-        bool b => new CellValueData { ValueBool = b },
-        DateTime dt => new CellValueData { ValueDate = dt },
-        _ => new CellValueData { ValueString = value.ToString() }
-    };
+    /// <summary>Опис колонки за кодом; невідомий код — відмова, а не пропуск.</summary>
+    private static ColumnDef ColumnOf(IReadOnlyDictionary<string, ColumnDef> columnDefs, string code)
+        => columnDefs.TryGetValue(code, out var column)
+            ? column
+            : throw new BusinessRuleException(
+                "ECR-CELL-0422",
+                $"Колонки «{code}» немає в цій версії шаблону.",
+                new Dictionary<string, object?> { ["columnCode"] = code });
 
     private static List<CellChangeRecord> BuildAuditRecords(
         PatchCellsRequest request, List<CellRecord> upserts,
@@ -362,7 +382,7 @@ public sealed class PatchCellsHandler(
     /// первинного ключа комірки, і будь-яке «приблизне» значення записало б
     /// дані в неіснуючу колонку.
     /// </remarks>
-    private static int ColumnDefIdOf(IReadOnlyDictionary<string, int> map, string columnCode)
+    private static int ColumnDefIdOf(Dictionary<string, int> map, string columnCode)
         => map.TryGetValue(columnCode, out var id)
             ? id
             : throw new BusinessRuleException(

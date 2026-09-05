@@ -1,25 +1,12 @@
 import type { JSX } from 'react';
 import { Badge, Loader, Table } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import type { TemplatePage, TemplateVersionSummary } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface TemplateSummary {
-  id: number;
-  code: string;
-  versionCount: number;
-}
-
-interface TemplateVersionSummary {
-  id: number;
-  templateId: number;
-  version: string;
-  status: string;
-  presentationRevision: number;
-}
 
 /**
  * Перелік шаблонів і їхніх версій.
@@ -32,19 +19,29 @@ interface TemplateVersionSummary {
 export function TemplatesPage(): JSX.Element {
   const templates = useQuery({
     queryKey: ['templates'],
-    queryFn: () => apiFetch<{ items: TemplateSummary[] }>('/api/v1/templates?limit=100'),
+    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
   });
 
-  const versions = useQuery({
-    queryKey: ['template-versions'],
-    queryFn: () => apiFetch<TemplateVersionSummary[]>('/api/v1/template-versions'),
-    enabled: templates.isSuccess,
+  const items = templates.data?.items ?? [];
+
+  // ⚠ Версії читаються ПО ШАБЛОНУ: маршрут контракту —
+  // `GET /api/v1/templates/{id}/versions`. До аудиту сторінка била в
+  // `/api/v1/template-versions`, якого не існує, і перелік версій був
+  // порожній завжди (`A7-03`).
+  const versionQueries = useQueries({
+    queries: items.map((template) => ({
+      queryKey: ['template-versions', template.id],
+      queryFn: () =>
+        apiFetch<TemplateVersionSummary[]>(`/api/v1/templates/${template.id}/versions`),
+    })),
   });
+
+  const versionsError = versionQueries.find((query) => query.error)?.error ?? null;
 
   return (
     <>
       <PageHeader title={t('templates.title')} />
-      <ErrorAlert error={templates.error ?? versions.error} />
+      <ErrorAlert error={templates.error ?? versionsError} />
 
       {templates.isPending ? (
         <Loader />
@@ -57,12 +54,11 @@ export function TemplatesPage(): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(templates.data?.items ?? []).map((template) => (
+            {items.map((template, index) => (
               <Table.Tr key={template.id}>
                 <Table.Td>{template.code}</Table.Td>
                 <Table.Td>
-                  {(versions.data ?? [])
-                    .filter((version) => version.templateId === template.id)
+                  {(versionQueries[index]?.data ?? [])
                     .map((version) => (
                       <Badge
                         key={version.id}

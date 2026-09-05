@@ -23,7 +23,7 @@ public sealed class TemplatesController(
     /// <summary>Перелік шаблонів. Право <c>Template.View</c>.</summary>
     /// <remarks>Сторінка, а не «все»: ендпоінтів, що повертають увесь набір, не існує.</remarks>
     [HttpGet]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.TemplateSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(
         [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
         // Право і межі сторінки перевіряє обробник: правило має діяти
@@ -44,7 +44,7 @@ public sealed class TemplatesController(
 
     /// <summary>Версії шаблону. Право <c>Template.View</c>.</summary>
     [HttpGet("{id:int}/versions")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.TemplateVersionSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ListVersions(int id, CancellationToken ct)
         => Ok(await listVersions.HandleAsync(id, new CursorRequest(), ct).ConfigureAwait(false));
 

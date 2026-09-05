@@ -184,6 +184,112 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// <summary>Стеля вибірки мапінгів; тисяча полів на одну сутність — вже аварія.</summary>
     private const int MaxFieldMaps = 1_000;
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SourceEntityStatus>> ListSourceEntitiesAsync(CancellationToken ct)
+    {
+        // ⚠ Три запити на весь перелік, а не три на кожну сутність: джерел
+        // десятки, і N+1 тут перетворив би екран конфігуратора на сотні
+        // звернень до бази.
+        var entities = await db.SourceEntities
+            .AsNoTracking()
+            .OrderBy(e => e.Code)
+            .Take(MaxSourceEntities)
+            .Select(e => new
+            {
+                e.Id,
+                e.Code,
+                e.DisplayName,
+                e.EntityPath,
+                e.IsActive,
+                e.DataSourceId,
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (entities.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = entities.ConvertAll(e => e.Id);
+
+        var transports = await db.DataSources
+            .AsNoTracking()
+            .Take(MaxSourceEntities)
+            .Select(s => new { s.Id, s.Transport })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Останній прогін кожної сутності: беремо всі завершені за стелею і
+        // згортаємо в пам'яті — вибірка на кожну сутність коштувала б N запитів.
+        var runs = await db.CollectionRuns
+            .AsNoTracking()
+            .Where(r => ids.Contains(r.SourceEntityId))
+            .OrderByDescending(r => r.StartedAt)
+            .Take(MaxRunsScanned)
+            .Select(r => new { r.SourceEntityId, r.FinishedAt, r.Status, r.PointsRetrieved, r.StartedAt })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var coverage = await db.CollectionCoverages
+            .AsNoTracking()
+            .Where(c => ids.Contains(c.SourceEntityId))
+            .OrderBy(c => c.CoveredFrom)
+            .Take(MaxIntervals)
+            .Select(c => new { c.SourceEntityId, c.CoveredFrom, c.CoveredTo })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var transportById = transports.ToDictionary(s => s.Id, s => s.Transport.ToString());
+
+        var lastRun = runs
+            .GroupBy(r => r.SourceEntityId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(r => r.StartedAt).First());
+
+        var now = clock.UtcNow;
+
+        return entities.ConvertAll(entity =>
+        {
+            var run = lastRun.GetValueOrDefault(entity.Id);
+
+            var intervals = coverage
+                .Where(c => c.SourceEntityId == entity.Id)
+                .Select(c => new TimeInterval(c.CoveredFrom, c.CoveredTo))
+                .ToList();
+
+            // ⚠ Прогалина шукається ТИМ САМИМ кодом, що й наздоганяння:
+            // друга реалізація «що таке дірка» показувала б на екрані одне,
+            // а збирала б інше.
+            var gaps = Ecr.Application.Integration.GapFinder.Find(intervals, now.AddDays(-GapLookbackDays), now);
+
+            return new SourceEntityStatus(
+                entity.Id,
+                entity.Code,
+                entity.DisplayName,
+                entity.EntityPath,
+                transportById.GetValueOrDefault(entity.DataSourceId, "—"),
+                entity.IsActive,
+                run is null ? null : new CollectionRunStatus(run.FinishedAt, run.Status, run.PointsRetrieved),
+                gaps.Count == 0 ? null : gaps[0].From);
+        });
+    }
+
+    /// <summary>Стеля переліку сутностей збору.</summary>
+    private const int MaxSourceEntities = 5_000;
+
+    /// <summary>Скільки прогонів проглядати, шукаючи останній по кожній сутності.</summary>
+    private const int MaxRunsScanned = 20_000;
+
+    /// <summary>Наскільки глибоко екран шукає прогалини.</summary>
+    /// <remarks>
+    /// Сорок п'ять діб — звітний місяць плюс пільговий строк, той самий обрій,
+    /// що й у наздоганянні (<c>CollectionRunner.CatchUpLookback</c>). Різні
+    /// обрії давали б екран, який показує «все добре», поки збирач наздоганяє.
+    /// </remarks>
+    private const int GapLookbackDays = 45;
+
     /// <summary>Одиниця джерела за її символом.</summary>
     /// <remarks>
     /// ⚠ Нерозпізнаний символ дає <c>null</c>, а не здогадку. Одиниця, взята

@@ -22,7 +22,7 @@ public sealed class SecurityController(
 {
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
     [HttpGet("roles")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.RoleView>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ListRoles(CancellationToken ct)
         // Небезпечні права віддаються ОКРЕМИМ списком: у складені ролі вони не
         // входять навмисно, і адміністратор має бачити різницю (ФВ-6.12, D-40).
@@ -44,7 +44,7 @@ public sealed class SecurityController(
 
     /// <summary>Перелік користувачів. Право <c>Security.ManageUsers</c>.</summary>
     [HttpGet("users")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Security.UserView>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ListUsers(
         [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
     {

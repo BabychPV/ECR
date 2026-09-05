@@ -1,33 +1,16 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Loader, NumberInput, Stack, Tabs, Text } from '@mantine/core';
+import { Badge, Button, Group, Loader, NumberInput, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import type { DocumentSummary, DocumentTableDto, ValidationMessageDto } from '@/api/types';
 import { DocumentGrid } from '@/features/grid/DocumentGrid';
 import { can, useSession } from '@/shared/session/useSession';
+import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-/** Аркуш документа з екземплярами таблиць. */
-interface SheetDto {
-  sheetDefId: number;
-  code: string;
-  name: string;
-  ordinal: number;
-  tables: { tableInstanceId: number; tableDefId: number; code: string; name: string }[];
-  /** Стан робочого процесу за обраний період. */
-  state: string;
-}
-
-interface DocumentDto {
-  id: number;
-  businessKey: string;
-  projectId: number;
-  templateVersionId: number;
-  sheets: SheetDto[];
-}
 
 /**
  * Екран документа: вибір періоду, вкладки аркушів, таблиці, робочий процес.
@@ -35,6 +18,11 @@ interface DocumentDto {
  * ⚠ Період — не фільтр показу, а **частина адреси даних**: екземпляри таблиць
  * і стан затвердження існують окремо на кожен період (R-A6). Тому зміна
  * періоду перечитує все, а не ховає рядки.
+ *
+ * ⛔ Таблиці беруться з `GET /api/v1/documents/{id}/tables`. До аудиту
+ * (`A7-05`) екран чекав, що `GET /api/v1/documents/{id}` віддасть аркуші з
+ * `tableInstanceId`, а той віддає `DocumentSummary` — бізнес-ключ і зведений
+ * стан. Grid отримував `undefined` замість екземпляра таблиці.
  */
 export function DocumentPage(): JSX.Element {
   const { id } = useParams();
@@ -45,14 +33,23 @@ export function DocumentPage(): JSX.Element {
   const [periodKey, setPeriodKey] = useState<number>(currentPeriodKey);
   const [sheet, setSheet] = useState<string | null>(null);
 
-  const document = useQuery({
+  const summary = useQuery({
     queryKey: ['document', documentId, periodKey],
-    queryFn: () => apiFetch<DocumentDto>(`/api/v1/documents/${documentId}?periodKey=${periodKey}`),
+    queryFn: () =>
+      apiFetch<DocumentSummary>(`/api/v1/documents/${documentId}?periodKey=${periodKey}`),
+  });
+
+  const tables = useQuery({
+    queryKey: ['document-tables', documentId, periodKey],
+    queryFn: () =>
+      apiFetch<DocumentTableDto[]>(
+        `/api/v1/documents/${documentId}/tables?periodKey=${periodKey}`,
+      ),
   });
 
   const validate = useMutation({
     mutationFn: () =>
-      apiFetch<{ messages: { severity: string; message: string }[] }>(
+      apiFetch<{ messages: ValidationMessageDto[] }>(
         `/api/v1/documents/${documentId}/validate`,
         { method: 'POST', body: JSON.stringify({ periodKey }) },
       ),
@@ -104,16 +101,25 @@ export function DocumentPage(): JSX.Element {
     },
   });
 
-  if (document.isPending) return <Loader />;
-  if (document.isError || document.data === undefined) return <ErrorAlert error={document.error} />;
+  if (summary.isPending || tables.isPending) return <Loader />;
 
-  const sheets = [...document.data.sheets].sort((a, b) => a.ordinal - b.ordinal);
+  if (summary.isError || summary.data === undefined) {
+    return <ErrorAlert error={summary.error} />;
+  }
+
+  const sheets = groupBySheet(tables.data ?? []);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
+
+  // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
+  // статусу документа не існує (D-93) — аркуші за один період бувають у
+  // різних станах одночасно.
+  const state = active === undefined ? '' : (summary.data.sheetStates[active.code] ?? 'Draft');
+  const readOnly = state === 'Submitted' || state === 'Approved';
 
   return (
     <Stack>
       <PageHeader
-        title={document.data.businessKey}
+        title={summary.data.businessKey}
         actions={
           <Group gap="xs">
             <NumberInput
@@ -130,7 +136,7 @@ export function DocumentPage(): JSX.Element {
                 {t('document.export')}
               </Button>
             )}
-            {active !== undefined && (
+            {active !== undefined && !readOnly && (
               <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate(active.sheetDefId)}>
                 {t('document.submit')}
               </Button>
@@ -143,7 +149,10 @@ export function DocumentPage(): JSX.Element {
         <Tabs.List>
           {sheets.map((s) => (
             <Tabs.Tab key={s.code} value={s.code}>
-              {s.name} · {s.state}
+              {s.name}{' '}
+              <Badge size="xs" variant="light">
+                {summary.data.sheetStates[s.code] ?? 'Draft'}
+              </Badge>
             </Tabs.Tab>
           ))}
         </Tabs.List>
@@ -154,18 +163,53 @@ export function DocumentPage(): JSX.Element {
       ) : (
         active.tables.map((table) => (
           <Stack key={table.tableInstanceId} gap="xs">
-            <Text fw={600}>{table.name}</Text>
+            <Text fw={600}>{localized(table.tableNameL10n)}</Text>
             <DocumentGrid
               documentId={documentId}
               tableInstanceId={table.tableInstanceId}
               periodKey={periodKey}
-              readOnly={active.state === 'Submitted' || active.state === 'Approved'}
+              readOnly={readOnly}
             />
           </Stack>
         ))
       )}
     </Stack>
   );
+}
+
+/** Аркуш із його таблицями. */
+interface SheetGroup {
+  sheetDefId: number;
+  code: string;
+  name: string;
+  ordinal: number;
+  tables: DocumentTableDto[];
+}
+
+/**
+ * Групує таблиці за аркушами.
+ *
+ * ⚠ Сервер віддає плоский перелік екземплярів: так його можна віддати одним
+ * запитом і не вигадувати вкладену структуру, яка все одно розбирається на
+ * клієнті.
+ */
+function groupBySheet(tables: DocumentTableDto[]): SheetGroup[] {
+  const sheets = new Map<string, SheetGroup>();
+
+  for (const table of tables) {
+    const group = sheets.get(table.sheetCode) ?? {
+      sheetDefId: table.sheetDefId,
+      code: table.sheetCode,
+      name: localized(table.sheetNameL10n) || table.sheetCode,
+      ordinal: table.sheetOrdinal,
+      tables: [],
+    };
+
+    group.tables.push(table);
+    sheets.set(table.sheetCode, group);
+  }
+
+  return [...sheets.values()].sort((a, b) => a.ordinal - b.ordinal);
 }
 
 /**

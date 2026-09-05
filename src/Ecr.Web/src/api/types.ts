@@ -86,3 +86,74 @@ export interface CellConflictDto {
   theirChangedAt: string;
   currentVersion: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Решта DTO екранів. Усі — псевдоніми згенерованих типів.
+//
+// ⛔ Власних `interface …Dto` в екранах більше немає. До аудиту (`A7-05`)
+// кожен екран оголошував свою форму «за здоровим глуздом», і жодна не
+// збігалася з сервером: реєстри чекали `name`, сервер віддавав `nameL10n`;
+// методології чекали `version`, сервер віддавав `versionNumber`; безпека
+// чекала `login` і `roles`, яких немає взагалі. Екрани відкривалися
+// порожніми, і `tsc` був зелений — типи узгоджені самі з собою.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Профіль поточного користувача з ефективними правами. */
+export type CurrentUserDto = Schemas['CurrentUserDto'];
+
+/** Документ у переліку; зведеного статусу немає за побудовою (D-93). */
+export type DocumentSummary = Schemas['DocumentSummary'];
+
+/** Сторінка документів. */
+export type DocumentPage = Schemas['PagedResultOfDocumentSummary'];
+
+/** Екземпляр таблиці документа разом з аркушем, якому він належить. */
+export type DocumentTableDto = Schemas['DocumentTableDto'];
+
+/** Шаблон у переліку. */
+export type TemplateSummary = Schemas['TemplateSummary'];
+
+/** Сторінка шаблонів. */
+export type TemplatePage = Schemas['PagedResultOfTemplateSummary'];
+
+/** Версія шаблону в переліку. */
+export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
+
+/** Структура версії шаблону: аркуші, таблиці, колонки. */
+export type TemplateStructureDto = Schemas['TemplateStructureDto'];
+
+/** Довідник. */
+export type RegistryDefDto = Schemas['RegistryDefDto'];
+
+/** Запис довідника. */
+export type RegistryEntryDto = Schemas['RegistryEntryDto'];
+
+/** Методологія з версіями. */
+export type MethodologyDto = Schemas['MethodologyDto'];
+
+/** Версія методології. */
+export type MethodologyVersionDto = Schemas['MethodologyVersionDto'];
+
+/** Роль із оголошеними правами. */
+export type RoleView = Schemas['RoleView'];
+
+/** Користувач; ані хеша пароля, ані солі тут немає за побудовою (ФВ-6.11). */
+export type UserView = Schemas['UserView'];
+
+/** Сторінка користувачів. */
+export type UserPage = Schemas['PagedResultOfUserView'];
+
+/** Календар періодів проєкту. */
+export type PeriodCalendarDto = Schemas['PeriodCalendarDto'];
+
+/** Період проєкту. */
+export type PeriodDto = Schemas['PeriodDto'];
+
+/** Сутність збору зі станом останнього прогону і прогалиною. */
+export type SourceEntityStatus = Schemas['SourceEntityStatus'];
+
+/** Зріз звітності. */
+export type ReportSnapshotSummary = Schemas['ReportSnapshotSummary'];
+
+/** Стан фонової задачі. */
+export type JobStatus = Schemas['JobStatus'];

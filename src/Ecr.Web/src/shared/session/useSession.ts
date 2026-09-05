@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { CurrentUserDto } from '@/api/types';
 
 /**
  * Профіль поточного користувача з ефективними правами.
@@ -7,18 +8,12 @@ import { apiFetch } from '@/api/client';
  * ⚠ Права беруться з `/me` і враховуються **до** показу кнопки: користувач не
  * має тиснути те, що все одно дасть 403. Це не заміна серверній перевірці —
  * та лишається єдиним рішенням; це відсутність кнопок, які не працюють.
+ *
+ * ⛔ Форма — **згенерований** тип, а не власний `interface`. До аудиту
+ * (`A7-05`) тут стояло `displayName`, а сервер віддавав `userName`: у шапці
+ * не показувалося нічого, і `tsc` був зелений.
  */
-export interface MeDto {
-  userId: number;
-  displayName: string;
-  language: string;
-  /** Ефективні права: `Document.Export`, `Registry.EditData`, … */
-  permissions: string[];
-  /** Разовий пароль: доки не змінено, доступні лише зміна пароля і вихід (ФВ-6.18). */
-  mustChangePassword: boolean;
-  /** Сеанс симуляції прав іншого користувача (ФВ-6.16a). */
-  simulation: { targetUserId: number; targetName: string } | null;
-}
+export type MeDto = CurrentUserDto;
 
 /** Ключ запиту профілю. */
 export const MeQueryKey = ['me'] as const;
@@ -27,7 +22,7 @@ export const MeQueryKey = ['me'] as const;
 export function useSession() {
   return useQuery({
     queryKey: MeQueryKey,
-    queryFn: () => apiFetch<MeDto>('/api/v1/me'),
+    queryFn: () => apiFetch<CurrentUserDto>('/api/v1/me'),
 
     // ⚠ Профіль НЕ кешується надовго: зміна ролей робить сесію недійсною
     // негайно (SecurityStamp), і показувати кнопки за старим профілем
@@ -38,6 +33,6 @@ export function useSession() {
 }
 
 /** Чи має користувач право. */
-export function can(me: MeDto | undefined, permission: string): boolean {
+export function can(me: CurrentUserDto | undefined, permission: string): boolean {
   return me?.permissions.includes(permission) ?? false;
 }

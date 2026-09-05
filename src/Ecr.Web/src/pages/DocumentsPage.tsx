@@ -3,25 +3,10 @@ import { Badge, Button, Group, Loader, NumberInput, Table, Text } from '@mantine
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import type { DocumentPage } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-/** Документ у переліку; форма з `02-contracts.md` §10. */
-interface DocumentSummary {
-  id: number;
-  projectId: number;
-  businessKey: string;
-  createdAt: string;
-  sheetCount: number;
-  /** ⛔ Скалярного статусу немає (D-93): стан рахується по аркушах. */
-  sheetStates: Record<string, string>;
-}
-
-interface Page<T> {
-  items: T[];
-  nextCursor: string | null;
-}
 
 /**
  * Перелік документів.
@@ -38,7 +23,7 @@ export function DocumentsPage(): JSX.Element {
   const query = useQuery({
     queryKey: ['documents', periodKey, cursor],
     queryFn: () =>
-      apiFetch<Page<DocumentSummary>>(
+      apiFetch<DocumentPage>(
         `/api/v1/documents?limit=50` +
           (periodKey === null ? '' : `&periodKey=${periodKey}`) +
           (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),

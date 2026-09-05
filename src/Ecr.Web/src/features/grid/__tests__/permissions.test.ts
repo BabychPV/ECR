@@ -46,7 +46,11 @@ describe('Права по комірках', () => {
     const decision = decide(slice({}), 'R1', column({ isReadOnly: true }));
 
     expect(decision.editable).toBe(false);
-    expect(decision.reason).toBe('ReadOnlyColumn');
+
+    // ⚠ Назва причини — ДОСЛІВНО серверна (`EditDenyReason.ColumnReadOnly`).
+    // До аудиту клієнт мав власну `ReadOnlyColumn`, і сервер із ним не
+    // збігався жодного разу (`A7-02`).
+    expect(decision.reason).toBe('ColumnReadOnly');
   });
 
   it('підказка показує причину заборони, а не просто «недоступно»', () => {
@@ -75,7 +79,7 @@ describe('Права по комірках', () => {
       const decision = decide(slice({}), 'R1', column({ dataType }));
 
       expect(decision.editable).toBe(false);
-      expect(decision.reason).toBe('Calculated');
+      expect(decision.reason).toBe('CalculatedCell');
     }
   });
 
@@ -91,7 +95,24 @@ describe('Права по комірках', () => {
     const decision = decide(slice({ [cellKey('R1', 'C1')]: 'СутоНоваПричина' }), 'R1', column());
 
     expect(decision.editable).toBe(false);
-    expect(decision.reason).toBe('NoPermission');
+
+    // ⚠ І не видає її за «немає права»: підмінити невідому причину знайомою
+    // означає збрехати користувачеві про те, чому комірка сіра.
+    expect(decision.reason).toBeNull();
+    expect(decision.hint).toContain('СутоНоваПричина');
+  });
+
+  it('усі причини сервера мають власний текст, а не спільну заглушку', () => {
+    // Перелік звіряє з `EditDenyReason` архітектурний тест
+    // `Кожна_причина_заборони_має_підказку_на_клієнті`; тут перевіряється, що
+    // тексти РІЗНІ — інакше «є підказка» означало б те саме «недоступно».
+    const reasons = ['PeriodClosed', 'DocumentSubmitted', 'SimulationReadOnly', 'ProjectArchived'];
+
+    const hints = reasons.map(
+      (reason) => decide(slice({ [cellKey('R1', 'C1')]: reason }), 'R1', column()).hint,
+    );
+
+    expect(new Set(hints).size).toBe(reasons.length);
   });
 
   it('сторож вставки і сіра комірка ніколи не розходяться', () => {

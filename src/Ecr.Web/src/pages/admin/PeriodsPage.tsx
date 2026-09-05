@@ -2,20 +2,10 @@ import { useState, type JSX } from 'react';
 import { Badge, Loader, NumberInput, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { PeriodCalendarDto } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface PeriodDto {
-  periodKey: number;
-  sequence: number;
-  year: number;
-  startsAt: string;
-  endsAt: string;
-  /** `Future`, `Open`, `Grace`, `Closed`. */
-  state: string;
-  graceEndsAt: string | null;
-}
 
 /**
  * Календар періодів проєкту.
@@ -32,7 +22,7 @@ export function PeriodsPage(): JSX.Element {
 
   const periods = useQuery({
     queryKey: ['periods', projectId],
-    queryFn: () => apiFetch<PeriodDto[]>(`/api/v1/projects/${projectId ?? 0}/periods`),
+    queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${projectId ?? 0}/periods`),
     enabled: projectId !== null,
   });
 
@@ -69,7 +59,7 @@ export function PeriodsPage(): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(periods.data ?? []).map((period) => (
+            {(periods.data?.periods ?? []).map((period) => (
               <Table.Tr key={period.periodKey}>
                 <Table.Td>{period.periodKey}</Table.Td>
                 <Table.Td>{period.sequence}</Table.Td>

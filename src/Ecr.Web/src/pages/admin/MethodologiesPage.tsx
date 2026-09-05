@@ -3,26 +3,12 @@ import { Badge, Button, Group, Loader, Modal, Table, Text, Textarea } from '@man
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
+import type { MethodologyDto } from '@/api/types';
+import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface MethodologyVersionDto {
-  id: number;
-  version: string;
-  status: string;
-  level: string;
-  effectiveFrom: string | null;
-  testsPassed: boolean;
-}
-
-interface MethodologyDto {
-  id: number;
-  code: string;
-  name: string;
-  versions: MethodologyVersionDto[];
-}
 
 /**
  * Конфігуратор методологій: версії, публікація, симуляція.
@@ -82,7 +68,7 @@ export function MethodologiesPage(): JSX.Element {
             {(methodologies.data ?? []).map((methodology) => (
               <Table.Tr key={methodology.id}>
                 <Table.Td>
-                  {methodology.name}{' '}
+                  {localized(methodology.nameL10n)}{' '}
                   <Text span c="dimmed">
                     ({methodology.code})
                   </Text>
@@ -92,18 +78,16 @@ export function MethodologiesPage(): JSX.Element {
                     {methodology.versions.map((version) => (
                       <Group key={version.id} gap={4}>
                         <Badge variant={version.status === 'Published' ? 'filled' : 'light'}>
-                          {version.version} · {version.level}
+                          {version.versionNumber} · {version.level}
                           {version.effectiveFrom === null ? '' : ` · ${version.effectiveFrom}`}
                         </Badge>
 
-                        {/* ⚠ Стан тесту видно ДО спроби публікації: інакше
-                            користувач дізнається про червоний тест лише з
-                            відмови ECR-CALC-0422. */}
-                        {!version.testsPassed && (
-                          <Badge color="red" variant="light">
-                            {t('methodologies.testsFailed')}
-                          </Badge>
-                        )}
+                        {/* ⚠ Режим і рівень трасування видно поруч із версією:
+                            саме вони визначають, чи зміняться числа при
+                            публікації, і саме їх порівнюють у diff публікації. */}
+                        <Badge variant="outline" size="sm">
+                          {version.numericMode} · {version.traceLevel}
+                        </Badge>
 
                         {version.status !== 'Published' &&
                           can(session.data, 'Calculation.Publish') && (

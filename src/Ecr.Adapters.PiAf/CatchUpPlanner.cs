@@ -1,3 +1,4 @@
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 
@@ -13,15 +14,8 @@ namespace Ecr.Adapters.PiAf;
 /// </remarks>
 public sealed class CatchUpPlanner(ICollectionStore store, IClock clock)
 {
-    /// <summary>
-    /// Скільки прогалин має сенс віддати за раз.
-    /// </summary>
-    /// <remarks>
-    /// Не оптимізація: п'ятсот окремих дірок у покритті означають, що джерело
-    /// віддає уривками місяцями, і це вже не наздоганяння, а інцидент —
-    /// закривати його треба руками, а не чергою з тисяч мікрозапитів.
-    /// </remarks>
-    public const int MaxGaps = 500;
+    /// <summary>Скільки прогалин має сенс віддати за раз; межа спільна з <see cref="GapFinder"/>.</summary>
+    public const int MaxGaps = GapFinder.MaxGaps;
 
     /// <summary>Знаходить непокриті інтервали за період lookback.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
@@ -42,68 +36,19 @@ public sealed class CatchUpPlanner(ICollectionStore store, IClock clock)
     }
 
     /// <summary>
-    /// Доповнення покриття до суцільного інтервалу — чиста функція.
+    /// Доповнення покриття до суцільного інтервалу.
     /// </summary>
     /// <param name="covered">Покриті інтервали в будь-якому порядку.</param>
     /// <param name="from">Початок огляду.</param>
     /// <param name="to">Кінець огляду.</param>
     /// <remarks>
-    /// ⚠ Виділена і статична навмисно: це єдине місце, де вирішується, що
-    /// таке «дірка». Перевірити її можна без бази й без джерела, а помилка
-    /// тут не падає — вона мовчки не збирає даних за проміжок, і побачать це
-    /// на звірці.
+    /// ⚠ Делегує в <see cref="GapFinder"/>, який живе в <c>Ecr.Application</c>.
+    /// Те саме питання — «що таке дірка» — ставить і екран джерел, який будує
+    /// <c>Ecr.Infrastructure</c>; проєкти сусідні, і без спільного місця тут
+    /// з'явилася б друга реалізація, яка розійшлася б із цією мовчки
+    /// (`A7-03`).
     /// </remarks>
     public static IReadOnlyList<(DateTime From, DateTime To)> FindGaps(
         IReadOnlyList<TimeInterval> covered, DateTime from, DateTime to)
-    {
-        ArgumentNullException.ThrowIfNull(covered);
-
-        if (to <= from)
-        {
-            return [];
-        }
-
-        // Обрізаємо по вікну огляду: інтервал, що виходить за межі, покриває
-        // тільки свою частину всередині.
-        var clipped = covered
-            .Select(c => (From: Max(c.FromUtc, from), To: Min(c.ToUtc, to)))
-            .Where(c => c.To > c.From)
-            .OrderBy(c => c.From)
-            .ToList();
-
-        var gaps = new List<(DateTime From, DateTime To)>();
-        var cursor = from;
-
-        foreach (var interval in clipped)
-        {
-            if (gaps.Count >= MaxGaps)
-            {
-                break;
-            }
-
-            // Суміжні й перекриті інтервали зливаються самим ходом курсора:
-            // окремий крок «злити» був би другим місцем, де живе те саме
-            // правило.
-            if (interval.From > cursor)
-            {
-                gaps.Add((cursor, interval.From));
-            }
-
-            if (interval.To > cursor)
-            {
-                cursor = interval.To;
-            }
-        }
-
-        if (cursor < to && gaps.Count < MaxGaps)
-        {
-            gaps.Add((cursor, to));
-        }
-
-        return gaps;
-    }
-
-    private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
-
-    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
+        => GapFinder.Find(covered, from, to);
 }

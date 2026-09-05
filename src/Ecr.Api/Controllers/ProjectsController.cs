@@ -95,7 +95,7 @@ public sealed class ProjectsController(
 
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:int}/periods")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType<Ecr.Application.Periods.Dto.PeriodCalendarDto>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Periods(int id, CancellationToken ct)
     {
         // Календар добудовується перед читанням: проєкт міг бути створений до

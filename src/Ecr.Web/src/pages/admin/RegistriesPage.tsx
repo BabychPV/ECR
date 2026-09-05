@@ -2,28 +2,11 @@ import { useState, type JSX } from 'react';
 import { Badge, Group, Loader, Select, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
+import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
-
-interface RegistryDef {
-  id: number;
-  code: string;
-  name: string;
-  /** Хто master для цих даних: `External`, `Hybrid`, `Ecr` (ФВ-8.9). */
-  sourceKind: string;
-  dataRevision: number;
-}
-
-interface RegistryEntry {
-  id: number;
-  code: string;
-  name: string;
-  parentEntryId: number | null;
-  validFrom: string | null;
-  validTo: string | null;
-  isActive: boolean;
-}
 
 /**
  * Конструктор реєстрів: схема, дані, темпоральність.
@@ -37,14 +20,14 @@ export function RegistriesPage(): JSX.Element {
 
   const registries = useQuery({
     queryKey: ['registries'],
-    queryFn: () => apiFetch<RegistryDef[]>('/api/v1/registries'),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
   });
 
   const entries = useQuery({
     queryKey: ['registry-entries', code],
     queryFn: () =>
-      apiFetch<{ items: RegistryEntry[] }>(
-        `/api/v1/registries/${encodeURIComponent(code ?? '')}/entries?limit=200`,
+      apiFetch<RegistryEntryDto[]>(
+        `/api/v1/registries/${encodeURIComponent(code ?? '')}/entries`,
       ),
     enabled: code !== null,
   });
@@ -64,7 +47,7 @@ export function RegistriesPage(): JSX.Element {
             onChange={setCode}
             data={(registries.data ?? []).map((registry) => ({
               value: registry.code,
-              label: `${registry.name} (${registry.code})`,
+              label: `${localized(registry.nameL10n)} (${registry.code})`,
             }))}
           />
         }
@@ -74,13 +57,13 @@ export function RegistriesPage(): JSX.Element {
 
       {selected !== undefined && (
         <Group gap="xs" mb="sm">
-          {/* ⚠ SourceKind видно поруч із даними: у реєстрі, де master —
-              зовнішня система, правка руками або заборонена, або буде затерта
-              наступним збором. Без цієї позначки це виглядало б як зникнення
-              роботи. */}
-          <Badge variant="light">{selected.sourceKind}</Badge>
+          {/* ⚠ Ознаки довідника видно поруч із даними: у темпоральному
+              запис має вікно чинності, і рядки документів, що на нього
+              посилаються, стають осиротілими поза цим вікном (ФВ-8.13). */}
+          {selected.isTemporal && <Badge variant="light">{t('registries.temporal')}</Badge>}
+          {selected.isHierarchical && <Badge variant="light">{t('registries.hierarchical')}</Badge>}
           <Text size="xs" c="dimmed">
-            rev {selected.dataRevision}
+            {t('registries.fields', { count: selected.fields.length })}
           </Text>
         </Group>
       )}
@@ -99,10 +82,10 @@ export function RegistriesPage(): JSX.Element {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(entries.data?.items ?? []).map((entry) => (
-                <Table.Tr key={entry.id} opacity={entry.isActive ? 1 : 0.5}>
+              {(entries.data ?? []).map((entry) => (
+                <Table.Tr key={entry.id}>
                   <Table.Td>{entry.code}</Table.Td>
-                  <Table.Td>{entry.name}</Table.Td>
+                  <Table.Td>{entry.display}</Table.Td>
                   <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
                   <Table.Td>
                     {(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}

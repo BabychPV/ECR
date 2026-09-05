@@ -55,7 +55,7 @@ export function LoginPage(): JSX.Element {
         </Title>
 
         <Stack gap="sm">
-          <Button onClick={() => void submit('/api/v1/auth/windows')} loading={busy}>
+          <Button onClick={() => void submit('/api/v1/login/windows')} loading={busy}>
             {t('login.windows')}
           </Button>
 
@@ -78,7 +78,7 @@ export function LoginPage(): JSX.Element {
           <Button
             variant="default"
             loading={busy}
-            onClick={() => void submit('/api/v1/auth/login', { login, password })}
+            onClick={() => void submit('/api/v1/login/local', { login, password })}
           >
             {t('login.submit')}
           </Button>
