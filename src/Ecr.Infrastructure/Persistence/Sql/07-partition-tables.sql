@@ -191,11 +191,10 @@ IF EXISTS
     SELECT 1
     FROM sys.foreign_keys AS fk
     JOIN sys.tables AS t ON t.object_id = fk.parent_object_id
-    WHERE fk.is_not_trusted = 1
-      AND fk.is_disabled = 0
+    WHERE (fk.is_not_trusted = 1 OR fk.is_disabled = 1)
       AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud')
 )
-    THROW 50032, N'Частина зовнішніх ключів лишилася недовіреною: оптимізатор їх ігноруватиме.', 1;
+    THROW 50032, N'Частина зовнішніх ключів недовірена або вимкнена.', 1;
 GO
 
 -- Перевірка: після скрипту жоден індекс партиційованої таблиці не має лежати

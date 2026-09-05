@@ -92,13 +92,19 @@ GO
 -- ⛔ Недовірений ключ тут не дрібниця: саме в такому стані опинялася база
 -- після масового завантаження, і оптимізатор ігнорував ключ на найгарячішій
 -- таблиці системи, не сказавши жодного слова.
+--
+-- ⛔ ВИМКНЕНІ ключі ловляться ТЕЖ, і це виправлення власної помилки. Перша
+-- редакція фільтрувала `is_disabled = 0` — тобто пропускала саме ті ключі,
+-- які не перевіряють нічого. Перевірено дією: `ALTER TABLE … NOCHECK
+-- CONSTRAINT` знімає обмеження цілком, а завдання рапортувало успіх.
+-- Вимкнений ключ гірший за недовірений: другий хоча б перевіряє вставки.
 DECLARE @db sysname = DB_NAME();
 DECLARE @physical nvarchar(max) = N'
 IF EXISTS (SELECT 1 FROM sys.foreign_keys fk
             JOIN sys.tables t ON t.object_id = fk.parent_object_id
-           WHERE fk.is_not_trusted = 1 AND fk.is_disabled = 0
+           WHERE (fk.is_not_trusted = 1 OR fk.is_disabled = 1)
              AND SCHEMA_NAME(t.schema_id) IN (N''doc'', N''calc'', N''aud''))
-    THROW 50041, N''Є недовірені зовнішні ключі: оптимізатор їх ігнорує.'', 1;
+    THROW 50041, N''Є недовірені або ВИМКНЕНІ зовнішні ключі.'', 1;
 
 IF EXISTS (SELECT 1 FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
