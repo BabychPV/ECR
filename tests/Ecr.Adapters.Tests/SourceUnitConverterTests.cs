@@ -1,4 +1,4 @@
-using Ecr.Adapters.PiAf;
+﻿using Ecr.Adapters.PiAf;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Services;
@@ -73,8 +73,19 @@ public sealed class SourceUnitConverterTests
     {
         // Порівнювати нема з чим: джерело одиниці не повідомило. Це не
         // «збіглося» і не привід підставляти безрозмірність (ФВ-16.12).
-        SourceUnitConverter.EnsureDeclaredUnit(KilogramId, null, Catalog(), "tag");
-        SourceUnitConverter.EnsureDeclaredUnit(null, "kg", Catalog(), "tag");
+        //
+        // ⚠ Твердження ЯВНЕ, хоч xUnit і так завалив би тест на винятку.
+        // Тест без жодного `Assert` не каже, ЩО він перевіряє: якщо метод
+        // почне повертати результат замість кидати, він лишиться зеленим і
+        // мовчки перестане щось означати.
+        var missingSource = Record.Exception(
+            () => SourceUnitConverter.EnsureDeclaredUnit(KilogramId, null, Catalog(), "tag"));
+
+        var missingTarget = Record.Exception(
+            () => SourceUnitConverter.EnsureDeclaredUnit(null, "kg", Catalog(), "tag"));
+
+        Assert.Null(missingSource);
+        Assert.Null(missingTarget);
     }
 
     [Fact]

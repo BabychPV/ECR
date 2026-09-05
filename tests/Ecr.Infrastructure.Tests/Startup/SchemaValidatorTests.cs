@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Startup;
@@ -119,7 +119,13 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         await using var db = CreateContext();
         var validator = new SchemaValidator(db, Capabilities(mode: SqlEditionMode.Standard, major: 15), Clock);
 
-        await validator.ValidateAsync("Validate", CancellationToken.None);
+        // ⚠ Твердження явне: тест без жодного `Assert` не каже, ЩО перевіряє,
+        // і мовчки перестане щось означати, якщо метод почне повертати
+        // результат замість кидати.
+        var exception = await Record.ExceptionAsync(
+            () => validator.ValidateAsync("Validate", CancellationToken.None));
+
+        Assert.Null(exception);
     }
 
     [Fact]

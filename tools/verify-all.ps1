@@ -69,6 +69,15 @@ function Step {
     Write-Host "   ✓ $Name" -ForegroundColor Green
 }
 
+# ⛔ Запущений застосунок тримає `Ecr.Infrastructure.dll`, і складання падає з
+# MSB3027 — «файл використовується іншим процесом». Помилка виглядає як
+# зламаний код, а насправді це забутий `dotnet run` у сусідньому вікні.
+#
+# ⚠ Знайдено аудитом: прогін показав ✗ на кроці складання при цілком
+# справному дереві, і на з'ясування причини пішло більше часу, ніж на цей
+# рядок.
+Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Stop-Process -Force
+
 Step 'Складання' {
     & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo
 }
