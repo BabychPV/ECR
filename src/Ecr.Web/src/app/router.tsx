@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, type JSX } from 'react';
+﻿import { Suspense, createElement, lazy, type JSX } from 'react';
 import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './AppLayout';
@@ -74,7 +74,36 @@ function Chunk({ children }: { children: JSX.Element }): JSX.Element {
   );
 }
 
+/**
+ * Каталог компонентів — лише в розробці (модуль 7.8).
+ *
+ * ⛔ У збірці для розгортання маршруту НЕМАЄ взагалі, і це не про безпеку, а
+ * про розмір і чесність: сторінка тягне всі спільні компоненти одразу, тобто
+ * зводить нанівець сенс лінивих маршрутів, а в переліку адрес системи
+ * з'явилася б сторінка, якої в системі немає.
+ *
+ * ⚠ Поза AppLayout: інакше вона потребувала б входу і була б недоступна саме
+ * тоді, коли потрібна, — при налаштуванні вигляду на чистій машині.
+ */
+const devRoutes = import.meta.env.DEV
+  ? [
+      {
+        path: '/_kitchen-sink',
+        element: (
+          <Chunk>
+            {createElement(
+              lazy(async () => ({
+                default: (await import('@/pages/KitchenSinkPage')).KitchenSinkPage,
+              })),
+            )}
+          </Chunk>
+        ),
+      },
+    ]
+  : [];
+
 export const router = createBrowserRouter([
+  ...devRoutes,
   { path: '/login', element: <Chunk><LoginPage /></Chunk> },
   {
     path: '/',

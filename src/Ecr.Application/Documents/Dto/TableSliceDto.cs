@@ -1,4 +1,4 @@
-// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
+﻿// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
 namespace Ecr.Application.Documents.Dto;
 
 /// <summary>
@@ -14,6 +14,14 @@ public sealed record TableSliceDto(
     IReadOnlyDictionary<string, string> CellPermissions);
 
 /// <summary>Опис колонки для клієнта.</summary>
+/// <remarks>
+/// ⚠ <see cref="Scale"/> і <see cref="Precision"/> потрібні клієнтові не для
+/// краси: за <c>ФВ-9.16c</c> вставка з Excel <b>округлює</b> зайві знаки і
+/// показує це, а ручне введення — ні. Округлити на клієнті можна лише знаючи
+/// масштаб колонки; без цих полів вставка з реального аркуша Excel
+/// відхилялася б цілком (<c>ECR-CELL-0422</c>), тобто головний шлях введення
+/// не працював би.
+/// </remarks>
 public sealed record ColumnDto(
     int Id,
     string Code,
@@ -26,7 +34,9 @@ public sealed record ColumnDto(
     string? DefaultValue,
     int? LookupRegistryDefId,
     int? UnitId,
-    string? UnitSymbol);
+    string? UnitSymbol,
+    byte? Precision = null,
+    byte? Scale = null);
 
 /// <summary>Рядок зі значеннями. Ключ у <paramref name="Cells"/> — код колонки.</summary>
 /// <param name="RowKey">Ідентичність рядка.</param>

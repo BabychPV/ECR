@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+﻿import type { JSX } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,6 +8,7 @@ import { theme } from '@/shared/theme/theme';
 import { router } from './router';
 
 import '@/shared/theme/motion.css';
+import '@/shared/theme/cell-states.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

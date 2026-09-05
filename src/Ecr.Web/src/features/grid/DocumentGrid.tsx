@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Alert, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
@@ -7,6 +7,8 @@ import { apiFetch } from '@/api/client';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
+import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
+import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
 import { buildRequest, cellEditKey, useCellPatch, type PendingEdit } from './useCellPatch';
@@ -67,6 +69,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
   const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
 
+  // ⛔ Округлені комірки (D-116, ФВ-9.16c) — перелік із «було → стало», а не
+  // прапорець на весь зріз. Позначка ставиться лише на ЗМІНЕНІ комірки: інакше
+  // лічильник «округлено N значень» показував би всі числа з дробовою частиною
+  // і на нього перестали б дивитися. Оригінал зберігається тому, що
+  // повідомлення без переліку — це «щось змінилося, розбирайся сам».
+  const [rounded, setRounded] = useState<readonly RoundedCell[]>([]);
+  const [showRounded, setShowRounded] = useState(false);
+
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
@@ -84,7 +94,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   const data = slice.data;
 
-  const columns = useMemo(() => (data === undefined ? [] : gridColumns(data, readOnly)), [data, readOnly]);
+  // ⚠ Позначки клієнта — окремо від зрізу: сервер не знає ні про незбережені
+  // правки, ні про те, що значення округлилося при вставці саме тут.
+  const flags = useMemo<LocalCellFlags>(
+    () => ({
+      dirty: new Set(pending.keys()),
+      rounded: new Set(rounded.map((cell) => cellKey(cell.rowKey, cell.columnCode))),
+    }),
+    [pending, rounded],
+  );
+
+  const columns = useMemo(
+    () => (data === undefined ? [] : gridColumns(data, readOnly, flags)),
+    [data, readOnly, flags],
+  );
   const rows = useMemo(() => (data === undefined ? [] : gridRows(data)), [data]);
 
   const save = useCallback(
@@ -121,15 +144,51 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       }
 
       const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
-      const types = new Map(data.columns.map((column) => [column.code, column.dataType]));
+      const byCode = new Map(data.columns.map((column) => [column.code, column]));
 
-      const edits: PendingEdit[] = plan.targets.map((target) => ({
-        rowKey: target.rowKey,
-        columnCode: target.columnCode,
-        value: coerce(target.value, types.get(target.columnCode)),
-        isEmpty: false,
-        baseVersion: versions.get(target.rowKey) ?? null,
-      }));
+      // ⛔ Округлення робиться ТУТ, до надсилання (ФВ-9.16c, D-116). Сервер
+      // нічого не округлює: зайвий знак у ручному введенні — помилка автора, а
+      // в аркуші Excel — норма джерела. Позначка ставиться лише на комірки, у
+      // яких значення справді змінилося.
+      const roundedNow: RoundedCell[] = [];
+
+      const edits: PendingEdit[] = plan.targets.map((target) => {
+        const column = byCode.get(target.columnCode);
+        const value = coerce(target.value, column?.dataType);
+
+        if (typeof value === 'number' && column !== undefined) {
+          const fixed = roundToScale(value, column);
+
+          if (fixed !== null) {
+            roundedNow.push({
+              rowKey: target.rowKey,
+              columnCode: target.columnCode,
+              original: target.value,
+              applied: fixed,
+            });
+
+            return {
+              rowKey: target.rowKey,
+              columnCode: target.columnCode,
+              value: fixed,
+              isEmpty: false,
+              baseVersion: versions.get(target.rowKey) ?? null,
+            };
+          }
+        }
+
+        return {
+          rowKey: target.rowKey,
+          columnCode: target.columnCode,
+          value,
+          isEmpty: false,
+          baseVersion: versions.get(target.rowKey) ?? null,
+        };
+      });
+
+      // ⚠ Позначки попередньої вставки знімаються: інакше через десять вставок
+      // половина таблиці була б помічена, і лічильник перестав би щось значити.
+      setRounded(roundedNow);
 
       // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
       // глибину, а Ctrl+Z відкочував би її по комірці.
@@ -277,6 +336,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Button>
       </Group>
 
+      {rounded.length > 0 && (
+        // ⛔ Повідомлення, а не діалог підтвердження (ФВ-9.16c). Діалог на
+        // кожну вставку з Excel закривали б не читаючи — і правило «мовчки
+        // округлювати не можна ніде» перестало б працювати саме там, де воно
+        // потрібне найбільше.
+        <Alert color="violet" title={t('grid.roundedTitle', { count: rounded.length })}>
+          <Group gap="sm">
+            <Text size="sm">{t('grid.roundedHint')}</Text>
+            <Button size="xs" variant="subtle" onClick={() => setShowRounded(true)}>
+              {t('grid.roundedShow')}
+            </Button>
+          </Group>
+        </Alert>
+      )}
+
       {conflicts.length > 0 && (
         <Alert color="orange" title={t('grid.conflictTitle')}>
           {/* ⛔ «Перезаписати мовчки» не є опцією: користувач бачить, чия
@@ -296,6 +370,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         style={{ height: '70vh' }}
       />
 
+      <Modal
+        opened={showRounded}
+        onClose={() => setShowRounded(false)}
+        title={t('grid.roundedTitle', { count: rounded.length })}
+      >
+        <List size="sm">
+          {rounded.map((cell) => (
+            <List.Item key={cellKey(cell.rowKey, cell.columnCode)}>
+              {cell.rowKey} · {cell.columnCode} — {cell.original} → {String(cell.applied)}
+            </List.Item>
+          ))}
+        </List>
+      </Modal>
+
       <Modal opened={rejected.length > 0} onClose={() => setRejected([])} title={t('grid.rejectedTitle')}>
         <Text size="sm" mb="sm">
           {t('grid.rejectedHint')}
@@ -312,8 +400,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 }
 
-/** Колонки grid із опису зрізу. */
-function gridColumns(slice: TableSliceDto, readOnly: boolean): ColumnRegular[] {
+/**
+ * Колонки grid із опису зрізу.
+ *
+ * ⚠ Стан комірки рахує спільна функція `cellStateOf`, а не цей колбек: п'ять
+ * станів, розкладені по місцю використання, розійшлися б на другому ж екрані,
+ * а перевірити їх можна було б лише через DOM веб-компонента.
+ */
+function gridColumns(
+  slice: TableSliceDto,
+  readOnly: boolean,
+  flags: LocalCellFlags,
+): ColumnRegular[] {
   return slice.columns.map((column) => ({
     prop: column.code,
     name: column.header,
@@ -324,9 +422,24 @@ function gridColumns(slice: TableSliceDto, readOnly: boolean): ColumnRegular[] {
     readonly: ({ model }) => readOnly || !decide(slice, rowKeyOf(model), column).editable,
 
     cellProperties: ({ model }) => {
-      const decision = decide(slice, rowKeyOf(model), column);
+      const rowKey = rowKeyOf(model);
+      const state = cellStateOf(slice, rowKey, column, flags);
 
-      return decision.editable ? {} : { class: 'ecr-cell-readonly', title: decision.hint };
+      if (state === null) return {};
+
+      const decision = decide(slice, rowKey, column);
+
+      return {
+        class: cellStateClass(state),
+
+        // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
+        // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
+        'data-cell-state': state,
+
+        // ⚠ Стан доступний і ТЕКСТОМ: форма й колір нічого не кажуть тому, хто
+        // працює з читалкою, а причина заборони вже є на сервері.
+        ...(decision.hint.length === 0 ? {} : { title: decision.hint }),
+      };
     },
   }));
 }

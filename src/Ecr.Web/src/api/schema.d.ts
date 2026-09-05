@@ -163,8 +163,8 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description OK */
-                200: {
+                /** @description No Content */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3138,6 +3138,10 @@ export interface components {
             /** Format: int32 */
             unitId: null | number;
             unitSymbol: null | string;
+            /** Format: uint8 */
+            precision?: null | number;
+            /** Format: uint8 */
+            scale?: null | number;
         };
         /** @description Запит на конверсію. */
         ConvertUnitRequest: {

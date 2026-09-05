@@ -1,4 +1,4 @@
-using Ecr.Application.Documents.Dto;
+﻿using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 
@@ -50,7 +50,8 @@ public sealed class GetTableSliceHandler(
             .Select(c => new ColumnDto(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
                 c.Ordinal, c.IsReadOnly, c.IsRequired, c.DisplayFormat, c.DefaultValue,
-                c.LookupRegistryDefId, c.UnitId, UnitSymbol: null))
+                c.LookupRegistryDefId, c.UnitId, UnitSymbol: null,
+                c.Precision, c.Scale))
             .ToList();
 
         var columnCodeById = table.Columns.ToDictionary(c => c.Id, c => c.Code);
