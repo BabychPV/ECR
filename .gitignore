@@ -48,3 +48,8 @@ source/
 
 # Локальна конфігурація інструментів розробника (запуск dev-сервера тощо).
 .claude/
+
+# Артефакти прогонів Playwright — у репозиторій не потрапляють (D-142).
+src/Ecr.Web/test-results/
+src/Ecr.Web/playwright-report/
+src/Ecr.Web/e2e/__screenshots__/

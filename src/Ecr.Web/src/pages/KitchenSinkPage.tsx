@@ -112,6 +112,29 @@ export function KitchenSinkPage(): JSX.Element {
 
       <Divider />
 
+      {/*
+       * ⛔ Стенд для ВИМІРЮВАННЯ, не для показу (`D-140`). Три умови, без яких
+       * піксельний вимір бреше:
+       *   1. шість комірок — п'ять станів плюс звичайна;
+       *   2. ОДНАКОВИЙ вміст у всіх шести, інакше різниця вимірює текст;
+       *   3. однакова геометрія, фіксований розмір.
+       *
+       * ⚠ Він не сховається за `display: none`: прихований елемент не
+       * рендериться, і знімати з нього нема чого. Тому просто малий і зверху.
+       */}
+      <div data-measure="cell-states">
+        {[...(Object.keys(cellState) as CellStateName[]), null].map((name) => (
+          <div
+            key={name ?? 'normal'}
+            data-measure-cell={name ?? 'normal'}
+            className={name === null ? '' : cellStateClass(name)}
+            style={{ width: 100, height: 24, boxSizing: 'border-box', overflow: 'hidden' }}
+          >
+            1 234,56
+          </div>
+        ))}
+      </div>
+
       <Section title="Стани комірки (ФВ-14.18, D-128)">
         <Text size="sm" c="dimmed">
           П'ять станів. Увімкніть «градації сірого»: якщо стани перестали

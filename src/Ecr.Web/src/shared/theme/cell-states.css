@@ -76,14 +76,21 @@
   border-left: 3px solid var(--ecr-cell-dirty-line);
 }
 
-/* Кутовий трикутник: помітний навіть у комірці шириною 40 пікселів. */
+/*
+ * Кутовий трикутник.
+ *
+ * ⚠ 9 пікселів, а не 6. Виміряно (`D-140`, гейт 4): при 6 px пара
+ * `dirty`/`rounded` після знеколірення різнилася на 2.7 % пікселів — рівно на
+ * порозі 2 %. Носій, що займає менше 2 % комірки, оператор не помічає, і
+ * запас у 0.7 % не запас.
+ */
 .ecr-cell--dirty::after {
   content: '';
   position: absolute;
   top: 0;
   right: 0;
-  border-top: 6px solid var(--ecr-cell-dirty-line);
-  border-left: 6px solid transparent;
+  border-top: 9px solid var(--ecr-cell-dirty-line);
+  border-left: 9px solid transparent;
 }
 
 /* ── readOnly: лише читання ────────────────────────────────────────────── */
@@ -120,7 +127,7 @@
   position: absolute;
   top: 0;
   right: 3px;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1;
   color: var(--ecr-cell-calculated-line);
 }
@@ -136,7 +143,7 @@
   position: absolute;
   top: 0;
   right: 3px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
   color: var(--ecr-cell-orphaned-line);
@@ -153,8 +160,8 @@
   position: absolute;
   right: 3px;
   bottom: 3px;
-  width: 4px;
-  height: 4px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ecr-cell-rounded-line);
 }
