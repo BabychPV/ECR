@@ -26,7 +26,17 @@ function slice(permissions: Record<string, string>, columns: ColumnDto[] = [colu
     tableInstanceId: 1,
     periodKey: 202603,
     columns,
-    rows: [{ rowKey: 'R1', ordinal: 1, rowKind: 'Static', label: null, rowVersion: '0x01', cells: {} }],
+    rows: [
+      {
+        rowKey: 'R1',
+        ordinal: 1,
+        rowKind: 'Static',
+        label: null,
+        rowVersion: '0x01',
+        cells: {},
+        isOrphaned: false,
+      },
+    ],
     cellPermissions: permissions,
   };
 }

@@ -43,7 +43,11 @@ builder.Services.AddControllers(options =>
 // Quartz стає придатним лише після ApplicationStarted. Без цієї реєстрації
 // вночі мовчазно не відбувалася б жодна перевірка.
 builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
-builder.Services.AddOpenApi();
+// ⚠ Трансформер словників обов'язковий: без нього `RowDto.cells` описано як
+// об'єкт без дозволених властивостей, і згенерований клієнт не може покласти
+// в комірку жодного значення (див. DictionarySchemaTransformer).
+builder.Services.AddOpenApi(options =>
+    options.AddSchemaTransformer<Ecr.Api.Startup.DictionarySchemaTransformer>());
 
 // ⚠ Теги розділяють перевірки за призначенням: /health/live не має права
 // торкатися БД — його опитує оркестратор, і повільна база не привід

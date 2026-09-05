@@ -5,10 +5,11 @@ import type { ColumnRegular } from '@revolist/revogrid';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
-import { parseClipboard, parseNumber, planPaste, toClipboard, type PasteRejection } from './clipboard';
+import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
+import { captureEdit, coerce, valueOf } from './edits';
 import { cellKey, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
-import { buildRequest, useCellPatch, type PendingEdit } from './useCellPatch';
+import { buildRequest, cellEditKey, useCellPatch, type PendingEdit } from './useCellPatch';
 import { t } from '@/shared/i18n';
 
 /** Властивості grid. */
@@ -66,13 +67,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
   const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
 
+  // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
+  // перестворювала б його і губила глибину; але тоді React не знає, що
+  // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const touchHistory = useCallback(() => setHistoryRevision((value) => value + 1), []);
+
   // ⛔ Історія скидається при переході на іншу таблицю: крок, застосований до
   // чужого зрізу, писав би значення в комірки з тими самими кодами, але
   // іншого документа.
   useEffect(() => {
     history.current.rescope(`${tableInstanceId}:${periodKey}`);
     setPending(new Map());
-  }, [tableInstanceId, periodKey]);
+    touchHistory();
+  }, [tableInstanceId, periodKey, touchHistory]);
 
   const data = slice.data;
 
@@ -135,9 +143,51 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         })),
       });
 
+      touchHistory();
       void save(edits);
     },
-    [data, readOnly, save],
+    [data, readOnly, save, touchHistory],
+  );
+
+  /**
+   * Правка з клавіатури.
+   *
+   * ⛔ Без цього обробника grid показував би введене значення і **не зберігав
+   * його**: RevoGrid тримає правку у власній моделі й не знає ні про наш
+   * batch-PATCH, ні про історію. Дефект без жодної ознаки збою — таблиця
+   * виглядає заповненою, доки її не перевідкриють.
+   */
+  const onAfterEdit = useCallback(
+    (event: { detail: unknown }) => {
+      if (data === undefined || readOnly) return;
+
+      const detail = event.detail as
+        | { prop?: string | number; model?: unknown; val?: unknown }
+        | undefined;
+
+      const captured = captureEdit(data, {
+        columnCode: detail?.prop === undefined ? '' : String(detail.prop),
+        rowKey: rowKeyOf(detail?.model),
+        raw: String(detail?.val ?? ''),
+      });
+
+      if (captured === null) return;
+
+      history.current.push({
+        label: t('grid.edit', { column: captured.columnHeader }),
+        edits: [captured.step],
+      });
+
+      touchHistory();
+
+      setPending((current) => {
+        const next = new Map(current);
+        next.set(cellEditKey(captured.pending), captured.pending);
+
+        return next;
+      });
+    },
+    [data, readOnly, touchHistory],
   );
 
   /** Ctrl+C: віддає виділене у форматі, який приймає Excel. */
@@ -187,6 +237,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
 
+      touchHistory();
+
       void save(
         edits.map((edit) => ({
           rowKey: edit.rowKey,
@@ -197,7 +249,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         })),
       );
     },
-    [data, save],
+    [data, save, touchHistory],
   );
 
   if (slice.isPending) return <Text>{t('grid.loading')}</Text>;
@@ -208,15 +260,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   return (
     <Stack gap="xs" onPaste={onPaste} onCopy={onCopy} onKeyDown={onKeyDown}>
-      <Group gap="xs">
+      <Group gap="xs" key={historyRevision}>
         <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
           {t('grid.undo')}
         </Button>
         <Button size="xs" variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
           {t('grid.redo')}
         </Button>
-        <Button size="xs" loading={isPending} onClick={() => void save([...pending.values()])}>
-          {t('grid.save')}
+        <Button
+          size="xs"
+          loading={isPending}
+          disabled={pending.size === 0}
+          onClick={() => void save([...pending.values()])}
+        >
+          {t('grid.save', { count: pending.size })}
         </Button>
       </Group>
 
@@ -235,6 +292,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         columns={columns}
         source={rows}
         readonly={readOnly}
+        onAfteredit={onAfterEdit}
         style={{ height: '70vh' }}
       />
 
@@ -295,30 +353,6 @@ function gridRows(slice: TableSliceDto): GridRow[] {
  */
 function rowKeyOf(model: unknown): string {
   return (model as GridRow | undefined)?.__rowKey ?? '';
-}
-
-function valueOf(slice: TableSliceDto, rowKey: string, columnCode: string): unknown {
-  return slice.rows.find((row) => row.rowKey === rowKey)?.cells[columnCode] ?? null;
-}
-
-/**
- * Приводить текст із буфера до типу колонки.
- *
- * ⚠ Число, прочитане як текст, впало б на серверній валідації вже після
- * відправки — тобто користувач побачив би помилку там, де її не робив.
- */
-function coerce(raw: string, dataType: string | undefined): unknown {
-  if (dataType === 'Decimal' || dataType === 'Int') {
-    const value = parseNumber(raw);
-
-    // Нерозпізнане число лишається текстом: сервер відповість
-    // ECR-CELL-0422 із назвою колонки, і це чесніше за мовчазний нуль.
-    return value ?? raw;
-  }
-
-  if (dataType === 'Bool') return raw.trim().toLowerCase() === 'true';
-
-  return raw;
 }
 
 /** Колонки для решти екранів; експортується заради повторного використання. */

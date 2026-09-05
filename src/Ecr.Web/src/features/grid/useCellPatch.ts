@@ -43,11 +43,15 @@ export function buildRequest(
   for (const edit of edits) {
     const row = rows.get(edit.rowKey) ?? { baseVersion: edit.baseVersion, cells: [] };
 
-    row.cells.push(
-      edit.isEmpty
-        ? { columnCode: edit.columnCode, isEmpty: true }
-        : { columnCode: edit.columnCode, value: edit.value },
-    );
+    // ⚠ `value` присутнє ЗАВЖДИ, навіть при явній порожнечі. Контракт
+    // розрізняє три наміри прапорцем `isEmpty`, а не наявністю поля: сама
+    // комірка потрапляє в запит лише тоді, коли її змінюють, і «поля немає»
+    // означало б «не чіпати» — тобто порожній намір у списку змін.
+    row.cells.push({
+      columnCode: edit.columnCode,
+      value: edit.isEmpty ? null : edit.value,
+      isEmpty: edit.isEmpty,
+    });
 
     rows.set(edit.rowKey, row);
   }

@@ -85,7 +85,7 @@
 | Q-014 | CONTRACT | десять контрактних типів не оголошені ніде | RESOLVED · перенесені в `02-contracts.md`, 2026-09-04 |
 | Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | RESOLVED · усі створені, 2026-09-04 |
 | Q-016 | ENV | Docker не запущений | **OPEN** |
-| Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **OPEN** |
+| Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **ЗАКРИТО** (Етап 6) |
 | Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | RESOLVED · варіант **B**, порти в контракті, 2026-09-04 |
 | Q-019 | BOOTSTRAP-FIX | немає `[CollectionDefinition("SqlServer")]` | RESOLVED |
 | Q-020 | DECIDED | мінімальні скелети для `StyleMapper`, `ImportDiffBuilder`, `CurrentUser` | RESOLVED |
@@ -971,6 +971,19 @@ SQL Server не перевірявся навмисно: `04-environment.md` §2
 ---
 
 ### Q-017 · SCOPE · Етап 0 · 2026-09-04
+
+> **ЗАКРИТО на Етапі 6 (2026-09-05).** Бекенд піднято на SQL Server Express,
+> `GET /openapi/v1.json` віддає 48 шляхів і 66 схем, `npm run api:types`
+> згенерував `src/api/schema.d.ts` (3307 рядків). Ручний переклад DTO в
+> `src/api/types.ts` замінено на **псевдоніми згенерованих типів**: доки він
+> був копією, перше поле, додане на сервері, розійшлося б із ним мовчки, а
+> `tsc` лишався б зеленим — типи ж узгоджені самі з собою.
+>
+> ⚠ Сама генерація одразу виявила дефект опису API (`A6-05`):
+> `IReadOnlyDictionary<string, object?>` описувався як об'єкт **без**
+> `additionalProperties`, тобто `RowDto.cells` ставав
+> `Record<string, never>` — у комірку не можна покласти жодного значення.
+> Виправлено `DictionarySchemaTransformer` на сервері.
 
 **Де:** `src/Ecr.Web`
 **Контекст:** `npm install`, `npx vitest run`, `npx tsc --noEmit`.
