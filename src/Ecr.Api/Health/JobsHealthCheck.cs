@@ -27,7 +27,7 @@ public sealed class JobsHealthCheck : IHealthCheck
     /// підсистему, якої немає, гірше — саме так з'являються моніторинги, що
     /// мовчать роками.
     /// </remarks>
-    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct)
+    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken)
         => Task.FromResult(HealthCheckResult.Degraded(
             "Планувальник фонових задач з'явиться на Етапі 5.",
             data: new Dictionary<string, object>(StringComparer.Ordinal) { ["stage"] = 5 }));

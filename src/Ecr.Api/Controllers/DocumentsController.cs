@@ -23,7 +23,10 @@ public sealed class DocumentsController(
     SubmitSheetHandler submit,
     ApproveSheetHandler approve,
     ReopenDocumentHandler reopen,
-    RecalculateDocumentHandler recalculate) : ControllerBase
+    RecalculateDocumentHandler recalculate,
+    ExportDocumentHandler export,
+    PreviewImportHandler previewImport,
+    ApplyImportHandler applyImport) : ControllerBase
 {
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -180,26 +183,56 @@ public sealed class DocumentsController(
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    public Task<IActionResult> Export(long id, [FromBody] ExportRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: у фон через IExcelExporter (бюджет 10 с p95); 202 із jobId.");
+    public async Task<IActionResult> Export(long id, [FromBody] ExportRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ⚠ 202 з jobId, а не файл у відповіді. Бюджет експорту — 10 с p95, і
+        // це середнє: книга на 500×60×12 будується довше за будь-який
+        // розумний таймаут проксі.
+        var jobId = await export
+            .HandleAsync(
+                id,
+                new Ecr.Application.Ports.ExcelExportOptions(
+                    request.IncludeFormulas, request.IncludeStyles, request.Language, request.PeriodKey),
+                ct)
+            .ConfigureAwait(false);
+
+        return Accepted(new { jobId });
+    }
 
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>
     /// <remarks>Імпорт **завжди** через перегляд diff (ФВ-4.3): застосування — окремим викликом.</remarks>
     [HttpPost("{id:long}/import/preview")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати IExcelImporter.PreviewAsync; повернути ImportPreview із previewToken.");
+    public async Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        // ⛔ Перегляд НЕ застосовує нічого. Це не проміжний крок майстра, а
+        // сам механізм захисту: імпорт без перегляду непомітно перезаписує
+        // чужу роботу (ФВ-4.3).
+        await using var stream = file.OpenReadStream();
+
+        return Ok(await previewImport.HandleAsync(id, stream, ct).ConfigureAwait(false));
+    }
 
     /// <summary>Застосування раніше переглянутого імпорту. Право <c>Document.Import</c>.</summary>
     [HttpPost("{id:long}/import/apply")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public Task<IActionResult> ImportApply(long id, [FromBody] ImportApplyRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: делегувати IExcelImporter.ApplyAsync; версії рядків перевіряються ЗАНОВО — " +
-            "між переглядом і застосуванням могла статися чужа правка.");
+    public async Task<IActionResult> ImportApply(
+        long id, [FromBody] ImportApplyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Конфлікт версій рядків підіймається зі звичайного шляху запису як
+        // ECR-CELL-0409 і перетворюється на 409 середовищем обробки помилок:
+        // окрема перевірка тут була б другою, яка вміє розійтися з першою.
+        return Ok(await applyImport
+            .HandleAsync(id, request.PreviewToken, ct)
+            .ConfigureAwait(false));
+    }
 }
 
 /// <summary>Запит на створення документа.</summary>
@@ -230,7 +263,14 @@ public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string
 /// <param name="IncludeFormulas">Транслювати вирази в Excel-синтаксис (ФВ-4.2).</param>
 /// <param name="IncludeStyles">Переносити стилі шаблону.</param>
 /// <param name="Language">Мова заголовків.</param>
-public sealed record ExportRequest(bool IncludeFormulas, bool IncludeStyles, string Language);
+/// <param name="PeriodKey">Період вивантаження (R-A6).</param>
+/// <remarks>
+/// ⚠ Період обовʼязковий: подання, затвердження і перерахунок працюють за
+/// період, і «експорт усього документа» означав би книгу, у якій неможливо
+/// сказати, який стовпчик за який місяць.
+/// </remarks>
+public sealed record ExportRequest(
+    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey);
 
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>

@@ -192,6 +192,11 @@ public sealed class SqlServerFixture : IAsyncLifetime
         // ⚠ 10 обов'язково: HasTrigger() у конфігурації EF тригера НЕ створює,
         // він лише вимикає OUTPUT-клаузу. Без цього скрипта незмінність
         // опублікованої структури не тримає ніщо (Q-045).
+        // ⚠ Таблиця розподіленого кешу: у ній живе diff імпорту між
+        // переглядом і застосуванням. Без неї інтеграційний тест імпорту
+        // падав би не на своїй причині, а на відсутній таблиці кешу.
+        await RunScriptAsync("13-cache-table.sql").ConfigureAwait(false);
+
         await RunScriptAsync("10-triggers.sql").ConfigureAwait(false);
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
 

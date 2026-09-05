@@ -117,6 +117,39 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         return status;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Найновіші першими і зі стелею. Зрізів за рік накопичуються тисячі:
+    /// перелік «усіх» довелося б гортати саме тоді, коли потрібен останній.
+    /// </remarks>
+    public async Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
+        int? projectId, int? periodKey, CancellationToken ct)
+        => await db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => projectId == null || s.ProjectId == projectId)
+            .Where(s => periodKey == null || s.PeriodKey == periodKey)
+            .OrderByDescending(s => s.BuiltAt)
+            .Take(MaxSnapshots)
+            .Select(s => new ReportSnapshotSummary(
+                s.Id,
+                s.ReportVersionId,
+                s.ProjectId,
+                s.PeriodKey,
+                s.Status.ToString(),
+                s.IsCurrent,
+                s.RowCount,
+
+                // ⚠ Сума віддається рядком. Байти в JSON перетворюються на
+                // base64, який неможливо звірити очима з тим, що показує
+                // SSRS, — а звіряють їх саме очима.
+                s.ContentHash == null ? null : Convert.ToHexString(s.ContentHash),
+                s.BuiltAt))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <summary>Стеля переліку зрізів.</summary>
+    private const int MaxSnapshots = 500;
+
     /// <summary>
     /// Статус, виведений зі стану аркушів проєкту.
     /// </summary>

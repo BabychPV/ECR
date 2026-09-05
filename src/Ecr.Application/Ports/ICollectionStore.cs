@@ -57,4 +57,16 @@ public interface ICollectionStore
     /// </summary>
     public Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
         int sourceEntityId, DateTime notBefore, CancellationToken ct);
+
+    /// <summary>
+    /// Мапінги полів сутності — саме вони несуть <b>оголошену</b> одиницю
+    /// джерела.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без цього збирач не має з чим порівняти UOM, який джерело повернуло
+    /// фактично, — і вимога «зміна UOM атрибута зупиняє збір» (ФВ-16.9,
+    /// <c>ECR-INT-0422</c>) лишилася б написаною, але нічиєю.
+    /// </remarks>
+    public Task<IReadOnlyList<EntityFieldMap>> GetFieldMapsAsync(
+        int sourceEntityId, CancellationToken ct);
 }

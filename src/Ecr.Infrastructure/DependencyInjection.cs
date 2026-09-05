@@ -7,6 +7,7 @@ using Ecr.Infrastructure.Startup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Quartz;
 
 namespace Ecr.Infrastructure;
 
@@ -118,18 +119,87 @@ public static class DependencyInjection
         // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).
         services.AddScoped<IUiStringCatalog, Localization.UiStringCatalogStore>();
 
-        // ⚠ Планувальник реєструється ЗАВЖДИ, хай навіть як відмова.
-        // Поки його не було, DocumentsController не міг бути створений через
-        // незарезольвлений RecalculateDocumentHandler — і кожен його ендпоінт
-        // відповідав 500, включно з поданням. Одна відсутня реєстрація вимикала
-        // цілий контролер, і видно це було лише на живому запиті.
-        services.AddSingleton<IBackgroundJobScheduler>(_ => new Jobs.QuartzJobScheduler());
+        // ⚠ Планувальник тепер справжній. Quartz піднімається як hosted
+        // service, а порт лишається тим самим: заміна на Hangfire, якщо ІБ
+        // погодить LGPL, коштує день (D-09).
+        services.AddQuartz(quartz =>
+        {
+            // Сховище в пам'яті: розклад описаний у коді й відновлюється при
+            // старті. Персистентне сховище Quartz мало б власну схему в нашій
+            // базі, а застосунок DDL-прав не має (D-66).
+            quartz.UseSimpleTypeLoader();
+            quartz.UseInMemoryStore();
+        });
+
+        services.AddQuartzHostedService(options =>
+        {
+            // ⚠ Дочекатися завершення задач при зупинці. Убитий посеред
+            // пакета перерахунок лишив би половину результатів записаними, і
+            // жоден статус про це не сказав би.
+            options.WaitForJobsToComplete = true;
+        });
+
+        // ⚠ Місток Quartz → IBackgroundJob. Transient, бо Quartz створює
+        // екземпляр на кожен запуск; свій scope задача відкриває сама.
+        services.AddTransient<Jobs.QuartzJobAdapter>();
+
+        // ⚠ Scoped, а не Singleton: прогрес живе в itg.JobProgress, тобто в
+        // DbContext, а той scoped. Singleton тримав би один контекст на всі
+        // одночасні постановки в чергу.
+        services.AddScoped<IBackgroundJobScheduler>(sp => new Jobs.QuartzJobScheduler(
+            sp.GetService<ISchedulerFactory>(), sp.GetService<IJobProgressStore>()));
 
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
         // приймав би завдання, і не виконувалося б нічого.
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
+
+        // ⚠ Кожна задача реєструється ПО ТИПУ: QuartzJobAdapter резолвить її
+        // за повним іменем із JobDataMap. Незареєстрована задача приймалася б
+        // у чергу і не виконувалася б — черга без виконавця ззовні виглядає
+        // як «дуже довго рахує».
         services.AddScoped<Jobs.OrphanScanJob>();
+        services.AddScoped<Jobs.PeriodStateJob>();
+        services.AddScoped<Jobs.ArchiveJob>();
+        services.AddScoped<Jobs.ConsistencyCheckJob>();
+        services.AddScoped<Jobs.PartitionCheckJob>();
+        services.AddScoped<Jobs.NotificationJob>();
+
+        // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
+        // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
+        // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би
+        // виконавця — черга приймала б завдання і не робила нічого.
+        services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
+        services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
+        services.AddScoped<IExcelExportJob, Jobs.ExcelExportJob>();
+
+        // Сховища Етапу 5.
+        services.AddScoped<IJobProgressStore, JobProgressStore>();
+        services.AddScoped<ICollectionStore, CollectionStore>();
+        services.AddScoped<IStyleCatalog, StyleCatalog>();
+        services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();
+        services.AddScoped<IReportSnapshotBuilder, Reporting.ReportSnapshotBuilder>();
+        services.AddSingleton<ISecretProvider, ConfigurationSecretProvider>();
+
+        // ⚠ Diff імпорту живе в РОЗПОДІЛЕНОМУ кеші: перегляд і застосування —
+        // два запити, і другий може потрапити на інший інстанс.
+        services.AddDistributedSqlServerCache(cache =>
+        {
+            cache.ConnectionString = connectionString;
+            cache.SchemaName = configuration["Cache:SchemaName"] ?? "dbo";
+            cache.TableName = configuration["Cache:TableName"] ?? "Cache";
+        });
+
+        services.AddScoped<IImportPreviewStore, ImportPreviewStore>();
+
+        // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
+        services.AddScoped<MetadataWarmup>();
+
+        // ⚠ Доменні сервіси — Singleton: вони не мають стану і не тримають
+        // з'єднань. Без цих двох рядків не створювалися б ані PeriodStateJob,
+        // ані збирач PI AF — а побачити це можна було б лише на живому старті.
+        services.AddSingleton<Domain.Services.UnitConverter>();
+        services.AddSingleton<Domain.Services.PeriodStateCalculator>();
 
         services.AddSingleton<ISqlCapabilities>(_ => new SqlCapabilitiesProbe());
         services.AddSingleton<IClock, SystemClock>();

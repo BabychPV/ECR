@@ -1,3 +1,4 @@
+using Ecr.Application.Reporting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,16 +12,20 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/reports")]
 [Authorize]
-public sealed class ReportsController : ControllerBase
+public sealed class ReportsController(
+    ListReportSnapshotsHandler snapshots, BuildReportSnapshotHandler build) : ControllerBase
 {
     /// <summary>Перелік побудованих зрізів. Право <c>Report.ViewRegulatory</c>.</summary>
+    /// <remarks>
+    /// У переліку є час побудови й контрольна сума: споживач має бачити, на
+    /// яких даних побудовано зріз. Два зрізи однієї версії за один період
+    /// відрізняються лише цим.
+    /// </remarks>
     [HttpGet("snapshots")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public Task<IActionResult> Snapshots(
+    public async Task<IActionResult> Snapshots(
         [FromQuery] int? projectId, [FromQuery] int? periodKey, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Report.ViewRegulatory; повернути зрізи з їхнім часом побудови " +
-            "і контрольною сумою — споживач має бачити, на яких даних побудовано.");
+        => Ok(await snapshots.HandleAsync(projectId, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Будує зріз. Право <c>Report.BuildSnapshot</c>.
@@ -32,9 +37,17 @@ public sealed class ReportsController : ControllerBase
     /// </remarks>
     [HttpPost("{code}/build")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    public Task<IActionResult> Build(string code, [FromBody] BuildSnapshotRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Report.BuildSnapshot; поставити ReportSnapshotJob; 202 із jobId.");
+    public async Task<IActionResult> Build(
+        string code, [FromBody] BuildSnapshotRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var jobId = await build
+            .HandleAsync(code, request.ProjectId, request.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        return Accepted(new { jobId });
+    }
 }
 
 /// <summary>Запит на побудову зрізу.</summary>

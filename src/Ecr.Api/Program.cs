@@ -39,6 +39,10 @@ builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
 builder.Services.AddScoped<Ecr.Api.Observability.BudgetMetricsFilter>();
 builder.Services.AddControllers(options =>
     options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>());
+// ⚠ Постійні розклади ставить hosted service, а не крок старту: планувальник
+// Quartz стає придатним лише після ApplicationStarted. Без цієї реєстрації
+// вночі мовчазно не відбувалася б жодна перевірка.
+builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
 builder.Services.AddOpenApi();
 
 // ⚠ Теги розділяють перевірки за призначенням: /health/live не має права

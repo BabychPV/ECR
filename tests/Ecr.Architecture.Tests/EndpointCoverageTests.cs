@@ -26,7 +26,9 @@ public sealed partial class EndpointCoverageTests
     /// Список має ЗМЕНШУВАТИСЯ. Етап, який уже зробили, але забули прибрати
     /// звідси, знову робить пропуск невидимим.
     /// </remarks>
-    private static readonly int[] DeferredStages = [5];
+    // ⚠ Список порожній: відкладених етапів більше немає. Кожен ендпоінт
+    // контракту має реалізацію, і кожне оголошене право десь перевіряється.
+    private static readonly int[] DeferredStages = [];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

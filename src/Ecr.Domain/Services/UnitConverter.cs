@@ -4,6 +4,25 @@ using Ecr.Domain.Entities.Units;
 namespace Ecr.Domain.Services;
 
 /// <summary>
+/// Одиниця у формі, потрібній самій конверсії: ідентифікатор, код, розмірність
+/// і перехід до базової одиниці.
+/// </summary>
+/// <remarks>
+/// ⚠ Існує, щоб математика конверсії мала <b>одне</b> місце. Довідник одиниць
+/// доходить до різних шарів у різному вигляді — сутністю <see cref="Unit"/> з
+/// бази, знімком на межі інтеграції, — і кожен шар, який «сам помножить на
+/// коефіцієнт», рано чи пізно помножить інакше. Розбіжність при цьому не
+/// падає: вона дає правдоподібне число.
+/// </remarks>
+/// <param name="Id">Ідентифікатор одиниці.</param>
+/// <param name="Code">Код: <c>kg</c>, <c>t</c>, <c>m3</c>.</param>
+/// <param name="DimensionId">Розмірність; конверсія можлива лише в її межах.</param>
+/// <param name="FactorToBase">Множник переходу до базової одиниці розмірності.</param>
+/// <param name="OffsetToBase">Зсув до базової; ненульовий лише в температури.</param>
+public readonly record struct UnitSpec(
+    int Id, string Code, byte DimensionId, decimal FactorToBase, decimal OffsetToBase);
+
+/// <summary>
 /// Конверсія одиниць. **Неявних конверсій не буває** (D-74): цей сервіс
 /// викликається лише там, де у виразі написано <c>CONVERT</c> або задано
 /// мапінг <c>SourceUnit → TargetUnit</c>.
@@ -27,6 +46,21 @@ public sealed class UnitConverter
         ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(to);
 
+        return Convert(value, Spec(from), Spec(to), explicitConversion);
+    }
+
+    /// <summary>Та сама конверсія над знімком довідника, а не над сутностями.</summary>
+    /// <param name="value">Значення у вихідній одиниці.</param>
+    /// <param name="from">Вихідна одиниця.</param>
+    /// <param name="to">Цільова одиниця.</param>
+    /// <param name="explicitConversion">Явна конверсія, якщо вона є в <c>uom.Conversion</c>.</param>
+    /// <remarks>
+    /// ⚠ Потрібна межі інтеграції: там одиниці приходять знімком довідника, а
+    /// не сутностями <c>uom.Unit</c>. Перевантаження, а не копія: копія — це
+    /// друга формула, яку виправлять лише один раз.
+    /// </remarks>
+    public decimal Convert(decimal value, UnitSpec from, UnitSpec to, UnitConversion? explicitConversion)
+    {
         if (from.Id == to.Id)
         {
             return value;
@@ -90,4 +124,8 @@ public sealed class UnitConverter
 
         return from.DimensionId == to.DimensionId;
     }
+
+    /// <summary>Сутність довідника у формі, потрібній конверсії.</summary>
+    private static UnitSpec Spec(Unit unit)
+        => new(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
 }

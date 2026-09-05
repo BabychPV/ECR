@@ -31,7 +31,15 @@ public static partial class StartupSequence
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Ecr.Startup");
+        var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger("Ecr.Startup");
+
+        // ⚠ ПЕРШИМ ділом — журнал Quartz на фабрику ЦЬОГО хоста. Quartz
+        // тримає постачальника журналу в статичному полі, і без цього рядка
+        // другий хост у тому самому процесі (а саме так працює
+        // WebApplicationFactory) звертався б до вже закритої фабрики й падав
+        // ще до першого запиту.
+        Infrastructure.Jobs.QuartzLogging.UseHost(loggerFactory);
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
 
@@ -77,10 +85,21 @@ public static partial class StartupSequence
             LogFewPartitions(logger, ahead);
         }
 
-        // ⚠ Прогрів кешу метаданих (крок 7 за B01 §6.3) тут ще не робиться:
-        // він має йти ПІСЛЯ валідації метаданих, а валідація спирається на
-        // рушій виразів — це Етап 2. Прогріти кеш зараз означало б закешувати
-        // структуру, яку ніхто не перевірив (`Q-051`).
+        // 7) Прогрів кешу метаданих — ПІСЛЯ валідації схеми і seed. Прогрітий
+        //    до перевірки кеш закешував би структуру, якої ніхто не перевіряв.
+        //    Помилка прогріву старт не валить: це оптимізація, і застосунок,
+        //    що не піднявся через непрогрітий кеш, гірший за повільний
+        //    перший запит.
+        var warmed = await scope.ServiceProvider
+            .GetRequiredService<MetadataWarmup>()
+            .WarmupAsync(CancellationToken.None)
+            .ConfigureAwait(false);
+
+        LogWarmupDone(logger, warmed);
+
+        // 8) Постійні розклади ставить окремий hosted service після того, як
+        //    застосунок піднявся: планувальник Quartz стає придатним лише
+        //    після ApplicationStarted (RecurringScheduleService).
     }
 
     private static async Task WaitForDatabaseAsync(EcrDbContext db, ILogger logger)
@@ -167,6 +186,9 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Старт: прогріто версій шаблонів: {Count}.")]
+    private static partial void LogWarmupDone(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: SQL {Edition}, режим {Mode}, RCSI {Rcsi}.")]
     private static partial void LogSqlMode(

@@ -128,15 +128,26 @@ public sealed class ContainerTests(SqlServerFixture sql)
         // Порти, чиї реалізації належать пізнішим етапам. Список має
         // ЗМЕНШУВАТИСЯ: порт, який уже реалізували, але забули прибрати
         // звідси, знову робить пропуск невидимим.
-        string[] deferred =
+        //
+        // ⚠ Список ПОРОЖНІЙ: етапів попереду більше немає, і кожен порт
+        // застосунку має реалізацію.
+        string[] deferred = [];
+
+        // ⚠ Збірки підвантажуються ЯВНО. `AppDomain.GetAssemblies()` бачить
+        // лише те, що вже завантажив CLR, а завантажує він ліниво — на першу
+        // згадку типу. Через це тест був чутливий до порядку виконання:
+        // запущений окремо, він «не бачив» Ecr.Calculations і
+        // Ecr.Adapters.PiAf і оголошував їхні порти нереалізованими.
+        Type[] anchors =
         [
-            "ICollectionStore",       // Етап 5
-            "IReportSnapshotBuilder", // Етап 5
-            "IExcelExporter",         // Етап 5
-            "IExcelImporter",         // Етап 5
-            "IExternalDataSource",    // Етап 5
-            "IJobProgress",           // Етап 5
+            typeof(Ecr.Infrastructure.Persistence.EcrDbContext),
+            typeof(Ecr.Calculations.CalculationOrchestrator),
+            typeof(Ecr.Adapters.PiAf.CollectionRunner),
+            typeof(Ecr.Adapters.Excel.ExcelExporter),
+            typeof(Ecr.Api.Auth.CurrentUser),
         ];
+
+        Assert.All(anchors, t => Assert.NotNull(t.Assembly));
 
         var ports = typeof(Ecr.Application.Ports.IUserStore).Assembly
             .GetTypes()

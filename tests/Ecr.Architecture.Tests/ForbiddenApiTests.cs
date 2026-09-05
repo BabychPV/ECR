@@ -99,8 +99,11 @@ public sealed class ForbiddenApiTests
                 // них токен неможливо. Скасування там береться з контексту
                 // (`HttpContext.RequestAborted`), а не з параметра — і це
                 // видно в самому коді, не в цьому списку.
+                // `Execute` — сигнатура Quartz.IJob: скасування там приходить
+                // у IJobExecutionContext.CancellationToken, і саме звідти
+                // QuartzJobAdapter його й бере.
                 if (name is "DisposeAsync" or "InvokeAsync" or "CheckHealthAsync"
-                        or "OnActionExecutionAsync"
+                        or "OnActionExecutionAsync" or "Execute"
                     || parameters.Contains("CancellationToken", StringComparison.Ordinal))
                 {
                     continue;

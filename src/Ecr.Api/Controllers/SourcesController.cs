@@ -1,3 +1,4 @@
+using Ecr.Application.Integration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,7 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/sources")]
 [Authorize]
-public sealed class SourcesController : ControllerBase
+public sealed class SourcesController(CollectFromSourceHandler collect) : ControllerBase
 {
     /// <summary>
     /// Запускає збір для сутності джерела. Право <c>Integration.Manage</c>.
@@ -24,10 +25,19 @@ public sealed class SourcesController : ControllerBase
     /// </remarks>
     [HttpPost("{id:int}/collect")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    public Task<IActionResult> Collect(int id, [FromBody] CollectRequest request, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити Integration.Manage; поставити CollectionJob через IBackgroundJobScheduler; " +
-            "202 із jobId. Транспорт обирається за полем джерела, а не тут (ФВ-11.2).");
+    public async Task<IActionResult> Collect(int id, [FromBody] CollectRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ⚠ 202 з jobId, а не 200 з даними: збір ходить по мережі до чужої
+        // системи, і його тривалість визначає не наш код. Синхронна відповідь
+        // тут — це таймаут проксі рівно тоді, коли джерело повільне.
+        var jobId = await collect
+            .HandleAsync(id, request.FromUtc, request.ToUtc, ct)
+            .ConfigureAwait(false);
+
+        return Accepted(new { jobId });
+    }
 }
 
 /// <summary>Запит на збір.</summary>

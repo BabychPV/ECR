@@ -47,3 +47,17 @@ public sealed record JobStatus(string JobId, string State, int Percent, string? 
 /// не має. Маркер дає use-case назвати задачу, не знаючи її реалізації.
 /// </remarks>
 public interface IRecalculationJob : IBackgroundJob;
+
+/// <summary>Маркер задачі експорту документа у <c>.xlsx</c>.</summary>
+/// <remarks>
+/// Той самий прийом, що й <see cref="IRecalculationJob"/>: use-case називає
+/// задачу, не знаючи, що її реалізація живе в <c>Ecr.Infrastructure</c> і
+/// спирається на адаптер Excel.
+/// </remarks>
+public interface IExcelExportJob : IBackgroundJob;
+
+/// <summary>Маркер задачі побудови зрізу звітності.</summary>
+public interface IReportSnapshotJob : IBackgroundJob;
+
+/// <summary>Маркер задачі збору із зовнішнього джерела.</summary>
+public interface ICollectionJob : IBackgroundJob;

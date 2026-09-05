@@ -24,7 +24,7 @@ public sealed class SourcesHealthCheck : IHealthCheck
     /// контейнера. Перевірка, яка не працює, гірша за її відсутність
     /// (`Q-051`). Разом із портом сюди повернеться і залежність.
     /// </remarks>
-    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct)
+    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken)
         => Task.FromResult(HealthCheckResult.Degraded(
             "Збір із зовнішніх джерел з'явиться на Етапі 5.",
             data: new Dictionary<string, object>(StringComparer.Ordinal) { ["stage"] = 5 }));

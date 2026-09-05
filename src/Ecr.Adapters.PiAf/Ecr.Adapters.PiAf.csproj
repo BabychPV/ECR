@@ -10,7 +10,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- PI SQL Client — ODBC; System.Data.Odbc входить у BCL -->
+    <!-- PI SQL Client — ODBC, не OLE DB (D-46). System.Data.Odbc у спільному
+         фреймворку лише переспрямований, тому пакет потрібен явно. -->
+    <PackageReference Include="System.Data.Odbc" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 

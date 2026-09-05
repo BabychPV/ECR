@@ -126,15 +126,20 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Міграція_не_створює_таблиць_поза_контрактними_схемами()
     {
-        // `__EFMigrationsHistory` — єдина дозволена таблиця в `dbo`: її кладе
-        // туди сам EF, і в контрактній схемі їй місця немає за побудовою.
+        // Дозволених таблиць у `dbo` рівно дві, і обидві — не наші за формою.
+        // `__EFMigrationsHistory` кладе туди сам EF. `Cache` — таблиця
+        // розподіленого кешу: її схему диктує
+        // `Microsoft.Extensions.Caching.SqlServer`, читає її власний провайдер
+        // пакета, і перенести її в контрактну схему означало б поставити в
+        // `02a-db-schema.md` таблицю, форму якої ми не визначаємо і змінити
+        // не можемо.
         var strays = await QueryAsync("""
             SELECT s.name + N'.' + t.name
             FROM sys.tables t
             JOIN sys.schemas s ON s.schema_id = t.schema_id
             WHERE s.name NOT IN (N'cfg', N'doc', N'calc', N'rpt', N'ext', N'sec',
                                  N'wf', N'dic', N'uom', N'arc', N'aud', N'itg', N'sys_ecr')
-              AND t.name <> N'__EFMigrationsHistory'
+              AND t.name NOT IN (N'__EFMigrationsHistory', N'Cache')
             ORDER BY 1
             """);
 

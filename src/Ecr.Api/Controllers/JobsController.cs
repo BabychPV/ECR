@@ -1,3 +1,4 @@
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,7 +9,7 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/jobs")]
 [Authorize]
-public sealed class JobsController(IBackgroundJobScheduler scheduler) : ControllerBase
+public sealed class JobsController(GetJobStatusHandler status) : ControllerBase
 {
     /// <summary>
     /// Стан задачі за її ідентифікатором. Право <c>System.ViewHealth</c>.
@@ -21,8 +22,10 @@ public sealed class JobsController(IBackgroundJobScheduler scheduler) : Controll
     [HttpGet("{jobId}")]
     [ProducesResponseType<JobStatus>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public Task<ActionResult<JobStatus>> Get(string jobId, CancellationToken ct)
-        => throw new NotImplementedException(
-            "TODO: перевірити System.ViewHealth; делегувати scheduler.GetStatusAsync(jobId, ct); " +
-            "невідомий jobId → 404.");
+    public async Task<ActionResult<JobStatus>> Get(string jobId, CancellationToken ct)
+    {
+        var found = await status.HandleAsync(jobId, ct).ConfigureAwait(false);
+
+        return found is null ? NotFound() : Ok(found);
+    }
 }

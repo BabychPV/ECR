@@ -31,7 +31,7 @@ public sealed class DatabaseHealthCheck(
         ["DATA_HOT", "DATA_ARCHIVE", "AUDIT", "INDEXES"];
 
     /// <inheritdoc />
-    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct)
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object>(StringComparer.Ordinal)
         {
@@ -46,7 +46,7 @@ public sealed class DatabaseHealthCheck(
         {
             var filegroups = await db.Database
                 .SqlQueryRaw<string>("SELECT name AS Value FROM sys.filegroups")
-                .ToListAsync(ct).ConfigureAwait(false);
+                .ToListAsync(cancellationToken).ConfigureAwait(false);
 
             data["filegroups"] = filegroups;
 
@@ -55,7 +55,7 @@ public sealed class DatabaseHealthCheck(
                 .ToList();
             data["missingFilegroups"] = missing;
 
-            var partitionsAhead = await PartitionsAheadAsync(ct).ConfigureAwait(false);
+            var partitionsAhead = await PartitionsAheadAsync(cancellationToken).ConfigureAwait(false);
             data["partitionsAhead"] = partitionsAhead;
             data["limitations"] = Limitations();
 
@@ -90,7 +90,7 @@ public sealed class DatabaseHealthCheck(
     }
 
     /// <summary>Скільки меж партиціонування лежить попереду поточного періоду.</summary>
-    private async Task<int> PartitionsAheadAsync(CancellationToken ct)
+    private async Task<int> PartitionsAheadAsync(CancellationToken cancellationToken)
     {
         var now = clock.UtcNow;
         var currentKey = (now.Year * 100) + now.Month;
@@ -104,7 +104,7 @@ public sealed class DatabaseHealthCheck(
                 WHERE pf.name = 'pf_ByPeriodKey' AND CAST(rv.value AS int) > {0}
                 """,
                 currentKey)
-            .ToListAsync(ct).ConfigureAwait(false);
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
 
         return ahead.Count > 0 ? ahead[0] : 0;
     }
