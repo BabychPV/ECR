@@ -262,7 +262,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 міграція і спрощення процедури, ~1 година.
 ---
 
-## P-10 — матеріалізації `ext.RawDataPoint` у комірки документа не описано
+### P-10 — матеріалізації `ext.RawDataPoint` у комірки документа не описано
 
 **Що виявлено.** Збір кладе сирі точки в `ext.RawDataPoint` **в одиниці
 джерела** (ФВ-16.10, D-79). `ext.EntityFieldMap` описує, куди вони мають
@@ -288,7 +288,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 
 ---
 
-## P-11 — форму запиту значень RTQP треба звірити з живим PI SQL Client
+### P-11 — форму запиту значень RTQP треба звірити з живим PI SQL Client
 
 **Що виявлено.** Імена об'єктів каталогу звірені з експортом чинного рішення
 (`source/…/ECR_01_Air_PISqlClientExportedObjects.sql`): `[Master].[Element].[Element]`,
@@ -310,7 +310,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 
 ---
 
-## P-12 — доступ до PI Web API: Kerberos чи токен
+### P-12 — доступ до PI Web API: Kerberos чи токен
 
 **Що виявлено.** `PiWebApiDataSource` надсилає секрет як `Bearer`, якщо він
 налаштований, і покладається на інтегровану автентифікацію службового
@@ -329,7 +329,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 
 ---
 
-## P-13 — сповіщень немає ні таблиці, ні транспорту, ні правил
+### P-13 — сповіщень немає ні таблиці, ні транспорту, ні правил
 
 **Що виявлено.** `NotificationJob` оголошений у `05e` і в чекпойнті 5.7, але
 в системі **немає**: таблиці черги сповіщень (у `02a-db-schema.md` її нема),
@@ -348,7 +348,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 
 ---
 
-## P-14 — вивантажену книгу нема звідки забрати
+### P-14 — вивантажену книгу нема звідки забрати
 
 **Що виявлено.** Таблиця ендпоінтів (`02-contracts.md` §9) оголошує
 `POST /api/v1/documents/{id}/export`, який повертає `202` з `jobId`. **Ендпоінта,
@@ -369,7 +369,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 
 ---
 
-## P-15 — каталог помилок довелося розширити на три коди
+### P-15 — каталог помилок довелося розширити на три коди
 
 **Що виявлено.** Каталог `02-contracts.md` §7 не мав **жодного** коду для
 звітності (`rpt.*`) і не мав 404 для сутності зовнішнього джерела.
@@ -385,7 +385,7 @@ ALTER TABLE SWITCH statement failed. SWITCH is not allowed because source table
 
 ---
 
-## P-16 — вставка 500×60 не вкладається в бюджет запису
+### P-16 — вставка 500×60 не вкладається в бюджет запису
 
 **Що виявлено.** Чекпойнт Етапу 6 вимагає вставки діапазону 500×60 з буфера
 Excel. Часткове застосування заборонене (B04 §2.3), тому клієнт надсилає це
@@ -409,7 +409,7 @@ Excel. Часткове застосування заборонене (B04 §2.3
 
 ---
 
-## P-17 — скрипти розгортання падали під `sqlcmd`, але проходили в тестах
+### P-17 — скрипти розгортання падали під `sqlcmd`, але проходили в тестах
 
 **Що виявлено.** `09-commands.md` §3 наказує виконувати `.sql`-скрипти через
 `sqlcmd`. У `sqlcmd` за замовчуванням `QUOTED_IDENTIFIER OFF`, а в
