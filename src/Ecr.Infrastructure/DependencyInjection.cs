@@ -119,6 +119,9 @@ public static class DependencyInjection
         // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).
         services.AddScoped<IUiStringCatalog, Localization.UiStringCatalogStore>();
         services.AddScoped<Application.Ports.INotificationOutbox, Integration.NotificationOutboxStore>();
+        services.AddScoped<Application.Ports.ICellPatcher, Integration.IntegrationCellPatcher>();
+        services.AddScoped<Application.Ports.ICoverageJournal, Integration.CoverageJournal>();
+        services.AddScoped<Application.Ports.IMaterializeCollectedDataJob, Jobs.MaterializeCollectedDataJob>();
 
         // ⚠ Планувальник тепер справжній. Quartz піднімається як hosted
         // service, а порт лишається тим самим: заміна на Hangfire, якщо ІБ

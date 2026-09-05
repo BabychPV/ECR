@@ -95,10 +95,56 @@ public sealed class CollectionCoverage : Entity<long>
         CollectionRunId = collectionRunId;
     }
 
+    /// <summary>
+    /// Причина, чому інтервал НЕ перенесено в комірки (<c>D-118</c>).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="periodKey">Період, якого це стосується.</param>
+    /// <param name="status">Статус: <c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>.</param>
+    /// <param name="details">Пояснення для людини; без стеків (ФВ-6.11).</param>
+    /// <param name="utcNow">Момент запису.</param>
+    /// <remarks>
+    /// ⛔ Це ОКРЕМИЙ вид рядка: інтервал зібрано, але значення не лягли в
+    /// комірки. Мовчазний пропуск тут — найдорожчий із можливих: збір
+    /// відпрацював, звіт склався, а числа за пізній інтервал у ньому немає, і
+    /// дізнаються про це на звірці через місяць.
+    ///
+    /// ⚠ Записується в ТУ САМУ таблицю покриття, а не в окрему: питання «що з
+    /// цим інтервалом» має одну відповідь в одному місці.
+    /// </remarks>
+    public static CollectionCoverage Skipped(
+        int sourceEntityId, int periodKey, string status, string details, DateTime utcNow)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+
+        return new CollectionCoverage(sourceEntityId, utcNow, utcNow, collectionRunId: 0)
+        {
+            PeriodKey = periodKey,
+            Status = status,
+            Details = details,
+        };
+    }
+
     public int SourceEntityId { get; private set; }
     public DateTime CoveredFrom { get; private set; }
     public DateTime CoveredTo { get; private set; }
     public long CollectionRunId { get; private set; }
+
+    /// <summary>Період, якого стосується статус; <c>null</c> — звичайне покриття.</summary>
+    public int? PeriodKey { get; private set; }
+
+    /// <summary>
+    /// Статус матеріалізації; <c>null</c> — інтервал покрито звичайним шляхом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>null</c> тут не «невідомо», а «нічого незвичайного»: рядків
+    /// покриття на порядки більше, ніж пропусків, і заповнювати їх усіх
+    /// словом «Ok» означало б платити місцем за відсутність інформації.
+    /// </remarks>
+    public string? Status { get; private set; }
+
+    /// <summary>Пояснення для людини; без стеків (ФВ-6.11).</summary>
+    public string? Details { get; private set; }
 }
 
 /// <summary>

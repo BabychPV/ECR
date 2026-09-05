@@ -56,6 +56,15 @@ public interface IRecalculationJob : IBackgroundJob;
 /// </remarks>
 public interface IExcelExportJob : IBackgroundJob;
 
+/// <summary>
+/// Маркер задачі перенесення зібраних точок у комірки (<c>D-118</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ Потрібен із тієї самої причини, що й решта маркерів: планувальник
+/// приймає ТИП, а прикладний шар не бачить реалізацій з інфраструктури.
+/// </remarks>
+public interface IMaterializeCollectedDataJob : IBackgroundJob;
+
 /// <summary>Маркер задачі побудови зрізу звітності.</summary>
 public interface IReportSnapshotJob : IBackgroundJob;
 

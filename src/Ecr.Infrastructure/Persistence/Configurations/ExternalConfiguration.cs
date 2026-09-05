@@ -75,9 +75,32 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
             "(TargetKind = 0 AND TargetColumnDefId IS NOT NULL) OR "
             + "(TargetKind = 1 AND TargetRegistryFieldDefId IS NOT NULL)"));
 
+        // ⚠ Кожне обмеження — окремим викликом: `t.HasCheckConstraint` повертає
+        // будівник обмеження, а не таблиці, і ланцюжок не збирається.
+        builder.ToTable("EntityFieldMap", "ext", t => t.HasCheckConstraint(
+                "CK_EFM_Transform",
+                // ⛔ Перелік закритий (`D-118`). Довільний код перетворення —
+                // це можливість вписати щось, чого обробник не знає, і
+                // дізнатися про це під час збору, а не при налаштуванні.
+                "TransformCode IS NULL OR TransformCode IN "
+                + "(N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')"));
+
+        builder.ToTable("EntityFieldMap", "ext", t => t.HasCheckConstraint(
+                "CK_EFM_Materialization",
+                // ⛔ Рядок і агрегація нерозривні. Мапінг, що називає рядок і
+                // не каже, як згортати точки періоду, дав би вибір коду — а
+                // код його зробити не може: він не знає, величина миттєва чи
+                // накопичувальна. Це помилка конфігурації, і ловиться вона
+                // тут, а не збором.
+                "TargetRowKey IS NULL OR TransformCode IS NOT NULL"));
+
         builder.HasKey(x => x.Id);
         builder.Property(x => x.SourceField).HasMaxLength(200).IsRequired();
         builder.Property(x => x.TransformCode).HasMaxLength(64);
+
+        // ⚠ 100 символів — стільки ж, скільки в `doc.TableRow.RowKey`: ключ,
+        // довший за той, на який він посилається, не знайшов би нічого.
+        builder.Property(x => x.TargetRowKey).HasMaxLength(100);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
 
         builder.HasIndex(x => new { x.SourceEntityId, x.SourceField })
@@ -274,6 +297,8 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
 
         builder.ToTable("CollectionCoverage", "itg");
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.Status).HasMaxLength(64);
+        builder.Property(x => x.Details).HasMaxLength(1000);
         builder.Property(x => x.CoveredFrom).HasColumnType("datetime2(3)");
         builder.Property(x => x.CoveredTo).HasColumnType("datetime2(3)");
 

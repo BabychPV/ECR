@@ -133,6 +133,33 @@ MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code 
 WHEN NOT MATCHED THEN INSERT (Code) VALUES (s.Code);
 GO
 
+-- ── Технічний обліковий запис інтеграції ─────────────────────────────────
+--
+-- ⛔ Матеріалізація точок AF пише в комірки ТИМ САМИМ шляхом, що й людина
+-- (`D-118`), а цей шлях вимагає `ChangedByUserId` в аудиті. Тому запис у
+-- `sec.User`, а не «системний нуль»: питання «хто змінив цю комірку» мусить
+-- мати відповідь, і «нуль» відповіддю не є.
+--
+-- ⚠ Пароль — випадковий і НІКОМУ не відомий: увійти цим записом не можна й не
+-- треба. Він не bootstrap і не отримує жодної ролі: перевірка доступу для
+-- нього — лише стан періоду, а довіра походить від того, хто налаштував
+-- мапінг (`Integration.Manage`, ФВ-12.10).
+--
+-- ⛔ Гранти на нього НЕ заводяться навмисно: їх довелося б виписувати на
+-- кожен проєкт окремо, і забутий проєкт означав би мовчазну втрату даних
+-- збору.
+MERGE sec.[User] AS t
+USING (VALUES (N'svc-integration')) AS s (UserName)
+   ON t.UserName = s.UserName
+WHEN NOT MATCHED THEN
+    INSERT (UserName, DisplayName, Provider, PasswordHash, SecurityStamp,
+            MustChangePassword, IsBootstrapAdmin, IsActive, CreatedAt)
+    VALUES (s.UserName, N'Integration service', 1,
+            CONVERT(nvarchar(400), HASHBYTES('SHA2_256', CAST(NEWID() AS nvarchar(64))), 2),
+            REPLACE(CAST(NEWID() AS nvarchar(64)), N'-', N''),
+            0, 0, 1, SYSUTCDATETIME());
+GO
+
 MERGE sec.Role AS t
 USING (VALUES (N'SystemAdministrator'), (N'TemplateAdministrator'), (N'PeriodAdministrator'),
               (N'DataEntry'), (N'Approver'), (N'Viewer'), (N'Auditor'),

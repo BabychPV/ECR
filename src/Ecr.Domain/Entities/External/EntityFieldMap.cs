@@ -14,6 +14,37 @@ public enum FieldTargetKind : byte
 }
 
 /// <summary>
+/// Як згорнути точки періоду в одне число (<c>D-118</c>).
+/// </summary>
+/// <remarks>
+/// ⛔ Значення за замовчуванням **немає і не буде**. Система не знає, чи
+/// величина миттєва (концентрація → <see cref="Last"/>) чи накопичувальна
+/// (обсяг → <see cref="Sum"/>); це знає той, хто налаштовує мапінг. Підставити
+/// «найімовірніше» означало б отримати ЧИСЛО, а не відмову, — і розбіжність
+/// знайшли б на звірці через місяць, коли звіт уже подано.
+/// </remarks>
+public enum AggregationKind : byte
+{
+    /// <summary>Сума точок періоду: обсяги, маси.</summary>
+    Sum = 0,
+
+    /// <summary>Середнє: концентрації, температури.</summary>
+    Avg = 1,
+
+    /// <summary>Мінімум за період.</summary>
+    Min = 2,
+
+    /// <summary>Максимум за період.</summary>
+    Max = 3,
+
+    /// <summary>Остання точка: показник лічильника на кінець періоду.</summary>
+    Last = 4,
+
+    /// <summary>Перша точка: показник на початок періоду.</summary>
+    First = 5,
+}
+
+/// <summary>
 /// Мапінг поля джерела на поле ECR (<c>ext.EntityFieldMap</c>).
 /// </summary>
 /// <remarks>
@@ -75,7 +106,31 @@ public sealed class EntityFieldMap : Entity<int>
     /// <summary>Іменоване перетворення зі списку; довільний код заборонений.</summary>
     public string? TransformCode { get; private set; }
 
+    /// <summary>
+    /// У ЯКИЙ рядок лягає значення (<c>D-118</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього поля мапінг не має адресата: комірка адресується трійкою
+    /// «період, рядок, колонка», а мапінг називав лише колонку. У таблиці на
+    /// 500 рядків неможливо сказати, у котрий із них лягає значення тега — і
+    /// будь-яка реалізація тут ВИГАДАЛА б правило («перший рядок», «рядок із
+    /// таким самим кодом»), усі однаково правдоподібні на вигляд.
+    ///
+    /// ⚠ Точка з AF завжди має фіксованого адресата: тег <c>Flare_01_CO</c>
+    /// належить рядку <c>Flare_01</c> завжди — це і є суть мапінгу. Варіанту
+    /// «ключ рядка з поля джерела» немає навмисно: у чинній системі такого
+    /// немає, і він відкрив би шлях до рядків, яких у шаблоні не існує.
+    ///
+    /// ⚠ <c>null</c> означає рівно одне: **мапінг не матеріалізується**.
+    /// Точки лишаються сирими в <c>ext.RawDataPoint</c> для звірки, і це
+    /// легальний стан — тег може збиратися для контролю, а не для форми.
+    /// </remarks>
+    public string? TargetRowKey { get; private set; }
+
     public bool IsActive { get; private set; }
+
+    /// <summary>Чи переносяться точки цього мапінгу в комірки.</summary>
+    public bool IsMaterialized => TargetRowKey is not null;
 
     /// <summary>Ставить одиниці межі.</summary>
     /// <param name="sourceUnitId">Одиниця джерела.</param>
@@ -89,6 +144,36 @@ public sealed class EntityFieldMap : Entity<int>
     /// <summary>Ставить іменоване перетворення.</summary>
     /// <param name="transformCode">Код перетворення; <c>null</c> — без нього.</param>
     public void SetTransform(string? transformCode) => TransformCode = transformCode;
+
+    /// <summary>
+    /// Задає рядок-адресат і спосіб згортання точок (<c>D-118</c>).
+    /// </summary>
+    /// <param name="targetRowKey">Ключ рядка; <c>null</c> — не матеріалізувати.</param>
+    /// <param name="aggregation">Як згортати; обов'язково при заданому рядку.</param>
+    /// <exception cref="DomainException">Рядок заданий без агрегації.</exception>
+    /// <remarks>
+    /// ⛔ Пара нерозривна. Мапінг із рядком і без агрегації — помилка
+    /// конфігурації, а не «збережемо, розберемося при зборі»: під час збору
+    /// вибір довелося б робити коду, а він його зробити не може. Ловиться
+    /// «Перевіркою конфігурації» (`ФВ-13.17`), не збором.
+    /// </remarks>
+    public void SetMaterialization(string? targetRowKey, AggregationKind? aggregation)
+    {
+        if (targetRowKey is not null && aggregation is null)
+        {
+            throw new DomainException(
+                "ECR-INT-0422",
+                $"Мапінг поля «{SourceField}» називає рядок «{targetRowKey}», але не каже, "
+                + "як згортати точки періоду. Система не знає, величина миттєва чи накопичувальна.");
+        }
+
+        TargetRowKey = targetRowKey;
+        TransformCode = aggregation?.ToString();
+    }
+
+    /// <summary>Спосіб згортання; <c>null</c> — мапінг не матеріалізується.</summary>
+    public AggregationKind? Aggregation
+        => Enum.TryParse<AggregationKind>(TransformCode, out var kind) ? kind : null;
 
     /// <summary>Вимикає мапінг.</summary>
     public void Deactivate() => IsActive = false;
