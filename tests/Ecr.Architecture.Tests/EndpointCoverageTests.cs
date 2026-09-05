@@ -1,4 +1,5 @@
 ﻿// tests/Ecr.Architecture.Tests/EndpointCoverageTests.cs
+using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Ecr.TestKit;
@@ -339,6 +340,67 @@ public sealed partial class EndpointCoverageTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Жодна_заглушка_не_пережила_свого_етапу()
+    {
+        // ⛔ Одинадцятий сторож. Заглушка має вмирати, коли етап закривається,
+        // а не коли хтось випадково запустить систему.
+        //
+        // ⚠ `A7-37` прожила два етапи: перевірки `jobs` і `sources`
+        // відповідали «з'явиться на Етапі 5» **незалежно ні від чого**, і
+        // `/health/ready` був жовтим ЗАВЖДИ — при семи працюючих задачах і
+        // живому зборі. Постійно жовтий індикатор гірший за відсутній: він
+        // навчає не помічати себе, і в день, коли пожовтіє по справі, ніхто
+        // не подивиться.
+        //
+        // ⚠ Поріг — НОМЕР ЕТАПУ, а не «будь-яка згадка». Заглушка з посиланням
+        // на майбутній етап законна: вона чесно каже, чого ще немає.
+        var offenders = SourceTree
+            .Production(
+                "Ecr.Domain", "Ecr.Application", "Ecr.Infrastructure", "Ecr.Api",
+                "Ecr.Calculations", "Ecr.Expressions", "Ecr.Adapters.PiAf", "Ecr.Adapters.Excel")
+            .SelectMany(file => StaleStubRegex
+                .Matches(WithoutComments(file.Text))
+                .Where(match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) <= CurrentStage)
+                .Select(match => $"{Path.GetFileName(file.Path)}: {match.Value.Trim()}"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(offenders);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Жодна_перевірка_здоровя_не_відповідає_константою()
+    {
+        // ⛔ Перевірка звіряється з реальним станом або її немає в переліку
+        // (`D-139`). Заглушка з фіксованим результатом заборонена: немає
+        // підсистеми — перевірки НЕМАЄ, а не «є і жовта».
+        //
+        // ⚠ Ознака константи проста і надійна: тіло перевірки не звертається
+        // до жодної залежності. Перевірка, яка нічого не питає, не може
+        // відповісти нічого, крім заздалегідь відомого.
+        var directory = Path.Combine(SolutionRoot(), "src", "Ecr.Api", "Health");
+
+        var offenders = Directory
+            .EnumerateFiles(directory, "*HealthCheck.cs")
+            .Where(file =>
+            {
+                var text = WithoutComments(File.ReadAllText(file));
+
+                return !text.Contains("await", StringComparison.Ordinal)
+                    && !text.Contains("null", StringComparison.Ordinal);
+            })
+            .Select(Path.GetFileName)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(offenders);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожна_відповідь_без_тіла_оголошена_своїм_кодом()
@@ -464,6 +526,22 @@ public sealed partial class EndpointCoverageTests
     /// <summary>Назва методу дії — щоб у звіті було видно, де саме дефект.</summary>
     [GeneratedRegex(@"public\s+(?:async\s+)?[\w<>\[\], ?]+\s+(\w+)\s*\(")]
     private static partial Regex MethodNameRegex { get; }
+
+    /// <summary>Поточний етап проєкту.</summary>
+    /// <remarks>
+    /// ⚠ Число, а не «останній етап у документі»: заглушка з посиланням на
+    /// МАЙБУТНІЙ етап законна — вона чесно каже, чого ще немає. Незаконна саме
+    /// та, чий етап уже закрито.
+    /// </remarks>
+    private const int CurrentStage = 7;
+
+    /// <summary>Заглушка з посиланням на номер етапу.</summary>
+    /// <remarks>
+    /// Ловить обидві форми, у яких вони писалися: «з'явиться на Етапі N» у
+    /// тексті відповіді і <c>TODO: Етап N</c> у коді.
+    /// </remarks>
+    [GeneratedRegex(@"(?:з['’]явиться на Етапі|TODO:\s*Етап|Етап)\s*(\d+)")]
+    private static partial Regex StaleStubRegex { get; }
 
     [GeneratedRegex(@"//[^
 ]*")]

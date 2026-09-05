@@ -16,6 +16,14 @@ namespace Ecr.Api.Tests;
 [Collection("SqlServer")]
 public sealed class HealthTests(SqlServerFixture sql)
 {
+    /// <summary>Перевірки, які мають бути в звіті готовності.</summary>
+    /// <remarks>
+    /// ⚠ Перелік ЗАКРИТИЙ: нова перевірка має потрапити сюди свідомо, а зникла
+    /// — завалити тест. Інакше підсистема тихо випадає зі спостереження, а
+    /// звіт лишається зеленим.
+    /// </remarks>
+    private static readonly string[] ExpectedChecks = ["db", "jobs", "sources"];
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -183,6 +191,37 @@ public sealed class HealthTests(SqlServerFixture sql)
             // Дані перевірки більше не «stage = 5», а щось вимірюване.
             Assert.False(check.GetProperty("data").TryGetProperty("stage", out _));
         }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.9")]
+    public async Task Health_ready_зелений_і_перелік_перевірок_повний()
+    {
+        // ⛔ ДВІ умови, не одна. Зелений при півтора перевірках теж зелений:
+        // якщо `sources` випаде з реєстрації, звіт лишиться `Healthy`, і
+        // ніхто не помітить, що ціла підсистема більше не спостерігається.
+        //
+        // ⚠ Це вимога до ЕТАПУ 8: післявстановна перевірка інсталятора читає
+        // саме цей ендпоінт і вимагає ЗЕЛЕНОГО, не «не червоного» (`D-139`).
+        // Індикатор, жовтий завжди, навчає не помічати себе — і в день, коли
+        // пожовтіє по справі, ніхто не подивиться.
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+        var report = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        var names = report.GetProperty("checks")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("name").GetString())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(ExpectedChecks, names);
+        Assert.Equal("Healthy", report.GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task<JsonElement> ReadDbDataAsync(HttpClient client)
