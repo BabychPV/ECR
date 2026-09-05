@@ -58,7 +58,15 @@ public sealed class BudgetMetricsFilter(EcrMetrics metrics) : IAsyncActionFilter
         var executed = await next().ConfigureAwait(false);
         stopwatch.Stop();
 
-        // ⚠ Міряємо і невдалі виклики теж. Відмова, що триває чотири секунди,
+        // ⚠ Скасований запит НЕ міряємо: клієнт пішов, і його час нічого не
+        // каже про бюджет — але роздує хвіст p95 рівно в пік, коли вкладки
+        // закривають найчастіше.
+        if (context.HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            return;
+        }
+
+        // ⚠ А от невдалі виклики міряємо. Відмова, що триває чотири секунди,
         // з'їдає бюджет так само, як успіх, — і саме її найлегше не помітити,
         // якщо рахувати лише успішні.
         _ = executed;

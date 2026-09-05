@@ -95,8 +95,12 @@ public sealed class ForbiddenApiTests
                 var name = match.Groups[1].Value;
                 var parameters = match.Groups[2].Value;
 
-                // DisposeAsync і подібні токена за контрактом не мають.
+                // ⚠ Методи, чию сигнатуру диктує ЧУЖИЙ інтерфейс: додати до
+                // них токен неможливо. Скасування там береться з контексту
+                // (`HttpContext.RequestAborted`), а не з параметра — і це
+                // видно в самому коді, не в цьому списку.
                 if (name is "DisposeAsync" or "InvokeAsync" or "CheckHealthAsync"
+                        or "OnActionExecutionAsync"
                     || parameters.Contains("CancellationToken", StringComparison.Ordinal))
                 {
                     continue;

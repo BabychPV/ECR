@@ -185,18 +185,9 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         // Етапи 4 і 5. Блок `calc` порожній: усі дванадцять таблиць створює
         // міграція `Stage4Calculations`.
 
-        // Етап 5 — інтеграція, звітність, архів
-        "arc.CalculationResult", "arc.CalculationStep", "arc.CellChange", "arc.CellValue",
-        "arc.TableInstance", "arc.TableRow",
-        "ext.CollectionSchedule", "ext.ConsistencyRule", "ext.DataSource", "ext.EntityFieldMap",
-        "ext.LegacyColumnMapping", "ext.LegacyRowMapping", "ext.LegacySheetMapping",
-        "ext.LegacyTableMapping", "ext.RawDataPoint", "ext.SourceEntity",
-        "itg.ArchiveRun", "itg.CollectionCoverage", "itg.CollectionRun",
-        "itg.JobProgress", "itg.MaintenanceRun",
-        "rpt.ReportDef", "rpt.ReportRow", "rpt.ReportSnapshot", "rpt.ReportVersion",
-
-        // Індекс IsIndexed-полів для фільтрів по документах; наповнює шлях запису.
-        "doc.DocumentIndexValue",
+        // ⚠ Список ПОРОЖНІЙ: схема розгорнута повністю. `arc.*` створює
+        // скрипт `12-archive-tables.sql` (columnstore і файлова група моделлю
+        // EF не виражаються), решту — міграція `Stage5Integration`.
     ];
 
     /// <summary>Таблиці, оголошені в <c>02a-db-schema.md</c>.</summary>

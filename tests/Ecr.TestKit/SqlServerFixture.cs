@@ -160,8 +160,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <item>`06` — RCSI;</item>
     /// <item>seed.</item>
     /// </list>
-    /// `03`, `04`, `05` не виконуються: вони посилаються на `calc.*` і `arc.*`,
-    /// а тих таблиць до етапів 3–5 ще немає.
+    /// `05` (вʼюхи звітів) не виконується: вʼюха генерується під конкретний
+    /// звіт, а звітів у порожній базі немає. `03` і `04` виконуються з Етапу 5,
+    /// коли з'явилися `calc.*` і `arc.*`.
     /// </remarks>
     private async Task BuildSchemaAsync()
     {
@@ -178,6 +179,15 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await RunScriptAsync("11-audit-tables.sql").ConfigureAwait(false);
         await RunScriptAsync("07-partition-tables.sql").ConfigureAwait(false);
         await RunScriptAsync("08-system-tables.sql").ConfigureAwait(false);
+
+        // ⚠ `arc.*` створюються скриптом, а не міграцією: різниця між архівом
+        // і джерелом ФІЗИЧНА — clustered columnstore і окрема файлова група,
+        // і ні того, ні того модель EF не виражає (АРХ-3).
+        await RunScriptAsync("12-archive-tables.sql").ConfigureAwait(false);
+
+        // `03` і `04` посилаються на `calc.*` і `arc.*`; обидві схеми вже є.
+        await RunScriptAsync("03-archive-proc.sql").ConfigureAwait(false);
+        await RunScriptAsync("04-partition-maintenance.sql").ConfigureAwait(false);
 
         // ⚠ 10 обов'язково: HasTrigger() у конфігурації EF тригера НЕ створює,
         // він лише вимикає OUTPUT-клаузу. Без цього скрипта незмінність
