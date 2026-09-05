@@ -338,6 +338,36 @@ public sealed partial class EndpointCoverageTests
         Assert.Empty(offenders);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожен_порт_застосунку_названий_у_контракті()
+    {
+        // ⛔ Дев'ятий сторож. Контракт — це те, що читатиме той, хто прийде
+        // після мене; порт, якого в ньому немає, для нього не існує. За шість
+        // етапів перелік відстав на ДВАДЦЯТЬ ШІСТЬ портів, і помітити це можна
+        // було лише звіркою вручну — тобто ніколи.
+        //
+        // ⚠ Перевіряється НАЗВА, а не текст оголошення. Вимагати дослівного
+        // збігу означало б завести два джерела правди: сигнатура живе в коді,
+        // а документ каже, що такий порт є і навіщо.
+        var directory = Path.Combine(SolutionRoot(), "src", "Ecr.Application", "Ports");
+        Assert.True(Directory.Exists(directory), $"Немає {directory}.");
+
+        var contract = File.ReadAllText(
+            Path.Combine(SolutionRoot(), "docs", "build", "02-contracts.md"));
+
+        var missing = Directory
+            .EnumerateFiles(directory, "I*.cs")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => name is not null)
+            .Where(name => !contract.Contains(name!, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(missing);
+    }
+
     /// <summary>Розбиває скрипт на пакети, що починаються заданим текстом.</summary>
     /// <param name="script">Текст скрипта.</param>
     /// <param name="start">Початок пакета, наприклад <c>MERGE sec.RolePermission</c>.</param>

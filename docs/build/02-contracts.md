@@ -1865,6 +1865,385 @@ public sealed record TableInstanceRef(
 ---
 
 <a id="error-model"></a>
+
+### Порти, додані етапами 1–5
+
+> ⚠ Розділ не «дельта», а продовження переліку вище: ці порти з'явилися
+> разом з етапами, і без них контракт описує систему, якої вже немає.
+> Форма стисліша — оголошення без коментарів реалізації: повний текст із
+> обґрунтуванням кожного рішення живе у файлі порту, і дублювати його
+> дослівно означало б завести два джерела, які розійдуться.
+>
+> ⛔ Що перелік не відстане знову, стежить архітектурний тест
+> `Кожен_порт_застосунку_названий_у_контракті`.
+
+#### `IAuditReader`
+
+Зміна комірки в журналі, як її бачить читач аудиту. Момент зміни в UTC. Звітний період. Документ. Ключ рядка — щоб журнал читався без join. Колонка. Старе значення. Нове значення. Автор — UserId, не SID (R-A2, D-86). Звідки зміна: правка, імпорт, перерахунок, міграція. Зміна в Grace або після Reopen (D-70). public sealed record CellChangeView( DateTime ChangedAt, int PeriodKey, long DocumentId, string RowKey, int ColumnDefId, string? OldValue, string? NewValue, int ChangedByUserId, string Origin, bool IsLateEdit); Читання аудиту. Журнал **тільки читається**: методів зміни тут немає і не буде — журнал, який можна відредагувати, не є доказом.
+
+```csharp
+public interface IAuditReader
+{
+    public interface IAuditReader
+    public Task<PagedResult<CellChangeView>> ReadCellChangesAsync(
+}
+```
+
+#### `IAuditWriter`
+
+Запис аудиту. Пакетний **навмисно**: окремий INSERT на кожну комірку не вкладається в бюджет збереження діапазону (300 мс на 100 комірок).
+
+```csharp
+public interface IAuditWriter
+{
+    public interface IAuditWriter
+    public Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct);
+    public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct);
+    public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
+    public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);
+}
+```
+
+#### `ICalculationRunner`
+
+Виконавець прогону розрахунку.
+
+```csharp
+public interface ICalculationRunner
+{
+    public interface ICalculationRunner
+    public Task<ModuleProfile> RunAsync(
+}
+```
+
+#### `ICellPatcher`
+
+Запис комірок від імені інтеграції (D-118).
+
+```csharp
+public interface ICellPatcher
+{
+    public interface ICellPatcher
+    public Task<IntegrationWriteResult> ApplyIntegrationAsync(
+    public interface ICoverageJournal
+    public Task RecordAsync(
+}
+```
+
+#### `ICollectionRunner`
+
+Виконавець збору із зовнішнього джерела.
+
+```csharp
+public interface ICollectionRunner
+{
+    public interface ICollectionRunner
+    public Task RunAsync(
+}
+```
+
+#### `IDocumentStore`
+
+Документ у переліку. ⛔ Статусу тут немає (D-93). Зведений стан рахується запитом до wf.ApprovalState і віддається окремим полем : скалярний статус був би другим джерелом істини і рано чи пізно показав би Approved на документі, половина аркушів якого ще в Draft. Ідентифікатор. Проєкт. Бізнес-ключ, унікальний у межах проєкту. Момент створення. Скільки аркушів у складі. Стан робочого процесу: аркуш → статус. public sealed record DocumentSummary( long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount, IReadOnlyDictionary SheetStates); Порушення правила складу документа. Група аркушів. Вид правила: 0 RequiresAll, 1 RequiresOne, 2 Optional. Що саме не так. public sealed record CompositionViolation(string SheetGroup, byte RuleKind, string Detail); Читання і створення документів. public interface IDocumentStore { Додає документ разом зі складом аркушів. public Task AddAsync(Document document, CancellationToken ct); Документ за ідентифікатором; null — не існує. public Task FindAsync(long documentId, PeriodKeyFilter period, CancellationToken ct); Сторінка документів проєкту. public Task> ListAsync( int? projectId, PeriodKeyFilter period, CursorRequest page, CancellationToken ct); Перевіряє склад за SheetGroupRule (ФВ-3.2).
+
+```csharp
+public interface IDocumentStore
+{
+    public interface IDocumentStore
+    public Task AddAsync(Document document, CancellationToken ct);
+    public Task<DocumentSummary?> FindAsync(long documentId, PeriodKeyFilter period, CancellationToken ct);
+    public Task<PagedResult<DocumentSummary>> ListAsync(
+    public Task<IReadOnlyList<CompositionViolation>> ValidateCompositionAsync(
+    public Task<string> NextBusinessKeyAsync(int projectId, int templateVersionId, CancellationToken ct);
+}
+```
+
+#### `IExcelExporter`
+
+Експорт документа у .xlsx. public interface IExcelExporter { Формує книгу. Довга операція — виконується у фоні з прогресом (бюджет 10 с p95, tz/08 §8.2).
+
+```csharp
+public interface IExcelExporter
+{
+    public interface IExcelExporter
+    public Task<Stream> ExportAsync(long documentId, ExcelExportOptions options, CancellationToken ct);
+}
+```
+
+#### `IExcelImporter`
+
+Імпорт із .xlsx — завжди через попередній перегляд diff (ФВ-4.3). public interface IExcelImporter { Розбирає файл і будує diff **без застосування**. Показує, що зміниться, що конфліктує і що буде відхилено правами або станом періоду.
+
+```csharp
+public interface IExcelImporter
+{
+    public interface IExcelImporter
+    public Task<ImportPreview> PreviewAsync(long documentId, Stream file, CancellationToken ct);
+    public Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct);
+}
+```
+
+#### `IExportStore`
+
+Готові книги .xlsx, побудовані фоновою задачею.
+
+```csharp
+public interface IExportStore
+{
+    public interface IExportStore
+    public Task SaveAsync(string exportId, byte[] content, TimeSpan lifetime, CancellationToken ct);
+    public Task<byte[]?> FindAsync(string exportId, CancellationToken ct);
+}
+```
+
+#### `IImportPreviewStore`
+
+Тимчасове сховище побудованих diff-ів імпорту.
+
+```csharp
+public interface IImportPreviewStore
+{
+    public interface IImportPreviewStore
+    public Task SaveAsync(string token, string payloadJson, TimeSpan lifetime, CancellationToken ct);
+    public Task<string?> FindAsync(string token, CancellationToken ct);
+    public Task RemoveAsync(string token, CancellationToken ct);
+}
+```
+
+#### `IJobProgressStore`
+
+Сховище прогресу фонових задач (itg.JobProgress).
+
+```csharp
+public interface IJobProgressStore
+{
+    public interface IJobProgressStore
+    public Task QueueAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct);
+    public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct);
+    public Task ReportAsync(string jobId, int percent, string? message, DateTime utcNow, CancellationToken ct);
+    public Task FinishAsync(
+    public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
+}
+```
+
+#### `INotificationOutbox`
+
+Черга сповіщень (itg.NotificationOutbox).
+
+```csharp
+public interface INotificationOutbox
+{
+    public interface INotificationOutbox
+    public Task EnqueueAsync(
+}
+```
+
+#### `INotificationSender`
+
+Доставка сповіщення.
+
+```csharp
+public interface INotificationSender
+{
+    public interface INotificationSender
+    public bool IsConfigured { get; }
+    public Task SendAsync(
+}
+```
+
+#### `IPeriodStore`
+
+Доступ до проєктів і їхніх періодів для календаря і адміністративних операцій над періодами.
+
+```csharp
+public interface IPeriodStore
+{
+    public interface IPeriodStore
+    public Task<Project?> FindProjectAsync(int projectId, CancellationToken ct);
+    public Task<PeriodPolicy> GetPolicyAsync(int periodPolicyId, CancellationToken ct);
+    public Task<Period?> LockAsync(int periodId, CancellationToken ct);
+    public void AddRange(IEnumerable<Period> periods);
+    public Task AddProjectAsync(Project project, CancellationToken ct);
+    public Task<IReadOnlyList<PeriodStateRef>> GetPeriodStatesAsync(
+    public Task<PeriodBounds?> FindPeriodBoundsAsync(
+}
+```
+
+#### `IProjectStore`
+
+```csharp
+public interface IProjectStore
+{
+    public interface IProjectStore
+    public Task<PagedResult<ProjectSummary>> ListAsync(CursorRequest page, CancellationToken ct);
+}
+```
+
+#### `IRegistryEntryCache`
+
+Кеш резолвлених списків довідника. Ключ несе DataRevision, тому інвалідація не потрібна — так само, як із метаданими (D-16).
+
+```csharp
+public interface IRegistryEntryCache
+{
+    public interface IRegistryEntryCache
+    public Task<IReadOnlyList<RegistryEntry>> GetOrAddAsync(
+}
+```
+
+#### `IRegistryStore`
+
+Доступ до довідників: визначення, записи, зв'язки і — окремо — перевірка посилань на запис.
+
+```csharp
+public interface IRegistryStore
+{
+    public interface IRegistryStore
+    public Task<RegistryDef?> FindDefinitionAsync(string code, CancellationToken ct);
+    public Task<RegistryDef?> FindDefinitionByIdAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryDef>> ListDefinitionsAsync(CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntry>> ListEntriesAsync(int registryDefId, CancellationToken ct);
+    public Task<RegistryEntry?> FindEntryAsync(long registryEntryId, CancellationToken ct);
+    public Task<RegistryEntry?> FindEntryByCodeAsync(int registryDefId, string code, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntryLink>> ListInboundLinksAsync(
+    public Task<int> CountReferencesAsync(long registryEntryId, CancellationToken ct);
+    public Task<bool> HasOpenPeriodAsync(CancellationToken ct);
+    public Task<IReadOnlyList<RegistryValue>> ListValuesAsync(long registryEntryId, CancellationToken ct);
+    public void Add(RegistryEntry entry);
+    public void AddValue(RegistryValue value);
+}
+```
+
+#### `IReportDefinitionStore`
+
+Описи звітів (rpt.ReportDef) та їхні версії.
+
+```csharp
+public interface IReportDefinitionStore
+{
+    public interface IReportDefinitionStore
+    public Task<int?> FindCurrentVersionIdAsync(string code, CancellationToken ct);
+}
+```
+
+#### `IReportSnapshotBuilder`
+
+Побудова зрізу звітності. rpt.* — **зріз без логіки**: агрегації робить сервіс тут, вʼюха лише проєктує (ФВ-0.3).
+
+```csharp
+public interface IReportSnapshotBuilder
+{
+    public interface IReportSnapshotBuilder
+    public Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
+    public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
+    public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
+    public Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
+}
+```
+
+#### `ISecretProvider`
+
+Значення секрету за його іменем.
+
+```csharp
+public interface ISecretProvider
+{
+    public interface ISecretProvider
+    public string? Find(string secretName);
+}
+```
+
+#### `IStyleCatalog`
+
+Стилі версії шаблону (cfg.StyleDef) за їхніми ідентифікаторами.
+
+```csharp
+public interface IStyleCatalog
+{
+    public interface IStyleCatalog
+    public Task<IReadOnlyDictionary<int, StyleDef>> GetAsync(int templateVersionId, CancellationToken ct);
+}
+```
+
+#### `ITemplateStructure`
+
+Синхронний доступ до вже завантаженого знімка структури версії.
+
+```csharp
+public interface ITemplateStructure
+{
+    public interface ITemplateStructure
+}
+```
+
+#### `IUnitCatalog`
+
+Довідник одиниць uom.* у формі, потрібній перевірці публікації.
+
+```csharp
+public interface IUnitCatalog
+{
+    public interface IUnitCatalog
+    public Task<UnitCatalogSnapshot> GetAsync(CancellationToken ct);
+}
+```
+
+#### `IUserStore`
+
+Доступ до облікових записів для use-cases безпеки.
+
+```csharp
+public interface IUserStore
+{
+    public interface IUserStore
+    public Task<User?> FindBootstrapAdminAsync(CancellationToken ct);
+    public Task<User?> FindByUserNameAsync(string userName, CancellationToken ct);
+    public Task<User?> FindByIdAsync(int userId, CancellationToken ct);
+    public Task<bool> HasActiveDomainAdminAsync(string permissionCode, CancellationToken ct);
+    public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct);
+    public void Add(User user);
+    public void RecordAttempt(LoginAttempt attempt);
+    public Task GrantRoleAsync(User user, string roleCode, CancellationToken ct);
+    public Task<Common.PagedResult<Security.UserView>> ListAsync(
+    public Task<IReadOnlyList<Security.RoleView>> ListRolesAsync(CancellationToken ct);
+    public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct);
+    public Task<IReadOnlyList<Security.ResourceGrantDto>> ListGrantsAsync(int roleId, CancellationToken ct);
+    public Task ReplaceGrantsAsync(
+    public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct);
+    public Task<IReadOnlyList<string>> FilterUnknownAsync(
+    public Task<IReadOnlyList<string>> FilterDangerousAsync(
+    public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct);
+}
+```
+
+#### `IValidationResultStore`
+
+```csharp
+public interface IValidationResultStore
+{
+    public interface IValidationResultStore
+    public Task SaveAsync(ValidationSummary summary, CancellationToken ct);
+    public Task<ValidationSummary?> GetLatestAsync(long documentId, int periodKey, CancellationToken ct);
+}
+```
+
+#### `IWorkflowStore`
+
+Доступ до стану робочого процесу і періоду для операцій подання, затвердження і повернення в роботу.
+
+```csharp
+public interface IWorkflowStore
+{
+    public interface IWorkflowStore
+    public Task<ApprovalState> GetOrCreateAsync(
+    public Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
+    public Task<Period> LockPeriodAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
+    public Task<long> SaveSnapshotAsync(SubmissionSnapshotRecord snapshot, CancellationToken ct);
+    public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
+    public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct);
+}
+```
+
 ## 6. Формат помилки
 
 Усі помилки API повертаються як `application/problem+json`

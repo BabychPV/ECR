@@ -1542,6 +1542,12 @@ CREATE TABLE ext.EntityFieldMap
     TargetRegistryFieldDefId int  NULL,
     TargetUnitId   int           NULL,
     TransformCode  nvarchar(64)  NULL,
+    -- ⛔ У ЯКИЙ рядок лягає значення (D-118). Комірка адресується трійкою
+    -- «період, рядок, колонка», і без цього поля мапінг не має адресата:
+    -- у таблиці на 500 рядків неможливо сказати, у котрий із них лягає тег.
+    -- NULL означає рівно одне: мапінг НЕ матеріалізується, точки лишаються
+    -- сирими в ext.RawDataPoint для звірки — і це легальний стан.
+    TargetRowKey     nvarchar(100) NULL,
     IsActive       bit           NOT NULL CONSTRAINT DF_EFM_Act DEFAULT(1),
     CONSTRAINT PK_EntityFieldMap PRIMARY KEY (Id),
     CONSTRAINT UQ_EntityFieldMap UNIQUE (SourceEntityId, SourceField),
@@ -1553,6 +1559,14 @@ CREATE TABLE ext.EntityFieldMap
     CONSTRAINT CK_EFM_Target CHECK
         ((TargetKind = 0 AND TargetColumnDefId IS NOT NULL) OR
          (TargetKind = 1 AND TargetRegistryFieldDefId IS NOT NULL))
+,
+    -- Перелік згортань закритий: довільний код дав би можливість вписати те,
+    -- чого обробник не знає, і дізнатися про це під час збору.
+    CONSTRAINT CK_EFM_Transform CHECK (TransformCode IS NULL OR TransformCode IN
+        (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')),
+    -- ⛔ Рядок і агрегація нерозривні (D-118): система не знає, величина
+    -- миттєва (концентрація → Last) чи накопичувальна (обсяг → Sum).
+    CONSTRAINT CK_EFM_Materialization CHECK (TargetRowKey IS NULL OR TransformCode IS NOT NULL)
 );
 GO
 
@@ -1779,6 +1793,9 @@ CREATE TABLE sec.[User]
     -- Технічний обліковий запис первинного налаштування. Вимикається
     -- автоматично, щойно з'явився хоч один активний доменний адміністратор.
     IsBootstrapAdmin bit         NOT NULL CONSTRAINT DF_User_Bootstrap DEFAULT(0),
+    -- Отримує алерти про збої (D-125). Лише для записів із заповненим Email:
+    -- увімкнений адресат, якому нічого не надсилається, виглядає налаштованим.
+    ReceivesAlerts bit           NOT NULL CONSTRAINT DF_User_Alerts DEFAULT(0),
     IsActive       bit           NOT NULL CONSTRAINT DF_User_Active DEFAULT(1),
     CreatedAt      datetime2(3)  NOT NULL,
     CreatedByUserId int          NULL,
@@ -2052,7 +2069,15 @@ CREATE TABLE itg.CollectionCoverage
     CollectionRunId bigint      NOT NULL,
     CONSTRAINT PK_CollectionCoverage PRIMARY KEY (Id),
     CONSTRAINT FK_CCov_Entity FOREIGN KEY (SourceEntityId)  REFERENCES ext.SourceEntity (Id),
-    CONSTRAINT FK_CCov_Run    FOREIGN KEY (CollectionRunId) REFERENCES itg.CollectionRun (Id)
+    CONSTRAINT FK_CCov_Run    FOREIGN KEY (CollectionRunId) REFERENCES itg.CollectionRun (Id),
+    -- Період, якого стосується статус; NULL — звичайне покриття інтервалу.
+    PeriodKey       int            NULL,
+    -- ⛔ Чому інтервал НЕ перенесено в комірки (D-118):
+    -- SkippedPeriodClosed | ConflictKeptManual. NULL — нічого незвичайного.
+    -- Мовчазний пропуск тут найдорожчий: збір відпрацював, звіт склався, а
+    -- числа за пізній інтервал у ньому немає.
+    Status          nvarchar(64)   NULL,
+    Details         nvarchar(1000) NULL
 );
 GO
 
@@ -2107,6 +2132,75 @@ GO
 ---
 
 <a id="arc"></a>
+### Таблиці, додані етапами 4–5
+
+> ⚠ Розділ існує тому, що ці три таблиці з'явилися **після** першої редакції
+> схеми, і документ про них не знав. `calc.TestCase` — найдорожчий випадок:
+> `ФВ-13.7` прямо на неї посилалася, а DDL її не мав, тож порт віддавав
+> порожній набір і публікація методології відхилялася **завжди** (`P-08`).
+
+```sql
+-- Золотий набір методології: вхід, очікуваний вихід, допуск.
+--
+-- ⛔ Тести — це ДАНІ (ФВ-13.7), а не код: інженер-технолог заводить їх разом
+-- із методологією і не чекає релізу. На них тримається заборона публікації
+-- без зеленого тесту (ФВ-9.12) — найнебезпечнішої операції системи:
+-- опублікована методологія переписує числа за минулі періоди.
+CREATE TABLE calc.TestCase
+(
+    Id                   int            IDENTITY(1,1) NOT NULL,
+    MethodologyVersionId int            NOT NULL,
+    Code                 nvarchar(64)   NOT NULL,
+    InputJson            nvarchar(max)  NOT NULL,
+    ExpectedJson         nvarchar(max)  NOT NULL,
+    -- Допуск потрібен саме тому, що числа рахуються в decimal з округленням
+    -- на кожному кроці: побітова рівність дала б червоний тест від зміни
+    -- порядку доданків, яка нічого не змінює по суті.
+    Tolerance            decimal(18,10) NOT NULL,
+    CONSTRAINT PK_TestCase PRIMARY KEY (Id),
+    CONSTRAINT UQ_TestCase UNIQUE (MethodologyVersionId, Code),
+    CONSTRAINT CK_TC_Tolerance CHECK (Tolerance >= 0),
+    CONSTRAINT FK_TC_Version FOREIGN KEY (MethodologyVersionId)
+        REFERENCES calc.MethodologyVersion (Id)
+);
+
+-- Черга сповіщень.
+--
+-- ⚠ Сповіщення — НЕ транзакційна частина операції: якщо пошта недоступна,
+-- подання все одно відбулося. Тому подія кладеться в чергу тим самим комітом,
+-- що й зміна, а відправляє її окрема задача (D-124). Спроба відправити
+-- всередині use-case зробила б доставку листа умовою збереження даних.
+CREATE TABLE itg.NotificationOutbox
+(
+    Id          bigint         IDENTITY(1,1) NOT NULL,
+    EventCode   nvarchar(64)   NOT NULL,   -- maintenance.failures
+    Subject     nvarchar(400)  NOT NULL,
+    Body        nvarchar(max)  NOT NULL,
+    Recipients  nvarchar(2000) NULL,       -- NULL — визначить політика (D-125)
+    CreatedAt   datetime2(3)   NOT NULL,
+    SentAt      datetime2(3)   NULL,
+    State       nvarchar(16)   NOT NULL,   -- Pending | Sent | Failed
+    Attempts    int            NOT NULL CONSTRAINT DF_Outbox_Attempts DEFAULT(0),
+    Error       nvarchar(1000) NULL,       -- без стеків (ФВ-6.11)
+    CONSTRAINT PK_NotificationOutbox PRIMARY KEY (Id)
+);
+
+-- Розподілений кеш ASP.NET Core.
+--
+-- ⛔ Таблиця НЕ наша за формою: її вигляд задає SqlServerCache, і міняти в ній
+-- нічого не можна. Вона тут лише тому, що інакше «звідки в базі dbo.Cache»
+-- лишалося б питанням без відповіді. Redis у контурі немає (D-11).
+CREATE TABLE dbo.Cache
+(
+    Id                        nvarchar(449)  NOT NULL,
+    Value                     varbinary(max) NOT NULL,
+    ExpiresAtTime             datetimeoffset NOT NULL,
+    SlidingExpirationInSeconds bigint        NULL,
+    AbsoluteExpiration        datetimeoffset NULL,
+    CONSTRAINT PK_Cache PRIMARY KEY (Id)
+);
+```
+
 ## 14. `arc` — архів
 
 > Дзеркало структури; відмінності **лише фізичні**: clustered columnstore,
