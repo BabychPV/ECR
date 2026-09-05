@@ -5,6 +5,7 @@ import { App } from './app/App';
 import '@mantine/core/styles.css';
 import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';
+import './app/theme.css';
 
 /*
  * ⚠ Точка входу. Файла немає ні в дереві `05-skeleton.md` §1, ні в `05i`

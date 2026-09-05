@@ -1,24 +1,71 @@
+import { lazy } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
+import { AppLayout } from './AppLayout';
 
 /**
  * Маршрути застосунку.
  *
- * TODO: створити з lazy-завантаженням сторінок:
- *   /login                              — вхід (два способи: Windows і локальний)
- *   /                                   — список документів
- *   /documents/:id                      — документ, вкладки аркушів, вибір періоду
- *   /admin/templates                    — конструктор шаблонів
- *   /admin/templates/:id/versions/:vid  — редактор структури
- *   /admin/registries                   — конструктор реєстрів
- *   /admin/methodologies                — конфігуратор методологій
- *   /admin/security                     — ролі, користувачі, матриця прав
- *   /admin/periods                      — календар періодів і матриця доступу
- *   /admin/sources                      — конфігуратор джерел і розклад збору
- *   /admin/jobs                         — черга, прогрес, історія перерахунку
- *   /admin/health                       — операційний дашборд і консистентність
+ * ⚠ Сторінки завантажуються **ліниво**. Конструктор шаблонів і конфігуратор
+ * методологій разом важать більше, ніж уся решта: класти їх у початковий
+ * бандл означало б, що оператор, який лише заповнює таблицю, щоранку
+ * завантажує редактори, яких не відкриє.
  *
- * ⛔ Маршрутів /reports/* НЕМАЄ: звітність лишається в SSRS (D-52).
+ * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52).
  */
+const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
+const ChangePasswordPage = lazy(async () => ({
+  default: (await import('@/pages/ChangePasswordPage')).ChangePasswordPage,
+}));
+const DocumentsPage = lazy(async () => ({
+  default: (await import('@/pages/DocumentsPage')).DocumentsPage,
+}));
+const DocumentPage = lazy(async () => ({
+  default: (await import('@/pages/DocumentPage')).DocumentPage,
+}));
+const TemplatesPage = lazy(async () => ({
+  default: (await import('@/pages/admin/TemplatesPage')).TemplatesPage,
+}));
+const TemplateVersionPage = lazy(async () => ({
+  default: (await import('@/pages/admin/TemplateVersionPage')).TemplateVersionPage,
+}));
+const RegistriesPage = lazy(async () => ({
+  default: (await import('@/pages/admin/RegistriesPage')).RegistriesPage,
+}));
+const MethodologiesPage = lazy(async () => ({
+  default: (await import('@/pages/admin/MethodologiesPage')).MethodologiesPage,
+}));
+const SecurityPage = lazy(async () => ({
+  default: (await import('@/pages/admin/SecurityPage')).SecurityPage,
+}));
+const PeriodsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/PeriodsPage')).PeriodsPage,
+}));
+const SourcesPage = lazy(async () => ({
+  default: (await import('@/pages/admin/SourcesPage')).SourcesPage,
+}));
+const JobsPage = lazy(async () => ({ default: (await import('@/pages/admin/JobsPage')).JobsPage }));
+const HealthPage = lazy(async () => ({
+  default: (await import('@/pages/admin/HealthPage')).HealthPage,
+}));
+
 export const router = createBrowserRouter([
-  // TODO: заповнити за описом вище
+  { path: '/login', element: <LoginPage /> },
+  {
+    path: '/',
+    element: <AppLayout />,
+    children: [
+      { index: true, element: <DocumentsPage /> },
+      { path: 'change-password', element: <ChangePasswordPage /> },
+      { path: 'documents/:id', element: <DocumentPage /> },
+      { path: 'admin/templates', element: <TemplatesPage /> },
+      { path: 'admin/templates/:id/versions/:versionId', element: <TemplateVersionPage /> },
+      { path: 'admin/registries', element: <RegistriesPage /> },
+      { path: 'admin/methodologies', element: <MethodologiesPage /> },
+      { path: 'admin/security', element: <SecurityPage /> },
+      { path: 'admin/periods', element: <PeriodsPage /> },
+      { path: 'admin/sources', element: <SourcesPage /> },
+      { path: 'admin/jobs', element: <JobsPage /> },
+      { path: 'admin/health', element: <HealthPage /> },
+    ],
+  },
 ]);
