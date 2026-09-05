@@ -342,6 +342,70 @@ public sealed partial class EndpointCoverageTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_дія_сервера_має_споживача_в_інтерфейсі()
+    {
+        // ⛔ Тринадцятий сторож, і він дивиться у ЗВОРОТНИЙ бік від дванадцяти
+        // попередніх. Ті перевіряють, що клієнт не кличе неіснуючого; цей — що
+        // сервер не вміє того, чого користувач не може зробити.
+        //
+        // ⚠ Знайдено аудитом, і знахідка виявилася найдорожчою за весь проєкт:
+        // із сорока дій запису дев'ятнадцять не мали в інтерфейсі жодної
+        // кнопки. Серед них `POST /documents/{id}/approve` — тобто **робочий
+        // процес обривався на поданні**: документ можна було подати і не можна
+        // затвердити, а без `Approved` дані не стають дійсними (`ФВ-5.14`) і не
+        // потрапляють у звіти для регулятора (`ФВ-10.11`).
+        //
+        // ⚠ Жоден наявний сторож цього не бачив за побудовою: усі вони йдуть
+        // від клієнта до сервера. Тести API були зелені — вони перевіряють,
+        // що ендпоінт працює, а не що до нього можна дійти.
+        var declared = Declared()
+            .Where(d => d.Method is "POST" or "PUT" or "PATCH" or "DELETE")
+            .Select(d => (d.Method, Path: Placeholders(d.Path)))
+            .ToHashSet();
+
+        var web = Path.Combine(SolutionRoot(), "src", "Ecr.Web", "src");
+
+        var used = Directory
+            .EnumerateFiles(web, "*.ts", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(web, "*.tsx", SearchOption.AllDirectories))
+            .Where(f => !f.Contains("schema.d.ts", StringComparison.Ordinal))
+            .SelectMany(f => ApiPathRegex.Matches(WithoutComments(File.ReadAllText(f)))
+                .Select(m => Placeholders(m.Groups[1].Value)))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var exempt = ServerOnlyActions();
+
+        var unreachable = declared
+            .Where(d => !used.Contains(d.Path))
+            .Where(d => !exempt.Contains($"{d.Method} {d.Path}"))
+            .Select(d => $"{d.Method} {d.Path}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(unreachable);
+    }
+
+    /// <summary>
+    /// Дії, до яких інтерфейсу не треба — і чому саме.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перелік короткий навмисно. Кожен рядок тут — це твердження «людині
+    /// це робити не потрібно», і воно має бути правдою: вигідніше додати
+    /// кнопку, ніж пояснювати, чому її немає.
+    /// </remarks>
+    private static HashSet<string> ServerOnlyActions() => new(StringComparer.Ordinal)
+    {
+        // Викликається клієнтом опосередковано, всередині форми входу.
+        "POST /api/v1/login/windows",
+
+        // Допоміжна конверсія для розрахунків; окремого екрана не має і не
+        // потребує — числа конвертуються там, де їх вводять.
+        "POST /api/v1/units/convert",
+    };
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Жодна_заглушка_не_пережила_свого_етапу()
     {
         // ⛔ Одинадцятий сторож. Заглушка має вмирати, коли етап закривається,
@@ -507,10 +571,20 @@ public sealed partial class EndpointCoverageTests
     /// </remarks>
     private static string Placeholders(string path)
     {
-        var withoutQuery = path.Split('?')[0].TrimEnd('/');
-        var withoutInterpolation = InterpolationRegex.Replace(withoutQuery, "{p}");
+        // ⛔ Порядок значущий. Інтерполяція згортається ПЕРШОЮ, і лише потім
+        // відрізається рядок запиту: інакше `Split('?')` ріже не тільки
+        // query, а й оператор `??` усередині виразу, і адреса
+        // `/api/v1/jobs/${encodeURIComponent(jobId ?? '')}` перетворюється на
+        // `/api/v1/jobs/${encodeURIComponent(jobId ` — шлях, якого на сервері
+        // немає і бути не може.
+        //
+        // ⚠ Знайдено аудитом. Сторож при цьому не «пропускав» помилку — він
+        // її ВИГАДУВАВ би, якби взагалі бачив ці адреси; попередній вираз
+        // захоплення обривався на тому самому пробілі, тож обидві вади разом
+        // давали тишу.
+        var withoutInterpolation = InterpolationRegex.Replace(path, "{p}");
 
-        return BraceRegex.Replace(withoutInterpolation, "{p}");
+        return BraceRegex.Replace(withoutInterpolation.Split('?')[0].TrimEnd('/'), "{p}");
     }
 
     /// <summary>Початок дії контролера — атрибут маршруту.</summary>
@@ -550,7 +624,18 @@ public sealed partial class EndpointCoverageTests
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
     private static partial Regex BlockCommentRegex { get; }
 
-    [GeneratedRegex(@"['""`](/(?:api/v1|health)/[^'""`\s]*)['""`]")]
+    /// <summary>Адреса API в клієнтському коді.</summary>
+    /// <remarks>
+    /// ⛔ Пробіли ВСЕРЕДИНІ <c>${…}</c> дозволені явно. Попередній вираз
+    /// обривався на першому пробілі, і адреса виду
+    /// <c>`/api/v1/roles/${roleId ?? 0}/grants`</c> для сторожа просто не
+    /// існувала — тобто сторож «кожна адреса клієнта існує на сервері» мовчки
+    /// пропускав кожен виклик із виразом у шляху.
+    ///
+    /// ⚠ Знайдено аудитом: інший підрахунок дав 21 «невикористаний» ендпоінт
+    /// замість 19, і різниця виявилася саме цією сліпотою.
+    /// </remarks>
+    [GeneratedRegex(@"['""`](/(?:api/v1|health)/(?:\$\{[^}]*\}|[^'""`\s])*)['""`]")]
     private static partial Regex ApiPathRegex { get; }
 
     [GeneratedRegex(@"\$\{(?:[^{}]|\{[^{}]*\})*\}")]
