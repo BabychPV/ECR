@@ -74,6 +74,16 @@ public sealed class AccessDecisionService(
                 System.Text.Encoding.UTF8.GetBytes(joined)))[..16];
     }
 
+    /// <summary>
+    /// Стеля вибірки призначень ролей на одну людину.
+    /// </summary>
+    /// <remarks>
+    /// Двісті призначень на одного користувача — це вже не права, а наслідок
+    /// помилки в адмініструванні. Межа існує, щоб така помилка не
+    /// перетворилася на повільний вхід, який ніхто не пов'яже з її причиною.
+    /// </remarks>
+    private const int MaxRoleAssignments = 200;
+
     /// <summary>Збирає профіль із бази. Викликається лише при промаху кешу.</summary>
     private async Task<AccessProfile> LoadAsync(int userId, string securityStamp, CancellationToken ct)
     {
@@ -90,15 +100,30 @@ public sealed class AccessDecisionService(
             ? currentUser.GroupSids
             : [];
 
-        var roleIds = await db.RoleAssignments
+        // ⛔ Межі дії перевіряє ДОМЕН (`RoleAssignment.IsEffectiveOn`), а не
+        // копія його умови в запиті (`H-23a`). Умова тут стояла дослівно та
+        // сама, і саме тому це було небезпечно: два формулювання одного
+        // правила збігаються рівно до першої правки одного з них, а
+        // розійшовшись, не ламають нічого — просто хтось зберігає права після
+        // закінчення підміни. Доменний метод був при цьому без викликача:
+        // покритий тестом і недосяжний.
+        //
+        // ⚠ Ціна — вибірка призначень замість самих ролей. Призначень на
+        // людину одиниці (свої плюс групові), тож у бюджет профілю це не
+        // втручається; стеля нижче захищає від зіпсованих даних, а не від
+        // нормального навантаження.
+        var assignments = await db.RoleAssignments
             .AsNoTracking()
-            .Where(a => (a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
-                        && (a.ValidFrom == null || a.ValidFrom <= today)
-                        && (a.ValidTo == null || a.ValidTo >= today))
-            .Select(a => a.RoleId)
-            .Distinct()
+            .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+            .Take(MaxRoleAssignments)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        var roleIds = assignments
+            .Where(a => a.IsEffectiveOn(today))
+            .Select(a => a.RoleId)
+            .Distinct()
+            .ToList();
         var permissions = roleIds.Count == 0
             ? []
             : await db.RolePermissions

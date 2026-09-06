@@ -174,6 +174,35 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.");
     }
 
+    /// <inheritdoc />
+    public async Task<int?> FindProjectIdAsync(long documentId, CancellationToken ct)
+        => await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Документ береться ВІДСТЕЖУВАНИМ: «дотик» — це зміна сутності, і
+    /// зберегти її має той самий <c>SaveChanges</c>, що й дані, які його
+    /// викликали. З <c>AsNoTracking</c> виклик компілювався б і не робив
+    /// нічого — рівно той вид дефекту, від якого весь `H-23`.
+    ///
+    /// ⚠ Документа немає — тихо нічого. Зміна комірок неіснуючого документа
+    /// відхиляється раніше, зовнішнім ключем; кидати ще й тут означало б
+    /// повідомляти про ту саму помилку двічі й різними словами.
+    /// </remarks>
+    public async Task TouchAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct)
+    {
+        var document = await db.Documents
+            .FirstOrDefaultAsync(d => d.Id == documentId, ct)
+            .ConfigureAwait(false);
+
+        document?.Touch(userId, utcNow);
+    }
+
     /// <summary>Стан аркушів за період; порожньо, якщо період не вказано.</summary>
     private async Task<IReadOnlyDictionary<string, string>> StatesAsync(
         long documentId, PeriodKeyFilter period, CancellationToken ct)

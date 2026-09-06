@@ -163,7 +163,7 @@ public sealed class ApprovalRouteHandlerTests
         access.CurrentApprovalStepAsync(1, 2, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new ApprovalStepView(StepId: 100, Ordinal: 1, RoleId: 42, NextStepId: 200, TotalSteps: 2));
 
-        await new ApproveSheetHandler(workflow, access, uow, _user, clock, audit)
+        await new ApproveSheetHandler(workflow, access, Reports(), uow, _user, clock, audit)
             .HandleAsync(1, 2, 202603, approved: true, reason: null, CancellationToken.None);
 
         // Аркуш НЕ затверджений…
@@ -207,6 +207,10 @@ public sealed class ApprovalRouteHandlerTests
 
         return (ApprovalRoute)call.GetArguments()[0]!;
     }
+
+    /// <summary>Проведення стану аркушів у зрізи звітності; тут не предмет.</summary>
+    private static Ecr.Application.Reporting.ReportSnapshotSync Reports()
+        => new(Substitute.For<IReportSnapshotBuilder>(), Substitute.For<IDocumentStore>());
 
     private static ApprovalRoute Route()
         => new(

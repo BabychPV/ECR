@@ -162,6 +162,18 @@ public sealed class ReportSnapshot : Entity<long>
     /// <param name="parametersJson">Параметри побудови.</param>
     public void Complete(int rowCount, byte[]? contentHash, long? calculationRunId, string? parametersJson)
     {
+        // ⛔ Поданий зріз не перебудовується (ФВ-9.17, ER-C-11). Без цієї
+        // перевірки іммутабельність трималася лише на `RefreshStatus`: статус
+        // мінятися не міг, а ЧИСЛА — могли, бо повторна побудова спокійно
+        // переписала б `RowCount` і контрольну суму. Регулятор отримав би той
+        // самий зріз із іншим вмістом і тією самою позначкою «подано».
+        if (Status == SnapshotStatus.Submitted)
+        {
+            throw new DomainException(
+                ErrorCodes.ReportImmutable,
+                $"Зріз {Id} поданий: його вміст не перебудовується, потрібен новий зріз.");
+        }
+
         RowCount = rowCount;
         ContentHash = contentHash;
         CalculationRunId = calculationRunId;
@@ -196,10 +208,15 @@ public sealed class ReportSnapshot : Entity<long>
 
     /// <summary>Позначає зріз поданим — після цього він іммутабельний.</summary>
     /// <param name="userId">Хто подав.</param>
+    /// <remarks>
+    /// ⚠ Ідемпотентний і НЕ переписує автора: подання аркушів за один період
+    /// приходить кількома викликами, і кожен наступний інакше стирав би того,
+    /// хто справді закрив звітність, останнім, хто натиснув кнопку.
+    /// </remarks>
     public void MarkSubmitted(int userId)
     {
         Status = SnapshotStatus.Submitted;
-        BuiltByUserId = BuiltByUserId ?? userId;
+        BuiltByUserId ??= userId;
     }
 
     /// <summary>Знімає поточність — попередній зріз лишається читабельним.</summary>

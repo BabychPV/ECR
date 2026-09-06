@@ -2,6 +2,7 @@ using System.Text.Json;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Quartz;
+using Quartz.Impl.Matchers;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -53,12 +54,32 @@ public sealed class QuartzJobScheduler(
         where TJob : IBackgroundJob
     {
         var scheduler = Scheduler(typeof(TJob).Name);
+        var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
 
         // ⚠ Ключ унікальний на постановку, а не на тип задачі: два перерахунки
         // різних документів — це дві задачі, і спільний ключ зробив би другу
         // «вже запланованою».
-        var jobId = $"{typeof(TJob).Name}-{Guid.NewGuid():N}";
+        return await EnqueueCoreAsync<TJob>(
+            instance, $"{typeof(TJob).Name}-{Guid.NewGuid():N}", payload, ct).ConfigureAwait(false);
+    }
 
+    /// <summary>Спільна частина постановки: запис прогресу і планування.</summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="instance">Планувальник.</param>
+    /// <param name="jobId">Готовий ідентифікатор задачі.</param>
+    /// <param name="payload">Завдання.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор задачі.</returns>
+    /// <remarks>
+    /// ⚠ Виділено тому, що постановок стало дві — звичайна і з витісненням
+    /// (<c>H-23c</c>). Різняться вони лише тим, як складається ідентифікатор;
+    /// друга копія решти рядків рано чи пізно забула б запис прогресу, і
+    /// клієнт отримав би <c>404</c> на задачу, яку щойно прийняли.
+    /// </remarks>
+    private async Task<string> EnqueueCoreAsync<TJob>(
+        IScheduler instance, string jobId, object? payload, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
         var detail = JobBuilder.Create<QuartzJobAdapter>()
             .WithIdentity(jobId)
             .UsingJobData(PayloadKey, JsonSerializer.Serialize(payload, PayloadOptions))
@@ -69,8 +90,6 @@ public sealed class QuartzJobScheduler(
             .WithIdentity($"{jobId}-trigger")
             .StartNow()
             .Build();
-
-        var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
 
         // ⚠ Запис прогресу створюється ДО постановки, а не при старті задачі.
         // Клієнт отримує 202 з jobId і одразу починає опитувати стан; без
@@ -87,6 +106,53 @@ public sealed class QuartzJobScheduler(
 
         return jobId;
     }
+
+    /// <inheritdoc />
+    public async Task<string> EnqueueExclusiveAsync<TJob>(
+        string targetKey, object? payload, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        var scheduler = Scheduler(typeof(TJob).Name);
+        var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
+
+        // ⚠ Ціль входить у ключ, і саме тому попередню задачу над тією самою
+        // ціллю можна знайти, нічого про неї не пам'ятаючи. Ідентифікатор
+        // лишається унікальним (хвіст із GUID): якби ключ був сталим, запис
+        // прогресу нової задачі затер би стан скасованої, і в журналі не
+        // лишилося б сліду, що вона взагалі була.
+        var prefix = $"{typeof(TJob).Name}{TargetSeparator}{Sanitize(targetKey)}{TargetSeparator}";
+
+        // ⛔ Витіснення ПЕРЕД постановкою. У зворотному порядку між двома
+        // прогонами існував би проміжок, у якому працюють обидва, — а вони
+        // пишуть в одні й ті самі результати.
+        var superseded = await instance
+            .GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct)
+            .ConfigureAwait(false);
+
+        foreach (var key in superseded)
+        {
+            if (key.Name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                await CancelAsync(key.Name, ct).ConfigureAwait(false);
+            }
+        }
+
+        return await EnqueueCoreAsync<TJob>(
+            instance, prefix + Guid.NewGuid().ToString("N"), payload, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Роздільник між типом задачі, ціллю і хвостом ідентифікатора.</summary>
+    /// <remarks>
+    /// ⚠ Не дефіс: дефіс уже вживається всередині <c>Guid</c>-подібних хвостів
+    /// і в кодах цілей, і пошук за префіксом ловив би зайве.
+    /// </remarks>
+    private const char TargetSeparator = '#';
+
+    /// <summary>Прибирає з цілі символи, які ламають пошук за префіксом.</summary>
+    private static string Sanitize(string targetKey)
+        => targetKey.Replace(TargetSeparator, '_');
 
     /// <inheritdoc />
     public async Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct)

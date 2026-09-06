@@ -53,6 +53,36 @@ public interface IDocumentStore
 
     /// <summary>Наступний вільний бізнес-ключ у межах проєкту.</summary>
     public Task<string> NextBusinessKeyAsync(int projectId, int templateVersionId, CancellationToken ct);
+
+    /// <summary>Проєкт документа; <c>null</c> — документа немає.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий метод, а не <see cref="FindAsync"/>: подання і затвердження
+    /// потребують РІВНО проєкту — щоб знайти зрізи звітності за той самий
+    /// період (<c>H-23b</c>). Тягнути заради одного числа склад аркушів і їхні
+    /// стани означало б платити трьома запитами за той, що читає одну колонку.
+    /// </remarks>
+    public Task<int?> FindProjectIdAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// Фіксує зміну документа: <c>ModifiedAt</c> і <c>ModifiedByUserId</c>.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="userId">Хто змінив.</param>
+    /// <param name="utcNow">Момент зміни в UTC.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ До <c>H-23d</c> <c>Document.Touch</c> не кликав НІХТО: обидві дати
+    /// документа назавжди лишалися моментом створення. У переліку документів
+    /// їх видно кожному, і саме тому це дорожче, ніж здається, — колонка, яка
+    /// показує неправду, знецінює й сусідні, правдиві.
+    ///
+    /// ⚠ Зберігає не сам: «дотик» має лягти тим самим комітом, що й зміна,
+    /// яка його викликала. Окремий коміт дав би документ із новою датою і без
+    /// нових даних, якби транзакція далі впала.
+    /// </remarks>
+    public Task TouchAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct);
 }
 
 /// <summary>Період, за який показувати стан аркушів; <c>null</c> — не показувати.</summary>

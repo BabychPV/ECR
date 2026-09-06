@@ -22,6 +22,7 @@ namespace Ecr.Application.Documents;
 public sealed class PatchCellsHandler(
     ICellStore cellStore,
     IRowStore rowStore,
+    IDocumentStore documents,
     IMetadataCache metadata,
     IAccessDecisionService access,
     Validation.ValidationEngine validation,
@@ -223,6 +224,16 @@ public sealed class PatchCellsHandler(
             ct).ConfigureAwait(false);
 
         await rowStore.TouchRowsAsync(touched, now, ct).ConfigureAwait(false);
+
+        // ⛔ Документ теж «торкається» (`H-23d`). До цього рядка `ModifiedAt` і
+        // `ModifiedByUserId` документа назавжди лишалися моментом створення:
+        // рядки оновлювалися, аудит писався, а перелік документів показував
+        // дату, якої зміни не мали. Колонка, що показує неправду, знецінює й
+        // сусідні — правдиві.
+        //
+        // ⚠ Тією ж транзакцією, що й значення: дата зміни без самої зміни
+        // гірша за відсутність дати.
+        await documents.TouchAsync(instance.DocumentId, userId, now, ct).ConfigureAwait(false);
 
         await audit.WriteCellChangesAsync(
             BuildAuditRecords(request, upserts, deletes, userId, now, instance.DocumentId), ct).ConfigureAwait(false);
