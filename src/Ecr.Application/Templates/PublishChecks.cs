@@ -45,8 +45,6 @@ public static class PublishChecks
         var resolver = new ReferenceResolver(snapshot);
         var expander = new RangeExpander();
         var extractor = new DependencyExtractor(resolver, expander);
-        var typeChecker = new TypeChecker();
-        var unitChecker = new UnitChecker();
 
         var tables = snapshot.Sheets
             .SelectMany(s => s.Tables)
@@ -58,36 +56,24 @@ public static class PublishChecks
         {
             foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
             {
-                var parsed = formulaEngine.Parse(formula.Expression, formula.Dialect);
-                diagnostics.AddRange(parsed.Diagnostics);
+                // ⛔ Перевірки одного виразу винесені в `CheckExpression` і
+                // викликаються ЗВІДСИ. Редактор виразів (`ФВ-9.15a`) кличе той
+                // самий метод: інакше «перевірка при введенні» і публікація
+                // були б двома реалізаціями одного переліку, і редактор світив
+                // би зеленим те, що публікація відхилить.
+                var checkResult = CheckExpression(
+                    formula.Expression,
+                    formula.Dialect,
+                    new ExpressionSite(table.Id, RowKeyOf(table, formula), formula.ColumnDefId),
+                    new ExpressionScope(formulaEngine, tables, extractor, typeContext, unitContext),
+                    diagnostics);
 
-                if (parsed.Expression is null)
+                if (checkResult is null)
                 {
                     continue;
                 }
 
-                var root = parsed.Expression.Root;
-                var rowKey = RowKeyOf(table, formula);
-
-                // 11. Предикат динамічного діапазону — без заборонених конструкцій.
-                PredicateValidator.Validate(root, diagnostics);
-
-                // 2, 5, 12. Резолвінг посилань, розкриття діапазонів у списки
-                // RowKey, заборона конкретного RowKey для RowMode = Dynamic.
-                var dependencies = extractor.Extract(
-                    root, table.Id, rowKey, tables, diagnostics, formula.ColumnDefId);
-
-                // 3. Типи сумісні в кожній операції.
-                if (typeContext is not null)
-                {
-                    typeChecker.Check(root, typeContext, diagnostics);
-                }
-
-                // 9, 10. Одиниці сумісні або є явний CONVERT.
-                if (unitContext is not null)
-                {
-                    unitChecker.Check(root, unitContext, diagnostics);
-                }
+                var dependencies = checkResult.Dependencies;
 
                 nodes.Add(new FormulaNode(
                     formula.Id, table.Id, formula.Scope, formula.ColumnDefId, formula.RowDefId,
@@ -247,6 +233,87 @@ public static class PublishChecks
     private static string? RowKeyOf(TableDef table, FormulaDef formula)
         => Recalculation.FormulaOutputs.RowKeyOf(table, formula);
 
+    /// <summary>
+    /// Перевірки ОДНОГО виразу — рівно ті й рівно в тому порядку, які
+    /// застосовує публікація (<c>02b</c> §12, пункти 1–3, 5, 7–12).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Метод існує заради ОДНОГО твердження: «редактор показує ті самі
+    /// зауваження на тих самих позиціях, що й публікація» (<c>ФВ-9.15a</c>).
+    /// Друга реалізація цього переліку розійшлася б із першою на першій же
+    /// правці, і розбіжність була б видима не як помилка, а як довіра до
+    /// зеленого редактора, після якого публікація відмовляє.
+    ///
+    /// ⚠ Тут НЕМАЄ перевірок 4 і 6 — ациклічності графа і порядку обчислення.
+    /// Це не пропуск: цикл є властивістю ВЕРСІЇ, а не виразу. Один вираз не
+    /// містить у собі відповіді на питання, чи утворює він цикл із рештою, і
+    /// вдавати цю відповідь означало б обіцяти те, чого перевірка не робить.
+    /// </remarks>
+    /// <param name="expression">Текст виразу.</param>
+    /// <param name="dialect">Діалект (<c>D-113</c>).</param>
+    /// <param name="site">Місце виразу в структурі: таблиця, рядок, колонка.</param>
+    /// <param name="scope">Оточення перевірки: рушій, таблиці, контексти.</param>
+    /// <param name="diagnostics">Куди складати зауваження.</param>
+    /// <returns>
+    /// Розібраний вираз і його залежності; <c>null</c> — вираз не розібрався,
+    /// і решта перевірок безпредметна.
+    /// </returns>
+    public static ExpressionCheckResult? CheckExpression(
+        string expression,
+        ExpressionDialect dialect,
+        ExpressionSite site,
+        ExpressionScope scope,
+        List<ExpressionDiagnostic> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        // 1, 7, 8. Синтаксис, наявність функції в діалекті, кількість і типи
+        // аргументів; плюс заборонені в діалекті посилання.
+        var parsed = scope.FormulaEngine.Parse(expression, dialect);
+        diagnostics.AddRange(parsed.Diagnostics);
+
+        if (parsed.Expression is null)
+        {
+            return null;
+        }
+
+        var root = parsed.Expression.Root;
+
+        // 11. Предикат динамічного діапазону — без заборонених конструкцій.
+        // ⚠ Не потребує ані структури, ані контекстів: працює завжди.
+        PredicateValidator.Validate(root, diagnostics);
+
+        // 2, 5, 12. Резолвінг посилань, розкриття діапазонів у списки RowKey,
+        // заборона конкретного RowKey для RowMode = Dynamic.
+        //
+        // ⚠ Без розкривача залежностей ці три перевірки ПРОПУСКАЮТЬСЯ — саме
+        // так, як пропускаються типи й одиниці без своїх контекстів. Editor
+        // без версії шаблону перевіряє лише те, що можна перевірити без неї, і
+        // порожній перелік тоді означає «синтаксис цілий», а не «все гаразд».
+        IReadOnlyList<ExtractedDependency> dependencies = [];
+
+        if (scope.Extractor is { } extractor && site.TableDefId is { } tableDefId)
+        {
+            dependencies = extractor.Extract(
+                root, tableDefId, site.RowKey, scope.Tables, diagnostics, site.ColumnDefId);
+        }
+
+        // 3. Типи сумісні в кожній операції.
+        if (scope.TypeContext is { } typeContext)
+        {
+            new TypeChecker().Check(root, typeContext, diagnostics);
+        }
+
+        // 9, 10. Одиниці сумісні або є явний CONVERT.
+        if (scope.UnitContext is { } unitContext)
+        {
+            new UnitChecker().Check(root, unitContext, diagnostics);
+        }
+
+        return new ExpressionCheckResult(parsed.Expression, dependencies);
+    }
+
     /// <summary>Знімок структури версії — для резолвера посилань і типів.</summary>
     /// <param name="version">Версія, що публікується.</param>
     public static TemplateVersionSnapshot Snapshot(TemplateVersion version)
@@ -401,3 +468,47 @@ public static class PublishChecks
         }
     }
 }
+
+/// <summary>
+/// Місце виразу в структурі версії.
+/// </summary>
+/// <remarks>
+/// ⚠ Усі три поля необов'язкові, і це не послаблення. Редактор виразів
+/// відкривають і тоді, коли формула ще нікуди не прив'язана: людина пише текст
+/// і лише потім вирішує, чиєю колонкою він буде. Вимагати місце наперед
+/// означало б, що перевірити вираз можна лише після того, як його вже кудись
+/// поклали.
+/// </remarks>
+/// <param name="TableDefId">Таблиця, в якій живе вираз; <c>null</c> — ще ніде.</param>
+/// <param name="RowKey">Рядок формули; <c>null</c> для формул рівня колонки.</param>
+/// <param name="ColumnDefId">Колонка — для підстановки <c>{Month}</c>.</param>
+public readonly record struct ExpressionSite(int? TableDefId, string? RowKey, int? ColumnDefId);
+
+/// <summary>
+/// Оточення перевірки виразу: що саме можна перевірити в цьому виклику.
+/// </summary>
+/// <remarks>
+/// ⛔ Кожне поле, яке дорівнює <c>null</c>, ВИМИКАЄ свою групу перевірок, і
+/// перелік зауважень стає рівно настільки повним, наскільки повне оточення.
+/// Це названо явно, бо порожній перелік без структури означає «синтаксис
+/// цілий», а не «вираз правильний», — і сплутати ці два твердження означає
+/// пообіцяти публікацію, якої не буде.
+/// </remarks>
+/// <param name="FormulaEngine">Розбір виразу; потрібен завжди.</param>
+/// <param name="Tables">Таблиці версії для розкриття діапазонів.</param>
+/// <param name="Extractor">Резолвер посилань; <c>null</c> — посилання не перевіряються.</param>
+/// <param name="TypeContext">Джерело типів; <c>null</c> — типи не перевіряються.</param>
+/// <param name="UnitContext">Джерело одиниць; <c>null</c> — одиниці не перевіряються.</param>
+public sealed record ExpressionScope(
+    IFormulaEngine FormulaEngine,
+    IReadOnlyDictionary<int, TableDef> Tables,
+    DependencyExtractor? Extractor,
+    ITypeContext? TypeContext,
+    IUnitContext? UnitContext);
+
+/// <summary>Результат перевірки одного виразу.</summary>
+/// <param name="Expression">Розібраний вираз із типом результату.</param>
+/// <param name="Dependencies">Комірки, від яких вираз залежить.</param>
+public sealed record ExpressionCheckResult(
+    ParsedExpression Expression,
+    IReadOnlyList<ExtractedDependency> Dependencies);

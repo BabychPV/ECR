@@ -932,6 +932,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expressions/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Склад мови: функції діалекту і символи контексту. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Діалект (`D-113`). */
+                    dialect?: components["schemas"]["ExpressionDialect"];
+                    /** @description Версія шаблону — джерело полів `HDR.`. */
+                    templateVersionId?: number;
+                    /** @description Версія методології — джерело `CST.`, `!`, `@`. */
+                    methodologyVersionId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExpressionMetadataDto"];
+                        "text/json": components["schemas"]["ExpressionMetadataDto"];
+                        "text/plain": components["schemas"]["ExpressionMetadataDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expressions/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перевіряє вираз так само, як це зробить публікація.
+         * @description ⛔ `200` означає «перевірка виконалася», а НЕ «зауважень немає» —
+         *     так само, як у `POST /documents/{id}/validate`. Відмовляти
+         *     `422` на кожен проміжний стан тексту було б неправильно за суттю:
+         *     користувач друкує вираз посимвольно, і половина станів синтаксично
+         *     невалідна за побудовою. Помилка транспорту і незакінчена формула — різні
+         *     події, і однаковий код зробив би їх нерозрізнюваними.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ValidateExpressionBody"];
+                    "application/json": components["schemas"]["ValidateExpressionBody"];
+                    "text/json": components["schemas"]["ValidateExpressionBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExpressionValidationDto"];
+                        "text/json": components["schemas"]["ExpressionValidationDto"];
+                        "text/plain": components["schemas"]["ExpressionValidationDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{jobId}": {
         parameters: {
             query?: never;
@@ -4116,6 +4236,23 @@ export interface components {
              *     відповідь. */
             reason: string;
         };
+        /** @description Проблема публікації у відповіді API. */
+        DiagnosticInfo: {
+            /** @description Код помилки з каталогу. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Довжина проблемного фрагмента.
+             */
+            length: number;
+            /** @description Пояснення. */
+            message: string;
+            /**
+             * Format: int32
+             * @description Зсув у тексті виразу.
+             */
+            position: number;
+        };
         /** @description Створений документ. */
         DocumentIdResponse: {
             /**
@@ -4226,6 +4363,64 @@ export interface components {
              * @description Період вивантаження (R-A6).
              */
             periodKey: number;
+        };
+        /**
+         * @description Діалект виразу. Визначає набір дозволених функцій і посилань.
+         * @enum {unknown}
+         */
+        ExpressionDialect: "Template" | "Methodology";
+        /** @description Функція діалекту та її сигнатура. */
+        ExpressionFunctionDto: {
+            /** @description Чи приймає діапазон рядків замість скалярів. */
+            acceptsRange: boolean;
+            /**
+             * Format: int32
+             * @description Максимум; `null` — необмежено (агрегати).
+             */
+            maxArgs: null | number;
+            /**
+             * Format: int32
+             * @description Мінімум аргументів.
+             */
+            minArgs: number;
+            /** @description Ім'я. */
+            name: string;
+            /** @description Тип результату; `null` — сигнатури немає. */
+            resultType: null | string;
+        };
+        /** @description Склад мови виразів для діалекту й контексту. */
+        ExpressionMetadataDto: {
+            /** @description Поля рядка джерела — префікс `@`. */
+            arguments: components["schemas"]["ExpressionSymbolDto"][];
+            /** @description Константи методології — префікс `CST.`. */
+            constants: components["schemas"]["ExpressionSymbolDto"][];
+            /** @description Формули тієї самої версії — префікс `!`. */
+            formulas: components["schemas"]["ExpressionSymbolDto"][];
+            /** @description Функції діалекту з сигнатурами. */
+            functions: components["schemas"]["ExpressionFunctionDto"][];
+            /** @description Поля шапки документа — префікс `HDR.`. */
+            headers: components["schemas"]["ExpressionSymbolDto"][];
+        };
+        /** @description Символ, на який може посилатися вираз. */
+        ExpressionSymbolDto: {
+            /** @description Ім'я без префікса. */
+            name: string;
+            /** @description Коротке пояснення: категорія, тип даних. */
+            note: null | string;
+            /** @description Позначення одиниці; `null` — безрозмірний. */
+            unit: null | string;
+        };
+        /** @description Результат перевірки виразу. */
+        ExpressionValidationDto: {
+            /** @description Зауваження з позиціями — тими самими, які покаже публікація. */
+            diagnostics: components["schemas"]["DiagnosticInfo"][];
+            /** @description Тип результату виразу; `null` — вираз не розібрався. */
+            resultType: null | string;
+            /** @description Які перевірки НЕ виконувалися. ⛔ Порожній перелік зауважень при
+             *     непорожньому `SkippedChecks` означає «те, що перевіряли, ціле», а не
+             *     «вираз правильний»: сплутати ці два твердження означає пообіцяти
+             *     публікацію, якої не буде. */
+            skippedChecks: string[];
         };
         FileResult: {
             contentType?: null | string;
@@ -5447,6 +5642,30 @@ export interface components {
             receivesAlerts: boolean;
             /** @description Ім'я входу. */
             userName: string;
+        };
+        /** @description Тіло запиту на перевірку виразу. */
+        ValidateExpressionBody: {
+            /**
+             * Format: int32
+             * @description Колонка — для підстановки `{Month}`.
+             */
+            columnDefId: null | number;
+            /** @description Діалект (`D-113`). */
+            dialect: components["schemas"]["ExpressionDialect"];
+            /** @description Текст виразу. */
+            expression: string;
+            /** @description Рядок формули; `null` для формул рівня колонки. */
+            rowKey: null | string;
+            /**
+             * Format: int32
+             * @description Таблиця, в якій живе вираз.
+             */
+            tableDefId: null | number;
+            /**
+             * Format: int32
+             * @description Версія шаблону; `null` — перевіряється лише синтаксис.
+             */
+            templateVersionId: null | number;
         };
         /** @description Повідомлення валідації. */
         ValidationMessageDto: {

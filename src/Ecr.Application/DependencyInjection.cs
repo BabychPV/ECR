@@ -116,6 +116,10 @@ public static class DependencyInjection
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
+
+        // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
+        services.AddScoped<Expressions.ValidateExpressionHandler>();
+        services.AddScoped<Expressions.GetExpressionMetadataHandler>();
         services.AddScoped<Units.ListUnitsHandler>();
         services.AddScoped<Calculations.ListMethodologiesHandler>();
         services.AddScoped<Calculations.PublishMethodologyHandler>();

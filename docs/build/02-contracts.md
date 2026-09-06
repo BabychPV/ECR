@@ -2548,6 +2548,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |
+| `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |
+| `GET` | `/api/v1/expressions/metadata` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |

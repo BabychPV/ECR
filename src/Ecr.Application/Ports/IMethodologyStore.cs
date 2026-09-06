@@ -58,7 +58,48 @@ public interface IMethodologyStore
     /// </remarks>
     public Task<IReadOnlyList<MethodologyTestCase>> GetTestCasesAsync(
         int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Таблиця символів версії: на що взагалі можуть посилатися її вирази.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один метод на три переліки, бо це один предмет: `CST.`, `!` і `@` —
+    /// три способи назвати щось, що ІСНУЄ в цій версії, і питання «що тут
+    /// можна написати» має один відповідач. Три окремі виклики означали б три
+    /// походи в базу на кожне відкриття редактора (`ФВ-9.15a`).
+    ///
+    /// ⛔ Аргументи (`@`) — це коди КОЛОНОК таблиці, до якої прив'язана
+    /// методологія (`CalculationInputBuilder`: «ім'я аргументу — це код
+    /// колонки»). Тому їх не можна перелічити з самої методології: потрібна
+    /// прив'язка `cfg.CalculationBinding`. Без неї перелік порожній — і це
+    /// правда про стан, а не збій: непри'вязана методологія справді не має
+    /// аргументів, які можна назвати.
+    /// </remarks>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Константи, формули й аргументи версії.</returns>
+    public Task<MethodologySymbols> GetSymbolsAsync(int methodologyVersionId, CancellationToken ct);
 }
+
+/// <summary>Символи, видимі виразам версії методології.</summary>
+/// <param name="Constants">Константи — префікс <c>CST.</c>.</param>
+/// <param name="Formulas">Формули тієї самої версії — префікс <c>!</c>.</param>
+/// <param name="Arguments">Поля рядка джерела — префікс <c>@</c>.</param>
+public sealed record MethodologySymbols(
+    IReadOnlyList<MethodologySymbol> Constants,
+    IReadOnlyList<MethodologySymbol> Formulas,
+    IReadOnlyList<MethodologySymbol> Arguments);
+
+/// <summary>Один символ: ім'я, одиниця і пояснення.</summary>
+/// <remarks>
+/// ⚠ Одиниця віддається ІДЕНТИФІКАТОРОМ, а не позначенням. Розв'язати його в
+/// текст — робота застосунку, у якого є каталог одиниць; сховище, яке саме
+/// підставляє позначення, стало б другим місцем, де живе це знання.
+/// </remarks>
+/// <param name="Name">Ім'я символу без префікса.</param>
+/// <param name="UnitId">Одиниця; <c>null</c> — безрозмірний або невідомо.</param>
+/// <param name="Note">Коротке пояснення: категорія, тип даних.</param>
+public sealed record MethodologySymbol(string Name, int? UnitId, string? Note);
 
 /// <summary>
 /// Тест методології: вхід, очікувані виходи і допуск.
