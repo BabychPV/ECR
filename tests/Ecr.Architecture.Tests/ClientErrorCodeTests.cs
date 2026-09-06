@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Ecr.TestKit;
 using Xunit;
 
@@ -26,14 +26,34 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed partial class ClientErrorCodeTests
 {
-    /// <summary>Код помилки в тексті клієнта.</summary>
+    /// <summary>Код помилки, ужитий як рядковий літерал.</summary>
     /// <remarks>
-    /// ⚠ Той самий вираз, що й у <c>ContractIntegrityTests</c>: два різні
-    /// поняття «коду» дали б два різні переліки, і розбіжність між ними ніхто
-    /// б не побачив.
+    /// ⚠ Той самий вираз, що й у <c>ContractIntegrityTests</c>, але в лапках:
+    /// перевіряється те, що клієнт **уживає**, а не те, що він згадує. Різницю
+    /// довелося провести одразу — коментар, який пояснює, ЯКИЙ вигаданий код
+    /// тут стояв і чому його прибрали, інакше валив би сторожа, і єдиним
+    /// способом його заспокоїти було б стерти пояснення.
+    ///
+    /// ⛔ Коментарі при цьому знімаються ДО пошуку (<see cref="WithoutComments"/>),
+    /// а не покладаються на лапки: у поясненні код цілком природно взяти в
+    /// зворотні лапки за розміткою, і тоді літерал і згадка стали б
+    /// нерозрізненними.
     /// </remarks>
-    [GeneratedRegex(@"ECR-[A-Z]{3,4}-\d{4}")]
+    [GeneratedRegex(@"['""`](ECR-[A-Z]{3,4}-\d{4})['""`]")]
     private static partial Regex ErrorCode();
+
+    /// <summary>Рядкові коментарі TypeScript.</summary>
+    /// <remarks>
+    /// ⚠ <c>\r?\n</c>, а не голий перенос: у <c>PrincipleTests</c> така сама
+    /// межа з CRLF колись не збігалася ніде, і сторож мовчки стеріг порожнечу.
+    /// </remarks>
+    [GeneratedRegex(@"//[^\r\n]*|/\*.*?\*/", RegexOptions.Singleline)]
+    private static partial Regex Comment();
+
+    /// <summary>Текст без коментарів.</summary>
+    /// <param name="source">Вихідний текст модуля.</param>
+    private static string WithoutComments(string source)
+        => Comment().Replace(source, string.Empty);
 
     /// <summary>Оголошення коду в каталозі домену.</summary>
     [GeneratedRegex(@"""(ECR-[A-Z]{3,4}-\d{4})""")]
@@ -59,13 +79,15 @@ public sealed partial class ClientErrorCodeTests
 
         foreach (var file in Sources(web))
         {
-            var text = File.ReadAllText(file);
+            var text = WithoutComments(File.ReadAllText(file));
 
             foreach (Match match in ErrorCode().Matches(text))
             {
-                if (!catalog.Contains(match.Value))
+                var code = match.Groups[1].Value;
+
+                if (!catalog.Contains(code))
                 {
-                    unknown.Add($"{Path.GetFileName(file)}: {match.Value}");
+                    unknown.Add($"{Path.GetFileName(file)}: {code}");
                 }
             }
         }
