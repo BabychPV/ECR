@@ -25,7 +25,6 @@ namespace Ecr.TestKit;
 public sealed class RealFormulaEngine : IFormulaEngine
 {
     private readonly Parser _parser = new();
-    private readonly Evaluator _evaluator = new(new FunctionRegistry());
 
     /// <summary>
     /// Справжній фасад — саме він обходить AST.
@@ -42,11 +41,16 @@ public sealed class RealFormulaEngine : IFormulaEngine
         => _parser.Parse(expression, dialect);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Обчислення теж іде через БОЙОВИЙ фасад, а не через власний
+    /// <c>Evaluator</c>. Тут стояла своя копія одного рядка — і вона
+    /// приховувала цілу зміну: коли `FormulaEngine` почав передавати
+    /// обчислювачу діалект розібраного виразу (`I.14`), підміна цього рядка на
+    /// «завжди діалект шаблонів» не робила червоним ЖОДНОГО тесту в жодному
+    /// проєкті. Копія в один рядок — теж друга правда.
+    /// </remarks>
     public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context)
-    {
-        ArgumentNullException.ThrowIfNull(expression);
-        return new EvaluationResult(_evaluator.Evaluate(expression.Root, context), []);
-    }
+        => _engine.Evaluate(expression, context);
 
     /// <inheritdoc />
     public DependencyExtraction ExtractDependencies(

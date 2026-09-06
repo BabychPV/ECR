@@ -4,8 +4,10 @@ using Ecr.Application.Expressions;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -81,15 +83,66 @@ public sealed class ExpressionMetadataTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.15a")]
-    public async Task Діалект_методологій_дає_свої_двадцять_чотири()
+    public async Task Діалект_методологій_дає_виміряний_набір_а_не_вигаданий()
     {
+        // ⛔ Тест переписаний за `Q-082`. Стояло «24 функції, серед них SUM» —
+        // і обидва твердження були неправдою про чинну систему: замір
+        // (`tests/Ecr.Legacy.Probe`) дає 22 ядра плюс 4 розширення, а `SUM` у
+        // діалекті методологій немає ЗА ПОБУДОВОЮ МОВИ — там немає діапазонів,
+        // операнди скалярні. Редактор пропонував агрегат, який нема до чого
+        // застосувати.
         var result = await Handler()
             .HandleAsync(ExpressionDialect.Methodology, null, null, CancellationToken.None)
             .ConfigureAwait(true);
 
-        Assert.Equal(24, result.Functions.Count);
+        Assert.Equal(26, result.Functions.Count);
+        Assert.Equal(22, result.Functions.Count(f => f.Tier == "Core"));
+
         Assert.Contains(result.Functions, f => f.Name == "SUBSTANCE");
-        Assert.Contains(result.Functions, f => f.Name == "SUM");
+        Assert.Contains(result.Functions, f => f.Name == "Pow");
+        Assert.Contains(result.Functions, f => f.Name == "if");
+
+        Assert.DoesNotContain(result.Functions, f => f.Name == "SUM");
+        Assert.DoesNotContain(result.Functions, f => f.Name == "POWER");
+        Assert.DoesNotContain(result.Functions, f => f.Name == "SWITCH");
+
+        // ⚠ Регістр — частина імені: `ROUND` у чинному рушії невідомий, і
+        // підказати його означало б навчити писати те, що публікація відхилить.
+        Assert.DoesNotContain(result.Functions, f => f.Name == "ROUND");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.15a")]
+    public async Task Розширення_позначене_ярусом_і_в_Legacy_не_пропонується()
+    {
+        // ⛔ `Legacy` існує, щоб відтворити числа чинного рушія. Вираз, якого
+        // той обчислити не міг, за визначенням нічого не відтворює, і
+        // публікація його відхилить (`ECR-CALC-0433`). Тому редактор такої
+        // функції в `Legacy`-версії не пропонує ВЗАГАЛІ: показати її означало б
+        // запросити написати те, що не збережеться.
+        Version(NumericMode.Legacy);
+
+        var legacy = await Handler()
+            .HandleAsync(ExpressionDialect.Methodology, null, 7, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        Assert.Equal(22, legacy.Functions.Count);
+        Assert.All(legacy.Functions, f => Assert.Equal("Core", f.Tier));
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "CONVERT");
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "Ln");
+
+        // А в `Strict` вони законні — і приходять із позначкою ярусу, щоб
+        // редактор міг сказати, що це поза набором чинної системи.
+        Version(NumericMode.Strict);
+
+        var strict = await Handler()
+            .HandleAsync(ExpressionDialect.Methodology, null, 7, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        Assert.Equal(26, strict.Functions.Count);
+        Assert.Equal("Extension", Assert.Single(strict.Functions, f => f.Name == "Ln").Tier);
+        Assert.Equal("Core", Assert.Single(strict.Functions, f => f.Name == "Pow").Tier);
     }
 
     [Fact]
@@ -172,6 +225,27 @@ public sealed class ExpressionMetadataTests
 
     private GetExpressionMetadataHandler Handler()
         => new(_versions, _methodologies, _catalogue, _access, _user);
+
+    /// <summary>Версія методології 7 у заданому числовому режимі.</summary>
+    private void Version(NumericMode mode)
+    {
+        var methodology = new Methodology(EcrCode.Create("WATER_DISCHARGE"), Text("Water"));
+        var version = new MethodologyVersion(
+            methodologyId: 1,
+            version: "1.0.0.0",
+            CalculationLevel.Configuration,
+            createdByUserId: 7,
+            Now);
+
+        typeof(Entity<int>).GetProperty(nameof(Entity<int>.Id))!.SetValue(version, 7);
+        version.SetModes(mode, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+        methodology.AddVersion(version);
+
+        _methodologies.FindByVersionAsync(7, Arg.Any<CancellationToken>()).Returns(methodology);
+    }
+
+    private static LocalizedText Text(string value)
+        => new(new Dictionary<string, string> { ["en"] = value });
 
     /// <summary>Версія з одним діловим ключем серед звичайних колонок.</summary>
     private void Structure()

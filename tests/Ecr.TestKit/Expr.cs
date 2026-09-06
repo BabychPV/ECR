@@ -45,7 +45,7 @@ public static class Expr
         }
 
         return new Evaluator(new FunctionRegistry())
-            .Evaluate(parsed.Expression.Root, context ?? new TestEvaluationContext());
+            .Evaluate(parsed.Expression.Root, context ?? new TestEvaluationContext(), dialect);
     }
 
     /// <summary>Обчислює вираз і повертає число; зручно для арифметичних тестів.</summary>

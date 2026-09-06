@@ -58,6 +58,14 @@ public sealed class MethodologyPublishTests
         _methodology = new Methodology(EcrCode.Create("WATER_DISCHARGE"), Text("Water"));
         _version = AddVersion(VersionId, "1.1.0.0");
 
+        // ⛔ `Strict`, а не типовий `Legacy`, і це не «щоб зелене». Формули
+        // цього набору побудовані на `CONVERT` — нашій власній функції, якої в
+        // NCalc 1.3.8 немає. Версія в `Legacy` обіцяла б відтворити числа
+        // чинного рушія на виразі, якого той не рахував ніколи; саме це й
+        // відхиляє `ECR-CALC-0433` (`02b` §8). `Legacy` тут стояв за
+        // замовчуванням конструктора, а не за рішенням.
+        _version.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+
         _store.FindByVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(_methodology);
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(Formulas());
         _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(TestCases());
@@ -112,12 +120,63 @@ public sealed class MethodologyPublishTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Розширення_у_версії_Legacy_відхиляється_ECR_CALC_0433()
+    {
+        // ⛔ `Legacy` існує рівно для того, щоб відтворити ЧИСЛА чинного рушія
+        // (NCalc 1.3.8). `CONVERT` — наша власна функція, якої там немає, отже
+        // формула `gsec` не рахувалася чинною системою НІКОЛИ, і відтворювати
+        // їй нічого. Мовчазний пропуск дав би версію, яка обіцяє звірку, а
+        // звіряти нема з чим (`02b` §8).
+        _version.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0433", error.ErrorCode);
+
+        // ⚠ Повідомлення називає ФОРМУЛУ і ФУНКЦІЮ поіменно: «версія не пройшла
+        // перевірок» відправило б методолога перебирати всі чотири формули.
+        Assert.Contains("gsec", error.Message, StringComparison.Ordinal);
+        Assert.Contains("CONVERT", error.Message, StringComparison.Ordinal);
+
+        // ⛔ І версія лишається чернеткою: відмова публікації — це відмова, а
+        // не попередження в журналі.
+        Assert.False(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Ядро_каталогу_у_версії_Legacy_проходить()
+    {
+        // ⛔ Друга половина того самого правила, і без неї перша нічого не
+        // варта: сторож, який відхиляє все підряд, зелений із хибної причини.
+        // Формули з самих лише `Core`-функцій — а саме такі всі імпортовані з
+        // `AF_*` методології — публікуються в `Legacy` без зауважень.
+        _version.SetModes(NumericMode.Legacy, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+
+        _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(
+        [
+            Formula(201, "Volume", "@Jan + @Feb + @Mar"),
+            Formula(202, "MassKg", "Round(!Volume * CST.EF, 4)"),
+            Formula(203, "Peak", "Max(!MassKg, Pow(2, 3))"),
+        ]);
+
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.6")]
     public async Task Публікація_формує_diff_РЕЗУЛЬТАТІВ_а_не_diff_коду()
     {
         // Попередня чинна версія з іншим календарним режимом і іншим числом.
         var previous = AddVersion(PreviousVersionId, "1.0.0.0");
-        previous.SetModes(NumericMode.Legacy, CalendarMode.Fixed360, TraceLevel.ErrorsOnly);
+
+        // ⚠ Числовий режим той самий, що й у версії, яку публікуємо: предмет
+        // цього тесту — зміна КАЛЕНДАРЯ, і другий змінений режим сховав би її
+        // за собою. Обидва `Strict` з тієї ж причини, що й у конструкторі:
+        // формули набору побудовані на `CONVERT`.
+        previous.SetModes(NumericMode.Strict, CalendarMode.Fixed360, TraceLevel.ErrorsOnly);
         _methodology.PublishVersion(
             previous, Reviewer, "Базова", new DateOnly(2026, 1, 1), testsPassed: true, Now);
 

@@ -4387,6 +4387,8 @@ export interface components {
             name: string;
             /** @description Тип результату; `null` — сигнатури немає. */
             resultType: null | string;
+            /** @description Ярус: `Core` — чинний рушій це вміє; `Extension` — ні. */
+            tier: string;
         };
         /** @description Склад мови виразів для діалекту й контексту. */
         ExpressionMetadataDto: {

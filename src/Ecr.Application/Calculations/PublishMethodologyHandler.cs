@@ -86,7 +86,7 @@ public sealed class PublishMethodologyHandler(
         var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var greenTest = await IsGreenAsync(methodology, version, testCases, ct).ConfigureAwait(false);
 
-        await ApplyEvaluationOrderAsync(methodology, methodologyVersionId, from, ct).ConfigureAwait(false);
+        await ApplyEvaluationOrderAsync(methodology, version, from, ct).ConfigureAwait(false);
 
         // Чотири очі, причина, зелений тест і незайнята дата — усе в домені:
         // правило, розкидане по обробниках, забудеться на другому виклику.
@@ -128,8 +128,12 @@ public sealed class PublishMethodologyHandler(
     /// </para>
     /// </remarks>
     private async Task ApplyEvaluationOrderAsync(
-        Methodology methodology, int methodologyVersionId, DateOnly effectiveFrom, CancellationToken ct)
+        Methodology methodology,
+        MethodologyVersion version,
+        DateOnly effectiveFrom,
+        CancellationToken ct)
     {
+        var methodologyVersionId = version.Id;
         var formulas = await methodologies.GetFormulasAsync(methodologyVersionId, ct).ConfigureAwait(false);
 
         // ⛔ Імпорти розв'язуються НА ДАТУ набуття чинності, а не «сьогодні»:
@@ -193,6 +197,8 @@ public sealed class PublishMethodologyHandler(
         var outputs = await methodologies
             .GetOutputsAsync(methodologyVersionId, ct).ConfigureAwait(false);
 
+        RejectExtensionFunctions(parsed, version.NumericMode);
+
         problems.AddRange(MethodologyPublishChecks.Check(parsed, constants, outputs));
         Reject(problems);
 
@@ -222,6 +228,102 @@ public sealed class PublishMethodologyHandler(
             .ReplaceDependenciesAsync(methodology.Id, dependencies, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Відхиляє публікацію, якщо у версії з <c>NumericMode = Legacy</c> є
+    /// функція ярусу <c>Extension</c> (<c>ECR-CALC-0433</c>, <c>02b</c> §8).
+    /// </summary>
+    /// <param name="formulas">Розібрані формули версії.</param>
+    /// <param name="mode">Числовий режим версії.</param>
+    /// <remarks>
+    /// ⛔ Причина не в чистоті набору. <c>Legacy</c> існує рівно для того, щоб
+    /// відтворити ЧИСЛА чинного рушія (NCalc 1.3.8) — а вираз, якого той
+    /// обчислити не міг, за визначенням нічого не відтворює. <c>Ln</c> і
+    /// <c>ifs</c> у 1.3.8 не оголошені (виміряно, <c>tests/Ecr.Legacy.Probe</c>),
+    /// <c>CONVERT</c> і <c>SUBSTANCE</c> — наші власні. Формула з ними в
+    /// <c>Legacy</c>-версії обіцяє звірку, якої не буде з чим робити.
+    ///
+    /// ⛔ Окремий код, а не <c>ECR-CALC-0422</c>: у методолога тут рівно одна
+    /// правильна дія — перевести версію в <c>Strict</c> **з нової дати дії**
+    /// (<c>B13</c> §8 п. 2), і зводити це до загального «версія не пройшла
+    /// перевірок» означало б сховати саме ту відповідь, яка потрібна.
+    ///
+    /// ⛔ Перевірка стала можливою лише ПІСЛЯ того, як діалект методологій
+    /// почав розбиратися за <c>DialectCatalog</c> (<c>Q-082</c>). Доти
+    /// <c>TierOf</c> віддавав <c>Core</c> на будь-яке невідоме ім'я, тож
+    /// <c>SWITCH</c> — функція, якої в чинному рушії немає взагалі, — проходив
+    /// би цю перевірку як ядро. Сторож був би зелений із хибної причини, тобто
+    /// гірший за відсутній.
+    ///
+    /// ⚠ Перелік, а не перша знахідка: методолог, який виправляє їх по одній
+    /// за прогін, робить це стільки разів, скільки їх є.
+    /// </remarks>
+    private static void RejectExtensionFunctions(
+        IReadOnlyList<ParsedFormula> formulas, NumericMode mode)
+    {
+        if (mode != NumericMode.Legacy)
+        {
+            return;
+        }
+
+        var found = formulas
+            .Where(f => f.Root is not null)
+            .SelectMany(f => Calls(f.Root!).Select(call => (Formula: f.Code, call.Name)))
+            .Where(hit => !Ecr.Expressions.Functions.DialectCatalog.IsAllowedIn(hit.Name, mode))
+            .Select(hit => $"«{hit.Formula}»: {hit.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        if (found.Count == 0)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0433",
+            $"Версія оголошена в режимі {NumericMode.Legacy}, тобто обіцяє відтворити числа "
+            + "чинного рушія, але використовує функції, яких той не обчислює: "
+            + $"{string.Join("; ", found)}. Або приберіть їх, або переведіть версію в "
+            + $"{NumericMode.Strict} з нової дати дії.");
+    }
+
+    /// <summary>Усі виклики функцій у дереві, у порядку обходу.</summary>
+    /// <remarks>
+    /// ⚠ Обхід власний, а не рушієвий, і це не порушення <c>H-3</c>: рушій
+    /// віддає ЗАЛЕЖНОСТІ виразу, а тут питання інше — які імена функцій у
+    /// ньому названо. Спільного визначення в них немає, тому й другої правди
+    /// не виникає.
+    /// </remarks>
+    private static IEnumerable<Ecr.Expressions.Ast.FunctionNode> Calls(
+        Ecr.Expressions.Ast.AstNode node)
+    {
+        if (node is Ecr.Expressions.Ast.FunctionNode function)
+        {
+            yield return function;
+        }
+
+        foreach (var child in Children(node))
+        {
+            foreach (var found in Calls(child))
+            {
+                yield return found;
+            }
+        }
+    }
+
+    /// <summary>Прямі нащадки вузла.</summary>
+    private static IEnumerable<Ecr.Expressions.Ast.AstNode> Children(
+        Ecr.Expressions.Ast.AstNode node)
+        => node switch
+        {
+            Ecr.Expressions.Ast.BinaryNode binary => [binary.Left, binary.Right],
+            Ecr.Expressions.Ast.UnaryNode unary => [unary.Operand],
+            Ecr.Expressions.Ast.ConditionalNode conditional =>
+                [conditional.Condition, conditional.WhenTrue, conditional.WhenFalse],
+            Ecr.Expressions.Ast.FunctionNode function => function.Arguments,
+            _ => [],
+        };
 
     /// <summary>Відхиляє публікацію переліком проблем, якщо він непорожній.</summary>
     /// <remarks>
