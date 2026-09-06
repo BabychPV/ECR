@@ -2,6 +2,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Periods.Dto;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Periods;
 
@@ -29,8 +30,11 @@ public sealed class GetPeriodCalendarHandler(
             .RequireAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
+        // ⛔ `ECR-PRJ-0404`: суб'єкт відмови — проєкт, а старий `ECR-PRD-0422`
+        // обіцяв 422 цифрами і віддавав 404 конвеєром (`P-25`, рядок 4).
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт {projectId} не знайдено.");
+                      ?? throw new NotFoundException(
+                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
 

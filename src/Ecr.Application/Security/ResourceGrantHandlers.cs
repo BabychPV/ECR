@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Security;
 
@@ -97,7 +98,10 @@ public sealed class ReplaceResourceGrantsHandler(
 
         var role = (await users.ListRolesAsync(ct).ConfigureAwait(false))
             .FirstOrDefault(r => r.Id == roleId)
-            ?? throw new NotFoundException("ECR-ROW-0404", $"Ролі {roleId} не існує.");
+            // ⛔ Родина SEC, а не ROW (`P-25`, рядок 2): суб'єкт відмови —
+            // запис каталогу безпеки, а `ROW` маршрутизує на клієнті в
+            // обробник помилок рядка таблиці документа.
+            ?? throw new NotFoundException(ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.");
 
         // ⛔ Дублікат ловиться ТУТ, а не унікальним індексом: `UQ_ResourceGrant`
         // дав би 500 «внутрішня помилка» замість пояснення, який саме ресурс

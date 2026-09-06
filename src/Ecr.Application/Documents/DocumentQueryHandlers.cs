@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Documents;
 
@@ -25,10 +26,13 @@ public sealed class ListDocumentsHandler(
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
+        // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
+        // помилка параметра запиту, і показувати її в обробнику помилок
+        // комірки означало б говорити про сітку, якої ще ніхто не відкривав.
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                "ECR-CELL-0422", $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
         var all = await documents

@@ -51,10 +51,14 @@ public sealed class ListProjectsHandler(
             throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
         }
 
+        // ⛔ Родина REQ, а не CELL. Саме цей рядок і назвав дефект (`P-25`,
+        // рядок 1): хибний `limit` у переліку ПРОЄКТІВ приходив клієнтові як
+        // помилка валідації комірки документа — екрана, до якого користувач
+        // ще навіть не дійшов.
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                "ECR-CELL-0422", $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
         var all = await projects.ListAsync(page, ct).ConfigureAwait(false);
@@ -255,8 +259,11 @@ public sealed class ActivateProjectHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Родина PRJ, а не ROW (`P-25`, рядок 2). `ROW` — це рядок ТАБЛИЦІ
+        // ДОКУМЕНТА, і «проєкту немає» доїжджало до обробника помилок сітки,
+        // якої на екрані переліку проєктів немає взагалі.
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-ROW-0404", $"Проєкту {projectId} не існує.");
+            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
 
         if (project.Status != Domain.Enums.ProjectStatus.Draft)
         {
@@ -314,7 +321,7 @@ public sealed class ArchiveProjectHandler(
             .ConfigureAwait(false);
 
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-ROW-0404", $"Проєкту {projectId} не існує.");
+            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
 
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
         // текстом: людині треба знати, які саме періоди закрити, а не що
