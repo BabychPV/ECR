@@ -70,6 +70,20 @@ public sealed class ValidateExpressionTests
         _formulas.Parse(Arg.Any<string>(), Arg.Any<ExpressionDialect>())
                  .Returns(call => parser.Parse(call.ArgAt<string>(0), call.ArgAt<ExpressionDialect>(1)));
 
+        // ⛔ Обхід AST теж справжній. Заглушка тут зробила б головний тест
+        // порожнім: резолвінг посилань живе саме в ньому, і без нього ні
+        // редактор, ні публікація не сказали б нічого про `[Apr]` — а тест
+        // порівнював би дві однакові порожнечі й лишався зеленим завжди.
+        var engine = new RealFormulaEngine();
+        _formulas.ExtractDependencies(
+                     Arg.Any<ParsedExpression>(),
+                     Arg.Any<TemplateVersionSnapshot?>(),
+                     Arg.Any<DependencyContext>())
+                 .Returns(call => engine.ExtractDependencies(
+                     call.ArgAt<ParsedExpression>(0),
+                     call.ArgAt<TemplateVersionSnapshot?>(1),
+                     call.ArgAt<DependencyContext>(2)));
+
         _formulas.BuildEvaluationOrder(Arg.Any<IReadOnlyList<FormulaNode>>())
                  .Returns(call => new OrderingResult(
                      true, call.Arg<IReadOnlyList<FormulaNode>>().Select(n => n.FormulaDefId).ToList(), null));
@@ -189,7 +203,53 @@ public sealed class ValidateExpressionTests
             .ConfigureAwait(true);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.15a")]
+    public async Task І_редактор_і_публікація_витягують_залежності_через_ПОРТ_зі_знімком_чернетки()
+    {
+        // ⛔ Тест упаде, щойно хтось знову заведе власний `DependencyExtractor`
+        // у редакторі або в публікації. Саме так і було: порт брав знімок із
+        // КЕШУ, а обидва шляхи працюють над ЧЕРНЕТКОЮ, якої в кеші немає за
+        // побудовою, — тож обидва йшли повз порт і тримали по власній копії
+        // обходу AST. Дві копії відповіді на питання «від чого залежить
+        // формула» розходяться на першій правці, і розбіжність видно не як
+        // помилку, а як довіру до зеленого редактора, після якого публікація
+        // відмовляє (`H-3`, директива №06 §1).
+        var table = Structure("SUM([Jan], [Apr])");
+
+        await PublishDiagnosticsAsync().ConfigureAwait(true);
+        var afterPublish = Extractions();
+
+        await EditorDiagnosticsAsync("SUM([Jan], [Apr])", table).ConfigureAwait(true);
+        var afterEditor = Extractions();
+
+        Assert.NotEmpty(afterPublish);
+        Assert.True(
+            afterEditor.Count > afterPublish.Count,
+            "редактор теж має ходити через порт, а не обходити його власним розкривачем");
+
+        // ⛔ Знімок — саме ЧЕРНЕТКИ, і приходить він параметром. Це і є та
+        // обставина, через яку метод порту раніше був недосяжним: із кешу
+        // чернетка не прийшла б узагалі, і перевірка мовчки працювала б над
+        // попередньою редакцією структури.
+        Assert.All(afterEditor, snapshot =>
+        {
+            Assert.NotNull(snapshot);
+            Assert.Equal(_draft.Id, snapshot.TemplateVersionId);
+        });
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Знімки, з якими рушій просили витягти залежності.</summary>
+    private List<TemplateVersionSnapshot?> Extractions()
+        => [.. _formulas.ReceivedCalls()
+            .Where(c => string.Equals(
+                c.GetMethodInfo().Name,
+                nameof(IFormulaEngine.ExtractDependencies),
+                StringComparison.Ordinal))
+            .Select(c => (TemplateVersionSnapshot?)c.GetArguments()[1])];
 
     private ValidateExpressionHandler Handler()
         => new(_versions, _catalogue, _formulas, _access, _user);

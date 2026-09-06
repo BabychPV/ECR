@@ -165,14 +165,65 @@ public sealed class PublishMethodologyHandler(
     }
 
     /// <summary>Формули, на які посилається ця через <c>!Code</c>.</summary>
-    private static List<int> DependsOn(
+    /// <remarks>
+    /// ⛔ Ребра будуються з РОЗІБРАНОГО виразу, а не пошуком підрядка. Пошук
+    /// підрядка — це пастка 4 директиви ПК-1 №05 §7, і вона була в нашому
+    /// коді: `Expression.Contains("!" + code)` вважає, що `!k1_GasComp`
+    /// містить посилання на `k1`. На чинному корпусі це 786 хибних ребер із
+    /// 8474 — 9,3 %: 14 збігів серед коротких імен констант (`k1 ⊂ k10`,
+    /// `a ⊂ a0`, `LHV ⊂ LHV0`, `Vch ⊂ Vchmax`) і 75 у родині складу газу
+    /// (`CmHnP_GCV_C12_1 ⊂ mn4CmHnP_GCV_C12_1`).
+    ///
+    /// ⚠ Наслідок вади — і, отже, наслідок виправлення — стосується
+    /// ІНВАЛІДАЦІЇ, а не підстановки значень. Зайве ребро не робить число
+    /// неправильним: воно лише додає формулу в чергу на перерахунок. Чинна
+    /// система рахує більше, ніж потрібно, а не рахує неправильно. Після цієї
+    /// зміни перерахунок торкається МЕНШОЇ множини формул — це очікуваний
+    /// результат, а не втрата.
+    ///
+    /// ⚠ Обхід AST не свій, а рушієвий (<c>H-3</c>): друге визначення того, від
+    /// чого залежить формула, розійшлося б із першим, і розбіжність була б
+    /// видима лише як порядок обчислення, що раптом став іншим.
+    ///
+    /// ⚠ Вираз, який не розбирається, ребер не дає: синтаксис — не предмет
+    /// цього методу. Опублікуватися така версія однаково не зможе, бо
+    /// порожній або червоний золотий набір публікацію не пропускає
+    /// (<see cref="GoldenSet.IsGreen"/>).
+    /// </remarks>
+    private List<int> DependsOn(
         MethodologyFormula formula, Dictionary<string, MethodologyFormula> byCode)
-        => byCode
-            .Where(pair => !string.Equals(pair.Key, formula.Code, StringComparison.OrdinalIgnoreCase))
-            .Where(pair => formula.Expression.Contains(
-                "!" + pair.Key, StringComparison.OrdinalIgnoreCase))
-            .Select(pair => pair.Value.Id)
-            .ToList();
+    {
+        var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
+        if (parsed.Expression is null)
+        {
+            return [];
+        }
+
+        // ⚠ Знімок структури не передається: діалект методологій не має
+        // посилань на комірки документа за побудовою — парсер відхиляє їх
+        // окремою помилкою. Резолвити тут нічого.
+        var extraction = formulaEngine.ExtractDependencies(
+            parsed.Expression,
+            snapshot: null,
+            new DependencyContext(CurrentTableDefId: 0, CurrentRowKey: null, CurrentColumnDefId: null));
+
+        var edges = new List<int>();
+
+        foreach (var code in extraction.Dependencies.Select(d => d.FormulaCode))
+        {
+            // ⚠ Самопосилання ребром не стає: формула, що читає власний
+            // результат, — це не порядок обчислення, а окреме питання, і
+            // топологічне сортування назвало б її циклом без пояснення.
+            if (code is not null
+                && byCode.TryGetValue(code, out var target)
+                && target.Id != formula.Id)
+            {
+                edges.Add(target.Id);
+            }
+        }
+
+        return edges;
+    }
 
     /// <summary>Чи зійшовся золотий набір у межах допуску.</summary>
     private async Task<bool> IsGreenAsync(

@@ -1,4 +1,5 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Functions;
@@ -16,14 +17,25 @@ namespace Ecr.TestKit;
 /// Ці частини — чистий код <c>Ecr.Expressions</c> без бази, HTTP і часу, тому
 /// в тестах вони беруться справжніми.
 ///
-/// Заглушені лише дві операції, які потребують знімка метаданих із кешу:
-/// витягування залежностей і топологічний порядок. Їхню власну поведінку
-/// перевіряють <c>RangeExpansionTests</c> і <c>TopologicalSorterTests</c>.
+/// ⛔ Витягування залежностей БІЛЬШЕ НЕ ЗАГЛУШЕНЕ. Заглушка стояла тут, доки
+/// метод сам діставав знімок структури з кешу; тепер знімок приходить
+/// параметром (<c>H-3</c>), і повертати порожній перелік означало б, що тест
+/// «редактор каже те саме, що публікація» звіряє дві порожнечі.
 /// </remarks>
 public sealed class RealFormulaEngine : IFormulaEngine
 {
     private readonly Parser _parser = new();
     private readonly Evaluator _evaluator = new(new FunctionRegistry());
+
+    /// <summary>
+    /// Справжній фасад — саме він обходить AST.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не власна копія обходу: друга проєкція залежностей у тестовому коді
+    /// розійшлася б із бойовою, і тест підтверджував би сам себе.
+    /// </remarks>
+    private readonly Ecr.Infrastructure.Expressions.FormulaEngine _engine =
+        new(new Parser(), new Evaluator(new FunctionRegistry()), new TopologicalSorter());
 
     /// <inheritdoc />
     public ParseResult Parse(string expression, ExpressionDialect dialect)
@@ -37,8 +49,9 @@ public sealed class RealFormulaEngine : IFormulaEngine
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<FormulaDependencyRef> ExtractDependencies(
-        ParsedExpression expression, DependencyContext context) => [];
+    public DependencyExtraction ExtractDependencies(
+        ParsedExpression expression, TemplateVersionSnapshot? snapshot, DependencyContext context)
+        => _engine.ExtractDependencies(expression, snapshot, context);
 
     /// <inheritdoc />
     /// <remarks>
