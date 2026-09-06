@@ -3,11 +3,48 @@ using Ecr.Domain.Enums;
 namespace Ecr.Expressions;
 
 /// <summary>
+/// Хто читає вираз: методолог у конфігураторі чи міграція з <c>AF_*</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Це не «режим сумісності» і не глобальний перемикач. Різниця рівно одна і
+/// вона названа в директиві №05 §4, пункт 5: у чинному корпусі параметр
+/// пишеться і як <c>@Total</c>, і як голе <c>Total</c> — в ОДНІЙ формулі
+/// (`Duration` 16 вживань, `Total` 9, `FlareUnitMode` 6, `IsPilot` 2 і ще дві
+/// назви профільних модулів). Не прийняти голе ім'я означає не імпортувати ці
+/// формули взагалі; прийняти його в редакторі означає втратити однозначність:
+/// <c>Duration</c> перестає відрізнятися від невідомої функції й від описки в
+/// назві. Тому імпортер його НОРМАЛІЗУЄ до <c>@Duration</c> (друк дерева
+/// повертає вже префіксовану форму), а редактор відхиляє.
+///
+/// ⚠ Голе ім'я лишається властивістю САМЕ діалекту методологій: у діалекті
+/// шаблонів операнд без дужок — це не параметр, а незакрите посилання на
+/// комірку, і мовчки зробити з нього аргумент означало б приховати помилку
+/// імпорту з Excel.
+///
+/// ⚠ Режим передається розбором (<c>Parser.Parse</c>), а не зберігається
+/// ніде: властивість тексту, який читають, а не версії методології. Версія
+/// після імпорту вже нормалізована, і другого читання в режимі
+/// <see cref="Import"/> їй не потрібно.
+/// </remarks>
+public enum ExpressionParseMode : byte
+{
+    /// <summary>Методолог пише вираз у конфігураторі — граматика строга.</summary>
+    Editor = 0,
+
+    /// <summary>Міграція читає текст чинної системи — приймає ще й голі імена.</summary>
+    Import = 1,
+}
+
+/// <summary>
 /// Синтаксичні властивості діалекту — те, чим діалекти різняться на рівні
 /// ГРАМАТИКИ, а не набору функцій і посилань.
 /// </summary>
 /// <param name="ArgumentSeparator">Символ між аргументами виклику функції.</param>
 /// <param name="CaretIsPower">Чи означає <c>^</c> піднесення до степеня.</param>
+/// <param name="BareNameIsArgument">
+/// Чи означає ідентифікатор без <c>@</c> посилання на параметр. Істина лише
+/// для <see cref="ExpressionParseMode.Import"/> діалекту методологій.
+/// </param>
 /// <remarks>
 /// ⛔ Досі різниця між діалектами була лише в дозволених посиланнях і функціях
 /// (<c>D-19</c>), а роздільник аргументів був літералом у лексері. Замір
@@ -17,7 +54,8 @@ namespace Ecr.Expressions;
 /// тихо ламає ЧИСЛА, тому мусить бути явною властивістю діалекту, а не
 /// константою, закопаною в лексер.
 /// </remarks>
-public sealed record DialectSyntax(char ArgumentSeparator, bool CaretIsPower)
+public sealed record DialectSyntax(
+    char ArgumentSeparator, bool CaretIsPower, bool BareNameIsArgument = false)
 {
     // Діалект шаблонів: `^` — степінь, і саме на цьому тримається чинний тест
     // `Степінь_правоасоціативний_2_у_3_у_2_дорівнює_512`. Тут нічого не
@@ -36,8 +74,22 @@ public sealed record DialectSyntax(char ArgumentSeparator, bool CaretIsPower)
     // не альтернативний синтаксис, а поодинокі випадки.
     private static readonly DialectSyntax MethodologySyntax = new(',', CaretIsPower: false);
 
+    // Той самий діалект очима МІГРАЦІЇ. Різниця лише в голому імені: решта
+    // граматики спільна, інакше імпортер розбирав би не ту мову, яку потім
+    // редагують.
+    private static readonly DialectSyntax MethodologyImportSyntax =
+        MethodologySyntax with { BareNameIsArgument = true };
+
     /// <summary>Синтаксис діалекту.</summary>
     /// <param name="dialect">Діалект виразу.</param>
-    public static DialectSyntax Of(ExpressionDialect dialect)
-        => dialect == ExpressionDialect.Template ? TemplateSyntax : MethodologySyntax;
+    /// <param name="mode">
+    /// Хто читає текст. За замовчуванням <see cref="ExpressionParseMode.Editor"/>:
+    /// послаблення граматики має бути ЯВНИМ проханням імпортера, а не станом,
+    /// у який система потрапляє за замовчуванням.
+    /// </param>
+    public static DialectSyntax Of(
+        ExpressionDialect dialect, ExpressionParseMode mode = ExpressionParseMode.Editor)
+        => dialect == ExpressionDialect.Template
+            ? TemplateSyntax
+            : mode == ExpressionParseMode.Import ? MethodologyImportSyntax : MethodologySyntax;
 }

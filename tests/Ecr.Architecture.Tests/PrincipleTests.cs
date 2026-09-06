@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Ecr.TestKit;
 using Xunit;
 
@@ -370,10 +370,20 @@ public sealed partial class PrincipleTests
     /// <c>$"…{Status}"</c>, тобто фігурні дужки всередині рядка всередині
     /// вкладеного блоку. Вираз із балансуванням на глибину два не збігався
     /// НІ З ЧИМ — і сторож мовчав би, якби не перевірка на порожній результат.
+    ///
+    /// ⛔ Перенос рядка в межі — <c>\r?\n</c>, а не сам символ переносу з
+    /// цього файлу. Доти межа несла CRLF (дослівний рядок зберігає байти
+    /// джерела), а текст, у якому шукають, приходить із
+    /// <c>WithoutComments</c> — і там <c>//[^\n]*</c> з'їдає <c>\r</c> разом
+    /// із коментарем. Перед КОЖНИМ переходом стоїть <c>///</c>-документація,
+    /// тож перед кожним <c>public void</c> лишався голий <c>\n</c>: межа не
+    /// збігалася ніде, увесь файл ставав тілом ПЕРШОГО методу, і сторож бачив
+    /// один перехід із чотирьох. Розбіжність у <c>submit</c>, <c>approve</c>
+    /// чи <c>reject</c> він не спіймав би взагалі — а на CRLF-викачці ще й
+    /// падав, показуючи розходження, якого немає.
     /// </remarks>
     [GeneratedRegex(
-        @"public void (Submit|Approve|Reject|Reopen)\([^)]*\)(?<body>.*?)(?=
-    public |\z)",
+        @"public void (Submit|Approve|Reject|Reopen)\([^)]*\)(?<body>.*?)(?=\r?\n    public |\z)",
         RegexOptions.Singleline)]
     private static partial Regex TransitionMethodRegex { get; }
 

@@ -82,6 +82,21 @@ public sealed class Lexer(DialectSyntax syntax)
                     // Плейсхолдер колонки: `{Month}`, `{Period}` (02b §1).
                     tokens.Add(ReadPlaceholder(expression, ref i));
                     continue;
+
+                case '@':
+                    // ⛔ Ім'я параметра читається ТУТ, разом із `@`, а не
+                    // загальним `ReadWord` — бо воно єдине в мові може містити
+                    // крапки: `@GCV.HSE400_FG_Makat_Methane`. З 4230 посилань
+                    // `@` у корпусі 2534 із крапкою, тобто без цього більшість
+                    // формул HSE400 і Flert не розбирається взагалі.
+                    tokens.Add(new Token(TokenType.At, "@", start, 1));
+                    i++;
+                    if (i < expression.Length && (char.IsLetter(expression[i]) || expression[i] == '_'))
+                    {
+                        tokens.Add(ReadDottedName(expression, ref i));
+                    }
+
+                    continue;
             }
 
             if (char.IsDigit(c))
@@ -250,6 +265,56 @@ public sealed class Lexer(DialectSyntax syntax)
         return new Token(TokenType.Identifier, text, start, i - start);
     }
 
+    /// <summary>
+    /// Ім'я параметра після <c>@</c> — ОДНА лексема разом із крапками.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Чинна система обходиться без такої лексеми: вона переписує текст
+    /// перед обчисленням (`Utilities.cs:220-236`) — знімає <c>@</c> і замінює
+    /// крапки підкресленнями, <c>Regex.Replace(expr, @"(?&lt;!\d)\.(?!\d)",
+    /// "_")</c>, ту саму заміну застосовуючи до <c>FInfo_Arguments</c>. Заміна
+    /// симетрична і тому правильна, але нам вона не потрібна: парсер читає
+    /// текст таким, як його написали. Потрібна не переписка, а ГРАМАТИКА, що
+    /// приймає дотове ім'я цілим.
+    ///
+    /// ⚠ Крапка продовжує ім'я лише перед літерою або підкресленням. Це і є
+    /// перенесене «(?!\d)» чинного регулярного виразу — воно там стоїть, щоб
+    /// сліпа заміна по всьому тексту не зіпсувала ЧИСЛОВИЙ літерал
+    /// (<c>1.5</c> → <c>1_5</c>). Тут зіпсувати нічого: ім'я вже почалося з
+    /// літери, і число всередині нього початися не може, — але межу треба
+    /// тримати з того самого боку, інакше <c>@Rate.5</c> стало б іменем.
+    ///
+    /// ⚠ Симетричного «(?&lt;!\d)» тут НЕМАЄ, і це свідомо: зворотний перегляд
+    /// у чинному регулярному виразі захищає число зліва (<c>12.</c>), а в
+    /// межах імені зліва завжди ім'я. Наслідок названий: <c>@HSE400.X</c> ми
+    /// приймемо, а чинна система — ні (там крапка після цифри не замінюється,
+    /// і NCalc падає на такому імені). Розбіжність безпечна в один бік:
+    /// формула, якої чинна система не рахувала, у нас не мовчить, а голосно
+    /// не резолвиться проти <c>FormulaDef.Arguments</c> при публікації.
+    /// </remarks>
+    private static Token ReadDottedName(string s, ref int i)
+    {
+        var start = i;
+
+        while (true)
+        {
+            while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_'))
+            {
+                i++;
+            }
+
+            if (i + 1 < s.Length && s[i] == '.' && (char.IsLetter(s[i + 1]) || s[i + 1] == '_'))
+            {
+                i++;
+                continue;
+            }
+
+            break;
+        }
+
+        return new Token(TokenType.Identifier, s[start..i], start, i - start);
+    }
+
     /// <summary>Оператор або розділовий знак.</summary>
     private static Token ReadOperator(string s, ref int i, char argumentSeparator)
     {
@@ -296,7 +361,10 @@ public sealed class Lexer(DialectSyntax syntax)
             '.' => TokenType.Dot,
             ':' => TokenType.Colon,
             '?' => TokenType.Question,
-            '@' => TokenType.At,
+
+            // ⚠ `@` сюди не доходить: він розбирається разом зі своїм іменем
+            // вище. Рядок тут був би не запасним варіантом, а другим місцем,
+            // де вирішується форма посилання на параметр.
             '!' => TokenType.Bang,
             '&' => TokenType.Ampersand,
             '+' => TokenType.Plus,
