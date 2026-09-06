@@ -29,7 +29,7 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.15")]
+    [Trait("Requirement", "ФВ-9.14")]
     public void Мітка_категорії_у_виразі_відхиляє_публікацію()
     {
         // ⛔ Упаде, якщо мітку зрівняти з текстовою константою. Підставлена у
@@ -45,7 +45,7 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.15")]
+    [Trait("Requirement", "ФВ-9.14")]
     public void Текстова_константа_в_порівнянні_проблемою_НЕ_є()
     {
         // ⛔ Найважливіший тест набору: він стереже саме те, що директива
@@ -64,7 +64,7 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.15")]
+    [Trait("Requirement", "ФВ-9.14")]
     public void Текстова_константа_в_арифметиці_відхиляється()
     {
         // ⚠ Той самий `'-'`, лише класифікований як текст. У порівнянні він
@@ -95,7 +95,7 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.15")]
+    [Trait("Requirement", "ФВ-9.14")]
     public void Формула_що_повертає_лише_текст_не_може_бути_числовою()
     {
         const string verdict = "if(@Excess > 0, 'Сверхнорматив', 'В пределе норматива')";
@@ -111,7 +111,7 @@ public sealed class MethodologyPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.15")]
+    [Trait("Requirement", "ФВ-9.14")]
     public void Числова_формула_оголошена_текстовою_відхиляється()
     {
         // Зворотний бік: число, оголошене текстом, тихо проходить у звіт рядком
