@@ -1,4 +1,5 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Binding;
 using Ecr.Expressions.Evaluation;
@@ -22,39 +23,61 @@ namespace Ecr.Infrastructure.Expressions;
 public sealed class FormulaEngine(
     Parser parser,
     Evaluator evaluator,
-    TopologicalSorter sorter,
-    ITemplateStructure structure) : IFormulaEngine
+    TopologicalSorter sorter) : IFormulaEngine
 {
+    /// <summary>
+    /// Знімок «структури немає» для виклику без версії шаблону.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній знімок, а не <c>null</c> усередині: <c>ReferenceResolver</c>
+    /// вимагає знімок, і без нього посилання на комірку впало б винятком
+    /// замість того, щоб стати зауваженням. У діалекті методологій таких
+    /// посилань немає за побудовою, тож сюди резолвер не заглядає взагалі.
+    /// </remarks>
+    private static readonly TemplateVersionSnapshot Structureless = new(
+        TemplateVersionId: 0,
+        PresentationRevision: 0,
+        Sheets: [],
+        ColumnsById: new Dictionary<int, ColumnDef>(),
+        RowsByKey: new Dictionary<(int TableDefId, string RowKey), RowDef>());
+
     /// <inheritdoc />
     public ParseResult Parse(string expression, ExpressionDialect dialect)
         => parser.Parse(expression, dialect);
 
     /// <inheritdoc />
-    public IReadOnlyList<FormulaDependencyRef> ExtractDependencies(
-        ParsedExpression expression, DependencyContext context)
+    public DependencyExtraction ExtractDependencies(
+        ParsedExpression expression, TemplateVersionSnapshot? snapshot, DependencyContext context)
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(context);
 
-        // ⚠ Знімок береться СИНХРОННО з кешу, а не очікуванням асинхронного
-        // виклику: сигнатура порту заморожена контрактом, і `GetAwaiter().
-        // GetResult()` тут виїдав би пул потоків саме на піку останнього дня
-        // періоду. Контракт ITemplateStructure сильніший — знімок має бути вже
-        // завантажений, і на шляху публікації це так і є.
-        var snapshot = structure.Get(context.TemplateVersionId);
+        var structure = snapshot ?? Structureless;
 
-        var tables = snapshot.Sheets
+        var tables = structure.Sheets
             .SelectMany(s => s.Tables)
             .ToDictionary(t => t.Id);
 
-        var extractor = new DependencyExtractor(new ReferenceResolver(snapshot), new RangeExpander());
+        // ⛔ Зауваження резолвінгу збираються тим самим обходом і повертаються
+        // разом: без них перевірки 2, 5 і 12 з `02b` §12 просто зникли б —
+        // нерезолвлене посилання проходило б публікацію і ставало б `#REF` у
+        // звіті через місяць.
+        var diagnostics = new List<ExpressionDiagnostic>();
+        var extractor = new DependencyExtractor(new ReferenceResolver(structure), new RangeExpander());
 
-        return extractor
-            .Extract(expression.Root, context.CurrentTableDefId, context.CurrentRowKey, tables)
-            .Select(d => new FormulaDependencyRef(
+        var found = extractor.Extract(
+            expression.Root,
+            context.CurrentTableDefId,
+            context.CurrentRowKey,
+            tables,
+            diagnostics,
+            context.CurrentColumnDefId);
+
+        return new DependencyExtraction(
+            [.. found.Select(d => new FormulaDependencyRef(
                 d.DependsOnKind, d.TableDefId, d.RowKey, d.ColumnDefId,
-                d.FilterJson, d.PeriodOffset, d.SortOrder))
-            .ToList();
+                d.FilterJson, d.PeriodOffset, d.SortOrder))],
+            diagnostics);
     }
 
     /// <inheritdoc />

@@ -988,7 +988,15 @@ public interface IFormulaEngine
     /// Витягує залежності виразу. Діапазони рядків розкриваються в явний список
     /// <c>RowKey</c> на момент <c>Publish</c> — у рантаймі діапазонів не існує (B03 §4).
     /// </summary>
-    public IReadOnlyList<FormulaDependencyRef> ExtractDependencies(ParsedExpression expression, DependencyContext context);
+    /// <remarks>
+    /// ⛔ Знімок приходить ПАРАМЕТРОМ, а не з кешу метаданих (<c>H-3</c>,
+    /// директива №06 §1): і редактор виразів, і публікація працюють над
+    /// чернеткою, якої в кеші немає за побудовою, — тому доти методом порту не
+    /// міг скористатися ніхто. <c>null</c> означає «структури немає»: у
+    /// діалекті методологій посилань на комірки не буває.
+    /// </remarks>
+    public DependencyExtraction ExtractDependencies(
+        ParsedExpression expression, TemplateVersionSnapshot? snapshot, DependencyContext context);
 
     /// <summary>Обчислює вираз.</summary>
     public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
@@ -1036,24 +1044,44 @@ public sealed record FormulaDependencyRef(
     int SortOrder);
 
 /// <summary>
+/// Результат витягування: залежності і зауваження, здобуті одним обходом.
+/// </summary>
+/// <remarks>
+/// ⛔ Зауваження повертаються РАЗОМ із залежностями: резолвінг посилань і є той
+/// самий обхід — він або дає залежність, або пояснює, чому не дав. Два обходи
+/// дали б два переліки зауважень, які розходяться, а на їхній тотожності
+/// тримається <c>ФВ-9.15a</c>.
+/// </remarks>
+/// <param name="Dependencies">Розкриті залежності виразу.</param>
+/// <param name="Diagnostics">Що не резолвилося; порожньо — усе резолвилося.</param>
+public sealed record DependencyExtraction(
+    IReadOnlyList<FormulaDependencyRef> Dependencies,
+    IReadOnlyList<ExpressionDiagnostic> Diagnostics);
+
+/// <summary>
 /// Контекст витягування залежностей: те, чого немає в самому виразі, але без
 /// чого скорочені форми посилань не резолвляться (02b §3.1).
 /// </summary>
 /// <remarks>
-/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Два останні поля дослівно повторюють
-/// параметри <c>DependencyExtractor.Extract(AstNode, int currentTableDefId,
-/// string? currentRowKey)</c> і <c>ReferenceResolver.Resolve(...)</c> з `05d`.
-/// <see cref="TemplateVersionId"/> додано мною: резолвер працює зі
-/// <c>TemplateVersionSnapshot</c>, і без ідентифікатора версії порт не може
-/// його дістати.
+/// ⚠ <b>Q-014, обґрунтування — тверде.</b> Поля дослівно повторюють параметри
+/// <c>DependencyExtractor.Extract(AstNode, int currentTableDefId,
+/// string? currentRowKey, …, int? currentColumnDefId)</c> і
+/// <c>ReferenceResolver.Resolve(...)</c> з `05d`.
+///
+/// ⚠ Поля <c>TemplateVersionId</c> тут БІЛЬШЕ НЕМАЄ (<c>H-3</c>): воно існувало
+/// заради того, щоб порт сам дістав знімок із кешу, а знімок тепер приходить
+/// параметром і сам несе свою версію.
 /// </remarks>
-/// <param name="TemplateVersionId">Версія шаблону, у межах якої резолвляться коди.</param>
 /// <param name="CurrentTableDefId">Таблиця, в якій живе формула — для скорочених форм.</param>
 /// <param name="CurrentRowKey">Рядок формули; <c>null</c> для формул рівня колонки.</param>
+/// <param name="CurrentColumnDefId">
+/// Колонка, яку підставляє плейсхолдер <c>{Month}</c>; <c>null</c> — формула не
+/// прив'язана до місячної колонки.
+/// </param>
 public sealed record DependencyContext(
-    int TemplateVersionId,
     int CurrentTableDefId,
-    string? CurrentRowKey);
+    string? CurrentRowKey,
+    int? CurrentColumnDefId);
 
 /// <summary>
 /// Вузол графа обчислення для <see cref="IFormulaEngine.BuildEvaluationOrder"/> —
