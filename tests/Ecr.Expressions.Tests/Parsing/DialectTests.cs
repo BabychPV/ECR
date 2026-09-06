@@ -51,15 +51,26 @@ public sealed class DialectTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Функція_поза_набором_діалекту_дає_ECR_TMPL_0422()
     {
-        // SQRT існує, але лише в методологіях: набір Template закритий
+        // `Sqrt` існує, але лише в методологіях: набір Template закритий
         // (02b §7). ⚠ Раніше тут стояв CONVERT — він перейшов у діалект
         // шаблонів за Q-066: у чинному шаблоні 216 формул конвертують одиниці
         // діленням на 1000, і без CONVERT їм нема куди мігрувати.
-        var result = Expr.Parse("SQRT(4)", ExpressionDialect.Template);
+        //
+        // ⛔ І раніше тут стояло `SQRT(4)` — у ВЕРХНЬОМУ регістрі, з
+        // твердженням, що діалект методологій його приймає. Це була неправда
+        // про чинну систему (`Q-082`): у NCalc 1.3.8 `EvaluateOptions.IgnoreCase`
+        // не виставлений, тож `SQRT` там — невідома функція, а корінь пишеться
+        // `Sqrt`. Тест зеленів, бо звірявся з нашим вигаданим набором.
+        var result = Expr.Parse("Sqrt(4)", ExpressionDialect.Template);
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Diagnostics, d => d.Code == "ECR-TMPL-0422");
-        Assert.True(Expr.Parse("SQRT(4)", ExpressionDialect.Methodology).IsSuccess);
+        Assert.True(Expr.Parse("Sqrt(4)", ExpressionDialect.Methodology).IsSuccess);
+
+        // ⛔ А ВЕРХНІЙ регістр не приймає ЖОДЕН із діалектів: у шаблоні такої
+        // функції немає взагалі, у методології — немає саме в такому написанні.
+        Assert.False(Expr.Parse("SQRT(4)", ExpressionDialect.Template).IsSuccess);
+        Assert.False(Expr.Parse("SQRT(4)", ExpressionDialect.Methodology).IsSuccess);
 
         // А CONVERT тепер доступний в обох діалектах.
         Assert.True(Expr.Parse("CONVERT(1, 't', 'kg')", ExpressionDialect.Template).IsSuccess);
@@ -67,6 +78,51 @@ public sealed class DialectTests
         var unknown = Expr.Parse("VLOOKUP(1, 2, 3)", ExpressionDialect.Methodology);
         Assert.False(unknown.IsSuccess);
         Assert.Contains(unknown.Diagnostics, d => d.Code == "ECR-TMPL-0422");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.5")]
+    public void Вигаданий_набір_у_діалекті_методологій_відхиляється()
+    {
+        // ⛔ Шість імен, які наш власний `FunctionRegistry` приймав до кроку
+        // `I.14`. Формула з ними проходила публікацію і рахувалася — при тому
+        // що чинний рушій (NCalc 1.3.8) жодного з них не знає. Це не «зайва
+        // суворість тепер»: це числа, звірені ні з чим, тоді (`Q-082`).
+        foreach (var expression in new[]
+                 {
+                     "POWER(2, 3)",
+                     "SWITCH(1, 1, 2, 3)",
+                     "COALESCE(1, 2)",
+                     "MOD(5, 3)",
+                     "TRUNC(1.7)",
+                     "IFERROR(1, 2)",
+                 })
+        {
+            var result = Expr.Parse(expression, ExpressionDialect.Methodology);
+
+            Assert.False(result.IsSuccess, $"{expression} мав бути відхилений");
+            Assert.Contains(result.Diagnostics, d => d.Code == ExpressionErrors.Syntax);
+        }
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("POW(2, 3)", "Pow")]
+    [InlineData("ROUND(1.5, 0)", "Round")]
+    [InlineData("POWER(2, 3)", "Pow(a, b)")]
+    [InlineData("MOD(5, 3)", "оператор %")]
+    [InlineData("SWITCH(1, 1, 2, 3)", "вкладені if")]
+    public void Відмова_називає_чим_саме_заміняти(string expression, string expected)
+    {
+        // ⚠ «Невідома функція» відправила б методолога шукати те, чого нема.
+        // Кожен із цих промахів має рівно одну правильну поправку, і вона
+        // мусить бути в тексті: `POW` — описка регістру, `POWER` і `SWITCH` —
+        // наш власний вигаданий набір, який ці формули приймав.
+        var result = Expr.Parse(expression, ExpressionDialect.Methodology);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(
+            result.Diagnostics,
+            d => d.Message.Contains(expected, StringComparison.Ordinal));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

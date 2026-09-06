@@ -431,6 +431,12 @@ USING (VALUES
     (N'expressions.methodologyVersion',  N'en', N'Methodology version', 1),
     (N'expressions.anyVersion',          N'en', N'Syntax only', 1),
     (N'expressions.editorLabel',         N'en', N'Expression', 1),
+
+    -- ⛔ Позначка ярусу `Extension` у переліку автодоповнення (`02b` §8).
+    -- Функція, якої чинний рушій не знає: у версії з `NumericMode = Legacy`
+    -- вираз із нею не опублікується (`ECR-CALC-0433`), тому позначка стоїть
+    -- у переліку, а не в описі під ним — рішення ухвалюють у мить вибору.
+    (N'expressions.function.extension',   N'en', N'outside the current engine set', 1),
     (N'expressions.noFindings',          N'en', N'No findings', 1),
     (N'expressions.findings',            N'en', N'Findings: {count}', 1),
     (N'expressions.resultType',          N'en', N'Result type: {type}', 1),

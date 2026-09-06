@@ -99,6 +99,13 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
             // ⚠ Тригонометрії в `decimal` немає і не буде: у корпусі чинної
             // системи жодного її входження, а власна реалізація рядів заради
             // нуля викликів — це код, який ніхто не перевірить.
+            //
+            // ⛔ Наслідок названий прямо: `Sin`, `Cos`, `Tan`, `Asin`, `Acos`,
+            // `Atan` є в каталозі (їх знає NCalc 1.3.8), розбираються і в
+            // `Legacy` рахуються — а в `Strict` дають #VALUE. Це помилка
+            // РЕЖИМУ, а не мови: перевести версію в `Strict` означає відмовитися
+            // від тригонометрії, і побачити це треба на першому ж прогоні
+            // золотого набору, а не в шостому знаку звірки.
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
     }
@@ -118,6 +125,23 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
             "Max" => ExpressionValue.Number(Math.Max(a, b)),
             "Min" => ExpressionValue.Number(Math.Min(a, b)),
             "Pow" => ExpressionValue.Number(DecimalMath.Pow(a, b)),
+
+            // ⚠ Логарифм `a` за основою `b` — саме двомісний, як у чинному
+            // рушії: одномісного виклику в NCalc 1.3.8 немає, тому й тут його
+            // немає. Основа 1 дала б ділення на нуль, від'ємна або нульова —
+            // невизначений результат; обидва випадки — #VALUE, а не виняток.
+            "Log" => a > 0m && b > 0m && b != 1m
+                ? ExpressionValue.Number(DecimalMath.Ln(a) / DecimalMath.Ln(b))
+                : ExpressionValue.Error(ExpressionErrors.BadValue),
+
+            // ⚠ `IEEERemainder` — НЕ оператор `%`: остача береться від
+            // НАЙБЛИЖЧОГО частого, тому знак інший. `IEEERemainder(5,3) = -1`,
+            // тоді як `5 % 3 = 2`. Округлення частки — банківське, як вимагає
+            // сам стандарт IEEE 754, і воно не залежить від `Rounding` цього
+            // режиму: правило належить функції, а не режиму.
+            "IEEERemainder" => b == 0m
+                ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
+                : ExpressionValue.Number(a - (b * decimal.Round(a / b, 0, MidpointRounding.ToEven))),
 
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };

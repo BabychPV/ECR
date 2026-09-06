@@ -1,17 +1,29 @@
-using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
 
 namespace Ecr.Expressions.Functions;
 
 /// <summary>
-/// Каталог функцій. Набір закритий: 12 для <c>Template</c>, 24 для
-/// <c>Methodology</c> (02b §7–8). Розширення — зміна контракту, тобто
-/// <c>questions.md</c> і зупинка.
+/// Каталог функцій діалекту <c>Template</c> — рівно дванадцять (<c>02b</c> §7).
+/// Розширення — зміна контракту, тобто <c>questions.md</c> і зупинка.
 /// </summary>
+/// <remarks>
+/// ⛔ **Діалекту методологій тут немає, і це виправлення, а не спрощення.**
+/// До кроку <c>I.14</c> цей клас оголошував ще й «дванадцять функцій діалекту
+/// Methodology» — <c>POWER</c>, <c>TRUNC</c>, <c>MOD</c>, <c>SWITCH</c>,
+/// <c>COALESCE</c> та інші, — і саме за ним розбиралися й обчислювалися
+/// вирази методологій. Той набір був вигаданий цілком: чинний рушій
+/// (NCalc 1.3.8) жодного з цих імен не знає, регістр у ньому значущий, а
+/// арність строга. Отже формула з <c>POWER(2,3)</c> проходила публікацію і
+/// рахувалася нами, хоча в чинній системі не працювала ніколи, — і звірка на
+/// ній нічого не доводила (<c>Q-082</c>).
+///
+/// ⚠ Склад діалекту методологій живе тепер там, звідки він виміряний, —
+/// у <see cref="DialectCatalog"/> (<c>tests/Ecr.Legacy.Probe</c>). Двох
+/// каталогів на одну мову більше немає.
+/// </remarks>
 public sealed class FunctionRegistry
 {
-
 
     /// <summary>
     /// Дванадцять функцій діалекту <c>Template</c> (02b §7).
@@ -45,48 +57,43 @@ public sealed class FunctionRegistry
         new("SUMIF", 2, 3, true, ExpressionValueType.Number),
     ];
 
-    /// <summary>Дванадцять функцій, які додає діалект <c>Methodology</c> (02b §8).</summary>
-    private static readonly FunctionSignature[] MethodologyOnlySet =
-    [
-        new("POWER", 2, 2, false, ExpressionValueType.Number),
-        new("SQRT", 1, 1, false, ExpressionValueType.Number),
-        new("EXP", 1, 1, false, ExpressionValueType.Number),
-        new("LN", 1, 1, false, ExpressionValueType.Number),
-        new("LOG10", 1, 1, false, ExpressionValueType.Number),
-        new("CEILING", 1, 2, false, ExpressionValueType.Number),
-        new("FLOOR", 1, 2, false, ExpressionValueType.Number),
-        new("TRUNC", 1, 2, false, ExpressionValueType.Number),
-        new("MOD", 2, 2, false, ExpressionValueType.Number),
-        new("COALESCE", 1, null, false, ExpressionValueType.Null),
-        new("SWITCH", 3, null, false, ExpressionValueType.Null),
-        new("SUBSTANCE", 1, 1, false, ExpressionValueType.Number),
-    ];
-
     private static readonly Dictionary<string, FunctionSignature> Template =
         TemplateSet.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
 
-    private static readonly Dictionary<string, FunctionSignature> Methodology =
-        TemplateSet.Concat(MethodologyOnlySet)
-                   .ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Імена функцій діалекту шаблонів — для перевірок повноти набору.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Параметра «діалект» тут НЕМАЄ навмисно. Він був, і жоден викликач не
+    /// передавав у нього <c>Methodology</c> — питання «які імена є в діалекті
+    /// B» має свого відповідача (<see cref="DialectCatalog"/>). Гілка, у яку
+    /// ніхто не заходить, — це наступний механізм без викликача, а їх у цьому
+    /// проєкті вже виловлювали двічі.
+    /// </remarks>
+    public static IReadOnlyCollection<string> Names => Template.Keys;
 
-    /// <summary>Імена функцій діалекту — для перевірок повноти набору.</summary>
-    public static IReadOnlyCollection<string> Names(ExpressionDialect dialect)
-        => dialect == ExpressionDialect.Template ? Template.Keys : Methodology.Keys;
-
-    /// <summary>Чи дозволена функція в діалекті.</summary>
-    public bool IsAllowed(string name, ExpressionDialect dialect)
+    /// <summary>Чи є така функція в діалекті шаблонів.</summary>
+    /// <param name="name">Ім'я функції; регістр не важить.</param>
+    public bool IsAllowed(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return dialect == ExpressionDialect.Template
-            ? Template.ContainsKey(name)
-            : Methodology.ContainsKey(name);
+        return Template.ContainsKey(name);
     }
 
-    /// <summary>Сигнатура функції для перевірки при публікації.</summary>
+    /// <summary>
+    /// Сигнатура функції ДІАЛЕКТУ ШАБЛОНІВ; <c>null</c> — такої там немає.
+    /// </summary>
+    /// <param name="name">Ім'я функції.</param>
+    /// <remarks>
+    /// ⛔ Саме шаблонів. Для методологій сигнатуру дає
+    /// <c>DialectCatalog.Find</c>, і питати її тут не можна: регістр там
+    /// значущий, а цей словник — <c>OrdinalIgnoreCase</c>, тобто відповів би
+    /// «є» на <c>ROUND</c>, якого чинний рушій не знає.
+    /// </remarks>
     public FunctionSignature? GetSignature(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return Methodology.GetValueOrDefault(name);
+        return Template.GetValueOrDefault(name);
     }
 
     /// <summary>Викликає функцію.</summary>
@@ -130,22 +137,10 @@ public sealed class FunctionRegistry
             "IF" => TemplateFunctions.If(args[0], args[1], args[2]),
             "IFERROR" => TemplateFunctions.IfError(args[0], args[1]),
             "CONVERT" => ConvertFunction.Invoke(args, context),
-            "POWER" => MethodologyFunctions.Power(args),
-            "SQRT" => MethodologyFunctions.Sqrt(args),
-            "EXP" => MethodologyFunctions.Exp(args),
-            "LN" => MethodologyFunctions.Ln(args),
-            "LOG10" => MethodologyFunctions.Log10(args),
-            "CEILING" => MethodologyFunctions.Ceiling(args),
-            "FLOOR" => MethodologyFunctions.Floor(args),
-            "TRUNC" => MethodologyFunctions.Trunc(args),
-            "MOD" => MethodologyFunctions.Mod(args),
-            "COALESCE" => MethodologyFunctions.Coalesce(args),
-            "SWITCH" => MethodologyFunctions.Switch(args),
-            "SUBSTANCE" => MethodologyFunctions.Substance(args, context),
 
             // Сюди не потрапити з розібраного виразу: парсер відхиляє невідомі
             // імена ще при публікації. Лишається як явна межа набору.
-            _ => throw new InvalidOperationException($"Функція '{name}' не входить у набір діалекту."),
+            _ => throw new InvalidOperationException($"Функція '{name}' не входить у набір діалекту шаблонів."),
         };
     }
 }

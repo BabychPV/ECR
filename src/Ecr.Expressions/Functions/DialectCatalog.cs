@@ -127,6 +127,69 @@ public static class DialectCatalog
     private static readonly HashSet<string> ExtensionNames =
         ExtensionSet.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Той самий каталог, але для пошуку БЕЗ урахування регістру.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Служить рівно одному: назвати правильне написання в тексті помилки.
+    /// Розбір ним не користується — інакше <c>POW(2,3)</c> був би прийнятий,
+    /// а чинна система його не рахувала ніколи.
+    /// </remarks>
+    private static readonly Dictionary<string, string> ByLowerCase =
+        CoreSet.Concat(ExtensionSet)
+               .ToDictionary(f => f.Name, f => f.Name, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Чим заміняти те, чого в діалекті немає (<c>02b</c> §8).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перелік не декоративний. Усі шість імен були в нашому ж
+    /// <c>FunctionRegistry</c> і **розбиралися** до кроку <c>I.14</c>: формула
+    /// з <c>POWER(2,3)</c> чи <c>SWITCH(…)</c> проходила публікацію, хоча
+    /// чинний рушій обох не знає (<c>Q-082</c>). Тому методолог, який їх уже
+    /// написав, має отримати не «невідома функція», а рядок, який каже, що
+    /// саме поставити замість.
+    ///
+    /// ⚠ <c>COALESCE</c> заміни не має і не потребує: у діалекті B <c>null</c>
+    /// під час прогону не буває — відсутній <c>@Arg</c> це
+    /// <c>ARGUMENT_MISSING</c>, нечислова константа — <c>CONSTANT_NOT_NUMERIC</c>,
+    /// і обидві виявляються при публікації.
+    /// </remarks>
+    private static readonly Dictionary<string, string> Replacements =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["POWER"] = "Pow(a, b)",
+            ["TRUNC"] = "Truncate(a) — лише до цілого; до знаків: Truncate(a * 10^n) / 10^n",
+            ["MOD"] = "оператор %",
+            ["SWITCH"] = "вкладені if(умова, тоді, інакше)",
+            ["COALESCE"] = "нічого: null під час прогону в діалекті методологій не буває",
+            ["IFERROR"] = "нічого: помилка обчислення в діалекті методологій не перехоплюється",
+        };
+
+    /// <summary>
+    /// Що написати замість імені, якого в діалекті немає; <c>null</c> — поради
+    /// немає.
+    /// </summary>
+    /// <param name="name">Ім'я, яке не знайшлося в каталозі.</param>
+    /// <remarks>
+    /// ⚠ Спершу перевіряється РЕГІСТР: <c>POW</c>, <c>ROUND</c> і <c>abs</c> —
+    /// не вигадані функції, а правильні з неправильним написанням, і порада
+    /// «використайте Pow(a, b)» на <c>POW</c> звучала б як знущання.
+    /// </remarks>
+    public static string? Advice(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        if (ByLowerCase.TryGetValue(name, out var exact))
+        {
+            return $"регістр значущий, і пишеться воно '{exact}'";
+        }
+
+        return Replacements.TryGetValue(name, out var replacement)
+            ? $"замість неї — {replacement}"
+            : null;
+    }
+
     /// <summary>Імена функцій діалекту методологій.</summary>
     public static IReadOnlyCollection<string> Names => Methodology.Keys;
 
@@ -144,6 +207,15 @@ public static class DialectCatalog
     /// <returns>
     /// <see cref="FunctionTier.Extension"/> — чинний рушій цього не вміє.
     /// </returns>
+    /// <remarks>
+    /// ⛔ Невідоме ім'я дає <see cref="FunctionTier.Core"/>, і це НЕ твердження
+    /// «така функція є в NCalc 1.3.8»: метод відповідає лише на питання «чи
+    /// наше це розширення». Питання «чи існує таке ім'я взагалі» ставиться
+    /// <see cref="Find"/>, і ставити його треба ПЕРШИМ — саме на цьому
+    /// спіткнувся <c>Q-082</c>: перевірка публікації, побудована на самому
+    /// <c>TierOf</c>, пропустила б <c>SWITCH</c> як «ядро».
+    /// Тому <see cref="IsAllowedIn"/> питає обидва.
+    /// </remarks>
     public static FunctionTier TierOf(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -160,7 +232,16 @@ public static class DialectCatalog
     /// ⛔ Імпортовані з <c>AF_*</c> методології цього обмеження не зачеплять
     /// ніколи: вони складаються з <see cref="FunctionTier.Core"/> за
     /// побудовою — інакше чинна система їх не рахувала б.
+    ///
+    /// ⛔ Ім'я, якого в діалекті немає, недозволене в ОБОХ режимах, а не лише
+    /// в <c>Legacy</c>. Без цієї гілки метод був би зеленим з хибної причини
+    /// (<c>Q-082</c>): <c>SWITCH</c> у <c>Legacy</c>-версії проходив би як
+    /// ядро, бо <see cref="TierOf"/> віддає <see cref="FunctionTier.Core"/> на
+    /// будь-яке невідоме слово. Первинний сторож — усе одно розбір
+    /// (<c>Parser.ParseFunctionCall</c>), який такого імені не пропускає;
+    /// тут — друга межа на випадок, якщо перевірку викличуть у обхід розбору.
     /// </remarks>
     public static bool IsAllowedIn(string name, NumericMode mode)
-        => TierOf(name) == FunctionTier.Core || mode == NumericMode.Strict;
+        => Find(name) is not null
+           && (TierOf(name) == FunctionTier.Core || mode == NumericMode.Strict);
 }

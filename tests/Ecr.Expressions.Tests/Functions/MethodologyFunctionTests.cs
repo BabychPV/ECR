@@ -1,6 +1,7 @@
 // tests/Ecr.Expressions.Tests/Functions/MethodologyFunctionTests.cs
 using Ecr.Domain.Enums;
 using Ecr.Expressions;
+using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using Xunit;
@@ -11,31 +12,180 @@ namespace Ecr.Expressions.Tests.Functions;
 public sealed class MethodologyFunctionTests
 {
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void SWITCH_без_збігу_і_без_default_дає_null()
+    public void Вибір_без_збігу_дає_null_а_не_нуль()
     {
-        // Парна кількість аргументів після значення — типового немає.
-        var value = Eval("SWITCH('W-99', 'W-01', 1, 'W-02', 2)");
+        // ⛔ Тест переписаний за `Q-082`. Стояло тут
+        // `SWITCH('W-99', 'W-01', 1, 'W-02', 2)` з твердженням «без збігу і без
+        // типового — null». Твердження було правдиве про НАШ рушій і хибне про
+        // мову: `SWITCH` у NCalc 1.3.8 не існує, отже жодна чинна формула так
+        // не написана, і перевіряти не було чого.
+        //
+        // ⚠ Що тест справді стеріг — і що лишилося: невідомий код не має
+        // тихо ставати нулем. Нуль виглядав би як виміряне значення і
+        // потрапив би в підсумок звіту як реальний викид.
+        Assert.False(Expr.Parse("SWITCH('W-99', 'W-01', 1)", ExpressionDialect.Methodology).IsSuccess);
 
-        // ⛔ null, а НЕ нуль. Нуль тут виглядав би як виміряне значення і
-        // потрапив би в підсумок звіту як реальний: невідома речовина стала б
-        // речовиною з нульовим викидом.
+        // Заміна за `02b` §8 — вкладені `if`, і типове значення в них пише
+        // автор ЯВНО. Написав `NULL` — отримав null, а не нуль.
+        var value = Eval("if(@Code = 'W-01', 1, if(@Code = 'W-02', 2, NULL))");
+
         Assert.True(value.IsNull);
         Assert.False(value.IsError);
 
-        // З типовим значенням — воно й повертається.
-        Assert.Equal(-1m, Number("SWITCH('W-99', 'W-01', 1, 'W-02', 2, -1)"));
+        // Той самий вираз із явним типовим значенням віддає його.
+        Assert.Equal(-1m, Number("if(@Code = 'W-01', 1, if(@Code = 'W-02', 2, -1))"));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    public void SWITCH_повертає_перший_збіг_а_не_останній()
+    public void Вибір_бере_перший_збіг_а_не_останній()
     {
-        // Дубльований збіг — не помилка конфігурації, яку можна відкинути:
-        // перелік читається згори вниз, і порядок у ньому автор написав
-        // навмисно. Останній збіг мовчки перекривав би виняток, поставлений
-        // першим саме тому, що він виняток.
-        Assert.Equal(1m, Number("SWITCH('W-01', 'W-01', 1, 'W-01', 2)"));
+        // ⛔ Тест переписаний за `Q-082`: стояло
+        // `SWITCH('W-01', 'W-01', 1, 'W-01', 2)`. Правило, яке він стеріг —
+        // «перелік читається згори вниз, і порядок у ньому автор написав
+        // навмисно» — нікуди не ділося; у вкладених `if` воно тримається
+        // самою структурою виразу, а не реалізацією функції.
+        var context = Context();
+        context.Arguments["Code"] = ExpressionValue.Text("W-01");
 
-        Assert.Equal(2m, Number("SWITCH(2, 1, 1, 2, 2, 3, 3)"));
+        Assert.Equal(
+            1m,
+            Number("if(@Code = 'W-01', 1, if(@Code = 'W-01', 2, 0))", context));
+
+        // ⛔ І гілка, яку не обрали, НЕ обчислюється — у чинному рушії теж
+        // (NCalc віддає `if` параметри лінивими). Різниця видима не в
+        // результаті: `@Mass / @Volume` дало б значення-помилку, яку ніхто не
+        // взяв би. Вона видима в `Legacy`, де `7 / 0` дає **нескінченність**,
+        // і крок маскування (`I.7`) записав би в трейс `MaskedZero` для гілки,
+        // якою розрахунок не йшов. Тому перевіряється саме ФАКТ читання.
+        var guard = new CountingContext();
+        guard.Inner.Arguments["Volume"] = ExpressionValue.Number(0m);
+        guard.Inner.Arguments["Mass"] = ExpressionValue.Number(7m);
+
+        Assert.Equal(0m, Expr.Eval("if(@Volume = 0, 0, @Mass / @Volume)", guard,
+            ExpressionDialect.Methodology).AsNumber());
+
+        // Прочитано рівно `@Volume` — умову. `@Mass` не торкалися.
+        Assert.Equal(["Volume"], guard.Reads);
+    }
+
+    /// <summary>
+    /// Контекст, який ЗАПАМʼЯТОВУЄ, які аргументи в нього питали.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лічильник, а не значення: лінивість гілки неможливо довести
+    /// результатом — помилка невибраної гілки все одно нікуди не потрапляє.
+    /// Довести її можна лише тим, що звернення не сталося.
+    /// </remarks>
+    private sealed class CountingContext : IEvaluationContext
+    {
+        public TestEvaluationContext Inner { get; } = new();
+
+        public List<string> Reads { get; } = [];
+
+        public PeriodContext Period => Inner.Period;
+
+        public ExpressionValue GetArgument(string name)
+        {
+            Reads.Add(name);
+            return Inner.GetArgument(name);
+        }
+
+        public IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
+            => Inner.Read(reference);
+
+        public ExpressionValue GetCell(int tableDefId, string rowKey, int columnDefId, int periodOffset)
+            => Inner.GetCell(tableDefId, rowKey, columnDefId, periodOffset);
+
+        public IReadOnlyList<ExpressionValue> GetCellsByPredicate(
+            int tableDefId, string filterJson, int columnDefId)
+            => Inner.GetCellsByPredicate(tableDefId, filterJson, columnDefId);
+
+        public ExpressionValue GetConstant(string name) => Inner.GetConstant(name);
+
+        public ExpressionValue GetFormulaResult(string name) => Inner.GetFormulaResult(name);
+
+        public ExpressionValue GetHeader(string name) => Inner.GetHeader(name);
+
+        public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)
+            => Inner.Convert(value, fromUnitCode, toUnitCode);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Формула_діалекту_B_повертає_текст()
+    {
+        // ⚠ У корпусі це `'В пределе норматива'` / `'Сверхнорматив'`: `if`
+        // повертає тип ОБРАНОЇ гілки, і в діалекті методологій це буває текст.
+        // Саме тому `FormulaDef` має `ResultType { Number, Text }`.
+        var context = Context();
+        context.Arguments["Ratio"] = ExpressionValue.Number(1.2m);
+
+        var value = Eval("if(@Ratio > 1, 'Сверхнорматив', 'В пределе норматива')", context);
+
+        Assert.Equal(ExpressionValueType.Text, value.Type);
+        Assert.Equal("Сверхнорматив", value.Value);
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData("Pow(2, 3)", 8)]
+    [InlineData("Max(Max(1, 7), 3)", 7)]
+    [InlineData("Min(1, 7)", 1)]
+    [InlineData("Truncate(-1.7)", -1)]
+    [InlineData("Floor(-1.2)", -2)]
+    [InlineData("Ceiling(1.2)", 2)]
+    [InlineData("Abs(-3)", 3)]
+    [InlineData("Sign(-3)", -1)]
+    [InlineData("Sqrt(9)", 3)]
+    [InlineData("Log(8, 2)", 3)]
+    [InlineData("Round(1.234, 2)", 1.23)]
+    public void Виміряні_функції_обчислюються(string expression, double expected)
+    {
+        // ⛔ Це і є суть кроку `I.14`: імена з `DialectCatalog` мусять не лише
+        // РОЗБИРАТИСЯ, а й рахуватися. Доти обчислювач звірявся з вигаданим
+        // набором, де степінь звався `POWER`, — тобто `Pow(2,3)` не працював
+        // ані на розборі, ані на обчисленні (`Q-082`).
+        Assert.Equal((decimal)expected, Number(expression));
+
+        // ⚠ Логарифм у `decimal` рахується рядом, і хвіст у 28-му знаку —
+        // властивість ряду, а не каталогу: `Log10(1000)` дає
+        // 3.0000000000000000000000000001. Подання (шість знаків,
+        // `NumericPolicy.OutputScale`) його не бачить, тому тут — округлення,
+        // а не точний збіг, і причина названа замість «≈».
+        Assert.Equal(3m, decimal.Round(Number("Log10(1000)"), 6));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void IEEERemainder_це_не_оператор_відсотка()
+    {
+        // ⚠ `IEEERemainder(5,3) = -1`, тоді як `5 % 3 = 2`: остача береться від
+        // НАЙБЛИЖЧОГО частого, а не від відкинутого. Сплутати їх означає
+        // змінити знак у результаті — і саме на від'ємних це найважче помітити.
+        Assert.Equal(-1m, Number("IEEERemainder(5, 3)"));
+        Assert.Equal(2m, Number("5 % 3"));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void In_перевіряє_належність_множині_порядково()
+    {
+        var context = Context();
+        context.Arguments["Mode"] = ExpressionValue.Text("Flare");
+
+        Assert.True((bool)Eval("in(@Mode, 'Vent', 'Flare')", context).Value!);
+
+        // ⛔ Регістр значущий: порівнюється значення довідника, а не текст
+        // користувача. Зведення регістру перевело б рядки з однієї гілки `if`
+        // в іншу — тихо і без жодної ознаки.
+        Assert.False((bool)Eval("in(@Mode, 'Vent', 'FLARE')", context).Value!);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Помилка_поширюється_крізь_функцію_каталогу()
+    {
+        // `Sqrt(1/0)` має лишитися #DIV/0, а не стати #VALUE: інакше причину
+        // видно не буде (02b §6.4).
+        Assert.Equal(ExpressionErrors.DivideByZero, Eval("Sqrt(1 / 0)").ErrorCode);
+
+        // null теж поширюється: корінь із «не заповнено» — це «не заповнено».
+        Assert.True(Eval("Sqrt(@Missing)").IsNull);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

@@ -68,7 +68,7 @@ public sealed class ClientServerEquivalenceTests
             .Where(name => name != "-")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var declared = FunctionRegistry.Names(ExpressionDialect.Template);
+        var declared = FunctionRegistry.Names;
 
         // ⚠ CONVERT — єдиний виняток, і не за недоглядом: конверсія потребує
         // довідника uom, якого на клієнті немає й не буде. Підказка під час

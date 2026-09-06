@@ -88,7 +88,13 @@ public sealed class FormulaEngine(
         // Помилка обчислення — це ЗНАЧЕННЯ всередині ExpressionValue
         // (#DIV/0, #REF, #VALUE), а не запис у Diagnostics: одна зіпсована
         // комірка не валить перерахунок таблиці (02b §6.4).
-        return new EvaluationResult(evaluator.Evaluate(expression.Root, context), []);
+        //
+        // ⛔ Діалект береться з РОЗБОРУ, а не з параметра виклику: приймати й
+        // рахувати мусить одна мова. Доки обчислювач діалекту не знав,
+        // `POWER(2;3)` у методології рахувався вигаданим набором `02b` §8,
+        // хоча чинний рушій такого імені не знає (`Q-082`).
+        return new EvaluationResult(
+            evaluator.Evaluate(expression.Root, context, expression.Dialect), []);
     }
 
     /// <inheritdoc />

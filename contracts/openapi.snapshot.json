@@ -1214,6 +1214,10 @@
               "null",
               "string"
             ]
+          },
+          "tier": {
+            "description": "Ярус: `Core` — чинний рушій це вміє; `Extension` — ні.",
+            "type": "string"
           }
         },
         "required": [
@@ -1221,7 +1225,8 @@
           "minArgs",
           "maxArgs",
           "acceptsRange",
-          "resultType"
+          "resultType",
+          "tier"
         ],
         "type": "object"
       },

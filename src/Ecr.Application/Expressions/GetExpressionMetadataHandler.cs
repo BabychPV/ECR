@@ -53,14 +53,18 @@ public sealed class GetExpressionMetadataHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var registry = new FunctionRegistry();
+        // ⛔ Режим версії потрібен ДО складання переліку: у
+        // `NumericMode = Legacy` функції ярусу `Extension` не пропонуються
+        // взагалі. Показати їх означало б запросити написати вираз, який
+        // публікація відхилить (`ECR-CALC-0433`), — а редактор існує саме для
+        // того, щоб цього не сталося.
+        var mode = methodologyVersionId is { } modeVersionId
+            ? await NumericModeAsync(modeVersionId, ct).ConfigureAwait(false)
+            : (NumericMode?)null;
 
         // ⚠ Порядок за іменем, а не за порядком оголошення: перелік читає
         // людина, яка шукає функцію, а не той, хто його писав.
-        var functions = FunctionRegistry.Names(dialect)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .Select(name => Function(name, registry))
-            .ToList();
+        var functions = Functions(dialect, mode);
 
         var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
         var unitById = catalogue.Units.Values.ToDictionary(u => u.Id, u => u.Code);
@@ -108,17 +112,74 @@ public sealed class GetExpressionMetadataHandler(
         ];
     }
 
-    private static ExpressionFunctionDto Function(string name, FunctionRegistry registry)
+    /// <summary>
+    /// Склад функцій діалекту.
+    /// </summary>
+    /// <param name="dialect">Діалект виразу.</param>
+    /// <param name="mode">
+    /// Числовий режим версії методології; <c>null</c> — версії не передали.
+    /// </param>
+    /// <remarks>
+    /// ⛔ Два діалекти — два каталоги, і питати не той означає підказувати не
+    /// ту мову. До кроку <c>I.14</c> обидва бралися з
+    /// <see cref="FunctionRegistry"/>, і редактор пропонував методологу
+    /// <c>POWER</c>, <c>SWITCH</c> і <c>SUM</c> — імена, яких чинний рушій не
+    /// знає, а діапазонів у діалекті B немає за побудовою (<c>Q-082</c>).
+    ///
+    /// ⚠ Без версії (<paramref name="mode"/> — <c>null</c>) віддається ВЕСЬ
+    /// каталог із позначкою ярусу. Приховати <c>Extension</c> «про всяк
+    /// випадок» означало б сховати їх і від версії в <c>Strict</c>, де вони
+    /// законні.
+    /// </remarks>
+    private static List<ExpressionFunctionDto> Functions(
+        ExpressionDialect dialect, NumericMode? mode)
     {
-        var signature = registry.GetSignature(name);
+        if (dialect == ExpressionDialect.Template)
+        {
+            var registry = new FunctionRegistry();
 
-        return new ExpressionFunctionDto(
+            return
+            [
+                .. FunctionRegistry.Names
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .Select(name => Function(name, registry.GetSignature(name), FunctionTier.Core)),
+            ];
+        }
+
+        return
+        [
+            .. DialectCatalog.Names
+                .Where(name => mode is not { } numeric || DialectCatalog.IsAllowedIn(name, numeric))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .Select(name => Function(
+                    name, DialectCatalog.Find(name), DialectCatalog.TierOf(name))),
+        ];
+    }
+
+    /// <summary>Числовий режим версії методології.</summary>
+    /// <remarks>
+    /// ⚠ Права тут не додаються: перелік функцій — це склад МОВИ, а не дані
+    /// версії, і <c>Calculation.View</c> на нього вже перевірено. Читається
+    /// рівно одне поле, і воно не є ані числом, ані формулою.
+    /// </remarks>
+    private async Task<NumericMode?> NumericModeAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var methodology = await methodologies
+            .FindByVersionAsync(methodologyVersionId, ct)
+            .ConfigureAwait(false);
+
+        return methodology?.Versions.FirstOrDefault(v => v.Id == methodologyVersionId)?.NumericMode;
+    }
+
+    private static ExpressionFunctionDto Function(
+        string name, FunctionSignature? signature, FunctionTier tier)
+        => new(
             name,
             signature?.MinArgs ?? 0,
             signature?.MaxArgs,
             signature?.AcceptsRange ?? false,
-            signature?.ResultType.ToString());
-    }
+            signature?.ResultType.ToString(),
+            tier.ToString());
 
     private static ExpressionSymbolDto Symbol(
         MethodologySymbol symbol, Dictionary<int, string> unitById)
@@ -150,12 +211,22 @@ public sealed record ExpressionMetadataDto(
 /// <param name="MaxArgs">Максимум; <c>null</c> — необмежено (агрегати).</param>
 /// <param name="AcceptsRange">Чи приймає діапазон рядків замість скалярів.</param>
 /// <param name="ResultType">Тип результату; <c>null</c> — сигнатури немає.</param>
+/// <param name="Tier">
+/// Ярус: <c>Core</c> — чинний рушій це вміє; <c>Extension</c> — ні.
+/// </param>
+/// <remarks>
+/// ⛔ Ярус віддає СЕРВЕР, а не виводить клієнт із зашитого переліку. Інакше
+/// «поза набором чинної системи» стало б другою правдою про мову: замір
+/// (<c>tests/Ecr.Legacy.Probe</c>) переніс би <c>Ln</c> в ядро, а редактор
+/// далі позначав би її як розширення.
+/// </remarks>
 public sealed record ExpressionFunctionDto(
     string Name,
     int MinArgs,
     int? MaxArgs,
     bool AcceptsRange,
-    string? ResultType);
+    string? ResultType,
+    string Tier);
 
 /// <summary>Символ, на який може посилатися вираз.</summary>
 /// <param name="Name">Ім'я без префікса.</param>

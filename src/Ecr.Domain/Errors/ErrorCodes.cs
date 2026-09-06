@@ -216,6 +216,19 @@ public static class ErrorCodes
     /// </remarks>
     public const string CaretNotPower = "ECR-CALC-0431";
 
+    /// <summary>
+    /// Функція ярусу <c>Extension</c> у версії з <c>NumericMode = Legacy</c>
+    /// (<c>ECR-CALC-0433</c>, <c>02b</c> §8).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>Legacy</c> існує рівно для того, щоб відтворити числа чинного
+    /// рушія. <c>Ln</c> і <c>ifs</c> у NCalc 1.3.8 не оголошені (виміряно),
+    /// <c>CONVERT</c> і <c>SUBSTANCE</c> — наші власні; формула з ними не
+    /// рахувалася чинною системою ніколи, і відтворювати їй нічого. Правильна
+    /// дія одна — <c>NumericMode.Strict</c> з нової дати дії.
+    /// </remarks>
+    public const string ExtensionFunctionInLegacy = "ECR-CALC-0433";
+
     // Робочий процес
     /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
     public const string SubmitBlockedByOrphans = "ECR-SUB-4221";
