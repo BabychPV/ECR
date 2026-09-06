@@ -162,6 +162,146 @@ public sealed class CreateRoleHandler(
 }
 
 /// <summary>Перелік користувачів. Право <c>Security.ManageUsers</c>.</summary>
+/// <summary>
+/// Заміна набору ролей наявного користувача. Право <c>Security.ManageUsers</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Способу призначити роль наявному користувачеві не існувало **взагалі**:
+/// ролі видавалися лише при створенні, а форма створення надсилала порожній
+/// перелік. Обліковий запис виходив працездатним на вигляд і безправним
+/// насправді, і виправити це було нічим, крім прямого запису в базу.
+///
+/// ⚠ Заміна НАБОРОМ: набір ролей і є повноваженнями людини, і бачити його
+/// треба цілком, а не як історію додавань.
+/// </remarks>
+public sealed class ReplaceUserRolesHandler(
+    IUserStore users,
+    IAccessDecisionService access,
+    IUnitOfWork uow,
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    Domain.Abstractions.IClock clock)
+{
+    /// <summary>Право керування користувачами.</summary>
+    public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Замінює ролі користувача.</summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="roleCodes">Коди ролей; порожньо — прибрати всі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки ролей тепер призначено.</returns>
+    public async Task<int> HandleAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(roleCodes);
+
+        var actorId = currentUser.UserId
+                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+
+        var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission))
+        {
+            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+        }
+
+        var before = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
+        var count = await users.ReplaceRolesAsync(userId, roleCodes, ct).ConfigureAwait(false);
+
+        // ⛔ Зміна повноважень — подія безпеки, і вона мусить бути в журналі
+        // з обома наборами. «Хто це йому видав» — питання, на яке через рік
+        // має бути відповідь, а не здогад.
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                ChangedAt: clock.UtcNow,
+                EventType: "UserRolesReplaced",
+                TargetUserId: userId,
+                TargetRoleId: null,
+                DetailsJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    from = before,
+                    to = roleCodes,
+                }),
+                ChangedByUserId: actorId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return count;
+    }
+}
+
+/// <summary>Ролі користувача. Право <c>Security.ManageUsers</c>.</summary>
+/// <remarks>
+/// ⚠ Потрібен формі: без нього редактор доступу відкривався б із порожнім
+/// переліком, і збереження мовчки відібрало б усі права.
+/// </remarks>
+public sealed class ListUserRolesHandler(
+    IUserStore users, IAccessDecisionService access, ICurrentUser currentUser)
+{
+    /// <summary>Право керування користувачами.</summary>
+    public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Повертає коди ролей користувача.</summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<string>> HandleAsync(int userId, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        return await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Адреса користувача для сповіщень. Право <c>Security.ManageUsers</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Поле <c>User.Email</c> існувало від Етапу 3 і **не присвоювалося ніде**.
+/// Наслідок мовчазний і повний: <c>NotificationJob</c> завжди отримував
+/// порожній перелік адресатів, тобто сповіщення (<c>ФВ-12</c>) не надходили
+/// нікому, а перемикач «отримувати сповіщення» був вічно неактивним і
+/// виглядав як налаштування, яке просто вимкнули.
+/// </remarks>
+public sealed class SetUserEmailHandler(
+    IUserStore users,
+    IAccessDecisionService access,
+    IUnitOfWork uow,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право керування користувачами.</summary>
+    public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Задає або прибирає адресу.</summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="email">Адреса; порожньо — прибрати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(int userId, string? email, CancellationToken ct)
+    {
+        var actorId = currentUser.UserId
+                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+
+        var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission))
+        {
+            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+        }
+
+        var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
+                   ?? throw new NotFoundException("ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+
+        // ⚠ Прибирання адреси знімає і прапорець сповіщень: прапорець без
+        // пошти беззмістовний і виглядав би як налаштований адресат, якому
+        // нічого не надсилається.
+        user.SetEmail(email);
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            user.SetReceivesAlerts(false);
+        }
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}
+
 public sealed class ListUsersHandler(IUserStore users, IAccessDecisionService access, ICurrentUser currentUser)
 {
     /// <summary>Право, без якого перелік не віддається.</summary>
@@ -207,6 +347,7 @@ public sealed class CreateUserHandler(
     /// <param name="windowsSid">SID; лише для доменного.</param>
     /// <param name="initialPassword">Разовий пароль; лише для локального.</param>
     /// <param name="roleCodes">Ролі, які призначити одразу.</param>
+    /// <param name="email">Адреса для сповіщень; <c>null</c> — без адреси.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<int> HandleAsync(
         string userName,
@@ -215,6 +356,7 @@ public sealed class CreateUserHandler(
         string? windowsSid,
         string? initialPassword,
         IReadOnlyList<string> roleCodes,
+        string? email,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
@@ -291,6 +433,11 @@ public sealed class CreateUserHandler(
             // назавжди лишається з чинним входом у чужий обліковий запис.
             user.RequirePasswordChange();
         }
+
+        // ⚠ Адреса задається ОДРАЗУ. Без неї обліковий запис не отримує
+        // сповіщень (`ФВ-12`), а дізнатися про це можна лише тоді, коли лист
+        // не прийшов.
+        user.SetEmail(email);
 
         users.Add(user);
         foreach (var roleCode in roleCodes)

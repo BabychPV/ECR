@@ -5,6 +5,8 @@ import {
   Checkbox,
   Group,
   Modal,
+  MultiSelect,
+  PasswordInput,
   ScrollArea,
   SegmentedControl,
   Select,
@@ -17,14 +19,16 @@ import {
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { createUserBody } from '@/features/security/createUserBody';
+import { UserAccessEditor } from '@/features/security/UserAccessEditor';
 import type {
   CreateRoleRequest,
-  CreateUserRequest,
   RoleIdResponse,
   RoleView,
   SetAlertsRequest,
   UserIdResponse,
   UserPage,
+  UserView,
 } from '@/api/types';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { GrantsPanel } from '@/pages/admin/GrantsPanel';
@@ -66,6 +70,18 @@ export function SecurityPage(): JSX.Element {
   const [displayName, setDisplayName] = useState('');
   const [provider, setProvider] = useState('Windows');
   const [sid, setSid] = useState('');
+
+  // ⛔ Разовий пароль ВВОДИТЬ адміністратор (`A7-60`). Сервер його не
+  // генерує і не має генерувати: повернути пароль у відповіді API прямо
+  // заборонено (`D-11`, `ФВ-6.11`), а надіслати листом нікуди — адреси в
+  // щойно створеного запису ще немає. Ризик — адміністратор знає пароль —
+  // знімається обов'язковою зміною при першому вході (`ФВ-6.18`).
+  const [oneTimePassword, setOneTimePassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [newUserRoles, setNewUserRoles] = useState<string[]>([]);
+
+  // Кого редагуємо: `null` — діалог закритий.
+  const [editingAccess, setEditingAccess] = useState<UserView | null>(null);
 
   // ⛔ Адресати алертів — ДАНІ, а не конфігурація (`D-125`). Перелік у змінних
   // оточення довелося б міняти розгортанням щоразу, коли хтось іде у
@@ -131,20 +147,20 @@ export function SecurityPage(): JSX.Element {
     mutationFn: () =>
       apiFetch<UserIdResponse>('/api/v1/users', {
         method: 'POST',
-        body: JSON.stringify({
-          userName: userName.trim(),
-          displayName: displayName.trim().length === 0 ? null : displayName.trim(),
-          provider,
-
-          // ⚠ SID потрібен саме доменному запису: за ним, а не за іменем,
-          // сервер упізнає користувача після перейменування в каталозі.
-          sid: provider === 'Windows' && sid.trim().length > 0 ? sid.trim() : null,
-
-          // ⛔ `null` означає «сервер видасть разовий сам». Поле пароля в
-          // цій формі означало б, що його хтось бачить і десь запише.
-          initialPassword: null,
-          roleCodes: null,
-        } satisfies CreateUserRequest),
+        // ⛔ Склад тіла — окремою чистою функцією (`createUserBody`). Саме
+        // тут жили `A7-60`, `A7-61` і `A7-62`, і перевірити їх рендером
+        // Mantine у jsdom неможливо за прийнятний час.
+        body: JSON.stringify(
+          createUserBody({
+            userName,
+            displayName,
+            provider,
+            sid,
+            oneTimePassword,
+            email,
+            roleCodes: newUserRoles,
+          }),
+        ),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -152,6 +168,9 @@ export function SecurityPage(): JSX.Element {
       setUserName('');
       setDisplayName('');
       setSid('');
+      setOneTimePassword('');
+      setEmail('');
+      setNewUserRoles([]);
       showDone(t('security.userCreated'));
     },
     onError: showApiError,
@@ -286,6 +305,7 @@ export function SecurityPage(): JSX.Element {
                 <Table.Th>{t('security.kind')}</Table.Th>
                 <Table.Th>{t('security.userState')}</Table.Th>
                 <Table.Th>{t('security.alerts')}</Table.Th>
+                <Table.Th />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -297,6 +317,19 @@ export function SecurityPage(): JSX.Element {
                     {/* Локальний і доменний вхід дають ту саму сесію; різниця
                         лише в тому, хто зберігає пароль. */}
                     <Badge variant="light">{user.provider}</Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    {/* ⛔ Ролі й адреса правляться ТУТ (`A7-61`, `A7-62`).
+                        Способу призначити роль наявному користувачеві не
+                        існувало взагалі, а адреса не присвоювалася ніде —
+                        обліковий запис виходив безправним і без сповіщень. */}
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      onClick={() => setEditingAccess(user)}
+                    >
+                      {t('security.access')}
+                    </Button>
                   </Table.Td>
                   <Table.Td>
                     {/* ⛔ Без пошти перемикач ВИМКНЕНИЙ, а не «вмикається і
@@ -421,6 +454,12 @@ export function SecurityPage(): JSX.Element {
         </Group>
       </Modal>
 
+      <UserAccessEditor
+        user={editingAccess}
+        roles={roles.data ?? []}
+        onClose={() => setEditingAccess(null)}
+      />
+
       <Modal
         opened={creatingUser}
         onClose={() => setCreatingUser(false)}
@@ -460,21 +499,55 @@ export function SecurityPage(): JSX.Element {
           />
         )}
 
-        {/* ⛔ Поля пароля тут немає навмисно. Сервер видає разовий пароль
-            сам і ставить `MustChangePassword`: пароль, який знає той, хто
-            його видав, — це не пароль (`ФВ-6.18`). */}
+        {/* ⛔ Разовий пароль вводить адміністратор. Сервер його НЕ генерує:
+            повернути пароль у відповіді API заборонено (`D-11`, `ФВ-6.11`), а
+            надіслати листом нікуди — адреси ще немає. Обов'язкова зміна при
+            першому вході (`ФВ-6.18`) робить його справді разовим. */}
         {provider === 'Local' && (
-          <Text size="xs" c="dimmed" mt="sm">
-            {t('security.localHint')}
-          </Text>
+          <>
+            <PasswordInput
+              mt="sm"
+              label={t('security.oneTimePassword')}
+              description={t('security.oneTimePasswordHint')}
+              value={oneTimePassword}
+              onChange={(event) => setOneTimePassword(event.currentTarget.value)}
+            />
+            <Text size="xs" c="dimmed" mt="xs">
+              {t('security.localHint')}
+            </Text>
+          </>
         )}
+
+        {/* ⛔ Адреса: без неї сповіщення не надходять нікому (`ФВ-12`). */}
+        <TextInput
+          mt="sm"
+          label={t('security.email')}
+          description={t('security.emailHint')}
+          value={email}
+          onChange={(event) => setEmail(event.currentTarget.value)}
+        />
+
+        {/* ⛔ Ролі задаються ОДРАЗУ. Обліковий запис без жодної ролі
+            виглядає працездатним і не може нічого. */}
+        <MultiSelect
+          mt="sm"
+          label={t('security.roles')}
+          description={t('security.rolesHint')}
+          data={(roles.data ?? []).map((r) => r.code)}
+          value={newUserRoles}
+          onChange={setNewUserRoles}
+          searchable
+        />
 
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={() => setCreatingUser(false)}>
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={userName.trim().length === 0}
+            disabled={
+              userName.trim().length === 0
+              || (provider === 'Local' && oneTimePassword.length === 0)
+            }
             loading={createUser.isPending}
             onClick={() => createUser.mutate()}
           >

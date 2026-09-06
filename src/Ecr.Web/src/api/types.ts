@@ -123,6 +123,7 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
 export type PeriodPolicyDto = Schemas['PeriodPolicyDto'];
 export type ApprovalRouteDto = Schemas['ApprovalRouteDto'];
+export type AffectedRolesResponse = Schemas['AffectedRolesResponse'];
 export type AffectedStepsResponse = Schemas['AffectedStepsResponse'];
 export type AccessMatrixDto = Schemas['AccessMatrixDto'];
 export type AccessMatrixSheetDto = Schemas['AccessMatrixSheetDto'];

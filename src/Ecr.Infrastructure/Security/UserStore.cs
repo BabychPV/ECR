@@ -87,6 +87,75 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct)
+        => await db.RoleAssignments
+            .AsNoTracking()
+
+            // ⚠ Лише БЕЗСТРОКОВІ призначення — рівно той набір, яким керує
+            // `ReplaceRolesAsync`. Показати тут ще й строкову підміну на час
+            // відпустки означало б, що збереження форми перетворює її на
+            // постійну: людина бачить роль у списку, лишає її — і тимчасове
+            // стає вічним.
+            .Where(a => a.UserId == userId && a.ValidFrom == null && a.ValidTo == null)
+            .Join(db.Roles, a => a.RoleId, r => r.Id, (_, r) => r.Code)
+            .OrderBy(code => code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<int> ReplaceRolesAsync(
+        int userId, IReadOnlyList<string> roleCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(roleCodes);
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false)
+                   ?? throw new Application.Errors.NotFoundException("ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+
+        // ⛔ Коди розв'язуються ДО будь-якої зміни: невідома роль у наборі
+        // означає помилку в переліку, і призначити «те, що знайшлося» гірше
+        // за відмову — людина отримала б частину повноважень і вважала б, що
+        // отримала всі.
+        var roles = await db.Roles
+            .AsNoTracking()
+            .Where(r => r.IsActive && roleCodes.Contains(r.Code))
+            .Select(r => new { r.Id, r.Code })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var unknown = roleCodes
+            .Except(roles.Select(r => r.Code), StringComparer.Ordinal)
+            .ToList();
+
+        if (unknown.Count > 0)
+        {
+            throw new Application.Errors.NotFoundException(
+                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.");
+        }
+
+        // ⚠ Призначення з обмеженням строку (`ValidFrom`/`ValidTo`) НЕ
+        // чіпаються: вони заведені навмисно — підміна на час відпустки — і
+        // заміна набору не має скасовувати те, що поставили окремим рішенням.
+        var permanent = await db.RoleAssignments
+            .Where(a => a.UserId == userId && a.ValidFrom == null && a.ValidTo == null)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.RoleAssignments.RemoveRange(permanent);
+
+        foreach (var role in roles)
+        {
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, user));
+        }
+
+        // ⛔ Штамп безпеки крутиться: інакше вже побудований профіль доступу
+        // живе в кеші до кінця сесії, і людина або лишається без щойно
+        // виданих прав, або зберігає щойно відібрані (`ФВ-6.7`).
+        user.RefreshSecurityStamp();
+
+        return roles.Count;
+    }
+
+    /// <inheritdoc />
     public async Task<PagedResult<UserView>> ListAsync(
         CursorRequest page, DateTime utcNow, CancellationToken ct)
     {

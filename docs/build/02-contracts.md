@@ -2540,6 +2540,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/entries` | `Registry.View` | 4 |
 | `POST` | `/api/v1/registries/{code}/entries` | `Registry.EditData` | 4 |
 | `PUT` | `/api/v1/registries/source-kind` | `Integration.Manage` | 4 |
+| `GET` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
+| `PUT` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
+| `PUT` | `/api/v1/users/{id}/email` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |

@@ -42,6 +42,22 @@ public sealed class User : Entity<int>
     /// </remarks>
     public bool ReceivesAlerts { get; private set; }
 
+    /// <summary>Задає адресу для сповіщень.</summary>
+    /// <param name="email">Адреса; <c>null</c> або порожньо — прибрати.</param>
+    /// <remarks>
+    /// ⛔ Сетера не було ЖОДНОГО, і поле не присвоювалося ніде в системі.
+    /// Наслідок мовчазний і повний: <c>NotificationJob</c> завжди отримував
+    /// порожній перелік адресатів, тобто сповіщення (<c>ФВ-12</c>) не
+    /// надходили нікому — а перемикач «отримувати сповіщення» в інтерфейсі
+    /// був вічно неактивним і виглядав як налаштування, яке просто вимкнули.
+    ///
+    /// ⚠ Адреса НЕ перевіряється на існування. Перевірка формату тут була б
+    /// самообманом: адреса, яка виглядає правильно і нікому не належить,
+    /// мовчить так само. Достовірність дає лише перший надісланий лист.
+    /// </remarks>
+    public void SetEmail(string? email)
+        => Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+
     /// <summary>Вмикає або вимикає отримання алертів.</summary>
     /// <param name="value">Чи отримує.</param>
     /// <exception cref="Abstractions.DomainException">Увімкнено без пошти.</exception>

@@ -21,6 +21,9 @@ public sealed class SecurityController(
     Ecr.Application.Security.ListResourceGrantsHandler listGrants,
     Ecr.Application.Security.ReplaceResourceGrantsHandler replaceGrants,
     Ecr.Application.Security.SetReceivesAlertsHandler setAlerts,
+    Ecr.Application.Security.ListUserRolesHandler listUserRoles,
+    Ecr.Application.Security.ReplaceUserRolesHandler replaceRoles,
+    Ecr.Application.Security.SetUserEmailHandler setEmail,
     Ecr.Domain.Abstractions.IClock clock) : ControllerBase
 {
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
@@ -110,11 +113,66 @@ public sealed class SecurityController(
         var userId = await createUser
             .HandleAsync(
                 request.UserName, request.DisplayName ?? request.UserName, provider,
-                request.Sid, request.InitialPassword, request.RoleCodes ?? [], ct)
+                request.Sid, request.InitialPassword, request.RoleCodes ?? [], request.Email, ct)
             .ConfigureAwait(false);
 
         // ⛔ У відповіді немає ні пароля, ні його хеша — лише ідентифікатор.
         return Created($"/api/v1/users/{userId}", new Contracts.UserIdResponse(userId));
+    }
+
+    /// <summary>Ролі користувача. Право <c>Security.ManageUsers</c>.</summary>
+    [HttpGet("users/{id:int}/roles")]
+    [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<string>>> UserRoles(int id, CancellationToken ct)
+        => Ok(await listUserRoles.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Замінює набір ролей користувача. Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Способу призначити роль наявному користувачеві не існувало взагалі:
+    /// ролі видавалися лише при створенні, а форма створення надсилала
+    /// порожній перелік. Обліковий запис виходив працездатним на вигляд і
+    /// безправним насправді.
+    ///
+    /// ⚠ Заміна НАБОРОМ, а не «додати/прибрати»: набір ролей і є
+    /// повноваженнями людини, і бачити його треба цілком.
+    /// </remarks>
+    [HttpPut("users/{id:int}/roles")]
+    [ProducesResponseType<Contracts.AffectedRolesResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReplaceUserRoles(
+        int id, [FromBody] ReplaceUserRolesRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var count = await replaceRoles.HandleAsync(id, request.RoleCodes, ct).ConfigureAwait(false);
+
+        return Ok(new Contracts.AffectedRolesResponse(count));
+    }
+
+    /// <summary>
+    /// Задає адресу користувача для сповіщень. Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Поле існувало від Етапу 3 і не присвоювалося ніде, тож
+    /// <c>NotificationJob</c> завжди отримував порожній перелік адресатів —
+    /// сповіщення (<c>ФВ-12</c>) не надходили нікому.
+    ///
+    /// ⚠ Порожня адреса ЗНІМАЄ і прапорець алертів: прапорець без пошти
+    /// виглядав би як налаштований адресат, якому нічого не надсилається.
+    /// </remarks>
+    [HttpPut("users/{id:int}/email")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SetUserEmail(
+        int id, [FromBody] SetUserEmailRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await setEmail.HandleAsync(id, request.Email, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>
@@ -232,6 +290,7 @@ public sealed record ReplaceGrantsRequest(
 /// <param name="DisplayName">Ім'я для показу; типово збігається з іменем входу.</param>
 /// <param name="InitialPassword">Разовий пароль локального запису.</param>
 /// <param name="RoleCodes">Ролі, які призначити одразу.</param>
+/// <param name="Email">Адреса для сповіщень; без неї листи не надходять (`ФВ-12`).</param>
 /// <remarks>
 /// ⚠ Три останні поля додані понад форму <c>05h</c>: без пароля неможливо
 /// створити локальний запис, а без ролей новий користувач не має жодного
@@ -244,7 +303,8 @@ public sealed record CreateUserRequest(
     string? Sid,
     string? DisplayName = null,
     string? InitialPassword = null,
-    IReadOnlyList<string>? RoleCodes = null);
+    IReadOnlyList<string>? RoleCodes = null,
+    string? Email = null);
 
 /// <summary>Запит на початок симуляції.</summary>
 /// <param name="SubjectUserId">Чиїми очима дивимося.</param>
@@ -255,6 +315,14 @@ public sealed record StartSimulationRequest(int SubjectUserId, string Reason);
 /// <param name="CurrentPassword">Поточний пароль.</param>
 /// <param name="NewPassword">Новий пароль.</param>
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+/// <summary>Запит на заміну набору ролей користувача.</summary>
+/// <param name="RoleCodes">Коди ролей; порожній набір прибирає всі.</param>
+public sealed record ReplaceUserRolesRequest(IReadOnlyList<string> RoleCodes);
+
+/// <summary>Запит на зміну адреси користувача.</summary>
+/// <param name="Email">Адреса; порожньо — прибрати разом із прапорцем алертів.</param>
+public sealed record SetUserEmailRequest(string? Email);
 
 /// <summary>Запит на зміну отримання алертів.</summary>
 /// <param name="ReceivesAlerts">Чи отримує людина алерти про збої.</param>
