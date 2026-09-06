@@ -22,33 +22,112 @@ internal static class Program
 {
     /// <summary>Точка входу.</summary>
     /// <param name="args">
-    /// <c>--documents 300 --fill 90 --year 2026 --connection "..."</c>
+    /// <c>--documents 300 --fill 90 --year 2026 --connection "..."</c>, або
+    /// <c>--cells 108000000 …</c>, або <c>--gate --load-seconds 900 …</c>.
     /// </param>
+    /// <returns>
+    /// <c>0</c> — зроблено; <c>1</c> — аргументи не розібрані; <c>2</c> —
+    /// **гейт `BR-07` не пройдено**.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Код виходу <c>2</c> — це і є вся суть режиму <c>--gate</c>. До нього
+    /// <see cref="GateBenchmark"/> не викликався **нізвідки**: клас існував,
+    /// був описаний у `05j-skeleton-tools.md`, згаданий у `progress.md` як
+    /// «5 із 6 замірів», — і не мав жодної точки входу. Бюджет, який не можна
+    /// запустити, не перевіряється ніколи.
+    /// </remarks>
     private static async Task<int> Main(string[] args)
     {
         var options = Options.Parse(args);
         if (options is null)
         {
             Console.WriteLine("""
-                Ecr.DataGen — синтетичний обсяг для гейта Етапу 0.
+                Ecr.DataGen — синтетичний обсяг і гейт BR-07 (Етап 0).
 
-                  --documents N   скільки документів (типово 300 — цільовий сценарій гейта)
-                  --fill N        заповненість комірок у відсотках (35 | 60 | 90)
-                  --year N        рік періодів (типово 2026)
-                  --connection S  рядок підключення; без нього береться ECR_ConnectionStrings__Ecr
+                  --documents N     скільки документів (типово 300 — цільовий сценарій гейта)
+                  --cells N         зупинитися, коли в doc.CellValue стане N комірок;
+                                    має пріоритет над --documents (0 — не обмежувати)
+                  --fill N          заповненість комірок у відсотках (35 | 60 | 90)
+                  --year N          рік періодів (типово 2026)
+                  --connection S    рядок підключення; без нього береться ECR_ConnectionStrings__Ecr
+                  --gate            не генерувати, а ЗАМІРЯТИ; код виходу 2, якщо бюджет не пройдено
+                  --load-seconds N  тривалість заміру №6 (типово 900 — 15 хв повного гейта)
+                  --load-slice S    у який зріз б'є замір №6: typical (типово, ~5 000 комірок
+                                    за tz/08 §8.2) або worst (500×60, критерій №1)
 
                 ⚠ Цільовий сценарій гейта — 300 документів при заповненості 90%:
                   замовник називає ≥200 на рік, і саме на 300 мають виконуватися бюджети.
+                ⚠ Обсяг задається В КОМІРКАХ (--cells), бо BR-07 названий у рядках
+                  doc.CellValue, а не в документах: скільки документів дасть 108 млн
+                  комірок, залежить від заповненості.
                 """);
             return 1;
         }
 
+        return options.Gate
+            ? await RunGateAsync(options).ConfigureAwait(false)
+            : await GenerateAsync(options).ConfigureAwait(false);
+    }
+
+    /// <summary>Заміри гейта і код виходу за їхнім результатом.</summary>
+    /// <param name="options">Розібрані аргументи командного рядка.</param>
+    /// <returns><c>0</c> — бюджет витриманий, <c>2</c> — ні.</returns>
+    private static async Task<int> RunGateAsync(Options options)
+    {
+        var benchmark = new GateBenchmark
+        {
+            LoadSeconds = options.LoadSeconds,
+            LoadWorstSlice = options.LoadWorstSlice,
+        };
+        var result = await benchmark
+            .RunAsync(options.ConnectionString, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Console.WriteLine();
+        Console.WriteLine("Гейт BR-07 — заміри:");
+        foreach (var (name, value) in result.Measurements)
+        {
+            Console.WriteLine(Fmt($"  {name,-28} {value,12:F1}"));
+        }
+
+        if (result.Failures.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Порушення бюджету:");
+            foreach (var failure in result.Failures)
+            {
+                Console.WriteLine(Fmt($"  ✗ {failure}"));
+            }
+        }
+
+        foreach (var note in result.Notes)
+        {
+            Console.WriteLine(Fmt($"  ! {note}"));
+        }
+
+        Console.WriteLine();
+        Console.WriteLine(result.Passed ? "Гейт BR-07 пройдено." : "Гейт BR-07 НЕ пройдено.");
+
+        // ⛔ Ненульовий код виходу — єдине, що відрізняє перевірку від звіту.
+        // Скрипт, який друкує числа і завжди виходить нулем, конвеєр пропустить.
+        return result.Passed ? 0 : 2;
+    }
+
+    /// <summary>Наповнення <c>doc.CellValue</c> до заданого обсягу.</summary>
+    /// <param name="options">Розібрані аргументи командного рядка.</param>
+    /// <returns>Завжди <c>0</c>: генерація або відпрацювала, або кинула виняток.</returns>
+    private static async Task<int> GenerateAsync(Options options)
+    {
         var profile = new DistributionProfile();
         var db = CreateContext(options.ConnectionString);
         var loader = new BulkCellLoader(options.ConnectionString, batchSize: 10_000);
 
+        var goal = options.TargetCells > 0
+            ? Fmt($"до {options.TargetCells} комірок")
+            : Fmt($"{options.Documents} документів");
+
         Console.WriteLine(Fmt(
-            $"Генерація: {options.Documents} документів, заповненість {options.Fill}%, рік {options.Year}."));
+            $"Генерація: {goal}, заповненість {options.Fill}%, рік {options.Year}."));
         var started = DateTime.UtcNow;
 
         var scaffold = await BuildScaffoldAsync(db, profile, options).ConfigureAwait(false);
@@ -58,6 +137,10 @@ internal static class Program
         long rows = 0, cells = 0;
         var random = new Random(Seed: 20260904);
 
+        // ⚠ Межа за комірками, а не лише за документами: BR-07 названий у
+        // рядках `doc.CellValue`. Обидві межі діють одночасно — генерація
+        // спиняється на тій, що настане раніше, інакше `--cells` на малому
+        // `--documents` мовчки недобрав би обсяг.
         for (var docIndex = 1; docIndex <= options.Documents; docIndex++)
         {
             var (r, c) = await GenerateDocumentAsync(
@@ -65,11 +148,18 @@ internal static class Program
             rows += r;
             cells += c;
 
-            if (docIndex % 10 == 0 || docIndex == options.Documents)
+            var reached = options.TargetCells > 0 && cells >= options.TargetCells;
+
+            if (docIndex % 10 == 0 || docIndex == options.Documents || reached)
             {
                 var elapsed = DateTime.UtcNow - started;
                 Console.WriteLine(Fmt(
                     $"  {docIndex}/{options.Documents}: рядків {rows}, комірок {cells}, {elapsed:hh\\:mm\\:ss}"));
+            }
+
+            if (reached)
+            {
+                break;
             }
         }
 
@@ -103,25 +193,32 @@ internal static class Program
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         var random = new Random(Seed: 42);
-        var tables = new List<TableShape>(profile.TablesPerDocument);
+        var tables = new List<TableShape>(profile.TablesPerDocument + 1);
 
-        for (var t = 1; t <= profile.TablesPerDocument; t++)
+        // ⛔ Остання таблиця — контрольна: рівно 500×60, тобто той самий зріз,
+        // під який записаний критерій №1 BR-07. Профіль її не дає ніколи
+        // (хвіст — 471 рядок), тому без неї бюджет «< 600 мс на 500×60»
+        // перевірявся б на зрізі в тридцять разів меншому.
+        for (var t = 1; t <= profile.TablesPerDocument + 1; t++)
         {
+            var isGateTable = t == profile.TablesPerDocument + 1;
+
             var table = new TableDef(
                 sheet.Id, EcrCode.Create($"T{t}_{tag}"), Name($"Table {t}"), t,
                 TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
             db.Add(table);
             await db.SaveChangesAsync().ConfigureAwait(false);
 
-            var columnCount = random.Next(profile.MinColumns, profile.MaxColumns + 1);
-            var columnIds = new List<int>(columnCount);
+            var columnCount = isGateTable
+                ? profile.GateSliceColumns
+                : random.Next(profile.MinColumns, profile.MaxColumns + 1);
+
             for (var c = 1; c <= columnCount; c++)
             {
                 var column = new ColumnDef(
                     table.Id, EcrCode.Create($"C{c}"), Name($"C{c}"), c,
                     c == 1 ? CellDataType.String : CellDataType.Decimal);
                 db.Add(column);
-                columnIds.Add(0);   // Id заповниться після SaveChanges
             }
 
             await db.SaveChangesAsync().ConfigureAwait(false);
@@ -132,7 +229,8 @@ internal static class Program
                 .Select(x => x.Id)
                 .ToListAsync().ConfigureAwait(false);
 
-            tables.Add(new TableShape(table.Id, ids, RowCount(profile, random)));
+            var rowCount = isGateTable ? profile.GateSliceRows : RowCount(profile, random);
+            tables.Add(new TableShape(table.Id, ids, rowCount));
         }
 
         var policyId = await db.PeriodPolicies.Select(p => p.Id).FirstAsync().ConfigureAwait(false);
@@ -308,14 +406,47 @@ internal static class Program
     private sealed record TableShape(int TableDefId, IReadOnlyList<int> ColumnIds, int Rows);
 
     /// <summary>Розібрані аргументи командного рядка.</summary>
-    private sealed record Options(int Documents, int Fill, int Year, string ConnectionString)
+    /// <param name="Documents">Верхня межа кількості документів.</param>
+    /// <param name="TargetCells">Цільова кількість рядків <c>doc.CellValue</c>; <c>0</c> — без межі.</param>
+    /// <param name="Fill">Заповненість комірок, %.</param>
+    /// <param name="Year">Рік періодів.</param>
+    /// <param name="ConnectionString">Рядок підключення до бази.</param>
+    /// <param name="Gate">Режим заміру замість генерації.</param>
+    /// <param name="LoadSeconds">Тривалість заміру №6, секунд.</param>
+    /// <param name="LoadWorstSlice">Бити заміром №6 у найважчий зріз, а не в типовий.</param>
+    private sealed record Options(
+        int Documents,
+        long TargetCells,
+        int Fill,
+        int Year,
+        string ConnectionString,
+        bool Gate,
+        int LoadSeconds,
+        bool LoadWorstSlice)
     {
+        /// <summary>Розбирає аргументи; <c>null</c>, якщо немає рядка підключення.</summary>
+        /// <param name="args">Аргументи командного рядка.</param>
+        /// <returns>Опції або <c>null</c>.</returns>
         public static Options? Parse(string[] args)
         {
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            for (var i = 0; i + 1 < args.Length; i += 2)
+            var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // ⚠ Прапорці без значення розбираються ОКРЕМО. Попередній розбір
+            // ішов парами `args[i]`/`args[i+1]`, і будь-який одиночний `--gate`
+            // з'їв би наступний ключ як своє значення — тихо, без помилки.
+            for (var i = 0; i < args.Length; i++)
             {
-                map[args[i].TrimStart('-')] = args[i + 1];
+                var key = args[i].TrimStart('-');
+                if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                {
+                    map[key] = args[i + 1];
+                    i++;
+                }
+                else
+                {
+                    flags.Add(key);
+                }
             }
 
             var connection = map.GetValueOrDefault("connection")
@@ -326,11 +457,20 @@ internal static class Program
                 return null;
             }
 
+            var cells = (long)Read(map, "cells", 0);
+
             return new Options(
-                Documents: Read(map, "documents", 300),
+                // ⚠ Коли обсяг заданий комірками, межа за документами має не
+                // заважати: інакше типові 300 обірвали б наповнення раніше за
+                // ціль і замір пішов би на недоборі, не сказавши про це.
+                Documents: Read(map, "documents", cells > 0 ? int.MaxValue : 300),
+                TargetCells: cells,
                 Fill: Read(map, "fill", 90),
                 Year: Read(map, "year", 2026),
-                ConnectionString: connection);
+                ConnectionString: connection,
+                Gate: flags.Contains("gate"),
+                LoadSeconds: Read(map, "load-seconds", 900),
+                LoadWorstSlice: map.GetValueOrDefault("load-slice") == "worst");
         }
 
         private static int Read(Dictionary<string, string> map, string key, int fallback)
