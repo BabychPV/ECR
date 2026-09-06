@@ -112,6 +112,20 @@
           "Blocked"
         ]
       },
+      "AffectedRolesResponse": {
+        "description": "Скільки ролей тепер призначено користувачеві.",
+        "properties": {
+          "roles": {
+            "description": "Кількість; `0` — жодної, обліковий запис безправний.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "roles"
+        ],
+        "type": "object"
+      },
       "AffectedRowsResponse": {
         "description": "Скільки рядків зачепила операція.",
         "properties": {
@@ -786,6 +800,13 @@
         "properties": {
           "displayName": {
             "description": "Ім'я для показу; типово збігається з іменем входу.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "email": {
+            "description": "Адреса для сповіщень; без неї листи не надходять (`ФВ-12`).",
             "type": [
               "null",
               "string"
@@ -2601,6 +2622,22 @@
         ],
         "type": "object"
       },
+      "ReplaceUserRolesRequest": {
+        "description": "Запит на заміну набору ролей користувача.",
+        "properties": {
+          "roleCodes": {
+            "description": "Коди ролей; порожній набір прибирає всі.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "roleCodes"
+        ],
+        "type": "object"
+      },
       "ReportSnapshotSummary": {
         "description": "Зріз у переліку.",
         "properties": {
@@ -2877,6 +2914,22 @@
         "required": [
           "value",
           "scope"
+        ],
+        "type": "object"
+      },
+      "SetUserEmailRequest": {
+        "description": "Запит на зміну адреси користувача.",
+        "properties": {
+          "email": {
+            "description": "Адреса; порожньо — прибрати разом із прапорцем алертів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "email"
         ],
         "type": "object"
       },
@@ -7837,6 +7890,204 @@
           }
         },
         "summary": "Вмикає або вимикає отримання алертів. Право `Security.ManageUsers`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/email": {
+      "put": {
+        "description": "⛔ Поле існувало від Етапу 3 і не присвоювалося ніде, тож\r\n`NotificationJob` завжди отримував порожній перелік адресатів —\r\nсповіщення (`ФВ-12`) не надходили нікому.\r\n\r\n⚠ Порожня адреса ЗНІМАЄ і прапорець алертів: прапорець без пошти\r\nвиглядав би як налаштований адресат, якому нічого не надсилається.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserEmailRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserEmailRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUserEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Задає адресу користувача для сповіщень. Право `Security.ManageUsers`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/roles": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Ролі користувача. Право `Security.ManageUsers`.",
+        "tags": [
+          "Security"
+        ]
+      },
+      "put": {
+        "description": "⛔ Способу призначити роль наявному користувачеві не існувало взагалі:\r\nролі видавалися лише при створенні, а форма створення надсилала\r\nпорожній перелік. Обліковий запис виходив працездатним на вигляд і\r\nбезправним насправді.\r\n\r\n⚠ Заміна НАБОРОМ, а не «додати/прибрати»: набір ролей і є\r\nповноваженнями людини, і бачити його треба цілком.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceUserRolesRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceUserRolesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceUserRolesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedRolesResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedRolesResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedRolesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Замінює набір ролей користувача. Право `Security.ManageUsers`.",
         "tags": [
           "Security"
         ]

@@ -34,6 +34,10 @@ public sealed record TemplateIdResponse(int TemplateId);
 /// <param name="VersionId">Ідентифікатор.</param>
 public sealed record VersionIdResponse(int VersionId);
 
+/// <summary>Скільки ролей тепер призначено користувачеві.</summary>
+/// <param name="Roles">Кількість; <c>0</c> — жодної, обліковий запис безправний.</param>
+public sealed record AffectedRolesResponse(int Roles);
+
 /// <summary>Скільки кроків тепер у маршруті погодження.</summary>
 /// <param name="Steps">Кількість; <c>0</c> — маршруту немає, затвердження одноетапне.</param>
 public sealed record AffectedStepsResponse(int Steps);

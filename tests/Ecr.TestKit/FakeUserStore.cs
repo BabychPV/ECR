@@ -98,6 +98,48 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+
+        return Task.FromResult<IReadOnlyList<string>>(user is null
+            ? []
+            : [.. Grants.Where(g => g.UserName == user.UserName).Select(g => g.RoleCode)]);
+    }
+
+    /// <inheritdoc />
+    public Task<int> ReplaceRolesAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(roleCodes);
+
+        var user = _users.Find(u => u.Id == userId)
+                   ?? throw new Application.Errors.NotFoundException(
+                       "ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+
+        var unknown = roleCodes
+            .Where(code => !Roles.Exists(r => r.Code == code))
+            .ToList();
+
+        if (unknown.Count > 0)
+        {
+            throw new Application.Errors.NotFoundException(
+                "ECR-SEC-0404", $"Ролей не існує: {string.Join(", ", unknown)}.");
+        }
+
+        Grants.RemoveAll(g => g.UserName == user.UserName);
+        foreach (var code in roleCodes)
+        {
+            Grants.Add((user.UserName, code));
+        }
+
+        // Штамп безпеки крутиться і у фікстурі: тест, який цього не бачить,
+        // не побачив би і його відсутності в бойовому коді.
+        user.RefreshSecurityStamp();
+
+        return Task.FromResult(roleCodes.Count);
+    }
+
+    /// <inheritdoc />
     public void RecordAttempt(LoginAttempt attempt) => Attempts.Add(attempt);
 
     /// <inheritdoc />

@@ -50,6 +50,28 @@ public interface IUserStore
     /// <summary>Призначає роль записові; застосовується разом із транзакцією.</summary>
     public Task GrantRoleAsync(User user, string roleCode, CancellationToken ct);
 
+    /// <summary>
+    /// Замінює НАБІР ролей користувача цілком.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Способу призначити роль наявному користувачеві не існувало взагалі:
+    /// ролі можна було видати лише при створенні, а форма створення надсилала
+    /// порожній перелік. Обліковий запис виходив працездатним на вигляд і
+    /// безправним насправді, і виправити це було нічим.
+    ///
+    /// ⚠ Заміна набором, а не «додати/прибрати»: набір ролей — це і є
+    /// повноваження людини, і бачити його треба цілком, а не як історію
+    /// правок.
+    /// </remarks>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="roleCodes">Коди ролей; порожньо — прибрати всі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки ролей тепер призначено.</returns>
+    public Task<int> ReplaceRolesAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct);
+
+    /// <summary>Коди ролей користувача.</summary>
+    public Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct);
+
     /// <summary>Сторінка облікових записів.</summary>
     /// <remarks>⛔ Хеш пароля і <c>SecurityStamp</c> не покидають сховище (ФВ-6.11).</remarks>
     public Task<Common.PagedResult<Security.UserView>> ListAsync(
