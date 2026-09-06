@@ -2,6 +2,7 @@ using System.Text.Json;
 using Ecr.Application.Localization;
 using Ecr.Application.Templates;
 using Ecr.Application.Templates.Dto;
+using Ecr.Domain.Errors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
@@ -153,7 +154,7 @@ public sealed class TemplateVersionsController(
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
-            Errors.ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ErrorCodes.Unauthorized, "Сесія не містить користувача.");
 }
 
 /// <summary>Запит на виведення версії з обігу.</summary>

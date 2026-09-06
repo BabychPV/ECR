@@ -1,6 +1,7 @@
 // src/Ecr.Domain/Entities/Security/User.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Domain.Entities.Security;
 
@@ -63,10 +64,14 @@ public sealed class User : Entity<int>
     /// <exception cref="Abstractions.DomainException">Увімкнено без пошти.</exception>
     public void SetReceivesAlerts(bool value)
     {
+        // ⛔ Родина USR, а не ROW. ROW — це помилки РЯДКА ТАБЛИЦІ ДОКУМЕНТА, і
+        // клієнт маршрутизує саме за родиною: відмова облікового запису
+        // приходила в обробник помилок сітки, де для неї немає ні місця, ні
+        // тексту, — користувач бачив би її як збій редактора документа.
         if (value && string.IsNullOrWhiteSpace(Email))
         {
             throw new Abstractions.DomainException(
-                "ECR-ROW-0422",
+                ErrorCodes.UserInvalid,
                 $"Користувач «{UserName}» не має пошти: вмикати отримання алертів немає куди.");
         }
 

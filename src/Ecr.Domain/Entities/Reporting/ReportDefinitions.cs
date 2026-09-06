@@ -1,6 +1,7 @@
 // src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Domain.Entities.Reporting;
@@ -82,7 +83,8 @@ public sealed class ReportVersion : Entity<int>
         if (Status != TemplateVersionStatus.Draft)
         {
             throw new DomainException(
-                "ECR-RPT-0409", $"Версія звіту {Version} у стані {Status}: публікувати нічого.");
+                ErrorCodes.ReportImmutable,
+                $"Версія звіту {Version} у стані {Status}: публікувати нічого.");
         }
 
         Status = TemplateVersionStatus.Published;
@@ -185,7 +187,7 @@ public sealed class ReportSnapshot : Entity<long>
         if (Status == SnapshotStatus.Submitted)
         {
             throw new DomainException(
-                "ECR-RPT-0409",
+                ErrorCodes.ReportImmutable,
                 $"Зріз {Id} поданий: його статус не змінюється, потрібен новий зріз.");
         }
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Ecr.Api.Middleware;
 using Ecr.Application.Errors;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Ecr.Api.Errors;
@@ -49,8 +50,9 @@ public sealed partial class ExceptionHandlingMiddleware(
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
             // Клієнт відвалився. Тіла відповіді ніхто не прочитає, а новий код
-            // помилки заради цього заводити не можна: каталог фіксований і
-            // звіряється аудитом (42 коди, вигаданих 0).
+            // помилки заради цього заводити не можна: кожен код каталогу
+            // звіряється з `02-contracts.md` §7 в обидва боки, і код, якого
+            // ніхто не побачить, лишився б там назавжди як мертвий рядок.
             context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
         }
         catch (Exception ex)

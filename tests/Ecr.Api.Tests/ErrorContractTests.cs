@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text.Json;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
+using Ecr.Domain.Errors;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using Xunit;

@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
@@ -413,8 +414,11 @@ public sealed class CreateUserHandler(
             // друга його копія тут була б і зайвою, і небезпечною.
             user = User.CreateDomain(
                 userName, displayName,
+                // ⛔ Родина USR, а не CELL: суб'єкт відмови — обліковий запис,
+                // а не комірка документа. З ECR-CELL-0422 відмова створення
+                // користувача приходила в обробник помилок сітки.
                 windowsSid ?? throw new BusinessRuleException(
-                    "ECR-CELL-0422", "Для доменного запису потрібен SID."),
+                    ErrorCodes.UserInvalid, "Для доменного запису потрібен SID."),
                 now);
         }
         else
@@ -422,7 +426,7 @@ public sealed class CreateUserHandler(
             if (string.IsNullOrWhiteSpace(initialPassword))
             {
                 throw new BusinessRuleException(
-                    "ECR-CELL-0422", "Для локального запису потрібен разовий пароль.");
+                    ErrorCodes.UserInvalid, "Для локального запису потрібен разовий пароль.");
             }
 
             user = new User(userName, displayName, AuthProvider.Local);

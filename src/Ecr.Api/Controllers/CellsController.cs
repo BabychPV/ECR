@@ -1,6 +1,7 @@
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Application.Documents.Dto;
 using Microsoft.AspNetCore.Authorization;
@@ -94,7 +95,7 @@ public sealed class CellsController(
     private Task<AccessProfile> ProfileAsync(CancellationToken ct)
         => access.BuildProfileAsync(
             currentUser.UserId ?? throw new Application.Errors.AccessDeniedException(
-                Errors.ErrorCodes.Unauthorized, "Сесія не містить користувача."),
+                ErrorCodes.Unauthorized, "Сесія не містить користувача."),
             ct);
 }
 

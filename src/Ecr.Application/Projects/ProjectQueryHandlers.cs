@@ -6,6 +6,7 @@ using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Projects;
@@ -260,14 +261,14 @@ public sealed class ActivateProjectHandler(
         if (project.Status != Domain.Enums.ProjectStatus.Draft)
         {
             throw new BusinessRuleException(
-                "ECR-PRJ-0422",
+                ErrorCodes.ProjectActivationInvalid,
                 $"Активувати можна лише чернетку; проєкт у стані {project.Status}.");
         }
 
         if (project.Periods.Count == 0)
         {
             throw new BusinessRuleException(
-                "ECR-PRJ-0422",
+                ErrorCodes.ProjectActivationInvalid,
                 "У проєкті немає жодного періоду: активувати нічого.");
         }
 
