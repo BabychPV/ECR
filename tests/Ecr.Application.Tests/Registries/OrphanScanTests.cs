@@ -280,6 +280,7 @@ public sealed class OrphanScanTests
         Permissions = new HashSet<string>(StringComparer.Ordinal) { "Registry.EditData" },
         Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(),
+        RoleIds = new HashSet<int>(),
     };
 
     private static RegistryEntry Entry(long id, DateOnly? from, DateOnly? to)

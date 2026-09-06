@@ -136,5 +136,6 @@ public sealed class DangerousPermissionTests
         Permissions = new HashSet<string>(permissions, StringComparer.Ordinal),
         Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
         Denies = new HashSet<string>(StringComparer.Ordinal),
+        RoleIds = new HashSet<int>(),
     };
 }

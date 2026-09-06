@@ -70,6 +70,7 @@ public sealed class PublishTemplateVersionTests
             Permissions = new HashSet<string>(StringComparer.Ordinal) { "Template.Publish" },
             Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(),
+            RoleIds = new HashSet<int>(),
         });
     }
 

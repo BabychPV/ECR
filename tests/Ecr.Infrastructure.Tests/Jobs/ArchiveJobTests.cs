@@ -197,10 +197,17 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
         Assert.Equal(before, await CountAsync("doc.CellValue", doc.PeriodKey.Value));
 
         // І значення те саме, до останнього знака.
+        //
+        // ⚠ Запит адресує РЯДОК цього тесту, а не `TOP 1` по всій таблиці.
+        // Було друге, і воно мовчки працювало, доки в періоді 202606 не
+        // з'явився чужий рядок: тест почав читати чуже значення й падати —
+        // причому падав не той тест, який щось зламав.
         Assert.Equal(
             77.5m,
             await ScalarAsync<decimal>(
-                $"SELECT TOP 1 ValueNumeric FROM doc.CellValue WHERE PeriodKey = {doc.PeriodKey.Value}")
+                "SELECT ValueNumeric FROM doc.CellValue "
+                + $"WHERE PeriodKey = {doc.PeriodKey.Value} "
+                + $"AND TableRowId = {doc.RowIds[0]} AND ColumnDefId = {doc.ColumnDefIds[1]}")
                 );
     }
 

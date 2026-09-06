@@ -67,6 +67,7 @@ public sealed class RegistryResolverTests
         },
         Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(),
+        RoleIds = new HashSet<int>(),
     };
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

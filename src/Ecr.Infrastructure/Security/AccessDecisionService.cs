@@ -150,6 +150,7 @@ public sealed class AccessDecisionService(
             Permissions = permissions.ToHashSet(StringComparer.Ordinal),
             Grants = grants,
             Denies = denies,
+            RoleIds = roleIds.ToHashSet(),
         };
     }
 
@@ -176,7 +177,8 @@ public sealed class AccessDecisionService(
         ArgumentNullException.ThrowIfNull(profile);
 
         var context = await BuildContextAsync(
-            documentId, address.PeriodKey, sheetDefId: null, address.ColumnDefId, ct).ConfigureAwait(false);
+            documentId, address.PeriodKey, sheetDefId: null, address.ColumnDefId,
+            evaluateAccessWindow: true, ct).ConfigureAwait(false);
 
         return EditRules.CanEdit(profile, context);
     }
@@ -197,13 +199,23 @@ public sealed class AccessDecisionService(
 
         var periodKey = new PeriodKey(instance.PeriodKeyValue);
 
+        var snapshot = await SnapshotAsync(instance.DocumentId, ct).ConfigureAwait(false);
+
+        // ⛔ Аркуш визначається ДО побудови умов, а не лишається нульовим.
+        // З <c>sheetDefId: null</c> стан робочого процесу не читався взагалі й
+        // підставлявся як <c>Draft</c> — тобто ПОДАНИЙ аркуш залишався
+        // редаговним на єдиному шляху, яким запис і йде (<c>PatchCellsHandler</c>).
+        // Перевірка в <see cref="EditRules"/> була, тести на неї були — а
+        // викликати її ніхто не міг (`A7-51`).
+        var sheetDefId = SheetOf(snapshot, instance.TableDefId);
+
         // ⚠ Спільні для зрізу умови рахуються ОДИН раз. Поштучний виклик
         // CanEditCellAsync у циклі — антипатерн: на таблиці 500×60 це 30 000
         // запитів, а на права відведено 50 мс на весь запит (ФВ-6.10).
         var shared = await BuildContextAsync(
-            instance.DocumentId, periodKey, sheetDefId: null, columnDefId: 0, ct).ConfigureAwait(false);
-
-        var snapshot = await SnapshotAsync(instance.DocumentId, ct).ConfigureAwait(false);
+                instance.DocumentId, periodKey, sheetDefId, columnDefId: 0,
+                evaluateAccessWindow: false, ct)
+            .ConfigureAwait(false);
 
         var rows = await db.TableRows
             .AsNoTracking()
@@ -216,12 +228,25 @@ public sealed class AccessDecisionService(
             .Where(c => c.TableDefId == instance.TableDefId)
             .ToList();
 
+        // ⛔ Правила доступу до періоду (`ФВ-2.15`) і все, що їм потрібно,
+        // читається ОДИН раз на зріз — див. `PeriodRuleContextAsync`.
+        var ruleContext = await PeriodRuleContextAsync(
+                snapshot.TemplateVersionId, shared.ProjectId, tableInstanceId, periodKey, ct)
+            .ConfigureAwait(false);
+
         var result = new Dictionary<CellAddress, EditDecision>(rows.Count * columns.Count);
 
         foreach (var row in rows)
         {
-            var rowReadOnly = snapshot.RowsByKey.TryGetValue((instance.TableDefId, row.RowKey), out var def)
-                              && def.IsReadOnly;
+            var def = snapshot.RowsByKey.TryGetValue((instance.TableDefId, row.RowKey), out var found)
+                ? found
+                : null;
+
+            // Вікна чинності записів довідника, на які посилається саме цей
+            // рядок: колонка → вікно. Порожньо — рядок нічого не обрав.
+            var sourceValues = ruleContext.SourceWindows.TryGetValue(row.Id, out var windows)
+                ? windows
+                : EmptyWindows;
 
             foreach (var column in columns)
             {
@@ -231,14 +256,151 @@ public sealed class AccessDecisionService(
                     ColumnDefId = column.Id,
                     ColumnIsComputed = column.IsComputed,
                     ColumnIsReadOnly = column.IsReadOnly,
-                    RowIsReadOnly = rowReadOnly,
+                    RowIsReadOnly = def?.IsReadOnly ?? false,
                 };
 
-                result[new CellAddress(periodKey, row.Id, column.Id)] = EditRules.CanEdit(profile, context);
+                var decision = EditRules.CanEdit(profile, context);
+
+                // ⚠ Правила періоду перевіряються ЛИШЕ там, де решта
+                // дозволила. Інакше комірка в закритому періоді доповідала б про
+                // вікно дозволу замість про сам період — причина має бути та,
+                // яку користувач здатен усунути першою.
+                if (decision.IsAllowed && ruleContext.Rules.Count > 0)
+                {
+                    var facts = new PeriodRuleFacts(
+                        sheetDefId,
+                        instance.TableDefId,
+                        def?.RowKind ?? RowKind.Item,
+                        (byte)periodKey.Sequence,
+                        periodKey.Year,
+                        ruleContext.CurrentSequence,
+                        column.MonthNumber,
+                        sourceValues,
+                        EmptyExpressions);
+
+                    var outcome = PeriodAccessRules.Evaluate(ruleContext.Rules, facts, profile.RoleIds);
+
+                    if (outcome.Blocks)
+                    {
+                        decision = EditDecision.Deny(outcome.Reason, outcome.Detail);
+                    }
+                }
+
+                result[new CellAddress(periodKey, row.Id, column.Id)] = decision;
             }
         }
 
         return result;
+    }
+
+    private static readonly IReadOnlyDictionary<int, SourceValidity> EmptyWindows
+        = new Dictionary<int, SourceValidity>();
+
+    private static readonly IReadOnlyDictionary<long, IReadOnlyDictionary<int, SourceValidity>>
+        EmptySourceWindows = new Dictionary<long, IReadOnlyDictionary<int, SourceValidity>>();
+
+    /// <summary>Результати умов <c>Expression</c>.</summary>
+    /// <remarks>
+    /// ⛔ Порожньо, і це ВИДНО, а не сховано: обчислення виразу
+    /// над рядком потребує рушія діалекту шаблонів на шляху перевірки
+    /// прав, а цей шлях має бюджет 50 мс на весь зріз (<c>ФВ-6.10</c>).
+    /// Правило виду <c>Expression</c> при цьому НЕ блокує нічого
+    /// мовчки: <see cref="PeriodAccessRules"/> трактує необчислену умову
+    /// як «не застосовується», а не як заборону.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, bool> EmptyExpressions
+        = new Dictionary<string, bool>(StringComparer.Ordinal);
+
+    /// <summary>Спільні для зрізу дані правил доступу до періоду.</summary>
+    /// <param name="Rules">Правила версії шаблону.</param>
+    /// <param name="CurrentSequence">Поточний період проєкту; <c>null</c> — не визначений.</param>
+    /// <param name="SourceWindows">Рядок → колонка → вікно чинності обраного запису.</param>
+    private sealed record PeriodRuleContext(
+        IReadOnlyList<PeriodAccessRuleDef> Rules,
+        byte? CurrentSequence,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<int, SourceValidity>> SourceWindows);
+
+    /// <summary>
+    /// Збирає все, що потрібно правилам доступу, ЗА КІЛЬКА ЗАПИТІВ НА ЗРІЗ
+    /// — не за запитом на комірку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Спокуса реалізувати <c>SourceWindow</c> походом у довідник на
+    /// кожну комірку велика, і вона тиха: тести на трьох рядках
+    /// пройдуть, а бюджет впаде лише на реальному зрізі 500×60.
+    /// Саме тому кількість запитів стереже окремий тест.
+    ///
+    /// ⚠ Другий і третій запити виконуються ЛИШЕ тоді, коли є правило
+    /// відповідного виду. Шаблон без них — а це більшість — не платить
+    /// за механізм нічим.
+    /// </remarks>
+    private async Task<PeriodRuleContext> PeriodRuleContextAsync(
+        int templateVersionId, int projectId, long tableInstanceId, PeriodKey periodKey,
+        CancellationToken ct)
+    {
+        var rules = await db.PeriodAccessRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == templateVersionId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (rules.Count == 0)
+        {
+            return new PeriodRuleContext(rules, null, EmptySourceWindows);
+        }
+
+        byte? currentSequence = null;
+        if (rules.Exists(r => r.RuleKind == PeriodAccessRuleKind.RelativeWindow))
+        {
+            // Поточний період — з календаря проєкту, а не з годинника
+            // сервера: проєкт із закріпленим періодом (`D-77`) інакше
+            // поводився б не так, як показує.
+            currentSequence = await db.Projects
+                .AsNoTracking()
+                .Where(p => p.Id == projectId && p.CurrentPeriodId != null)
+                .Join(db.Periods, p => p.CurrentPeriodId!.Value, x => x.Id, (_, x) => (byte?)x.Sequence)
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false);
+        }
+
+        var sourceColumns = rules
+            .Where(r => r.RuleKind == PeriodAccessRuleKind.SourceWindow)
+            .Select(r => r.SourceColumnDefId)
+            .OfType<int>()
+            .Distinct()
+            .ToList();
+
+        if (sourceColumns.Count == 0)
+        {
+            return new PeriodRuleContext(rules, currentSequence, EmptySourceWindows);
+        }
+
+        // ⛔ ОДИН запит на весь зріз: посилання рядків на записи довідника
+        // разом із вікнами чинності цих записів.
+        var references = await (
+                from cell in db.CellValues.AsNoTracking()
+                join row in db.TableRows.AsNoTracking()
+                    on new { cell.PeriodKeyValue, Id = cell.TableRowId }
+                    equals new { row.PeriodKeyValue, row.Id }
+                join entry in db.RegistryEntries.AsNoTracking()
+                    on (long)cell.ValueRegistryEntryId!.Value equals entry.Id
+                where row.TableInstanceId == tableInstanceId
+                      && cell.PeriodKeyValue == periodKey.Value
+                      && cell.ValueRegistryEntryId != null
+                      && sourceColumns.Contains(cell.ColumnDefId)
+                select new { cell.TableRowId, cell.ColumnDefId, entry.ValidFrom, entry.ValidTo })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var windows = references
+            .GroupBy(r => r.TableRowId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyDictionary<int, SourceValidity>)g.ToDictionary(
+                    r => r.ColumnDefId,
+                    r => new SourceValidity(r.ValidFrom, r.ValidTo)));
+
+        return new PeriodRuleContext(rules, currentSequence, windows);
     }
 
     /// <inheritdoc />
@@ -247,7 +409,8 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var context = await BuildContextAsync(documentId, periodKey, sheetDefId, columnDefId: 0, ct)
+        var context = await BuildContextAsync(
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
 
         // ⚠ При поданні блокує БУДЬ-ЯКА помилка валідації будь-якого рівня
@@ -271,7 +434,8 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var context = await BuildContextAsync(documentId, periodKey, sheetDefId, columnDefId: 0, ct)
+        var context = await BuildContextAsync(
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
 
         return EditRules.CanApprove(profile, context);
@@ -282,8 +446,19 @@ public sealed class AccessDecisionService(
     /// ⛔ <c>Project.CurrentPeriod</c> у цей ланцюг НЕ входить: інакше «пін»
     /// поточного періоду став би прихованим правом редагувати закрите (D-77).
     /// </remarks>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetDefId">Аркуш; <c>null</c> — рішення не про аркуш.</param>
+    /// <param name="columnDefId">Колонка; <c>0</c> — рішення не про комірку.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="evaluateAccessWindow">
+    /// Чи рахувати спрощене вікно доступу тут. <c>false</c> — виклик робить це
+    /// сам через <see cref="PeriodAccessRules"/>, маючи повні факти (рядок,
+    /// колонка, роль), а не лише аркуш і таблицю.
+    /// </param>
     private async Task<CellAccessContext> BuildContextAsync(
-        long documentId, PeriodKey periodKey, int? sheetDefId, int columnDefId, CancellationToken ct)
+        long documentId, PeriodKey periodKey, int? sheetDefId, int columnDefId,
+        bool evaluateAccessWindow, CancellationToken ct)
     {
         var document = await db.Documents
             .AsNoTracking()
@@ -336,7 +511,8 @@ public sealed class AccessDecisionService(
             effectiveSheet = sheetDefId ?? SheetOf(snapshot, tableDefId);
         }
 
-        var outOfWindow = period is not null
+        var outOfWindow = evaluateAccessWindow
+                          && period is not null
                           && await OutOfWindowAsync(
                               project.TemplateVersionId, effectiveSheet, tableDefId, period.Sequence, ct)
                               .ConfigureAwait(false);
@@ -377,12 +553,26 @@ public sealed class AccessDecisionService(
     }
 
     /// <summary>Чи виходить номер періоду за вікно доступу аркуша (ФВ-2.16).</summary>
+    /// <remarks>
+    /// ⚠ Береться ЛИШЕ вид <c>EditablePeriodOnly</c> і лише з блокувальною
+    /// поведінкою. Решта п'яти видів говорить про рядок, колонку або довідник,
+    /// а тут відомі тільки аркуш і таблиця: застосувати їх звідси означало б
+    /// заборонити весь аркуш через правило про один рядок.
+    ///
+    /// ⛔ Поведінка звіряється теж. Без цього <c>Warn</c> і
+    /// <c>AllowWithConfirmation</c> блокували б так само, як <c>ReadOnly</c>, і
+    /// три поведінки <c>ФВ-2.16</c> тихо стали б однією — саме те, від чого
+    /// вимога застерігає.
+    /// </remarks>
     private async Task<bool> OutOfWindowAsync(
         int templateVersionId, int sheetDefId, int tableDefId, byte sequence, CancellationToken ct)
     {
         var rules = await db.PeriodAccessRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId
+                        && r.RuleKind == PeriodAccessRuleKind.EditablePeriodOnly
+                        && (r.OnOutOfWindow == OutOfWindowBehavior.Hide
+                            || r.OnOutOfWindow == OutOfWindowBehavior.ReadOnly)
                         && (r.SheetDefId == null || r.SheetDefId == sheetDefId)
                         && (r.TableDefId == null || r.TableDefId == tableDefId))
             .ToListAsync(ct)

@@ -36,7 +36,8 @@ export type DenyReason =
   | 'ProjectArchived'
   | 'ArchivingInProgress'
   | 'BusinessRule'
-  | 'SimulationReadOnly';
+  | 'SimulationReadOnly'
+  | 'OutsidePermitWindow';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -74,6 +75,7 @@ const Hints: Record<DenyReason, string> = {
   ArchivingInProgress: 'deny.ArchivingInProgress',
   BusinessRule: 'deny.BusinessRule',
   SimulationReadOnly: 'deny.SimulationReadOnly',
+  OutsidePermitWindow: 'deny.OutsidePermitWindow',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */

@@ -29,6 +29,7 @@ public sealed class AccessBuilder
     private readonly Dictionary<string, GrantLevel> _grants = new(StringComparer.Ordinal);
     private readonly HashSet<string> _denies = new(StringComparer.Ordinal);
     private readonly HashSet<string> _permissions = new(StringComparer.Ordinal);
+    private readonly HashSet<int> _roles = [];
 
     /// <summary>Користувач, чиї права описуються.</summary>
     public int UserId { get; init; } = 7;
@@ -54,6 +55,13 @@ public sealed class AccessBuilder
         return this;
     }
 
+    /// <summary>Додає роль; потрібна правилам доступу, обмеженим роллю.</summary>
+    public AccessBuilder Role(int roleId)
+    {
+        _roles.Add(roleId);
+        return this;
+    }
+
     /// <summary>Збирає профіль.</summary>
     public AccessProfile Build(bool simulation = false, int? simulatedFor = null)
         => new()
@@ -64,6 +72,7 @@ public sealed class AccessBuilder
             Permissions = _permissions,
             Grants = _grants,
             Denies = _denies,
+            RoleIds = _roles,
             IsSimulation = simulation,
             SimulatedForUserId = simulatedFor,
             SimulationActorUserId = simulation ? UserId : null,

@@ -647,15 +647,33 @@ CREATE TABLE cfg.PeriodAccessRuleDef
     SheetDefId        int          NULL,
     TableDefId        int          NULL,
     RoleId            int          NULL,       -- NULL = для всіх ролей
+    -- Вид правила (ФВ-2.15). Шість, а не один: чинне рішення має шість
+    -- механізмів захисту, і перенос лише одного лишав ФВ-5.20 без основи.
+    RuleKind          tinyint      NOT NULL CONSTRAINT DF_PAR_Kind DEFAULT(2),
+                                            -- 0 AlwaysReadOnly, 1 HeaderRows,
+                                            -- 2 EditablePeriodOnly, 3 RelativeWindow,
+                                            -- 4 SourceWindow, 5 Expression
+    RowKind           tinyint      NULL,       -- вид рядків; NULL = усі
     FromSequence      tinyint      NULL,       -- 1..12 для Monthly; NULL = без обмеження
     ToSequence        tinyint      NULL,
+    SourceColumnDefId int          NULL,       -- SourceWindow: звідки брати запис довідника
+    RelativeOffset    smallint     NULL,       -- RelativeWindow: ±N періодів від поточного
+    ConditionExpr     nvarchar(1000) NULL,     -- Expression: булевий вираз діалекту шаблонів
     OnOutOfWindow     tinyint      NOT NULL,   -- OutOfWindowBehavior
     CONSTRAINT PK_PeriodAccessRuleDef PRIMARY KEY (Id),
     CONSTRAINT FK_PAR_TV    FOREIGN KEY (TemplateVersionId) REFERENCES cfg.TemplateVersion (Id),
     CONSTRAINT FK_PAR_Sheet FOREIGN KEY (SheetDefId) REFERENCES cfg.SheetDef (Id),
     CONSTRAINT FK_PAR_Table FOREIGN KEY (TableDefId) REFERENCES cfg.TableDef (Id),
+    CONSTRAINT FK_PAR_SourceColumn FOREIGN KEY (SourceColumnDefId) REFERENCES cfg.ColumnDef (Id),
     CONSTRAINT CK_PAR_Target CHECK (SheetDefId IS NOT NULL OR TableDefId IS NOT NULL),
-    CONSTRAINT CK_PAR_Range  CHECK (FromSequence IS NULL OR ToSequence IS NULL OR FromSequence <= ToSequence)
+    CONSTRAINT CK_PAR_Range  CHECK (FromSequence IS NULL OR ToSequence IS NULL OR FromSequence <= ToSequence),
+    -- Обов'язковий параметр на кожен вид. Правило SourceWindow без
+    -- колонки-джерела не блокує нічого і виглядає працездатним.
+    CONSTRAINT CK_PAR_Kind CHECK (
+        (RuleKind = 4 AND SourceColumnDefId IS NOT NULL) OR
+        (RuleKind = 3 AND RelativeOffset    IS NOT NULL) OR
+        (RuleKind = 5 AND ConditionExpr     IS NOT NULL) OR
+         RuleKind IN (0, 1, 2))
 );
 GO
 

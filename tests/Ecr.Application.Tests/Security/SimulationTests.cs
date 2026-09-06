@@ -200,6 +200,7 @@ public sealed class SimulationTests
                 Permissions = subject.Permissions,
                 Grants = subject.Grants,
                 Denies = subject.Denies,
+                RoleIds = subject.RoleIds,
                 IsSimulation = true,
                 SimulatedForUserId = Started.Subject,
                 SimulationActorUserId = Started.Actor,

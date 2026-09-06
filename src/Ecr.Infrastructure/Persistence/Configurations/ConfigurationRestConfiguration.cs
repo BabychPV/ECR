@@ -138,9 +138,32 @@ public sealed class PeriodAccessRuleDefConfiguration : IEntityTypeConfiguration<
             t.HasCheckConstraint(
                 "CK_PAR_Range",
                 "FromSequence IS NULL OR ToSequence IS NULL OR FromSequence <= ToSequence");
+
+            // ⛔ Обов'язковий параметр на кожен вид правила. Правило
+            // `SourceWindow` без колонки-джерела не блокує нічого і
+            // виглядає працездатним — саме та мовчазна порожнеча, яку
+            // виловлював увесь `A7`.
+            t.HasCheckConstraint(
+                "CK_PAR_Kind",
+                "(RuleKind = 4 AND SourceColumnDefId IS NOT NULL) OR "
+                + "(RuleKind = 3 AND RelativeOffset IS NOT NULL) OR "
+                + "(RuleKind = 5 AND ConditionExpr IS NOT NULL) OR "
+                + "RuleKind IN (0, 1, 2)");
         });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.OnOutOfWindow).HasConversion<byte>();
+        builder.Property(x => x.RuleKind).HasConversion<byte>();
+        builder.Property(x => x.RowKind).HasConversion<byte>();
+        builder.Property(x => x.ConditionExpr).HasMaxLength(1000);
+
+        // ⚠ Зовнішній ключ, а не «просто число»: без нього правило
+        // пережило б видалення колонки і мовчки перестало б знаходити
+        // вікно — тобто дозволило б усе.
+        builder.HasOne<ColumnDef>()
+               .WithMany()
+               .HasForeignKey(x => x.SourceColumnDefId)
+               .HasConstraintName("FK_PAR_SourceColumn")
+               .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

@@ -111,13 +111,21 @@ public sealed class LayerRulesTests
         //
         // Перевіряються і Application, і Infrastructure: у першому запитів до
         // бази не має бути взагалі (правило 2), у другому вони й живуть.
+        //
+        // ⚠ Межа може бути записана і синтаксисом запиту: `where` у
+        // `from … join … where …` обмежує вибірку так само, як `.Where(`.
+        // Правило цього не знало і позначало ЛЕГІТИМНИЙ обмежений запит —
+        // хибне спрацювання, після якого сторожа зазвичай просто вимикають.
+        // Пропустити воно при цьому нічого не могло: запит без жодної межі
+        // не має ні `.Where(`, ні `where`, і ловиться далі.
+        var bounded = new System.Text.RegularExpressions.Regex(
+            @"\.Where\(|\.Take\(|\bwhere\b|SqlQueryRaw");
+
         var offenders = SourceTree.Production("Ecr.Application", "Ecr.Infrastructure")
             .SelectMany(f => Statements(f).Select(st => (f.Path, st.Line, st.Text)))
             .Where(x => x.Text.Contains("ToListAsync(", StringComparison.Ordinal)
                         && x.Text.Contains("db.", StringComparison.Ordinal)
-                        && !x.Text.Contains("Where(", StringComparison.Ordinal)
-                        && !x.Text.Contains("Take(", StringComparison.Ordinal)
-                        && !x.Text.Contains("SqlQueryRaw", StringComparison.Ordinal))
+                        && !bounded.IsMatch(x.Text))
             .Select(x => $"{x.Path}:{x.Line}  {x.Text.Trim()}")
             .ToList();
 

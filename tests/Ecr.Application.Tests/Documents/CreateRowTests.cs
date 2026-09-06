@@ -29,7 +29,7 @@ public sealed class CreateRowTests
     {
         CacheKey = "p", UserId = 9, SecurityStamp = "s",
         Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
-        Denies = new HashSet<string>()
+        Denies = new HashSet<string>(), RoleIds = new HashSet<int>()
     };
 
     private void Arrange(TableRowMode mode, int? maxRows, params string[] existingKeys)

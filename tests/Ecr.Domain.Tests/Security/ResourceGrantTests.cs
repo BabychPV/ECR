@@ -55,6 +55,7 @@ public sealed class ResourceGrantTests
             Permissions = new HashSet<string>(),
             Grants = allowed,
             Denies = denied,
+            RoleIds = new HashSet<int>(),
         };
     }
 

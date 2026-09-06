@@ -115,6 +115,7 @@ public sealed class AccessProfileCacheTests : IDisposable
             Permissions = profile.Permissions,
             Grants = profile.Grants,
             Denies = profile.Denies,
+            RoleIds = profile.RoleIds,
         });
     }
 

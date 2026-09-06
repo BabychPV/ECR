@@ -99,6 +99,7 @@ public sealed class ColumnUnitSymbolTests
         Permissions = new HashSet<string>(StringComparer.Ordinal),
         Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
         Denies = new HashSet<string>(StringComparer.Ordinal),
+        RoleIds = new HashSet<int>(),
     };
 
     [Fact]

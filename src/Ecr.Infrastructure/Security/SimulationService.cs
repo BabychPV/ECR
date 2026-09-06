@@ -100,6 +100,12 @@ public sealed class SimulationService(
             Permissions = subject.Permissions,
             Grants = subject.Grants,
             Denies = subject.Denies,
+
+            // ⚠ Ролі беруться від СУБ'ЄКТА, а не від того, хто симулює:
+            // інакше правило, обмежене роллю, показувало б не ті комірки —
+            // тобто симуляція показувала б не те, що бачить користувач, і
+            // сенс режиму зникав би (`D-96`).
+            RoleIds = subject.RoleIds,
             IsSimulation = true,
             SimulatedForUserId = subjectUserId,
 

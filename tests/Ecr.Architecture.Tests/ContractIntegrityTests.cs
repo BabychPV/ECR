@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using System.Text.RegularExpressions;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
@@ -132,6 +133,12 @@ public sealed class ContractIntegrityTests
             // BusinessRule приходить не з доступу, а з валідації: подання з
             // незакритими помилками (ФВ-5.19).
             EditRules.CanSubmit(profile, AccessBuilder.Cell(), hasBlockingErrors: true).Reason,
+
+            // ⛔ OutsidePermitWindow приходить з ІНШОГО рушія — правил доступу
+            // до періоду (`ФВ-5.20`). Перелічити його тут константою означало б
+            // довести лише те, що я вмію писати назву причини; сценарій нижче
+            // доводить, що її повертає код.
+            PermitWindowReason(),
         };
 
         var unreachable = Enum.GetValues<EditDenyReason>()
@@ -140,6 +147,30 @@ public sealed class ContractIntegrityTests
             .ToList();
 
         Assert.Empty(unreachable);
+    }
+
+    /// <summary>Причина, яку повертає правило вікна довідника (<c>ФВ-5.20</c>).</summary>
+    private static EditDenyReason PermitWindowReason()
+    {
+        var rule = PeriodAccessRuleDef.ForSourceWindow(
+            templateVersionId: 1, sourceColumnDefId: 5, OutOfWindowBehavior.ReadOnly);
+
+        // Дозвіл діяв до кінця травня; комірка — за червень.
+        var facts = new PeriodRuleFacts(
+            SheetDefId: 0,
+            TableDefId: 0,
+            RowKind: RowKind.Item,
+            PeriodSequence: 6,
+            PeriodYear: 2026,
+            CurrentSequence: null,
+            ColumnMonthNumber: 6,
+            SourceValues: new Dictionary<int, SourceValidity>
+            {
+                [5] = new(null, new DateOnly(2026, 5, 31)),
+            },
+            ExpressionResults: new Dictionary<string, bool>(StringComparer.Ordinal));
+
+        return PeriodAccessRules.Evaluate([rule], facts, new HashSet<int>()).Reason;
     }
 
     [Fact]

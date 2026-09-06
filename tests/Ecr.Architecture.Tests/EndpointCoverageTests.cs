@@ -184,6 +184,40 @@ public sealed partial class EndpointCoverageTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Жоден_ключ_каталогу_не_повторюється_в_seed()
+    {
+        // ⛔ Seed наповнює каталог одним `MERGE … USING (VALUES …)`. Два
+        // рядки з однаковим ключем валять його в рантаймі: «The MERGE
+        // statement attempted to UPDATE or DELETE the same row more than
+        // once». Не при складанні, не в тестах — при СТАРТІ ЗАСТОСУНКУ,
+        // бо seed виконує він (`02-contracts.md` §14).
+        //
+        // ⚠ Сторож написаний після реального дубля: додаючи підказку
+        // `deny.OutsidePermitWindow`, я вставив її двома скриптами в два
+        // місця. Помітив випадково — жодна перевірка цього не ловила, а
+        // ціна помилки максимальна: чиста база не піднімається взагалі.
+        var seed = File.ReadAllText(Path.Combine(
+            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+
+        var keys = SeedKeyRegex.Matches(seed).Select(m => m.Groups[1].Value).ToList();
+        Assert.NotEmpty(keys);
+
+        var duplicates = keys
+            .GroupBy(k => k, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"{g.Key} — {g.Count()} рази")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            duplicates.Count == 0,
+            "Ключі каталогу, вставлені двічі — seed упаде на старті:"
+            + Environment.NewLine + string.Join(Environment.NewLine, duplicates));
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Роль_і_право_bootstrap_адміністратора_існують_у_seed()

@@ -253,6 +253,7 @@ public sealed class MethodologyPublishTests
         Permissions = new HashSet<string>(StringComparer.Ordinal) { "Calculation.Publish" },
         Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(),
+        RoleIds = new HashSet<int>(),
     };
 
     private PublishMethodologyHandler Handler()

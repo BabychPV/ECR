@@ -18,7 +18,6 @@ public sealed class PeriodAccessRuleTests
     [InlineData(12, false)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-2.15")]
-    [Trait("Requirement", "ФВ-2.18")]
     public void Правило_діє_лише_для_періодів_у_заданому_діапазоні(byte sequence, bool applies)
     {
         var rule = Rule(from: 1, to: 3);
@@ -42,15 +41,15 @@ public sealed class PeriodAccessRuleTests
         }
     }
 
-    /// <summary>Правило з межами; поля закриті, тому виставляються рефлексією.</summary>
+    /// <summary>
+    /// Правило з межами номерів періоду.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Рефлексія тут більше не потрібна: межі задаються фабричним
+    /// методом. Це не косметика — раніше конструктор дозволяв створити
+    /// правило будь-якого виду без його обов'язкового параметра.
+    /// </remarks>
     private static PeriodAccessRuleDef Rule(byte? from, byte? to)
-    {
-        var rule = new PeriodAccessRuleDef(templateVersionId: 1, OutOfWindowBehavior.ReadOnly);
-        Set(rule, nameof(PeriodAccessRuleDef.FromSequence), from);
-        Set(rule, nameof(PeriodAccessRuleDef.ToSequence), to);
-        return rule;
-    }
-
-    private static void Set(object target, string name, object? value)
-        => target.GetType().GetProperty(name)!.SetValue(target, value);
+        => PeriodAccessRuleDef.EditablePeriodOnly(
+            templateVersionId: 1, OutOfWindowBehavior.ReadOnly, from, to);
 }
