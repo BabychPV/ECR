@@ -73,6 +73,11 @@ public sealed class ApprovalState : Entity<long>
         ReopenedByUserId = userId;
         ReopenReason = reason;
 
+        // ⚠ Маршрут починається спочатку. Лишити крок означало б, що після
+        // правки документ підхопить погодження з середини — тобто перші
+        // погоджувачі не побачать змін, які внесли після їхнього підпису.
+        CurrentStepId = null;
+
         // ⚠ Перевірку стану ПЕРІОДУ тут не робимо — вона в use-case, бо
         // вимагає UPDLOCK на doc.Period проти гонки з PeriodStateJob
         // (ФВ-1.10a). При Closed періоді use-case поверне ECR-PRD-4223.
@@ -81,8 +86,17 @@ public sealed class ApprovalState : Entity<long>
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="userId">Хто подає.</param>
     /// <param name="utcNow">Момент подання.</param>
+    /// <param name="firstStepId">
+    /// Перший крок маршруту погодження; <c>null</c> — маршруту немає, і
+    /// затвердження одноетапне, як було до <c>ФВ-5.17</c>.
+    /// </param>
     /// <exception cref="DomainException">Аркуш не в <c>Draft</c> і не відхилений.</exception>
-    public void Submit(int userId, DateTime utcNow)
+    /// <remarks>
+    /// ⚠ Параметр необов'язковий навмисно: за замовчуванням поведінка
+    /// **не змінюється**. Маршрутів у seed немає, і система, у якій їх ніхто
+    /// не завів, працює рівно як раніше.
+    /// </remarks>
+    public void Submit(int userId, DateTime utcNow, int? firstStepId = null)
     {
         // ⚠ Повторне подання поданого — не «нічого не змінилося», а спроба
         // перезаписати момент і автора подання. Саме на них посилається зріз.
@@ -97,6 +111,7 @@ public sealed class ApprovalState : Entity<long>
         SubmittedAt = utcNow;
         SubmittedByUserId = userId;
         RejectedReason = null;
+        CurrentStepId = firstStepId;
     }
 
     /// <summary>Затверджує поданий аркуш.</summary>
@@ -115,6 +130,47 @@ public sealed class ApprovalState : Entity<long>
         Status = DocumentStatus.Approved;
         ApprovedAt = utcNow;
         ApprovedByUserId = userId;
+    }
+
+    /// <summary>
+    /// Затверджує ПОТОЧНИЙ крок маршруту і переходить до наступного.
+    /// </summary>
+    /// <param name="userId">Хто затверджує.</param>
+    /// <param name="utcNow">Момент операції.</param>
+    /// <param name="nextStepId">
+    /// Наступний крок маршруту; <c>null</c> — цей крок був останнім, і аркуш
+    /// стає <c>Approved</c>.
+    /// </param>
+    /// <exception cref="DomainException">Аркуш не в стані <c>Submitted</c>.</exception>
+    /// <remarks>
+    /// ⛔ Проміжний крок НЕ робить аркуш затвердженим. Це головна властивість
+    /// багатоетапності: підпис першого погоджувача не є підписом останнього, і
+    /// документ, який став би <c>Approved</c> після першого кроку, потрапив би
+    /// у звітність для регулятора без решти погоджень (<c>ФВ-10.11</c>).
+    ///
+    /// ⚠ <see cref="ApprovedByUserId"/> заповнюється лише на ОСТАННЬОМУ
+    /// кроці: поле означає «хто затвердив документ», а не «хто підписав
+    /// останнім». Хто проходив проміжні кроки — питання до аудиту, і саме там
+    /// на нього є відповідь.
+    /// </remarks>
+    public void ApproveStep(int userId, DateTime utcNow, int? nextStepId)
+    {
+        if (Status != DocumentStatus.Submitted)
+        {
+            throw new DomainException(
+                "ECR-DOC-0409",
+                $"Затверджувати можна лише поданий аркуш; поточний стан — {Status}.");
+        }
+
+        if (nextStepId is { } next)
+        {
+            CurrentStepId = next;
+
+            return;
+        }
+
+        Approve(userId, utcNow);
+        CurrentStepId = null;
     }
 
     /// <summary>Відхиляє поданий аркуш із коментарем.</summary>
@@ -142,5 +198,10 @@ public sealed class ApprovalState : Entity<long>
         RejectedReason = comment;
         ApprovedByUserId = userId;
         ApprovedAt = utcNow;
+
+        // ⚠ Відхилення скидає маршрут: наступне подання йде з першого кроку.
+        // Інакше виправлений документ обійшов би тих, хто вже «підписав» до
+        // правки, — тобто підпис стосувався б не того тексту.
+        CurrentStepId = null;
     }
 }

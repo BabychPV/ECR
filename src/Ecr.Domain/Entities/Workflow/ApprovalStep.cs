@@ -8,11 +8,12 @@ public sealed class ApprovalStep : Entity<int>
 {
     private ApprovalStep() { }
 
-    public ApprovalStep(int approvalRouteId, int ordinal, int roleId)
+    public ApprovalStep(int approvalRouteId, int ordinal, int roleId, bool isOptional = false)
     {
         ApprovalRouteId = approvalRouteId;
         Ordinal = ordinal;
         RoleId = roleId;
+        IsOptional = isOptional;
     }
 
     public int ApprovalRouteId { get; private set; }

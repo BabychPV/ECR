@@ -18,6 +18,84 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     private const string NoMethodologies = "{}";
 
     /// <inheritdoc />
+    public async Task<ApprovalRoute?> FindRouteAsync(
+        int projectId, int templateVersionId, CancellationToken ct)
+    {
+        // ⚠ ОДИН запит на всі рівні, а не чотири по черзі: подання і
+        // затвердження — часті операції, і чотири походи в базу заради
+        // таблиці на кілька рядків були б платою ні за що.
+        var candidates = await db.ApprovalRoutes
+            .AsNoTracking()
+            .Include(r => r.Steps)
+            .Where(r => r.IsActive
+                        && (r.ProjectId == null || r.ProjectId == projectId)
+                        && (r.TemplateVersionId == null || r.TemplateVersionId == templateVersionId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Найконкретніший виграє; при рівній конкретності — стабільний
+        // порядок за кодом, щоб вибір не залежав від порядку рядків у базі.
+        return candidates
+            .OrderByDescending(r => r.Specificity)
+            .ThenBy(r => r.Code, StringComparer.Ordinal)
+            .FirstOrDefault();
+    }
+
+    /// <inheritdoc />
+    public async Task<ApprovalRoute?> FindProjectRouteAsync(int projectId, CancellationToken ct)
+        => await db.ApprovalRoutes
+            .Include(r => r.Steps)
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task AddRouteAsync(ApprovalRoute route, CancellationToken ct)
+    {
+        await db.ApprovalRoutes.AddAsync(route, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Кроки прибираються ЯВНО. `FK_AS_Route` оголошений `Restrict` ще від
+    /// Етапу 3, і покластися на каскад означало б, що прибирання маршруту
+    /// падає на зовнішньому ключі — а виявилося б це вже тоді, коли хтось
+    /// спробував повернути одноетапне затвердження.
+    /// </remarks>
+    public async Task RemoveRouteAsync(ApprovalRoute route, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var steps = await db.ApprovalSteps
+            .Where(s => s.ApprovalRouteId == route.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.ApprovalSteps.RemoveRange(steps);
+        db.ApprovalRoutes.Remove(route);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveStepsAsync(ApprovalRoute route, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var steps = await db.ApprovalSteps
+            .Where(s => s.ApprovalRouteId == route.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Спершу ПОЗНАЧИТИ видаленими, потім прибрати з колекції. У
+        // зворотному порядку EF бачить відвʼязану дитину з обовʼязковим
+        // ключем і відмовляється зберігати зміни взагалі.
+        db.ApprovalSteps.RemoveRange(steps);
+        route.ClearSteps();
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RoleExistsAsync(int roleId, CancellationToken ct)
+        => await db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<ApprovalState> GetOrCreateAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
     {

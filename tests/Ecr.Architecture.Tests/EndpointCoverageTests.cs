@@ -184,6 +184,27 @@ public sealed partial class EndpointCoverageTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "ФВ-5.17")]
+    public void Seed_не_створює_жодного_маршруту_погодження()
+    {
+        // ⛔ Критерій `4.8` директиви №04. Маршрут у seed зробив би
+        // багатоетапне затвердження поведінкою за замовчуванням для КОЖНОЇ
+        // щойно розгорнутої системи — тобто змінив би те, що працює, без
+        // жодного рішення людини.
+        //
+        // ⚠ Перевіряється ФАЙЛ, а не база: тестова база спільна, і сусідній
+        // тест, який заводить маршрут для власного проєкту, зробив би цю
+        // перевірку то зеленою, то червоною залежно від порядку прогону.
+        var seed = File.ReadAllText(Path.Combine(
+            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+
+        Assert.DoesNotContain("wf.ApprovalRoute", seed, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("wf.ApprovalStep", seed, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Жоден_ключ_каталогу_не_повторюється_в_seed()

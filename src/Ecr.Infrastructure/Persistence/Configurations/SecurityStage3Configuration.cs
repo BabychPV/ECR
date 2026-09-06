@@ -105,6 +105,33 @@ public sealed class ApprovalRouteConfiguration : IEntityTypeConfiguration<Approv
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_AR_Act");
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_ApprovalRoute");
 
+        // ⚠ Обчислювана властивість: у базі її немає і бути не має —
+        // збережений пріоритет розійшовся б з областю дії при першій правці.
+        builder.Ignore(x => x.Specificity);
+
+        // ⛔ Друга половина області дії маршруту (`ФВ-5.17`). FK на проєкт, а
+        // не просто число: маршрут неіснуючого проєкту — це маршрут, який
+        // ніколи не спрацює, і знайшли б його лише тоді, коли документ не
+        // затверджується.
+        builder.HasOne<Domain.Entities.Documents.Project>()
+               .WithMany()
+               .HasForeignKey(x => x.ProjectId)
+               .HasConstraintName("FK_AR_Project");
+
+        // ⚠ Індекс саме за областю дії: резолюція маршруту — запит виду
+        // «ProjectId = @p OR ProjectId IS NULL», і він виконується на КОЖНЕ
+        // подання та затвердження.
+        builder.HasIndex(x => new { x.ProjectId, x.TemplateVersionId })
+               .HasDatabaseName("IX_ApprovalRoute_Scope");
+
+        // ⚠ Поведінка видалення НЕ перевизначається: у базі `FK_AS_Route`
+        // оголошений `Restrict` ще від Етапу 3, і модель має казати те саме.
+        // Кроки прибирає явно `WorkflowStore.RemoveStepsAsync` —
+        // покластися на те, що EF сам розбереться з відв'язаними дітьми, не
+        // вийшло: він відмовляється зберігати зміни взагалі
+        // («the association … has been severed»), і замінити маршрут стало б
+        // неможливо. Знайдено тестом на РЕАЛЬНІЙ базі; тест обробника зі
+        // заглушкою-сховищем цього не бачить за побудовою.
         builder.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ApprovalRouteId)
                .HasConstraintName("FK_AS_Route");
     }

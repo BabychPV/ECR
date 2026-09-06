@@ -176,7 +176,12 @@ public static class EditRules
     /// <summary>Чи можна затвердити аркуш.</summary>
     /// <param name="profile">Профіль прав.</param>
     /// <param name="context">Умови аркуша.</param>
-    public static EditDecision CanApprove(AccessProfile profile, CellAccessContext context)
+    /// <param name="requiredRoleId">
+    /// Роль ПОТОЧНОГО кроку маршруту погодження (<c>ФВ-5.17</c>);
+    /// <c>null</c> — маршруту немає, і затвердження одноетапне.
+    /// </param>
+    public static EditDecision CanApprove(
+        AccessProfile profile, CellAccessContext context, int? requiredRoleId = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -191,6 +196,21 @@ public static class EditRules
         {
             return EditDecision.Deny(
                 EditDenyReason.BusinessRule, $"Аркуш у стані {context.SheetStatus}, а не Submitted.");
+        }
+
+        // ⛔ Роль кроку перевіряється НА ДОДАЧУ до гранта, а не замість нього.
+        // Маршрут каже «чия черга», грант — «чи має ця людина право на цей
+        // проєкт узагалі»; замінити друге першим означало б, що додавання
+        // ролі в маршрут роздає доступ до чужих проєктів.
+        //
+        // ⚠ Параметр необов'язковий, і за замовчуванням поведінка **не
+        // змінюється**: маршрутів у seed немає, система без них працює як
+        // раніше, і жоден наявний тест затвердження не правився.
+        if (requiredRoleId is { } roleId && !profile.RoleIds.Contains(roleId))
+        {
+            return EditDecision.Deny(
+                EditDenyReason.NoGrant,
+                $"Крок маршруту погодження вимагає ролі {roleId}; зараз черга не ваша.");
         }
 
         return Effective(profile, context) >= GrantLevel.Approve

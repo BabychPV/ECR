@@ -270,7 +270,8 @@ public sealed class PeriodAccessSliceTests(SqlServerFixture sql) : IDisposable
             new MetadataCache(_memory, db),
             new AccessProfileCache(_memory),
             new TestClock(Now),
-            Substitute.For<ICurrentUser>());
+            Substitute.For<ICurrentUser>(),
+            new WorkflowStore(db));
 
     /// <summary>Профіль із правом писати в проєкт: предмет тестів — правила, не гранти.</summary>
     private static AccessProfile Profile(int projectId)

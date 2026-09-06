@@ -13,7 +13,8 @@ public sealed class ApproveSheetHandler(
     IAccessDecisionService access,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IAuditWriter audit)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -46,7 +47,47 @@ public sealed class ApproveSheetHandler(
 
         if (approved)
         {
-            state.Approve(userId, now);
+            // ⛔ Проміжний крок НЕ робить аркуш затвердженим (`ФВ-5.17`).
+            // Документ, який став би `Approved` після першого підпису,
+            // потрапив би у звітність для регулятора без решти погоджень
+            // (`ФВ-10.11`) — а саме заради них маршрут і заводять.
+            //
+            // ⚠ Маршруту немає — `step` порожній, `nextStepId` теж, і
+            // `ApproveStep` поводиться рівно як `Approve`: одноетапно, як було.
+            var step = await access
+                .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
+                .ConfigureAwait(false);
+
+            state.ApproveStep(userId, now, step?.NextStepId);
+
+            // ⛔ ПРОМІЖНИЙ крок пишеться в аудит окремо. На рядку стану є лише
+            // `ApprovedByUserId` — один; після маршруту з трьох кроків там
+            // лишиться останній, а перших двох не буде НІДЕ. Багатоетапність
+            // заводять саме заради відповідальності, і втратити її разом із
+            // проміжними підписами означало б зробити механізм гіршим за його
+            // відсутність.
+            //
+            // ⚠ Останній крок не дублюється: його автор уже на рядку стану.
+            if (step is { NextStepId: not null })
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        ChangedAt: now,
+                        EventType: "ApprovalStepPassed",
+                        TargetUserId: null,
+                        TargetRoleId: step.RoleId,
+                        DetailsJson: System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            documentId,
+                            sheetDefId,
+                            periodKey,
+                            step = step.Ordinal,
+                            of = step.TotalSteps,
+                        }),
+                        ChangedByUserId: userId,
+                        CorrelationId: currentUser.CorrelationId),
+                    ct).ConfigureAwait(false);
+            }
         }
         else
         {

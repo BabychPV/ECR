@@ -10,6 +10,7 @@ import type {
   ReopenPeriodRequest,
   SetCurrentPeriodRequest,
 } from '@/api/types';
+import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -204,6 +205,13 @@ export function PeriodsPage(): JSX.Element {
               value={projectId === null ? null : String(projectId)}
               onChange={(value) => setProjectId(value === null ? null : Number(value))}
             />
+
+            {/* ⛔ Маршрут погодження (`ФВ-5.17`). Дві таблиці існували від
+                Етапу 3 і не мали жодного способу наповнення — багатоетапне
+                затвердження було конфігурацією, якої неможливо створити. */}
+            {selected !== undefined && manages && (
+              <ApprovalRouteEditor projectId={selected.id} />
+            )}
 
             {manages && (
               <Button size="xs" onClick={() => setCreating(true)}>

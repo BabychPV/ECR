@@ -34,6 +34,10 @@ public sealed record TemplateIdResponse(int TemplateId);
 /// <param name="VersionId">Ідентифікатор.</param>
 public sealed record VersionIdResponse(int VersionId);
 
+/// <summary>Скільки кроків тепер у маршруті погодження.</summary>
+/// <param name="Steps">Кількість; <c>0</c> — маршруту немає, затвердження одноетапне.</param>
+public sealed record AffectedStepsResponse(int Steps);
+
 /// <summary>Створений документ.</summary>
 /// <param name="DocumentId">Ідентифікатор.</param>
 public sealed record DocumentIdResponse(long DocumentId);

@@ -1579,6 +1579,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/approval-route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Маршрут погодження проєкту. Право `Project.Manage`.
+         * @description ⚠ Відповідь є завжди: «маршруту немає» — стан налаштування, а не
+         *     помилка, і `404` змусив би клієнт розрізняти його від «проєкту немає»
+         *     за тим самим кодом.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteDto"];
+                        "text/json": components["schemas"]["ApprovalRouteDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteDto"];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює маршрут погодження проєкту. Право `Project.Manage`.
+         * @description ⛔ Заміна НАБОРОМ кроків, а не поштучна правка: маршрут — це
+         *     послідовність, і «змінити третій крок» означає змінити те, після чого
+         *     він іде.
+         *
+         *     ⚠ Порожній набір ПРИБИРАЄ маршрут, і затвердження повертається до
+         *     одноетапного. Без цього маршрут, заведений помилково, лишався б назавжди.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "application/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "text/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AffectedStepsResponse"];
+                        "text/json": components["schemas"]["AffectedStepsResponse"];
+                        "text/plain": components["schemas"]["AffectedStepsResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/archive": {
         parameters: {
             query?: never;
@@ -3483,6 +3588,42 @@ export interface components {
              */
             affectedRows: number;
         };
+        /** @description Скільки кроків тепер у маршруті погодження. */
+        AffectedStepsResponse: {
+            /**
+             * Format: int32
+             * @description Кількість; `0` — маршруту немає, затвердження одноетапне.
+             */
+            steps: number;
+        };
+        /** @description Маршрут погодження проєкту. */
+        ApprovalRouteDto: {
+            /** @description Чи налаштований власний маршрут. `false` — затвердження одноетапне:
+             *     достатньо одного носія рівня `Approve`. */
+            hasRoute: boolean;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /** @description Кроки в порядку проходження. */
+            steps: components["schemas"]["ApprovalStepDto"][];
+        };
+        /** @description Крок маршруту. */
+        ApprovalStepDto: {
+            /** @description Крок можна пропустити. */
+            isOptional: boolean;
+            /**
+             * Format: int32
+             * @description Порядковий номер, від 1.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Роль, яка затверджує на цьому кроці.
+             */
+            roleId: number;
+        };
         /** @description Запит на погодження аркуша. */
         ApproveSheetRequest: {
             /** @description `true` — погодити, `false` — відхилити. */
@@ -4589,6 +4730,12 @@ export interface components {
              * @description До якого моменту період лишається відкритим; `null` — безстроково.
              */
             until: null | string;
+        };
+        /** @description Запит на заміну маршруту погодження. */
+        ReplaceApprovalRouteRequest: {
+            /** @description Ролі кроків у порядку проходження; порожній набір прибирає маршрут і
+             *     повертає одноетапне затвердження. */
+            roleIds: number[];
         };
         /** @description Запит на заміну набору ресурсних грантів ролі. */
         ReplaceGrantsRequest: {

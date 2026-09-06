@@ -19,7 +19,9 @@ public sealed class ProjectsController(
     CloneProjectHandler cloneProject,
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
-    ListPeriodPoliciesHandler policies) : ControllerBase
+    ListPeriodPoliciesHandler policies,
+    Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
+    Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
@@ -47,6 +49,45 @@ public sealed class ProjectsController(
     public async Task<ActionResult<IReadOnlyList<Ecr.Application.Projects.PeriodPolicyDto>>> PeriodPolicies(
         CancellationToken ct)
         => Ok(await policies.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Маршрут погодження проєкту. Право <c>Project.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Відповідь є завжди: «маршруту немає» — стан налаштування, а не
+    /// помилка, і `404` змусив би клієнт розрізняти його від «проєкту немає»
+    /// за тим самим кодом.
+    /// </remarks>
+    [HttpGet("{id:int}/approval-route")]
+    [ProducesResponseType<Ecr.Application.Workflow.ApprovalRouteDto>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<Ecr.Application.Workflow.ApprovalRouteDto>> ApprovalRoute(
+        int id, CancellationToken ct)
+        => await getRoute.HandleAsync(id, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Замінює маршрут погодження проєкту. Право <c>Project.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Заміна НАБОРОМ кроків, а не поштучна правка: маршрут — це
+    /// послідовність, і «змінити третій крок» означає змінити те, після чого
+    /// він іде.
+    ///
+    /// ⚠ Порожній набір ПРИБИРАЄ маршрут, і затвердження повертається до
+    /// одноетапного. Без цього маршрут, заведений помилково, лишався б назавжди.
+    /// </remarks>
+    [HttpPut("{id:int}/approval-route")]
+    [ProducesResponseType<Contracts.AffectedStepsResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ReplaceApprovalRoute(
+        int id, [FromBody] ReplaceApprovalRouteRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var steps = await replaceRoute.HandleAsync(id, request.RoleIds, ct).ConfigureAwait(false);
+
+        return Ok(new Contracts.AffectedStepsResponse(steps));
+    }
 
     /// <summary>Створює проєкт. Право <c>Project.Manage</c>.</summary>
     /// <remarks>
@@ -185,6 +226,13 @@ public sealed record CreateProjectRequest(
     int? Year = null,
     int? TemplateVersionId = null,
     int? PeriodPolicyId = null);
+
+/// <summary>Запит на заміну маршруту погодження.</summary>
+/// <param name="RoleIds">
+/// Ролі кроків у порядку проходження; порожній набір прибирає маршрут і
+/// повертає одноетапне затвердження.
+/// </param>
+public sealed record ReplaceApprovalRouteRequest(IReadOnlyList<int> RoleIds);
 
 /// <summary>Запит на клонування проєкту.</summary>
 /// <param name="Code">Код нового проєкту.</param>
