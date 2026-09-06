@@ -90,6 +90,12 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<MethodologySubstance> MethodologySubstances => Set<MethodologySubstance>();
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
+
+    /// <summary>Чиї формули видно виразам версії через <c>!Name</c> (директива ПК-1 №05, поправка 10).</summary>
+    public DbSet<MethodologyImport> MethodologyImports => Set<MethodologyImport>();
+
+    /// <summary>Ребра графа між методологіями: без них порядок перерахунку неповний (`B13` §4.3).</summary>
+    public DbSet<MethodologyDependency> MethodologyDependencies => Set<MethodologyDependency>();
     public DbSet<ScriptVersion> ScriptVersions => Set<ScriptVersion>();
     public DbSet<CalculationRun> CalculationRuns => Set<CalculationRun>();
     public DbSet<CalculationResult> CalculationResults => Set<CalculationResult>();

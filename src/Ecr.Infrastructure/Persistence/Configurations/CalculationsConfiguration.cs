@@ -25,7 +25,70 @@ public sealed class MethodologyConfiguration : IEntityTypeConfiguration<Methodol
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Group).HasColumnName("Group").HasMaxLength(64);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
+
+        // ⚠ Значення за замовчуванням у БАЗІ, а не в моделі: наявні рядки
+        // корпусу — це 44 методології `ECW_C**`, і всі вони DataDriven. У
+        // моделі default не оголошено навмисно — інакше EF пропускав би
+        // властивість при вставці саме тоді, коли вона дорівнює нулю.
+        builder.Property(x => x.Kind).HasColumnName("Kind");
+
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_Methodology");
+    }
+}
+
+/// <summary>Конфігурація <see cref="MethodologyImport"/> — видимості чужих формул.</summary>
+public sealed class MethodologyImportConfiguration : IEntityTypeConfiguration<MethodologyImport>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyImport> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyImport", "calc");
+        builder.HasKey(x => x.Id);
+
+        // Двічі оголошений той самий імпорт нічого не додає, але подвоїв би
+        // кандидатів у резолвінгу `!Name` і зробив би однозначне посилання
+        // «неоднозначним».
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.ImportedMethodologyId })
+               .IsUnique().HasDatabaseName("UQ_MethodologyImport");
+
+        // ⚠ Обидва боки Restrict — глобально, як усе в цій моделі
+        // (`EcrDbContext.OnModelCreating`). Тут це особливо доречно для
+        // FK_MI_Imported: видалення бібліотеки, на яку посилаються 265 виразів
+        // корпусу, має впертися в помилку, а не тихо забрати з ними видимість
+        // її формул.
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_MI_Version");
+        builder.HasOne<Methodology>().WithMany().HasForeignKey(x => x.ImportedMethodologyId)
+               .HasConstraintName("FK_MI_Imported");
+    }
+}
+
+/// <summary>Конфігурація <see cref="MethodologyDependency"/> — ребра графа методологій.</summary>
+public sealed class MethodologyDependencyConfiguration : IEntityTypeConfiguration<MethodologyDependency>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyDependency> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyDependency", "calc", t => t.HasCheckConstraint(
+            "CK_MD_NoSelfLoop", "FromMethodologyId <> ToMethodologyId"));
+
+        builder.HasKey(x => x.Id);
+
+        builder.HasIndex(x => new { x.FromMethodologyId, x.ToMethodologyId })
+               .IsUnique().HasDatabaseName("UQ_MethodologyDependency");
+
+        // ⚠ Обидва боки Restrict (глобально, `EcrDbContext.OnModelCreating`):
+        // ребро — це знання про порядок перерахунку. Каскадне видалення тихо
+        // зробило б порядок неповним, а неповний порядок дає торішнє число без
+        // жодної помилки в журналі.
+        builder.HasOne<Methodology>().WithMany().HasForeignKey(x => x.FromMethodologyId)
+               .HasConstraintName("FK_MD_From");
+        builder.HasOne<Methodology>().WithMany().HasForeignKey(x => x.ToMethodologyId)
+               .HasConstraintName("FK_MD_To");
     }
 }
 
@@ -85,11 +148,17 @@ public sealed class MethodologyFormulaConfiguration : IEntityTypeConfiguration<M
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("MethodologyFormula", "calc");
+        // ⛔ Одиниця результату несумісна з текстовим результатом, і тримати це
+        // лише в домені мало: рядки методологій кладе ще й імпортер корпусу,
+        // який ходить у базу масовою вставкою повз сутності.
+        builder.ToTable("MethodologyFormula", "calc", t => t.HasCheckConstraint(
+            "CK_MF_TextHasNoUnit", "ResultType = 0 OR OutputUnitId IS NULL"));
+
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
         builder.Property(x => x.EvaluationOrder).HasDefaultValue(0);
+        builder.Property(x => x.ResultType).HasColumnName("ResultType");
 
         builder.HasIndex(x => new { x.MethodologyVersionId, x.Code })
                .IsUnique().HasDatabaseName("UQ_MethodologyFormula");
@@ -147,13 +216,34 @@ public sealed class MethodologyConstantConfiguration : IEntityTypeConfiguration<
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("MethodologyConstant", "calc", t => t.HasCheckConstraint(
-            "CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo"));
+        builder.ToTable("MethodologyConstant", "calc", t =>
+        {
+            t.HasCheckConstraint(
+                "CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo");
+
+            // ⛔ Перелік станів навмисно НЕПОВНИЙ: `Kind = 0` із `Value IS NULL`
+            // дозволений. Це рядок, який імпорт не зміг розібрати
+            // (`n_ECW_C11_13_ = '-'`, `k22_HSE30X_Int_FG_ = ''`), і він має
+            // дожити до публікації, щоб людина ухвалила рішення. Заборонити
+            // його тут означало б або впустити тихий нуль, або обірвати імпорт
+            // 6507 констант на трьох дефектних рядках.
+            //
+            // ⚠ Текст і мітка одиниці не мають: вимір — властивість числа.
+            t.HasCheckConstraint(
+                "CK_MC_Kind",
+                "(Kind = 0 AND UnitId IS NOT NULL AND (Value IS NOT NULL OR TextValue IS NOT NULL)) "
+                + "OR (Kind <> 0 AND Value IS NULL AND UnitId IS NULL AND TextValue IS NOT NULL)");
+        });
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Category).HasMaxLength(64);
+        builder.Property(x => x.Kind).HasColumnName("Kind");
         builder.Property(x => x.Value).HasColumnType("decimal(28,10)");
+
+        // 400 — та сама межа, що в `calc.CalculationInput.ValueString`: у
+        // корпусі найдовше нечислове значення — `'LPG - СУГ'`.
+        builder.Property(x => x.TextValue).HasMaxLength(400);
         builder.Property(x => x.ValidFrom).HasColumnType("date");
         builder.Property(x => x.ValidTo).HasColumnType("date");
         builder.Property(x => x.SubstanceEntryId).HasConversion<int?>();

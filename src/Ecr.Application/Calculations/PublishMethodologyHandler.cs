@@ -86,7 +86,7 @@ public sealed class PublishMethodologyHandler(
         var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var greenTest = await IsGreenAsync(methodology, version, testCases, ct).ConfigureAwait(false);
 
-        await ApplyEvaluationOrderAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        await ApplyEvaluationOrderAsync(methodology, methodologyVersionId, from, ct).ConfigureAwait(false);
 
         // Чотири очі, причина, зелений тест і незайнята дата — усе в домені:
         // правило, розкидане по обробниках, забудеться на другому виклику.
@@ -112,17 +112,49 @@ public sealed class PublishMethodologyHandler(
         return diff;
     }
 
-    /// <summary>Проставляє топологічний порядок формул (ФВ-9.4).</summary>
+    /// <summary>
+    /// Перевіряє версію за типами й посиланнями і проставляє топологічний
+    /// порядок формул (ФВ-9.4).
+    /// </summary>
     /// <remarks>
     /// Порядок обчислюється саме тут, при публікації, а не в рантаймі: цикл
     /// має бути відмовою публікації, а не тихо неправильним числом. У рантаймі
     /// його вже пізно ловити — результат подано.
+    /// <para>
+    /// ⛔ Один прохід на всі три питання — порядок формул, типи констант і
+    /// результатів, ребра між методологіями. Розділити означало б розібрати ті
+    /// самі вирази тричі й дістати три відповіді на питання «що в них
+    /// написано» (<c>H-3</c>).
+    /// </para>
     /// </remarks>
-    private async Task ApplyEvaluationOrderAsync(int methodologyVersionId, CancellationToken ct)
+    private async Task ApplyEvaluationOrderAsync(
+        Methodology methodology, int methodologyVersionId, DateOnly effectiveFrom, CancellationToken ct)
     {
         var formulas = await methodologies.GetFormulasAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ Імпорти розв'язуються НА ДАТУ набуття чинності, а не «сьогодні»:
+        // версія бібліотеки вибирається тим самим правилом, що й будь-яка інша
+        // (ФВ-9.3, поправка 10 директиви ПК-1 №05).
+        var imports = await methodologies
+            .ResolveImportsAsync(methodologyVersionId, effectiveFrom, ct)
+            .ConfigureAwait(false);
+
+        var problems = new List<string>();
+        problems.AddRange(await LibraryProblemsAsync(methodology, methodologyVersionId, ct).ConfigureAwait(false));
+        problems.AddRange(imports
+            .Where(library => library.MethodologyVersionId is null)
+            .Select(library =>
+                $"Імпортована методологія «{library.MethodologyCode}» не має версії, чинної на "
+                + $"{effectiveFrom:yyyy-MM-dd}: її формули невидимі."));
+
         if (formulas.Count == 0)
         {
+            Reject(problems);
+
+            // ⚠ Ребра прибираються і тут: версія без формул не посилається ні
+            // на кого, а ті, що лишилися від попередньої редакції, тягли б
+            // методологію в чергу перерахунку без жодної причини.
+            await methodologies.ReplaceDependenciesAsync(methodology.Id, [], ct).ConfigureAwait(false);
             return;
         }
 
@@ -137,17 +169,32 @@ public sealed class PublishMethodologyHandler(
                 + "топологічний порядок зіставляється за ідентифікаторами.");
         }
 
-        var byCode = formulas.ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase);
+        var byCode = formulas.ToDictionary(f => f.Code, f => f.Id, StringComparer.OrdinalIgnoreCase);
+        var parsed = new List<ParsedFormula>(formulas.Count);
+        var nodes = new List<FormulaNode>(formulas.Count);
+        var dependencies = new HashSet<int>();
 
-        var nodes = formulas
-            .Select(f => new FormulaNode(
-                f.Id,
+        foreach (var formula in formulas)
+        {
+            var resolution = Resolve(formula, byCode, imports, dependencies, problems);
+            parsed.Add(new ParsedFormula(formula.Code, formula.ResultType, resolution.Root));
+
+            nodes.Add(new FormulaNode(
+                formula.Id,
                 TableDefId: 0,
                 FormulaScope.Column,
                 ColumnDefId: null,
                 RowDefId: null,
-                DependsOn(f, byCode)))
-            .ToList();
+                resolution.Edges));
+        }
+
+        var constants = await methodologies
+            .GetConstantsAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        var outputs = await methodologies
+            .GetOutputsAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        problems.AddRange(MethodologyPublishChecks.Check(parsed, constants, outputs));
+        Reject(problems);
 
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
         if (!ordering.IsSuccess)
@@ -162,10 +209,61 @@ public sealed class PublishMethodologyHandler(
         {
             formulas.Single(f => f.Id == formulaId).SetEvaluationOrder(++position);
         }
+
+        // ⛔ Ребра пишуться навіть коли їх нуль: заміна порожньою множиною
+        // прибирає ті, що лишилися від попередньої редакції. Інакше граф
+        // накопичує залежності, яких у виразах уже немає.
+        await methodologies
+            .ReplaceDependenciesAsync(methodology.Id, dependencies, ct)
+            .ConfigureAwait(false);
     }
 
-    /// <summary>Формули, на які посилається ця через <c>!Code</c>.</summary>
+    /// <summary>Відхиляє публікацію переліком проблем, якщо він непорожній.</summary>
     /// <remarks>
+    /// ⚠ Перелік, а не перша помилка (02b §12): методолог, який виправляє їх по
+    /// одній за прогін, робить це стільки разів, скільки їх є.
+    /// </remarks>
+    private static void Reject(List<string> problems)
+    {
+        if (problems.Count > 0)
+        {
+            throw new BusinessRuleException("ECR-CALC-0422", MethodologyPublishChecks.Describe(problems));
+        }
+    }
+
+    /// <summary>Проблеми, що випливають із природи методології (поправка 6).</summary>
+    /// <remarks>
+    /// ⛔ Бібліотека не рахує ні для кого: правило прив'язки на ній означає, що
+    /// планувальник запускатиме її окремо, з порожнім набором аргументів, і
+    /// щоночі писатиме або нулі, або помилку — залежно від формул.
+    /// </remarks>
+    private async Task<IEnumerable<string>> LibraryProblemsAsync(
+        Methodology methodology, int methodologyVersionId, CancellationToken ct)
+    {
+        if (methodology.Kind != MethodologyKind.Library)
+        {
+            return [];
+        }
+
+        var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        return rules.Count == 0
+            ? []
+            : [$"Методологія «{methodology.Code}» оголошена бібліотекою, але має {rules.Count} "
+               + "активних правил прив'язки: бібліотека не рахує ні для кого, на її формули посилаються."];
+    }
+
+    /// <summary>
+    /// Один прохід над виразом формули: ребра до своїх формул, ребра до чужих
+    /// методологій і корінь дерева для перевірки типів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Посилання <c>!Name</c> резолвиться СПЕРШУ у своїй версії, потім у
+    /// оголошених імпортах (поправка 10 директиви ПК-1 №05). Перше дає ребро
+    /// між формулами, друге — ребро між МЕТОДОЛОГІЯМИ: формули бібліотеки
+    /// рахує своя методологія, і змішати їх у одному топологічному порядку
+    /// означало б зіставляти ідентифікатори з різних нумерацій.
+    ///
     /// ⛔ Ребра будуються з РОЗІБРАНОГО виразу, а не пошуком підрядка. Пошук
     /// підрядка — це пастка 4 директиви ПК-1 №05 §7, і вона була в нашому
     /// коді: `Expression.Contains("!" + code)` вважає, що `!k1_GasComp`
@@ -190,13 +288,17 @@ public sealed class PublishMethodologyHandler(
     /// порожній або червоний золотий набір публікацію не пропускає
     /// (<see cref="GoldenSet.IsGreen"/>).
     /// </remarks>
-    private List<int> DependsOn(
-        MethodologyFormula formula, Dictionary<string, MethodologyFormula> byCode)
+    private FormulaResolution Resolve(
+        MethodologyFormula formula,
+        Dictionary<string, int> byCode,
+        IReadOnlyList<MethodologyLibrary> imports,
+        HashSet<int> dependencies,
+        List<string> problems)
     {
         var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
         if (parsed.Expression is null)
         {
-            return [];
+            return new FormulaResolution([], null);
         }
 
         // ⚠ Знімок структури не передається: діалект методологій не має
@@ -211,19 +313,53 @@ public sealed class PublishMethodologyHandler(
 
         foreach (var code in extraction.Dependencies.Select(d => d.FormulaCode))
         {
-            // ⚠ Самопосилання ребром не стає: формула, що читає власний
-            // результат, — це не порядок обчислення, а окреме питання, і
-            // топологічне сортування назвало б її циклом без пояснення.
-            if (code is not null
-                && byCode.TryGetValue(code, out var target)
-                && target.Id != formula.Id)
+            if (code is null)
             {
-                edges.Add(target.Id);
+                continue;
+            }
+
+            var reference = MethodologyReferenceResolver.Resolve(code, byCode, imports);
+
+            switch (reference.Outcome)
+            {
+                // ⚠ Самопосилання ребром не стає: формула, що читає власний
+                // результат, — це не порядок обчислення, а окреме питання, і
+                // топологічне сортування назвало б її циклом без пояснення.
+                case MethodologyReferenceOutcome.Local when reference.FormulaId != formula.Id:
+                    edges.Add(reference.FormulaId!.Value);
+                    break;
+
+                // ⛔ Перехресне посилання дає ребро МІЖ МЕТОДОЛОГІЯМИ, а не між
+                // формулами: формули бібліотеки не входять у топологічний
+                // порядок цієї версії — вони рахуються своєю. Без цього ребра
+                // порядок перерахунку неповний, і `HSE400` читає торішній
+                // результат `Common` без жодної помилки в журналі.
+                case MethodologyReferenceOutcome.Imported:
+                    dependencies.Add(reference.MethodologyId!.Value);
+                    break;
+
+                // ⛔ Неоднозначність між двома бібліотеками — відмова, а не
+                // «перший за списком»: інакше число залежало б від порядку
+                // рядків у `calc.MethodologyImport`.
+                // ⚠ TODO: потрібен окремий код `ECR-CALC-0435`.
+                case MethodologyReferenceOutcome.Ambiguous:
+                    problems.Add(
+                        $"Формула «{formula.Code}»: посилання «!{code}» знайдено у "
+                        + $"{reference.Candidates.Count} імпортах ({string.Join(", ", reference.Candidates)}).");
+                    break;
+
+                default:
+                    break;
             }
         }
 
-        return edges;
+        return new FormulaResolution(edges, parsed.Expression.Root);
     }
+
+    /// <summary>Що дав один прохід над виразом формули.</summary>
+    /// <param name="Edges">Формули цієї версії, від яких залежить ця.</param>
+    /// <param name="Root">Корінь дерева для перевірки типів; <c>null</c> — не розібралося.</param>
+    private sealed record FormulaResolution(List<int> Edges, Ecr.Expressions.Ast.AstNode? Root);
 
     /// <summary>Чи зійшовся золотий набір у межах допуску.</summary>
     private async Task<bool> IsGreenAsync(
