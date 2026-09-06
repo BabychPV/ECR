@@ -135,7 +135,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
                 .GetProperty(nameof(Domain.Abstractions.Entity<long>.Id))!
                 .SetValue(entity, nextId++);
 
-            entity.Describe(step.Expression, step.Value, step.TraceJson, resultId: null);
+            entity.Describe(step.Expression, step.Value, step.TraceJson, resultId: null, step.Masked);
             db.CalculationSteps.Add(entity);
         }
     }

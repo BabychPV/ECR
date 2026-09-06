@@ -1,4 +1,4 @@
-// src/Ecr.Domain/Entities/Calculations/CalculationTrace.cs
+﻿// src/Ecr.Domain/Entities/Calculations/CalculationTrace.cs
 using Ecr.Domain.Abstractions;
 
 namespace Ecr.Domain.Entities.Calculations;
@@ -112,16 +112,39 @@ public sealed class CalculationStep : Entity<long>
     /// <summary>Деталізація: підставлені аргументи, константи, код помилки.</summary>
     public string? TraceJson { get; private set; }
 
+    /// <summary>
+    /// Чому значення стало нулем (<c>H-24d-1</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ОКРЕМА колонка, а не поле в <see cref="TraceJson"/>, і це весь
+    /// зміст кроку. Чинна система маскує <c>NaN</c> і <c>±∞</c> у нуль
+    /// мовчки, і цінність цього запису — у тому, що такі випадки можна
+    /// **перелічити**. Шукати їх у JSON по мільйонах рядків трейсу означало б
+    /// повне сканування щоразу — тобто звіт, який ніхто не буде будувати.
+    ///
+    /// ⚠ Типове значення — <see cref="Enums.MaskedZeroReason.None"/>, тож наявні рядки
+    /// при міграції кажуть правду: маскування до цього кроку не траплялося
+    /// ніколи — режим <c>Legacy</c> рахував у <c>decimal</c>, де <c>NaN</c> не буває.
+    /// </remarks>
+    public Enums.MaskedZeroReason Masked { get; private set; }
+
     /// <summary>Записує деталі кроку.</summary>
     /// <param name="expression">Вираз.</param>
     /// <param name="value">Значення.</param>
     /// <param name="traceJson">Деталізація.</param>
     /// <param name="resultId">Результат, до якого належить крок.</param>
-    public void Describe(string? expression, decimal? value, string? traceJson, long? resultId)
+    /// <param name="masked">Причина маскування в нуль (<c>H-24d-1</c>).</param>
+    public void Describe(
+        string? expression,
+        decimal? value,
+        string? traceJson,
+        long? resultId,
+        Enums.MaskedZeroReason masked = Enums.MaskedZeroReason.None)
     {
         Expression = expression;
         Value = value;
         TraceJson = traceJson;
         ResultId = resultId;
+        Masked = masked;
     }
 }

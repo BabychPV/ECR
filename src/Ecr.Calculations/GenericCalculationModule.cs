@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
@@ -106,12 +106,33 @@ public sealed class GenericCalculationModule(
             foreach (var output in outputs)
             {
                 var value = context.GetFormulaResult(output.Code);
-                if (value.AsNumber() is not { } number)
+                var masked = MaskedZero.Prepare(value, version.NumericMode);
+
+                if (masked.Value is not { } number)
                 {
+                    // ⚠ У `Strict` сюди потрапляє і замаскований випадок:
+                    // значення там `null`, а не нуль (`ФВ-9.14`). Причина
+                    // однаково має бути названа, тому запис іде окремим
+                    // кроком, а не загальним «#NULL».
+                    if (masked.Reason != MaskedZeroReason.None)
+                    {
+                        trace.Masked(output.Code, null, null, masked.Reason);
+                        continue;
+                    }
+
                     // Вихід без числа не пишеться: нуль тут виглядав би як
                     // порахований результат. Причина вже в трейсі.
                     trace.Failed(output.Code, null, value.ErrorCode ?? "#NULL");
                     continue;
+                }
+
+                // ⛔ Замаскований нуль пишеться в трейс ЗАВЖДИ, коли він
+                // стався. Число при цьому те саме, що дала б чинна система, —
+                // саме тому знайти ці випадки можна лише за записом, і саме
+                // вони обіцяні як найцінніший побічний результат міграції.
+                if (masked.Reason != MaskedZeroReason.None)
+                {
+                    trace.Masked(output.Code, null, number, masked.Reason);
                 }
 
                 values.Add(new CalculationOutputValue(
@@ -131,7 +152,8 @@ public sealed class GenericCalculationModule(
             input.SourceRowKey,
             values,
             trace.Steps
-                .Select(s => new CalculationTraceStep(s.Order, s.Code, s.Expression, s.Value, s.Error))
+                .Select(s => new CalculationTraceStep(
+                    s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked))
                 .ToList());
     }
 
@@ -177,7 +199,12 @@ public sealed class GenericCalculationModule(
             return ExpressionValue.Error("#VALUE");
         }
 
-        var result = formulaEngine.Evaluate(parsed.Expression, context).Value;
+        // ⛔ Режим версії передається явно (`I.7`): без нього рушій рахував
+        // `Legacy` у `decimal`, де ані `NaN`, ані нескінченності не існує, —
+        // тобто маскувати ніже було б нічого.
+        var result = formulaEngine
+            .Evaluate(parsed.Expression, context, numeric.Mode)
+            .Value;
 
         if (result.IsError)
         {

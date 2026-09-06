@@ -1,4 +1,4 @@
-// src/Ecr.Application/Ports/ICalculationModule.cs
+﻿// src/Ecr.Application/Ports/ICalculationModule.cs
 
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -156,9 +156,15 @@ public sealed record CalculationOutputValue(
 /// <param name="Expression">Вираз як його бачив рушій.</param>
 /// <param name="Value">Значення кроку.</param>
 /// <param name="TraceJson">Довільна деталізація: підставлені аргументи, константи.</param>
+/// <param name="Masked">
+/// Чому значення стало нулем (<c>H-24d-1</c>). Чинна система маскує
+/// <c>NaN</c> і <c>±∞</c> у нуль мовчки; число ми віддаємо те саме, а причину
+/// пишемо — саме за нею такі випадки можна перелічити.
+/// </param>
 public sealed record CalculationTraceStep(
     int StepOrder,
     string StepCode,
     string? Expression,
     decimal? Value,
-    string? TraceJson);
+    string? TraceJson,
+    Domain.Enums.MaskedZeroReason Masked = Domain.Enums.MaskedZeroReason.None);

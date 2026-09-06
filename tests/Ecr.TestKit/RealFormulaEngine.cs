@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
@@ -49,8 +49,11 @@ public sealed class RealFormulaEngine : IFormulaEngine
     /// «завжди діалект шаблонів» не робила червоним ЖОДНОГО тесту в жодному
     /// проєкті. Копія в один рядок — теж друга правда.
     /// </remarks>
-    public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context)
-        => _engine.Evaluate(expression, context);
+    public EvaluationResult Evaluate(
+        ParsedExpression expression,
+        IEvaluationContext context,
+        Ecr.Domain.Enums.NumericMode mode = Ecr.Domain.Enums.NumericMode.Strict)
+        => _engine.Evaluate(expression, context, mode);
 
     /// <inheritdoc />
     public DependencyExtraction ExtractDependencies(

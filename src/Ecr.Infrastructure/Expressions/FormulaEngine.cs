@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Binding;
@@ -25,6 +25,21 @@ public sealed class FormulaEngine(
     Evaluator evaluator,
     TopologicalSorter sorter) : IFormulaEngine
 {
+    /// <summary>Обчислювач для режиму.</summary>
+    /// <remarks>
+    /// ⚠ Два екземпляри на весь застосунок, а не новий на кожен вираз:
+    /// нічний перерахунок — це мільйони викликів, і алокація на кожен була б
+    /// платою за ніщо. Обидва без стану, тож спільні безпечно.
+    /// </remarks>
+    /// <param name="mode">Режим версії.</param>
+    private Evaluator EvaluatorFor(Ecr.Domain.Enums.NumericMode mode)
+        => mode == Ecr.Domain.Enums.NumericMode.Legacy ? _legacy : evaluator;
+
+    /// <summary>Обчислювач із арифметикою чинної системи.</summary>
+    private readonly Evaluator _legacy =
+        evaluator.WithArithmetic(
+            EvaluationArithmetics.For(Ecr.Domain.Enums.NumericMode.Legacy));
+
     /// <summary>
     /// Знімок «структури немає» для виклику без версії шаблону.
     /// </summary>
@@ -81,7 +96,10 @@ public sealed class FormulaEngine(
     }
 
     /// <inheritdoc />
-    public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context)
+    public EvaluationResult Evaluate(
+        ParsedExpression expression,
+        IEvaluationContext context,
+        Ecr.Domain.Enums.NumericMode mode = Ecr.Domain.Enums.NumericMode.Strict)
     {
         ArgumentNullException.ThrowIfNull(expression);
 
@@ -93,8 +111,13 @@ public sealed class FormulaEngine(
         // рахувати мусить одна мова. Доки обчислювач діалекту не знав,
         // `POWER(2;3)` у методології рахувався вигаданим набором `02b` §8,
         // хоча чинний рушій такого імені не знає (`Q-082`).
+        // ⛔ Арифметика береться за РЕЖИМОМ версії (`I.7`). Доти
+        // обчислювач був один і завжди `Strict`, тож `Legacy` рахував у
+        // `decimal` — і режим, який існує заради відтворення чисел,
+        // відтворював інші.
+
         return new EvaluationResult(
-            evaluator.Evaluate(expression.Root, context, expression.Dialect), []);
+            EvaluatorFor(mode).Evaluate(expression.Root, context, expression.Dialect), []);
     }
 
     /// <inheritdoc />
