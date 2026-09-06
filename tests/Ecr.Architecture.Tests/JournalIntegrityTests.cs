@@ -95,6 +95,50 @@ public sealed partial class JournalIntegrityTests
         Assert.Empty(phantom);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Числа_вимог_у_плані_збігаються_із_заміром()
+    {
+        // ⛔ План сам вимагає від себе саме цього: «Це зведення **обчислюється**
+        // з директив, а не ведеться паралельно їм». Рядок «Стан на дату» цього
+        // правила не дотримувався — числа переписували руками, і вони вже
+        // розійшлися: 252 · 221 · 27 · 4 у плані проти 253 · 224 · 27 · 3
+        // у замірі.
+        //
+        // ⚠ Розбіжність ховала більше, ніж арифметику. Непокритих стало менше
+        // не тому, що вимогу закрили, а тому, що `ФВ-9.15` («адміністратор
+        // редагує методології У ВЕБІ») отримала трейт від тестів перевірок
+        // публікації — екрана не існує, а матриця показувала покриття.
+        var census = RequirementCensus.Take(RepositoryRoot());
+        var stated = PlanCensus();
+
+        Assert.Equal(
+            $"{census.Declared} · {census.Covered} · {census.Exempt} · {census.Uncovered.Count}",
+            stated);
+    }
+
+    /// <summary>Числа з рядка «Стан на дату» плану.</summary>
+    /// <remarks>
+    /// ⚠ Рядок читається цілком і зводиться до чотирьох чисел, а не
+    /// порівнюється дослівно: слова навколо них — це виклад, і правити його
+    /// має бути можна без червоного тесту.
+    /// </remarks>
+    private static string PlanCensus()
+    {
+        var text = File.ReadAllText(
+            Path.Combine(RepositoryRoot(), "docs", "build", "roadmap.md"));
+
+        var row = PlanCensusRow().Match(text);
+        Assert.True(row.Success, "У плані немає рядка «Вимог ТЗ (листових)».");
+
+        return string.Join(" · ", row.Groups.Cast<Group>().Skip(1).Select(g => g.Value));
+    }
+
+    /// <summary>Рядок плану: <c>| Вимог ТЗ (листових) | 253 · покрито 224 · … |</c>.</summary>
+    [GeneratedRegex(
+        @"\|\s*Вимог ТЗ \(листових\)\s*\|\s*(\d+)\s*·\s*покрито\s*(\d+)\s*·\s*звільнено\s*(\d+)\s*·\s*\**непокрито\s*(\d+)\**\s*\|")]
+    private static partial Regex PlanCensusRow();
+
     /// <summary>Текст журналу питань.</summary>
     private static string Journal()
         => File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "build", "questions.md"));
