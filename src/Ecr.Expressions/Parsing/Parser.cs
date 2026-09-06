@@ -7,10 +7,16 @@ using Ecr.Expressions.Lexing;
 namespace Ecr.Expressions.Parsing;
 
 /// <summary>
-/// Парсер рекурсивного спуску. Один парсер на обидва діалекти: різниця між
-/// <c>Template</c> і <c>Methodology</c> — лише в наборі дозволених посилань і
-/// функцій, а не в синтаксисі (D-19).
+/// Парсер рекурсивного спуску. Один парсер на обидва діалекти.
 /// </summary>
+/// <remarks>
+/// ⚠ <c>D-19</c> казав, що різниця між <c>Template</c> і <c>Methodology</c> —
+/// **лише** в наборі дозволених посилань і функцій, а не в синтаксисі. Замір
+/// NCalc 1.3.8 це спростував: у діалекті методологій <c>^</c> — XOR, а не
+/// степінь. Тому синтаксична різниця тепер є, вона рівно одна, і вся вона
+/// зібрана в <see cref="DialectSyntax"/> — щоб її не довелося шукати по
+/// гілках парсера.
+/// </remarks>
 public sealed class Parser
 {
     private static readonly FunctionRegistry Functions = new();
@@ -27,11 +33,12 @@ public sealed class Parser
         ArgumentNullException.ThrowIfNull(expression);
 
         var diagnostics = new List<ExpressionDiagnostic>();
+        var syntax = DialectSyntax.Of(dialect);
 
         IReadOnlyList<Token> tokens;
         try
         {
-            tokens = new Lexer().Tokenize(expression);
+            tokens = new Lexer(syntax).Tokenize(expression);
         }
         catch (LexicalException ex)
         {
@@ -40,7 +47,7 @@ public sealed class Parser
             return new ParseResult(false, null, diagnostics);
         }
 
-        var state = new State(tokens, dialect, diagnostics);
+        var state = new State(tokens, dialect, syntax, diagnostics);
         AstNode root;
         try
         {
@@ -233,15 +240,50 @@ public sealed class Parser
         return ParsePower(s);
     }
 
-    /// <summary>Степінь правоасоціативний: <c>2^3^2 = 2^(3^2) = 512</c>.</summary>
+    /// <summary>
+    /// Степінь правоасоціативний: <c>2^3^2 = 2^(3^2) = 512</c> — і лише в
+    /// діалекті шаблонів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ У діалекті методологій <c>^</c> заборонений (<c>ECR-CALC-0431</c>,
+    /// директива №05 §4). Причина не в чистоті мови: у NCalc 1.3.8 це
+    /// **XOR**, і `2^3` там дорівнює 1. Прийняти вираз означало б порахувати
+    /// його інакше, ніж чинна система, — тихо і без жодної ознаки.
+    ///
+    /// ⚠ Розбір після діагностики ПРОДОВЖУЄТЬСЯ, а не обривається: інакше
+    /// формула з <c>^</c> посередині дала б ще й «зайвий текст після кінця
+    /// виразу», і методолог шукав би другу помилку, якої немає.
+    /// </remarks>
     private static AstNode ParsePower(State s)
     {
         var left = ParsePrimary(s);
-        if (!s.Match(TokenType.Caret))
+        if (s.Current.Type != TokenType.Caret)
         {
             return left;
         }
 
+        if (!s.Syntax.CaretIsPower)
+        {
+            // ⚠ `Pow(a, b)` — ЄДИНИЙ степінь діалекту B: оператора `**` у
+            // NCalc 1.3.8 теж немає (замір скасував критерій `2**3 = 8` з
+            // кроку 2 директиви №05), тож альтернативи в пораді бути не може.
+            //
+            // ⛔ Порада поки що випереджає код: `ParseFunctionCall` звіряється
+            // з `FunctionRegistry` (вигаданий набір `02b` §8, де степінь —
+            // `POWER`), а не з виміряним `DialectCatalog`, де він `Pow`.
+            // Тому сьогодні `Pow(2,3)` відхиляється як невідома функція.
+            // Каталоги зводить крок `I.14` (`E-7`) — і саме `Pow` має лишитися
+            // в тексті: назвати тут `POWER` означало б порадити функцію, якої
+            // чинний рушій не знає.
+            s.Error(
+                ExpressionErrors.CaretNotPower,
+                "'^' у діалекті методологій не означає степінь: це побітовий XOR, "
+                + "і '2^3' дорівнює 1, а не 8. Використайте Pow(a, b).",
+                s.Current.Position,
+                1);
+        }
+
+        s.Advance();
         var right = ParseUnary(s);
         return new BinaryNode(BinaryOperator.Power, left, right) { Position = left.Position };
     }
@@ -372,7 +414,7 @@ public sealed class Parser
         if (s.Current.Type != TokenType.RParen)
         {
             args.Add(ParseExpression(s));
-            while (s.Match(TokenType.Comma))
+            while (s.Match(TokenType.ArgumentSeparator))
             {
                 args.Add(ParseExpression(s));
             }
@@ -610,11 +652,17 @@ public sealed class Parser
     private sealed class ParseAbort : Exception;
 
     private sealed class State(
-        IReadOnlyList<Token> tokens, ExpressionDialect dialect, List<ExpressionDiagnostic> diagnostics)
+        IReadOnlyList<Token> tokens,
+        ExpressionDialect dialect,
+        DialectSyntax syntax,
+        List<ExpressionDiagnostic> diagnostics)
     {
         private int _index;
 
         public ExpressionDialect Dialect => dialect;
+
+        /// <summary>Синтаксичні відмінності діалекту — поки що рівно одна.</summary>
+        public DialectSyntax Syntax => syntax;
 
         public Token Current => tokens[Math.Min(_index, tokens.Count - 1)];
 
@@ -658,6 +706,18 @@ public sealed class Parser
         public void Error(string message) => Error(message, Current.Position, Math.Max(Current.Length, 1));
 
         public void Error(string message, int position, int length)
-            => diagnostics.Add(new ExpressionDiagnostic(ExpressionErrors.Syntax, message, position, length));
+            => Error(ExpressionErrors.Syntax, message, position, length);
+
+        /// <summary>
+        /// Діагностика з ВЛАСНИМ кодом — для випадків, які не є опискою.
+        /// </summary>
+        /// <remarks>
+        /// ⛔ Код тут не косметика: за ним конфігуратор відрізняє «поправте
+        /// синтаксис» від «ця конструкція означає в цьому діалекті інше».
+        /// Загальний <c>ECR-TMPL-0422</c> звів би обидва до одного рядка в
+        /// журналі публікації.
+        /// </remarks>
+        public void Error(string code, string message, int position, int length)
+            => diagnostics.Add(new ExpressionDiagnostic(code, message, position, length));
     }
 }

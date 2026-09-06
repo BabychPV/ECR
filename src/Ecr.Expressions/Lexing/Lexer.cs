@@ -3,7 +3,16 @@ using System.Globalization;
 namespace Ecr.Expressions.Lexing;
 
 /// <summary>Лексичний аналізатор виразів.</summary>
-public sealed class Lexer
+/// <param name="syntax">
+/// Синтаксис діалекту: звідси береться символ роздільника аргументів.
+/// </param>
+/// <remarks>
+/// ⛔ Лексер залежить від діалекту саме через <see cref="DialectSyntax"/>, а не
+/// через <c>ExpressionDialect</c>: інакше кожна нова діалектна відмінність
+/// дописувала б сюди ще одне <c>if (dialect == …)</c>, і роздільник знову
+/// виявився б літералом — тепер уже в двох гілках замість однієї.
+/// </remarks>
+public sealed class Lexer(DialectSyntax syntax)
 {
     /// <summary>Ключові слова; порівняння регістронезалежне (02b §1).</summary>
     private static readonly Dictionary<string, TokenType> Keywords = new(StringComparer.OrdinalIgnoreCase)
@@ -87,7 +96,7 @@ public sealed class Lexer
                 continue;
             }
 
-            tokens.Add(ReadOperator(expression, ref i));
+            tokens.Add(ReadOperator(expression, ref i, syntax.ArgumentSeparator));
         }
 
         if (depth != 0)
@@ -242,7 +251,7 @@ public sealed class Lexer
     }
 
     /// <summary>Оператор або розділовий знак.</summary>
-    private static Token ReadOperator(string s, ref int i)
+    private static Token ReadOperator(string s, ref int i, char argumentSeparator)
     {
         var start = i;
 
@@ -270,12 +279,21 @@ public sealed class Lexer
             }
         }
 
+        // ⛔ Роздільник аргументів перевіряється ОКРЕМО від таблиці нижче, бо
+        // він єдиний, чий символ задає діалект, а не граматика. У таблиці він
+        // був би літералом `,` — тобто твердженням, що кома означає роздільник
+        // у будь-якому діалекті, хоча діалект A цього питання ще не вирішив.
+        if (s[i] == argumentSeparator)
+        {
+            i++;
+            return new Token(TokenType.ArgumentSeparator, s[start..i], start, 1);
+        }
+
         var single = s[i] switch
         {
             '(' => TokenType.LParen,
             ')' => TokenType.RParen,
             '.' => TokenType.Dot,
-            ',' => TokenType.Comma,
             ':' => TokenType.Colon,
             '?' => TokenType.Question,
             '@' => TokenType.At,
