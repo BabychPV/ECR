@@ -130,6 +130,78 @@ public static class PublishChecks
         return diagnostics;
     }
 
+    /// <summary>
+    /// Розкриті залежності всіх формул версії — для <c>cfg.FormulaDependency</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Таблиця залежностей не наповнювалася НІЧИМ. Наслідок мовчазний і
+    /// найгірший з можливих: граф залежностей порожній, тож каскадний
+    /// перерахунок не бачить похідних комірок — числа лишаються старими без
+    /// жодної помилки на екрані (<c>A7-63</c>).
+    ///
+    /// ⚠ Розбір повторюється, а не переиспользовується з <see cref="Run"/>.
+    /// Публікація — рідкісна операція, а зчепити збереження з перевіркою
+    /// означало б, що жодну з них не можна змінити окремо. Ціна — один
+    /// зайвий розбір на публікацію.
+    ///
+    /// ⚠ Діапазони тут уже РОЗКРИТІ в конкретні <c>RowKey</c>: у рантаймі
+    /// діапазонів не існує (`B03` §4), і саме тому зміна порядку рядків після
+    /// публікації не змінює результат.
+    /// </remarks>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <param name="formulaEngine">Рушій — розбір виразів.</param>
+    /// <returns>Залежності, готові до збереження.</returns>
+    public static IReadOnlyList<FormulaDependency> Dependencies(
+        TemplateVersion version, IFormulaEngine formulaEngine)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(formulaEngine);
+
+        var snapshot = Snapshot(version);
+        var extractor = new DependencyExtractor(new ReferenceResolver(snapshot), new RangeExpander());
+
+        var tables = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .ToDictionary(t => t.Id);
+
+        var result = new List<FormulaDependency>();
+
+        foreach (var table in tables.Values)
+        {
+            foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
+            {
+                var parsed = formulaEngine.Parse(formula.Expression, formula.Dialect);
+
+                // Непридатний вираз сюди не доходить: публікація вже
+                // відхилена `Run`. Але метод має бути придатним і окремо —
+                // мовчазний `NullReferenceException` при збереженні гірший
+                // за пропущену формулу.
+                if (parsed.Expression is null)
+                {
+                    continue;
+                }
+
+                var dependencies = extractor.Extract(
+                    parsed.Expression.Root, table.Id, RowKeyOf(table, formula), tables);
+
+                foreach (var dependency in dependencies)
+                {
+                    result.Add(FormulaDependency.ForFormula(
+                        formula.Id,
+                        dependency.DependsOnKind,
+                        dependency.TableDefId,
+                        dependency.RowKey,
+                        dependency.ColumnDefId,
+                        dependency.FilterJson,
+                        dependency.PeriodOffset,
+                        dependency.SortOrder));
+                }
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Формули, від яких залежить ця — для топологічного порядку.</summary>
     private static List<int> DependsOn(
         FormulaDef formula,

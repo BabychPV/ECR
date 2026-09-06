@@ -74,8 +74,10 @@ public sealed class PublishTemplateVersionTests
         });
     }
 
+    private readonly ITemplateVersionStore _versionStore = Substitute.For<ITemplateVersionStore>();
+
     private PublishTemplateVersionHandler Handler()
-        => new(_versions, _formulas, _cache, _catalogue, _access, _user, _audit, _uow, _clock);
+        => new(_versions, _versionStore, _formulas, _cache, _catalogue, _access, _user, _audit, _uow, _clock);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Коректна_версія_публікується()
@@ -93,6 +95,37 @@ public sealed class PublishTemplateVersionTests
         // прогрів би кеш зі стану, якого ще немає в базі.
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
         await _cache.Received(1).InvalidateAsync(1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Публікація_зберігає_граф_залежностей()
+    {
+        // ⛔ `A7-63`. Таблиця `cfg.FormulaDependency` не наповнювалася НІЧИМ,
+        // і наслідок був найтихішим із можливих: граф порожній, каскадний
+        // перерахунок не бачить похідних комірок, числа лишаються старими —
+        // без жодної помилки на екрані.
+        Structure("SUM([Jan])", scope: FormulaScope.Column);
+
+        await Handler().PublishAsync(1, userId: 9, CancellationToken.None);
+
+        var call = _versionStore.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name
+                         == nameof(ITemplateVersionStore.ReplaceFormulaDependenciesAsync));
+
+        var saved = (IReadOnlyList<Ecr.Domain.Entities.Configuration.FormulaDependency>)
+            call.GetArguments()[1]!;
+
+        Assert.NotEmpty(saved);
+
+        // ⚠ Кожна залежність названа ФОРМУЛОЮ і колонкою: без цього зворотний
+        // індекс «які формули залежать від цієї комірки» не побудувати.
+        Assert.All(saved, d =>
+        {
+            Assert.NotNull(d.FormulaDefId);
+            Assert.NotNull(d.ColumnDefId);
+            Assert.Equal(0, d.SourceKind);
+        });
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
