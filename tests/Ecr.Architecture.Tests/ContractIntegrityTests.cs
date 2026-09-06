@@ -70,27 +70,177 @@ public sealed class ContractIntegrityTests
         Assert.Empty(duplicated);
     }
 
+    /// <summary>
+    /// Коди, названі в контракті, яких сьогодні не кидає жоден шлях.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це НЕ виняток «щоб зелене». Кожен рядок — визнаний факт із причиною,
+    /// і сторож стежить за списком у ДВА боки: код звідси, який почали
+    /// кидати, зобов'язаний зі списку зникнути. Без цього бронь тихо
+    /// перетворилася б на дірку, крізь яку пролізе будь-який мертвий код.
+    ///
+    /// ⚠ Причини різні і їх не можна плутати:
+    /// <list type="bullet">
+    /// <item><c>ECR-SCHM-0409</c>, <c>ECR-SCHM-0422</c> — вимога ФВ-7.4 є,
+    /// <c>ChangeClassifier</c> уже розрізняє <c>Breaking</c> і <c>Guarded</c>,
+    /// але жоден шлях поки не ВІДХИЛЯЄ операцію: класифікація лише
+    /// показується в діагностиці версій. Це недороблена вимога.</item>
+    /// <item><c>ECR-CELL-4222</c>, <c>ECR-SIM-0403</c> — сценарій живий, але
+    /// доїжджає іншим кодом: межі довідника перевіряє
+    /// <c>ColumnDef.ValidateValue</c> (<c>ECR-CELL-0422</c>), а вихід за вікно
+    /// дозволу і запис у симуляції — <c>ECR-ACCS-0403</c> з
+    /// <c>EditDenyReason</c>. Це кандидати на вилучення з контракту.</item>
+    /// <item><c>ECR-UOM-4221</c> — заборона тримається побудовою таблиці
+    /// конверсій, а не перевіркою в C#.</item>
+    /// </list>
+    /// </remarks>
+    private static readonly string[] ReservedCodes =
+        ["ECR-CELL-4222", "ECR-SCHM-0409", "ECR-SCHM-0422", "ECR-SIM-0403", "ECR-UOM-4221"];
+
+    /// <summary>Шлях каталогу констант відносно кореня репозиторію.</summary>
+    private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Коди_помилок_унікальні_і_відповідають_формату()
     {
-        var codes = typeof(Ecr.Api.Errors.ErrorCodes)
-            .GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)
-            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
-            .Select(f => (Name: f.Name, Value: (string)f.GetRawConstantValue()!))
+        // ⚠ Читається ТЕКСТ каталогу, а не рефлексія по типу. Рефлексія
+        // повертає вже розібрані константи і тому не бачить ані друкарської
+        // помилки у форматі (`ECR-USR-422` з трьома цифрами так само стане
+        // рядком), ані того, що каталог узагалі переїхав чи зник.
+        var constants = Regex.Matches(Catalog().Text, @"public const string (\w+)\s*=\s*""([^""]*)""")
+            .Select(m => (Name: m.Groups[1].Value, Value: m.Groups[2].Value))
             .ToList();
 
-        Assert.NotEmpty(codes);
-        Assert.All(codes, c => Assert.Matches(@"^ECR-[A-Z]+-\d{4}$", c.Value));
+        Assert.NotEmpty(constants);
+        Assert.All(constants, c => Assert.Matches(@"^ECR-[A-Z]{3,4}-\d{4}$", c.Value));
 
         // Один код на два стани означає, що клієнт не може їх розрізнити —
         // а весь сенс коду саме в цьому.
-        var duplicates = codes.GroupBy(c => c.Value, StringComparer.Ordinal)
+        var duplicates = constants.GroupBy(c => c.Value, StringComparer.Ordinal)
             .Where(g => g.Count() > 1)
             .Select(g => $"{g.Key}: {string.Join(", ", g.Select(x => x.Name))}")
             .ToList();
 
         Assert.Empty(duplicates);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Каталог_кодів_помилок_збігається_з_контрактом_в_обидва_боки()
+    {
+        // ⛔ Сторож сканує ЛІТЕРАЛИ в `src/`, а не константи каталогу. Доки
+        // він рефлексував `ErrorCodes`, чотири коди (`ECR-INT-0404`,
+        // `ECR-PRJ-0422`, `ECR-RPT-0404`, `ECR-RPT-0409`) жили рядками повз
+        // каталог і були для нього невидимі: друкарська помилка в них не
+        // спіймалася б нічим. Каталог розійшовся у три боки — 48 кодів у
+        // контракті, 44 в константах, 55 у коді — і жодне з трьох чисел не
+        // збігалося з тим, що писали журнали.
+        var contract = ContractCodes();
+        var thrown = ThrownCodes();
+
+        Assert.NotEmpty(contract);
+        Assert.NotEmpty(thrown);
+
+        // Бік перший: код доїжджає до клієнта, а в контракті його немає.
+        // Клієнт розрізняє причини САМЕ за кодом — і не знаходить його.
+        var undocumented = thrown.Except(contract, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(undocumented);
+
+        // ⛔ Бік другий, і він не менш важливий: код названий у контракті, а
+        // не кидає його ніхто. Це означає, що сценарій, який його породжував,
+        // зник непомітно — разом із вимогою, яку він закривав.
+        var dead = contract
+            .Except(thrown, StringComparer.Ordinal)
+            .Except(ReservedCodes, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(dead);
+
+        // Бронь, яку почали кидати, зобов'язана зі списку зникнути: інакше
+        // список поволі накрив би собою весь другий бік перевірки.
+        var revived = ReservedCodes.Intersect(thrown, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(revived);
+
+        // І константа каталогу, якої немає в контракті: каталог — не місце,
+        // де код заводять тихо.
+        var catalogOnly = Regex.Matches(Catalog().Text, @"""(ECR-[A-Z]{3,4}-\d{4})""")
+            .Select(m => m.Groups[1].Value)
+            .Except(contract, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Empty(catalogOnly);
+    }
+
+    /// <summary>Файл каталогу констант.</summary>
+    private static SourceFile Catalog()
+        => SourceTree.Production().Single(
+            f => string.Equals(f.Path, CatalogFile, StringComparison.Ordinal));
+
+    /// <summary>Коди з таблиці `02-contracts.md` §7.</summary>
+    private static HashSet<string> ContractCodes()
+    {
+        var path = Path.Combine(SourceTree.Root, "docs", "build", "02-contracts.md");
+        var text = File.ReadAllText(path);
+
+        var start = text.IndexOf("## 7. Каталог кодів помилок", StringComparison.Ordinal);
+        var section = text[start..text.IndexOf("## 8.", start, StringComparison.Ordinal)];
+
+        return Regex.Matches(section, @"^\|\s*`(ECR-[A-Z]{3,4}-\d{4})`\s*\|", RegexOptions.Multiline)
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>Коди, які справді кидає код у <c>src/</c>.</summary>
+    /// <remarks>
+    /// ⛔ Файл каталогу з цього перегляду ВИКЛЮЧЕНИЙ. Інакше константа
+    /// виправдовувала б саму себе: оголошення `= "ECR-…"` — теж літерал, і
+    /// другий бік перевірки («у контракті є, ніхто не кидає») перестав би
+    /// спрацьовувати назавжди.
+    ///
+    /// ⚠ Тому звертання виду <c>ErrorCodes.Ім'я</c> доводиться зводити до
+    /// значення окремо — після переїзду каталогу нижче за <c>Ecr.Api</c>
+    /// саме так пишуться місця, які раніше писали літерал.
+    ///
+    /// ⚠ У полі зору лише <c>.cs</c>: коди **породжує** сервер, і саме його
+    /// перелік має збігатися з контрактом. Клієнт коди СПОЖИВАЄ, і його
+    /// власна розбіжність — інший дефект з іншою ціною; вона названа окремо
+    /// (`P-25`, `ECR-PER-0409` у демо-сторінці), бо ловити її тут означало б
+    /// зробити червоним контракт сервера через вигаданий рядок у макеті.
+    /// </remarks>
+    private static HashSet<string> ThrownCodes()
+    {
+        var files = SourceTree.Production();
+        var codes = files
+            .Where(f => !string.Equals(f.Path, CatalogFile, StringComparison.Ordinal))
+            .SelectMany(f => Regex.Matches(f.Text, @"""(ECR-[A-Z]{3,4}-\d{4})""")
+                                  .Select(m => m.Groups[1].Value))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var catalog = Catalog();
+        foreach (Match declaration in Regex.Matches(
+            catalog.Text, @"public const string (\w+)\s*=\s*""(ECR-[A-Z]{3,4}-\d{4})"""))
+        {
+            var name = declaration.Groups[1].Value;
+            var referenced = files.Any(
+                f => f.Path != catalog.Path
+                     && Regex.IsMatch(f.Text, $@"\bErrorCodes\.{name}\b"));
+
+            if (referenced)
+            {
+                codes.Add(declaration.Groups[2].Value);
+            }
+        }
+
+        return codes;
     }
 
     [Fact]

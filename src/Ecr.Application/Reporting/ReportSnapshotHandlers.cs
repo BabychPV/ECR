@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Reporting;
 
@@ -75,7 +76,8 @@ public sealed class BuildReportSnapshotHandler(
         // в коді.
         var versionId = await definitions.FindCurrentVersionIdAsync(code, ct).ConfigureAwait(false)
                         ?? throw new NotFoundException(
-                            "ECR-RPT-0404", $"Звіту «{code}» немає або в нього немає чинної версії.");
+                            ErrorCodes.ReportNotFound,
+                            $"Звіту «{code}» немає або в нього немає чинної версії.");
 
         return await jobs
             .EnqueueAsync<IReportSnapshotJob>(

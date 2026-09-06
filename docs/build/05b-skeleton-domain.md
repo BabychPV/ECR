@@ -88,6 +88,29 @@ public sealed class DomainException(string errorCode, string message) : Exceptio
 
 ---
 
+### `src/Ecr.Domain/Errors/ErrorCodes.cs`
+MODULE: domain | STAGE: 1
+CONTRACT: 02-contracts.md#error-codes
+SCOPE: константи кодів; **вміст — це таблиця §7 контракту**, і повторювати її
+тут не можна.
+NOT IN SCOPE: зіставлення коду з HTTP-статусом — це рівень API
+(`ExceptionHandlingMiddleware`).
+
+⛔ **Файл живе в `Ecr.Domain`, а не в `Ecr.Api`** (крок `II.5`, `H-5`). Доки
+він лежав під API, `Ecr.Application` і `Ecr.Domain` не могли на нього
+послатися — залежності йдуть лише всередину — і писали коди рядковими
+літералами повз каталог. Чотири коди (`ECR-INT-0404`, `ECR-PRJ-0422`,
+`ECR-RPT-0404`, `ECR-RPT-0409`) так і з'явилися: сторож рефлексував саме
+`ErrorCodes` і їх не бачив.
+
+⚠ **Переліку кодів тут немає навмисно.** Скелет уже одного разу розійшовся з
+кодом саме тому, що тримав другу копію каталогу: у `05h` бракувало п'яти
+кодів, і бракувало непомітно. Єдине джерело — таблиця
+[`02-contracts.md` §7](02-contracts.md#error-codes); збіг файла з нею
+перевіряє `ContractIntegrityTests` в обидва боки.
+
+---
+
 ## 3. `Entities/Configuration`
 
 ### `src/Ecr.Domain/Entities/Configuration/Template.cs`
