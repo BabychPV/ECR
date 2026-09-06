@@ -93,6 +93,50 @@ public sealed class ApprovalRouteResolutionTests(SqlServerFixture sql)
         Assert.Null(route);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.17")]
+    public async Task Заміна_кроків_прибирає_старі_а_не_додає_поверх()
+    {
+        // ⛔ `ClearSteps` чистить лише список у пам'яті. Якщо EF не побачить
+        // видалення, старі рядки лишаться в базі, і маршрут із двох кроків
+        // після заміни став би маршрутом із чотирьох — половина з яких від
+        // конфігурації, якої вже немає.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(periodKey: 202611, ct: CancellationToken.None);
+
+        await using (var db = builder.CreateContext())
+        {
+            var route = Route($"REPL_{doc.ProjectId}", doc.ProjectId, null, roleId: 11);
+            route.AddStep(22);
+
+            db.ApprovalRoutes.Add(route);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var db = builder.CreateContext())
+        {
+            var route = await new WorkflowStore(db)
+                .FindProjectRouteAsync(doc.ProjectId, CancellationToken.None);
+
+            Assert.NotNull(route);
+            Assert.Equal(2, route.Steps.Count);
+
+            await new WorkflowStore(db).RemoveStepsAsync(route, CancellationToken.None);
+            route.AddStep(33);
+
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using var check = builder.CreateContext();
+        var replaced = await new WorkflowStore(check)
+            .FindProjectRouteAsync(doc.ProjectId, CancellationToken.None);
+
+        Assert.NotNull(replaced);
+        Assert.Equal([33], replaced.Steps.Select(s => s.RoleId));
+    }
+
     /// <summary>Роль першого кроку маршруту, який виграв резолюцію.</summary>
     private async Task<int> RoleOfFirstStepAsync(TestDocumentBuilder builder, TestDocument doc)
     {

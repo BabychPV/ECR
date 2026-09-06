@@ -75,6 +75,23 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    public async Task RemoveStepsAsync(ApprovalRoute route, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var steps = await db.ApprovalSteps
+            .Where(s => s.ApprovalRouteId == route.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Спершу ПОЗНАЧИТИ видаленими, потім прибрати з колекції. У
+        // зворотному порядку EF бачить відвʼязану дитину з обовʼязковим
+        // ключем і відмовляється зберігати зміни взагалі.
+        db.ApprovalSteps.RemoveRange(steps);
+        route.ClearSteps();
+    }
+
+    /// <inheritdoc />
     public async Task<bool> RoleExistsAsync(int roleId, CancellationToken ct)
         => await db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct).ConfigureAwait(false);
 

@@ -124,11 +124,14 @@ public sealed class ApprovalRouteConfiguration : IEntityTypeConfiguration<Approv
         builder.HasIndex(x => new { x.ProjectId, x.TemplateVersionId })
                .HasDatabaseName("IX_ApprovalRoute_Scope");
 
-        // ⚠ FK лишається `Restrict`, як у схемі від Етапу 3, а кроки
-        // прибирає явно `WorkflowStore.RemoveRouteAsync`. Оголосити в моделі
-        // каскад, якого в базі немає, було б гірше за будь-який із варіантів:
-        // EF вважав би, що діти зникнуть самі, і видалення падало б на
-        // зовнішньому ключі вже в продуктиві.
+        // ⚠ Поведінка видалення НЕ перевизначається: у базі `FK_AS_Route`
+        // оголошений `Restrict` ще від Етапу 3, і модель має казати те саме.
+        // Кроки прибирає явно `WorkflowStore.RemoveStepsAsync` —
+        // покластися на те, що EF сам розбереться з відв'язаними дітьми, не
+        // вийшло: він відмовляється зберігати зміни взагалі
+        // («the association … has been severed»), і замінити маршрут стало б
+        // неможливо. Знайдено тестом на РЕАЛЬНІЙ базі; тест обробника зі
+        // заглушкою-сховищем цього не бачить за побудовою.
         builder.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ApprovalRouteId)
                .HasConstraintName("FK_AS_Route");
     }

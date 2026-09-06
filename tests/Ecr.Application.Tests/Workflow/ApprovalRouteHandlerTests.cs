@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Workflow;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
@@ -126,6 +127,58 @@ public sealed class ApprovalRouteHandlerTests
 
         Assert.False(dto.HasRoute);
         Assert.Empty(dto.Steps);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.17")]
+    public async Task Проміжний_крок_лишає_слід_в_аудиті()
+    {
+        // ⛔ На рядку стану є лише ОДИН `ApprovedByUserId`. Після маршруту з
+        // трьох кроків там лишиться останній, а перших двох не буде ніде —
+        // тобто багатоетапність, яку заводять заради відповідальності,
+        // відповідальність би й губила.
+        var audit = Substitute.For<IAuditWriter>();
+        var workflow = Substitute.For<IWorkflowStore>();
+        var access = Substitute.For<IAccessDecisionService>();
+        var uow = Substitute.For<IUnitOfWork>();
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+
+        var now = new DateTime(2026, 3, 10, 9, 0, 0, DateTimeKind.Utc);
+        clock.UtcNow.Returns(now);
+
+        var state = new ApprovalState(documentId: 1, sheetDefId: 2, periodKey: 202603);
+        state.Submit(userId: 5, now, firstStepId: 100);
+
+        workflow.GetOrCreateAsync(1, 2, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(state);
+
+        access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Build());
+        access.CanApproveAsync(
+                Arg.Any<AccessProfile>(), 1, 2, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
+        // Крок 1 із двох: попереду ще один.
+        access.CurrentApprovalStepAsync(1, 2, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new ApprovalStepView(StepId: 100, Ordinal: 1, RoleId: 42, NextStepId: 200, TotalSteps: 2));
+
+        await new ApproveSheetHandler(workflow, access, uow, _user, clock, audit)
+            .HandleAsync(1, 2, 202603, approved: true, reason: null, CancellationToken.None);
+
+        // Аркуш НЕ затверджений…
+        Assert.Equal(Ecr.Domain.Enums.DocumentStatus.Submitted, state.Status);
+
+        // …а слід про пройдений крок є.
+        var events = audit.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteSecurityEventAsync))
+            .Select(c => (SecurityEventRecord)c.GetArguments()[0]!)
+            .ToList();
+
+        var passed = Assert.Single(events);
+        Assert.Equal("ApprovalStepPassed", passed.EventType);
+        Assert.Equal(42, passed.TargetRoleId);
+        Assert.Equal(9, passed.ChangedByUserId);
     }
 
     [Fact]

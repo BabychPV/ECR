@@ -130,7 +130,7 @@ public sealed class ReplaceApprovalRouteHandler(
         }
         else
         {
-            route.ClearSteps();
+            await workflow.RemoveStepsAsync(route, ct).ConfigureAwait(false);
         }
 
         foreach (var roleId in roleIds)

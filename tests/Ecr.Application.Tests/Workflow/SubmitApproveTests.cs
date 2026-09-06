@@ -117,7 +117,9 @@ public sealed class SubmitApproveTests
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _uow, _user, _clock);
 
-    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _user, _clock);
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+
+    private ApproveSheetHandler Approve() => new(_workflow, _access, _uow, _user, _clock, _audit);
 
     private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock);
 

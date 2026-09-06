@@ -102,6 +102,14 @@ public interface IWorkflowStore
     /// <summary>Прибирає маршрут разом із кроками.</summary>
     public Task RemoveRouteAsync(ApprovalRoute route, CancellationToken ct);
 
+    /// <summary>Прибирає всі кроки маршруту, лишаючи сам маршрут.</summary>
+    /// <remarks>
+    /// ⛔ Окремий метод, бо «очистити список у пам'яті» недостатньо: EF
+    /// відмовляється зберігати відв'язані обов'язкові звʼязки і валить
+    /// операцію цілком. Кроки мають бути позначені видаленими ЯВНО.
+    /// </remarks>
+    public Task RemoveStepsAsync(ApprovalRoute route, CancellationToken ct);
+
     /// <summary>Чи існує роль із таким ідентифікатором.</summary>
     /// <remarks>
     /// ⚠ Крок маршруту посилається на роль числом. Неіснуюча роль дала б
