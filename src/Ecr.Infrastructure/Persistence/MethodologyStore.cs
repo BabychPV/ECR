@@ -138,6 +138,126 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyConstant>> GetConstantsAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyConstants
+            .AsNoTracking()
+            .Where(c => c.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(c => c.Code)
+            .ThenBy(c => c.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Версія бібліотеки добирається тим самим правилом, що й будь-яка інша:
+    /// остання опублікована з <c>EffectiveFrom ≤ дата</c> (ФВ-9.3). Двох
+    /// запитів це не варте, але одного — так: інакше перерахунок за минулий рік
+    /// узяв би сьогоднішню редакцію <c>Common</c>, і 265 посилань корпусу
+    /// порахували б інші числа, ніж рік тому.
+    /// </remarks>
+    public async Task<IReadOnlyList<MethodologyLibrary>> ResolveImportsAsync(
+        int methodologyVersionId, DateOnly onDate, CancellationToken ct)
+    {
+        var imported = await db.MethodologyImports
+            .AsNoTracking()
+            .Where(i => i.MethodologyVersionId == methodologyVersionId)
+            .Join(
+                db.Methodologies.AsNoTracking(),
+                i => i.ImportedMethodologyId,
+                m => m.Id,
+                (i, m) => new { m.Id, m.Code })
+            .OrderBy(x => x.Code)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (imported.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = imported.ConvertAll(x => x.Id);
+
+        // ⚠ Deprecated теж бере участь: версія, виведена з обігу, лишається
+        // чинною для періодів, які вона рахувала, — так само, як у
+        // `Methodology.VersionOn`. Два різні правила вибору версії розійшлися б
+        // на першому ж перерахунку минулого періоду.
+        var versions = await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => ids.Contains(v.MethodologyId)
+                        && v.EffectiveFrom != null
+                        && v.EffectiveFrom <= onDate
+                        && (v.Status == TemplateVersionStatus.Published
+                            || v.Status == TemplateVersionStatus.Deprecated))
+            .OrderByDescending(v => v.EffectiveFrom)
+            .Select(v => new { v.Id, v.MethodologyId, v.EffectiveFrom })
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var effective = versions
+            .GroupBy(v => v.MethodologyId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.EffectiveFrom).First().Id);
+
+        var versionIds = effective.Values.ToList();
+
+        var formulas = await db.MethodologyFormulas
+            .AsNoTracking()
+            .Where(f => versionIds.Contains(f.MethodologyVersionId))
+            .Select(f => new { f.MethodologyVersionId, f.Code })
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byVersion = formulas
+            .GroupBy(f => f.MethodologyVersionId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(f => f.Code).ToList());
+
+        return imported.ConvertAll(x =>
+        {
+            var versionId = effective.TryGetValue(x.Id, out var found) ? found : (int?)null;
+
+            return new MethodologyLibrary(
+                x.Id,
+                x.Code,
+                versionId,
+                versionId is { } id && byVersion.TryGetValue(id, out var codes) ? codes : []);
+        });
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Зміни лише готуються; записує їх <c>IUnitOfWork</c> у тій самій
+    /// транзакції, що й публікацію. Окремий <c>SaveChanges</c> тут означав би,
+    /// що ребра графа можуть уціліти після відкоченої публікації.
+    /// </remarks>
+    public async Task ReplaceDependenciesAsync(
+        int fromMethodologyId, IReadOnlyCollection<int> toMethodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(toMethodologyIds);
+
+        var existing = await db.MethodologyDependencies
+            .Where(d => d.FromMethodologyId == fromMethodologyId)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = new HashSet<int>(toMethodologyIds);
+
+        db.MethodologyDependencies.RemoveRange(
+            existing.Where(d => !wanted.Contains(d.ToMethodologyId)));
+
+        var present = existing.Select(d => d.ToMethodologyId).ToHashSet();
+
+        foreach (var target in wanted.Where(t => !present.Contains(t)))
+        {
+            db.MethodologyDependencies.Add(new MethodologyDependency(fromMethodologyId, target));
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologySubstances

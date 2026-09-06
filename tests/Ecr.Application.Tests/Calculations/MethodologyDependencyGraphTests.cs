@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -43,6 +43,9 @@ public sealed class MethodologyDependencyGraphTests
 
     /// <summary>Формула, яка посилається ЛИШЕ на довше ім'я.</summary>
     private const int ReferencingId = 103;
+
+    /// <summary>Формула, яка читає ВЛАСНИЙ результат.</summary>
+    private const int SelfReferenceId = 104;
 
     private static readonly DateTime Now = new(2026, 2, 10, 12, 0, 0, DateTimeKind.Utc);
     private static readonly DateOnly From = new(2026, 6, 1);
@@ -142,6 +145,26 @@ public sealed class MethodologyDependencyGraphTests
         Assert.Empty(_nodes.Single(n => n.FormulaDefId == LongNameId).DependsOnFormulaDefIds);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Самопосилання_доходить_до_графа_а_не_відсіюється()
+    {
+        // ⛔ Цей тест існує тому, що фільтр самопосилання вже повертався.
+        // `I.21` його зняв, а злиття сусідньої гілки принесло назад разом
+        // із переписаним циклом резолвінгу — і жоден тест не впав: шлях
+        // методологій не був покритий взагалі, покритий був лише шаблонний.
+        //
+        // ⚠ Формула, яка читає власний результат, не має порядку
+        // обчислення, і `BuildEvaluationOrder` документує, що публікація
+        // має це побачити (`ФВ-9.4`). Щоб побачити — ребро мусить дійти.
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        var node = _nodes.Single(n => n.FormulaDefId == SelfReferenceId);
+
+        Assert.Contains(SelfReferenceId, node.DependsOnFormulaDefIds);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private PublishMethodologyHandler Handler()
@@ -173,6 +196,7 @@ public sealed class MethodologyDependencyGraphTests
         Formula(ShortNameId, "k1", "10"),
         Formula(LongNameId, "k1_GasComp", "20"),
         Formula(ReferencingId, "Total", "!k1_GasComp * 2"),
+        Formula(SelfReferenceId, "SelfRef", "!SelfRef + 1"),
     ];
 
     private static MethodologyFormula Formula(int id, string code, string expression)
