@@ -3393,6 +3393,157 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Задає адресу користувача для сповіщень. Право `Security.ManageUsers`.
+         * @description ⛔ Поле існувало від Етапу 3 і не присвоювалося ніде, тож
+         *     `NotificationJob` завжди отримував порожній перелік адресатів —
+         *     сповіщення (`ФВ-12`) не надходили нікому.
+         *
+         *     ⚠ Порожня адреса ЗНІМАЄ і прапорець алертів: прапорець без пошти
+         *     виглядав би як налаштований адресат, якому нічого не надсилається.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetUserEmailRequest"];
+                    "application/json": components["schemas"]["SetUserEmailRequest"];
+                    "text/json": components["schemas"]["SetUserEmailRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ролі користувача. Право `Security.ManageUsers`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": string[];
+                        "text/json": string[];
+                        "text/plain": string[];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює набір ролей користувача. Право `Security.ManageUsers`.
+         * @description ⛔ Способу призначити роль наявному користувачеві не існувало взагалі:
+         *     ролі видавалися лише при створенні, а форма створення надсилала
+         *     порожній перелік. Обліковий запис виходив працездатним на вигляд і
+         *     безправним насправді.
+         *
+         *     ⚠ Заміна НАБОРОМ, а не «додати/прибрати»: набір ролей і є
+         *     повноваженнями людини, і бачити його треба цілком.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceUserRolesRequest"];
+                    "application/json": components["schemas"]["ReplaceUserRolesRequest"];
+                    "text/json": components["schemas"]["ReplaceUserRolesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AffectedRolesResponse"];
+                        "text/json": components["schemas"]["AffectedRolesResponse"];
+                        "text/plain": components["schemas"]["AffectedRolesResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/db": {
         parameters: {
             query?: never;
@@ -3580,6 +3731,14 @@ export interface components {
          * @enum {unknown}
          */
         AccessMatrixState: "Editable" | "Partial" | "Blocked";
+        /** @description Скільки ролей тепер призначено користувачеві. */
+        AffectedRolesResponse: {
+            /**
+             * Format: int32
+             * @description Кількість; `0` — жодної, обліковий запис безправний.
+             */
+            roles: number;
+        };
         /** @description Скільки рядків зачепила операція. */
         AffectedRowsResponse: {
             /**
@@ -3903,6 +4062,8 @@ export interface components {
         CreateUserRequest: {
             /** @description Ім'я для показу; типово збігається з іменем входу. */
             displayName?: null | string;
+            /** @description Адреса для сповіщень; без неї листи не надходять (`ФВ-12`). */
+            email?: null | string;
             /** @description Разовий пароль локального запису. */
             initialPassword?: null | string;
             /** @description `Windows` або `Local`. */
@@ -4742,6 +4903,11 @@ export interface components {
             /** @description Новий набір; порожній прибирає доступ ролі повністю. */
             grants: components["schemas"]["ResourceGrantDto"][];
         };
+        /** @description Запит на заміну набору ролей користувача. */
+        ReplaceUserRolesRequest: {
+            /** @description Коди ролей; порожній набір прибирає всі. */
+            roleCodes: string[];
+        };
         /** @description Зріз у переліку. */
         ReportSnapshotSummary: {
             /**
@@ -4881,6 +5047,11 @@ export interface components {
             scope: components["schemas"]["UiStringScope"];
             /** @description Текст. */
             value: string;
+        };
+        /** @description Запит на зміну адреси користувача. */
+        SetUserEmailRequest: {
+            /** @description Адреса; порожньо — прибрати разом із прапорцем алертів. */
+            email: null | string;
         };
         /** @description Запит на зміну вікна дії запису довідника. */
         SetValidityRequest: {
