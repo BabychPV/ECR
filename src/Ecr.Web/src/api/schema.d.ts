@@ -1495,6 +1495,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/period-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Політики періодів для форми створення проєкту. Право `Project.Manage`.
+         * @description ⛔ Без цього переліку форма не має з чого вибирати політику, надсилає
+         *     запит без неї — і сервер відхиляє його з `ECR-PRD-0422`. Так
+         *     створення проєкту, тобто ПЕРШИЙ крок роботи із системою, не працювало
+         *     з інтерфейсу взагалі (`A7-56`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PeriodPolicyDto"][];
+                        "text/json": components["schemas"]["PeriodPolicyDto"][];
+                        "text/plain": components["schemas"]["PeriodPolicyDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/activate": {
         parameters: {
             query?: never;
@@ -4300,6 +4344,36 @@ export interface components {
          * @enum {unknown}
          */
         PeriodKind: "Monthly" | "Quarterly" | "Yearly" | "Custom";
+        /** @description Політика зсувів періодів. */
+        PeriodPolicyDto: {
+            /** @description Код політики. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Скільки днів після кінця періоду діє пільговий строк.
+             */
+            graceOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Через скільки днів період закривається остаточно.
+             */
+            hardCloseOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Через скільки днів після початку періоду він відкривається.
+             */
+            openOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Пільговий строк на рік.
+             */
+            yearGraceOffsetDays: number;
+        };
         /**
          * @description Стан звітного періоду. Обчислює `PeriodStateJob`, а не запит.
          * @enum {unknown}

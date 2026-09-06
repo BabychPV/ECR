@@ -21,6 +21,17 @@ public interface IPeriodStore
     /// <summary>Політика періодів проєкту.</summary>
     public Task<PeriodPolicy> GetPolicyAsync(int periodPolicyId, CancellationToken ct);
 
+    /// <summary>
+    /// Усі політики періодів — для вибору при створенні проєкту.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без переліку поле «політика» у формі не має з чого вибирати, а
+    /// обробник відхиляє створення без неї (<c>ECR-PRD-0422</c>) — і форма
+    /// перетворюється на кнопку, яка ніколи не спрацьовує (<c>A7-56</c>).
+    /// Межі сторінки немає: політик одиниці, це конфігурація майданчика.
+    /// </remarks>
+    public Task<IReadOnlyList<PeriodPolicy>> ListPoliciesAsync(CancellationToken ct);
+
     /// <summary>Період із <c>UPDLOCK</c> до кінця транзакції.</summary>
     public Task<Period?> LockAsync(int periodId, CancellationToken ct);
 

@@ -70,6 +70,49 @@ public sealed class ListProjectsHandler(
     }
 }
 
+/// <summary>
+/// Політики періодів для вибору при створенні проєкту. Право <c>Project.Manage</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Обробник з'явився через <c>A7-56</c>: форма створення проєкту не мала з
+/// чого вибирати політику, тому надсилала запит без неї, а сервер відхиляв
+/// його з <c>ECR-PRD-0422</c>. Тобто перший крок роботи із системою — створити
+/// проєкт — не працював із інтерфейсу взагалі.
+/// </remarks>
+public sealed class ListPeriodPoliciesHandler(
+    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser)
+{
+    /// <summary>Право керування проєктами: політика потрібна лише при створенні.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Повертає всі політики.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<PeriodPolicyDto>> HandleAsync(CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var all = await periods.ListPoliciesAsync(ct).ConfigureAwait(false);
+
+        return [.. all.Select(p => new PeriodPolicyDto(
+            p.Id, p.Code, p.OpenOffsetDays, p.GraceOffsetDays, p.HardCloseOffsetDays, p.YearGraceOffsetDays))];
+    }
+}
+
+/// <summary>Політика зсувів періодів.</summary>
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Код політики.</param>
+/// <param name="OpenOffsetDays">Через скільки днів після початку періоду він відкривається.</param>
+/// <param name="GraceOffsetDays">Скільки днів після кінця періоду діє пільговий строк.</param>
+/// <param name="HardCloseOffsetDays">Через скільки днів період закривається остаточно.</param>
+/// <param name="YearGraceOffsetDays">Пільговий строк на рік.</param>
+public sealed record PeriodPolicyDto(
+    int Id,
+    string Code,
+    int OpenOffsetDays,
+    int GraceOffsetDays,
+    int HardCloseOffsetDays,
+    int YearGraceOffsetDays);
+
 /// <summary>Створення проєкту. Право <c>Project.Manage</c>.</summary>
 public sealed class CreateProjectHandler(
     IProjectStore projects,
@@ -123,10 +166,39 @@ public sealed class CreateProjectHandler(
                 "ECR-PRD-0422", "Проєкт неможливо створити без політики періодів.");
         }
 
+        // ⛔ Пояс НЕ підставляється мовчки (`D-5`). Сервер стоїть де завгодно,
+        // а межі періодів рахуються в поясі МАЙДАНЧИКА (`D-68`): тихий `UTC`
+        // зсунув би закриття періоду на кілька годин, і помітили б це лише
+        // тоді, коли хтось не встиг подати форму «вчасно».
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            throw new BusinessRuleException(
+                "ECR-CFG-0422",
+                "Часовий пояс майданчика обов'язковий: у ньому рахуються межі періодів "
+                + "і позначки пізніх змін. Після відкриття першого періоду його вже не змінити.");
+        }
+
         // ⚠ Пояс перевіряється ТУТ, при створенні: після відкриття першого
         // періоду змінити його вже не можна (ФВ-1.1a), тож невідомий
         // ідентифікатор став би вічною властивістю проєкту.
-        _ = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        //
+        // ⚠ І перетворюється на 422, а не на 500: невідомий ідентифікатор —
+        // помилка ВВЕДЕННЯ, і той, хто його надіслав, має побачити, що саме
+        // не так, а не «внутрішня помилка сервера».
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            throw new BusinessRuleException(
+                "ECR-CFG-0422", $"Часового поясу «{timeZoneId}» не існує на цьому сервері.");
+        }
+        catch (InvalidTimeZoneException)
+        {
+            throw new BusinessRuleException(
+                "ECR-CFG-0422", $"Опис часового поясу «{timeZoneId}» пошкоджений.");
+        }
 
         var project = new Project(
             EcrCode.Create(code),

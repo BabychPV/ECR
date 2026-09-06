@@ -36,6 +36,26 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
                "ECR-PRD-0422",
                $"Політику періодів {periodPolicyId} не знайдено. Виконайте seed перед створенням проєкту.");
 
+    /// <summary>Стеля переліку політик.</summary>
+    /// <remarks>
+    /// ⚠ Межа є навіть там, де рядків завідомо одиниці. «Їх завжди мало» —
+    /// це те саме припущення, з якого починається кожен запит без межі:
+    /// таблиця конфігурації одного разу стає таблицею даних, і помічають це
+    /// на бойовому обсязі. Двісті політик періодів — це не масштаб, а
+    /// зламане налаштування майданчика, і обрізаний перелік у полі вибору
+    /// нічого не псує: будь-яка з них лишається придатною до вибору.
+    /// </remarks>
+    private const int MaxPolicies = 200;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PeriodPolicy>> ListPoliciesAsync(CancellationToken ct)
+        => await db.PeriodPolicies
+            .AsNoTracking()
+            .OrderBy(p => p.Code)
+            .Take(MaxPolicies)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
     /// <inheritdoc />
     public Task<Period?> LockAsync(int periodId, CancellationToken ct)
         // ⚠ UPDLOCK тримається до кінця транзакції: адміністративне відкриття і

@@ -2016,6 +2016,49 @@
           "Custom"
         ]
       },
+      "PeriodPolicyDto": {
+        "description": "Політика зсувів періодів.",
+        "properties": {
+          "code": {
+            "description": "Код політики.",
+            "type": "string"
+          },
+          "graceOffsetDays": {
+            "description": "Скільки днів після кінця періоду діє пільговий строк.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hardCloseOffsetDays": {
+            "description": "Через скільки днів період закривається остаточно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openOffsetDays": {
+            "description": "Через скільки днів після початку періоду він відкривається.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yearGraceOffsetDays": {
+            "description": "Пільговий строк на рік.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "openOffsetDays",
+          "graceOffsetDays",
+          "hardCloseOffsetDays",
+          "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
       "PeriodState": {
         "description": "Стан звітного періоду. Обчислює `PeriodStateJob`, а не запит.",
         "enum": [
@@ -5466,6 +5509,46 @@
           }
         },
         "summary": "Створює проєкт. Право `Project.Manage`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/period-policies": {
+      "get": {
+        "description": "⛔ Без цього переліку форма не має з чого вибирати політику, надсилає\r\nзапит без неї — і сервер відхиляє його з `ECR-PRD-0422`. Так\r\nстворення проєкту, тобто ПЕРШИЙ крок роботи із системою, не працювало\r\nз інтерфейсу взагалі (`A7-56`).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PeriodPolicyDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PeriodPolicyDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PeriodPolicyDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Політики періодів для форми створення проєкту. Право `Project.Manage`.",
         "tags": [
           "Projects"
         ]
