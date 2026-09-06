@@ -191,12 +191,24 @@ public sealed class GenericCalculationModule(
             return result;
         }
 
-        // Момент округлення визначає NumericMode: Legacy округлює КОЖЕН крок,
-        // як чинна система, Strict — лише вихід (ФВ-9.9).
-        var rounded = numeric.RoundStep(number);
-        trace.Step(formula.Code, formula.Expression, rounded);
+        // ⛔ Проміжний крок НЕ округлюється. Тут стояло `numeric.RoundStep`
+        // з поясненням «Legacy округлює кожен крок, як чинна система» — і це
+        // було вигадано (директива №05 §6).
+        //
+        // Вихідні тексти `DllProject` показують протилежне: у всіх 148 файлах
+        // немає жодного `Math.Round`, жодного `MidpointRounding`, жодного
+        // `decimal.Round`. Округлення в чинній системі відбувається виключно
+        // всередині `Round()` самої формули; між формулами результат іде
+        // рядком у форматі `G17`, який для `double` круговий — тобто
+        // точність НЕ втрачається.
+        //
+        // ⚠ Друга і остання точка округлення — збереження проміжного
+        // результату між ЗАЛЕЖНИМИ методологіями, де число проходить через
+        // колонку і втрачає знаки за її типом. Це ребро графа
+        // `calc.MethodologyDependency`, а не крок усередині формули.
+        trace.Step(formula.Code, formula.Expression, number);
 
-        return ExpressionValue.Number(rounded);
+        return result;
     }
 
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
