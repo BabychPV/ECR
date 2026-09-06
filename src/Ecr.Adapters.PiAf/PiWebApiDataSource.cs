@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -30,6 +30,9 @@ public sealed class PiWebApiDataSource(
     public static TimeSpan RetryDelay => TimeSpan.FromSeconds(2);
 
     private const string SourceUnavailable = "ECR-INT-0503";
+
+    /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
+    private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <inheritdoc />
     public ExternalTransport Transport => ExternalTransport.PiWebApi;
@@ -178,6 +181,20 @@ public sealed class PiWebApiDataSource(
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    // ⛔ 401/403 — ОКРЕМИЙ вид відмови, і він не повторюється
+                    // жодного разу (`H-20`). Той самий заголовок дасть ту саму
+                    // відповідь, а прогін від цього стане повільнішим, не
+                    // успішнішим. Тип винятку тут — єдине, що не дає збирачеві
+                    // проковтнути відмову й піти в наздоганяння.
+                    if (Unauthorized(response.StatusCode))
+                    {
+                        throw new SourceAuthenticationException(
+                            AuthenticationRefused,
+                            $"PI Web API відповів {(int)response.StatusCode} на {path}: "
+                            + "джерело не приймає облікові дані.",
+                            new Dictionary<string, object?> { ["status"] = (int)response.StatusCode });
+                    }
+
                     if (attempt >= MaxAttempts || !Retryable(response.StatusCode))
                     {
                         throw new BusinessRuleException(
@@ -214,10 +231,16 @@ public sealed class PiWebApiDataSource(
     /// <remarks>
     /// ⚠ Схема — це **налаштування**, а не гілка коду (`P-12`). Як саме
     /// автентифікується PI Web API в конкретному контурі, з коду не видно:
-    /// Kerberos, Basic і Bearer однаково правдоподібні. Помилка тут не
-    /// проявляється як помилка — збір просто завжди отримує <c>401</c>,
-    /// потрапляє в наздоганяння і <b>завершується успішно</b>, рівно як
-    /// задумано для тимчасово недоступного джерела.
+    /// Kerberos, Basic і Bearer однаково правдоподібні. Помилка тут дає збору
+    /// постійний <c>401</c>.
+    /// <para>
+    /// ⛔ Раніше такий <c>401</c> потрапляв у наздоганяння і прогін
+    /// <b>завершувався успішно</b> — рівно як задумано для тимчасово
+    /// недоступного джерела. Це був наш дефект (<c>H-20</c>): помилка в
+    /// налаштуванні не проявлялася як помилка. Тепер відмова в автентифікації
+    /// кидає <see cref="SourceAuthenticationException"/>, прогін стає
+    /// <c>Failed</c>, а алерт іде негайно.
+    /// </para>
     /// <para>
     /// Тому значення секрету читається як <c>"схема значення"</c>:
     /// <c>Basic dXNlcjpwYXNz</c>, <c>Bearer eyJ…</c>. Секрет без пробілу —
@@ -253,6 +276,15 @@ public sealed class PiWebApiDataSource(
 
     private static bool Retryable(HttpStatusCode status)
         => (int)status >= 500 || status == HttpStatusCode.RequestTimeout;
+
+    /// <summary>Чи це відмова саме в автентифікації, а не в доступності.</summary>
+    /// <remarks>
+    /// ⚠ <c>403</c> сюди входить нарівні з <c>401</c>. Для PI Web API різниця
+    /// між «не назвався» і «назвався не тим» — це різниця в налаштуванні
+    /// службового запису, і обидва випадки лікує людина, а не повтор.
+    /// </remarks>
+    private static bool Unauthorized(HttpStatusCode status)
+        => status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     /// <summary>Точки батча в одиниці ДЖЕРЕЛА (ФВ-16.10).</summary>
     private static List<SourceDataPoint> Points(JsonElement root, string sourcePath, string? defaultUnits)

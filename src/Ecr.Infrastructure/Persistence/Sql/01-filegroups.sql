@@ -74,6 +74,35 @@ DECLARE @sql nvarchar(max);
 --    перевіряти фізичну модель на ньому можна повноцінно.
 DECLARE @isExpress bit = CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) = 4 THEN 1 ELSE 0 END;
 
+-- ⛔ Одного лише видання НЕ ДОСИТЬ, і коштувало це цілого диска. Замовник
+--    ухвалив ставити локально **Developer Edition** (`H-19`), і в неї
+--    EngineEdition = 3 — та сама, що в Enterprise. Перевірка вище мовчала, і
+--    КОЖНА тестова база народжувалася на 14 ГБ: 4096 + 4096 + 4096 + 2048.
+--    Інстанс на цій машині ще й називається `SQLEXPRESS`, тобто ім'я казало
+--    «Express», а видання — ні; сімнадцять тестових баз з'їли 152 ГБ і
+--    зупинили роботу помилкою «operating system error 112».
+--
+-- ⚠ Видання — це про МЕЖУ (Express не витягне 14 ГБ), а розмір файлів має
+--    вирішувати ПРИЗНАЧЕННЯ бази: тестовій на кілька сотень рядків продуктивні
+--    розміри не потрібні на жодному виданні. Призначення скрипт вивести не
+--    може — його треба сказати, і сказати ЯВНО.
+--
+--    Позначка ставиться на базі одразу після CREATE DATABASE:
+--
+--        EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;
+--
+--    Її ставить `SqlServerFixture`; DBA в розгортанні не ставить нічого, і
+--    продуктивна поведінка не змінюється ні на байт. Умовчання лишається
+--    продуктивним навмисно: база, яка мовчки отримала 64 МБ замість 4 ГБ,
+--    деградує під навантаженням непомітно, а це гірше за зайвий рядок у
+--    чек-листі розгортання.
+DECLARE @markedSmall bit = CASE WHEN EXISTS (
+        SELECT 1 FROM sys.extended_properties
+        WHERE class = 0 AND name = N'Ecr_SmallFiles')
+    THEN 1 ELSE 0 END;
+
+DECLARE @isSmall bit = CASE WHEN @isExpress = 1 OR @markedSmall = 1 THEN 1 ELSE 0 END;
+
 -- 1. Файлові групи, яких ще немає.
 --    Один пакет DDL замість циклу: коротше і без курсорів у скрипті,
 --    який читає людина перед запуском на проді.
@@ -112,14 +141,18 @@ FROM (VALUES
         (N'Ecr_audit',   N'AUDIT',        4096, 2048, 0),
         (N'Ecr_idx',     N'INDEXES',      2048, 1024, 0)
      ) AS f(LogicalName, FileGroup, SizeMb0, GrowthMb0, UseArchivePath)
-CROSS APPLY (SELECT SizeMb   = CASE WHEN @isExpress = 1 THEN 64 ELSE f.SizeMb0   END,
-                    GrowthMb = CASE WHEN @isExpress = 1 THEN 64 ELSE f.GrowthMb0 END) AS sz
+CROSS APPLY (SELECT SizeMb   = CASE WHEN @isSmall = 1 THEN 64 ELSE f.SizeMb0   END,
+                    GrowthMb = CASE WHEN @isSmall = 1 THEN 64 ELSE f.GrowthMb0 END) AS sz
 WHERE NOT EXISTS (SELECT 1 FROM sys.database_files d WHERE d.name = f.LogicalName);
 
 IF @sql IS NOT NULL EXEC sp_executesql @sql;
 
 PRINT N'База ' + @db + N': файлові групи і файли готові'
-    + CASE WHEN @isExpress = 1 THEN N' (Express: зменшені початкові розміри).' ELSE N'.' END;
+    + CASE WHEN @isSmall = 1
+           THEN N' (зменшені початкові розміри: '
+              + CASE WHEN @isExpress = 1 THEN N'Express' ELSE N'позначка Ecr_SmallFiles' END
+              + N').'
+           ELSE N'.' END;
 PRINT N'  каталог даних: ' + @DataPath;
 PRINT N'  каталог архіву: ' + @ArchivePath;
 GO

@@ -145,8 +145,8 @@ public sealed class GoldenCalculationTests
         var cod = await resolver.ResolveAsync(VersionId, "EF", null, CodEntry, onDate, default);
         var tss = await resolver.ResolveAsync(VersionId, "EF", null, TssEntry, onDate, default);
 
-        Assert.Equal(0.250m, cod!.Value.Value);
-        Assert.Equal(0.080m, tss!.Value.Value);
+        Assert.Equal(0.250m, cod!.Number);
+        Assert.Equal(0.080m, tss!.Number);
 
         // ⛔ Дві константи з одним кодом, чинні на ту саму дату і не звужені
         // речовиною — це помилка конфігурації, а не привід узяти першу.

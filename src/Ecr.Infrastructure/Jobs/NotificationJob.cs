@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Integration;
@@ -27,8 +28,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// надіслані листи.
 /// </para>
 /// </remarks>
-public sealed class NotificationJob(EcrDbContext db, IClock clock, INotificationSender sender)
-    : IBackgroundJob
+public sealed class NotificationJob(
+    EcrDbContext db, IClock clock, Integration.OutboxDispatcher outbox) : IBackgroundJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "notification";
@@ -76,10 +77,26 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock, INotification
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⚠ Коди сутностей читаються ОДНИМ запитом на всі збої. Джерело у
+        // зведенні має бути назване так, як його знає адміністратор, а не
+        // числом: за `42` він не знайде нічого (`H-20`).
+        var sourceIds = failed.Select(r => r.SourceEntityId).Distinct().ToList();
+
+        var sourceCodes = sourceIds.Count == 0
+            ? []
+            : await db.SourceEntities
+                .AsNoTracking()
+                .Where(e => sourceIds.Contains(e.Id))
+                .Take(MaxDigestItems)
+                .Select(e => new { e.Id, e.Code })
+                .ToDictionaryAsync(e => e.Id, e => e.Code, ct)
+                .ConfigureAwait(false);
+
         var collection = failed
             .Select(r => new DigestItem(
-                "collection",
-                r.SourceEntityId.ToString(CultureInfo.InvariantCulture),
+                KindOf(r.ErrorMessage),
+                sourceCodes.GetValueOrDefault(
+                    r.SourceEntityId, r.SourceEntityId.ToString(CultureInfo.InvariantCulture)),
                 r.Status,
                 r.ErrorMessage,
                 r.FinishedAt))
@@ -150,7 +167,7 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock, INotification
 
         await progress.ReportAsync(80, "Відправка черги сповіщень", ct).ConfigureAwait(false);
 
-        var (sent, pending) = await FlushOutboxAsync(ct).ConfigureAwait(false);
+        var (sent, pending) = await outbox.FlushAsync(ct).ConfigureAwait(false);
 
         await progress
             .ReportAsync(
@@ -161,97 +178,36 @@ public sealed class NotificationJob(EcrDbContext db, IClock clock, INotification
     }
 
     /// <summary>
-    /// Відправляє чергу сповіщень.
+    /// Вид рядка зведення для відмови джерела в автентифікації (<c>H-20</c>).
     /// </summary>
-    /// <returns>Скільки надіслано і скільки лишилося.</returns>
     /// <remarks>
-    /// ⚠ «Не налаштовано» і «не доставлено» — <b>різні стани</b>. Без
-    /// відправника події не позначаються невдалими: вони чекають, і саме тому
-    /// налаштування транспорту не потребує повторного створення подій.
+    /// ⛔ Рядок із цим видом означає, що збір не почнеться взагалі, доки не
+    /// втрутиться людина. Решта видів означає «даних поки немає»; сплутати їх —
+    /// це чекати на наздоганяння, якого не буде.
     /// </remarks>
-    private async Task<(int Sent, int Pending)> FlushOutboxAsync(CancellationToken ct)
-    {
-        var pending = await db.NotificationOutbox
-            .Where(n => n.State == "Pending")
-            .OrderBy(n => n.CreatedAt)
-            .Take(MaxOutboxPerRun)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+    public const string AuthenticationKind = "collection.auth";
 
-        if (pending.Count == 0 || !sender.IsConfigured)
-        {
-            return (0, pending.Count);
-        }
+    /// <summary>Звичайний вид рядка про збій збору.</summary>
+    public const string CollectionKind = "collection";
 
-        // ⚠ Адресати — ДАНІ, а не конфігурація (`D-125`): прапорець на
-        // користувачі з заповненою поштою. Список у змінних оточення довелося б
-        // міняти розгортанням щоразу, коли хтось іде у відпустку.
-        var subscribers = await db.Users
-            .AsNoTracking()
-            .Where(u => u.ReceivesAlerts && u.IsActive && u.Email != null)
-            .Select(u => u.Email!)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var sent = 0;
-
-        foreach (var item in pending)
-        {
-            // ⚠ Адресати події перекривають загальних: подія може бути
-            // адресною (наприклад, автору), і тоді розсилати її всім — шум.
-            var explicitTo = (item.Recipients ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            var recipients = explicitTo.Length > 0 ? explicitTo : [.. subscribers];
-
-            if (recipients.Length == 0)
-            {
-                // ⛔ Подія без адресата не «надсилається нікуди»: вона
-                // позначається невдалою з причиною. Інакше вона зникла б, і
-                // ніхто не дізнався б, що адресатів не задано.
-                item.MarkFailed(
-                    "Адресатів не визначено: жоден активний користувач не має "
-                    + "увімкненого отримання алертів і пошти.",
-                    MaxAttempts);
-                continue;
-            }
-
-            try
-            {
-                await sender.SendAsync(recipients, item.Subject, item.Body, ct).ConfigureAwait(false);
-                item.MarkSent(clock.UtcNow);
-                sent++;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception error)
-            {
-                // ⛔ Текст без стека (ФВ-6.11): він видимий в інтерфейсі
-                // обслуговування.
-                item.MarkFailed(error.Message, MaxAttempts);
-            }
-        }
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return (sent, pending.Count - sent);
-    }
-
-    /// <summary>Скільки подій відправляти за один прогін.</summary>
+    /// <summary>
+    /// Вид рядка зведення за текстом відмови прогону.
+    /// </summary>
+    /// <param name="errorMessage">Текст із <c>itg.CollectionRun.ErrorMessage</c>.</param>
+    /// <returns><see cref="AuthenticationKind"/> або <see cref="CollectionKind"/>.</returns>
     /// <remarks>
-    /// Задача працює щогодини. Дві сотні листів за раз — це межа, за якою
-    /// поштовий сервер починає вважати нас розсилкою.
+    /// ⛔ Відмова в автентифікації дістає ВЛАСНИЙ вид рядка (<c>H-20</c>). У
+    /// спільному <c>collection</c> вона читалася б як «зібрано 0 рядків» і
+    /// нічим не відрізнялася б від джерела, яке просто мовчить, — а лікують ці
+    /// два стани по-різному: перше править адміністратор, друге минає само.
+    ///
+    /// ⚠ Окремий метод, а не вираз усередині проєкції, саме щоб це правило
+    /// можна було перевірити без бази.
     /// </remarks>
-    public const int MaxOutboxPerRun = 200;
-
-    /// <summary>Після скількох спроб перестати пробувати.</summary>
-    /// <remarks>
-    /// П'ять спроб — це п'ять годин. Довше означало б, що недоступна пошта
-    /// щогодини стукає в мертвий сервер тижнями.
-    /// </remarks>
-    public const int MaxAttempts = 5;
+    public static string KindOf(string? errorMessage)
+        => CollectionFailure.IsAuthenticationRefusal(errorMessage)
+            ? AuthenticationKind
+            : CollectionKind;
 
     /// <summary>Налаштування серіалізації зведення; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);

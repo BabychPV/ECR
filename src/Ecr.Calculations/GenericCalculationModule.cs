@@ -235,9 +235,17 @@ public sealed class GenericCalculationModule(
                 period.End,
                 ct).ConfigureAwait(false);
 
+            // ⛔ Текстова константа підставляється ТЕКСТОМ, а не числом
+            // (поправка 2-біс директиви ПК-1 №05). У корпусі ~90 констант
+            // стоять операндом порівняння —
+            // `if(@Land_Category = CST.k1_CategorySelection_, …)`; спроба
+            // зробити з `'Summer'` число дала б помилку обчислення на кожному
+            // рядку, де категорія збігається.
             if (constant is { } found)
             {
-                resolved[code] = ExpressionValue.Number(found.Value);
+                resolved[code] = found.Number is { } number
+                    ? ExpressionValue.Number(number)
+                    : ExpressionValue.Text(found.Text ?? string.Empty);
             }
         }
 

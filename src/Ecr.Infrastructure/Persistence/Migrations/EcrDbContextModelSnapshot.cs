@@ -215,6 +215,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint")
+                        .HasColumnName("Kind");
+
                     b.Property<string>("NameL10n")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -245,6 +249,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint")
+                        .HasColumnName("Kind");
+
                     b.Property<int>("MethodologyVersionId")
                         .HasColumnType("int");
 
@@ -256,7 +264,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("SubstanceEntryId")
                         .HasColumnType("int");
 
-                    b.Property<int>("UnitId")
+                    b.Property<string>("TextValue")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int?>("UnitId")
                         .HasColumnType("int");
 
                     b.Property<DateOnly?>("ValidFrom")
@@ -265,7 +277,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("ValidTo")
                         .HasColumnType("date");
 
-                    b.Property<decimal>("Value")
+                    b.Property<decimal?>("Value")
                         .HasPrecision(28, 10)
                         .HasColumnType("decimal(28,10)");
 
@@ -273,7 +285,35 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.ToTable("MethodologyConstant", "calc", t =>
                         {
+                            t.HasCheckConstraint("CK_MC_Kind", "(Kind = 0 AND UnitId IS NOT NULL AND (Value IS NOT NULL OR TextValue IS NOT NULL)) OR (Kind <> 0 AND Value IS NULL AND UnitId IS NULL AND TextValue IS NOT NULL)");
+
                             t.HasCheckConstraint("CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyDependency", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("FromMethodologyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToMethodologyId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromMethodologyId", "ToMethodologyId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MethodologyDependency");
+
+                    b.ToTable("MethodologyDependency", "calc", t =>
+                        {
+                            t.HasCheckConstraint("CK_MD_NoSelfLoop", "FromMethodologyId <> ToMethodologyId");
                         });
                 });
 
@@ -306,13 +346,43 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("OutputUnitId")
                         .HasColumnType("int");
 
+                    b.Property<byte>("ResultType")
+                        .HasColumnType("tinyint")
+                        .HasColumnName("ResultType");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MethodologyVersionId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UQ_MethodologyFormula");
 
-                    b.ToTable("MethodologyFormula", "calc");
+                    b.ToTable("MethodologyFormula", "calc", t =>
+                        {
+                            t.HasCheckConstraint("CK_MF_TextHasNoUnit", "ResultType = 0 OR OutputUnitId IS NULL");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyImport", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ImportedMethodologyId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MethodologyVersionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MethodologyVersionId", "ImportedMethodologyId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MethodologyImport");
+
+                    b.ToTable("MethodologyImport", "calc");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyOutput", b =>
@@ -3790,8 +3860,24 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("UnitId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
                         .HasConstraintName("FK_MC_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyDependency", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.Methodology", null)
+                        .WithMany()
+                        .HasForeignKey("FromMethodologyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MD_From");
+
+                    b.HasOne("Ecr.Domain.Entities.Calculations.Methodology", null)
+                        .WithMany()
+                        .HasForeignKey("ToMethodologyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MD_To");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyFormula", b =>
@@ -3808,6 +3894,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OutputUnitId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_MF_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyImport", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.Methodology", null)
+                        .WithMany()
+                        .HasForeignKey("ImportedMethodologyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MI_Imported");
+
+                    b.HasOne("Ecr.Domain.Entities.Calculations.MethodologyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MethodologyVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MI_Version");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyOutput", b =>

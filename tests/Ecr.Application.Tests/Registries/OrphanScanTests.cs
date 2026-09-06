@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Registries/OrphanScanTests.cs
+// tests/Ecr.Application.Tests/Registries/OrphanScanTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Errors;
@@ -273,7 +273,12 @@ public sealed class OrphanScanTests
     private GetTableSliceHandler Slice() => new(_rows, _cells, _metadata, Units(), _access);
 
     private SubmitSheetHandler Submit()
-        => new(_cells, _rows, _workflow, _access, validation: null!, _uow, _user, _clock);
+        => new(
+            _cells, _rows, _workflow, _access, validation: null!,
+            new Ecr.Application.Reporting.ReportSnapshotSync(
+                NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
+                NSubstitute.Substitute.For<IDocumentStore>()),
+            _uow, _user, _clock);
 
     private static RegistryDef Definition()
         => new(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);

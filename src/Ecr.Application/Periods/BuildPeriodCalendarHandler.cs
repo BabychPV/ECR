@@ -2,6 +2,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 using Ecr.Domain.Services;
 
 namespace Ecr.Application.Periods;
@@ -27,8 +28,14 @@ public sealed class BuildPeriodCalendarHandler(
             .RequireAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
+        // ⛔ `ECR-PRJ-0404`, а не `ECR-PRD-0422` (`P-25`, рядок 4). Старий код
+        // суперечив сам собі: його цифри кажуть 422, а `NotFoundException`
+        // віддає 404 — клієнт, який виводить HTTP із коду, читав із однієї
+        // відповіді два різні статуси. Заразом виправлено суб'єкт: немає
+        // ПРОЄКТУ, а не «період поза межами проєкту».
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт {projectId} не знайдено.");
+                      ?? throw new NotFoundException(
+                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
 
         var policy = await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false);
 

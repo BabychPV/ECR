@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Projects;
@@ -46,9 +47,12 @@ public sealed class CloneProjectHandler(
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Анонімний запит не може створювати проєкти.");
 
+        // ⛔ `ECR-PRJ-0404`: клонується ПРОЄКТ, і його відсутність не має нічого
+        // спільного з «період поза межами проєкту». Старий код до того ж казав
+        // цифрами 422 при статусі 404 (`P-25`, рядок 4).
         var source = await periods.FindProjectAsync(sourceProjectId, ct).ConfigureAwait(false)
                      ?? throw new NotFoundException(
-                         "ECR-PRD-0422", $"Проєкт {sourceProjectId} не знайдено.");
+                         ErrorCodes.ProjectNotFound, $"Проєкт {sourceProjectId} не знайдено.");
 
         // Рік зсувається на один: клон робиться заради наступного звітного
         // періоду, і залишити ті самі дати означало б два проєкти з однаковими

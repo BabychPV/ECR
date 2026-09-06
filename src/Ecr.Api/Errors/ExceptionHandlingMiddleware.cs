@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Ecr.Api.Middleware;
+using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Localization;
+using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
 using Microsoft.AspNetCore.Mvc;
@@ -91,7 +94,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         var problem = new EcrProblemDetails
         {
             Status = status,
-            Title = code,
+            Title = await LocalizedTitleAsync(context, code).ConfigureAwait(false),
             Detail = message,
             Type = $"https://ecr.ncoc.kz/errors/{code}",
             Instance = context.Request.Path,
@@ -122,6 +125,65 @@ public sealed partial class ExceptionHandlingMiddleware(
             problem,
             SerializerOptions,
             context.RequestAborted).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Заголовок відповіді: текст із каталогу за ключем <c>err.&lt;код&gt;</c>,
+    /// інакше сам код (ФВ-14.9a, <c>D-111</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Механізм локалізації один, не два. ФВ-14.9a каже прямо: повідомлення
+    /// каталогу помилок — це записи того самого <c>sys.UiString</c> із
+    /// префіксом <c>err.</c>, і <b>резолвить їх сервер</b>. Обидві половини
+    /// механізму вже існували — п'ять ключів <c>err.ECR-…</c> у seed і
+    /// <c>UiStringResolver.ResolveError</c>, — і не була написана рівно одна
+    /// сполучна ланка: ця. Тому ключі не читав НІХТО, а заголовком помилки
+    /// їхав сам код: користувач бачив «ECR-AUTH-0423» замість «обліковий запис
+    /// заблоковано», причому будь-якою мовою однаково.
+    ///
+    /// ⚠ Замінюється <c>Title</c>, а не <c>Detail</c>. <c>Detail</c> несе
+    /// конкретику сервера («Проєкт 42 не знайдено») — саме її забороняє
+    /// втратити <c>07-checkpoints</c> Етап 6 («щось пішло не так» заборонено).
+    /// Каталог дає постійний текст на код, і разом вони читаються як заголовок
+    /// плюс подробиця.
+    ///
+    /// ⚠ Ключа немає — повертається сам код, а не рядок «err.ECR-…»:
+    /// <c>ResolveError</c> підставляє ключ, і показати його користувачеві було
+    /// б гірше за код, який принаймні названий у контракті.
+    ///
+    /// ⛔ Будь-який збій каталогу ковтається. Це обробник ПОМИЛОК: якщо база
+    /// недоступна (а 500 масово трапляються саме тоді), похід за перекладом
+    /// кине вдруге — уже поза <c>try</c> конвеєра, і клієнт замість
+    /// <c>problem+json</c> отримав би обірване з'єднання.
+    /// </remarks>
+    private static async Task<string> LocalizedTitleAsync(HttpContext context, string code)
+    {
+        try
+        {
+            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
+            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+
+            if (catalog is null || currentUser is null)
+            {
+                return code;
+            }
+
+            var strings = await catalog
+                .GetAsync(currentUser.Language, context.RequestAborted)
+                .ConfigureAwait(false);
+
+            var text = UiStringResolver.ResolveError(strings, code);
+
+            return string.Equals(text, UiStringResolver.ErrorKeyPrefix + code, StringComparison.Ordinal)
+                ? code
+                : text;
+        }
+#pragma warning disable CA1031 // Причина — у ⛔ вище: помилка в обробнику помилок не має права дійти до клієнта.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return code;
+        }
     }
 
     /// <summary>Виняток → код відповіді, код помилки, повідомлення, подробиці.</summary>
@@ -161,6 +223,19 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         BusinessRuleException e when e.ErrorCode is ErrorCodes.Archiving or ErrorCodes.SourceUnavailable =>
             (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
+
+        // ⚠ Відмова джерела в автентифікації сьогодні доїжджає лише у фонову
+        // задачу (збір ставиться в чергу, `202`), і до HTTP не доходить. Арм
+        // усе одно є: без нього той самий виняток, кинутий із синхронного
+        // шляху, дав би `500` з беззмістовним текстом — тобто найгіршу з
+        // можливих відповідей саме там, де причина відома точно.
+        //
+        // ⛔ `502`, а не `503`, і цифри коду це повторюють (`ECR-INT-0502`).
+        // 503 обіцяє «спробуйте пізніше» — а відмова в автентифікації від
+        // повторення не минає. 401 сказав би клієнтові «увійдіть», хоча
+        // не пускають не його, а нас.
+        SourceAuthenticationException e =>
+            (StatusCodes.Status502BadGateway, e.ErrorCode, e.Message, e.Details),
 
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),

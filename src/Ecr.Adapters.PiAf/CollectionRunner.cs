@@ -1,4 +1,5 @@
-using Ecr.Application.Errors;
+﻿using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
 
@@ -12,6 +13,13 @@ namespace Ecr.Adapters.PiAf;
 /// джерела має бути **затримкою, а не втратою**. Ознака здоров'я — журнал
 /// покриття, а не тиша: система, яка «нічого не повідомляє», і система, яка
 /// «нічого не зібрала», ззовні виглядають однаково.
+/// <para>
+/// ⛔ Рівно одна відмова з цього правила випадає — <c>401</c>/<c>403</c>
+/// (<c>H-20</c>). Вона не затримка: облікові дані не полагодяться самі, і
+/// наздоганяння стукатиме в ті самі двері щоночі, щоразу рапортуючи успіх із
+/// нулем рядків. Такий прогін обривається одразу, стає <c>Failed</c> і не
+/// лишає по собі роботи в черзі.
+/// </para>
 /// </remarks>
 public sealed class CollectionRunner(
     IEnumerable<IExternalDataSource> sources,
@@ -39,6 +47,9 @@ public sealed class CollectionRunner(
     public static TimeSpan CatchUpLookback => TimeSpan.FromDays(45);
 
     private const string SourceUnavailable = "ECR-INT-0503";
+
+    /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
+    private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <inheritdoc />
     public async Task RunAsync(
@@ -79,6 +90,16 @@ public sealed class CollectionRunner(
         string? failureMessage = null;
         var step = 0;
 
+        // ⚠ «Джерело нас у цьому прогоні вже пускало». Саме цим відрізняється
+        // прострочений квиток від неправильних облікових даних: перший
+        // з'являється ПІСЛЯ успішних відповідей, другі — з першої ж.
+        var accepted = false;
+
+        // ⚠ Друга спроба на прогін одна. Без лічильника «перездобути квиток»
+        // перетворилося б на нескінченний цикл рівно тоді, коли джерело
+        // відмовляє стало.
+        var reacquired = false;
+
         try
         {
             foreach (var interval in work)
@@ -90,8 +111,38 @@ public sealed class CollectionRunner(
                     var outcome = await ReadAsync(
                         adapter, dataSource.Id, sourceEntityId, path, interval, ct).ConfigureAwait(false);
 
+                    if (outcome.Unauthorized)
+                    {
+                        // ⚠ Єдиний виняток із заборони повторювати: квиток міг
+                        // просто протухнути посеред довгого прогону. Запит
+                        // адаптера перескладається з нуля — секрет читається на
+                        // кожне звернення, — тож це справді ПЕРЕЗДОБУТТЯ, а не
+                        // той самий заголовок удруге.
+                        if (accepted && !reacquired)
+                        {
+                            reacquired = true;
+
+                            outcome = await ReadAsync(
+                                adapter, dataSource.Id, sourceEntityId, path, interval, ct)
+                                .ConfigureAwait(false);
+                        }
+
+                        if (outcome.Unauthorized)
+                        {
+                            // ⛔ Прогін обривається ТУТ. Решта інтервалів і
+                            // атрибутів не читається: ті самі облікові дані
+                            // дадуть ту саму відмову, а прогін від цього стане
+                            // лише довшим (`H-20`).
+                            throw await FailAuthenticationAsync(
+                                runId, sourceEntityId, entity.Code, covered, retrieved, outcome.Message)
+                                .ConfigureAwait(false);
+                        }
+                    }
+
                     if (outcome.Collected is { } result)
                     {
+                        accepted = true;
+
                         // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
                         // відмові батча: викинути прочитане через те, що хвіст
                         // діапазону не дався, означало б читати його вдруге —
@@ -166,6 +217,82 @@ public sealed class CollectionRunner(
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Закриває прогін як невдалий через відмову в автентифікації і віддає
+    /// виняток, яким його треба обірвати.
+    /// </summary>
+    /// <param name="runId">Прогін збору.</param>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourceCode">Код сутності — його шукатиме людина у зведенні.</param>
+    /// <param name="covered">Інтервали, прочитані ПОВНІСТЮ до відмови.</param>
+    /// <param name="retrieved">Скільки точок устигли записати.</param>
+    /// <param name="detail">Текст відмови від адаптера; без стека (ФВ-6.11).</param>
+    /// <returns>Виняток, який обриває прогін.</returns>
+    /// <remarks>
+    /// ⛔ Повертає виняток, а не кидає його сам: інакше компілятор не бачив би,
+    /// що виконання далі не йде, і за викликом лишалася б гілка «збір триває»,
+    /// яку ніхто ніколи не виконає, — а такі гілки згодом починають правити
+    /// всерйоз.
+    ///
+    /// ⚠ Покриття за ПРОЧИТАНІ до відмови інтервали пишеться. Викидати його
+    /// разом із прогоном означало б збирати їх удруге після того, як облікові
+    /// дані полагодять.
+    ///
+    /// ⚠ <c>CancellationToken.None</c> навмисно: журнал прогону має закритися
+    /// навіть тоді, коли задачу вже скасували, — інакше прогін лишиться
+    /// «Running» назавжди, і його чекатимуть замість того, щоб дивитися на
+    /// джерело.
+    /// </remarks>
+    private async Task<Exception> FailAuthenticationAsync(
+        long runId,
+        int sourceEntityId,
+        string sourceCode,
+        IReadOnlyList<TimeInterval> covered,
+        int retrieved,
+        string? detail)
+    {
+        var message = Compose(CollectionFailure.AuthenticationRefused(sourceCode), detail);
+
+        await store
+            .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        await store
+            .FinishRunAsync(
+                runId, CollectionFailure.FailedStatus, retrieved, message, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        return new SourceAuthenticationException(
+            AuthenticationRefused,
+            message,
+            new Dictionary<string, object?>
+            {
+                ["sourceEntityId"] = sourceEntityId,
+                ["sourceCode"] = sourceCode,
+            });
+    }
+
+    /// <summary>Скільки символів тексту від адаптера входить у журнал прогону.</summary>
+    /// <remarks>
+    /// <c>itg.CollectionRun.ErrorMessage</c> — <c>nvarchar(2000)</c>. Причина
+    /// відмови має вміститися РАЗОМ із нашим формулюванням, інакше запис
+    /// обрізала б база, і обрізала б саме те, що ми додали.
+    /// </remarks>
+    private const int MaxDetailLength = 900;
+
+    /// <summary>Наше формулювання плюс причина від джерела.</summary>
+    private static string Compose(string message, string? detail)
+    {
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return message;
+        }
+
+        var trimmed = detail.Length > MaxDetailLength ? detail[..MaxDetailLength] : detail;
+
+        return $"{message} Причина від джерела: {trimmed}";
+    }
+
     /// <summary>Що читати: запитаний діапазон плюс давніші прогалини.</summary>
     /// <remarks>
     /// ⚠ Давнє йде ПЕРШИМ. Прогалина потрібна звітності тим більше, чим вона
@@ -211,11 +338,20 @@ public sealed class CollectionRunner(
 
         try
         {
-            return new ReadOutcome(await adapter.ReadAsync(request, ct).ConfigureAwait(false), null, null);
+            return new ReadOutcome(
+                await adapter.ReadAsync(request, ct).ConfigureAwait(false), null, null);
         }
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (SourceAuthenticationException ex)
+        {
+            // ⛔ Відмова в автентифікації НЕ зводиться до «джерело недоступне»
+            // (`H-20`). Саме тут її раніше й губили: гілка нижче гасила будь-який
+            // виняток у звичайний збій, після якого прогін ішов у наздоганяння
+            // і завершувався успішно.
+            return new ReadOutcome(null, ex.ErrorCode, ex.Message, Unauthorized: true);
         }
         catch (Exception ex)
         {
@@ -276,11 +412,19 @@ public sealed class CollectionRunner(
     /// <param name="Collected">Прочитане; <c>null</c> — джерело відмовило.</param>
     /// <param name="ErrorCode">Код відмови; <c>null</c> — відмови не було.</param>
     /// <param name="Message">Текст відмови — без стека (ФВ-6.11).</param>
+    /// <param name="Unauthorized">
+    /// <c>true</c> — джерело відмовило в автентифікації (<c>H-20</c>): такий
+    /// збій не йде в наздоганяння і не повторюється.
+    /// </param>
     /// <remarks>
     /// ⚠ Поле зветься <c>Collected</c>, а не <c>Result</c>, свідомо:
     /// архітектурне правило 5 забороняє блокувальні <c>.Result</c> і шукає їх
     /// текстом. Властивість із такою назвою робила б правило шумним — а
     /// правило, яке звикли гасити винятками, перестає ловити справжні випадки.
     /// </remarks>
-    private sealed record ReadOutcome(CollectionResult? Collected, string? ErrorCode, string? Message);
+    private sealed record ReadOutcome(
+        CollectionResult? Collected,
+        string? ErrorCode,
+        string? Message,
+        bool Unauthorized = false);
 }

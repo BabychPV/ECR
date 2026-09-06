@@ -173,6 +173,37 @@ public sealed class PublishTemplateVersionTests
         Assert.Contains("7 → 8 → 7", Diagnostics(error), StringComparison.Ordinal);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Формула_яка_читає_власну_колонку_відхиляється_названо()
+    {
+        // ⛔ Раніше цей випадок не доходив до графа взагалі: обидва
+        // викликачі відсіювали самопосилання перед побудовою, хоч рушій
+        // документував, що має бачити їх як цикл. Обіцянка була недосяжна.
+        //
+        // ⚠ Формула колонки `Total`, яка читає `[Total]`, читає те саме,
+        // що пише. Порядку обчислення для неї не існує, і в чинній системі
+        // вона мовчки не рахувалася зовсім.
+        Structure("SUM([Total])", scope: FormulaScope.Column);
+
+        IReadOnlyList<FormulaNode> captured = [];
+        _formulas.BuildEvaluationOrder(Arg.Any<IReadOnlyList<FormulaNode>>())
+                 .Returns(call =>
+                 {
+                     captured = call.Arg<IReadOnlyList<FormulaNode>>();
+                     return new OrderingResult(
+                         true, captured.Select(n => n.FormulaDefId).ToList(), null);
+                 });
+
+        await Handler().PublishAsync(1, userId: 9, CancellationToken.None);
+
+        // ⛔ Саме це й було зламане: саморебро не доходило до графа,
+        // тож сортувальник не мав шансу назвати цикл, а обіцянка
+        // <c>BuildEvaluationOrder</c> лишалася недосяжною.
+        var node = Assert.Single(captured);
+        Assert.Contains(node.FormulaDefId, node.DependsOnFormulaDefIds);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Несумісні_одиниці_без_CONVERT_відхиляють_публікацію()
     {

@@ -26,6 +26,27 @@ public sealed class Methodology : Entity<int>
     public LocalizedText NameL10n { get; private set; } = null!;
     public bool IsActive { get; private set; }
 
+    /// <summary>
+    /// Природа методології: обирається правилом, зашита в модуль, або лише
+    /// віддає формули іншим (директива ПК-1 №05, поправка 6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Поле несуче, а не описове. <b>69 % формул корпусу живуть у
+    /// <see cref="MethodologyKind.Bespoke"/>-модулях</b>, для яких правила
+    /// прив'язки не існує в принципі: планувальник, який шукає його всім
+    /// однаково, тихо не порахує <c>HSE400</c>, <c>Flert</c> і
+    /// <c>Thermaloxidizer</c> — 1388 формул із 2013.
+    /// <para>
+    /// ⚠ <see cref="MethodologyKind.Library"/> — <b>не</b> ворота спільного
+    /// використання. Перехресне <c>!Name</c> дозволене будь-якій методології
+    /// через <see cref="MethodologyImport"/>; <c>Common</c> просто складається
+    /// зі спільних формул цілком, а <c>ECW_C09_02_01</c> — звичайна
+    /// <see cref="MethodologyKind.DataDriven"/> методологія з однією формулою,
+    /// на яку посилаються п'ять інших.
+    /// </para>
+    /// </remarks>
+    public MethodologyKind Kind { get; private set; }
+
     /// <summary>Група методологій; вона ж одиниця перемикання master (ФВ-13.10).</summary>
     public string? Group { get; private set; }
 
@@ -53,6 +74,10 @@ public sealed class Methodology : Entity<int>
     /// <summary>Ставить групу методології.</summary>
     /// <param name="group">Назва групи; <c>null</c> — поза групами.</param>
     public void SetGroup(string? group) => Group = group;
+
+    /// <summary>Оголошує природу методології.</summary>
+    /// <param name="kind">Обирається правилом, зашита в модуль або бібліотека.</param>
+    public void SetKind(MethodologyKind kind) => Kind = kind;
 
     /// <summary>
     /// Публікує версію з перевіркою, що вікна дії не перетинаються (ФВ-13.3).

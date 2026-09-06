@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Periods;
 
@@ -44,11 +45,18 @@ public sealed class ReopenPeriodHandler(
         // ⚠ Період береться з UPDLOCK і перечитується В ТРАНЗАКЦІЇ: інакше
         // PeriodStateJob може закрити його посеред операції, і відкриття
         // застосується до стану, якого вже немає (ФВ-1.10a).
+        // ⛔ Два різні суб'єкти — два різні коди (`P-25`, рядок 4). Обидва
+        // рядки писали `ECR-PRD-0422`, у якого цифри кажуть 422, а конвеєр
+        // віддає 404, і при цьому не розрізняли, ЩО саме не знайдено. Для
+        // адміністратора, який відкриває період, це різниця між «помилився в
+        // номері періоду» і «проєкт видалили».
         var period = await periods.LockAsync(periodId, ct).ConfigureAwait(false)
-                     ?? throw new NotFoundException("ECR-PRD-0422", $"Період {periodId} не знайдено.");
+                     ?? throw new NotFoundException(
+                         ErrorCodes.PeriodNotFound, $"Період {periodId} не знайдено.");
 
         var project = await periods.FindProjectAsync(period.ProjectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт періоду {periodId} не знайдено.");
+                      ?? throw new NotFoundException(
+                          ErrorCodes.ProjectNotFound, $"Проєкт періоду {periodId} не знайдено.");
 
         // Архівований проєкт — кінцевий стан: відкривати в ньому нема чого,
         // дані вже поїхали в архівні партиції (ФВ-1.10).

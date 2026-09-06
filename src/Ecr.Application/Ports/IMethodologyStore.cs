@@ -30,6 +30,60 @@ public interface IMethodologyStore
     /// <summary>Формули версії в порядку обчислення.</summary>
     public Task<IReadOnlyList<MethodologyFormula>> GetFormulasAsync(int methodologyVersionId, CancellationToken ct);
 
+    /// <summary>Константи версії — усі, включно з текстовими й мітками категорій.</summary>
+    /// <remarks>
+    /// ⛔ Саме всі. Перевірка публікації «мітка категорії у виразі» неможлива,
+    /// якщо сховище віддає лише числові: відфільтрувати нечислові тут означало б
+    /// зробити помилку, яку ця перевірка ловить, невидимою для неї
+    /// (директива ПК-1 №05, поправка 2-біс).
+    /// </remarks>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Константи версії.</returns>
+    public Task<IReadOnlyList<MethodologyConstant>> GetConstantsAsync(
+        int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Бібліотеки, видимі виразам версії: оголошені імпорти з версією, чинною
+    /// **на дату**, і кодами їхніх формул.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Дата — параметр, а не «сьогодні»: версія бібліотеки вибирається тим
+    /// самим правилом «останній <c>EffectiveFrom</c> ≤ дата» (ФВ-9.3), що й
+    /// версія будь-якої іншої методології. Інакше перерахунок минулого періоду
+    /// брав би сьогоднішню редакцію <c>Common</c>.
+    ///
+    /// ⚠ Оголошений імпорт без чинної версії на дату повертається з
+    /// <c>MethodologyVersionId = null</c>, а не пропускається: «бібліотеки не
+    /// видно» і «бібліотеки не оголошено» — різні проблеми, і плутати їх у
+    /// повідомленні публікації означає шукати не там.
+    /// </remarks>
+    /// <param name="methodologyVersionId">Версія, що оголосила імпорти.</param>
+    /// <param name="onDate">Дата, на яку добирається версія бібліотеки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Оголошені імпорти в порядку коду методології.</returns>
+    public Task<IReadOnlyList<MethodologyLibrary>> ResolveImportsAsync(
+        int methodologyVersionId, DateOnly onDate, CancellationToken ct);
+
+    /// <summary>
+    /// Замінює ребра <c>calc.MethodologyDependency</c>, що виходять із методології.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Саме заміна, а не додавання. Прибране з версії посилання має прибрати
+    /// й ребро: інакше граф накопичує залежності, яких у виразах уже немає, і
+    /// перерахунок щоразу тягне за собою методологію, з якою давно розв'язався.
+    ///
+    /// ⚠ Ребро будується і для посилань у бібліотеку (поправка 10). Без нього
+    /// топологічний порядок неповний, і методологія читає торішній результат
+    /// <c>Common</c> — без жодної помилки в журналі.
+    /// </remarks>
+    /// <param name="fromMethodologyId">Методологія, що посилається.</param>
+    /// <param name="toMethodologyIds">Методології, на які вона посилається.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача заміни; збереження робить <c>IUnitOfWork</c>.</returns>
+    public Task ReplaceDependenciesAsync(
+        int fromMethodologyId, IReadOnlyCollection<int> toMethodologyIds, CancellationToken ct);
+
     /// <summary>Речовини версії: для кожної рахуються власні виходи.</summary>
     public Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
 
@@ -80,6 +134,27 @@ public interface IMethodologyStore
     /// <returns>Константи, формули й аргументи версії.</returns>
     public Task<MethodologySymbols> GetSymbolsAsync(int methodologyVersionId, CancellationToken ct);
 }
+
+/// <summary>
+/// Оголошений імпорт, розв'язаний на дату: чиї формули видно і які саме.
+/// </summary>
+/// <remarks>
+/// ⚠ Тип називає бібліотекою будь-яку імпортовану методологію, а не лише
+/// <c>Kind = Library</c>: <c>ECW_C09_02_01</c> — звичайна <c>DataDriven</c>
+/// методологія з однією формулою, на яку посилаються п'ять інших, і жодних
+/// воріт для неї не існує (директива ПК-1 №05, поправка 6).
+/// </remarks>
+/// <param name="MethodologyId">Імпортована методологія.</param>
+/// <param name="MethodologyCode">Її код — те, що потрапляє в повідомлення про неоднозначність.</param>
+/// <param name="MethodologyVersionId">
+/// Версія, чинна на дату; <c>null</c> — на цю дату жодна не чинна.
+/// </param>
+/// <param name="FormulaCodes">Коди формул цієї версії — те, на що можна послатися.</param>
+public sealed record MethodologyLibrary(
+    int MethodologyId,
+    string MethodologyCode,
+    int? MethodologyVersionId,
+    IReadOnlyList<string> FormulaCodes);
 
 /// <summary>Символи, видимі виразам версії методології.</summary>
 /// <param name="Constants">Константи — префікс <c>CST.</c>.</param>

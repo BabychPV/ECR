@@ -22,6 +22,7 @@ public sealed class SubmitSheetHandler(
     IWorkflowStore workflow,
     IAccessDecisionService access,
     Validation.ValidationEngine validation,
+    Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock)
@@ -105,6 +106,15 @@ public sealed class SubmitSheetHandler(
         //
         // ⚠ Події черги — лише ЗБОЇ: збір, архівація, стани періодів,
         // перевищення бюджету перерахунку. Їх зводить `NotificationJob`.
+
+        // ⛔ Подання МОРОЗИТЬ зріз звітності, якщо в періоді не лишилося
+        // неподаних аркушів (`H-23b`, ФВ-9.17). На цьому тримається `ER-C-11`:
+        // «подане не перераховується». Доти позначку `Submitted` не ставив
+        // ніхто, і гарантія існувала лише на письмі — зріз, за яким звіт уже
+        // пішов регуляторові, спокійно перебудовувався з іншими числами.
+        await reports
+            .MarkSubmittedAsync(documentId, key, userId, ct)
+            .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

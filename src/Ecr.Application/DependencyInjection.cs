@@ -100,6 +100,10 @@ public static class DependencyInjection
         services.AddScoped<Periods.GetPeriodCalendarHandler>();
 
         // Робочий процес (модулі 3.4–3.6)
+        // ⚠ Проведення стану аркушів у зрізи звітності — окрема залежність
+        // обох обробників: питання «що тепер зі зрізом» одне, і відповідь на
+        // нього має бути одна (`H-23b`).
+        services.AddScoped<Reporting.ReportSnapshotSync>();
         services.AddScoped<Workflow.SubmitSheetHandler>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();

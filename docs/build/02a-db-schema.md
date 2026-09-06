@@ -1,4 +1,4 @@
-# 02a — Схема БД. Повний DDL
+﻿# 02a — Схема БД. Повний DDL
 
 > Частина контракту. Реалізується **дослівно**. Розбіжність між цим файлом і
 > `docs/07-data-model.md` вирішується на користь **цього файлу** (див.
@@ -140,6 +140,35 @@ DECLARE @sql nvarchar(max);
 --    перевіряти фізичну модель на ньому можна повноцінно.
 DECLARE @isExpress bit = CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) = 4 THEN 1 ELSE 0 END;
 
+-- ⛔ Одного лише видання НЕ ДОСИТЬ, і коштувало це цілого диска. Замовник
+--    ухвалив ставити локально **Developer Edition** (`H-19`), і в неї
+--    EngineEdition = 3 — та сама, що в Enterprise. Перевірка вище мовчала, і
+--    КОЖНА тестова база народжувалася на 14 ГБ: 4096 + 4096 + 4096 + 2048.
+--    Інстанс на цій машині ще й називається `SQLEXPRESS`, тобто ім'я казало
+--    «Express», а видання — ні; сімнадцять тестових баз з'їли 152 ГБ і
+--    зупинили роботу помилкою «operating system error 112».
+--
+-- ⚠ Видання — це про МЕЖУ (Express не витягне 14 ГБ), а розмір файлів має
+--    вирішувати ПРИЗНАЧЕННЯ бази: тестовій на кілька сотень рядків продуктивні
+--    розміри не потрібні на жодному виданні. Призначення скрипт вивести не
+--    може — його треба сказати, і сказати ЯВНО.
+--
+--    Позначка ставиться на базі одразу після CREATE DATABASE:
+--
+--        EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;
+--
+--    Її ставить `SqlServerFixture`; DBA в розгортанні не ставить нічого, і
+--    продуктивна поведінка не змінюється ні на байт. Умовчання лишається
+--    продуктивним навмисно: база, яка мовчки отримала 64 МБ замість 4 ГБ,
+--    деградує під навантаженням непомітно, а це гірше за зайвий рядок у
+--    чек-листі розгортання.
+DECLARE @markedSmall bit = CASE WHEN EXISTS (
+        SELECT 1 FROM sys.extended_properties
+        WHERE class = 0 AND name = N'Ecr_SmallFiles')
+    THEN 1 ELSE 0 END;
+
+DECLARE @isSmall bit = CASE WHEN @isExpress = 1 OR @markedSmall = 1 THEN 1 ELSE 0 END;
+
 -- 1. Файлові групи, яких ще немає.
 --    Один пакет DDL замість циклу: коротше і без курсорів у скрипті,
 --    який читає людина перед запуском на проді.
@@ -178,14 +207,18 @@ FROM (VALUES
         (N'Ecr_audit',   N'AUDIT',        4096, 2048, 0),
         (N'Ecr_idx',     N'INDEXES',      2048, 1024, 0)
      ) AS f(LogicalName, FileGroup, SizeMb0, GrowthMb0, UseArchivePath)
-CROSS APPLY (SELECT SizeMb   = CASE WHEN @isExpress = 1 THEN 64 ELSE f.SizeMb0   END,
-                    GrowthMb = CASE WHEN @isExpress = 1 THEN 64 ELSE f.GrowthMb0 END) AS sz
+CROSS APPLY (SELECT SizeMb   = CASE WHEN @isSmall = 1 THEN 64 ELSE f.SizeMb0   END,
+                    GrowthMb = CASE WHEN @isSmall = 1 THEN 64 ELSE f.GrowthMb0 END) AS sz
 WHERE NOT EXISTS (SELECT 1 FROM sys.database_files d WHERE d.name = f.LogicalName);
 
 IF @sql IS NOT NULL EXEC sp_executesql @sql;
 
 PRINT N'База ' + @db + N': файлові групи і файли готові'
-    + CASE WHEN @isExpress = 1 THEN N' (Express: зменшені початкові розміри).' ELSE N'.' END;
+    + CASE WHEN @isSmall = 1
+           THEN N' (зменшені початкові розміри: '
+              + CASE WHEN @isExpress = 1 THEN N'Express' ELSE N'позначка Ecr_SmallFiles' END
+              + N').'
+           ELSE N'.' END;
 PRINT N'  каталог даних: ' + @DataPath;
 PRINT N'  каталог архіву: ' + @ArchivePath;
 GO
@@ -1165,15 +1198,60 @@ GO
 ## 7. `calc` — розрахунки
 
 ```sql
+-- Kind — природа методології (директива ПК-1 №05, поправка 6). НЕ описове поле:
+-- 69 % формул корпусу живуть у Bespoke-модулях (HSE400 341, Flert 407,
+-- Thermaloxidizer 640), для яких правила прив'язки не існує в принципі.
+-- Планувальник, який шукає правило всім однаково, тихо не порахує 1388 формул.
+-- ⚠ Library (Common, 49 формул) — НЕ механізм спільного використання: перехресне
+-- `!Name` дозволене будь-якій методології через calc.MethodologyImport.
 CREATE TABLE calc.Methodology
 (
     Id       int           IDENTITY(1,1) NOT NULL,
     Code     nvarchar(64)  NOT NULL,
     NameL10n nvarchar(max) NOT NULL,
     [Group]  nvarchar(64)  NULL,
+    Kind     tinyint       NOT NULL CONSTRAINT DF_Meth_Kind DEFAULT(0),  -- MethodologyKind
     IsActive bit           NOT NULL CONSTRAINT DF_Meth_Active DEFAULT(1),
     CONSTRAINT PK_Methodology PRIMARY KEY (Id),
     CONSTRAINT UQ_Methodology UNIQUE (Code)
+);
+GO
+
+-- Чиї формули видно виразам версії через `!Name` (директива ПК-1 №05, поправка 10).
+-- ⛔ Методологія не замкнена: 149 посилань із HSE400 і 116 з Flert ведуть у
+-- Common, а ECW_C09_02_01 — одна формула — потрібна п'яти методологіям.
+-- ⚠ Імпорт називає МЕТОДОЛОГІЮ, а не версію: версія бібліотеки вибирається на
+-- дату періоду тим самим правилом, що й будь-яка інша (ФВ-9.3).
+-- ⚠ Поля порядку немає навмисно — воно виглядало б як пріоритет і мовчки
+-- розв'язувало б неоднозначність; збіг імені у двох імпортах — помилка публікації.
+CREATE TABLE calc.MethodologyImport
+(
+    Id                    int NOT NULL IDENTITY(1,1),
+    MethodologyVersionId  int NOT NULL,
+    ImportedMethodologyId int NOT NULL,
+    CONSTRAINT PK_MethodologyImport PRIMARY KEY (Id),
+    CONSTRAINT UQ_MethodologyImport UNIQUE (MethodologyVersionId, ImportedMethodologyId),
+    CONSTRAINT FK_MI_Version  FOREIGN KEY (MethodologyVersionId)  REFERENCES calc.MethodologyVersion (Id),
+    CONSTRAINT FK_MI_Imported FOREIGN KEY (ImportedMethodologyId) REFERENCES calc.Methodology (Id)
+);
+GO
+
+-- Ребро графа МІЖ методологіями (B13 §4.3): From читає результат To.
+-- ⛔ Будується і для посилань у бібліотеку. Без нього топологічний порядок
+-- перерахунку неповний, і HSE400 читає торішній результат Common — число
+-- правдоподібне, помилки в журналі немає.
+CREATE TABLE calc.MethodologyDependency
+(
+    Id                int NOT NULL IDENTITY(1,1),
+    FromMethodologyId int NOT NULL,
+    ToMethodologyId   int NOT NULL,
+    CONSTRAINT PK_MethodologyDependency PRIMARY KEY (Id),
+    CONSTRAINT UQ_MethodologyDependency UNIQUE (FromMethodologyId, ToMethodologyId),
+    CONSTRAINT FK_MD_From FOREIGN KEY (FromMethodologyId) REFERENCES calc.Methodology (Id),
+    CONSTRAINT FK_MD_To   FOREIGN KEY (ToMethodologyId)   REFERENCES calc.Methodology (Id),
+    -- Петля зупиняє топологічний порядок УСЬОГО перерахунку і виглядає як
+    -- «цикл» без підказки, у чому річ.
+    CONSTRAINT CK_MD_NoSelfLoop CHECK (FromMethodologyId <> ToMethodologyId)
 );
 GO
 
@@ -1184,7 +1262,8 @@ CREATE TABLE calc.MethodologyVersion
     Version           nvarchar(20)   NOT NULL,
     Status            tinyint        NOT NULL,   -- TemplateVersionStatus
     [Level]           tinyint        NOT NULL,   -- CalculationLevel
-    -- Арифметичний режим: Legacy відтворює числа чинної системи побітово (ФВ-9.9)
+    -- Арифметичний режим: Legacy рахує в double за NCalc 1.3.8 (ФВ-9.9);
+    -- звірка з еталоном — у поданні колонки, не побітово (ФВ-9.16)
     NumericMode       tinyint        NOT NULL CONSTRAINT DF_MV_Numeric  DEFAULT(0),
     -- Джерело Period.Days/Hours/Seconds. Різниця конвенції змінює ВСІ числа (D-78)
     CalendarMode      tinyint        NOT NULL CONSTRAINT DF_MV_Calendar DEFAULT(0),
@@ -1213,26 +1292,39 @@ CREATE TABLE calc.MethodologyFormula
     Code                  nvarchar(64)   NOT NULL,
     Expression            nvarchar(2000) NOT NULL,
     OutputUnitId          int            NULL,
+    -- Формула діалекту B повертає і ТЕКСТ: у корпусі це 'В пределе норматива',
+    -- 'Сверхнорматив', 'Превышение!!!' (02b §8, поправка 2-біс). Без оголошеного
+    -- типу такий результат пішов би в calc.CalculationResult.Value decimal(28,10).
+    ResultType            tinyint        NOT NULL CONSTRAINT DF_MF_Result DEFAULT(0),  -- FormulaResultType
     -- Порядок НЕ зберігається: він топологічний і рахується при Publish (ФВ-9.4).
     -- Це поле — результат обчислення, а не введення користувача.
     EvaluationOrder       int            NOT NULL CONSTRAINT DF_MF_Order DEFAULT(0),
     CONSTRAINT PK_MethodologyFormula PRIMARY KEY (Id),
     CONSTRAINT UQ_MethodologyFormula UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT FK_MF_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
-    CONSTRAINT FK_MF_Unit    FOREIGN KEY (OutputUnitId)         REFERENCES uom.Unit (Id)
+    CONSTRAINT FK_MF_Unit    FOREIGN KEY (OutputUnitId)         REFERENCES uom.Unit (Id),
+    -- Одиниця на текстовому результаті не має симптому: перевірка розмірностей
+    -- при публікації порівнює одиниці, а не значення (ФВ-16.6).
+    CONSTRAINT CK_MF_TextHasNoUnit CHECK (ResultType = 0 OR OutputUnitId IS NULL)
 );
 GO
 
 -- Контекстні коефіцієнти (щільність, теплотворність) — САМЕ ТУТ, а не в
 -- uom.Conversion: вони залежать від речовини й умов і змінюються з часом (ФВ-16.5).
+-- ⛔ Константа НЕ завжди число (директива ПК-1 №05, поправка 2-біс): з 6507
+-- констант корпусу 108 нечислові, і ~90 із них ужиті у виразах як операнд
+-- порівняння — if(@Land_Category = CST.k1_CategorySelection_, …). Тому Value і
+-- UnitId стали NULL-придатними, а вид значення оголошує Kind.
 CREATE TABLE calc.MethodologyConstant
 (
     Id                   int            IDENTITY(1,1) NOT NULL,
     MethodologyVersionId int            NOT NULL,
     Code                 nvarchar(64)   NOT NULL,
     Category             nvarchar(64)   NULL,
-    Value                decimal(28,10) NOT NULL,
-    UnitId               int            NOT NULL,
+    Kind                 tinyint        NOT NULL CONSTRAINT DF_MC_Kind DEFAULT(0),  -- ConstantKind
+    Value                decimal(28,10) NULL,      -- лише Kind = Numeric і лише коли розібралося
+    TextValue            nvarchar(400)  NULL,      -- текст, мітка або СИРИЙ рядок джерела
+    UnitId               int            NULL,      -- лише Kind = Numeric: вимір — властивість числа
     ValidFrom            date           NULL,
     ValidTo              date           NULL,
     SubstanceEntryId     int            NULL,      -- прив'язка до речовини
@@ -1242,7 +1334,16 @@ CREATE TABLE calc.MethodologyConstant
     CONSTRAINT FK_MC_Version   FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
     CONSTRAINT FK_MC_Unit      FOREIGN KEY (UnitId)               REFERENCES uom.Unit (Id),
     CONSTRAINT FK_MC_Substance FOREIGN KEY (SubstanceEntryId)     REFERENCES dic.RegistryEntry (Id),
-    CONSTRAINT CK_MC_Period    CHECK (ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo)
+    CONSTRAINT CK_MC_Period    CHECK (ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo),
+    -- ⛔ Перелік станів навмисно НЕПОВНИЙ: Kind = 0 з порожнім Value дозволений,
+    -- якщо є TextValue. Це рядок, який імпорт не зміг розібрати
+    -- (n_ECW_C11_13_ = '-' у 16 формулах, Kp_ECW_C11_13_ = '-' у 4,
+    -- k22_HSE30X_Int_FG_ = '' у 5), і він мусить дожити до публікації, щоб
+    -- людина ухвалила рішення. Заборона тут означала б або тихий нуль у 25
+    -- формулах, або обрив імпорту 6507 констант на трьох дефектних рядках.
+    CONSTRAINT CK_MC_Kind CHECK (
+        (Kind = 0 AND UnitId IS NOT NULL AND (Value IS NOT NULL OR TextValue IS NOT NULL))
+     OR (Kind <> 0 AND Value IS NULL AND UnitId IS NULL AND TextValue IS NOT NULL))
 );
 GO
 

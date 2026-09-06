@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -58,7 +58,8 @@ public sealed class CreateRowTests
     private static LocalizedText Text(string s) => new(new Dictionary<string, string> { ["en"] = s });
     private static void SetId(TableDef t, int id) => typeof(Entity<int>).GetProperty("Id")!.SetValue(t, id);
 
-    private CreateRowHandler Handler() => new(_rows, _cells, _metadata, _access, _uow, _clock);
+    private CreateRowHandler Handler()
+        => new(_rows, _cells, Substitute.For<IDocumentStore>(), _metadata, _access, _uow, _clock);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task BaseVersion_null_трактується_як_створення()

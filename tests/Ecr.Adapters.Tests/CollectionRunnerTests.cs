@@ -1,5 +1,6 @@
 ﻿using Ecr.Adapters.PiAf;
 using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
@@ -127,6 +128,112 @@ public sealed class CollectionRunnerTests
                 SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None));
 
         Assert.Equal("ECR-INT-0503", error.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "H-20")]
+    public async Task Відмова_в_автентифікації_валить_прогін_і_не_йде_в_наздоганяння()
+    {
+        // ⛔ Регресія, яку ловить цей тест: `401` знову гаситься у звичайну
+        // відмову джерела. Тоді прогін стане «Degraded», винятку не буде,
+        // задача завершиться успішно — і система з неправильними обліковими
+        // даними виглядатиме як справна, що мовчить (`H-20`).
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(_ => throw new SourceAuthenticationException(
+                "ECR-INT-0503", "PI Web API відповів 401."));
+
+        var error = await Assert.ThrowsAsync<SourceAuthenticationException>(
+            () => world.Runner.RunAsync(
+                SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None));
+
+        // 1. Прогін — саме «Failed», і в тексті назване ДЖЕРЕЛО: у зведенні з
+        //    двадцяти сутностей рядок «збір не вдався» не каже, куди йти.
+        await world.Store.Received().FinishRunAsync(
+            Arg.Any<long>(),
+            "Failed",
+            Arg.Any<int>(),
+            Arg.Is<string?>(m => m != null
+                                 && m.Contains("STACK-1", StringComparison.Ordinal)
+                                 && CollectionFailure.IsAuthenticationRefusal(m)),
+            Arg.Any<CancellationToken>());
+
+        Assert.Contains("STACK-1", error.Message, StringComparison.Ordinal);
+
+        // 2. Черга повторів порожня: жодного другого запиту з тими самими
+        //    обліковими даними — ні по інших атрибутах, ні по інших інтервалах.
+        await world.Source.Received(1).ReadAsync(
+            Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>());
+
+        // 3. Покриття не пишеться: даних немає, і позначати інтервал зібраним
+        //    означало б сховати дірку назавжди.
+        await world.Store.DidNotReceive().WriteCoverageAsync(
+            Arg.Any<long>(), Arg.Any<int>(),
+            Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Count > 0), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "H-20")]
+    public async Task Прострочений_квиток_дає_рівно_одну_спробу_перездобуття()
+    {
+        // ⛔ Регресія: або спроб стає більше однієї (джерело, що відмовляє
+        // стало, отримує шквал запитів), або жодної — і довгий прогін падає
+        // через квиток, який достатньо було перевипустити.
+        var world = new World();
+        world.Maps.Add(EntityFieldMap.ToColumn(SourceEntityId, "tagA", columnDefId: 7));
+        world.Maps.Add(EntityFieldMap.ToColumn(SourceEntityId, "tagB", columnDefId: 8));
+
+        var call = 0;
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(_ =>
+            {
+                call++;
+
+                // Перший атрибут читається успішно — джерело нас пустило.
+                // Далі квиток «протухає» і не оживає навіть після переспроби.
+                return call == 1
+                    ? Task.FromResult(new CollectionResult(
+                        [new SourceDataPoint("tagA", Now.AddHours(-2), 10m, null, null, "Good")], [], null))
+                    : throw new SourceAuthenticationException("ECR-INT-0503", "401 після успішних відповідей.");
+            });
+
+        await Assert.ThrowsAsync<SourceAuthenticationException>(
+            () => world.Runner.RunAsync(
+                SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None));
+
+        // Успіх + відмова + РІВНО одна переспроба. Четвертого звернення бути
+        // не може: облікові дані не полагодяться від наполегливості.
+        Assert.Equal(3, call);
+
+        await world.Store.Received().FinishRunAsync(
+            Arg.Any<long>(), "Failed", Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "H-20")]
+    public async Task Перша_ж_відмова_в_автентифікації_переспроби_не_отримує()
+    {
+        // ⚠ Різниця з попереднім тестом принципова: доки джерело нас жодного
+        // разу не пустило, «прострочений квиток» пояснити нічим — це
+        // неправильні облікові дані, і друга спроба лише подвоїть запис у
+        // журналі невдалих входів на боці замовника.
+        var world = new World();
+        world.Maps.Add(EntityFieldMap.ToColumn(SourceEntityId, "tagA", columnDefId: 7));
+        world.Maps.Add(EntityFieldMap.ToColumn(SourceEntityId, "tagB", columnDefId: 8));
+
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(_ => throw new SourceAuthenticationException(
+                "ECR-INT-0503", "401 з першого ж запиту."));
+
+        await Assert.ThrowsAsync<SourceAuthenticationException>(
+            () => world.Runner.RunAsync(
+                SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None));
+
+        await world.Source.Received(1).ReadAsync(
+            Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>());
     }
 
     private static EntityFieldMap Map(int? sourceUnitId)

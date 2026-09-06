@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -24,6 +24,10 @@ public sealed class PatchCellsTests
 
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
+
+    /// <summary>Сховище документів — через нього йде «дотик» документа (`H-23d`).</summary>
+    private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
+
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
@@ -70,7 +74,7 @@ public sealed class PatchCellsTests
     };
 
     private PatchCellsHandler Handler()
-        => new(_cells, _rows, _metadata, _access,
+        => new(_cells, _rows, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _audit, _jobs, _uow, _user, _clock);
 
@@ -192,6 +196,42 @@ public sealed class PatchCellsTests
         await _cells.Received(1).ApplyAsync(
             Arg.Is<CellChangeSet>(c => c.Upserts.Count == 1 && c.Deletes.Count == 0),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "H-23d")]
+    public async Task Правка_комірок_піднімає_дату_зміни_ДОКУМЕНТА()
+    {
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        // ⛔ Регресія: «дотик» документа знову зникає, і `ModifiedAt` із
+        // `ModifiedByUserId` назавжди лишаються моментом СТВОРЕННЯ. Ніщо не
+        // падає: рядки оновлюються, аудит пишеться, а перелік документів
+        // показує дату, якої зміни не мали. Колонка, що показує неправду,
+        // знецінює й сусідні — правдиві.
+        await _documents.Received(1).TouchAsync(700, 9, Now, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "H-23d")]
+    public async Task Дотик_документа_йде_ДО_коміту_а_не_після()
+    {
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        // ⚠ Порядок тут не косметика: дата зміни має лягти ТИМ САМИМ комітом,
+        // що й самі значення. Окремим збереженням після коміту вона пережила б
+        // відкат — і документ отримав би дату зміни, якої не було.
+        Received.InOrder(() =>
+        {
+            _documents.TouchAsync(700, 9, Now, Arg.Any<CancellationToken>());
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+        });
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]

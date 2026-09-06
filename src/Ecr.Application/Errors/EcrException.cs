@@ -33,3 +33,32 @@ public sealed class ConcurrencyConflictException(string errorCode, string messag
 /// <summary>Сутність не знайдена. HTTP 404.</summary>
 public sealed class NotFoundException(string errorCode, string message)
     : EcrException(errorCode, message);
+
+/// <summary>
+/// Зовнішнє джерело відмовило в АВТЕНТИФІКАЦІЇ (<c>401</c>/<c>403</c>).
+/// HTTP 503, як і решта відмов інтеграції.
+/// </summary>
+/// <remarks>
+/// ⛔ Окремий тип, а не <see cref="BusinessRuleException"/> з тим самим кодом,
+/// і не з педантизму: <b>наздоганяння зобов'язане його не проковтнути</b>
+/// (<c>H-20</c>). Недоступне джерело збирач гасить у результат і йде далі —
+/// це затримка. Відмова в автентифікації від повторення не зникає: збір
+/// потрапляв у наздоганяння і <b>завершувався успішно</b>, тож неправильно
+/// налаштовані облікові дані виглядали як тиша справної системи. Розрізняє їх
+/// саме тип винятку — гілка <c>catch</c>, а не рядок у повідомленні.
+///
+/// ⚠ Власний код заведено: <c>ECR-INT-0502</c>
+/// (<see cref="Ecr.Domain.Errors.ErrorCodes.SourceAuthenticationRefused"/>).
+/// Клієнт і журнал розрізняють «джерело лежить» (<c>ECR-INT-0503</c>, минає
+/// само) і «нас не пускають» (не минає ніколи).
+///
+/// ⛔ Номер не <c>0401</c>, як пропонував крок: цифри означають НАШ статус
+/// відповіді, а <c>401</c> сказав би клієнтові «увійдіть» — хоча не пускають
+/// не його, а нас.
+/// </remarks>
+/// <param name="errorCode">Код помилки.</param>
+/// <param name="message">Текст без стека (ФВ-6.11).</param>
+/// <param name="details">Подробиці для журналу.</param>
+public sealed class SourceAuthenticationException(
+    string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
+    : EcrException(errorCode, message, details);

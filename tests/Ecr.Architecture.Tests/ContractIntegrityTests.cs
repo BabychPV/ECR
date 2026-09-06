@@ -81,10 +81,13 @@ public sealed class ContractIntegrityTests
     ///
     /// ⚠ Причини різні і їх не можна плутати:
     /// <list type="bullet">
-    /// <item><c>ECR-SCHM-0409</c>, <c>ECR-SCHM-0422</c> — вимога ФВ-7.4 є,
-    /// <c>ChangeClassifier</c> уже розрізняє <c>Breaking</c> і <c>Guarded</c>,
-    /// але жоден шлях поки не ВІДХИЛЯЄ операцію: класифікація лише
-    /// показується в діагностиці версій. Це недороблена вимога.</item>
+    /// <item><c>ECR-SCHM-0422</c> — вимога є (<c>Guarded</c>-зміна без
+    /// стратегії міграції), але ОПЕРАЦІЇ, яка приймає стратегію, ще немає:
+    /// ФВ-7.5 (явний перехід документів на нову версію) не реалізована, а
+    /// <c>PATCH …/presentation</c> міграцій не приймає і не прийматиме — там
+    /// <c>Guarded</c>-зміна відхиляється як структурна правка опублікованої
+    /// версії (ФВ-7.1, <c>ECR-TMPL-0409</c>). Код чекає на свою операцію, а не
+    /// на дозвіл.</item>
     /// <item><c>ECR-CELL-4222</c>, <c>ECR-SIM-0403</c> — сценарій живий, але
     /// доїжджає іншим кодом: межі довідника перевіряє
     /// <c>ColumnDef.ValidateValue</c> (<c>ECR-CELL-0422</c>), а вихід за вікно
@@ -93,9 +96,13 @@ public sealed class ContractIntegrityTests
     /// <item><c>ECR-UOM-4221</c> — заборона тримається побудовою таблиці
     /// конверсій, а не перевіркою в C#.</item>
     /// </list>
+    ///
+    /// ⚠ <c>ECR-SCHM-0409</c> зі списку ПІШОВ: ФВ-7.4 доведена до відмови
+    /// операції в <c>PatchPresentationHandler</c>. Саме так цей список і має
+    /// коротшати — не правкою «щоб зелене», а виконаною вимогою.
     /// </remarks>
     private static readonly string[] ReservedCodes =
-        ["ECR-CELL-4222", "ECR-SCHM-0409", "ECR-SCHM-0422", "ECR-SIM-0403", "ECR-UOM-4221"];
+        ["ECR-CELL-4222", "ECR-SCHM-0422", "ECR-SIM-0403", "ECR-UOM-4221"];
 
     /// <summary>Шлях каталогу констант відносно кореня репозиторію.</summary>
     private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";

@@ -91,7 +91,7 @@ public static class PublishChecks
         {
             diagnostics.Add(new ExpressionDiagnostic(
                 ExpressionErrors.Cycle,
-                $"Формули утворюють цикл: {string.Join(" → ", ordering.CyclePath ?? [])}.",
+                Ecr.Expressions.Graph.CycleDescription.Describe(ordering.CyclePath),
                 0, 1));
         }
         else
@@ -207,10 +207,28 @@ public static class PublishChecks
                 continue;
             }
 
-            // Формула залежить від ІНШОЇ ФОРМУЛИ, якщо читає комірку, яку та
-            // формула обчислює. Без цього ребра баланс порахувався б раніше
-            // за суми, з яких він складається.
-            foreach (var candidate in table.Formulas.Where(f => !f.IsDeleted && f.Id != formula.Id))
+            // ⛔ МІЖПЕРІОДНА залежність не є ребром порядку: минулий
+            // період уже порахований, і чекати на нього нікому не треба.
+            //
+            // ⚠ Без цього рядка дві формули, що читають одна одну ЗА МИНУЛИЙ
+            // період, виглядали б циклом і не публікувалися — при тому, що
+            // це звичайна форма перехідного залишку.
+            if (dependency.PeriodOffset is not (null or 0))
+            {
+                continue;
+            }
+
+            // Формула залежить від формули, якщо читає комірку, яку та
+            // обчислює. Без цього ребра баланс порахувався б раніше за суми,
+            // з яких він складається.
+            //
+            // ⛔ Сама формула З ПЕРЕЛІКУ НЕ ВИКЛЮЧАЄТЬСЯ. Тут стояло
+            // `f.Id != formula.Id`, і цей фільтр робив дві речі водночас:
+            // ховав справжнє самопосилання (формула читає те, що сама
+            // пише — це цикл) і випадково рятував законне міжперіодне
+            // посилання на власну колонку. Друге тепер закриває перевірка
+            // зсуву вище, а перше має бути видним (ФВ-9.4).
+            foreach (var candidate in table.Formulas.Where(f => !f.IsDeleted))
             {
                 if (Recalculation.FormulaOutputs.Produces(
                         candidate, table, dependency.RowKey, dependency.ColumnDefId))
