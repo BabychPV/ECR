@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -30,6 +30,9 @@ public sealed class PiWebApiDataSource(
     public static TimeSpan RetryDelay => TimeSpan.FromSeconds(2);
 
     private const string SourceUnavailable = "ECR-INT-0503";
+
+    /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
+    private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <inheritdoc />
     public ExternalTransport Transport => ExternalTransport.PiWebApi;
@@ -186,7 +189,7 @@ public sealed class PiWebApiDataSource(
                     if (Unauthorized(response.StatusCode))
                     {
                         throw new SourceAuthenticationException(
-                            SourceUnavailable,
+                            AuthenticationRefused,
                             $"PI Web API відповів {(int)response.StatusCode} на {path}: "
                             + "джерело не приймає облікові дані.",
                             new Dictionary<string, object?> { ["status"] = (int)response.StatusCode });

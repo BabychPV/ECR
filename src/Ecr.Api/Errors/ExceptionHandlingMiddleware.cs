@@ -229,8 +229,13 @@ public sealed partial class ExceptionHandlingMiddleware(
         // усе одно є: без нього той самий виняток, кинутий із синхронного
         // шляху, дав би `500` з беззмістовним текстом — тобто найгіршу з
         // можливих відповідей саме там, де причина відома точно.
+        //
+        // ⛔ `502`, а не `503`, і цифри коду це повторюють (`ECR-INT-0502`).
+        // 503 обіцяє «спробуйте пізніше» — а відмова в автентифікації від
+        // повторення не минає. 401 сказав би клієнтові «увійдіть», хоча
+        // не пускають не його, а нас.
         SourceAuthenticationException e =>
-            (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
+            (StatusCodes.Status502BadGateway, e.ErrorCode, e.Message, e.Details),
 
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),

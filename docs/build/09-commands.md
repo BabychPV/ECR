@@ -73,7 +73,7 @@ dotnet test tests/Ecr.Architecture.Tests/Ecr.Architecture.Tests.csproj
 # створити міграцію (виконується ОДИН раз на Етапі 1, далі — за потреби)
 dotnet ef migrations add InitialCreate \
   --project src/Ecr.Infrastructure \
-  --startup-project src/Ecr.Api \
+  --startup-project src/Ecr.Infrastructure \
   --output-dir Persistence/Migrations
 
 # застосувати: ТІЛЬКИ скриптом, і в dev теж
@@ -87,6 +87,12 @@ dotnet ef migrations script \
 
 ⚠ `migrations script` бере збірку, а не джерела: **не** передавайте `--no-build`
 після зміни конфігурацій — отримаєте скрипт зі старої моделі без жодної помилки.
+
+> ⛔ `--startup-project` тут **`Ecr.Infrastructure`, а не `Ecr.Api`**. Стояло
+> `Ecr.Api`, і команда не виконувалася жодного разу: «Your startup project
+> 'Ecr.Api' doesn't reference Microsoft.EntityFrameworkCore.Design». Пакет
+> підключений саме до `Ecr.Infrastructure` — і правильно, бо API про EF-інструменти
+> знати не має. Перевірено `dotnet ef migrations list` в обох формах.
 
 Об'єкти, які **не створюються міграціями EF** і живуть окремими SQL-скриптами
 (`src/Ecr.Infrastructure/Persistence/Sql/`), бо їх виконує SQL Agent під окремим

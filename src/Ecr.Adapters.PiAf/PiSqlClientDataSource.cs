@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Data.Odbc;
 using System.Globalization;
 using Ecr.Application.Errors;
@@ -27,6 +27,9 @@ public sealed class PiSqlClientDataSource(
     public const int MaxCatalogRows = 20_000;
 
     private const string SourceUnavailable = "ECR-INT-0503";
+
+    /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
+    private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <summary>
     /// Каталог елементів і атрибутів AF.
@@ -239,7 +242,7 @@ public sealed class PiSqlClientDataSource(
             if (IsAuthenticationFailure(ex))
             {
                 throw new SourceAuthenticationException(
-                    SourceUnavailable,
+                    AuthenticationRefused,
                     $"PI SQL Client не приймає облікові дані джерела {source.Code}: {ex.Message}",
                     new Dictionary<string, object?> { ["dataSource"] = source.Code });
             }

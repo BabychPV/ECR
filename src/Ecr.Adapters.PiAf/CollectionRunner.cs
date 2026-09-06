@@ -1,4 +1,4 @@
-using Ecr.Application.Errors;
+﻿using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
@@ -47,6 +47,9 @@ public sealed class CollectionRunner(
     public static TimeSpan CatchUpLookback => TimeSpan.FromDays(45);
 
     private const string SourceUnavailable = "ECR-INT-0503";
+
+    /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
+    private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <inheritdoc />
     public async Task RunAsync(
@@ -260,7 +263,7 @@ public sealed class CollectionRunner(
             .ConfigureAwait(false);
 
         return new SourceAuthenticationException(
-            SourceUnavailable,
+            AuthenticationRefused,
             message,
             new Dictionary<string, object?>
             {
