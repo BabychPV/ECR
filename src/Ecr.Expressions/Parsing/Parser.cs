@@ -12,10 +12,10 @@ namespace Ecr.Expressions.Parsing;
 /// <remarks>
 /// ⚠ <c>D-19</c> казав, що різниця між <c>Template</c> і <c>Methodology</c> —
 /// **лише** в наборі дозволених посилань і функцій, а не в синтаксисі. Замір
-/// NCalc 1.3.8 це спростував: у діалекті методологій <c>^</c> — XOR, а не
-/// степінь. Тому синтаксична різниця тепер є, вона рівно одна, і вся вона
-/// зібрана в <see cref="DialectSyntax"/> — щоб її не довелося шукати по
-/// гілках парсера.
+/// NCalc 1.3.8 це спростував двічі: у діалекті методологій <c>^</c> — XOR, а
+/// не степінь, і параметр там можна писати без <c>@</c>. Тому синтаксична
+/// різниця тепер є, і вся вона зібрана в <see cref="DialectSyntax"/> — щоб її
+/// не довелося шукати по гілках парсера.
 /// </remarks>
 public sealed class Parser
 {
@@ -24,16 +24,25 @@ public sealed class Parser
     /// <summary>Розбирає вираз.</summary>
     /// <param name="expression">Текст.</param>
     /// <param name="dialect">Діалект — визначає, які посилання дозволені.</param>
+    /// <param name="mode">
+    /// Хто читає текст. <see cref="ExpressionParseMode.Import"/> приймає ще й
+    /// голе ім'я параметра (директива №05 §4, пункт 5) і нормалізує його до
+    /// <c>@Name</c> у дереві. За замовчуванням — <c>Editor</c>: послаблення
+    /// граматики мусить бути явним проханням, інакше воно тихо стає правилом.
+    /// </param>
     /// <returns>
     /// Результат із AST або з діагностиками. Помилка синтаксису — **результат**,
     /// а не виняток: конфігуратор має показати проблему, а не впасти.
     /// </returns>
-    public ParseResult Parse(string expression, ExpressionDialect dialect)
+    public ParseResult Parse(
+        string expression,
+        ExpressionDialect dialect,
+        ExpressionParseMode mode = ExpressionParseMode.Editor)
     {
         ArgumentNullException.ThrowIfNull(expression);
 
         var diagnostics = new List<ExpressionDiagnostic>();
-        var syntax = DialectSyntax.Of(dialect);
+        var syntax = DialectSyntax.Of(dialect, mode);
 
         IReadOnlyList<Token> tokens;
         try
@@ -399,7 +408,26 @@ public sealed class Parser
             return ParseFunctionCall(s);
         }
 
-        s.Error($"Невідомий ідентифікатор '{token.Text}'. Посилання на комірку пишеться у квадратних дужках.");
+        // ⛔ Голе ім'я — це параметр, і приймає його ЛИШЕ імпортер (директива
+        // №05 §4, пункт 5). У корпусі `Total` і `@Total` стоять в одній
+        // формулі, тобто `@` там необов'язковий; відмовити означало б не
+        // імпортувати профільні модулі взагалі. Але в дереві лишається одна
+        // форма — `SymbolKind.Argument`, — тому друк повертає вже `@Total`, і
+        // далі по системі голого імені не існує.
+        if (s.Syntax.BareNameIsArgument)
+        {
+            s.Advance();
+            return new SymbolReferenceNode(SymbolKind.Argument, token.Text) { Position = token.Position };
+        }
+
+        // ⚠ Повідомлення різні, бо різні й помилки. У діалекті методологій
+        // комірок немає за побудовою (02b §3.4), і порада «пишіть у квадратних
+        // дужках» відправила б методолога робити те, що заборонено; там єдина
+        // правильна поправка — дописати `@`.
+        s.Error(s.Dialect == ExpressionDialect.Methodology
+            ? $"'{token.Text}' — голе ім'я: у діалекті методологій параметр пишеться з '@' ('@{token.Text}'). "
+              + "Без префікса ім'я не відрізнити від описки в назві функції."
+            : $"Невідомий ідентифікатор '{token.Text}'. Посилання на комірку пишеться у квадратних дужках.");
         throw new ParseAbort();
     }
 
@@ -661,7 +689,10 @@ public sealed class Parser
 
         public ExpressionDialect Dialect => dialect;
 
-        /// <summary>Синтаксичні відмінності діалекту — поки що рівно одна.</summary>
+        /// <summary>
+        /// Синтаксичні відмінності діалекту і режиму розбору: значення <c>^</c>,
+        /// роздільник аргументів, допустимість голого імені параметра.
+        /// </summary>
         public DialectSyntax Syntax => syntax;
 
         public Token Current => tokens[Math.Min(_index, tokens.Count - 1)];

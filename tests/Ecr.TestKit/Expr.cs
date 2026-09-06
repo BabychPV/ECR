@@ -1,4 +1,5 @@
 using Ecr.Domain.Enums;
+using Ecr.Expressions;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Functions;
 using Ecr.Expressions.Parsing;
@@ -12,8 +13,18 @@ namespace Ecr.TestKit;
 public static class Expr
 {
     /// <summary>Розбирає вираз.</summary>
-    public static ParseResult Parse(string expression, ExpressionDialect dialect = ExpressionDialect.Template)
-        => new Parser().Parse(expression, dialect);
+    /// <param name="expression">Текст виразу.</param>
+    /// <param name="dialect">Діалект; за замовчуванням — шаблонний.</param>
+    /// <param name="mode">
+    /// Хто читає текст. Режим імпортера послаблює граматику рівно на одну
+    /// конструкцію — голе ім'я параметра, — тому тест мусить просити його
+    /// явно: інакше послаблення непомітно стало б станом за замовчуванням.
+    /// </param>
+    public static ParseResult Parse(
+        string expression,
+        ExpressionDialect dialect = ExpressionDialect.Template,
+        ExpressionParseMode mode = ExpressionParseMode.Editor)
+        => new Parser().Parse(expression, dialect, mode);
 
     /// <summary>Обчислює вираз; кидає, якщо він не розібрався.</summary>
     /// <remarks>
