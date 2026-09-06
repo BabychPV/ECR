@@ -134,6 +134,38 @@ public sealed class SeedTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Роль_DataEntry_має_право_бачити_шаблони()
+    {
+        // ⛔ `A7-54`. Створення документа починається з вибору шаблону і
+        // версії, а обидва переліки вимагають `Template.View`. Без нього
+        // роль, уся суть якої — заповнювати документи, не могла створити
+        // ЖОДНОГО: діалог відкривався і показував порожні списки, бо сервер
+        // відповідав 403 на кожен із трьох запитів.
+        //
+        // ⚠ Порожній список і «немає прав» виглядають однаково — саме тому
+        // дефект прожив увесь `A7` і знайшовся лише тоді, коли ендпоінт
+        // структури почав перевіряти оголошене контрактом право.
+        Assert.Equal(1, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'DataEntry' AND rp.PermissionCode = N'Template.View'
+            """));
+
+        // ⚠ І тільки перегляд: право правити шаблони роль не отримує.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'DataEntry'
+              AND rp.PermissionCode IN (N'Template.Edit', N'Template.Publish')
+            """));
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-16.2")]
