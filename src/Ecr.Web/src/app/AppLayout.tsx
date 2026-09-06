@@ -53,6 +53,11 @@ const Items: NavItem[] = [
     permission: 'System.ManageLocalization',
   },
   { path: '/admin/health', labelKey: 'nav.health', permission: 'System.ViewHealth' },
+
+  // ⛔ БЕЗ права — і це не пропуск. Пункт відповідає на «чому в мене порожні
+  // екрани», тобто потрібен саме тому, у кого прав немає (`H-21`). Закрити
+  // його правом означало б показувати відповідь лише тим, хто й так знає.
+  { path: '/my-groups', labelKey: 'nav.myGroups' },
 ];
 
 /** Каркас застосунку: навігація, профіль, вміст сторінки. */

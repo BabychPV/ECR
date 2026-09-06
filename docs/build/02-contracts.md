@@ -2622,6 +2622,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |
 | `POST` | `/api/v1/security/simulation` | `Security.Simulate` | 3 |
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
+| `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |
+| `GET` | `/api/v1/security/users/{id}/groups` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 
@@ -2633,6 +2635,22 @@ public sealed class NotFoundException(string errorCode, string message)
 > (`ФВ-14.2`). Кожна область має **власний** `ETag = revision`; на
 > `If-None-Match` — `304`. Тексти помилок (`err.<код>`, `ФВ-14.9a`) розподілені
 > між областями за тим самим правилом: помилки входу — публічні, решта — ні.
+
+> **Діагностика доступу — два маршрути, а не один із параметром** (`H-21`).
+> `my-groups` віддає **власні** групи і не потребує права: людина, яка після
+> входу бачить порожні екрани, має отримати відповідь «чому» без звернення до
+> адміністратора, а власні SID вона й так бачить у своєму квитку.
+> `users/{id}/groups` віддає те саме про **чужий** запис і тому стоїть під
+> `Security.ManageUsers`.
+>
+> ⚠ Один маршрут із `?userId=` мав би дві різні відповіді на питання «яке
+> право потрібне» — тобто рядок у цій таблиці, який не можна заповнити чесно.
+>
+> ⛔ Членство в групах приходить **із квитка** (`ФВ-6.15a`), а квитка чужої
+> сесії в нас немає (`P-02`). Тому відповідь про чужого користувача називає
+> `groupsFromTicket: false` **явно**: порожній перелік груп там означає «ми не
+> знаємо», а не «людина в жодній групі не перебуває», і сплутати ці два стани
+> — рівно той дефект, заради якого маршрути й заведені.
 
 ---
 
