@@ -192,14 +192,27 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
                         && (v.Status == TemplateVersionStatus.Published
                             || v.Status == TemplateVersionStatus.Deprecated))
             .OrderByDescending(v => v.EffectiveFrom)
-            .Select(v => new { v.Id, v.MethodologyId, v.EffectiveFrom })
+            // ⛔ `Version` у проєкції обов'язковий: без нього правило вибору
+            // нижче не має чим розрізнити дві версії від однієї дати, і
+            // відповідь визначав би порядок рядків.
+            .Select(v => new { v.Id, v.MethodologyId, v.EffectiveFrom, v.Version })
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ Правило вибору — те саме, що в `Methodology.VersionOn` і
+        // `MethodologyResolver`, і задане воно один раз у домені. Тут стояло
+        // `OrderByDescending(v => v.EffectiveFrom).First()`, тобто третя копія
+        // того самого дефекту: за рівних дат вигравав перший рядок вибірки
+        // (`H-24d-4`).
         var effective = versions
             .GroupBy(v => v.MethodologyId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.EffectiveFrom).First().Id);
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(
+                        v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                        MethodologyVersionKey.Currency)
+                      .First().Id);
 
         var versionIds = effective.Values.ToList();
 

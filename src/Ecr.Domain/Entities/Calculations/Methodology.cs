@@ -1,4 +1,4 @@
-// src/Ecr.Domain/Entities/Calculations/Methodology.cs
+﻿// src/Ecr.Domain/Entities/Calculations/Methodology.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -137,16 +137,28 @@ public sealed class Methodology : Entity<int>
     /// <param name="periodDate">Дата періоду, а не «сьогодні».</param>
     /// <returns>Версія або <c>null</c>, якщо на цю дату жодна не чинна.</returns>
     /// <remarks>
-    /// ⚠ Береться остання опублікована версія, що почалася **не пізніше** за
-    /// дату: кінця вікна не існує, і версія діє до початку наступної. Такий
-    /// вибір однозначний за побудовою — саме тому <see cref="PublishVersion"/>
-    /// не дає двом версіям почати одного дня.
+    /// ⚠ Береться остання версія, що почалася **не пізніше** за дату: кінця
+    /// вікна не існує, і версія діє до початку наступної.
+    ///
+    /// ⛔ Тут стояло: «вибір однозначний **за побудовою** — саме тому
+    /// <see cref="PublishVersion"/> не дає двом версіям почати одного дня».
+    /// Твердження хибне, і різниця не теоретична. Перевірка публікації дивиться
+    /// лише на <c>IsPublished</c>, а цей вибір бере ще й <c>Deprecated</c> —
+    /// бо виведена з обігу версія лишається чинною для періодів, які вона
+    /// рахувала. Пара «виведена + нова від тієї самої дати» перевірку
+    /// проходить, і за рівних дат відповідь визначав порядок у списку.
+    ///
+    /// ⚠ Правило тепер задано один раз —
+    /// <see cref="MethodologyVersionKey.Currency"/>, — і це **наш вибір**, а не
+    /// відтворення: у чинній системі правила не існує взагалі (<c>H-24d-4</c>).
     /// </remarks>
     public MethodologyVersion? VersionOn(DateOnly periodDate)
         => _versions
             .Where(v => v.Status == TemplateVersionStatus.Published
                         || v.Status == TemplateVersionStatus.Deprecated)
             .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= periodDate)
-            .OrderByDescending(v => v.EffectiveFrom)
+            .OrderByDescending(
+                v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                MethodologyVersionKey.Currency)
             .FirstOrDefault();
 }

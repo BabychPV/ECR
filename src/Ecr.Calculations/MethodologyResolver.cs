@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.ValueObjects;
@@ -23,11 +24,17 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
     {
         var versions = await store.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
 
-        // Максимальний EffectiveFrom ≤ дата. Кінця вікна не існує: версія
-        // чинна до початку наступної, і саме тому вибір однозначний.
+        // ⛔ Правило вибору береться з домену
+        // (`MethodologyVersionKey.Currency`), а не повторюється тут. Тут
+        // стояло `OrderByDescending(v => v.EffectiveFrom).FirstOrDefault()`,
+        // тобто за рівних дат відповідь визначав порядок рядків, який поверне
+        // SQL Server, — рівно дефект чинної системи (`H-24d-4`), відтворений
+        // у нашому коді. Правило: пізніша дата → старша версія → більший Id.
         var version = versions
             .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= onDate)
-            .OrderByDescending(v => v.EffectiveFrom)
+            .OrderByDescending(
+                v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                MethodologyVersionKey.Currency)
             .FirstOrDefault();
 
         // ⛔ Жодної чинної версії — це не порожній результат, а помилка
