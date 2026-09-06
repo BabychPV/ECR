@@ -164,6 +164,34 @@ public sealed class MethodologyVersionTests
         Assert.Equal(NumericMode.Strict, version.NumericMode);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.3")]
+    public void Виведена_з_обігу_версія_не_перекриває_нову_від_тієї_самої_дати()
+    {
+        // ⛔ Діра, якої коментар над `VersionOn` обіцяв не допустити. Перевірка
+        // публікації дивиться лише на `IsPublished`, а вибір версії бере ще й
+        // `Deprecated` — тож пара «виведена + нова від тієї самої дати»
+        // проходить, і версій від однієї дати стає дві.
+        //
+        // ⚠ Порядок додавання тут значущий і обраний навмисно: `OrderByDescending`
+        // стабільний, тож без третього правила вигравав би перший доданий,
+        // тобто СТАРА виведена версія. У базі цей «перший» — просто порядок
+        // рядків, який здатна змінити перебудова індексу (`H-24d-4`).
+        var methodology = Methodology();
+        var old = Version(methodology, "1.0.0.0");
+        var fresh = Version(methodology, "1.1.0.0");
+
+        methodology.PublishVersion(old, Reviewer, "Базова версія", From, testsPassed: true, Now);
+        old.Deprecate();
+
+        // Проходить: `old` уже не `IsPublished`.
+        methodology.PublishVersion(fresh, Reviewer, "Уточнення", From, testsPassed: true, Now);
+
+        // ⛔ Береться НОВА. Інакше період рахувався б за формулою, яку
+        // свідомо вивели з обігу, і жодної ознаки цього в звіті не було б.
+        Assert.Same(fresh, methodology.VersionOn(new DateOnly(2026, 3, 31)));
+    }
+
     private static Methodology Methodology()
         => new(EcrCode.Create("WATER_DISCHARGE"), Text("Water discharge"));
 
