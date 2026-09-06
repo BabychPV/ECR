@@ -624,6 +624,11 @@ public sealed class AccessDecisionService(
     private async Task<bool> OutOfWindowAsync(
         int templateVersionId, int sheetDefId, int tableDefId, byte sequence, CancellationToken ct)
     {
+        // ⚠ Застарілий <c>Hide</c> читається нарівні з <c>ReadOnly</c> (`H-1`):
+        // в базі лежать рядки, записані до того, як вияснилося, що
+        // ФВ-2.16 приховування не просила. Перестати їх бачити означало б
+        // тихе відкриття доступу там, де він був закритий.
+#pragma warning disable CS0618
         var rules = await db.PeriodAccessRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId
@@ -634,6 +639,7 @@ public sealed class AccessDecisionService(
                         && (r.TableDefId == null || r.TableDefId == tableDefId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+#pragma warning restore CS0618
 
         // Правил немає — вікна немає: за замовчуванням доступні всі періоди.
         // Зворотне («немає правила — заборонено») зробило б кожен новий аркуш

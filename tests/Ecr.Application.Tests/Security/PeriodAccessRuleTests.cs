@@ -220,7 +220,6 @@ public sealed class PeriodAccessRuleTests
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-2.16")]
-    [InlineData(OutOfWindowBehavior.Hide, true)]
     [InlineData(OutOfWindowBehavior.ReadOnly, true)]
     [InlineData(OutOfWindowBehavior.Warn, false)]
     [InlineData(OutOfWindowBehavior.AllowWithConfirmation, false)]
@@ -238,6 +237,36 @@ public sealed class PeriodAccessRuleTests
 
         Assert.Equal(EditDenyReason.OutOfAccessWindow, outcome.Reason);
         Assert.Equal(blocks, outcome.Blocks);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public void Наявне_правило_з_приховуванням_продовжує_блокувати()
+    {
+        // ⛔ Нове правило з <c>Hide</c> завести більше не можна (`H-1`,
+        // перевіряється в домені). Але в базі лежать рядки, записані
+        // раніше, і вони мусять продовжувати блокувати запис.
+        //
+        // ⚠ Якби <c>Blocks</c> перестав розуміти <c>Hide</c>, правило, яке
+        // вчора забороняло правку, сьогодні її дозволило б — і ніхто не
+        // помітив би цього, бо жодна помилка не виникла б.
+        var rule = PeriodAccessRuleDef
+            .EditablePeriodOnly(Version, OutOfWindowBehavior.ReadOnly, fromSequence: 1, toSequence: 2)
+            .ForSheet(Sheet);
+
+        // Наслідуємо матеріалізацію з бази: EF пише властивість напряму,
+        // обходячи фабрику.
+#pragma warning disable CS0618
+        typeof(PeriodAccessRuleDef)
+            .GetProperty(nameof(PeriodAccessRuleDef.OnOutOfWindow))!
+            .SetValue(rule, OutOfWindowBehavior.Hide);
+#pragma warning restore CS0618
+
+        var outcome = Run(rule, Facts(sequence: 9));
+
+        Assert.Equal(EditDenyReason.OutOfAccessWindow, outcome.Reason);
+        Assert.True(outcome.Blocks);
     }
 
     [Fact]

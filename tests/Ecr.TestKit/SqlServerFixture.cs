@@ -98,7 +98,43 @@ public sealed class SqlServerFixture : IAsyncLifetime
             .Replace("Ecr.", string.Empty, StringComparison.Ordinal)
             .Replace(".Tests", string.Empty, StringComparison.Ordinal);
 
-        return string.IsNullOrWhiteSpace(suffix) ? DatabaseNamePrefix : $"{DatabaseNamePrefix}_{suffix}";
+        var name = string.IsNullOrWhiteSpace(suffix)
+            ? DatabaseNamePrefix
+            : $"{DatabaseNamePrefix}_{suffix}";
+
+        return $"{name}_{WorkspaceTag()}";
+    }
+
+    /// <summary>
+    /// Коротка мітка РОБОЧОГО КАТАЛОГУ — щоб два прогони не зіткнулися.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий клас дефекту, що й <c>Q-055</c>, але на рівень вище.
+    /// Тоді стикалися <b>проєкти в одному прогоні</b> — це закрив
+    /// суфікс із імені проєкту. Тепер стикаються <b>два прогони</b>:
+    /// два git-worktree, два агенти або розробник і CI на одному сервері.
+    /// Фікстура робить
+    /// <c>ALTER DATABASE … SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE</c>,
+    /// тож один прогін скидає базу з-під другого посеред роботи.
+    ///
+    /// ⚠ Симптом оманливий до неможливості: падають цілі фікстури
+    /// хвилями, щоразу інша збірка, а кожна з них наодинці зелена. Шукати
+    /// причину починають у власній правці — і не знаходять.
+    ///
+    /// ⚠ <c>ECR_TEST_DB</c> цього не розв'язує: він одного значення на всі
+    /// проєкти, тож задати його для повного прогону означало б повернути
+    /// саме той дефект, який закрив <c>Q-055</c>.
+    ///
+    /// ⚠ Мітка виводиться з каталогу збірки, а не з випадкового числа:
+    /// вона стала в межах одного робочого каталогу, тож база від попереднього
+    /// прогону перестворюється, а не накопичується сміттям.
+    /// </remarks>
+    private static string WorkspaceTag()
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(AppContext.BaseDirectory));
+
+        return Convert.ToHexString(bytes.AsSpan(0, 3));
     }
 
     /// <summary>Скидає і створює порожню базу; повертає рядок підключення до неї.</summary>

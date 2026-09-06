@@ -28,6 +28,24 @@ public sealed class PeriodAccessRuleDef : Entity<int>
     private PeriodAccessRuleDef(
         int templateVersionId, PeriodAccessRuleKind kind, OutOfWindowBehavior onOutOfWindow)
     {
+        // ⛔ НОВЕ правило не може отримати <c>Hide</c> (`H-1`). ФВ-2.16
+        // називає три поведінки, і приховування серед них немає — воно
+        // з‘явилося в коді як <c>0</c> і ніколи нізвідки не випливало.
+        //
+        // ⚠ Заборона стоїть у ФАБРИЦІ, а не в перевірці публікації, і
+        // це сильніше: до публікації правило вже лежало б у базі. Наявні
+        // рядки це не зачіпає: EF матеріалізує їх приватним
+        // конструктором без параметрів, і вони продовжують блокувати запис.
+#pragma warning disable CS0618
+        if (onOutOfWindow == OutOfWindowBehavior.Hide)
+        {
+            throw new DomainException(
+                "ECR-CFG-0422",
+                "Поведінка «Hide» більше не заводиться: ФВ-2.16 приховування "
+                + "не передбачає. Візьміть «ReadOnly» — це те саме «заборонити».");
+        }
+#pragma warning restore CS0618
+
         TemplateVersionId = templateVersionId;
         RuleKind = kind;
         OnOutOfWindow = onOutOfWindow;
