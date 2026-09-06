@@ -18,7 +18,8 @@ public sealed class ProjectsController(
     SetCurrentPeriodHandler setCurrentPeriod,
     CloneProjectHandler cloneProject,
     ActivateProjectHandler activate,
-    ArchiveProjectHandler archive) : ControllerBase
+    ArchiveProjectHandler archive,
+    ListPeriodPoliciesHandler policies) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
@@ -31,6 +32,21 @@ public sealed class ProjectsController(
         // немає доступу, це вже розвідка структури підприємства.
         => Ok(await list.HandleAsync(new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
             .ConfigureAwait(false));
+
+    /// <summary>
+    /// Політики періодів для форми створення проєкту. Право <c>Project.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього переліку форма не має з чого вибирати політику, надсилає
+    /// запит без неї — і сервер відхиляє його з <c>ECR-PRD-0422</c>. Так
+    /// створення проєкту, тобто ПЕРШИЙ крок роботи із системою, не працювало
+    /// з інтерфейсу взагалі (<c>A7-56</c>).
+    /// </remarks>
+    [HttpGet("period-policies")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Projects.PeriodPolicyDto>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<Ecr.Application.Projects.PeriodPolicyDto>>> PeriodPolicies(
+        CancellationToken ct)
+        => Ok(await policies.HandleAsync(ct).ConfigureAwait(false));
 
     /// <summary>Створює проєкт. Право <c>Project.Manage</c>.</summary>
     /// <remarks>
