@@ -5,6 +5,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Periods;
 
@@ -43,8 +44,11 @@ public sealed class SetCurrentPeriodHandler(
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Анонімний запит не може змінювати поточний період.");
 
+        // ⛔ `ECR-PRJ-0404`: старий `ECR-PRD-0422` обіцяв 422 цифрами і віддавав
+        // 404 конвеєром — суперечність усередині одного коду (`P-25`, рядок 4).
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт {projectId} не знайдено.");
+                      ?? throw new NotFoundException(
+                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
 
         var now = clock.UtcNow;
         var before = project.CurrentPeriodId;

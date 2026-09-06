@@ -84,6 +84,72 @@ public sealed class PatchPresentationTests
         Assert.Equal(0, _published.PresentationRevision);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-7.4")]
+    public async Task Перейменування_коду_колонки_на_версії_з_документами_дає_ECR_SCHM_0409()
+    {
+        // ⛔ ФВ-7.4 каже дослівно: `Breaking`-зміна у версії, до якої вже
+        // прив'язані документи, — це ВІДМОВА ОПЕРАЦІЇ, а не попередження. Доки
+        // код `ECR-SCHM-0409` не кидав ніхто, ця зміна поверталася загальним
+        // `ECR-TMPL-0409` разом із порадою «внесіть це клонуванням версії»
+        // (ФВ-7.1) — і саме порада тут коштує дорого: клон із новим кодом
+        // колонки НЕ рятує введені дані. Комірка посилається на код, тож після
+        // переходу документів значення просто перестають знаходитися, і
+        // дізнаються про це не з відмови, а з порожньої форми через місяць.
+        const string patch =
+            """[{"entityType":"ColumnDef","entityId":5,"field":"Code","value":"VOLUME_M3"}]""";
+
+        var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Handler().PatchAsync(1, patch, userId: 9, CancellationToken.None));
+
+        Assert.Equal("ECR-SCHM-0409", ex.ErrorCode);
+
+        // ⚠ Тип винятку тут — частина перевірки, а не випадковість: статус
+        // відповіді береться з ТИПУ, і `BusinessRuleException` дав би 422 при
+        // коді `…0409`. Саме така суперечність усередині одного коду щойно
+        // виправлена в `ECR-PRD-0422` (`P-25`), і відтворювати її новим кодом
+        // не можна.
+        Assert.Equal(
+            ChangeClass.Breaking,
+            new ChangeClassifier().Classify("ColumnDef", "Code", hasDocuments: true));
+
+        // Порушник названий поіменно, і кількість зачеплених документів теж:
+        // «щось структурне» не дає підстав ухвалити рішення.
+        Assert.Contains("ColumnDef.Code", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(true, ex.Details?["hasDocuments"]);
+
+        // Нічого не застосовано і ревізія не інкрементована.
+        await _store.DidNotReceive().ApplyPresentationAsync(
+            Arg.Any<int>(), Arg.Any<IReadOnlyList<PresentationChange>>(), Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().IncrementPresentationRevisionAsync(
+            Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-7.4")]
+    public async Task Те_саме_перейменування_без_документів_лишається_ФВ_7_1()
+    {
+        // ⛔ Друга половина ФВ-7.4, без якої перша нічого не означає: та сама
+        // зміна на версії БЕЗ документів не є `Breaking` — рятувати нічого, і
+        // класифікатор повертає `Safe`. Відмова лишається, але це вже ФВ-7.1
+        // («опублікована версія структурно незмінна»), і порада «внесіть
+        // клонуванням» тут правильна.
+        //
+        // ⚠ Без цього тесту перший був би зеленим і від «кидати ECR-SCHM-0409
+        // на будь-яку структурну зміну» — тобто від відмови, яка забороняє те,
+        // що дозволено.
+        _store.HasDocumentsAsync(1, Arg.Any<CancellationToken>()).Returns(false);
+
+        const string patch =
+            """[{"entityType":"ColumnDef","entityId":5,"field":"Code","value":"VOLUME_M3"}]""";
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().PatchAsync(1, patch, userId: 9, CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0409", ex.ErrorCode);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Змішаний_патч_із_однією_структурною_зміною_відхиляється_повністю()
     {

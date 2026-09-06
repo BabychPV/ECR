@@ -374,8 +374,12 @@ public sealed class CreateUserHandler(
 
         if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is not null)
         {
+            // ⛔ Родина USR, а не ROW (`P-25`, рядок 3). Дублікат ОБЛІКОВОГО
+            // ЗАПИСУ подавався як дублікат `RowKey` у таблиці документа: форма
+            // створення користувача не має сітки, і відмова доїжджала в
+            // обробник, у якого для неї немає ні місця, ні тексту.
             throw new BusinessRuleException(
-                "ECR-ROW-0409", $"Користувач з іменем «{userName}» уже існує.");
+                ErrorCodes.UserDuplicate, $"Користувач з іменем «{userName}» уже існує.");
         }
 
         // ⛔ Ролі перевіряються ТУТ і ДО створення чого-небудь. Сховище
@@ -399,8 +403,11 @@ public sealed class CreateUserHandler(
                 // ⚠ Саме `NotFoundException`: статус відповіді береться з ТИПУ
                 // винятку, а не з коду. `BusinessRuleException` дав би 422 при
                 // коді `...0404` — відповідь, що суперечить сама собі.
+                // ⛔ Родина SEC, а не ROW (`P-25`, рядок 2): невідома роль —
+                // це відсутній запис каталогу безпеки, а не рядок сітки
+                // документа.
                 throw new NotFoundException(
-                    "ECR-ROW-0404",
+                    ErrorCodes.SecurityPrincipalNotFound,
                     $"Ролей не існує: {string.Join(", ", unknown)}.");
             }
         }
@@ -508,7 +515,8 @@ public sealed class SetReceivesAlertsHandler(
         }
 
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-ROW-0404", $"Користувача {userId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.SecurityPrincipalNotFound, $"Користувача {userId} не існує.");
 
         // ⚠ Правило «без пошти не можна» живе в домені, а не тут: інакше його
         // обійшов би будь-який інший шлях запису.

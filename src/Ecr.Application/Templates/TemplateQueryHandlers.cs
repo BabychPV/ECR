@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Templates;
 
@@ -22,10 +23,13 @@ public sealed class ListTemplatesHandler(
 
         await RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
+        // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): перелік шаблонів комірок
+        // не має взагалі, тому `ECR-CELL-0422` доїжджав до обробника, у якого
+        // для цієї відмови немає ні місця, ні тексту.
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                "ECR-CELL-0422", $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
         return await templates.ListTemplatesAsync(page, ct).ConfigureAwait(false);

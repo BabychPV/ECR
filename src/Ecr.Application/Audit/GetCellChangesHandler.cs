@@ -2,6 +2,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Audit;
 
@@ -43,16 +44,20 @@ public sealed class GetCellChangesHandler(
             throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
         }
 
+        // ⛔ Родина REQ, а не CELL: суб'єкт відмови — ПАРАМЕТР ЗАПИТУ, а не
+        // комірка документа. З `ECR-CELL-0422` відмова журналу аудиту
+        // приходила клієнтові в обробник помилок сітки, якої на цьому екрані
+        // немає взагалі (`P-25`, рядок 1).
         if (to <= from)
         {
             throw new BusinessRuleException(
-                "ECR-CELL-0422", "Кінець вікна аудиту має бути пізнішим за початок.");
+                ErrorCodes.RequestInvalid, "Кінець вікна аудиту має бути пізнішим за початок.");
         }
 
         if (to - from > MaxWindow)
         {
             throw new BusinessRuleException(
-                "ECR-CELL-0422",
+                ErrorCodes.RequestInvalid,
                 $"Вікно аудиту ширше за {MaxWindow.TotalDays:F0} днів: запит пішов би по всіх партиціях.",
                 new Dictionary<string, object?> { ["maxDays"] = MaxWindow.TotalDays });
         }
@@ -60,7 +65,7 @@ public sealed class GetCellChangesHandler(
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                "ECR-CELL-0422", $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
         return await audit.ReadCellChangesAsync(from, to, documentId, page, ct).ConfigureAwait(false);

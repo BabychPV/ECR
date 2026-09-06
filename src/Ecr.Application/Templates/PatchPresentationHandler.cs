@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.Services;
 
 namespace Ecr.Application.Templates;
@@ -34,6 +35,10 @@ public sealed class PatchPresentationHandler(
     /// <exception cref="BusinessRuleException">
     /// Серед змін є структурна — <c>ECR-TMPL-0409</c>.
     /// </exception>
+    /// <exception cref="ConcurrencyConflictException">
+    /// Серед змін є <c>Breaking</c>, а на версії вже є документи —
+    /// <c>ECR-SCHM-0409</c> (ФВ-7.4).
+    /// </exception>
     public async Task<int> PatchAsync(int templateVersionId, string patchJson, int userId, CancellationToken ct)
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
@@ -57,9 +62,54 @@ public sealed class PatchPresentationHandler(
         // ⚠ Спершу класифікуємо ВСІ зміни і лише потім вирішуємо. Часткове
         // застосування неприпустиме: користувач надіслав патч як одне ціле, і
         // побачити половину застосованих правок гірше, ніж не побачити жодної.
-        var violations = changes
-            .Where(c => classifier.Classify(c.EntityType, c.Field, hasDocuments) != ChangeClass.Presentation)
-            .Select(c => $"{c.EntityType}.{c.Field}")
+        var classified = changes
+            .Select(c => (Name: $"{c.EntityType}.{c.Field}",
+                          Class: classifier.Classify(c.EntityType, c.Field, hasDocuments)))
+            .ToList();
+
+        // ⛔ ФВ-7.4: `Breaking`-зміна у версії, до якої вже прив'язані
+        // документи, — це ВІДМОВА ОПЕРАЦІЇ, а не попередження. Перевірка йде
+        // ПЕРЕД загальною забороною ФВ-7.1, і саме тому окремим кодом: ФВ-7.1
+        // радить «внесіть це клонуванням версії», і для перейменування
+        // `ColumnDef.Code` ця порада ХИБНА. Клон із новим кодом не рятує вже
+        // введені дані — комірка посилається на код колонки, і після переходу
+        // документів на такий клон значення просто перестають знаходитися.
+        // Тобто користувач, який слухняно виконав пораду, дізнався б про
+        // втрату не з відмови, а з порожньої форми через місяць.
+        //
+        // ⚠ Доки цей код не кидав ніхто, `ChangeClassifier` розрізняв
+        // `Breaking` лише для діагностики версій (`DiffTemplateVersionsHandler`),
+        // і обидві відповіді — «перестав місцями колонки» і «перейменував код
+        // на версії з тисячею документів» — доїжджали до клієнта однаковим
+        // `ECR-TMPL-0409`.
+        var breaking = classified
+            .Where(c => c.Class == ChangeClass.Breaking)
+            .Select(c => c.Name)
+            .ToList();
+
+        if (breaking.Count > 0)
+        {
+            // ⚠ Саме `ConcurrencyConflictException`: статус відповіді береться
+            // з ТИПУ винятку, а цифри коду кажуть 409. `BusinessRuleException`
+            // дав би 422 при коді `…0409` — рівно та суперечність усередині
+            // одного коду, через яку переписано `ECR-PRD-0422` (`P-25`).
+            throw new ConcurrencyConflictException(
+                ErrorCodes.BreakingChange,
+                "Патч містить зміни ідентичності на версії, до якої вже прив'язані документи: " +
+                string.Join(", ", breaking) +
+                ". Це відмова, а не попередження (ФВ-7.4): комірки посилаються на код колонки " +
+                "і ключ рядка, тому після перейменування вже введені значення перестають знаходитися. " +
+                "Клонування версії тут не допомагає — переносити документи буде нікуди.",
+                new Dictionary<string, object?>
+                {
+                    ["breakingFields"] = breaking,
+                    ["hasDocuments"] = hasDocuments,
+                });
+        }
+
+        var violations = classified
+            .Where(c => c.Class != ChangeClass.Presentation)
+            .Select(c => c.Name)
             .ToList();
 
         if (violations.Count > 0)
