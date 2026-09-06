@@ -3,7 +3,6 @@ using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
-using Ecr.Expressions.Binding;
 using Ecr.Expressions.Parsing;
 
 namespace Ecr.Application.Expressions;
@@ -122,8 +121,7 @@ public sealed class ValidateExpressionHandler(
         skipped.Add(SkippedUnits);
 
         return new ExpressionScope(
-            formulaEngine, new Dictionary<int, TableDef>(), Extractor: null,
-            TypeContext: null, UnitContext: null);
+            formulaEngine, Structure: null, TypeContext: null, UnitContext: null);
     }
 
     /// <summary>
@@ -135,6 +133,14 @@ public sealed class ValidateExpressionHandler(
     /// ЧЕРНЕТКОЮ, а кеш тримає лише опубліковані версії — з нього чернетка не
     /// прийшла б узагалі, і перевірка мовчки працювала б над попередньою
     /// редакцією структури.
+    ///
+    /// ⛔ Знімок віддається рушієві ЦІЛИМ (<c>H-3</c>). Доти обробник ліпив
+    /// власний <c>DependencyExtractor</c> і обтинав таблиці власною стелею —
+    /// а обтятий знімок означав, що на версії понад стелю редактор скаржиться
+    /// «діапазон неможливо розкрити» там, де публікація не скаржиться ні на
+    /// що. Це рівно та розбіжність, від якої стереже <c>ФВ-9.15a</c>, і
+    /// коштувала вона більше, ніж давала: структуру однаково читає
+    /// <see cref="PublishChecks.Snapshot"/> цілком.
     /// </remarks>
     private async Task<ExpressionScope> StructuredScopeAsync(int templateVersionId, CancellationToken ct)
     {
@@ -146,28 +152,12 @@ public sealed class ValidateExpressionHandler(
         var snapshot = PublishChecks.Snapshot(version);
         var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
 
-        var tables = snapshot.Sheets
-            .SelectMany(s => s.Tables)
-            .Take(MaxTables)
-            .ToDictionary(t => t.Id);
-
         return new ExpressionScope(
             formulaEngine,
-            tables,
-            new DependencyExtractor(new ReferenceResolver(snapshot), new RangeExpander()),
+            snapshot,
             new SnapshotTypeContext(snapshot),
             new SnapshotUnitContext(snapshot, catalogue));
     }
-
-    /// <summary>
-    /// Стеля таблиць у знімку.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Не захист від зловмисника, а межа запиту: версія з тисячами таблиць
-    /// означала б, що інтерактивна перевірка одного виразу читає всю структуру
-    /// на кожен натиск клавіші. Чинний шаблон має 21 результатну таблицю.
-    /// </remarks>
-    private const int MaxTables = 2_000;
 }
 
 /// <summary>Запит на перевірку виразу.</summary>

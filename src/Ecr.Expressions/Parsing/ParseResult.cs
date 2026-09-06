@@ -21,7 +21,10 @@ public sealed record ParsedExpression(
     ExpressionValueType ResultType);
 
 /// <summary>Діагностика розбору або перевірки.</summary>
-/// <param name="Code">Код із каталогу помилок (<c>ECR-TMPL-*</c>).</param>
+/// <param name="Code">
+/// Код із каталогу помилок: <c>ECR-TMPL-*</c> для шаблону, <c>ECR-CALC-*</c>
+/// для того, що ламається лише в діалекті методологій.
+/// </param>
 /// <param name="Message">Локалізоване повідомлення.</param>
 /// <param name="Position">Позиція в тексті виразу.</param>
 /// <param name="Length">Довжина проблемного фрагмента.</param>

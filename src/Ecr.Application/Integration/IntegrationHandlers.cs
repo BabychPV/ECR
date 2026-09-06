@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Integration;
 
@@ -47,7 +48,8 @@ public sealed class CollectFromSourceHandler(
         // ввів.
         _ = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-INT-0404", $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
+                ErrorCodes.SourceEntityNotFound,
+                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
 
         return await jobs
             .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, fromUtc, toUtc), ct)

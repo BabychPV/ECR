@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Ecr.Api.Errors;
+using Ecr.Domain.Errors;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 

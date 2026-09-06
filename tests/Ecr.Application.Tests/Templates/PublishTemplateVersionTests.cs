@@ -344,6 +344,19 @@ public sealed class PublishTemplateVersionTests
         _formulas.Parse(Arg.Any<string>(), Arg.Any<ExpressionDialect>())
                  .Returns(call => parser.Parse(call.ArgAt<string>(0), call.ArgAt<ExpressionDialect>(1)));
 
+        // ⛔ Обхід AST — справжній: саме він резолвить посилання і розкриває
+        // діапазони. Заглушка тут зробила б зеленими тести про нерезолвлену
+        // колонку і про збережений граф, нічого при цьому не перевіривши.
+        var engine = new RealFormulaEngine();
+        _formulas.ExtractDependencies(
+                     Arg.Any<ParsedExpression>(),
+                     Arg.Any<TemplateVersionSnapshot?>(),
+                     Arg.Any<DependencyContext>())
+                 .Returns(call => engine.ExtractDependencies(
+                     call.ArgAt<ParsedExpression>(0),
+                     call.ArgAt<TemplateVersionSnapshot?>(1),
+                     call.ArgAt<DependencyContext>(2)));
+
         var expander = new RangeExpander();
         Captured = expander.Expand(table, "7001001", "7001003")
             .Select((key, i) => new ExtractedDependency(0, table.Id, key, totalId, null, null, i))

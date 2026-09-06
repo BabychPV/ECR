@@ -42,9 +42,6 @@ public static class PublishChecks
 
         var diagnostics = new List<ExpressionDiagnostic>();
         var snapshot = Snapshot(version);
-        var resolver = new ReferenceResolver(snapshot);
-        var expander = new RangeExpander();
-        var extractor = new DependencyExtractor(resolver, expander);
 
         var tables = snapshot.Sheets
             .SelectMany(s => s.Tables)
@@ -65,7 +62,7 @@ public static class PublishChecks
                     formula.Expression,
                     formula.Dialect,
                     new ExpressionSite(table.Id, RowKeyOf(table, formula), formula.ColumnDefId),
-                    new ExpressionScope(formulaEngine, tables, extractor, typeContext, unitContext),
+                    new ExpressionScope(formulaEngine, snapshot, typeContext, unitContext),
                     diagnostics);
 
                 if (checkResult is null)
@@ -135,7 +132,7 @@ public static class PublishChecks
     /// публікації не змінює результат.
     /// </remarks>
     /// <param name="version">Версія, що публікується.</param>
-    /// <param name="formulaEngine">Рушій — розбір виразів.</param>
+    /// <param name="formulaEngine">Рушій — розбір виразів і обхід AST.</param>
     /// <returns>Залежності, готові до збереження.</returns>
     public static IReadOnlyList<FormulaDependency> Dependencies(
         TemplateVersion version, IFormulaEngine formulaEngine)
@@ -144,7 +141,6 @@ public static class PublishChecks
         ArgumentNullException.ThrowIfNull(formulaEngine);
 
         var snapshot = Snapshot(version);
-        var extractor = new DependencyExtractor(new ReferenceResolver(snapshot), new RangeExpander());
 
         var tables = snapshot.Sheets
             .SelectMany(s => s.Tables)
@@ -167,10 +163,17 @@ public static class PublishChecks
                     continue;
                 }
 
-                var dependencies = extractor.Extract(
-                    parsed.Expression.Root, table.Id, RowKeyOf(table, formula), tables);
+                // ⚠ Колонка формули передається так само, як у `Run`. Без неї
+                // плейсхолдер `{Month}` не резолвився, і збережений граф
+                // МОВЧКИ втрачав ребра саме тих формул, які пишуться на
+                // місячну колонку, — перевірка публікації їх бачила, а
+                // каскадний перерахунок уже ні.
+                var extraction = formulaEngine.ExtractDependencies(
+                    parsed.Expression,
+                    snapshot,
+                    new DependencyContext(table.Id, RowKeyOf(table, formula), formula.ColumnDefId));
 
-                foreach (var dependency in dependencies)
+                foreach (var dependency in extraction.Dependencies)
                 {
                     result.Add(FormulaDependency.ForFormula(
                         formula.Id,
@@ -191,7 +194,7 @@ public static class PublishChecks
     /// <summary>Формули, від яких залежить ця — для топологічного порядку.</summary>
     private static List<int> DependsOn(
         FormulaDef formula,
-        IReadOnlyList<ExtractedDependency> dependencies,
+        IReadOnlyList<FormulaDependencyRef> dependencies,
         Dictionary<int, TableDef> tables)
     {
         var result = new List<int>();
@@ -287,16 +290,27 @@ public static class PublishChecks
         // 2, 5, 12. Резолвінг посилань, розкриття діапазонів у списки RowKey,
         // заборона конкретного RowKey для RowMode = Dynamic.
         //
-        // ⚠ Без розкривача залежностей ці три перевірки ПРОПУСКАЮТЬСЯ — саме
-        // так, як пропускаються типи й одиниці без своїх контекстів. Editor
-        // без версії шаблону перевіряє лише те, що можна перевірити без неї, і
+        // ⛔ Обхід AST робить РУШІЙ (`H-3`), а не власний екземпляр
+        // `DependencyExtractor` тут. Доти і редактор, і публікація тримали по
+        // своєму — тобто по власній відповіді на питання «від чого залежить
+        // формула»; розійшовшись, вони давали б різні зауваження на той самий
+        // текст, а `ФВ-9.15a` тримається саме на їхній тотожності.
+        //
+        // ⚠ Без знімка структури ці три перевірки ПРОПУСКАЮТЬСЯ — саме так, як
+        // пропускаються типи й одиниці без своїх контекстів. Редактор без
+        // версії шаблону перевіряє лише те, що можна перевірити без неї, і
         // порожній перелік тоді означає «синтаксис цілий», а не «все гаразд».
-        IReadOnlyList<ExtractedDependency> dependencies = [];
+        IReadOnlyList<FormulaDependencyRef> dependencies = [];
 
-        if (scope.Extractor is { } extractor && site.TableDefId is { } tableDefId)
+        if (scope.Structure is { } structure && site.TableDefId is { } tableDefId)
         {
-            dependencies = extractor.Extract(
-                root, tableDefId, site.RowKey, scope.Tables, diagnostics, site.ColumnDefId);
+            var extraction = scope.FormulaEngine.ExtractDependencies(
+                parsed.Expression,
+                structure,
+                new DependencyContext(tableDefId, site.RowKey, site.ColumnDefId));
+
+            dependencies = extraction.Dependencies;
+            diagnostics.AddRange(extraction.Diagnostics);
         }
 
         // 3. Типи сумісні в кожній операції.
@@ -494,15 +508,15 @@ public readonly record struct ExpressionSite(int? TableDefId, string? RowKey, in
 /// цілий», а не «вираз правильний», — і сплутати ці два твердження означає
 /// пообіцяти публікацію, якої не буде.
 /// </remarks>
-/// <param name="FormulaEngine">Розбір виразу; потрібен завжди.</param>
-/// <param name="Tables">Таблиці версії для розкриття діапазонів.</param>
-/// <param name="Extractor">Резолвер посилань; <c>null</c> — посилання не перевіряються.</param>
+/// <param name="FormulaEngine">Розбір виразу і обхід AST; потрібен завжди.</param>
+/// <param name="Structure">
+/// Знімок структури версії; <c>null</c> — посилання не перевіряються.
+/// </param>
 /// <param name="TypeContext">Джерело типів; <c>null</c> — типи не перевіряються.</param>
 /// <param name="UnitContext">Джерело одиниць; <c>null</c> — одиниці не перевіряються.</param>
 public sealed record ExpressionScope(
     IFormulaEngine FormulaEngine,
-    IReadOnlyDictionary<int, TableDef> Tables,
-    DependencyExtractor? Extractor,
+    TemplateVersionSnapshot? Structure,
     ITypeContext? TypeContext,
     IUnitContext? UnitContext);
 
@@ -511,4 +525,4 @@ public sealed record ExpressionScope(
 /// <param name="Dependencies">Комірки, від яких вираз залежить.</param>
 public sealed record ExpressionCheckResult(
     ParsedExpression Expression,
-    IReadOnlyList<ExtractedDependency> Dependencies);
+    IReadOnlyList<FormulaDependencyRef> Dependencies);

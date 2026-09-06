@@ -1,7 +1,9 @@
 // src/Ecr.Application/Ports/IFormulaEngine.cs
 
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Binding;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
@@ -22,7 +24,33 @@ public interface IFormulaEngine
     /// Витягує залежності виразу. Діапазони рядків розкриваються в явний список
     /// <c>RowKey</c> на момент <c>Publish</c> — у рантаймі діапазонів не існує (B03 §4).
     /// </summary>
-    public IReadOnlyList<FormulaDependencyRef> ExtractDependencies(ParsedExpression expression, DependencyContext context);
+    /// <remarks>
+    /// ⛔ Знімок приходить ПАРАМЕТРОМ, а не з кешу метаданих (<c>H-3</c>,
+    /// директива №06 §1). Доти метод діставав його сам через
+    /// <c>ITemplateStructure.Get</c> — і саме тому ним не міг скористатися
+    /// ніхто: і редактор виразів, і публікація працюють над **чернеткою**,
+    /// якої в кеші немає за побудовою. Обидва будували знімок із графа
+    /// сутностей і йшли повз порт, тобто тримали по власній копії обходу
+    /// AST — а дві копії відповіді на питання «від чого залежить формула»
+    /// розходяться на першій правці.
+    ///
+    /// ⚠ Друга причина — чистота <c>Ecr.Expressions</c> (<c>B03</c> §2):
+    /// збірка має лишатися лексером, парсером, AST і компілятором із
+    /// залежностями BCL + NCalc. Звертання до кешу метаданих із фасада над
+    /// нею цю межу стирало.
+    /// </remarks>
+    /// <param name="expression">Розібраний вираз.</param>
+    /// <param name="snapshot">
+    /// Знімок структури версії, у межах якої резолвляться посилання на комірки;
+    /// <c>null</c> — структури немає. ⚠ Це не «полегшений режим»: у діалекті
+    /// методологій посилань на комірки немає за побудовою (парсер їх відхиляє),
+    /// тож резолвити нічого, а залежності між формулами <c>!Code</c> видно і
+    /// без структури.
+    /// </param>
+    /// <param name="context">Місце формули: таблиця, рядок, колонка.</param>
+    /// <returns>Залежності і зауваження, здобуті тим самим обходом.</returns>
+    public DependencyExtraction ExtractDependencies(
+        ParsedExpression expression, TemplateVersionSnapshot? snapshot, DependencyContext context);
 
     /// <summary>Обчислює вираз.</summary>
     public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
@@ -67,27 +95,66 @@ public sealed record FormulaDependencyRef(
     int? ColumnDefId,
     string? FilterJson,
     short? PeriodOffset,
-    int SortOrder);
+    int SortOrder)
+{
+    /// <summary>
+    /// Код формули, на яку посилається токен <c>!Code</c>; <c>null</c> — це
+    /// залежність іншого виду.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Розпаковування живе ТУТ, в одному місці, бо кодування неочевидне:
+    /// <c>cfg.FormulaDependency</c> не має колонки під ім'я символу, тож обхід
+    /// AST кладе його в <see cref="RowKey"/> при порожньому
+    /// <see cref="TableDefId"/>. Повторити цю здогадку на боці викликача
+    /// означало б, що зміна кодування мовчки зіпсує граф обчислення: посилання
+    /// на комірку завжди має таблицю, а <c>!Code</c> — ніколи.
+    /// </remarks>
+    public string? FormulaCode
+        => DependsOnKind == DependencyExtractor.KindCell && TableDefId is null ? RowKey : null;
+}
+
+/// <summary>
+/// Результат витягування: залежності і зауваження, здобуті одним обходом.
+/// </summary>
+/// <remarks>
+/// ⛔ Зауваження повертаються РАЗОМ із залежностями, а не збираються окремою
+/// перевіркою. Резолвінг посилань — це і є той самий обхід: він або дає
+/// залежність, або пояснює, чому не дав («колонки „Apr“ немає в таблиці»).
+/// Розділити їх означало б обходити вираз двічі й отримати два переліки
+/// зауважень, які розходяться, — а на цьому тримається <c>ФВ-9.15a</c>:
+/// редактор каже те саме, що публікація, і на тих самих позиціях.
+/// </remarks>
+/// <param name="Dependencies">Розкриті залежності виразу.</param>
+/// <param name="Diagnostics">Що не резолвилося; порожньо — усе резолвилося.</param>
+public sealed record DependencyExtraction(
+    IReadOnlyList<FormulaDependencyRef> Dependencies,
+    IReadOnlyList<ExpressionDiagnostic> Diagnostics);
 
 /// <summary>
 /// Контекст витягування залежностей: те, чого немає в самому виразі, але без
 /// чого скорочені форми посилань не резолвляться (02b §3.1).
 /// </summary>
 /// <remarks>
-/// ⚠ <b>Q-014, обґрунтування — часткове.</b> Два останні поля дослівно повторюють
-/// параметри <c>DependencyExtractor.Extract(AstNode, int currentTableDefId,
-/// string? currentRowKey)</c> і <c>ReferenceResolver.Resolve(...)</c> з `05d`.
-/// <see cref="TemplateVersionId"/> додано мною: резолвер працює зі
-/// <c>TemplateVersionSnapshot</c>, і без ідентифікатора версії порт не може
-/// його дістати.
+/// ⚠ <b>Q-014, обґрунтування — тверде.</b> Поля дослівно повторюють параметри
+/// <c>DependencyExtractor.Extract(AstNode, int currentTableDefId,
+/// string? currentRowKey, …, int? currentColumnDefId)</c> і
+/// <c>ReferenceResolver.Resolve(...)</c> з `05d`.
+///
+/// ⚠ Поля <c>TemplateVersionId</c> тут БІЛЬШЕ НЕМАЄ (<c>H-3</c>). Воно існувало
+/// рівно заради того, щоб порт сам дістав знімок із кешу; тепер знімок
+/// приходить параметром і сам несе свою версію. Лишити ідентифікатор означало б
+/// дозволити виклик, у якому знімок і версія з різних місць.
 /// </remarks>
-/// <param name="TemplateVersionId">Версія шаблону, у межах якої резолвляться коди.</param>
 /// <param name="CurrentTableDefId">Таблиця, в якій живе формула — для скорочених форм.</param>
 /// <param name="CurrentRowKey">Рядок формули; <c>null</c> для формул рівня колонки.</param>
+/// <param name="CurrentColumnDefId">
+/// Колонка, яку підставляє плейсхолдер <c>{Month}</c>; <c>null</c> — формула не
+/// прив'язана до місячної колонки.
+/// </param>
 public sealed record DependencyContext(
-    int TemplateVersionId,
     int CurrentTableDefId,
-    string? CurrentRowKey);
+    string? CurrentRowKey,
+    int? CurrentColumnDefId);
 
 /// <summary>
 /// Вузол графа обчислення для <see cref="IFormulaEngine.BuildEvaluationOrder"/> —

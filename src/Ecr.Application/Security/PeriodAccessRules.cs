@@ -67,8 +67,17 @@ public readonly record struct PeriodRuleOutcome(
     /// підтвердження в інтерфейсі. Заборона тут перетворила б обидві на
     /// <c>ReadOnly</c>, і три поведінки з вимоги стали б однією.
     /// </remarks>
+    /// <remarks>
+    /// ⚠ <c>Hide</c> тут навмисно: це застарілий синонім <c>ReadOnly</c>
+    /// (<c>H-1</c>), і наявні рядки з ним у базі мусять продовжувати
+    /// блокувати запис. Перестати його розуміти означало б, що правило,
+    /// яке вчора забороняло правку, сьогодні її дозволяє — і ніхто не
+    /// помітить.
+    /// </remarks>
+#pragma warning disable CS0618 // Застаріле значення мусить читатися з бази.
     public bool Blocks => Reason != EditDenyReason.None
                           && Behavior is OutOfWindowBehavior.Hide or OutOfWindowBehavior.ReadOnly;
+#pragma warning restore CS0618
 }
 
 /// <summary>
