@@ -72,17 +72,18 @@ export function completionAt(text: string, offset: number): CompletionContext | 
   const typed = /[A-Za-z0-9_]*$/.exec(before)?.[0] ?? '';
   const head = before.slice(0, before.length - typed.length);
 
+  // ⛔ Перевірка рядка — ПЕРША, до розпізнавання префіксів. Зворотний порядок
+  // здається рівноцінним і не є ним: у `'@Fuel` префікс `@` знаходиться раніше,
+  // ніж хтось питає, чи ми взагалі в тексті, — і редактор пропонує підставити
+  // ім'я аргументу всередину константи, яку користувач саме друкує.
+  if (insideString(before)) {
+    return null;
+  }
+
   for (const { text: prefix, kind } of Prefixes) {
     if (head.endsWith(prefix)) {
       return { kind, replaceFrom: before.length - typed.length, typed };
     }
-  }
-
-  // ⛔ Усередині рядкового літерала не доповнюється НІЧОГО. `'@Fuel'` — це
-  // текст, а не посилання, і підставити туди ім'я аргументу означало б мовчки
-  // зіпсувати константу, яку користувач саме друкує.
-  if (insideString(before)) {
-    return null;
   }
 
   // ⚠ Порожній `typed` теж доповнюється: перелік функцій має відкриватися по

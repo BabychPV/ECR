@@ -13,6 +13,7 @@
     "lint": "eslint src e2e",
     "api:types": "openapi-typescript ../../contracts/openapi.snapshot.json -o src/api/schema.d.ts",
     "test:a11y": "vitest run --config vitest.a11y.config.ts",
+    "budget": "node scripts/check-bundle-budget.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

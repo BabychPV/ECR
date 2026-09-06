@@ -37,6 +37,9 @@ const RegistriesPage = lazy(async () => ({
 const MethodologiesPage = lazy(async () => ({
   default: (await import('@/pages/admin/MethodologiesPage')).MethodologiesPage,
 }));
+const ExpressionsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/ExpressionsPage')).ExpressionsPage,
+}));
 const SecurityPage = lazy(async () => ({
   default: (await import('@/pages/admin/SecurityPage')).SecurityPage,
 }));
@@ -130,6 +133,7 @@ export const router = createBrowserRouter([
       { path: 'admin/templates/:id/versions/:versionId', element: <TemplateVersionPage /> },
       { path: 'admin/registries', element: <RegistriesPage /> },
       { path: 'admin/methodologies', element: <MethodologiesPage /> },
+      { path: 'admin/expressions', element: <ExpressionsPage /> },
       { path: 'admin/security', element: <SecurityPage /> },
       { path: 'admin/periods', element: <PeriodsPage /> },
       { path: 'admin/sources', element: <SourcesPage /> },
