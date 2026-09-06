@@ -69,7 +69,14 @@ public interface IUserStore
     /// <returns>Скільки ролей тепер призначено.</returns>
     public Task<int> ReplaceRolesAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct);
 
-    /// <summary>Коди ролей користувача.</summary>
+    /// <summary>
+    /// Коди БЕЗСТРОКОВИХ ролей користувача.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Строкові призначення (підміна на час відпустки) сюди не входять і
+    /// не редагуються цим шляхом: інакше збереження форми перетворювало б
+    /// тимчасове на постійне — людина бачить роль у списку і лишає її.
+    /// </remarks>
     public Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct);
 
     /// <summary>Сторінка облікових записів.</summary>

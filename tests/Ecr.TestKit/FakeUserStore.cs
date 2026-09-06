@@ -100,6 +100,8 @@ public sealed class FakeUserStore : IUserStore
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct)
     {
+        // Фікстура тримає лише безстрокові призначення — саме ті, якими
+        // керує `ReplaceRolesAsync`.
         var user = _users.Find(u => u.Id == userId);
 
         return Task.FromResult<IReadOnlyList<string>>(user is null

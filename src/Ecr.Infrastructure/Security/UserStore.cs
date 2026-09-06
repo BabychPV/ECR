@@ -90,7 +90,13 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     public async Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct)
         => await db.RoleAssignments
             .AsNoTracking()
-            .Where(a => a.UserId == userId)
+
+            // ⚠ Лише БЕЗСТРОКОВІ призначення — рівно той набір, яким керує
+            // `ReplaceRolesAsync`. Показати тут ще й строкову підміну на час
+            // відпустки означало б, що збереження форми перетворює її на
+            // постійну: людина бачить роль у списку, лишає її — і тимчасове
+            // стає вічним.
+            .Where(a => a.UserId == userId && a.ValidFrom == null && a.ValidTo == null)
             .Join(db.Roles, a => a.RoleId, r => r.Id, (_, r) => r.Code)
             .OrderBy(code => code)
             .ToListAsync(ct)
