@@ -67,6 +67,15 @@
 
 ## Зведення
 
+> ⛔ **Виправлено 2026-09-06.** Ця таблиця правилася окремо від записів і
+> розійшлася з ними в п'яти місцях: `Q-006`, `Q-012`, `Q-016`, `Q-039` і
+> `Q-075` стояли `OPEN`, хоча їхні записи вже читалися `RESOLVED`, а `Q-063`
+> у таблиці не було взагалі. Статуси приведені до записів і до коду.
+>
+> ⚠ Відкритим лишається **один** запис — `Q-063` (гейт `BR-07`, упирається в
+> залізо). Єдиний чинний перелік того, що чекає на людину, —
+> [`pk1-handover.md`](pk1-handover.md); ця таблиця веде історію.
+
 | ID | Тип | Тема | Статус |
 |---|---|---|---|
 | Q-001 | DECIDED | пакет документації перенесено в `docs/` | RESOLVED |
@@ -74,17 +83,17 @@
 | Q-003 | BOOTSTRAP-FIX | чотири `.csproj` оголошені в `.sln`, але відсутні в пакеті | RESOLVED |
 | Q-004 | BOOTSTRAP-FIX | версії пакетів: downgrade + вразливості | RESOLVED · мажор `NCalcSync 5→6` підтверджено 2026-09-04 |
 | Q-005 | **CONTRACT** | `Entity<TId> : struct` проти `Permission : Entity<string>` | RESOLVED · перекваліфіковано за рев'ю (В-1) |
-| Q-006 | BOOTSTRAP-FIX | аналізатори ламають власний код пакета (18 правил) | **OPEN** — рішення про стиль |
+| Q-006 | BOOTSTRAP-FIX | аналізатори ламають власний код пакета (18 правил) | RESOLVED · варіант **B**, виконано в `Q-064` |
 | Q-007 | BOOTSTRAP-FIX | `IRepository.cs` — пропущений `///` | RESOLVED |
 | Q-008 | BOOTSTRAP-FIX | `Ecr.Application → Ecr.Expressions` | RESOLVED |
 | Q-009 | DECIDED | namespace `ParseResult.cs` | RESOLVED |
 | Q-010 | DECIDED | секції на два файли, директиви `COPY FROM` | RESOLVED |
 | Q-011 | BOOTSTRAP-FIX | відсутні `using` у 34 файлах | RESOLVED · доповнено за рев'ю (К-2) |
-| Q-012 | DECIDED | `TemplateStructureDto` бере `ColumnDto`/`RowDto` з `Documents.Dto` | **OPEN** — семантика DTO |
+| Q-012 | DECIDED | `TemplateStructureDto` бере `ColumnDto`/`RowDto` з `Documents.Dto` | RESOLVED · самозакриття, див. запис |
 | Q-013 | CONFLICT | циклічна залежність `FormulaEngine` | RESOLVED · варіант **A**, 2026-09-04 |
 | Q-014 | CONTRACT | десять контрактних типів не оголошені ніде | RESOLVED · перенесені в `02-contracts.md`, 2026-09-04 |
 | Q-015 | SCOPE | 41 файл у дереві без вмісту в `05*` | RESOLVED · усі створені, 2026-09-04 |
-| Q-016 | ENV | Docker не запущений | **OPEN** |
+| Q-016 | ENV | Docker не запущений | RESOLVED · `Q-062`: Docker і локальний SQL — два рівноправні шляхи |
 | Q-017 | SCOPE | frontend: `typecheck` потребує згенерованих модулів | **ЗАКРИТО** (Етап 6) |
 | Q-018 | CONFLICT | `Ecr.Calculations` і `Ecr.Adapters.PiAf` вимагають `Ecr.Infrastructure` | RESOLVED · варіант **B**, порти в контракті, 2026-09-04 |
 | Q-019 | BOOTSTRAP-FIX | немає `[CollectionDefinition("SqlServer")]` | RESOLVED |
@@ -106,10 +115,10 @@
 | Q-036 | ENV | `InvariantGlobalization` блокує `ef database update`; потрібен `sqlcmd -I` | RESOLVED |
 | Q-037 | CONFLICT | 57 розбіжностей зі схемою на рівні стовпців, індексів, `DEFAULT`, `CHECK` | RESOLVED · схема виграє |
 | Q-038 | BOOTSTRAP-FIX | тіньові FK-колонки і винайдені EF індекси | RESOLVED |
-| **Q-039** | **ENV** | **зіставлення бази не задане в контракті — впливає на унікальність кодів** | **OPEN · потребує рішення** |
+| Q-039 | ENV | зіставлення бази не задане в контракті — впливає на унікальність кодів | RESOLVED · `Latin1_General_100_CI_AS_SC`, виконано в `Q-061` |
 | Q-040 | CONFLICT | `InvariantGlobalization=true` не дає SqlClient відкрити з'єднання | RESOLVED · вимкнено, намір НФВ тримається `CultureInfo.InvariantCulture` |
 | Q-041 | DECIDED | `sys_ecr.*` поза моделлю EF, seed, `SqlBatches`, дві сутності `sec.*` | RESOLVED |
-| **Q-042** | **CONFLICT** | **`sec.RoleAssignment`: у схемі немає місця під призначення ролі на AD-групу (ФВ-6.15)** | **OPEN · потребує рішення** |
+| Q-042 | CONFLICT | `sec.RoleAssignment`: у схемі немає місця під призначення ролі на AD-групу (ФВ-6.15) | RESOLVED · виконано на Етапі 3 |
 | Q-043 | DECIDED | модулі 1.5–1.6: `TestDocumentBuilder`, `MetadataCacheTests` в інтеграційні, послідовності лише для SQL Server | RESOLVED |
 | Q-044 | SCOPE | аудит, п'ятий прохід: розсинхрон контракту, `08`/`09` поза §13, тести поза `06*` | RESOLVED |
 | Q-045 | CONFLICT | тригери незмінності оголошені в EF, але їх не створює ніхто | RESOLVED · `10-triggers.sql` |
@@ -128,12 +137,13 @@
 | Q-058 | CONFLICT | правило «час лише через `IClock`» знайшло 4 порушення у щойно написаному коді | RESOLVED |
 | Q-059 | SCOPE | доробка Етапу 1: заглушок `Stage1` — нуль | RESOLVED |
 | Q-074 | DECIDED | `IUiStringCatalog` доповнено `GetScopedAsync` і `SetAsync` — без області поділ `D-114` невиразний | RESOLVED |
-| Q-075 | **CONTRACT** | порушення політики пароля повертає `ECR-PWD-0428`: власного коду в закритому каталозі немає | **OPEN** — потрібне підтвердження |
+| Q-075 | CONTRACT | порушення політики пароля повертає `ECR-PWD-0428`: власного коду в закритому каталозі немає | RESOLVED · заведено `ECR-PWD-0422` |
 | Q-076 | CONFLICT | `sec.RolePermission` не наповнювався seed-ом: жоден користувач не мав ЖОДНОГО права | RESOLVED |
 | Q-077 | CONFLICT | `IBackgroundJobScheduler` не зареєстрований → `DocumentsController` не створювався, `500` на всіх ендпоінтах | RESOLVED |
 | Q-078 | CONFLICT | каталог обіцяв `428`, `423`, `503`; конвеєр віддавав `422` | RESOLVED |
 | Q-079 | DECIDED | чотири обробники Етапу 3 отримали залежності, яких не було в скелеті | RESOLVED |
-| **Q-027** | **CONFLICT** | **22 сутності розходяться зі схемою БД** | **OPEN** · Етап 1 **не зачеплено** (`Q-028`), виконання за етапами 3–5 |
+| Q-027 | CONFLICT | 22 сутності розходяться зі схемою БД | RESOLVED · виконано за етапами 3–5 |
+| **Q-063** | **SCOPE** | **гейт `BR-07` не міряний: SQL Express непридатний за побудовою** | **OPEN** · упирається в залізо (`P-03`, `C-6`) |
 
 ---
 
@@ -1018,7 +1028,7 @@ src/features/grid/DocumentGrid.tsx(39,58): error TS2503: Cannot find namespace '
 
 `npm run build` не запускав: він потребує `index.html`, якого немає (Q-015),
 і `tsc -b`, який упаде на тих самих помилках.
-**Статус:** OPEN · Етап 6
+**Статус:** RESOLVED · Закрито на Етапі 6 (2026-09-05); рядок `OPEN` був застарілим — виправлено 2026-09-06
 
 ---
 
@@ -1664,7 +1674,7 @@ public string ConditionExpression { get; private set; } = null!;
 lookback не згадує, тож правило «схема виграє» діє без застережень —
 `LookbackDays` із `DEFAULT(7)`. Тривога через «зміну одиниці» була зайвою.
 
-**Статус:** OPEN · правило уточнене, виконання рознесене за етапами
+**Статус:** RESOLVED · виконано за етапами 3–5. Перевірено 2026-09-06: у `EcrDbContext` не лишилося жодного `Ignore<T>()`; обидва названі вимогою поля на місці (`PrincipalSid`; `IsCurrent` свідомо живе на `CalculationRun`)
 
 ---
 
@@ -2653,7 +2663,7 @@ public string? PrincipalSid { get; private set; }
 конвенційною таблицею в `dbo`, як і решта заблокованих `Q-027`. На Етап 1 це не
 впливає: seed її не наповнює.
 
-**Статус:** OPEN
+**Статус:** RESOLVED · виконано на Етапі 3. Перевірено 2026-09-06: `PrincipalSid` і `CK_RoleAssign_Principal` у `SecurityStage3Configuration`
 
 ---
 
@@ -4397,7 +4407,7 @@ public Task<int> GetRevisionAsync(CancellationToken ct);
 **Що потрібно від людини:** підтвердити повторне використання `ECR-PWD-0428`
 або дозволити додати `ECR-PWD-0422` до каталогу.
 
-**Статус:** OPEN
+**Статус:** RESOLVED · заведено `ECR-PWD-0422` (`PasswordPolicyViolated`); клієнт розрізняє «ще не міняв» і «спробував невдало»
 
 ---
 
