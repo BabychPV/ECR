@@ -152,9 +152,14 @@ public sealed class PublishMethodologyHandler(
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
         if (!ordering.IsSuccess)
         {
+            var byId = formulas.ToDictionary(f => f.Id, f => f.Code);
+
             throw new BusinessRuleException(
                 "ECR-TMPL-4221",
-                "Формули версії утворюють цикл: " + string.Join(" → ", ordering.CyclePath ?? []));
+                Ecr.Expressions.Graph.CycleDescription.Describe(
+                    ordering.CyclePath,
+                    id => byId.TryGetValue(id, out var code) ? code : id.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture)));
         }
 
         var position = 0;
@@ -211,12 +216,17 @@ public sealed class PublishMethodologyHandler(
 
         foreach (var code in extraction.Dependencies.Select(d => d.FormulaCode))
         {
-            // ⚠ Самопосилання ребром не стає: формула, що читає власний
-            // результат, — це не порядок обчислення, а окреме питання, і
-            // топологічне сортування назвало б її циклом без пояснення.
-            if (code is not null
-                && byCode.TryGetValue(code, out var target)
-                && target.Id != formula.Id)
+            // ⛔ Самопосилання БІЛЬШЕ НЕ ВІДСІЮЄТЬСЯ. Тут стояв фільтр
+            // «це не порядок обчислення, а окреме питання», і він суперечив
+            // власному рушію: <c>BuildEvaluationOrder</c> документував, що
+            // формула, залежна від себе, — це цикл і публікація має його
+            // побачити (ФВ-9.4). Обіцянка була недосяжна: саморебро до
+            // графа не доходило ніколи.
+            //
+            // ⚠ Застереження фільтра було правдиве — «цикл: X → X» справді
+            // нічого не пояснює. Тому воно зняте не відкиданням, а
+            // <c>CycleDescription</c>, який називає саме цей випадок словами.
+            if (code is not null && byCode.TryGetValue(code, out var target))
             {
                 edges.Add(target.Id);
             }
