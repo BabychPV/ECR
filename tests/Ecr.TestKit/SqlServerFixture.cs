@@ -170,6 +170,8 @@ public sealed class SqlServerFixture : IAsyncLifetime
                 .ConfigureAwait(false);
         }
 
+        await MarkAsSmallAsync(serverConnection).ConfigureAwait(false);
+
         var target = new SqlConnectionStringBuilder(serverConnection)
         {
             InitialCatalog = DatabaseName,
@@ -177,6 +179,42 @@ public sealed class SqlServerFixture : IAsyncLifetime
         };
 
         return target.ConnectionString;
+    }
+
+    /// <summary>
+    /// Позначає базу як тестову — щоб <c>01-filegroups.sql</c> робив малі файли.
+    /// </summary>
+    /// <param name="serverConnection">Підключення до сервера.</param>
+    /// <remarks>
+    /// ⛔ Позначка з'явилася після того, як тестові бази з'їли **152 ГБ** і
+    /// зупинили роботу помилкою «operating system error 112». Скрипт зменшував
+    /// файли лише на Express (<c>EngineEdition = 4</c>), а замовник ухвалив
+    /// ставити локально **Developer Edition** (<c>H-19</c>) — у неї
+    /// <c>EngineEdition = 3</c>. Перевірка мовчала, і кожна база з кількома
+    /// сотнями рядків народжувалася на 14 ГБ.
+    ///
+    /// ⚠ Найоманливіше було ім'я: інстанс називається <c>SQLEXPRESS</c>, тобто
+    /// сам сервер повідомляв «Express» — а виданням не був.
+    ///
+    /// ⚠ Позначку ставить ФІКСТУРА, а не скрипт: призначення бази знає лише
+    /// той, хто її створює. Розгортання не ставить нічого, і продуктивні
+    /// розміри не змінюються ні на байт.
+    /// </remarks>
+    private async Task MarkAsSmallAsync(string serverConnection)
+    {
+        var target = new SqlConnectionStringBuilder(serverConnection)
+        {
+            InitialCatalog = DatabaseName,
+            TrustServerCertificate = true,
+        };
+
+        await using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await ExecuteAsync(
+            connection,
+            "EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;")
+            .ConfigureAwait(false);
     }
 
     /// <summary>

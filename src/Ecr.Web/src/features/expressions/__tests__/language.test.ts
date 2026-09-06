@@ -16,12 +16,28 @@ function rootRules(dialect: 'Template' | 'Methodology', functions: string[] = []
   return [...buildMonarchLanguage({ dialect, functionNames: functions }).tokenizer['root']!];
 }
 
+/** Правило, прив'язане до початку тексту. */
+function anchored(rule: TokenRule): RegExp {
+  return new RegExp(`^(?:${rule[0].source})`, rule[0].flags.replace('g', ''));
+}
+
 /** Перше правило, чий зразок збігається з початком тексту. */
 function firstMatch(rules: readonly TokenRule[], text: string): TokenRule | undefined {
-  return rules.find((rule) => {
-    const anchored = new RegExp(`^(?:${rule[0].source})`, rule[0].flags.replace('g', ''));
-    return anchored.test(text);
-  });
+  return rules.find((rule) => anchored(rule).test(text));
+}
+
+/**
+ * Скільки тексту з'їдає перше правило, що збіглося.
+ *
+ * ⛔ Саме довжина, а не факт збігу: правило `@[A-Za-z_]\w*` збігається з
+ * `@GCV.Temperature` теж — воно просто бере з нього `@GCV`. Тест, який питає
+ * лише «яке правило спрацювало», такої різниці не побачив би, а на екрані вона
+ * означає інший зміст виразу.
+ */
+function consumed(rules: readonly TokenRule[], text: string): string | undefined {
+  const rule = firstMatch(rules, text);
+
+  return rule === undefined ? undefined : (anchored(rule).exec(text)?.[0] ?? undefined);
 }
 
 describe('посилання на формулу «!» — єдина справжня неоднозначність граматики', () => {
@@ -49,6 +65,49 @@ describe('посилання на формулу «!» — єдина справ
     for (const dialect of ['Template', 'Methodology'] as const) {
       expect(firstMatch(rootRules(dialect), '!= 1')?.[1]).toBe('operator');
     }
+  });
+});
+
+describe('дотове ім’я аргументу — ОДНЕ посилання (I.6)', () => {
+  // ⛔ Правило дослівно повторює `Lexer.ReadDottedName` на сервері. Розійтися
+  // з ним тут означає рівно те, чого цей файл забороняє собі в шапці:
+  // редактор показує інший зміст, ніж бачить парсер. У корпусі методологій
+  // таких імен 2534 — тобто розбіжність була б видима на кожному другому
+  // виразі.
+
+  it('ФВ-9.15a: «@GCV.HSE400_FG_Makat_Methane» фарбується цілком', () => {
+    const rules = rootRules('Methodology');
+
+    expect(consumed(rules, '@GCV.HSE400_FG_Makat_Methane')).toBe(
+      '@GCV.HSE400_FG_Makat_Methane',
+    );
+    expect(firstMatch(rules, '@GCV.HSE400_FG_Makat_Methane')?.[1]).toBe('variable');
+  });
+
+  it('кілька крапок поспіль теж одне ім’я', () => {
+    expect(consumed(rootRules('Methodology'), '@A.B.C')).toBe('@A.B.C');
+  });
+
+  it('ім’я без крапки не змінилося', () => {
+    expect(consumed(rootRules('Methodology'), '@Land_Measure_Component_337')).toBe(
+      '@Land_Measure_Component_337',
+    );
+  });
+
+  it('крапка перед цифрою іменем не є — лексер зупиняється там само', () => {
+    // ⚠ `@X.5` — це аргумент `@X`, крапка і число. З'їсти тут `.5` означало б
+    // пофарбувати як ім'я те, що сервер прочитає інакше.
+    expect(consumed(rootRules('Methodology'), '@X.5')).toBe('@X');
+  });
+
+  it('крапка в кінці не втягується', () => {
+    expect(consumed(rootRules('Methodology'), '@X.')).toBe('@X');
+  });
+
+  it('у шаблонах правило те саме: діалект тут ні до чого', () => {
+    // Дотових імен у діалекті A не буває, але правило спільне, і різна
+    // поведінка означала б другу точку задання.
+    expect(consumed(rootRules('Template'), '@GCV.Temperature')).toBe('@GCV.Temperature');
   });
 });
 
