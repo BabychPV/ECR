@@ -996,8 +996,13 @@ CREATE TABLE doc.Project
     PeriodKind          tinyint       NOT NULL,    -- PeriodKind
     PeriodPolicyId      int           NOT NULL,
     YearGraceOffsetDays int           NOT NULL CONSTRAINT DF_Project_YearGrace DEFAULT(45),
-    -- Пояс майданчика: у ньому рахуються межі періодів, offsets і IsLateEdit (D-68)
-    TimeZoneId          nvarchar(64)  NOT NULL CONSTRAINT DF_Project_Tz DEFAULT(N'Central Asia Standard Time'),
+    -- Пояс майданчика: у ньому рахуються межі періодів, offsets і IsLateEdit (D-68).
+    -- Значення — ІДЕНТИФІКАТОР IANA (N'Asia/Aqtau'), не Windows-ідентифікатор і не
+    -- зсув: зсув міняється переходом на літній час, а збережене число — ні (H-13).
+    -- ⛔ DEFAULT прибраний (D2-74). Він підставляв N'Central Asia Standard Time' —
+    -- Windows-ідентифікатор, і робив це мовчки для будь-якої вставки, яка колонку
+    -- не назвала. Пояс обов'язковий і видимий: вставка без нього має падати.
+    TimeZoneId          nvarchar(64)  NOT NULL,
     -- Поточний період — НАША конфігурація, а не значення з AF (D-77)
     CurrentPeriodMode   tinyint       NOT NULL CONSTRAINT DF_Project_CPMode DEFAULT(0),
     CurrentPeriodId     int           NULL,
@@ -1014,6 +1019,11 @@ CREATE TABLE doc.Project
     CONSTRAINT FK_Project_TV     FOREIGN KEY (TemplateVersionId) REFERENCES cfg.TemplateVersion (Id),
     CONSTRAINT FK_Project_Policy FOREIGN KEY (PeriodPolicyId)    REFERENCES doc.PeriodPolicy (Id),
     CONSTRAINT CK_Project_Period CHECK (PeriodStart <= PeriodEnd),
+    -- Груба сітка проти повернення Windows-ідентифікаторів і зсувів (D2-75).
+    -- Точне правило — в домені (SiteTimeZone); база ловить два класи значень,
+    -- які в цю колонку справді потрапляли: N'Central Asia Standard Time' (пробіли)
+    -- і N'+05:00' / N'UTC+13' (+ або :). Жоден ідентифікатор IANA їх не містить.
+    CONSTRAINT CK_Project_TzIana CHECK (LEN(TimeZoneId) > 0 AND TimeZoneId NOT LIKE N'%[ +:]%'),
     CONSTRAINT CK_Project_Pinned CHECK (CurrentPeriodMode <> 1 OR
         (CurrentPeriodId IS NOT NULL AND CurrentPeriodPinnedReason IS NOT NULL))
 );

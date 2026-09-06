@@ -183,7 +183,12 @@
 ## 4. Дані документа
 
 Проєкт `ECR-2026-DEMO`, `PeriodStart = 2026-01-01`, `PeriodEnd = 2026-12-31`,
-`TimeZoneId = Central Asia Standard Time`, політика `ECR-Standard`.
+`TimeZoneId = Asia/Almaty`, політика `ECR-Standard`.
+
+> ⚠ Було `Central Asia Standard Time`. Домен більше не приймає
+> Windows-ідентифікаторів (`ФВ-1.1b`, `H-13`), а `Asia/Almaty` — це те, у що
+> сама платформа переводить старе значення: обидва +06:00, тож усі очікувані
+> межі періодів у фікстурі лишилися ті самі.
 
 Документ `DOC-DEMO-01`, `BusinessKey = 'PLANT-A'`.
 
@@ -606,7 +611,7 @@ gsec = 912687.5 / 2592000             = 0.352117... g/s → 0.352117
     "periodStart": "2026-01-01",
     "periodEnd": "2026-12-31",
     "periodKind": "Monthly",
-    "timeZoneId": "Central Asia Standard Time",
+    "timeZoneId": "Asia/Almaty",
     "periodPolicy": "ECR-Standard"
   },
 

@@ -3,6 +3,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -126,17 +127,19 @@ public sealed class PeriodStateJob(
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>Пояс за ідентифікатором; невідомий — UTC із явним падінням у журнал.</summary>
+    /// <summary>Правила поясу майданчика за збереженим ідентифікатором IANA.</summary>
+    /// <remarks>
+    /// ⛔ Мовчазного UTC тут НЕМАЄ і бути не може. Він був: порожній
+    /// ідентифікатор повертав <c>TimeZoneInfo.Utc</c> — при тому, що сусідній
+    /// коментар обіцяв протилежне. Для майданчика на <c>Asia/Aqtau</c> це
+    /// зсунуло б кожну межу періоду на п'ять годин, і «31 числа о 23:59»
+    /// закривалося б о 18:59 за місцем — тобто рівно посеред робочого дня,
+    /// коли форми ще дозаповнюють. Помітили б це лише за скаргою «не встиг
+    /// подати», і причину шукали б де завгодно, крім порожньої колонки.
+    ///
+    /// ⚠ Виняток тут — не аварія задачі, а єдиний спосіб дізнатися, що в базі
+    /// лежить пояс, якого система не знає.
+    /// </remarks>
     private static TimeZoneInfo ResolveZone(string? timeZoneId)
-    {
-        if (string.IsNullOrWhiteSpace(timeZoneId))
-        {
-            return TimeZoneInfo.Utc;
-        }
-
-        // ⛔ Мовчазний UTC при помилці в ідентифікаторі зсунув би межі періодів
-        // на кілька годин — і ніхто б не помітив, поки період не закрився б
-        // «не тоді». Тому виняток летить далі.
-        return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-    }
+        => SiteTimeZone.Create(timeZoneId).ToTimeZoneInfo();
 }

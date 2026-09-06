@@ -161,7 +161,7 @@
     "periodStart": "2026-01-01",
     "periodEnd": "2026-12-31",
     "periodKind": "Monthly",
-    "timeZoneId": "Central Asia Standard Time",
+    "timeZoneId": "Asia/Almaty",
     "periodPolicy": "ECR-Standard"
   },
 

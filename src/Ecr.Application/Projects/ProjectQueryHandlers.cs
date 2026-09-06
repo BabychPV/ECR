@@ -15,7 +15,7 @@ namespace Ecr.Application.Projects;
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код.</param>
 /// <param name="Status">Стан проєкту.</param>
-/// <param name="TimeZoneId">Пояс майданчика.</param>
+/// <param name="TimeZoneId">Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`).</param>
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="CurrentPeriodId">Поточний період — підказка UI, не правило доступу (D-77).</param>
 /// <param name="PeriodCount">Скільки періодів у календарі.</param>
@@ -133,12 +133,15 @@ public sealed class CreateProjectHandler(
     /// <summary>Створює проєкт на звітний рік.</summary>
     /// <param name="code">Код проєкту.</param>
     /// <param name="name">Назва мовами каталогу.</param>
-    /// <param name="timeZoneId">Пояс майданчика.</param>
+    /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA (<c>Asia/Aqtau</c>).</param>
     /// <param name="periodKind">Періодичність.</param>
-    /// <param name="year">Звітний рік; <c>null</c> — поточний за <c>IClock</c>.</param>
+    /// <param name="year">Звітний рік; <c>null</c> — поточний **у поясі майданчика**.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
     /// <param name="periodPolicyId">Політика періодів.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CFG-4221</c> — пояс порожній, невідомий або не є ідентифікатором IANA.
+    /// </exception>
     public async Task<int> HandleAsync(
         string code,
         IReadOnlyDictionary<string, string> name,
@@ -153,7 +156,28 @@ public sealed class CreateProjectHandler(
 
         await ListTemplatesHandler.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
-        var reportingYear = year ?? clock.UtcNow.Year;
+        // ⛔ Пояс перевіряється ПЕРШИМ із усього, і саме тут. Він вічний
+        // (ФВ-1.1a), тож невідомий ідентифікатор став би вічною властивістю
+        // проєкту; і без нього не можна порахувати навіть звітний рік нижче.
+        //
+        // ⛔ Перевіряє `SiteTimeZone`, а не `FindSystemTimeZoneById`. Тут стояв
+        // саме він, і вимогу «IANA» не забезпечував: виміряно, що на Windows
+        // він приймає і `Central Asia Standard Time`, і `UTC+13`. Тобто
+        // директиву №06 §3 старий код проходив лише на вигляд.
+        //
+        // ⚠ Виняток доменний, тому це 422 з кодом і текстом, а не 500:
+        // невідомий пояс — помилка ВВЕДЕННЯ, і той, хто його надіслав, має
+        // побачити, що саме не так.
+        var zone = SiteTimeZone.Create(timeZoneId);
+
+        // ⛔ Рік беремо в поясі МАЙДАНЧИКА, а не сервера. Тут стояло
+        // `clock.UtcNow.Year`, і для майданчика на `Asia/Almaty` (UTC+6)
+        // проєкт, створений 1 січня о 03:00 за місцем (це 31 грудня 21:00
+        // UTC), отримував МИНУЛИЙ рік: дванадцять періодів із ключами
+        // `YYYY*100+N` не того року. `PeriodKey` — ключ партиціонування (R-A6),
+        // тож дані поїхали б у чужі партиції й у чужий архів, а виглядало б це
+        // як «конфігуратор помилився роком».
+        var reportingYear = year ?? TimeZoneInfo.ConvertTimeFromUtc(clock.UtcNow, zone.ToTimeZoneInfo()).Year;
 
         // ⛔ Нуль тут — не «значення за замовчуванням», а відсутність вибору.
         // Проєкт без версії шаблону не має структури, без політики періодів —
@@ -171,40 +195,6 @@ public sealed class CreateProjectHandler(
                 "ECR-PRD-0422", "Проєкт неможливо створити без політики періодів.");
         }
 
-        // ⛔ Пояс НЕ підставляється мовчки (`D-5`). Сервер стоїть де завгодно,
-        // а межі періодів рахуються в поясі МАЙДАНЧИКА (`D-68`): тихий `UTC`
-        // зсунув би закриття періоду на кілька годин, і помітили б це лише
-        // тоді, коли хтось не встиг подати форму «вчасно».
-        if (string.IsNullOrWhiteSpace(timeZoneId))
-        {
-            throw new BusinessRuleException(
-                "ECR-CFG-0422",
-                "Часовий пояс майданчика обов'язковий: у ньому рахуються межі періодів "
-                + "і позначки пізніх змін. Після відкриття першого періоду його вже не змінити.");
-        }
-
-        // ⚠ Пояс перевіряється ТУТ, при створенні: після відкриття першого
-        // періоду змінити його вже не можна (ФВ-1.1a), тож невідомий
-        // ідентифікатор став би вічною властивістю проєкту.
-        //
-        // ⚠ І перетворюється на 422, а не на 500: невідомий ідентифікатор —
-        // помилка ВВЕДЕННЯ, і той, хто його надіслав, має побачити, що саме
-        // не так, а не «внутрішня помилка сервера».
-        try
-        {
-            _ = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            throw new BusinessRuleException(
-                "ECR-CFG-0422", $"Часового поясу «{timeZoneId}» не існує на цьому сервері.");
-        }
-        catch (InvalidTimeZoneException)
-        {
-            throw new BusinessRuleException(
-                "ECR-CFG-0422", $"Опис часового поясу «{timeZoneId}» пошкоджений.");
-        }
-
         var project = new Project(
             EcrCode.Create(code),
             new LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
@@ -213,7 +203,10 @@ public sealed class CreateProjectHandler(
             templateVersionId,
             periodKind,
             periodPolicyId,
-            timeZoneId);
+
+            // Перевірене значення, а не вхідний рядок: у базу має лягти рівно
+            // те, за чим порахований `reportingYear` вище.
+            zone);
 
         await periods.AddProjectAsync(project, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
