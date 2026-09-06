@@ -181,13 +181,12 @@ public sealed class PublishMethodologyHandler(
         IReadOnlyList<MethodologyTestCase> testCases,
         CancellationToken ct)
     {
-        // ⛔ Порожній набір — НЕ зелений. «Тестів немає, отже все гаразд» —
-        // саме та підміна, через яку публікація без перевірки виглядає як
-        // публікація з перевіркою.
-        if (testCases.Count == 0)
-        {
-            return false;
-        }
+        // ⛔ Порівняння тут БІЛЬШЕ НЕ ЖИВЕ. Воно винесене в `GoldenSet`, бо
+        // тими самими очікуваннями має міряти і прогін без запису
+        // (`ФВ-13.5`): доти той проганяв ті самі тести і жодного разу не
+        // звіряв їх з очікуваннями, тож людина бачила числа, але не бачила,
+        // зійшлися вони чи ні — а публікація відмовляла саме тому.
+        var verdicts = new List<TestCaseVerdict>();
 
         foreach (var testCase in testCases)
         {
@@ -195,17 +194,10 @@ public sealed class PublishMethodologyHandler(
                 .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, version)), ct)
                 .ConfigureAwait(false);
 
-            foreach (var (code, expected) in testCase.Expected)
-            {
-                var actual = output.Values.FirstOrDefault(v => v.OutputCode == code);
-                if (actual is null || Math.Abs(actual.Value - expected) > testCase.Tolerance)
-                {
-                    return false;
-                }
-            }
+            verdicts.Add(GoldenSet.Judge(testCase, output));
         }
 
-        return true;
+        return GoldenSet.IsGreen(verdicts);
     }
 
     /// <summary>Diff результатів між новою версією і попередньою чинною.</summary>

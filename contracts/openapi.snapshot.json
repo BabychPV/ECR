@@ -3229,6 +3229,10 @@
             "description": "Різниця з чинною опублікованою версією. Порожня — версія нічого не змінює;\r\nсаме це і треба бачити перед публікацією (`ФВ-9.6`).",
             "type": "object"
           },
+          "isGreen": {
+            "description": "Чи зійшовся набір цілком. ⛔ Порожній набір — **не** зелений: «тестів\r\nнемає, отже все гаразд» — саме та підміна, через яку публікація без\r\nперевірки виглядає як публікація з перевіркою (`ФВ-9.12`).",
+            "type": "boolean"
+          },
           "outputs": {
             "additionalProperties": {
               "format": "double",
@@ -3236,6 +3240,13 @@
             },
             "description": "Код виходу → значення й одиниця.",
             "type": "object"
+          },
+          "testCases": {
+            "description": "Вердикт кожного тесту золотого набору (`ФВ-13.7`) — тим самим правилом,\r\nяким публікація вирішує, чи набір зелений.",
+            "items": {
+              "$ref": "#/components/schemas/TestCaseVerdict"
+            },
+            "type": "array"
           },
           "trace": {
             "description": "Покроковий журнал; у симуляції завжди повний.",
@@ -3248,7 +3259,9 @@
         "required": [
           "outputs",
           "diffWithPublished",
-          "trace"
+          "trace",
+          "testCases",
+          "isGreen"
         ],
         "type": "object"
       },
@@ -3806,6 +3819,66 @@
           "presentationRevision",
           "clonedFromVersionId",
           "publishedAt"
+        ],
+        "type": "object"
+      },
+      "TestCaseMismatch": {
+        "description": "Одна розбіжність: очікували одне, отримали інше.",
+        "properties": {
+          "actual": {
+            "description": "Що вийшло; `null` — виходу не було взагалі.",
+            "format": "double",
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "expected": {
+            "description": "Що мало вийти.",
+            "format": "double",
+            "type": "number"
+          },
+          "outputCode": {
+            "description": "Який вихід розійшовся.",
+            "type": "string"
+          },
+          "tolerance": {
+            "description": "Допуск порівняння; нуль означає точний збіг.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "outputCode",
+          "actual",
+          "expected",
+          "tolerance"
+        ],
+        "type": "object"
+      },
+      "TestCaseVerdict": {
+        "description": "Вердикт одного тесту золотого набору.",
+        "properties": {
+          "code": {
+            "description": "Код тесту — те, що потрапляє в повідомлення про провал.",
+            "type": "string"
+          },
+          "isGreen": {
+            "description": "Чи зійшлися всі очікувані числа в межах допуску.",
+            "type": "boolean"
+          },
+          "mismatches": {
+            "description": "Розбіжності; порожньо, якщо тест зелений.",
+            "items": {
+              "$ref": "#/components/schemas/TestCaseMismatch"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "isGreen",
+          "mismatches"
         ],
         "type": "object"
       },

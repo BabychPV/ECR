@@ -10,6 +10,7 @@ import type {
   TemplateVersionSummary,
 } from '@/api/types';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
+import { TestCaseRunner } from '@/features/expressions/TestCaseRunner';
 import type { ExpressionPlacement } from '@/features/expressions/api';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -55,6 +56,22 @@ export function ExpressionsPage(): JSX.Element {
       apiFetch<TemplateVersionSummary[]>(`/api/v1/templates/${String(firstTemplateId)}/versions`),
     enabled: firstTemplateId !== undefined,
   });
+
+  // Яку саме версію методології обрано — потрібні обидва ідентифікатори:
+  // симуляція адресується методологією, а набір тестів належить версії.
+  const selectedMethodology = useMemo(() => {
+    if (methodologyVersionId === null) return undefined;
+
+    for (const methodology of methodologies.data ?? []) {
+      for (const version of methodology.versions) {
+        if (String(version.id) === methodologyVersionId) {
+          return { methodologyId: methodology.id, versionId: version.id };
+        }
+      }
+    }
+
+    return undefined;
+  }, [methodologies.data, methodologyVersionId]);
 
   // ⚠ Об'єкт розміщення мемоізується: редактор перезапитує склад мови і
   // перевірку на КОЖНУ його зміну за посиланням, і новий літерал на кожен
@@ -133,8 +150,35 @@ export function ExpressionsPage(): JSX.Element {
       />
 
       <Findings result={result} />
+
+      {/*
+        ⛔ Прогін тестів з'являється ЛИШЕ коли обрана версія методології, і це
+        не зручність. Золотий набір належить версії (`calc.TestCase`); кнопка
+        без неї не мала б що проганяти, а показана і бездіяльна — обіцяла б
+        перевірку, якої не буде.
+      */}
+      {dialect === 'Methodology' && selectedMethodology !== undefined && (
+        <TestCaseRunner
+          methodologyId={selectedMethodology.methodologyId}
+          methodologyVersionId={selectedMethodology.versionId}
+          periodKey={currentPeriodKey()}
+        />
+      )}
     </Stack>
   );
+}
+
+/**
+ * Поточний період у форматі `PeriodKey` (`R-A6`: рік × 100 + порядковий).
+ *
+ * ⚠ Місяць, а не квартал: прогін іде на даних періоду, і найдрібніший період
+ * дає найшвидшу відповідь. Для методологій із іншою періодичністю це
+ * найближче наближення, яке не потребує окремого поля на цій сторінці.
+ */
+function currentPeriodKey(): number {
+  const now = new Date();
+
+  return now.getUTCFullYear() * 100 + now.getUTCMonth() + 1;
 }
 
 /**

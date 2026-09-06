@@ -441,3 +441,7 @@ export type ValidateExpressionBody = Schemas['ValidateExpressionBody'];
  * обробити новий випадок — замість того, щоб мовчки його не показати.
  */
 export type ExpressionDialect = Schemas['ExpressionDialect'];
+
+
+/** Вердикт одного тесту золотого набору (`ФВ-13.7`). */
+export type TestCaseVerdict = Schemas['TestCaseVerdict'];

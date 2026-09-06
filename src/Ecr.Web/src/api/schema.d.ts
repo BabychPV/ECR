@@ -5304,10 +5304,17 @@ export interface components {
             diffWithPublished: {
                 [key: string]: number;
             };
+            /** @description Чи зійшовся набір цілком. ⛔ Порожній набір — **не** зелений: «тестів
+             *     немає, отже все гаразд» — саме та підміна, через яку публікація без
+             *     перевірки виглядає як публікація з перевіркою (`ФВ-9.12`). */
+            isGreen: boolean;
             /** @description Код виходу → значення й одиниця. */
             outputs: {
                 [key: string]: number;
             };
+            /** @description Вердикт кожного тесту золотого набору (`ФВ-13.7`) — тим самим правилом,
+             *     яким публікація вирішує, чи набір зелений. */
+            testCases: components["schemas"]["TestCaseVerdict"][];
             /** @description Покроковий журнал; у симуляції завжди повний. */
             trace: string[];
         };
@@ -5549,6 +5556,35 @@ export interface components {
             status: components["schemas"]["TemplateVersionStatus"];
             /** @description Номер версії. */
             version: string;
+        };
+        /** @description Одна розбіжність: очікували одне, отримали інше. */
+        TestCaseMismatch: {
+            /**
+             * Format: double
+             * @description Що вийшло; `null` — виходу не було взагалі.
+             */
+            actual: null | number;
+            /**
+             * Format: double
+             * @description Що мало вийти.
+             */
+            expected: number;
+            /** @description Який вихід розійшовся. */
+            outputCode: string;
+            /**
+             * Format: double
+             * @description Допуск порівняння; нуль означає точний збіг.
+             */
+            tolerance: number;
+        };
+        /** @description Вердикт одного тесту золотого набору. */
+        TestCaseVerdict: {
+            /** @description Код тесту — те, що потрапляє в повідомлення про провал. */
+            code: string;
+            /** @description Чи зійшлися всі очікувані числа в межах допуску. */
+            isGreen: boolean;
+            /** @description Розбіжності; порожньо, якщо тест зелений. */
+            mismatches: components["schemas"]["TestCaseMismatch"][];
         };
         /**
          * @description Рівень деталізації трейсу розрахунку (ЗБР-3).
