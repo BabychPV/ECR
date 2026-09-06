@@ -74,7 +74,7 @@ public sealed class Parser
             return new ParseResult(false, null, diagnostics);
         }
 
-        var parsed = new ParsedExpression(expression, dialect, root, InferShape(root));
+        var parsed = new ParsedExpression(expression, dialect, root, InferShape(root, dialect));
         return new ParseResult(diagnostics.Count == 0, parsed, diagnostics);
     }
 
@@ -276,14 +276,6 @@ public sealed class Parser
             // ⚠ `Pow(a, b)` — ЄДИНИЙ степінь діалекту B: оператора `**` у
             // NCalc 1.3.8 теж немає (замір скасував критерій `2**3 = 8` з
             // кроку 2 директиви №05), тож альтернативи в пораді бути не може.
-            //
-            // ⛔ Порада поки що випереджає код: `ParseFunctionCall` звіряється
-            // з `FunctionRegistry` (вигаданий набір `02b` §8, де степінь —
-            // `POWER`), а не з виміряним `DialectCatalog`, де він `Pow`.
-            // Тому сьогодні `Pow(2,3)` відхиляється як невідома функція.
-            // Каталоги зводить крок `I.14` (`E-7`) — і саме `Pow` має лишитися
-            // в тексті: назвати тут `POWER` означало б порадити функцію, якої
-            // чинний рушій не знає.
             s.Error(
                 ExpressionErrors.CaretNotPower,
                 "'^' у діалекті методологій не означає степінь: це побітовий XOR, "
@@ -453,15 +445,13 @@ public sealed class Parser
         // Набір функцій ЗАКРИТИЙ (02b §7–8). Невідома функція — це не «поки що
         // не реалізовано», а помилка публікації: інакше друкарська помилка в
         // імені тихо дає порожнє значення.
-        if (!Functions.IsAllowed(name, s.Dialect))
+        var signature = SignatureOf(name, s.Dialect);
+        if (signature is null)
         {
-            s.Error(
-                $"Функція '{name}' недоступна в діалекті {s.Dialect}.",
-                token.Position, token.Length);
+            s.Error(UnknownFunction(name, s.Dialect), token.Position, token.Length);
         }
-        else if (Functions.GetSignature(name) is { } signature
-                 && (args.Count < signature.MinArgs
-                     || (signature.MaxArgs is { } max && args.Count > max)))
+        else if (args.Count < signature.MinArgs
+                 || (signature.MaxArgs is { } max && args.Count > max))
         {
             s.Error(
                 $"Функція '{name}' приймає {Describe(signature)}, а отримала {args.Count}.",
@@ -469,6 +459,49 @@ public sealed class Parser
         }
 
         return new FunctionNode(name, args) { Position = token.Position };
+    }
+
+    /// <summary>
+    /// Сигнатура функції в діалекті; <c>null</c> — такої функції там немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Два діалекти — два КАТАЛОГИ, і це не симетрія заради симетрії.
+    /// Діалект шаблонів описує наш власний рушій над таблицею документа
+    /// (<c>02b</c> §7): імена там ексельні й регістронезалежні, бо переносяться
+    /// з аркуша. Діалект методологій описує ЧУЖИЙ рушій — NCalc 1.3.8, — і
+    /// його склад виміряний, а не обраний (<c>DialectCatalog</c>).
+    ///
+    /// ⛔ До кроку <c>I.14</c> обидва діалекти звірялися з
+    /// <see cref="FunctionRegistry"/>, тобто діалект B розбирався вигаданим
+    /// набором: <c>POWER(2,3)</c> і <c>SWITCH(…)</c> проходили публікацію, хоча
+    /// чинний рушій обох не знає (<c>Q-082</c>). Це не «зайва суворість
+    /// тепер» — це різні ЧИСЛА тоді, звірені ні з чим.
+    /// </remarks>
+    private static FunctionSignature? SignatureOf(string name, ExpressionDialect dialect)
+        => dialect == ExpressionDialect.Methodology
+            ? DialectCatalog.Find(name)
+            : Functions.IsAllowed(name) ? Functions.GetSignature(name) : null;
+
+    /// <summary>Текст відмови для імені, якого в діалекті немає.</summary>
+    /// <remarks>
+    /// ⚠ Порада — не ввічливість. У діалекті методологій більшість промахів
+    /// має рівно одну правильну поправку: <c>POW</c> це описка регістру,
+    /// <c>POWER</c> і <c>SWITCH</c> — наш власний вигаданий набір, який ці
+    /// формули приймав. «Невідома функція» відправила б методолога шукати те,
+    /// чого нема, замість переписати одне слово.
+    /// </remarks>
+    private static string UnknownFunction(string name, ExpressionDialect dialect)
+    {
+        var message = $"Функція '{name}' недоступна в діалекті {dialect}.";
+
+        if (dialect != ExpressionDialect.Methodology)
+        {
+            return message;
+        }
+
+        return DialectCatalog.Advice(name) is { } advice
+            ? $"{message} У наборі чинного рушія (NCalc 1.3.8) {advice}."
+            : message;
     }
 
     private static string Describe(FunctionSignature signature)
@@ -653,20 +686,26 @@ public sealed class Parser
     }
 
     /// <summary>Груба оцінка типу за формою виразу; точний тип дає <c>TypeChecker</c>.</summary>
-    private static ExpressionValueType InferShape(AstNode node)
+    /// <remarks>
+    /// ⚠ Діалект тут потрібен рівно заради функцій: <c>if</c> діалекту B
+    /// повертає тип обраної гілки (у корпусі це буває ТЕКСТ —
+    /// <c>'Сверхнорматив'</c>), а ексельний <c>IF</c> діалекту A — свій. Один
+    /// каталог на обидва давав би тип не тієї мови.
+    /// </remarks>
+    private static ExpressionValueType InferShape(AstNode node, ExpressionDialect dialect)
         => node switch
         {
             LiteralNode literal => literal.Type,
             UnaryNode { Operator: UnaryOperator.Not } => ExpressionValueType.Boolean,
-            UnaryNode unary => InferShape(unary.Operand),
+            UnaryNode unary => InferShape(unary.Operand, dialect),
             BinaryNode binary => binary.Operator switch
             {
                 BinaryOperator.Concat => ExpressionValueType.Text,
                 >= BinaryOperator.Equal and <= BinaryOperator.Or => ExpressionValueType.Boolean,
                 _ => ExpressionValueType.Number,
             },
-            ConditionalNode conditional => InferShape(conditional.WhenTrue),
-            FunctionNode function => Functions.GetSignature(function.Name)?.ResultType
+            ConditionalNode conditional => InferShape(conditional.WhenTrue, dialect),
+            FunctionNode function => SignatureOf(function.Name, dialect)?.ResultType
                                      ?? ExpressionValueType.Null,
             PeriodPropertyNode => ExpressionValueType.Number,
             _ => ExpressionValueType.Null,

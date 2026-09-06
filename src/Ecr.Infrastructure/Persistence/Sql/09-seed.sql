@@ -431,6 +431,12 @@ USING (VALUES
     (N'expressions.methodologyVersion',  N'en', N'Methodology version', 1),
     (N'expressions.anyVersion',          N'en', N'Syntax only', 1),
     (N'expressions.editorLabel',         N'en', N'Expression', 1),
+
+    -- ⛔ Позначка ярусу `Extension` у переліку автодоповнення (`02b` §8).
+    -- Функція, якої чинний рушій не знає: у версії з `NumericMode = Legacy`
+    -- вираз із нею не опублікується (`ECR-CALC-0433`), тому позначка стоїть
+    -- у переліку, а не в описі під ним — рішення ухвалюють у мить вибору.
+    (N'expressions.function.extension',   N'en', N'outside the current engine set', 1),
     (N'expressions.noFindings',          N'en', N'No findings', 1),
     (N'expressions.findings',            N'en', N'Findings: {count}', 1),
     (N'expressions.resultType',          N'en', N'Result type: {type}', 1),
@@ -716,8 +722,11 @@ USING (VALUES
     (N'registries.sourceSwitchHint',     N'en', N'The set is switched as one operation', 1),
     (N'registries.sourceSwitchWarning',  N'en', N'All or nothing: an unknown code rejects the whole operation, and the check for open periods is done once for the set. Not allowed while any period is open: part of the documents would be filled against one list of entries and part against another.', 1),
     (N'registries.sourceReasonHint',     N'en', N'A year from now this is the only question that will need an answer: why these registries were switched together.', 1),
-    (N'periods.timeZone',                N'en', N'Site time zone', 1),
-    (N'periods.timeZoneHint',            N'en', N'Period boundaries and late-edit marks are calculated in this zone. It cannot be changed once the first period is open.', 1),
+    (N'periods.timeZone',                N'en', N'Site time zone (IANA)', 1),
+    -- ⚠ Підказка називає IANA і незмінність разом: поле обов'язкове і без
+    -- початкового значення (H-13), тож користувач має знати обидві причини,
+    -- перш ніж обере — після відкриття першого періоду вибір остаточний.
+    (N'periods.timeZoneHint',            N'en', N'IANA identifier of the site, for example Asia/Aqtau. Period boundaries and late-edit marks are calculated in this zone, and it cannot be changed once the first period is open.', 1),
     (N'periods.templateVersion',         N'en', N'Template version', 1),
     (N'periods.templateVersionHint',     N'en', N'Published versions only: a draft has no frozen structure.', 1),
     (N'periods.policy',                  N'en', N'Period policy', 1),
@@ -739,6 +748,32 @@ USING (VALUES
     (N'security.emailHint',              N'en', N'Without it no notification reaches this person, and the alerts switch stays off.', 1),
     (N'security.oneTimePassword',        N'en', N'One-time password', 1),
     (N'security.oneTimePasswordHint',    N'en', N'You will have to pass it on yourself. The server neither generates nor returns passwords, and the account must change it at first sign-in.', 1),
+
+    -- «Мої групи»: чому в мене немає доступу (`H-21`).
+    (N'nav.myGroups',                    N'en', N'My groups', 1),
+    (N'myGroups.title',                  N'en', N'My groups and roles', 1),
+    (N'myGroups.hint',                   N'en', N'Roles of domain accounts are assigned to AD groups, and membership comes from your sign-in ticket. This page shows which of your groups produced roles, and which produced nothing.', 1),
+    (N'myGroups.ticketGroups',           N'en', N'Groups in your sign-in ticket', 1),
+    (N'myGroups.ticketGroupsHint',       N'en', N'Every group from the ticket, matched or not. A group that produced nothing is what the directory team needs from you.', 1),
+    (N'myGroups.sid',                    N'en', N'Security identifier', 1),
+    (N'myGroups.matched',                N'en', N'Produced a role', 1),
+    (N'myGroups.yes',                    N'en', N'yes', 1),
+    (N'myGroups.no',                     N'en', N'no', 1),
+    (N'myGroups.effective',              N'en', N'Roles you actually have', 1),
+    (N'myGroups.noRoles',                N'en', N'None. Every screen will be empty, and that is not a fault of the data.', 1),
+    (N'myGroups.personal',               N'en', N'Assigned to you personally: {roles}', 1),
+    (N'myGroups.expired',                N'en', N'Assigned but no longer in force: {roles}. A dated assignment has ended.', 1),
+    (N'myGroups.noSidsTitle',            N'en', N'Your ticket carries no group at all', 1),
+    (N'myGroups.noSidsHint',             N'en', N'That is a setup question rather than a permissions one: a local account has no groups, and a domain sign-in that carries none means the ticket was issued without them.', 1),
+    (N'myGroups.unmatchedTitle',         N'en', N'{count} group(s) produced nothing', 1),
+    (N'myGroups.unmatchedHint',          N'en', N'The system knows the groups but grants no role through them. Quote the identifiers below when you ask the directory team.', 1),
+    (N'myGroups.notMineTitle',           N'en', N'Group membership of another account is unknown here', 1),
+    (N'myGroups.notMineHint',            N'en', N'Membership arrives in the sign-in ticket, and this person''s ticket is not ours to read. What is listed instead is which groups grant roles at all.', 1),
+    (N'myGroups.catalogue',              N'en', N'Groups that grant roles', 1),
+    (N'myGroups.catalogueHint',          N'en', N'Add the person to one of these groups in the directory; nothing else here grants a role.', 1),
+    (N'myGroups.other',                  N'en', N'Another account', 1),
+    (N'myGroups.otherHint',              N'en', N'Answers "why do I have no access" without signing in as that person.', 1),
+    (N'myGroups.otherPlaceholder',       N'en', N'Pick an account', 1),
     (N'nav.units',                       N'en', N'Units', 1),
     (N'units.title',                     N'en', N'Units of measure', 1),
     (N'units.value',                     N'en', N'Value', 1),

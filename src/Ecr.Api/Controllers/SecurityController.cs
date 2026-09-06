@@ -24,8 +24,52 @@ public sealed class SecurityController(
     Ecr.Application.Security.ListUserRolesHandler listUserRoles,
     Ecr.Application.Security.ReplaceUserRolesHandler replaceRoles,
     Ecr.Application.Security.SetUserEmailHandler setEmail,
+    Ecr.Application.Security.GetAccessDiagnosticsHandler accessDiagnostics,
     Ecr.Domain.Abstractions.IClock clock) : ControllerBase
 {
+    /// <summary>
+    /// Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Ендпоінт існує тому, що збій рольової моделі на живому домені
+    /// <b>не відрізняється від справної системи</b>: людина входить, бачить
+    /// порожні переліки і вважає, що даних немає. Тут вона бачить свій SID,
+    /// усі SID груп зі свого квитка, які з них дали ролі і які — ні.
+    ///
+    /// ⚠ Права не потребує НАВМИСНО: вимагати <c>Security.ManageUsers</c> на
+    /// власні групи означало б лишити без відповіді саме тих, заради кого
+    /// маршрут заведений, — рядових співробітників без жодного права. Чужі
+    /// SID цим шляхом не віддаються: суб'єкт завжди сам викликач.
+    /// </remarks>
+    [HttpGet("security/my-groups")]
+    [ProducesResponseType<Ecr.Application.Security.AccessDiagnosticsView>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> MyGroups(CancellationToken ct)
+        => Ok(await accessDiagnostics.HandleAsync(subjectUserId: null, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Те саме про ЧУЖИЙ запис. Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="id">Обліковий запис, доступ якого пояснюємо.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Потрібен, щоб адміністратор відповідав на «чому в мене немає
+    /// доступу», <b>не заходячи під людиною</b>: симуляція (`ФВ-6.16a`) для
+    /// цього завелика — вона пише сеанс в аудит і показує чужі дані, тоді як
+    /// питання стосується самих лише призначень.
+    ///
+    /// ⛔ Членство в групах приходить із квитка (`ФВ-6.15a`), а квитка чужої
+    /// сесії в нас немає (`P-02`) — відповідь каже про це прямо
+    /// (<c>groupsFromTicket: false</c>) і натомість перелічує, які групи
+    /// взагалі щось дають. Мовчазний порожній перелік читався б як «людина ні
+    /// в яких групах не перебуває», і це була б неправда.
+    /// </remarks>
+    [HttpGet("security/users/{id:int}/groups")]
+    [ProducesResponseType<Ecr.Application.Security.AccessDiagnosticsView>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UserGroups(int id, CancellationToken ct)
+        => Ok(await accessDiagnostics.HandleAsync(id, ct).ConfigureAwait(false));
+
     /// <summary>Перелік ролей. Право <c>Security.ManageRoles</c>.</summary>
     [HttpGet("roles")]
     [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.RoleView>>(StatusCodes.Status200OK)]

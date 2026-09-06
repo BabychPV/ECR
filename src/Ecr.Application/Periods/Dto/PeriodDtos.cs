@@ -39,7 +39,11 @@ public sealed record PeriodDto(
 /// ⚠ Поточний період — підказка UI, а не правило доступу (<c>D-77</c>).
 /// </remarks>
 /// <param name="ProjectId">Проєкт.</param>
-/// <param name="TimeZoneId">Пояс майданчика, у якому пораховані межі.</param>
+/// <param name="TimeZoneId">
+/// Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`), у якому пораховані
+/// межі. Клієнт отримує саме ідентифікатор, а не зсув: зсув чинний лише на
+/// момент відповіді і збрехав би на межі переходу на літній час.
+/// </param>
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="CurrentPeriodMode">Автоматичний вибір чи закріплений період.</param>
 /// <param name="Periods">Періоди в порядку зростання <c>PeriodKey</c>.</param>

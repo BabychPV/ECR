@@ -26,8 +26,9 @@ import {
   type ExpressionPalette,
 } from '@/shared/theme/expressionTheme';
 import { buildLanguageConfiguration, buildMonarchLanguage } from './language';
-import { completionAt, completionsFor, signatureOf } from './completion';
+import { completionAt, completionsFor, signatureOf, type CompletionItem } from './completion';
 import { markersFor } from './markers';
+import { t } from '@/shared/i18n';
 import type { ExpressionDialect, ExpressionMetadataDto } from '@/api/types';
 import { languageIdOf } from './dialect';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
@@ -262,7 +263,7 @@ function registerCompletion(languageId: string, source: MetadataSource): void {
         ...(item.kind === 'function'
           ? { insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet }
           : {}),
-        ...(item.detail === undefined ? {} : { detail: item.detail }),
+        ...detail(item),
 
         // ⛔ Простий рядок, а не `IMarkdownString`. Опис приходить із бази, де
         // його редагує адміністратор; віддати його розмітці означало б
@@ -282,7 +283,18 @@ function registerSignatureHelp(languageId: string, source: MetadataSource): void
     provideSignatureHelp(model, position) {
       const text = model.getValue();
       const name = enclosingFunction(text, model.getOffsetAt(position));
-      const fn = source()?.functions.find((f) => f.name === name);
+
+      if (name === null) return null;
+
+      // ⛔ Спершу ТОЧНИЙ збіг, і лише потім без регістру. У діалекті методологій
+      // регістр значущий (`Round` є, `ROUND` немає), і зведення до одного
+      // написання показувало б підказку не тієї функції. Запасний прохід
+      // потрібен діалекту шаблонів: там імена ексельні й регістронезалежні,
+      // тобто `sum(` і `SUM(` — те саме слово.
+      const functions = source()?.functions ?? [];
+      const fn =
+        functions.find((f) => f.name === name) ??
+        functions.find((f) => f.name.toUpperCase() === name.toUpperCase());
 
       if (fn === undefined) return null;
 
@@ -306,6 +318,12 @@ function registerSignatureHelp(languageId: string, source: MetadataSource): void
  * ⚠ Рахує вкладеність назад від курсора: у `SUM(ROUND(x, 2), 3)` підказка має
  * стосуватися `SUM` або `ROUND` залежно від того, де саме стоїть курсор, а не
  * першої знайденої назви.
+ *
+ * ⛔ Ім'я повертається ЯК НАПИСАНЕ. Тут стояв `.toUpperCase()`, і для діалекту
+ * шаблонів це було нешкідливо — там усі 12 імен у верхньому регістрі. Для
+ * діалекту методологій він означав би, що підказку не знайдено НІКОЛИ: у
+ * виміряному наборі всі імена змішаного регістру (`Pow`, `Round`, `if`), і
+ * `POW` серед них немає.
  */
 function enclosingFunction(text: string, offset: number): string | null {
   let depth = 0;
@@ -316,7 +334,7 @@ function enclosingFunction(text: string, offset: number): string | null {
     if (symbol === ')') depth++;
     else if (symbol === '(') {
       if (depth === 0) {
-        return /[A-Za-z_]\w*$/.exec(text.slice(0, i))?.[0]?.toUpperCase() ?? null;
+        return /[A-Za-z_]\w*$/.exec(text.slice(0, i))?.[0] ?? null;
       }
 
       depth--;
@@ -324,6 +342,29 @@ function enclosingFunction(text: string, offset: number): string | null {
   }
 
   return null;
+}
+
+/**
+ * Права колонка переліку підстановок.
+ *
+ * ⛔ Функція ярусу `Extension` позначається просто в переліку, а не в описі
+ * під ним: опис бачить лише той, хто затримався на варіанті, а рішення
+ * «брати цю функцію чи ні» ухвалюють у мить вибору. Позначка каже те саме, що
+ * і `ECR-CALC-0433`: чинний рушій цього не вміє, тож у версії з
+ * `NumericMode = Legacy` такий вираз не опублікується.
+ *
+ * ⚠ Ярус приходить із СЕРВЕРА. Зашитий тут перелік «наших» функцій став би
+ * другою правдою: замір (`tests/Ecr.Legacy.Probe`) переніс би `Ln` у ядро, а
+ * редактор далі позначав би її як розширення.
+ */
+function detail(item: CompletionItem): { detail?: string } {
+  const mark = item.tier === 'Extension' ? t('expressions.function.extension') : undefined;
+
+  if (mark === undefined) {
+    return item.detail === undefined ? {} : { detail: item.detail };
+  }
+
+  return { detail: item.detail === undefined ? mark : `${item.detail} · ${mark}` };
 }
 
 function kindOf(kind: string): monaco.languages.CompletionItemKind {

@@ -180,6 +180,24 @@ public static class ErrorCodes
     /// </remarks>
     public const string InvalidCode = "ECR-CFG-0422";
 
+    /// <summary>
+    /// Часовий пояс проєкту не є відомим ідентифікатором IANA
+    /// (<c>ECR-CFG-4221</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий код, а не <see cref="InvalidCode"/>. Форма створення проєкту
+    /// має ОБИДВА поля — код і пояс, — і на обидва сервер відповідав однаковим
+    /// <c>ECR-CFG-0422</c>. Клієнт маршрутизує за кодом, тому підсвітити
+    /// правильне поле він не міг: «Код «KASH-2026» недопустимий» і «поясу
+    /// «Central Asia Standard Time» не існує» приходили як та сама відмова.
+    ///
+    /// ⚠ Один код на всі три причини (порожньо, невідомий ідентифікатор,
+    /// Windows-ідентифікатор замість IANA) — навмисно: клієнт підсвічує ПОЛЕ,
+    /// а яка саме з трьох причин — сказано текстом. Три коди на одне поле
+    /// змусили б клієнт знати їх усі, щоб зробити те саме.
+    /// </remarks>
+    public const string ProjectTimeZoneNotIana = "ECR-CFG-4221";
+
     // Реєстри і одиниці
     public const string RegistryEntryNotFound = "ECR-REG-0404";
     public const string RegistryEntryInUse = "ECR-REG-0409";
@@ -215,6 +233,19 @@ public static class ErrorCodes
     /// інше число, тому оператор відхиляється парсером.
     /// </remarks>
     public const string CaretNotPower = "ECR-CALC-0431";
+
+    /// <summary>
+    /// Функція ярусу <c>Extension</c> у версії з <c>NumericMode = Legacy</c>
+    /// (<c>ECR-CALC-0433</c>, <c>02b</c> §8).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>Legacy</c> існує рівно для того, щоб відтворити числа чинного
+    /// рушія. <c>Ln</c> і <c>ifs</c> у NCalc 1.3.8 не оголошені (виміряно),
+    /// <c>CONVERT</c> і <c>SUBSTANCE</c> — наші власні; формула з ними не
+    /// рахувалася чинною системою ніколи, і відтворювати їй нічого. Правильна
+    /// дія одна — <c>NumericMode.Strict</c> з нової дати дії.
+    /// </remarks>
+    public const string ExtensionFunctionInLegacy = "ECR-CALC-0433";
 
     // Робочий процес
     /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>

@@ -19,6 +19,20 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
                 "CK_Project_Pinned",
                 "CurrentPeriodMode <> 1 OR " +
                 "(CurrentPeriodId IS NOT NULL AND CurrentPeriodPinnedReason IS NOT NULL)");
+
+            // ⚠ Груба сітка, а не повна перевірка IANA: точне правило живе в
+            // `SiteTimeZone`, база — остання лінія. Ловить рівно те, що в цю
+            // колонку справді потрапляло: Windows-ідентифікатори
+            // (`Central Asia Standard Time`) і зсуви (`+05:00`, `UTC+13`) —
+            // усі вони або з пробілом, або зі знаком. Жоден ідентифікатор
+            // IANA не має ні пробілу, ні `+`, ні `:` (виміряно на 139 поясах
+            // CLDR цієї машини).
+            //
+            // ⛔ Сітка потрібна тому, що в таблицю пишуть не лише через домен:
+            // сідінг, фікстури і руки DBA — теж.
+            t.HasCheckConstraint(
+                "CK_Project_TzIana",
+                "LEN(TimeZoneId) > 0 AND TimeZoneId NOT LIKE N'%[ +:]%'");
         });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
@@ -31,6 +45,8 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
 
         // Пояс майданчика — не косметика: межі періодів рахуються в ньому,
         // і після відкриття першого періоду він не змінюється (ECR-PRD-0409).
+        // Значення — ідентифікатор IANA (`Asia/Aqtau`), а не зсув: зсув
+        // міняється переходом на літній час, а збережене число — ні.
         builder.Property(x => x.TimeZoneId).HasMaxLength(64).IsRequired();
 
         builder.Property(x => x.TagsJson).HasMaxLength(500);
@@ -41,7 +57,14 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.YearGraceOffsetDays).HasDefaultValue(45, "DF_Project_YearGrace");
-        builder.Property(x => x.TimeZoneId).HasDefaultValue("Central Asia Standard Time", "DF_Project_Tz");
+
+        // ⛔ `DF_Project_Tz` ПРИБРАНИЙ (директива ПК-1 №06 §3, `H-13`). Він
+        // підставляв `N'Central Asia Standard Time'` — Windows-ідентифікатор,
+        // тобто рівно те, що директива забороняє, і робив це МОВЧКИ: рядок,
+        // вставлений повз домен, отримував вічний пояс зі схеми 2016 року.
+        // Пояс обов'язковий і видимий, тож вставка без нього має падати гучно,
+        // а не отримувати чужий +06:00.
+
         builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode");
         builder.Property(x => x.IsArchiving).HasDefaultValue(false, "DF_Project_Arch");
         builder.Navigation(x => x.Periods).UsePropertyAccessMode(PropertyAccessMode.Field);

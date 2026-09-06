@@ -1,6 +1,91 @@
 {
   "components": {
     "schemas": {
+      "AccessDiagnosticsView": {
+        "description": "Відповідь на питання «чому в мене немає доступу» (`H-21`).",
+        "properties": {
+          "effectiveRoleCodes": {
+            "description": "Ролі, які людина має насправді.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "expiredRoleCodes": {
+            "description": "Ролі, призначення яких існує, але вже (або ще) не діє — строкова підміна.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "groupAssignmentsInSystem": {
+            "description": "Які групи взагалі щось дають. Заповнюється лише носієві\r\n`Security.ManageUsers`.",
+            "items": {
+              "$ref": "#/components/schemas/GroupAssignmentView"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "description": "Усі SID груп із квитка — і ті, що збіглися, і ті, що ні.",
+            "items": {
+              "$ref": "#/components/schemas/GroupSidView"
+            },
+            "type": "array"
+          },
+          "groupsFromTicket": {
+            "description": "Чи взято перелік груп із квитка ЦІЄЇ сесії. `false` означає «ми не\r\nзнаємо», а не «людина в жодній групі не перебуває».",
+            "type": "boolean"
+          },
+          "personalRoleCodes": {
+            "description": "Ролі, призначені особисто (не через групу).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "principalSid": {
+            "description": "SID самого запису в каталозі; `null` у локального.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AuthProvider",
+            "description": "Провайдер входу: доменний чи локальний."
+          },
+          "unmatchedSids": {
+            "description": "SID, на які немає жодного чинного призначення.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "userId": {
+            "description": "Обліковий запис, про який відповідь.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userName": {
+            "description": "Ім'я входу.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "userName",
+          "provider",
+          "principalSid",
+          "groupsFromTicket",
+          "groups",
+          "unmatchedSids",
+          "personalRoleCodes",
+          "effectiveRoleCodes",
+          "expiredRoleCodes",
+          "groupAssignmentsInSystem"
+        ],
+        "type": "object"
+      },
       "AccessMatrixCellDto": {
         "description": "Клітинка матриці.",
         "properties": {
@@ -681,7 +766,7 @@
             ]
           },
           "timeZoneId": {
-            "description": "Пояс майданчика; після відкриття періоду не змінюється.",
+            "description": "Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після\r\nвідкриття періоду не змінюється. Windows-ідентифікатор або зсув —\r\n`ECR-CFG-4221`.",
             "type": "string"
           },
           "year": {
@@ -1214,6 +1299,10 @@
               "null",
               "string"
             ]
+          },
+          "tier": {
+            "description": "Ярус: `Core` — чинний рушій це вміє; `Extension` — ні.",
+            "type": "string"
           }
         },
         "required": [
@@ -1221,7 +1310,8 @@
           "minArgs",
           "maxArgs",
           "acceptsRange",
-          "resultType"
+          "resultType",
+          "tier"
         ],
         "type": "object"
       },
@@ -1381,6 +1471,53 @@
           "Approve",
           "Manage"
         ]
+      },
+      "GroupAssignmentView": {
+        "description": "Групове призначення, яке існує в системі.",
+        "properties": {
+          "roleCodes": {
+            "description": "Ролі, які отримує член цієї групи.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sid": {
+            "description": "SID AD-групи.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sid",
+          "roleCodes"
+        ],
+        "type": "object"
+      },
+      "GroupSidView": {
+        "description": "SID групи з квитка і те, що він дав.",
+        "properties": {
+          "matched": {
+            "description": "Чи знайшлося ЧИННЕ призначення на цей SID.",
+            "type": "boolean"
+          },
+          "roleCodes": {
+            "description": "Ролі, які з нього вийшли; порожньо — жодної.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sid": {
+            "description": "SID групи безпеки.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sid",
+          "matched",
+          "roleCodes"
+        ],
+        "type": "object"
       },
       "HealthCheckDto": {
         "description": "Одна перевірка у звіті.",
@@ -2196,7 +2333,7 @@
             "type": "integer"
           },
           "timeZoneId": {
-            "description": "Пояс майданчика, у якому пораховані межі.",
+            "description": "Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`), у якому пораховані\r\nмежі. Клієнт отримує саме ідентифікатор, а не зсув: зсув чинний лише на\r\nмомент відповіді і збрехав би на межі переходу на літній час.",
             "type": "string"
           }
         },
@@ -2448,7 +2585,7 @@
             "description": "Стан проєкту."
           },
           "timeZoneId": {
-            "description": "Пояс майданчика.",
+            "description": "Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`).",
             "type": "string"
           }
         },
@@ -6064,7 +6201,7 @@
         ]
       },
       "post": {
-        "description": "`TimeZoneId` задається тут і **не змінюється** після відкриття\r\nпершого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі\r\nмайданчика, і зміна поясу заднім числом зсунула б уже подану звітність.",
+        "description": "`TimeZoneId` задається тут і **не змінюється** після відкриття\r\nпершого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі\r\nмайданчика, і зміна поясу заднім числом зсунула б уже подану звітність.\r\n\r\n⛔ Тільки ідентифікатор IANA (`Asia/Aqtau`). Windows-ідентифікатор\r\n(`Central Asia Standard Time`) і зсув (`+05:00`) — це\r\n`ECR-CFG-4221`: зсув міняється переходом на літній час, а\r\nWindows-ідентифікатор на зворотному шляху втрачає державу\r\n(`Asia/Aqtau` повертається як `Asia/Tashkent`).",
         "requestBody": {
           "content": {
             "application/*+json": {
@@ -6105,6 +6242,26 @@
               }
             },
             "description": "Created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Створює проєкт. Право `Project.Manage`.",
@@ -7175,6 +7332,37 @@
         ]
       }
     },
+    "/api/v1/security/my-groups": {
+      "get": {
+        "description": "⛔ Ендпоінт існує тому, що збій рольової моделі на живому домені\r\n<b>не відрізняється від справної системи</b>: людина входить, бачить\r\nпорожні переліки і вважає, що даних немає. Тут вона бачить свій SID,\r\nусі SID груп зі свого квитка, які з них дали ролі і які — ні.\r\n\r\n⚠ Права не потребує НАВМИСНО: вимагати `Security.ManageUsers` на\r\nвласні групи означало б лишити без відповіді саме тих, заради кого\r\nмаршрут заведений, — рядових співробітників без жодного права. Чужі\r\nSID цим шляхом не віддаються: суб'єкт завжди сам викликач.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessDiagnosticsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessDiagnosticsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessDiagnosticsView"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
     "/api/v1/security/simulation": {
       "delete": {
         "parameters": [
@@ -7263,6 +7451,70 @@
           }
         },
         "summary": "Починає сеанс симуляції. Право `Security.Simulate`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/security/users/{id}/groups": {
+      "get": {
+        "description": "⚠ Потрібен, щоб адміністратор відповідав на «чому в мене немає\r\nдоступу», <b>не заходячи під людиною</b>: симуляція (`ФВ-6.16a`) для\r\nцього завелика — вона пише сеанс в аудит і показує чужі дані, тоді як\r\nпитання стосується самих лише призначень.\r\n\r\n⛔ Членство в групах приходить із квитка (`ФВ-6.15a`), а квитка чужої\r\nсесії в нас немає (`P-02`) — відповідь каже про це прямо\r\n(`groupsFromTicket: false`) і натомість перелічує, які групи\r\nвзагалі щось дають. Мовчазний порожній перелік читався б як «людина ні\r\nв яких групах не перебуває», і це була б неправда.",
+        "parameters": [
+          {
+            "description": "Обліковий запис, доступ якого пояснюємо.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessDiagnosticsView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessDiagnosticsView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessDiagnosticsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Те саме про ЧУЖИЙ запис. Право `Security.ManageUsers`.",
         "tags": [
           "Security"
         ]

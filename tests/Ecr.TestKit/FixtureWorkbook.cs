@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Functions;
 using Ecr.TestKit;
@@ -251,7 +252,7 @@ public sealed class FixtureWorkbook
                 Context.CurrentRow = target.Row;
                 Context.CurrentMonthColumn = target.MonthColumn;
 
-                var value = evaluator.Evaluate(target.Root, Context);
+                var value = evaluator.Evaluate(target.Root, Context, ExpressionDialect.Template);
                 var key = TestEvaluationContext.Key(target.Sheet, target.Table, target.Row, target.Column);
 
                 if (!Context.Cells.TryGetValue(key, out var previous) || !previous.Equals(value))

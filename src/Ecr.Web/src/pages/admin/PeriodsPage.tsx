@@ -291,6 +291,17 @@ export function PeriodsPage(): JSX.Element {
         onRetry={() => void periods.refetch()}
       >
         {(calendar) => (
+        <>
+        {/* ⛔ Пояс названо ПОРУЧ із межами, а не лише у формі створення
+            (директива ПК-1 №06 §3). Колонки нижче показують моменти в поясі
+            МАЙДАНЧИКА (`D-68`), і без підпису «01.02 00:00» читається як
+            місцевий час того, хто дивиться. Для проєкту на `Asia/Aqtau`
+            (+05:00), відкритого з Астани (+06:00), це різниця в годину рівно
+            там, де вирішується, встиг чи не встиг. */}
+        <Text size="xs" c="dimmed" mb="xs">
+          {t('periods.timeZone')}: {calendar.timeZoneId}
+        </Text>
+
         <Table striped className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
@@ -358,6 +369,7 @@ export function PeriodsPage(): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
+        </>
         )}
       </AsyncBoundary>
 

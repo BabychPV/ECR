@@ -187,7 +187,8 @@ public sealed class TestEvaluationContext : IEvaluationContext
                     foreach (var rowKey in all)
                     {
                         CurrentRow = rowKey;
-                        var verdict = _evaluator.Evaluate(predicate.Condition, this);
+                        var verdict = _evaluator.Evaluate(
+                            predicate.Condition, this, ExpressionDialect.Template);
                         if (verdict.Type == ExpressionValueType.Boolean && (bool)verdict.Value!)
                         {
                             matched.Add(rowKey);

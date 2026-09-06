@@ -15,7 +15,11 @@ function refusal(): EcrApiError {
     title: 'Період закрито',
     detail: 'Період закрито: зміни потребують окремого погодження.',
     status: 409,
-    errorCode: 'ECR-PER-0409',
+    // ⚠ Плейсхолдер навмисно НЕ з каталогу: тест перевіряє, що компонент
+    // ПОКАЗУЄ код, а не що код правильний. Тут стояв `ECR-PER-0409` —
+    // вигаданий, родини `PER` не існує; сторож `ClientErrorCodeTests` таких
+    // більше не пропускає. `HTTP-409` — форма, яку `client.ts` породжує сам.
+    errorCode: 'HTTP-409',
     correlationId: 'cid-test-1',
   });
 }
@@ -63,7 +67,7 @@ describe('Чотири стани подання', () => {
     expect(alert.textContent).toContain('Період закрито');
 
     // Стабільний код і кореляція — те, з чим ідуть у підтримку.
-    expect(alert.textContent).toContain('ECR-PER-0409');
+    expect(alert.textContent).toContain('HTTP-409');
     expect(alert.textContent).toContain('cid-test-1');
 
     // ⛔ Головне твердження розділу: порожній стан не показано.

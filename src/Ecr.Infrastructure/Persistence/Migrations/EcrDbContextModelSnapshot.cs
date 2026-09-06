@@ -2088,10 +2088,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("TimeZoneId")
                         .IsRequired()
-                        .ValueGeneratedOnAdd()
                         .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)")
-                        .HasDefaultValue("Central Asia Standard Time", "DF_Project_Tz");
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<short?>("Year")
                         .HasColumnType("smallint");
@@ -2112,6 +2110,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_Project_Period", "PeriodStart <= PeriodEnd");
 
                             t.HasCheckConstraint("CK_Project_Pinned", "CurrentPeriodMode <> 1 OR (CurrentPeriodId IS NOT NULL AND CurrentPeriodPinnedReason IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Project_TzIana", "LEN(TimeZoneId) > 0 AND TimeZoneId NOT LIKE N'%[ +:]%'");
                         });
                 });
 

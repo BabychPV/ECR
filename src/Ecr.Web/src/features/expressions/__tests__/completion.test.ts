@@ -13,9 +13,16 @@ import { completionAt, completionsFor, signatureOf } from '../completion';
 
 const metadata: ExpressionMetadataDto = {
   functions: [
-    { name: 'SUM', minArgs: 1, maxArgs: null, acceptsRange: true, resultType: 'Number' },
-    { name: 'ROUND', minArgs: 2, maxArgs: 2, acceptsRange: false, resultType: 'Number' },
-    { name: 'SUBSTANCE', minArgs: 1, maxArgs: 1, acceptsRange: false, resultType: 'Number' },
+    { name: 'SUM', minArgs: 1, maxArgs: null, acceptsRange: true, resultType: 'Number', tier: 'Core' },
+    { name: 'ROUND', minArgs: 2, maxArgs: 2, acceptsRange: false, resultType: 'Number', tier: 'Core' },
+    {
+      name: 'SUBSTANCE',
+      minArgs: 1,
+      maxArgs: 1,
+      acceptsRange: false,
+      resultType: 'Number',
+      tier: 'Extension',
+    },
   ],
   constants: [{ name: 'EF_CO2', unit: 'kg_per_t', note: 'Fuel' }],
   formulas: [{ name: 'BaseEmission', unit: 'kg', note: null }],
@@ -76,6 +83,18 @@ describe('склад переліку', () => {
     const items = completionsFor({ kind: 'function', replaceFrom: 0, typed: 'su' }, metadata);
 
     expect(items.map((i) => i.insert)).toEqual(['SUBSTANCE', 'SUM']);
+  });
+
+  it('ярус приходить із сервера і доїжджає до варіанта підстановки', () => {
+    // ⛔ `Extension` означає «чинний рушій цього не вміє»: у версії з
+    // `NumericMode = Legacy` вираз із такою функцією не опублікується
+    // (`ECR-CALC-0433`). Позначку малює місце реєстрації провайдера, але
+    // ЗНАННЯ про ярус мусить дійти сюди з сервера — інакше редактор його
+    // вигадував би із зашитого переліку.
+    const items = completionsFor({ kind: 'function', replaceFrom: 0, typed: '' }, metadata);
+
+    expect(items.find((i) => i.insert === 'SUBSTANCE')?.tier).toBe('Extension');
+    expect(items.find((i) => i.insert === 'SUM')?.tier).toBe('Core');
   });
 
   it('без метаданих перелік порожній, а не вигаданий', () => {

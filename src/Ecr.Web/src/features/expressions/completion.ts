@@ -33,6 +33,19 @@ export interface CompletionItem {
   readonly detail?: string | undefined;
   /** Пояснення під переліком. */
   readonly documentation?: string | undefined;
+  /**
+   * Ярус функції — з СЕРВЕРА (`DialectCatalog`).
+   *
+   * ⛔ `Extension` означає «чинний рушій цього не вміє», і показати таку
+   * функцію без позначки означало б запросити написати вираз, якого немає з
+   * чим звіряти. Текст позначки цей модуль не складає навмисно: він чистий і
+   * перевіряється без каталогу рядків, а локалізує напис місце реєстрації
+   * провайдера.
+   *
+   * ⚠ У версії з `NumericMode = Legacy` таких функцій у переліку немає
+   * взагалі — їх не віддає сервер (`ECR-CALC-0433`).
+   */
+  readonly tier?: string | undefined;
 }
 
 /** Що доповнюємо і який фрагмент тексту замінюємо. */
@@ -171,9 +184,10 @@ function symbolItem(symbol: ExpressionSymbolDto, kind: CompletionKind): Completi
 /**
  * Варіант для функції: підставляє дужки і лишає курсор між ними.
  *
- * ⚠ Функція без аргументів у нашій мові не існує — усі 24 приймають
- * щонайменше один (`02b` §7–§8). Тому дужки підставляються завжди, і курсор
- * завжди всередині: інакше кожен виклик доводилося б дописувати руками.
+ * ⚠ Функція без аргументів у нашій мові не існує: у діалекті шаблонів усі 12,
+ * у діалекті методологій усі 26 приймають щонайменше один (`02b` §7–§8). Тому
+ * дужки підставляються завжди, і курсор завжди всередині: інакше кожен виклик
+ * доводилося б дописувати руками.
  */
 function functionItem(fn: ExpressionFunctionDto): CompletionItem {
   return {
@@ -182,6 +196,7 @@ function functionItem(fn: ExpressionFunctionDto): CompletionItem {
     kind: 'function',
     detail: signatureOf(fn),
     documentation: fn.resultType ?? undefined,
+    tier: fn.tier,
   };
 }
 

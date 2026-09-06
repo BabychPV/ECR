@@ -1580,6 +1580,12 @@ export interface paths {
          * @description `TimeZoneId` задається тут і **не змінюється** після відкриття
          *     першого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі
          *     майданчика, і зміна поясу заднім числом зсунула б уже подану звітність.
+         *
+         *     ⛔ Тільки ідентифікатор IANA (`Asia/Aqtau`). Windows-ідентифікатор
+         *     (`Central Asia Standard Time`) і зсув (`+05:00`) — це
+         *     `ECR-CFG-4221`: зсув міняється переходом на літній час, а
+         *     Windows-ідентифікатор на зворотному шляху втрачає державу
+         *     (`Asia/Aqtau` повертається як `Asia/Tashkent`).
          */
         post: {
             parameters: {
@@ -1605,6 +1611,17 @@ export interface paths {
                         "application/json": components["schemas"]["ProjectIdResponse"];
                         "text/json": components["schemas"]["ProjectIdResponse"];
                         "text/plain": components["schemas"]["ProjectIdResponse"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -2497,6 +2514,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/my-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.
+         * @description ⛔ Ендпоінт існує тому, що збій рольової моделі на живому домені
+         *     <b>не відрізняється від справної системи</b>: людина входить, бачить
+         *     порожні переліки і вважає, що даних немає. Тут вона бачить свій SID,
+         *     усі SID груп зі свого квитка, які з них дали ролі і які — ні.
+         *
+         *     ⚠ Права не потребує НАВМИСНО: вимагати `Security.ManageUsers` на
+         *     власні групи означало б лишити без відповіді саме тих, заради кого
+         *     маршрут заведений, — рядових співробітників без жодного права. Чужі
+         *     SID цим шляхом не віддаються: суб'єкт завжди сам викликач.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccessDiagnosticsView"];
+                        "text/json": components["schemas"]["AccessDiagnosticsView"];
+                        "text/plain": components["schemas"]["AccessDiagnosticsView"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/simulation": {
         parameters: {
             query?: never;
@@ -2575,6 +2641,70 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/security/users/{id}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Те саме про ЧУЖИЙ запис. Право `Security.ManageUsers`.
+         * @description ⚠ Потрібен, щоб адміністратор відповідав на «чому в мене немає
+         *     доступу», <b>не заходячи під людиною</b>: симуляція (`ФВ-6.16a`) для
+         *     цього завелика — вона пише сеанс в аудит і показує чужі дані, тоді як
+         *     питання стосується самих лише призначень.
+         *
+         *     ⛔ Членство в групах приходить із квитка (`ФВ-6.15a`), а квитка чужої
+         *     сесії в нас немає (`P-02`) — відповідь каже про це прямо
+         *     (`groupsFromTicket: false`) і натомість перелічує, які групи
+         *     взагалі щось дають. Мовчазний порожній перелік читався б як «людина ні
+         *     в яких групах не перебуває», і це була б неправда.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Обліковий запис, доступ якого пояснюємо. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccessDiagnosticsView"];
+                        "text/json": components["schemas"]["AccessDiagnosticsView"];
+                        "text/plain": components["schemas"]["AccessDiagnosticsView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3795,6 +3925,36 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Відповідь на питання «чому в мене немає доступу» (`H-21`). */
+        AccessDiagnosticsView: {
+            /** @description Ролі, які людина має насправді. */
+            effectiveRoleCodes: string[];
+            /** @description Ролі, призначення яких існує, але вже (або ще) не діє — строкова підміна. */
+            expiredRoleCodes: string[];
+            /** @description Які групи взагалі щось дають. Заповнюється лише носієві
+             *     `Security.ManageUsers`. */
+            groupAssignmentsInSystem: components["schemas"]["GroupAssignmentView"][];
+            /** @description Усі SID груп із квитка — і ті, що збіглися, і ті, що ні. */
+            groups: components["schemas"]["GroupSidView"][];
+            /** @description Чи взято перелік груп із квитка ЦІЄЇ сесії. `false` означає «ми не
+             *     знаємо», а не «людина в жодній групі не перебуває». */
+            groupsFromTicket: boolean;
+            /** @description Ролі, призначені особисто (не через групу). */
+            personalRoleCodes: string[];
+            /** @description SID самого запису в каталозі; `null` у локального. */
+            principalSid: null | string;
+            /** @description Провайдер входу: доменний чи локальний. */
+            provider: components["schemas"]["AuthProvider"];
+            /** @description SID, на які немає жодного чинного призначення. */
+            unmatchedSids: string[];
+            /**
+             * Format: int32
+             * @description Обліковий запис, про який відповідь.
+             */
+            userId: number;
+            /** @description Ім'я входу. */
+            userName: string;
+        };
         /** @description Клітинка матриці. */
         AccessMatrixCellDto: {
             /** @description Пояснення для підказки. */
@@ -4130,7 +4290,9 @@ export interface components {
              * @description Версія шаблону, за якою заповнюються документи.
              */
             templateVersionId?: null | number;
-            /** @description Пояс майданчика; після відкриття періоду не змінюється. */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після
+             *     відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
+             *     `ECR-CFG-4221`. */
             timeZoneId: string;
             /**
              * Format: int32
@@ -4387,6 +4549,8 @@ export interface components {
             name: string;
             /** @description Тип результату; `null` — сигнатури немає. */
             resultType: null | string;
+            /** @description Ярус: `Core` — чинний рушій це вміє; `Extension` — ні. */
+            tier: string;
         };
         /** @description Склад мови виразів для діалекту й контексту. */
         ExpressionMetadataDto: {
@@ -4435,6 +4599,22 @@ export interface components {
          * @enum {unknown}
          */
         GrantLevel: "None" | "Read" | "Write" | "Submit" | "Approve" | "Manage";
+        /** @description Групове призначення, яке існує в системі. */
+        GroupAssignmentView: {
+            /** @description Ролі, які отримує член цієї групи. */
+            roleCodes: string[];
+            /** @description SID AD-групи. */
+            sid: string;
+        };
+        /** @description SID групи з квитка і те, що він дав. */
+        GroupSidView: {
+            /** @description Чи знайшлося ЧИННЕ призначення на цей SID. */
+            matched: boolean;
+            /** @description Ролі, які з нього вийшли; порожньо — жодної. */
+            roleCodes: string[];
+            /** @description SID групи безпеки. */
+            sid: string;
+        };
         /** @description Одна перевірка у звіті. */
         HealthCheckDto: {
             /** @description Подробиці перевірки; текст винятку сюди не потрапляє (ФВ-6.11). */
@@ -4786,7 +4966,9 @@ export interface components {
              * @description Проєкт.
              */
             projectId: number;
-            /** @description Пояс майданчика, у якому пораховані межі. */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`), у якому пораховані
+             *     межі. Клієнт отримує саме ідентифікатор, а не зсув: зсув чинний лише на
+             *     момент відповіді і збрехав би на межі переходу на літній час. */
             timeZoneId: string;
         };
         /** @description Період у календарі проєкту. */
@@ -4928,7 +5110,7 @@ export interface components {
             periodKind: components["schemas"]["PeriodKind"];
             /** @description Стан проєкту. */
             status: components["schemas"]["ProjectStatus"];
-            /** @description Пояс майданчика. */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). */
             timeZoneId: string;
         };
         /** @description Запит на публікацію версії методології. */

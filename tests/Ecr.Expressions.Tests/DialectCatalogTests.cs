@@ -124,6 +124,43 @@ public sealed class DialectCatalogTests
         Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
     }
 
+    [Theory]
+    [InlineData("SWITCH")]
+    [InlineData("POWER")]
+    [InlineData("POW")]
+    [InlineData("VLOOKUP")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Невідоме_імʼя_недозволене_в_ОБОХ_режимах(string name)
+    {
+        // ⛔ Це та сама пастка, на якій спіткнувся `Q-082`. `TierOf` віддає
+        // `Core` на будь-яке невідоме слово — він відповідає лише на питання
+        // «чи це наше розширення». Перевірка публікації, побудована на самому
+        // `TierOf`, пропустила б `SWITCH` як ядро: сторож був би зелений, і
+        // саме тому — марний.
+        Assert.Equal(FunctionTier.Core, DialectCatalog.TierOf(name));
+
+        Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Legacy));
+        Assert.False(DialectCatalog.IsAllowedIn(name, NumericMode.Strict));
+    }
+
+    [Theory]
+    [InlineData("POWER", "Pow(a, b)")]
+    [InlineData("MOD", "оператор %")]
+    [InlineData("SWITCH", "вкладені if")]
+    [InlineData("POW", "'Pow'")]
+    [InlineData("ROUND", "'Round'")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Каталог_каже_чим_заміняти(string name, string expected)
+    {
+        // ⚠ Порада — не ввічливість: усі шість вигаданих імен приймав наш
+        // власний `FunctionRegistry`, тож методолог міг їх уже написати.
+        // «Невідома функція» відправила б його шукати те, чого нема.
+        var advice = DialectCatalog.Advice(name);
+
+        Assert.NotNull(advice);
+        Assert.Contains(expected, advice, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Ядро_це_рівно_двадцять_дві_функції()
