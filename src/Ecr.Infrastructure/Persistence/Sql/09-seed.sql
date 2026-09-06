@@ -664,6 +664,12 @@ USING (VALUES
     (N'methodologies.trace',             N'en', N'Trace', 1),
 
     -- Зрізи регламентної звітності.
+    (N'registries.sourceSwitch',         N'en', N'Switch master source', 1),
+    (N'registries.sourceKind',           N'en', N'New master source', 1),
+    (N'registries.sourceSwitched',       N'en', N'{count} registry(ies) switched.', 1),
+    (N'registries.sourceSwitchHint',     N'en', N'The set is switched as one operation', 1),
+    (N'registries.sourceSwitchWarning',  N'en', N'All or nothing: an unknown code rejects the whole operation, and the check for open periods is done once for the set. Not allowed while any period is open: part of the documents would be filled against one list of entries and part against another.', 1),
+    (N'registries.sourceReasonHint',     N'en', N'A year from now this is the only question that will need an answer: why these registries were switched together.', 1),
     (N'nav.units',                       N'en', N'Units', 1),
     (N'units.title',                     N'en', N'Units of measure', 1),
     (N'units.value',                     N'en', N'Value', 1),

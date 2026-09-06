@@ -7,6 +7,7 @@ import {
   RegistryEntryEditor,
   ValidityEditor,
 } from '@/features/registries/RegistryEntryEditor';
+import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -73,6 +74,18 @@ export function RegistriesPage(): JSX.Element {
               <Button size="xs" onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
               </Button>
+            )}
+
+            {/* ⛔ Перемикання master набором (`ФВ-13.10`). Дія існувала на
+                сервері й не мала в інтерфейсі жодного споживача — тобто
+                поетапний перехід майстра (`ФВ-11.4`) був неможливий інакше,
+                як руками в базі.
+
+                ⚠ Право небезпечне (`Integration.Manage`) і в seed його не
+                має ніхто: кнопка з'явиться лише в того, кому його видали
+                поіменно. */}
+            {can(session.data, 'Integration.Manage') && (
+              <SourceKindSwitch registries={registries.data ?? []} />
             )}
           </Group>
         }

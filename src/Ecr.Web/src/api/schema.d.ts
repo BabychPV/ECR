@@ -1758,6 +1758,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/source-kind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Перемикає master-джерело <b>набору</b> довідників. Право `Integration.Manage`.
+         * @description ⛔ Операція над НАБОРОМ, і сутності «група довідників» немає навмисно
+         *     (`ФВ-13.10`): група — це факт одного перемикання, а не властивість
+         *     довідника. Набір складає той, хто перемикає: він єдиний, хто знає, які
+         *     довідники пов'язані <b>сьогодні</b>.
+         *
+         *     ⚠ Усе або нічого: невідомий код у переліку відхиляє операцію цілком, а
+         *     перевірка «немає відкритого періоду» робиться один раз на весь набір.
+         *     Половина блоку в одному режимі, половина в іншому — гірше, ніж відмова.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SwitchSourceKindRequest"];
+                    "application/json": components["schemas"]["SwitchSourceKindRequest"];
+                    "text/json": components["schemas"]["SwitchSourceKindRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AffectedRowsResponse"];
+                        "text/json": components["schemas"]["AffectedRowsResponse"];
+                        "text/plain": components["schemas"]["AffectedRowsResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries": {
         parameters: {
             query?: never;
@@ -4327,6 +4403,10 @@ export interface components {
             isTemporal: boolean;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Хто master (`ФВ-8.9`). Потрібен тому, хто складає набір для
+             *     перемикання: без нього довідник, який уже в цільовому режимі, і той, який
+             *     ще ні, у переліку виглядають однаково. */
+            sourceKind: components["schemas"]["RegistrySourceKind"];
         };
         /** @description Запис довідника для UI і резолвінгу. У комірці зберігається
          *     long RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому
@@ -4406,6 +4486,11 @@ export interface components {
              */
             unitId: null | number;
         };
+        /**
+         * @description Хто є master для реєстру (ФВ-8.9).
+         * @enum {unknown}
+         */
+        RegistrySourceKind: "External" | "Hybrid" | "Local";
         /** @description Запит на відкриття поданого документа. */
         ReopenDocumentRequest: {
             /**
@@ -4696,6 +4781,17 @@ export interface components {
             /** Format: int32 */
             offset?: number;
             value?: null | string;
+        };
+        /** @description Запит на перемикання master-джерела набору довідників. */
+        SwitchSourceKindRequest: {
+            /** @description Причина. Обов'язкова: через рік питання «навіщо перемикали цей набір
+             *     разом» — єдине, на яке доведеться відповісти, і відповідь має бути в
+             *     журналі, а не в чиїйсь пам'яті. */
+            reason: string;
+            /** @description Коди довідників; порожній набір відхиляється. */
+            registryCodes: string[];
+            /** @description Нове джерело для всіх перелічених. */
+            sourceKind: components["schemas"]["RegistrySourceKind"];
         };
         TableDto: {
             code: string;
