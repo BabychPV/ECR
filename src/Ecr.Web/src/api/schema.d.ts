@@ -2330,6 +2330,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/access-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Матриця доступу `період × аркуш` для конструктора. Право `Template.View`.
+         * @description ⛔ Будується тим самим обчислювачем, що й доступ у документі
+         *     (`ФВ-2.18`): друга реалізація «для перегляду» показувала б не те,
+         *     що система робить насправді, і перегляд перестав би ловити помилку в
+         *     правилах — тобто робив би рівно протилежне тому, заради чого існує.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccessMatrixDto"];
+                        "text/json": components["schemas"]["AccessMatrixDto"];
+                        "text/plain": components["schemas"]["AccessMatrixDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/clone": {
         parameters: {
             query?: never;
@@ -3253,6 +3299,62 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Клітинка матриці. */
+        AccessMatrixCellDto: {
+            /** @description Пояснення для підказки. */
+            detail: null | string;
+            /**
+             * Format: uint8
+             * @description Порядковий номер періоду (`1…12`).
+             */
+            periodSequence: number;
+            /** @description Причина блокування; `None` — доступно. */
+            reason: components["schemas"]["EditDenyReason"];
+            /** @description Доступно, частково, заблоковано. */
+            state: components["schemas"]["AccessMatrixState"];
+        };
+        /** @description Матриця доступу `період × аркуш`. */
+        AccessMatrixDto: {
+            /**
+             * Format: int32
+             * @description Скільки періодів у матриці.
+             */
+            periodCount: number;
+            /**
+             * Format: int32
+             * @description Ревізія; частина ключа кешу структури.
+             */
+            presentationRevision: number;
+            /** @description Аркуші в порядку шаблону. */
+            sheets: components["schemas"]["AccessMatrixSheetDto"][];
+            /**
+             * Format: int32
+             * @description Версія шаблону.
+             */
+            templateVersionId: number;
+        };
+        /** @description Рядок матриці — один аркуш. */
+        AccessMatrixSheetDto: {
+            /** @description Клітинки за порядковими номерами періодів. */
+            cells: components["schemas"]["AccessMatrixCellDto"][];
+            /** @description Код аркуша. */
+            code: string;
+            /** @description Аркуш має правило, яке залежить від даних документа
+             *     (`SourceWindow` або `Expression`): показана картина неповна. */
+            dependsOnData: boolean;
+            /** @description Назва аркуша. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+        };
+        /**
+         * @description Стан клітинки матриці доступу.
+         * @enum {unknown}
+         */
+        AccessMatrixState: "Editable" | "Partial" | "Blocked";
         /** @description Скільки рядків зачепила операція. */
         AffectedRowsResponse: {
             /**
@@ -3680,6 +3782,11 @@ export interface components {
              */
             tableOrdinal: number;
         };
+        /**
+         * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
+         * @enum {unknown}
+         */
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow";
         EntityTagHeaderValue: {
             isWeak?: boolean;
             tag?: components["schemas"]["StringSegment"];

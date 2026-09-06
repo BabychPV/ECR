@@ -13,13 +13,22 @@ namespace Ecr.Application.Periods;
 /// порівняння в запитах залежало б від поясу; переводить їх саме цей шар,
 /// один раз і на межі системи.
 /// </remarks>
-public sealed class GetPeriodCalendarHandler(IPeriodStore periods)
+public sealed class GetPeriodCalendarHandler(
+    IPeriodStore periods,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Повертає календар проєкту.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<PeriodCalendarDto> HandleAsync(int projectId, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Document.View", ct)
+            .ConfigureAwait(false);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт {projectId} не знайдено.");
 

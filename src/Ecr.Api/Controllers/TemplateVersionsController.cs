@@ -18,6 +18,7 @@ public sealed class TemplateVersionsController(
     DiffTemplateVersionsHandler diff,
     PatchPresentationHandler patchPresentation,
     GetTemplateStructureHandler structure,
+    GetAccessMatrixHandler accessMatrix,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -134,6 +135,20 @@ public sealed class TemplateVersionsController(
 
         return dto;
     }
+
+    /// <summary>
+    /// Матриця доступу <c>період × аркуш</c> для конструктора. Право <c>Template.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Будується тим самим обчислювачем, що й доступ у документі
+    /// (<c>ФВ-2.18</c>): друга реалізація «для перегляду» показувала б не те,
+    /// що система робить насправді, і перегляд перестав би ловити помилку в
+    /// правилах — тобто робив би рівно протилежне тому, заради чого існує.
+    /// </remarks>
+    [HttpGet("access-matrix")]
+    [ProducesResponseType<AccessMatrixDto>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<AccessMatrixDto>> AccessMatrix(int id, CancellationToken ct)
+        => await accessMatrix.HandleAsync(id, ct).ConfigureAwait(false);
 
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId

@@ -10,7 +10,9 @@ namespace Ecr.Application.Templates;
 public sealed class CloneTemplateVersionHandler(
     ITemplateVersionStore versions,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Клонує версію.</summary>
     /// <param name="sourceVersionId">Версія-джерело.</param>
@@ -30,6 +32,11 @@ public sealed class CloneTemplateVersionHandler(
     public async Task<int> CloneAsync(int sourceVersionId, string newVersion, int userId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(newVersion);
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Template.Edit", ct)
+            .ConfigureAwait(false);
 
         var versionId = await versions
             .CloneAsync(sourceVersionId, newVersion, userId, clock.UtcNow, ct)

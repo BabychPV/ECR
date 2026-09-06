@@ -74,6 +74,18 @@ public interface ITemplateVersionStore
         Common.CursorRequest page, CancellationToken ct);
 
     /// <summary>
+    /// Правила доступу до періоду цієї версії (<c>ФВ-2.15</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Межі сторінки тут немає навмисно: правил доступу в одній версії
+    /// одиниці — це частина СТРУКТУРИ шаблону, а не дані. Пагінація
+    /// структури зробила б матрицю <c>ФВ-2.18</c> неповною, а неповна
+    /// матриця гірша за відсутню: вона показує зелене там, де замок.
+    /// </remarks>
+    public Task<IReadOnlyList<Domain.Entities.Configuration.PeriodAccessRuleDef>>
+        ListPeriodAccessRulesAsync(int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Застосовує презентаційні зміни до структури версії.
     /// </summary>
     /// <remarks>

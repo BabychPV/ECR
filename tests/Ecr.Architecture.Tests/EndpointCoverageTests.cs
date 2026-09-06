@@ -904,6 +904,280 @@ public sealed partial class EndpointCoverageTests
     private static partial Regex PermissionCell { get; }
 
     /// <summary>Рядок таблиці ендпоінтів контракту.</summary>
+    /// <summary>
+    /// Кожен ендпоінт перевіряє САМЕ ТЕ право, яке оголошує контракт.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Сторож вище (<c>Кожне_право_з_таблиці_ендпоінтів_десь_перевіряється</c>)
+    /// питає лише, чи згадується право хоч десь у застосунку. Це майже нічого
+    /// не доводить: варто одному обробнику перевірити <c>Template.Edit</c>, і
+    /// «перевіреними» вважаються ВСІ п'ять ендпоінтів, що його оголошують.
+    ///
+    /// ⛔ Так і сталося (<c>A7-53</c>): клон версії, патч презентації,
+    /// створення версії, diff і структура не перевіряли нічого, крім
+    /// <c>[Authorize]</c>. Тобто будь-який автентифікований користувач —
+    /// оператор введення, погоджувач, аудитор — міг клонувати версію шаблону
+    /// і правити підписи колонок. Обидва попередні сторожі були зелені.
+    ///
+    /// ⚠ Перевіряється ТІЛО ОБРОБНИКА, яким користується дія, а не файл
+    /// цілком: у спільному файлі (<c>TemplateQueryHandlers.cs</c>) сусідній
+    /// клас перевіряє інше право, і пошук по файлу знову доводив би не те.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожен_ендпоінт_перевіряє_саме_своє_право()
+    {
+        var handlers = HandlerBodies();
+        Assert.NotEmpty(handlers);
+
+        var actions = ActionHandlers();
+        Assert.NotEmpty(actions);
+
+        var offenders = new List<string>();
+
+        foreach (var (key, permission) in EndpointPermissions())
+        {
+            if (!actions.TryGetValue(key, out var used))
+            {
+                // Відсутність реалізації ловить перший сторож; тут вона не
+                // має перетворюватися на другу скаргу про те саме.
+                continue;
+            }
+
+            var checks = used
+                .Where(handlers.ContainsKey)
+                .Any(h => handlers[h].Contains(permission));
+
+            if (!checks)
+            {
+                offenders.Add(
+                    $"{key.Method} {key.Path} оголошує {permission}, "
+                    + $"але жоден із обробників [{string.Join(", ", used)}] його не перевіряє");
+            }
+        }
+
+        // ⚠ Перелік у повідомленні, а не `Assert.Empty`: сторож або мовчить,
+        // або має назвати КОЖЕН ендпоінт. Обрізаний xUnit'ом список змушує
+        // шукати решту вручну, і саме тоді половину «полагодять потім».
+        Assert.True(
+            offenders.Count == 0,
+            "Ендпоінти, які не перевіряють оголошеного права:"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    /// <summary>Маршрут → оголошене право; рядки без права пропущені.</summary>
+    private static Dictionary<(string Method, string Path), string> EndpointPermissions()
+    {
+        var path = Path.Combine(SolutionRoot(), "docs", "build", "02-contracts.md");
+        var result = new Dictionary<(string, string), string>();
+
+        foreach (Match row in ContractRowWithPermission.Matches(File.ReadAllText(path)))
+        {
+            var stage = int.Parse(row.Groups[4].Value, CultureInfo.InvariantCulture);
+            if (DeferredStages.Contains(stage))
+            {
+                continue;
+            }
+
+            var permission = row.Groups[3].Value;
+            if (!permission.Contains('.', StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            result[(row.Groups[1].Value.ToUpperInvariant(),
+                    Normalize(row.Groups[2].Value.Split('?')[0].TrimEnd('/')))] = permission;
+        }
+
+        return result;
+    }
+
+    /// <summary>Маршрут → типи обробників, якими користується дія контролера.</summary>
+    /// <remarks>
+    /// ⚠ Ім'я в тілі дії зіставляється з параметром первинного конструктора
+    /// контролера: саме він називає тип. Без цього кроку залишалося б лише
+    /// ім'я змінної, і сторож не знав би, чий код читати.
+    /// </remarks>
+    private static Dictionary<(string Method, string Path), List<string>> ActionHandlers()
+    {
+        var result = new Dictionary<(string, string), List<string>>();
+        var directory = Path.Combine(SolutionRoot(), "src", "Ecr.Api", "Controllers");
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.cs"))
+        {
+            var source = File.ReadAllText(file);
+            var route = RouteAttributeRegex.Match(source);
+            var baseRoute = route.Success ? route.Groups[1].Value : string.Empty;
+
+            // ⚠ Параметри беруться зі СПИСКУ первинного конструктора, а не
+            // рядками файла: половина контролерів оголошує його в один рядок,
+            // і прив'язка до відступу пропускала їх мовчки — сторож доповідав
+            // «жодного обробника» там, де обробник є.
+            var types = new Dictionary<string, string>(StringComparer.Ordinal);
+            var ctor = ControllerCtorRegex.Match(source);
+
+            if (ctor.Success)
+            {
+                foreach (Match parameter in CtorParameterRegex.Matches(ctor.Groups[1].Value))
+                {
+                    types[parameter.Groups[2].Value] = parameter.Groups[1].Value.Split('.')[^1];
+                }
+            }
+
+            // ⚠ Вікно тіла ширше, ніж у `Implemented()`: там достатньо
+            // побачити `throw` одразу після сигнатури, а тут виклик обробника
+            // може стояти після перевірки сторінки і трьох рядків розбору.
+            // З вузьким вікном сторож доповідав про вісім дій «жодного
+            // обробника» — тобто мовчав про них.
+            foreach (Match action in ActionBodyRegex.Matches(source))
+            {
+                var suffix = action.Groups[2].Value;
+                var full = "/" + string.Join('/', new[] { baseRoute, suffix }.Where(p => p.Length > 0));
+
+                // ⚠ …але обрізане наступним атрибутом маршруту. Інакше в дію
+                // потрапляє сусідня, і перевірка сусіда зараховується цій —
+                // сторож ставав би тим самим «десь перевіряється», який він
+                // і покликаний замінити.
+                var body = action.Groups["body"].Value;
+                var next = body.IndexOf("[Http", StringComparison.Ordinal);
+                if (next >= 0)
+                {
+                    body = body[..next];
+                }
+
+                var used = CallRegex.Matches(body)
+                    .Select(m => m.Groups[1].Value)
+                    .Where(types.ContainsKey)
+                    .Select(name => types[name])
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                result[(action.Groups[1].Value.ToUpperInvariant(), Normalize(full))] = used;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Тип обробника → права, які він справді перевіряє.</summary>
+    /// <remarks>
+    /// ⚠ Клас береться ЗРІЗОМ файла, а не файлом цілком: у спільному файлі
+    /// (<c>TemplateQueryHandlers.cs</c>, <c>RoleAndUserHandlers.cs</c>) сусідній
+    /// клас перевіряє інше право, і пошук по файлу доводив би не те.
+    ///
+    /// ⚠ Право найчастіше не літерал, а константа сусіда:
+    /// <c>ListTemplatesHandler.Permission</c>. Посилання тому
+    /// <b>розв'язуються</b> — інакше сторож скаржився б на п'ять обробників,
+    /// кожен із яких право перевіряє, і його вимкнули б за шум.
+    /// </remarks>
+    private static Dictionary<string, HashSet<string>> HandlerBodies()
+    {
+        var bodies = new Dictionary<string, string>(StringComparer.Ordinal);
+        var directory = Path.Combine(SolutionRoot(), "src", "Ecr.Application");
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var source = File.ReadAllText(file);
+            var starts = ClassRegex.Matches(source).ToList();
+
+            for (var i = 0; i < starts.Count; i++)
+            {
+                var from = starts[i].Index;
+                var to = i + 1 < starts.Count ? starts[i + 1].Index : source.Length;
+                bodies[starts[i].Groups[1].Value] = source[from..to];
+            }
+        }
+
+        // Константа права, оголошена класом: `public const string Permission = "…"`.
+        var constants = bodies.ToDictionary(
+            pair => pair.Key,
+            pair => PermissionConstRegex.Match(pair.Value) is { Success: true } m
+                ? m.Groups[1].Value
+                : null,
+            StringComparer.Ordinal);
+
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (var (name, body) in bodies)
+        {
+            var permissions = new HashSet<string>(StringComparer.Ordinal);
+
+            // Літерал у самому тілі.
+            foreach (Match literal in PermissionLiteralRegex.Matches(body))
+            {
+                permissions.Add(literal.Groups[1].Value);
+            }
+
+            // Власна константа: клас, який її оголошує, нею й користується.
+            if (constants.TryGetValue(name, out var own) && own is not null)
+            {
+                permissions.Add(own);
+            }
+
+            // Константа або допоміжна перевірка сусіда: `Інший.Permission`,
+            // `Інший.RequireAsync(…)`, `Інший.ProfileAsync(…)`.
+            foreach (Match reference in QualifiedPermissionRegex.Matches(body))
+            {
+                if (constants.TryGetValue(reference.Groups[1].Value, out var borrowed)
+                    && borrowed is not null)
+                {
+                    permissions.Add(borrowed);
+                }
+            }
+
+            result[name] = permissions;
+        }
+
+        return result;
+    }
+
+    /// <summary>Дія контролера з широким вікном тіла — до наступного атрибута.</summary>
+    [GeneratedRegex(
+        @"\[Http(Get|Post|Put|Patch|Delete)(?:\(""([^""]*)""\))?\]"
+        + @".*?public\s+(?:async\s+)?(?:Task<[^(]*?>|Task|IActionResult)\s+\w+\s*\("
+        + @"[^)]*\)(?=(?<body>.{0,2000}))",
+        RegexOptions.Singleline)]
+    private static partial Regex ActionBodyRegex { get; }
+
+    /// <summary>Константа права, оголошена класом.</summary>
+    [GeneratedRegex(@"const\s+string\s+Permission\s*=\s*""([^""]+)""")]
+    private static partial Regex PermissionConstRegex { get; }
+
+    /// <summary>Літерал права: <c>"Область.Дія"</c>.</summary>
+    [GeneratedRegex(@"""([A-Z]\w+\.[A-Z]\w+)""")]
+    private static partial Regex PermissionLiteralRegex { get; }
+
+    /// <summary>Позичена константа або допоміжна перевірка сусіда.</summary>
+    [GeneratedRegex(@"\b(\w+Handler)\s*\.\s*(?:Permission\b|RequireAsync\(|ProfileAsync\()")]
+    private static partial Regex QualifiedPermissionRegex { get; }
+
+    [GeneratedRegex(@"^\|\s*`(GET|POST|PUT|PATCH|DELETE)`\s*\|\s*`([^`]+)`\s*\|\s*`?([^|`]*)`?\s*\|\s*(\d)\s*\|",
+                    RegexOptions.Multiline)]
+    private static partial Regex ContractRowWithPermission { get; }
+
+    /// <summary>Список параметрів первинного конструктора контролера.</summary>
+    [GeneratedRegex(@"class\s+\w+Controller\s*\(([\s\S]*?)\)\s*:\s*ControllerBase")]
+    private static partial Regex ControllerCtorRegex { get; }
+
+    /// <summary>Параметр первинного конструктора: тип і ім'я.</summary>
+    [GeneratedRegex(@"([A-Z][\w.<>]*)\s+([a-z]\w*)\s*(?=,|$)", RegexOptions.Multiline)]
+    private static partial Regex CtorParameterRegex { get; }
+
+    /// <summary>Виклик методу на змінній: <c>handler.DoAsync(</c>.</summary>
+    [GeneratedRegex(@"\b([a-z]\w*)\s*\n?\s*\.\s*\w+\s*\(")]
+    private static partial Regex CallRegex { get; }
+
+    /// <summary>Оголошення класу верхнього рівня.</summary>
+    [GeneratedRegex(@"^public\s+(?:sealed\s+)?(?:partial\s+)?class\s+(\w+)", RegexOptions.Multiline)]
+    private static partial Regex ClassRegex { get; }
+
     private sealed record Endpoint(string Method, string Path, int Stage);
 
     [GeneratedRegex(@"^\|\s*`(GET|POST|PUT|PATCH|DELETE)`\s*\|\s*`([^`]+)`\s*\|[^|]*\|\s*(\d)\s*\|",

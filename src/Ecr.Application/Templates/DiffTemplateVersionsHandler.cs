@@ -17,7 +17,11 @@ namespace Ecr.Application.Templates;
 /// зрозуміти, що насправді змінилося.
 /// </remarks>
 public sealed class DiffTemplateVersionsHandler(
-    IMetadataCache metadata, ITemplateVersionStore versions, ChangeClassifier classifier)
+    IMetadataCache metadata,
+    ITemplateVersionStore versions,
+    ChangeClassifier classifier,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Порівнює дві версії.</summary>
     /// <param name="fromVersionId">Версія-джерело.</param>
@@ -25,6 +29,12 @@ public sealed class DiffTemplateVersionsHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<TemplateDiffDto> HandleAsync(int fromVersionId, int toVersionId, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Template.View", ct)
+            .ConfigureAwait(false);
+
         var from = await metadata.GetAsync(fromVersionId, ct).ConfigureAwait(false);
         var to = await metadata.GetAsync(toVersionId, ct).ConfigureAwait(false);
 

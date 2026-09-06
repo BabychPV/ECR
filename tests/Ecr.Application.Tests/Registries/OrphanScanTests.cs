@@ -83,6 +83,14 @@ public sealed class OrphanScanTests
                   new(new CellAddress(new PeriodKey(Period), Row1, VolumeId), 3,
                       new CellValueData { ValueNumeric = 12500m }),
               });
+
+        // ⛔ Читання зрізу тепер вимагає і права `Document.View`, і ГРАНТА на
+        // проєкт (`A7-53`, `A7-55`). Фікстура видає обидва явно: предмет цих
+        // тестів — вміст зрізу, а не доступ, і мовчазний дозвіл підмінив би
+        // одне іншим.
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
@@ -277,7 +285,7 @@ public sealed class OrphanScanTests
         SecurityStamp = "s",
         // Право на зміну довідників видане: предмет цих тестів — симетрія
         // ознаки IsOrphaned, а не доступ.
-        Permissions = new HashSet<string>(StringComparer.Ordinal) { "Registry.EditData" },
+        Permissions = new HashSet<string>(StringComparer.Ordinal) { "Registry.EditData", "Document.View" },
         Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(),
         RoleIds = new HashSet<int>(),

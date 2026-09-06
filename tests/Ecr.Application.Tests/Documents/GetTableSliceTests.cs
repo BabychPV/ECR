@@ -51,6 +51,14 @@ public sealed class GetTableSliceTests
              .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A" });
         _rows.GetOrphanFlagsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool> { [Row1] = false });
+
+        // ⛔ Читання зрізу тепер вимагає і права `Document.View`, і ГРАНТА на
+        // проєкт (`A7-53`, `A7-55`). Фікстура видає обидва явно: предмет цих
+        // тестів — вміст зрізу, а не доступ, і мовчазний дозвіл підмінив би
+        // одне іншим.
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
     }
@@ -62,7 +70,8 @@ public sealed class GetTableSliceTests
     private static AccessProfile Profile() => new()
     {
         CacheKey = "p", UserId = 9, SecurityStamp = "s",
-        Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+        Permissions = new HashSet<string>(StringComparer.Ordinal) { "Document.View" },
+        Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(), RoleIds = new HashSet<int>()
     };
 
@@ -108,6 +117,49 @@ public sealed class GetTableSliceTests
         // комірок, яких у зрізі немає.
         Assert.Single(slice.Columns);
         Assert.Equal("Volume", slice.Columns[0].Code);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.13")]
+    public async Task Без_права_Document_View_зріз_не_читається()
+    {
+        // ⛔ `A7-53`. Ендпоінт оголошував право в контракті й не перевіряв
+        // нічого, крім `[Authorize]`: зріз чужого документа читав будь-хто,
+        // хто увійшов. Контролер будував профіль і передавав його далі, ні
+        // про що не питаючи.
+        Cells(Cell(Row1, new CellValueData { ValueNumeric = 1m }));
+
+        var stranger = new AccessProfile
+        {
+            CacheKey = "s", UserId = 42, SecurityStamp = "s",
+            Permissions = new HashSet<string>(StringComparer.Ordinal),
+            Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
+        };
+
+        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.AccessDeniedException>(
+            () => Handler().HandleAsync(700, TableInstance, stranger, "en", CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.13")]
+    public async Task Без_гранта_на_проєкт_зріз_не_читається()
+    {
+        // ⛔ `A7-55`. Функціональне право каже «цей користувач узагалі працює
+        // з документами»; грант каже, з ЯКИМИ. `CanReadDocumentAsync`
+        // існувала від Етапу 3 і НЕ МАЛА ЖОДНОГО ВИКЛИКУ — тобто ресурсна
+        // модель, включно з `IsDeny` (`ФВ-6.6`), на читанні не діяла зовсім.
+        Cells(Cell(Row1, new CellValueData { ValueNumeric = 1m }));
+
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
+
+        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.AccessDeniedException>(
+            () => Handler().HandleAsync(700, TableInstance, Profile(), "en", CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]

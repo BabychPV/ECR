@@ -21,6 +21,27 @@ public sealed class GetTableSliceHandler(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
+        // ⛔ Право перевіряється ТУТ (`A7-53`). Контролер будував профіль і
+        // передавав його далі, не питаючи нічого: `[Authorize]` пропускав
+        // будь-кого, хто увійшов.
+        if (!profile.Has("Document.View"))
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", "Потрібне право Document.View.");
+        }
+
+        // ⛔ І ГРАНТ на проєкт (`A7-55`, `ФВ-6.13`). Функціональне право
+        // каже «цей користувач узагалі працює з документами»; грант каже, з
+        // ЯКИМИ. Без другої перевірки ресурсна модель — включно з `IsDeny`
+        // (`ФВ-6.6`) — не діяла на читанні зовсім: `CanReadDocumentAsync`
+        // існувала і не мала жодного виклику.
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
+
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
         // 1. Метадані — зі знімка, без звернення до БД (D-16).

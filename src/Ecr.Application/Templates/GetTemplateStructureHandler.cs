@@ -11,13 +11,23 @@ namespace Ecr.Application.Templates;
 /// Ключ `v{id}:r{rev}` (ФВ-2.5) робить інвалідацію непотрібною: інша
 /// ревізія — інший ключ.
 /// </summary>
-public sealed class GetTemplateStructureHandler(IMetadataCache metadata, IUnitCatalog units)
+public sealed class GetTemplateStructureHandler(
+    IMetadataCache metadata,
+    IUnitCatalog units,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Повертає структуру версії.</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<TemplateStructureDto> HandleAsync(int templateVersionId, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Template.View", ct)
+            .ConfigureAwait(false);
+
         // ⛔ Жодного звернення до DbContext звідси: воно заборонене
         // архітектурним тестом, і не заради чистоти шарів. Структура читається
         // на кожне відкриття таблиці; похід у базу тут з'їв би весь бюджет

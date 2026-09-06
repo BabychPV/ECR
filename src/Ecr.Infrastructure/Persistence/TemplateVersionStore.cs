@@ -200,6 +200,16 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<PeriodAccessRuleDef>> ListPeriodAccessRulesAsync(
+        int templateVersionId, CancellationToken ct)
+        => await db.PeriodAccessRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == templateVersionId)
+            .OrderBy(r => r.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int> ApplyPresentationAsync(
         int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct)
     {

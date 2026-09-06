@@ -21,7 +21,9 @@ public sealed class PatchPresentationHandler(
     ChangeClassifier classifier,
     IAuditWriter audit,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Застосовує презентаційні зміни.</summary>
     /// <param name="templateVersionId">Версія.</param>
@@ -34,6 +36,12 @@ public sealed class PatchPresentationHandler(
     /// </exception>
     public async Task<int> PatchAsync(int templateVersionId, string patchJson, int userId, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Template.Edit", ct)
+            .ConfigureAwait(false);
+
         ArgumentException.ThrowIfNullOrWhiteSpace(patchJson);
 
         var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);

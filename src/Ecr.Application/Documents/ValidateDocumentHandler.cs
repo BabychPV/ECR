@@ -15,7 +15,9 @@ public sealed class ValidateDocumentHandler(
     IValidationResultStore results,
     ValidationEngine engine,
     Domain.Abstractions.IClock clock,
-    IUnitOfWork uow)
+    IUnitOfWork uow,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -25,6 +27,20 @@ public sealed class ValidateDocumentHandler(
     public async Task<IReadOnlyList<ValidationMessage>> HandleAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). Валідація читає ВЕСЬ документ
+        // і повертає повідомлення з підписами рядків і колонок — тобто його
+        // зміст. До цього її міг запустити будь-хто, хто увійшов.
+        var profile = await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Document.View", ct)
+            .ConfigureAwait(false);
+
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
+
         // ⚠ Екземпляри таблиць беруться ОДНИМ запитом, а не по аркушах:
         // бюджет — 3 с p95 на весь документ, і похід у базу на кожну з
         // сотні таблиць у нього не вкладається.

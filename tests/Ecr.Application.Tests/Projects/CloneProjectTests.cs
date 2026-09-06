@@ -46,9 +46,16 @@ public sealed class CloneProjectTests
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
         _periods.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(_source);
+
+        // Право видане: предмет цих тестів — правила клонування, а не доступ.
+        // Саме право стереже `EndpointCoverageTests`.
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
     }
 
-    private CloneProjectHandler Handler() => new(_periods, _uow, _audit, _user, _clock);
+    private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+
+    private CloneProjectHandler Handler() => new(_periods, _uow, _audit, _user, _clock, _access);
 
     /// <summary>Проєкт, який обробник передав сховищу.</summary>
     private Project Cloned()

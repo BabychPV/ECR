@@ -7,7 +7,12 @@ using Ecr.Domain.Services;
 namespace Ecr.Application.Periods;
 
 /// <summary>Будує календар періодів проєкту (ФВ-1.5).</summary>
-public sealed class BuildPeriodCalendarHandler(IPeriodStore periods, IUnitOfWork uow, IClock clock)
+public sealed class BuildPeriodCalendarHandler(
+    IPeriodStore periods,
+    IUnitOfWork uow,
+    IClock clock,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Створює періоди, яких ще немає.</summary>
     /// <param name="projectId">Проєкт.</param>
@@ -16,6 +21,12 @@ public sealed class BuildPeriodCalendarHandler(IPeriodStore periods, IUnitOfWork
     /// <exception cref="NotFoundException">Проєкт не знайдено.</exception>
     public async Task<int> HandleAsync(int projectId, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Document.View", ct)
+            .ConfigureAwait(false);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException("ECR-PRD-0422", $"Проєкт {projectId} не знайдено.");
 

@@ -73,6 +73,14 @@ public sealed class ColumnUnitSymbolTests
         _rows.GetOrphanFlagsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns([]);
+
+        // ⛔ Читання зрізу тепер вимагає і права `Document.View`, і ГРАНТА на
+        // проєкт (`A7-53`, `A7-55`). Фікстура видає обидва явно: предмет цих
+        // тестів — вміст зрізу, а не доступ, і мовчазний дозвіл підмінив би
+        // одне іншим.
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
 
@@ -96,7 +104,7 @@ public sealed class ColumnUnitSymbolTests
         CacheKey = "p",
         UserId = 9,
         SecurityStamp = "s",
-        Permissions = new HashSet<string>(StringComparer.Ordinal),
+        Permissions = new HashSet<string>(StringComparer.Ordinal) { "Document.View" },
         Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
         Denies = new HashSet<string>(StringComparer.Ordinal),
         RoleIds = new HashSet<int>(),

@@ -1,6 +1,117 @@
 {
   "components": {
     "schemas": {
+      "AccessMatrixCellDto": {
+        "description": "Клітинка матриці.",
+        "properties": {
+          "detail": {
+            "description": "Пояснення для підказки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodSequence": {
+            "description": "Порядковий номер періоду (`1…12`).",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/EditDenyReason",
+            "description": "Причина блокування; `None` — доступно."
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccessMatrixState",
+            "description": "Доступно, частково, заблоковано."
+          }
+        },
+        "required": [
+          "periodSequence",
+          "state",
+          "reason",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "AccessMatrixDto": {
+        "description": "Матриця доступу `період × аркуш`.",
+        "properties": {
+          "periodCount": {
+            "description": "Скільки періодів у матриці.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "presentationRevision": {
+            "description": "Ревізія; частина ключа кешу структури.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheets": {
+            "description": "Аркуші в порядку шаблону.",
+            "items": {
+              "$ref": "#/components/schemas/AccessMatrixSheetDto"
+            },
+            "type": "array"
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "presentationRevision",
+          "periodCount",
+          "sheets"
+        ],
+        "type": "object"
+      },
+      "AccessMatrixSheetDto": {
+        "description": "Рядок матриці — один аркуш.",
+        "properties": {
+          "cells": {
+            "description": "Клітинки за порядковими номерами періодів.",
+            "items": {
+              "$ref": "#/components/schemas/AccessMatrixCellDto"
+            },
+            "type": "array"
+          },
+          "code": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "dependsOnData": {
+            "description": "Аркуш має правило, яке залежить від даних документа\r\n(`SourceWindow` або `Expression`): показана картина неповна.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша."
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "code",
+          "nameL10n",
+          "dependsOnData",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "AccessMatrixState": {
+        "description": "Стан клітинки матриці доступу.",
+        "enum": [
+          "Editable",
+          "Partial",
+          "Blocked"
+        ]
+      },
       "AffectedRowsResponse": {
         "description": "Скільки рядків зачепила операція.",
         "properties": {
@@ -888,6 +999,26 @@
           "maxDynamicRows"
         ],
         "type": "object"
+      },
+      "EditDenyReason": {
+        "description": "Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).",
+        "enum": [
+          "None",
+          "NoGrant",
+          "PeriodNotOpenYet",
+          "PeriodClosed",
+          "OutOfAccessWindow",
+          "DocumentSubmitted",
+          "DocumentApproved",
+          "ColumnReadOnly",
+          "RowReadOnly",
+          "CalculatedCell",
+          "ProjectArchived",
+          "ArchivingInProgress",
+          "BusinessRule",
+          "SimulationReadOnly",
+          "OutsidePermitWindow"
+        ]
       },
       "EntityTagHeaderValue": {
         "properties": {
@@ -6281,6 +6412,49 @@
         "summary": "Запускає збір для сутності джерела. Право `Integration.Manage`.",
         "tags": [
           "Sources"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/access-matrix": {
+      "get": {
+        "description": "⛔ Будується тим самим обчислювачем, що й доступ у документі\r\n(`ФВ-2.18`): друга реалізація «для перегляду» показувала б не те,\r\nщо система робить насправді, і перегляд перестав би ловити помилку в\r\nправилах — тобто робив би рівно протилежне тому, заради чого існує.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessMatrixDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessMatrixDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessMatrixDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Матриця доступу `період × аркуш` для конструктора. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
         ]
       }
     },

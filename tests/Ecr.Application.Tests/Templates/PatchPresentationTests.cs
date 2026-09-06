@@ -1,5 +1,7 @@
-﻿using Ecr.Application.Errors;
+﻿using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
@@ -35,10 +37,17 @@ public sealed class PatchPresentationTests
         _versions.GetAsync(1, Arg.Any<CancellationToken>()).Returns(_published);
         _store.HasDocumentsAsync(1, Arg.Any<CancellationToken>()).Returns(true);
         _store.IncrementPresentationRevisionAsync(1, Arg.Any<CancellationToken>()).Returns(1);
+
+        _user.UserId.Returns(9);
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Template.Edit").Build());
     }
 
+    private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+
     private PatchPresentationHandler Handler()
-        => new(_versions, _store, new ChangeClassifier(), _audit, _uow, _clock);
+        => new(_versions, _store, new ChangeClassifier(), _audit, _uow, _clock, _access, _user);
 
     private const string HeaderPatch =
         """[{"entityType":"ColumnDef","entityId":5,"field":"HeaderL10n","value":"{\"en\":\"Volume, m3\"}"}]""";

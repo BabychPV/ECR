@@ -10,6 +10,7 @@ import type {
   TemplateStructureDto,
   VersionIdResponse,
 } from '@/api/types';
+import { AccessMatrix } from '@/features/templates/AccessMatrix';
 import { PresentationEditor } from '@/features/templates/PresentationEditor';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
@@ -150,6 +151,12 @@ export function TemplateVersionPage(): JSX.Element {
                 «що зміниться» законне й для того, хто нічого не править —
                 саме з нього починається рішення про міграцію. */}
             {can(session.data, 'Template.View') && <VersionDiff templateVersionId={id} />}
+
+            {/* ⛔ Матриця доступу (`ФВ-2.18`) — теж право ПЕРЕГЛЯДУ: питання
+                «які періоди відкриті на цьому аркуші» законне для всіх, і
+                саме воно найчастіше й з'ясовується постфактум, коли форму
+                вже не заповнити. */}
+            {can(session.data, 'Template.View') && <AccessMatrix templateVersionId={id} />}
 
             {/* ⛔ Клон — єдиний спосіб змінити структуру після публікації
                 (`ФВ-7.1`). Кнопка є завжди, коли є право правити шаблони:

@@ -121,6 +121,9 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 
 /** Структура версії шаблону: аркуші, таблиці, колонки. */
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
+export type AccessMatrixDto = Schemas['AccessMatrixDto'];
+export type AccessMatrixSheetDto = Schemas['AccessMatrixSheetDto'];
+export type AccessMatrixCellDto = Schemas['AccessMatrixCellDto'];
 
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];

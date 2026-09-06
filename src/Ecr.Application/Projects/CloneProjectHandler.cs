@@ -22,7 +22,12 @@ namespace Ecr.Application.Projects;
 /// періодів і пояс майданчика.
 /// </remarks>
 public sealed class CloneProjectHandler(
-    IPeriodStore periods, IUnitOfWork uow, IAuditWriter audit, ICurrentUser currentUser, IClock clock)
+    IPeriodStore periods,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    ICurrentUser currentUser,
+    IClock clock,
+    Security.IAccessDecisionService access)
 {
     /// <summary>Створює проєкт-копію з новим кодом.</summary>
     /// <param name="sourceProjectId">Проєкт-джерело.</param>
@@ -31,6 +36,12 @@ public sealed class CloneProjectHandler(
     /// <returns>Ідентифікатор створеного проєкту.</returns>
     public async Task<int> HandleAsync(int sourceProjectId, string newCode, CancellationToken ct)
     {
+        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
+        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, "Project.Manage", ct)
+            .ConfigureAwait(false);
+
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Анонімний запит не може створювати проєкти.");
