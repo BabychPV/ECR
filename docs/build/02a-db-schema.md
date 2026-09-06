@@ -1184,7 +1184,8 @@ CREATE TABLE calc.MethodologyVersion
     Version           nvarchar(20)   NOT NULL,
     Status            tinyint        NOT NULL,   -- TemplateVersionStatus
     [Level]           tinyint        NOT NULL,   -- CalculationLevel
-    -- Арифметичний режим: Legacy відтворює числа чинної системи побітово (ФВ-9.9)
+    -- Арифметичний режим: Legacy рахує в double за NCalc 1.3.8 (ФВ-9.9);
+    -- звірка з еталоном — у поданні колонки, не побітово (ФВ-9.16)
     NumericMode       tinyint        NOT NULL CONSTRAINT DF_MV_Numeric  DEFAULT(0),
     -- Джерело Period.Days/Hours/Seconds. Різниця конвенції змінює ВСІ числа (D-78)
     CalendarMode      tinyint        NOT NULL CONSTRAINT DF_MV_Calendar DEFAULT(0),

@@ -25,7 +25,7 @@ public sealed class NumericPolicyTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.16a")]
+    [Trait("Requirement", "ФВ-9.16d")]
     public void Legacy_бере_подвійну_точність_і_банківське_округлення()
     {
         var policy = new NumericPolicy(NumericMode.Legacy);

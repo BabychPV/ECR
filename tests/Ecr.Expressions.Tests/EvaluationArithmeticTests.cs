@@ -39,7 +39,7 @@ public sealed class EvaluationArithmeticTests
     [InlineData(1.5, 2.0)]
     [InlineData(3.5, 4.0)]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.16a")]
+    [Trait("Requirement", "ФВ-9.16d")]
     public void Legacy_округлює_банківськи(double value, double expected)
     {
         // ⛔ Не «поки не виміряно», а факт: чинна збірка створює
