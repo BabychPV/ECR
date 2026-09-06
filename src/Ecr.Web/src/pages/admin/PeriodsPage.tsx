@@ -4,24 +4,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type {
   CloneProjectRequest,
-  CreateProjectRequest,
   PagedProjects,
   PeriodCalendarDto,
   ProjectIdResponse,
   ReopenPeriodRequest,
   SetCurrentPeriodRequest,
 } from '@/api/types';
+import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
-
-/** Види періоду; значення збігаються з `PeriodKind` домену. */
-const PeriodKinds = ['Monthly', 'Quarterly', 'Yearly', 'Custom'];
 
 /**
  * Проєкти і календар їхніх періодів.
@@ -45,9 +41,6 @@ export function PeriodsPage(): JSX.Element {
   const session = useSession();
 
   const [creating, setCreating] = useState(false);
-  const [code, setCode] = useState('');
-  const [name, setName] = useState<LocalizedValue>({});
-  const [periodKind, setPeriodKind] = useState('Monthly');
 
   const [cloning, setCloning] = useState(false);
   const [cloneCode, setCloneCode] = useState('');
@@ -85,44 +78,6 @@ export function PeriodsPage(): JSX.Element {
     onSuccess: async () => {
       await refresh();
       showDone(t('periods.activated'));
-    },
-    onError: showApiError,
-  });
-
-  /**
-   * Створення проєкту.
-   *
-   * ⛔ Дії не було в інтерфейсі: сторож вважав `POST /projects` досяжним лише
-   * тому, що клієнт ЧИТАЄ `GET /projects` тією самою адресою (`A7-42`). А без
-   * проєкту немає ані періодів, ані документів — тобто перший крок роботи із
-   * системою доводилося робити запитом повз неї.
-   *
-   * ⚠ Проєкт створюється ЧЕРНЕТКОЮ: періоди лишаються закритими, доки його не
-   * активують. Це не зайвий крок — календар будується з рішень, які доти ще
-   * можна виправити без сліду в аудиті.
-   */
-  const create = useMutation({
-    mutationFn: () =>
-      apiFetch<ProjectIdResponse>('/api/v1/projects', {
-        method: 'POST',
-        body: JSON.stringify({
-          code: code.trim(),
-          nameL10n: name,
-          periodKind,
-
-          // ⚠ Часовий пояс — ПРОЄКТУ, а не сервера: межі періоду рахуються в
-          // ньому (`D-6`). Сервер у Європі не має вирішувати, коли
-          // закінчився місяць на місці видобутку.
-          timeZoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        } satisfies CreateProjectRequest),
-      }),
-    onSuccess: async (result) => {
-      await refresh();
-      setCreating(false);
-      setCode('');
-      setName({});
-      setProjectId(result.projectId);
-      showDone(t('periods.created'));
     },
     onError: showApiError,
   });
@@ -398,43 +353,20 @@ export function PeriodsPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
-      <Modal opened={creating} onClose={() => setCreating(false)} title={t('periods.create')}>
-        <TextInput
-          label={t('periods.code')}
-          description={t('periods.codeHint')}
-          value={code}
-          onChange={(event) => setCode(event.currentTarget.value)}
-          data-autofocus
-        />
-
-        <LocalizedInput label={t('periods.name')} value={name} onChange={setName} />
-
-        {/* ⛔ Вид періоду задається при створенні і потім визначає весь
-            календар: у квартальному проєкті `Sequence` іде від 1 до 4, і
-            змінити це згодом означало б переписати ключі всіх даних. */}
-        <Select
-          mt="sm"
-          label={t('periods.kind')}
-          description={t('periods.kindHint')}
-          data={PeriodKinds}
-          value={periodKind}
-          onChange={(value) => setPeriodKind(value ?? 'Monthly')}
-          allowDeselect={false}
-        />
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setCreating(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={code.trim().length === 0 || !hasAnyText(name)}
-            loading={create.isPending}
-            onClick={() => create.mutate()}
-          >
-            {t('common.save')}
-          </Button>
-        </Group>
-      </Modal>
+      {/* ⛔ Форма створення живе ОКРЕМИМ компонентом (`A7-56`). Вона
+          надсилала запит без версії шаблону і без політики періодів, а сервер
+          відхиляє створення без них — тобто перший крок роботи із системою не
+          працював жодного разу. Окремий компонент дає їй власний тест, який
+          дивиться на тіло запиту, а не на те, що діалог відкрився. */}
+      <CreateProjectModal
+        opened={creating}
+        onClose={() => setCreating(false)}
+        onCreated={async (projectId) => {
+          await refresh();
+          setProjectId(projectId);
+          showDone(t('periods.created'));
+        }}
+      />
 
       <Modal opened={cloning} onClose={() => setCloning(false)} title={t('periods.clone')}>
         <Text size="sm" mb="sm">
