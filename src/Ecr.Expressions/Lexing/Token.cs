@@ -1,12 +1,17 @@
 namespace Ecr.Expressions.Lexing;
 
 /// <summary>Тип лексеми.</summary>
+/// <remarks>
+/// ⚠ <c>ArgumentSeparator</c> названий за РОЛЛЮ, а не за символом: сам символ
+/// задає діалект (<see cref="DialectSyntax.ArgumentSeparator"/>), і назва
+/// «Comma» зробила б із властивості діалекту факт граматики.
+/// </remarks>
 public enum TokenType : byte
 {
     Number, String, Boolean, Null,
     Identifier,
     LBracket, RBracket, LParen, RParen,
-    Dot, Comma, Colon, Question,
+    Dot, ArgumentSeparator, Colon, Question,
     At, Bang, Ampersand,
     Plus, Minus, Star, Slash, Percent, Caret,
     Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual,

@@ -1,5 +1,7 @@
 // tests/Ecr.Expressions.Tests/Lexing/LexerTests.cs
 using System.Globalization;
+using Ecr.Domain.Enums;
+using Ecr.Expressions;
 using Ecr.Expressions.Lexing;
 using Ecr.TestKit;
 using Xunit;
@@ -12,7 +14,10 @@ namespace Ecr.Expressions.Tests.Lexing;
 /// </summary>
 public sealed class LexerTests
 {
-    private static readonly Lexer Lexer = new();
+    // ⚠ Діалект задається явно: символ роздільника аргументів — властивість
+    // діалекту (`DialectSyntax`), а не константа лексера, тому лексер без
+    // діалекту не існує.
+    private static readonly Lexer Lexer = new(DialectSyntax.Of(ExpressionDialect.Template));
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Ідентифікатор_не_починається_з_цифри_поза_дужками()
@@ -84,7 +89,7 @@ public sealed class LexerTests
 
             Assert.Equal(TokenType.Number, tokens[0].Type);
             Assert.Equal("1", tokens[0].Text);
-            Assert.Equal(TokenType.Comma, tokens[1].Type);
+            Assert.Equal(TokenType.ArgumentSeparator, tokens[1].Type);
             Assert.Equal("5", tokens[2].Text);
 
             Assert.Equal(6m, Expr.Number("SUM(1,5)"));
