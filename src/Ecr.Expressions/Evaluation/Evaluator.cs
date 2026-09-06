@@ -202,7 +202,33 @@ public sealed class Evaluator(
         };
     }
 
-    private static ExpressionValue Arithmetic(ExpressionValue left, ExpressionValue right, BinaryOperator op)
+    /// <summary>
+    /// Арифметика бінарного оператора.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Чотири дії і залишок рахує <see cref="IEvaluationArithmetic"/>, а не
+    /// цей метод. Доти він рахував їх САМ, у <c>decimal</c>, незалежно від
+    /// режиму версії — і <c>LegacyDoubleArithmetic.Binary</c>, написаний і
+    /// покритий тестами на кроці <c>I.4</c>, на шлях операторів не потрапляв
+    /// узагалі: його кликали лише функції (<c>I.14</c>).
+    ///
+    /// ⚠ Наслідок був той самий, що завжди в цьому пакеті, — тихий. У
+    /// <c>Legacy</c> вираз <c>1/0</c> давав <c>#DIV/0</c>, тоді як чинний
+    /// рушій дає <c>+∞</c> (виміряно), і саме це <c>+∞</c> він далі маскує в
+    /// нуль. Тобто режим, що існує заради відтворення чисел, на найпростішому
+    /// діленні відтворював інше.
+    ///
+    /// ⛔ <see cref="BinaryOperator.Power"/> НЕ делегується, і це не пропуск.
+    /// Тут степінь із дробовим показником — помилка-значення, а
+    /// <c>DecimalMath.Pow</c> в арифметиці її рахує; делегування мовчки
+    /// змінило б <c>2 ^ 0.5</c> у шаблонах із <c>#VALUE</c> на число. У
+    /// діалекті методологій <c>^</c> не існує взагалі — парсер відхиляє його
+    /// як <c>ECR-CALC-0431</c>, — тож цей оператор буває лише в шаблонах.
+    /// </remarks>
+    /// <param name="left">Ліве значення.</param>
+    /// <param name="right">Праве значення.</param>
+    /// <param name="op">Оператор.</param>
+    private ExpressionValue Arithmetic(ExpressionValue left, ExpressionValue right, BinaryOperator op)
     {
         // Date − Date → Number (днів); Date + Number → Date (02b §5).
         if (left.Type == ExpressionValueType.Date || right.Type == ExpressionValueType.Date)
@@ -210,36 +236,21 @@ public sealed class Evaluator(
             return DateArithmetic(left, right, op);
         }
 
-        if (left.AsNumber() is not { } a || right.AsNumber() is not { } b)
+        if (op == BinaryOperator.Power)
         {
-            return ExpressionValue.Error(ExpressionErrors.BadValue);
+            return left.AsNumber() is { } b1 && right.AsNumber() is { } e1
+                ? Power(b1, e1)
+                : ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
         switch (op)
         {
             case BinaryOperator.Add:
-                return ExpressionValue.Number(a + b);
-
             case BinaryOperator.Subtract:
-                return ExpressionValue.Number(a - b);
-
             case BinaryOperator.Multiply:
-                return ExpressionValue.Number(a * b);
-
             case BinaryOperator.Divide:
-                // Ділення на нуль — ЗНАЧЕННЯ, а не виняток: одна зіпсована
-                // комірка не має валити перерахунок усієї таблиці.
-                return b == 0m
-                    ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
-                    : ExpressionValue.Number(a / b);
-
             case BinaryOperator.Modulo:
-                return b == 0m
-                    ? ExpressionValue.Error(ExpressionErrors.DivideByZero)
-                    : ExpressionValue.Number(a % b);
-
-            case BinaryOperator.Power:
-                return Power(a, b);
+                return arithmetic.Binary(left, right, op);
 
             default:
                 return ExpressionValue.Error(ExpressionErrors.BadValue);
