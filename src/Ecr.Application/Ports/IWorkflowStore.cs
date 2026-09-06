@@ -57,6 +57,58 @@ public interface IWorkflowStore
     /// перерахунку.
     /// </remarks>
     public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Маршрут погодження для проєкту і версії шаблону — найконкретніший із
+    /// придатних (<c>ФВ-5.17</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Порядок від конкретного до загального:
+    /// <list type="number">
+    /// <item>проєкт <b>і</b> версія;</item>
+    /// <item>проєкт, версія будь-яка;</item>
+    /// <item>версія, проєкт будь-який;</item>
+    /// <item>типовий — обидві координати порожні;</item>
+    /// <item>маршруту немає → затвердження ОДНОЕТАПНЕ, як було.</item>
+    /// </list>
+    ///
+    /// ⚠ Третій рівень директива не називає, але поле
+    /// <c>TemplateVersionId</c> існувало в схемі до <c>ProjectId</c>, і
+    /// маршрут, налаштований лише на версію, без нього був би тихо мертвим —
+    /// рівно той дефект, від якого весь <c>A7</c>.
+    ///
+    /// ⛔ Пункт 5 — головний. Порожня таблиця маршрутів означає поведінку
+    /// **без змін**: seed не створює жодного, і багатоетапність вмикається
+    /// тим, що хтось завів маршрут, а не тим, що вийшла нова версія системи.
+    /// </remarks>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="templateVersionId">Версія шаблону проєкту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Маршрут із завантаженими кроками або <c>null</c>.</returns>
+    public Task<ApprovalRoute?> FindRouteAsync(
+        int projectId, int templateVersionId, CancellationToken ct);
+
+    /// <summary>Власний маршрут проєкту (<c>ProjectId = @id</c>) або <c>null</c>.</summary>
+    /// <remarks>
+    /// ⚠ Саме ВЛАСНИЙ, а не той, що діє. Екран налаштування має показувати,
+    /// що налаштовано тут, а не те, що успадковано: інакше «прибрати
+    /// маршрут» виглядало б як «нічого не змінилося».
+    /// </remarks>
+    public Task<ApprovalRoute?> FindProjectRouteAsync(int projectId, CancellationToken ct);
+
+    /// <summary>Додає маршрут.</summary>
+    public Task AddRouteAsync(ApprovalRoute route, CancellationToken ct);
+
+    /// <summary>Прибирає маршрут разом із кроками.</summary>
+    public Task RemoveRouteAsync(ApprovalRoute route, CancellationToken ct);
+
+    /// <summary>Чи існує роль із таким ідентифікатором.</summary>
+    /// <remarks>
+    /// ⚠ Крок маршруту посилається на роль числом. Неіснуюча роль дала б
+    /// маршрут, який неможливо пройти: документ подали б і не затвердили
+    /// ніколи, а причина була б видима лише в базі.
+    /// </remarks>
+    public Task<bool> RoleExistsAsync(int roleId, CancellationToken ct);
 }
 
 /// <summary>

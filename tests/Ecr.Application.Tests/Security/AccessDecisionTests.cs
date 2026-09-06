@@ -171,6 +171,43 @@ public sealed class AccessDecisionTests
         Assert.False(EditRules.CanApprove(approver, AccessBuilder.Cell()).IsAllowed);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.17")]
+    public void Крок_маршруту_вимагає_САМЕ_своєї_ролі()
+    {
+        // ⛔ Носій рівня `Approve` — ще не той, чия зараз черга. Без цієї
+        // перевірки маршрут був би оздобою: будь-хто з правом затвердження
+        // проходив би всі кроки поспіль сам, і багатоетапність не додавала б
+        // жодного погодження.
+        var submitted = AccessBuilder.Cell(sheet: DocumentStatus.Submitted);
+
+        var wrongRole = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Approve)
+            .Role(7)
+            .Build();
+
+        var stepRole = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Approve)
+            .Role(42)
+            .Build();
+
+        var denied = EditRules.CanApprove(wrongRole, submitted, requiredRoleId: 42);
+        Assert.False(denied.IsAllowed);
+        Assert.Equal(EditDenyReason.NoGrant, denied.Reason);
+        Assert.Contains("42", denied.Detail, StringComparison.Ordinal);
+
+        Assert.True(EditRules.CanApprove(stepRole, submitted, requiredRoleId: 42).IsAllowed);
+
+        // ⚠ І роль кроку НЕ замінює гранта: додавання ролі в маршрут не має
+        // роздавати доступ до чужих проєктів.
+        var noGrant = new AccessBuilder().Role(42).Build();
+        Assert.False(EditRules.CanApprove(noGrant, submitted, requiredRoleId: 42).IsAllowed);
+
+        // ⛔ Без маршруту поведінка та сама, що була: жоден наявний тест
+        // затвердження не правився.
+        Assert.True(EditRules.CanApprove(stepRole, submitted).IsAllowed);
+    }
+
     // ——— Додаткові з tz/07 §7.6 ———
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

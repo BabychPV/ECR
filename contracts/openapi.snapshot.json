@@ -126,6 +126,72 @@
         ],
         "type": "object"
       },
+      "AffectedStepsResponse": {
+        "description": "Скільки кроків тепер у маршруті погодження.",
+        "properties": {
+          "steps": {
+            "description": "Кількість; `0` — маршруту немає, затвердження одноетапне.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "type": "object"
+      },
+      "ApprovalRouteDto": {
+        "description": "Маршрут погодження проєкту.",
+        "properties": {
+          "hasRoute": {
+            "description": "Чи налаштований власний маршрут. `false` — затвердження одноетапне:\r\nдостатньо одного носія рівня `Approve`.",
+            "type": "boolean"
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "steps": {
+            "description": "Кроки в порядку проходження.",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalStepDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "projectId",
+          "hasRoute",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "ApprovalStepDto": {
+        "description": "Крок маршруту.",
+        "properties": {
+          "isOptional": {
+            "description": "Крок можна пропустити.",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "description": "Порядковий номер, від 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "roleId": {
+            "description": "Роль, яка затверджує на цьому кроці.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ordinal",
+          "roleId",
+          "isOptional"
+        ],
+        "type": "object"
+      },
       "ApproveSheetRequest": {
         "description": "Запит на погодження аркуша.",
         "properties": {
@@ -2499,6 +2565,23 @@
         "required": [
           "reason",
           "until"
+        ],
+        "type": "object"
+      },
+      "ReplaceApprovalRouteRequest": {
+        "description": "Запит на заміну маршруту погодження.",
+        "properties": {
+          "roleIds": {
+            "description": "Ролі кроків у порядку проходження; порожній набір прибирає маршрут і\r\nповертає одноетапне затвердження.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "roleIds"
         ],
         "type": "object"
       },
@@ -5575,6 +5658,150 @@
           }
         },
         "summary": "Активує проєкт. Право `Project.Manage`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/approval-route": {
+      "get": {
+        "description": "⚠ Відповідь є завжди: «маршруту немає» — стан налаштування, а не\r\nпомилка, і `404` змусив би клієнт розрізняти його від «проєкту немає»\r\nза тим самим кодом.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Маршрут погодження проєкту. Право `Project.Manage`.",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "put": {
+        "description": "⛔ Заміна НАБОРОМ кроків, а не поштучна правка: маршрут — це\r\nпослідовність, і «змінити третій крок» означає змінити те, після чого\r\nвін іде.\r\n\r\n⚠ Порожній набір ПРИБИРАЄ маршрут, і затвердження повертається до\r\nодноетапного. Без цього маршрут, заведений помилково, лишався б назавжди.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedStepsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedStepsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedStepsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює маршрут погодження проєкту. Право `Project.Manage`.",
         "tags": [
           "Projects"
         ]

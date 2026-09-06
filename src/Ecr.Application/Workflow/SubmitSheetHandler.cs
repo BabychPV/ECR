@@ -88,7 +88,16 @@ public sealed class SubmitSheetHandler(
                 SubmittedByUserId: userId),
             ct).ConfigureAwait(false);
 
-        state.Submit(userId, now);
+        // ⛔ Подання СТАВИТЬ аркуш на перший крок маршруту (`ФВ-5.17`).
+        // Без цього багатоетапність існувала б лише в таблиці: маршрут
+        // завели б, а документ ішов би повз нього.
+        //
+        // ⚠ Маршруту немає — крок `null`, і поведінка та сама, що була.
+        var step = await access
+            .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
+            .ConfigureAwait(false);
+
+        state.Submit(userId, now, step?.StepId);
 
         // ⛔ Подання СПОВІЩЕННЯ НЕ ПОРОДЖУЄ (`D-119`). Тут раніше стояла
         // постановка події в чергу — прибрано за рішенням замовника: лист про

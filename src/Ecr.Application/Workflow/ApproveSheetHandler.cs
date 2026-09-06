@@ -46,7 +46,18 @@ public sealed class ApproveSheetHandler(
 
         if (approved)
         {
-            state.Approve(userId, now);
+            // ⛔ Проміжний крок НЕ робить аркуш затвердженим (`ФВ-5.17`).
+            // Документ, який став би `Approved` після першого підпису,
+            // потрапив би у звітність для регулятора без решти погоджень
+            // (`ФВ-10.11`) — а саме заради них маршрут і заводять.
+            //
+            // ⚠ Маршруту немає — `step` порожній, `nextStepId` теж, і
+            // `ApproveStep` поводиться рівно як `Approve`: одноетапно, як було.
+            var step = await access
+                .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
+                .ConfigureAwait(false);
+
+            state.ApproveStep(userId, now, step?.NextStepId);
         }
         else
         {

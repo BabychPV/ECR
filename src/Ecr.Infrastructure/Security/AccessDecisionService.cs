@@ -23,7 +23,8 @@ public sealed class AccessDecisionService(
     IMetadataCache metadata,
     Caching.AccessProfileCache profileCache,
     IClock clock,
-    Application.Common.ICurrentUser currentUser) : IAccessDecisionService
+    Application.Common.ICurrentUser currentUser,
+    Application.Ports.IWorkflowStore workflow) : IAccessDecisionService
 {
     /// <inheritdoc />
     public async Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
@@ -438,7 +439,63 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
 
-        return EditRules.CanApprove(profile, context);
+        // ⚠ Маршрут читається ЛИШЕ при затвердженні, а не в кожному рішенні
+        // про доступ: затверджують рідко, а комірки читають тисячами.
+        var step = await CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct)
+            .ConfigureAwait(false);
+
+        return EditRules.CanApprove(profile, context, step?.RoleId);
+    }
+
+    /// <inheritdoc />
+    public async Task<ApprovalStepView?> CurrentApprovalStepAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var scope = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => new { p.Id, p.TemplateVersionId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (scope is null)
+        {
+            return null;
+        }
+
+        var route = await workflow.FindRouteAsync(scope.Id, scope.TemplateVersionId, ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Немає маршруту — немає кроку, і затвердження лишається
+        // одноетапним. Це найчастіший стан: seed не створює жодного маршруту.
+        if (route is null || route.Steps.Count == 0)
+        {
+            return null;
+        }
+
+        var currentStepId = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(a => a.DocumentId == documentId
+                        && a.SheetDefId == sheetDefId
+                        && a.PeriodKey == periodKey.Value)
+            .Select(a => a.CurrentStepId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Перехід рахує ДОМЕН, а не служба. Друга реалізація «яка черга»
+        // розійшлася б із першою на першій же правці маршруту, і розбіжність
+        // була б видима лише тоді, коли документ застряг у погодженні.
+        var current = route.StepAt(currentStepId);
+
+        if (current is null)
+        {
+            return null;
+        }
+
+        var next = route.StepAfter(current.Id);
+
+        return new ApprovalStepView(
+            current.Id, current.Ordinal, current.RoleId, next?.Id, route.Steps.Count);
     }
 
     /// <summary>Збирає умови доступу з бази в один <see cref="CellAccessContext"/>.</summary>

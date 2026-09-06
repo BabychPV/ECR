@@ -105,6 +105,30 @@ public sealed class ApprovalRouteConfiguration : IEntityTypeConfiguration<Approv
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_AR_Act");
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_ApprovalRoute");
 
+        // ⚠ Обчислювана властивість: у базі її немає і бути не має —
+        // збережений пріоритет розійшовся б з областю дії при першій правці.
+        builder.Ignore(x => x.Specificity);
+
+        // ⛔ Друга половина області дії маршруту (`ФВ-5.17`). FK на проєкт, а
+        // не просто число: маршрут неіснуючого проєкту — це маршрут, який
+        // ніколи не спрацює, і знайшли б його лише тоді, коли документ не
+        // затверджується.
+        builder.HasOne<Domain.Entities.Documents.Project>()
+               .WithMany()
+               .HasForeignKey(x => x.ProjectId)
+               .HasConstraintName("FK_AR_Project");
+
+        // ⚠ Індекс саме за областю дії: резолюція маршруту — запит виду
+        // «ProjectId = @p OR ProjectId IS NULL», і він виконується на КОЖНЕ
+        // подання та затвердження.
+        builder.HasIndex(x => new { x.ProjectId, x.TemplateVersionId })
+               .HasDatabaseName("IX_ApprovalRoute_Scope");
+
+        // ⚠ FK лишається `Restrict`, як у схемі від Етапу 3, а кроки
+        // прибирає явно `WorkflowStore.RemoveRouteAsync`. Оголосити в моделі
+        // каскад, якого в базі немає, було б гірше за будь-який із варіантів:
+        // EF вважав би, що діти зникнуть самі, і видалення падало б на
+        // зовнішньому ключі вже в продуктиві.
         builder.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.ApprovalRouteId)
                .HasConstraintName("FK_AS_Route");
     }

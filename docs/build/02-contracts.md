@@ -2512,6 +2512,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects` | `Document.View` | 1 |
 | `POST` | `/api/v1/projects` | `Project.Manage` | 1 |
 | `GET` | `/api/v1/projects/period-policies` | `Project.Manage` | 1 |
+| `GET` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
+| `PUT` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
