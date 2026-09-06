@@ -1,9 +1,11 @@
 // src/Ecr.Application/Registries/RegistryAdminHandlers.cs
+using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Registries;
@@ -42,6 +44,7 @@ public sealed class ListRegistriesHandler(
                 // тисячі рядків заради одного bool у переліку метаданих.
                 IsHierarchical: d.Fields.Any(f => f.RefRegistryDefId == d.Id),
                 d.IsTemporal,
+                d.SourceKind,
                 d.Fields
                     .OrderBy(f => f.Ordinal)
                     .Select(f => new RegistryFieldDto(
@@ -61,13 +64,24 @@ public sealed class ListRegistriesHandler(
 }
 
 /// <summary>
-/// Перемикання master-джерела довідника (ФВ-8.9).
+/// Перемикання master-джерела <b>набором довідників</b> (ФВ-8.9, ФВ-13.10).
 /// </summary>
 /// <remarks>
 /// ⛔ У відкритому періоді заборонено — <c>ECR-REG-0422</c>. Причина не
 /// технічна: master визначає, чий набір записів вважається істинним, і зміна
 /// посеред періоду означала б, що частина документів заповнена за одним
 /// переліком дозволів, а частина — за іншим, без жодної позначки в даних.
+///
+/// ⛔ Операція <b>над набором</b>, а не над одним довідником, і сутності
+/// «група довідників» немає навмисно. Група — це факт ОДНОГО перемикання, а
+/// не властивість довідника: через рік після переходу всі довідники будуть
+/// у <c>Local</c>, групи виконають свою роль і лишаться в базі довідником
+/// довідників, який ніхто не оновлює. Наступний, хто заводитиме довідник,
+/// побачить поле «група» і питатиме, що туди писати.
+///
+/// ⚠ Уся інформація, заради якої була б потрібна група, зберігається в
+/// АУДИТІ: один запис із повним набором кодів і причиною. Через рік видно,
+/// що саме перемикали разом — і це все, що від групи потрібно.
 /// </remarks>
 public sealed class SwitchRegistrySourceHandler(
     IRegistryStore registries,
@@ -78,79 +92,149 @@ public sealed class SwitchRegistrySourceHandler(
     IClock clock)
 {
     /// <summary>
-    /// Право на зміну ВИЗНАЧЕННЯ довідника — не даних.
+    /// Право на перемикання master — <b>небезпечне</b> (<c>ФВ-6.12</c>).
     /// </summary>
     /// <remarks>
-    /// Перемикання master змінює, чий перелік записів вважається істинним:
-    /// це рішення про сам довідник, а не правка значення в ньому.
+    /// ⚠ Не <c>Registry.EditDefinition</c>. Перемикання master — це крок
+    /// поетапного переходу (<c>ФВ-11.4</c>), а не правка визначення
+    /// довідника: воно міняє, чия система вважається джерелом істини для
+    /// цілого блоку даних. Право видається поіменно і в seed не має ніхто.
     /// </remarks>
-    public const string Permission = "Registry.EditDefinition";
+    public const string Permission = "Integration.Manage";
 
-    /// <summary>Перемикає master.</summary>
-    /// <param name="registryCode">Код довідника.</param>
-    /// <param name="kind">Нове джерело.</param>
+    /// <summary>Перемикає master для всього набору однією транзакцією.</summary>
+    /// <param name="registryCodes">Коди довідників; порожній набір — помилка.</param>
+    /// <param name="kind">Нове джерело для всіх.</param>
+    /// <param name="reason">Причина; потрапляє в аудит разом із набором.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <exception cref="NotFoundException">Довідника немає.</exception>
-    /// <exception cref="BusinessRuleException">Є відкритий період — <c>ECR-REG-0422</c>.</exception>
-    public async Task HandleAsync(string registryCode, RegistrySourceKind kind, CancellationToken ct)
+    /// <returns>Скільки довідників справді змінили джерело.</returns>
+    /// <exception cref="NotFoundException">Хоча б одного довідника немає — <c>ECR-REG-0404</c>.</exception>
+    /// <exception cref="BusinessRuleException">Порожній набір, дублі, порожня причина або відкритий період.</exception>
+    public async Task<int> HandleAsync(
+        IReadOnlyList<string> registryCodes,
+        RegistrySourceKind kind,
+        string reason,
+        CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
+        ArgumentNullException.ThrowIfNull(registryCodes);
+
+        await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
 
-        var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{registryCode}» не існує.");
-
-        if (definition.SourceKind == kind)
+        if (registryCodes.Count == 0)
         {
-            // Перемикання в той самий стан — не помилка, але й не подія:
-            // писати аудит тут означало б засмічувати журнал змінами, яких не було.
-            return;
+            throw new BusinessRuleException(
+                "ECR-REG-0422", "Набір довідників порожній: перемикати нічого.");
         }
 
-        // ⚠ Питання ставиться глобально, а не по проєкту: довідник один на всі
-        // проєкти, і перемикання «у закритому проєкті» змінило б перелік
-        // записів у сусідньому, відкритому.
+        // ⚠ Дубль у наборі — не дрібниця. Він означає, що набір складали не
+        // руками, а зліпили з двох переліків, і другий міг містити зайве.
+        var duplicates = registryCodes
+            .GroupBy(c => c, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (duplicates.Count > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Коди повторюються в наборі: {string.Join(", ", duplicates)}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            // ⛔ Причина обов'язкова: через рік питання «навіщо перемикали цей
+            // набір разом» — єдине, на яке треба буде відповісти, і відповідь
+            // має бути в журналі, а не в чиїйсь пам'яті.
+            throw new BusinessRuleException(
+                "ECR-REG-0422", "Причина перемикання master обов'язкова.");
+        }
+
+        // ⛔ СПЕРШУ розв'язуються ВСІ коди, і лише потім міняється хоч що
+        // одне. Невідомий код у переліку означає, що набір складено помилково,
+        // і перемкнути «те, що знайшлося», було б гірше за відмову: половина
+        // блоку опинилася б в одному режимі, половина в іншому, і ніхто б не
+        // знав, де межа.
+        var definitions = new List<RegistryDef>(registryCodes.Count);
+
+        foreach (var code in registryCodes)
+        {
+            definitions.Add(
+                await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+                ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує."));
+        }
+
+        // ⚠ Питання ставиться ОДИН раз на весь набір і ГЛОБАЛЬНО, а не по
+        // проєкту: довідник один на всі проєкти, і перемикання «у закритому
+        // проєкті» змінило б перелік записів у сусідньому, відкритому.
         if (await registries.HasOpenPeriodAsync(ct).ConfigureAwait(false))
         {
             throw new BusinessRuleException(
                 "ECR-REG-0422",
-                $"Перемикання джерела довідника «{registryCode}» заборонене, доки є відкриті періоди: "
-                + "частина документів заповнилася б за одним переліком записів, частина — за іншим.",
+                "Перемикання джерела заборонене, доки є відкриті періоди: частина документів "
+                + "заповнилася б за одним переліком записів, частина — за іншим.",
                 new Dictionary<string, object?>
                 {
-                    ["registryCode"] = registryCode,
-                    ["from"] = definition.SourceKind.ToString(),
+                    ["registryCodes"] = string.Join(",", registryCodes),
                     ["to"] = kind.ToString(),
                 });
         }
 
-        var previous = definition.SourceKind;
-        definition.SwitchSource(kind);
+        var changed = new List<object>(definitions.Count);
 
-        // ⚠ Ревізія даних тут НЕ рухається: змінився власник довідника, а не
-        // його вміст. Рухати її означало б інвалідувати кеш там, де нічого не
-        // змінилося, і привчити клієнта ігнорувати ревізію.
+        foreach (var definition in definitions)
+        {
+            if (definition.SourceKind == kind)
+            {
+                // Той самий стан — не помилка, але й не подія. У наборі такі
+                // трапляються постійно: перемикають блок, частина вже там.
+                continue;
+            }
 
+            changed.Add(new { code = definition.Code, from = definition.SourceKind.ToString() });
+            definition.SwitchSource(kind);
+
+            // ⚠ Ревізія даних НЕ рухається: змінився власник довідника, а не
+            // його вміст. Рухати її означало б інвалідувати кеш там, де нічого
+            // не змінилося, і привчити клієнта ігнорувати ревізію.
+        }
+
+        if (changed.Count == 0)
+        {
+            return 0;
+        }
+
+        // ⛔ ОДИН запис аудиту на весь набір, а не по запису на довідник.
+        // Три записи поруч у журналі не відрізняються від трьох випадкових
+        // перемикань, зроблених того ж дня, — а саме зв'язок між ними і є тим
+        // єдиним, заради чого була б потрібна сутність «група».
         await audit.WriteStructureChangeAsync(
             new StructureChangeRecord(
                 ChangedAt: clock.UtcNow,
                 TemplateVersionId: 0,
                 EntityType: "cfg.RegistryDef",
-                EntityId: definition.Id,
+
+                // Набір не має одного ідентифікатора; коди — у JSON нижче.
+                EntityId: 0,
                 ChangeClass: ChangeClass.Guarded,
-                Operation: "SwitchSource",
-                OldJson: $"{{\"sourceKind\":\"{previous}\"}}",
-                NewJson: $"{{\"sourceKind\":\"{kind}\"}}",
-                ChangeReason: "Перемикання master-джерела (ФВ-8.9); далі — період подвійної звірки (D-49).",
+                Operation: "SwitchSourceSet",
+                OldJson: JsonSerializer.Serialize(new { registries = changed }),
+                NewJson: JsonSerializer.Serialize(
+                    new { sourceKind = kind.ToString(), registryCodes }),
+                ChangeReason: reason,
                 ChangedByUserId: userId,
                 CorrelationId: currentUser.CorrelationId),
             ct).ConfigureAwait(false);
 
+        // ⛔ Одне збереження на весь набір: або перемкнулися всі, або жоден.
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return changed.Count;
     }
 }
 
