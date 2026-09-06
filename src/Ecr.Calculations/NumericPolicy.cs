@@ -44,9 +44,7 @@ public sealed class NumericPolicy(NumericMode mode)
     /// ⚠ Обидві реалізації без стану, тож створюються тут і не кешуються:
     /// спільний екземпляр не дав би нічого, крім ще одного статичного поля.
     /// </remarks>
-    public IEvaluationArithmetic Arithmetic { get; } = mode == NumericMode.Legacy
-        ? new LegacyDoubleArithmetic()
-        : new StrictDecimalArithmetic();
+    public IEvaluationArithmetic Arithmetic { get; } = EvaluationArithmetics.For(mode);
 
     /// <summary>
     /// Округлення значення, що йде в <c>calc.CalculationResult</c>.

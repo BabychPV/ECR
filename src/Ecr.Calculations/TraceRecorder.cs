@@ -1,4 +1,4 @@
-using Ecr.Domain.Enums;
+﻿using Ecr.Domain.Enums;
 
 namespace Ecr.Calculations;
 
@@ -54,9 +54,43 @@ public sealed class TraceRecorder(TraceLevel level)
         _steps.Add(new TraceStep(_steps.Count + 1, code, expression, null, error));
     }
 
+    /// <summary>Записує крок, значення якого замасковане в нуль.</summary>
+    /// <param name="code">Код кроку — зазвичай код виходу.</param>
+    /// <param name="expression">Вираз.</param>
+    /// <param name="value">Значення, яке пішло в результат.</param>
+    /// <param name="reason">Причина маскування.</param>
+    /// <remarks>
+    /// ⛔ Пишеться на БУДЬ-ЯКОМУ рівні, крім <c>Off</c> — навіть на
+    /// <c>ErrorsOnly</c>, де кроки зі значеннями не пишуться. Це не виняток,
+    /// а весь зміст <c>H-24d-1</c>: число не змінюється, змінюється **тиша**.
+    /// Замаскований нуль, якого не видно на типовому рівні трейсу, — це
+    /// рівно та тиша, яку ми прибираємо.
+    /// </remarks>
+    public void Masked(string code, string? expression, decimal? value, MaskedZeroReason reason)
+    {
+        if (Level == TraceLevel.Off)
+        {
+            return;
+        }
+
+        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, value, null, reason));
+    }
+
     /// <summary>Зібрані кроки.</summary>
     public IReadOnlyList<TraceStep> Steps => _steps;
 }
 
 /// <summary>Крок трейсу.</summary>
-public sealed record TraceStep(int Order, string Code, string? Expression, decimal? Value, string? Error);
+/// <param name="Order">Порядок кроку.</param>
+/// <param name="Code">Код кроку.</param>
+/// <param name="Expression">Вираз.</param>
+/// <param name="Value">Значення.</param>
+/// <param name="Error">Код помилки-значення.</param>
+/// <param name="Masked">Чому значення стало нулем (<c>H-24d-1</c>).</param>
+public sealed record TraceStep(
+    int Order,
+    string Code,
+    string? Expression,
+    decimal? Value,
+    string? Error,
+    MaskedZeroReason Masked = MaskedZeroReason.None);

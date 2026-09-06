@@ -40,6 +40,22 @@ public sealed class Evaluator(
     {
     }
 
+    /// <summary>
+    /// Той самий обчислювач з іншою арифметикою.
+    /// </summary>
+    /// <param name="other">Арифметика режиму (<see cref="EvaluationArithmetics.For"/>).</param>
+    /// <returns>Новий екземпляр із тим самим каталогом функцій.</returns>
+    /// <remarks>
+    /// ⚠ Новий екземпляр, а не поле, яке перемикають. Обчислювач один на
+    /// застосунок і працює з багатьох потоків одразу: змінюване поле режиму
+    /// означало б, що прогін <c>Legacy</c> здатен посеред виразу почати
+    /// рахувати в <c>decimal</c>, бо сусідній потік перемкнув його на
+    /// <c>Strict</c>. Помилку такого роду не відтворює жоден тест.
+    ///
+    /// ⚠ Дешево: обидва поля — посилання, і обидві арифметики без стану.
+    /// </remarks>
+    public Evaluator WithArithmetic(IEvaluationArithmetic other) => new(functions, other);
+
     /// <summary>Обчислює вираз у контексті.</summary>
     /// <param name="node">Корінь дерева.</param>
     /// <param name="context">Джерело даних.</param>

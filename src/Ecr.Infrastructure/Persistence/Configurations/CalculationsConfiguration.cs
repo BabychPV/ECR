@@ -457,6 +457,20 @@ public sealed class CalculationStepConfiguration : IEntityTypeConfiguration<Calc
         builder.Property(x => x.StepCode).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Expression).HasMaxLength(2000);
         builder.Property(x => x.Value).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.Masked).HasColumnName("MaskedZero").HasDefaultValue(Domain.Enums.MaskedZeroReason.None);
+
+        // ⛔ Фільтрований індекс, а не звичайний. Замаскованих кроків мало —
+        // решта трейсу це `MaskedZero = 0`, — а питання до них рівно одне:
+        // «покажи всі». Звичайний індекс по колонці, яка майже завжди нуль,
+        // коштував би місця на кожному з мільйонів рядків і не пришвидшив би
+        // нічого; фільтрований важить стільки, скільки самих знахідок.
+        //
+        // ⚠ Саме заради цього запиту крок і робиться: директива обіцяє, що
+        // випадків знайдеться чимало, і що це найцінніший побічний результат
+        // міграції. Обіцянка здійсненна лише тоді, коли їх можна перелічити.
+        builder.HasIndex(x => new { x.PeriodKey, x.Masked })
+               .HasDatabaseName("IX_CStep_Masked")
+               .HasFilter("[MaskedZero] <> 0");
 
         builder.HasOne<CalculationRun>().WithMany().HasForeignKey(x => x.CalculationRunId)
                .HasConstraintName("FK_CStep_Run");

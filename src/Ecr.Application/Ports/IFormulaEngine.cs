@@ -53,7 +53,28 @@ public interface IFormulaEngine
         ParsedExpression expression, TemplateVersionSnapshot? snapshot, DependencyContext context);
 
     /// <summary>Обчислює вираз.</summary>
-    public EvaluationResult Evaluate(ParsedExpression expression, IEvaluationContext context);
+    /// <param name="expression">Розібраний вираз.</param>
+    /// <param name="context">Джерело значень.</param>
+    /// <param name="mode">
+    /// Арифметичний режим версії (<c>ФВ-9.9</c>).
+    /// </param>
+    /// <remarks>
+    /// ⛔ Режим — **параметр виклику**, а не стан рушія: рушій один на
+    /// застосунок, і прогони різних версій ідуть одночасно. Поле режиму
+    /// означало б, що <c>Legacy</c>-прогін здатен посеред виразу почати
+    /// рахувати в <c>decimal</c>, бо сусідній потік перемкнув режим.
+    ///
+    /// ⚠ Умовчання — <c>Strict</c>, і це не рішення про методології, а
+    /// збереження чинної поведінки двох інших викликачів
+    /// (<c>RecalculationService</c>, <c>ValidationEngine</c>): вони рахують
+    /// формули ШАБЛОНІВ, тобто діалект A, який наскрізь <c>decimal</c> за
+    /// побудовою. Мовчазний вибір мусить збігатися з тим, що було, а не бути
+    /// новим твердженням про числа.
+    /// </remarks>
+    public EvaluationResult Evaluate(
+        ParsedExpression expression,
+        IEvaluationContext context,
+        Domain.Enums.NumericMode mode = Domain.Enums.NumericMode.Strict);
 
     /// <summary>
     /// Топологічний порядок обчислення. Цикл повертається як помилка публікації,
