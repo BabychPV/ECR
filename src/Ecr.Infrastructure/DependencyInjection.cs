@@ -91,9 +91,14 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddScoped<IMetadataCache, MetadataCache>();
 
-        // Синхронний доступ до вже завантаженого знімка: потрібен рушію
-        // виразів, бо ExtractDependencies у контракті синхронний, а блокувальне
-        // очікування заборонене архітектурним правилом (див. ITemplateStructure).
+        // ⛔ Реєстрація без споживача. Тут стояло «потрібен рушію виразів, бо
+        // ExtractDependencies у контракті синхронний» — і це вже неправда:
+        // після `H-3` порт приймає знімок ПАРАМЕТРОМ, тож у кеш не лізе ніхто.
+        //
+        // ⚠ Лишена свідомо і на один крок: прибирати порт означає правити
+        // `02-contracts.md`, знімати синхронний аксесор у `MetadataCache` і
+        // проходити двома сторожами портів. Записано в
+        // `unreachable-mechanisms.md` як ⛔, щоб не загубитися.
         services.AddSingleton<ITemplateStructure, Caching.CachedTemplateStructure>();
 
         // Рушій виразів. Парсер, обчислювач і сортувальник без стану —
