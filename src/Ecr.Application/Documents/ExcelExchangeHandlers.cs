@@ -35,9 +35,21 @@ public sealed class ExportDocumentHandler(
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        await ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ І ГРАНТ на проєкт (`A7-55`). Експорт віддає документ ЦІЛКОМ —
+        // усі числа, підписи й одиниці. Функціональне право каже «цей
+        // користувач узагалі вивантажує документи»; грант каже, ЯКІ. Без
+        // другої перевірки право `Document.Export`, видане роллю `DataEntry`,
+        // відкривало б будь-який проєкт.
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
