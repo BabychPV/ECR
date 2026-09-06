@@ -20,6 +20,7 @@ import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
+import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
 import { KitchenSinkPage } from '@/pages/KitchenSinkPage';
 
 /**
@@ -43,6 +44,14 @@ function Shell({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
+/**
+ * ⚠ Редактор виразів потрапляє сюди СВОЄЮ сторінкою, а не Monaco: у jsdom той
+ * падає в службі тем ще до першого токена. Перевіряється те, що в jsdom
+ * існує, — обрамлення сторінки і **видиме повідомлення про незавантажений
+ * редактор**. Це не обхід: саме такий вигляд має сторінка, коли чанк на 818 КБ
+ * не дійшов через корпоративний канал, і саме тоді доступність важить
+ * найбільше.
+ */
 const Pages: [string, () => JSX.Element][] = [
   ['/login', LoginPage],
   ['/change-password', ChangePasswordPage],
@@ -50,6 +59,7 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/templates', TemplatesPage],
   ['/admin/registries', RegistriesPage],
   ['/admin/methodologies', MethodologiesPage],
+  ['/admin/expressions', ExpressionsPage],
   ['/admin/security', SecurityPage],
   ['/admin/periods', PeriodsPage],
   ['/admin/sources', SourcesPage],

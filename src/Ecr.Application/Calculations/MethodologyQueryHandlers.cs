@@ -133,6 +133,7 @@ public sealed class SimulateMethodologyHandler(
         var outputs = new Dictionary<string, decimal>(StringComparer.Ordinal);
         var diff = new Dictionary<string, decimal>(StringComparer.Ordinal);
         var trace = new List<string>();
+        var verdicts = new List<TestCaseVerdict>();
 
         // Порівнюємо з версією, чинною на дату періоду, а не з «останньою»:
         // саме її числа зараз у звітах (ФВ-9.3).
@@ -149,6 +150,12 @@ public sealed class SimulateMethodologyHandler(
             };
 
             var simulated = await module.ExecuteAsync(input, ct).ConfigureAwait(false);
+
+            // ⛔ Звірка з очікуваннями — ТИМ САМИМ правилом, яким публікація
+            // вирішує, чи набір зелений (`GoldenSet`). Доти прогін проганяв
+            // тести і мовчав про результат: числа показував, а «зійшлося чи
+            // ні» — ні. Саме на це питання людина й дивиться перед публікацією.
+            verdicts.Add(GoldenSet.Judge(testCase, simulated));
 
             foreach (var value in simulated.Values)
             {
@@ -185,7 +192,7 @@ public sealed class SimulateMethodologyHandler(
         // Інакше симуляція засмітила б історію прогонів, за якою відновлюють
         // числа, і питання «яким прогоном пораховано цей звіт» отримало б
         // відповіді, яких ніхто не запускав.
-        return new SimulationResultDto(outputs, diff, trace);
+        return new SimulationResultDto(outputs, diff, trace, verdicts, GoldenSet.IsGreen(verdicts));
     }
 
     private static MethodologyDescriptor Descriptor(

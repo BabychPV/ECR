@@ -75,7 +75,7 @@ public enum FormulaScope : byte
 /// <summary>Діалект виразу. Визначає набір дозволених функцій і посилань.</summary>
 public enum ExpressionDialect : byte
 {
-    /// <summary>Формули шаблону: 11 Excel-сумісних функцій, посилання на аркуші й рядки.</summary>
+    /// <summary>Формули шаблону: 12 Excel-сумісних функцій, посилання на аркуші й рядки.</summary>
     Template = 0,
     /// <summary>Формули методології: NCalc-діалект, аргументи <c>@Arg</c>, константи <c>CST.</c>.</summary>
     Methodology = 1

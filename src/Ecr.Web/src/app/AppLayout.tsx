@@ -39,6 +39,7 @@ const Items: NavItem[] = [
   { path: '/admin/templates', labelKey: 'nav.templates', permission: 'Template.Edit' },
   { path: '/admin/registries', labelKey: 'nav.registries', permission: 'Registry.View' },
   { path: '/admin/methodologies', labelKey: 'nav.methodologies', permission: 'Calculation.View' },
+  { path: '/admin/expressions', labelKey: 'nav.expressions', permission: 'Calculation.View' },
   { path: '/admin/units', labelKey: 'nav.units', permission: 'Calculation.View' },
   { path: '/admin/security', labelKey: 'nav.security', permission: 'Security.ManageRoles' },
   { path: '/admin/periods', labelKey: 'nav.periods', permission: 'Period.Manage' },

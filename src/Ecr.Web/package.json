@@ -13,6 +13,7 @@
     "lint": "eslint src e2e",
     "api:types": "openapi-typescript ../../contracts/openapi.snapshot.json -o src/api/schema.d.ts",
     "test:a11y": "vitest run --config vitest.a11y.config.ts",
+    "budget": "node scripts/check-bundle-budget.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "@revolist/react-datagrid": "4.11.0",
     "@tanstack/react-query": "5.62.11",
     "dayjs": "1.11.13",
+    "monaco-editor": "0.56.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-hook-form": "7.54.2",

@@ -942,6 +942,36 @@
         ],
         "type": "object"
       },
+      "DiagnosticInfo": {
+        "description": "Проблема публікації у відповіді API.",
+        "properties": {
+          "code": {
+            "description": "Код помилки з каталогу.",
+            "type": "string"
+          },
+          "length": {
+            "description": "Довжина проблемного фрагмента.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "description": "Пояснення.",
+            "type": "string"
+          },
+          "position": {
+            "description": "Зсув у тексті виразу.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "position",
+          "length"
+        ],
+        "type": "object"
+      },
       "DocumentIdResponse": {
         "description": "Створений документ.",
         "properties": {
@@ -1144,6 +1174,163 @@
           "includeStyles",
           "language",
           "periodKey"
+        ],
+        "type": "object"
+      },
+      "ExpressionDialect": {
+        "description": "Діалект виразу. Визначає набір дозволених функцій і посилань.",
+        "enum": [
+          "Template",
+          "Methodology"
+        ]
+      },
+      "ExpressionFunctionDto": {
+        "description": "Функція діалекту та її сигнатура.",
+        "properties": {
+          "acceptsRange": {
+            "description": "Чи приймає діапазон рядків замість скалярів.",
+            "type": "boolean"
+          },
+          "maxArgs": {
+            "description": "Максимум; `null` — необмежено (агрегати).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "minArgs": {
+            "description": "Мінімум аргументів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          },
+          "resultType": {
+            "description": "Тип результату; `null` — сигнатури немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "minArgs",
+          "maxArgs",
+          "acceptsRange",
+          "resultType"
+        ],
+        "type": "object"
+      },
+      "ExpressionMetadataDto": {
+        "description": "Склад мови виразів для діалекту й контексту.",
+        "properties": {
+          "arguments": {
+            "description": "Поля рядка джерела — префікс `@`.",
+            "items": {
+              "$ref": "#/components/schemas/ExpressionSymbolDto"
+            },
+            "type": "array"
+          },
+          "constants": {
+            "description": "Константи методології — префікс `CST.`.",
+            "items": {
+              "$ref": "#/components/schemas/ExpressionSymbolDto"
+            },
+            "type": "array"
+          },
+          "formulas": {
+            "description": "Формули тієї самої версії — префікс `!`.",
+            "items": {
+              "$ref": "#/components/schemas/ExpressionSymbolDto"
+            },
+            "type": "array"
+          },
+          "functions": {
+            "description": "Функції діалекту з сигнатурами.",
+            "items": {
+              "$ref": "#/components/schemas/ExpressionFunctionDto"
+            },
+            "type": "array"
+          },
+          "headers": {
+            "description": "Поля шапки документа — префікс `HDR.`.",
+            "items": {
+              "$ref": "#/components/schemas/ExpressionSymbolDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "functions",
+          "constants",
+          "formulas",
+          "arguments",
+          "headers"
+        ],
+        "type": "object"
+      },
+      "ExpressionSymbolDto": {
+        "description": "Символ, на який може посилатися вираз.",
+        "properties": {
+          "name": {
+            "description": "Ім'я без префікса.",
+            "type": "string"
+          },
+          "note": {
+            "description": "Коротке пояснення: категорія, тип даних.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unit": {
+            "description": "Позначення одиниці; `null` — безрозмірний.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "unit",
+          "note"
+        ],
+        "type": "object"
+      },
+      "ExpressionValidationDto": {
+        "description": "Результат перевірки виразу.",
+        "properties": {
+          "diagnostics": {
+            "description": "Зауваження з позиціями — тими самими, які покаже публікація.",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticInfo"
+            },
+            "type": "array"
+          },
+          "resultType": {
+            "description": "Тип результату виразу; `null` — вираз не розібрався.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "skippedChecks": {
+            "description": "Які перевірки НЕ виконувалися. ⛔ Порожній перелік зауважень при\r\nнепорожньому `SkippedChecks` означає «те, що перевіряли, ціле», а не\r\n«вираз правильний»: сплутати ці два твердження означає пообіцяти\r\nпублікацію, якої не буде.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "diagnostics",
+          "resultType",
+          "skippedChecks"
         ],
         "type": "object"
       },
@@ -3042,6 +3229,10 @@
             "description": "Різниця з чинною опублікованою версією. Порожня — версія нічого не змінює;\r\nсаме це і треба бачити перед публікацією (`ФВ-9.6`).",
             "type": "object"
           },
+          "isGreen": {
+            "description": "Чи зійшовся набір цілком. ⛔ Порожній набір — **не** зелений: «тестів\r\nнемає, отже все гаразд» — саме та підміна, через яку публікація без\r\nперевірки виглядає як публікація з перевіркою (`ФВ-9.12`).",
+            "type": "boolean"
+          },
           "outputs": {
             "additionalProperties": {
               "format": "double",
@@ -3049,6 +3240,13 @@
             },
             "description": "Код виходу → значення й одиниця.",
             "type": "object"
+          },
+          "testCases": {
+            "description": "Вердикт кожного тесту золотого набору (`ФВ-13.7`) — тим самим правилом,\r\nяким публікація вирішує, чи набір зелений.",
+            "items": {
+              "$ref": "#/components/schemas/TestCaseVerdict"
+            },
+            "type": "array"
           },
           "trace": {
             "description": "Покроковий журнал; у симуляції завжди повний.",
@@ -3061,7 +3259,9 @@
         "required": [
           "outputs",
           "diffWithPublished",
-          "trace"
+          "trace",
+          "testCases",
+          "isGreen"
         ],
         "type": "object"
       },
@@ -3622,6 +3822,66 @@
         ],
         "type": "object"
       },
+      "TestCaseMismatch": {
+        "description": "Одна розбіжність: очікували одне, отримали інше.",
+        "properties": {
+          "actual": {
+            "description": "Що вийшло; `null` — виходу не було взагалі.",
+            "format": "double",
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "expected": {
+            "description": "Що мало вийти.",
+            "format": "double",
+            "type": "number"
+          },
+          "outputCode": {
+            "description": "Який вихід розійшовся.",
+            "type": "string"
+          },
+          "tolerance": {
+            "description": "Допуск порівняння; нуль означає точний збіг.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "outputCode",
+          "actual",
+          "expected",
+          "tolerance"
+        ],
+        "type": "object"
+      },
+      "TestCaseVerdict": {
+        "description": "Вердикт одного тесту золотого набору.",
+        "properties": {
+          "code": {
+            "description": "Код тесту — те, що потрапляє в повідомлення про провал.",
+            "type": "string"
+          },
+          "isGreen": {
+            "description": "Чи зійшлися всі очікувані числа в межах допуску.",
+            "type": "boolean"
+          },
+          "mismatches": {
+            "description": "Розбіжності; порожньо, якщо тест зелений.",
+            "items": {
+              "$ref": "#/components/schemas/TestCaseMismatch"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "isGreen",
+          "mismatches"
+        ],
+        "type": "object"
+      },
       "TraceLevel": {
         "description": "Рівень деталізації трейсу розрахунку (ЗБР-3).",
         "enum": [
@@ -3787,6 +4047,59 @@
           "isLockedOut",
           "email",
           "receivesAlerts"
+        ],
+        "type": "object"
+      },
+      "ValidateExpressionBody": {
+        "description": "Тіло запиту на перевірку виразу.",
+        "properties": {
+          "columnDefId": {
+            "description": "Колонка — для підстановки `{Month}`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/ExpressionDialect",
+            "description": "Діалект (`D-113`)."
+          },
+          "expression": {
+            "description": "Текст виразу.",
+            "type": "string"
+          },
+          "rowKey": {
+            "description": "Рядок формули; `null` для формул рівня колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableDefId": {
+            "description": "Таблиця, в якій живе вираз.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону; `null` — перевіряється лише синтаксис.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "expression",
+          "dialect",
+          "templateVersionId",
+          "tableDefId",
+          "rowKey",
+          "columnDefId"
         ],
         "type": "object"
       },
@@ -5057,6 +5370,156 @@
         "summary": "Валідація документа. Право `Document.View`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/expressions/metadata": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Діалект (`D-113`).",
+            "in": "query",
+            "name": "dialect",
+            "schema": {
+              "$ref": "#/components/schemas/ExpressionDialect"
+            }
+          },
+          {
+            "description": "Версія шаблону — джерело полів `HDR.`.",
+            "in": "query",
+            "name": "templateVersionId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія методології — джерело `CST.`, `!`, `@`.",
+            "in": "query",
+            "name": "methodologyVersionId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionMetadataDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionMetadataDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionMetadataDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Склад мови: функції діалекту і символи контексту.",
+        "tags": [
+          "Expressions"
+        ]
+      }
+    },
+    "/api/v1/expressions/validate": {
+      "post": {
+        "description": "⛔ `200` означає «перевірка виконалася», а НЕ «зауважень немає» —\r\nтак само, як у `POST /documents/{id}/validate`. Відмовляти\r\n`422` на кожен проміжний стан тексту було б неправильно за суттю:\r\nкористувач друкує вираз посимвольно, і половина станів синтаксично\r\nневалідна за побудовою. Помилка транспорту і незакінчена формула — різні\r\nподії, і однаковий код зробив би їх нерозрізнюваними.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateExpressionBody"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateExpressionBody"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateExpressionBody"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionValidationDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionValidationDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpressionValidationDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Перевіряє вираз так само, як це зробить публікація.",
+        "tags": [
+          "Expressions"
         ]
       }
     },
@@ -8173,6 +8636,9 @@
     },
     {
       "name": "Documents"
+    },
+    {
+      "name": "Expressions"
     },
     {
       "name": "Jobs"

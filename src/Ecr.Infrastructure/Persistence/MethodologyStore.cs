@@ -31,6 +31,86 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<MethodologySymbols> GetSymbolsAsync(
+        int methodologyVersionId, CancellationToken ct)
+    {
+        var constants = await db.MethodologyConstants
+            .AsNoTracking()
+            .Where(c => c.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(c => c.Code)
+            .Take(MaxChildren)
+            .Select(c => new MethodologySymbol(c.Code, c.UnitId, c.Category))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var formulas = await db.MethodologyFormulas
+            .AsNoTracking()
+            .Where(f => f.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(f => f.EvaluationOrder)
+            .ThenBy(f => f.Id)
+            .Take(MaxChildren)
+            .Select(f => new MethodologySymbol(f.Code, f.OutputUnitId, null))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var arguments = await ArgumentsAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        return new MethodologySymbols(constants, formulas, arguments);
+    }
+
+    /// <summary>
+    /// Аргументи <c>@</c> — коди колонок таблиці, до якої прив'язана методологія.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Шлях довгий і не скорочується: версія → методологія → активні
+    /// прив'язки (<c>cfg.CalculationBinding</c>) → таблиці → колонки. Коротшого
+    /// немає, бо аргумент — це не властивість методології, а КОНТРАКТ між нею і
+    /// таблицею, на якій її запускають (<c>D-69</c>).
+    ///
+    /// ⚠ Порожній результат — не помилка: методологія без активної прив'язки
+    /// справді не має аргументів, які можна назвати. Вигадати їх зі списку
+    /// виходів означало б підказувати імена, яких у рядку джерела немає.
+    /// </remarks>
+    private async Task<IReadOnlyList<MethodologySymbol>> ArgumentsAsync(
+        int methodologyVersionId, CancellationToken ct)
+    {
+        var methodologyId = await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => v.Id == methodologyVersionId)
+            .Select(v => (int?)v.MethodologyId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (methodologyId is not { } id)
+        {
+            return [];
+        }
+
+        var tableIds = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.MethodologyId == id && b.IsActive)
+            .Select(b => b.TableDefId)
+            .Distinct()
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (tableIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => tableIds.Contains(c.TableDefId) && !c.IsDeleted)
+            .OrderBy(c => c.Code)
+            .Take(MaxChildren)
+            .Select(c => new MethodologySymbol(c.Code, c.UnitId, c.DataType.ToString()))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyRule>> GetRulesAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologyRules

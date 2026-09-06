@@ -414,3 +414,34 @@ export type SimulationSessionResponse = Schemas['SimulationSessionResponse'];
 
 /** Прийнята в чергу довга операція. */
 export type JobAcceptedResponse = Schemas['JobAcceptedResponse'];
+
+/** Зауваження до виразу: код, текст і позиція в тексті. */
+export type DiagnosticInfo = Schemas['DiagnosticInfo'];
+
+/** Результат перевірки виразу при введенні (`ФВ-9.15a`). */
+export type ExpressionValidationDto = Schemas['ExpressionValidationDto'];
+
+/** Склад мови виразів для діалекту й контексту. */
+export type ExpressionMetadataDto = Schemas['ExpressionMetadataDto'];
+
+/** Функція діалекту та її сигнатура. */
+export type ExpressionFunctionDto = Schemas['ExpressionFunctionDto'];
+
+/** Символ, на який може посилатися вираз: `CST.`, `!`, `@`, `HDR.`. */
+export type ExpressionSymbolDto = Schemas['ExpressionSymbolDto'];
+
+/** Тіло запиту на перевірку виразу. */
+export type ValidateExpressionBody = Schemas['ValidateExpressionBody'];
+
+/**
+ * Діалект мови виразів (`D-113`).
+ *
+ * ⚠ Тип **згенерований** із серверного переліку, а не написаний тут. Коли до
+ * нього додасться режим C# (`K-1`), тип розшириться сам, і TypeScript змусить
+ * обробити новий випадок — замість того, щоб мовчки його не показати.
+ */
+export type ExpressionDialect = Schemas['ExpressionDialect'];
+
+
+/** Вердикт одного тесту золотого набору (`ФВ-13.7`). */
+export type TestCaseVerdict = Schemas['TestCaseVerdict'];

@@ -5,7 +5,7 @@ using Ecr.Expressions.Evaluation;
 namespace Ecr.Expressions.Functions;
 
 /// <summary>
-/// Каталог функцій. Набір закритий: 11 для <c>Template</c>, 24 для
+/// Каталог функцій. Набір закритий: 12 для <c>Template</c>, 24 для
 /// <c>Methodology</c> (02b §7–8). Розширення — зміна контракту, тобто
 /// <c>questions.md</c> і зупинка.
 /// </summary>
