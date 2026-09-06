@@ -127,6 +127,22 @@ public sealed partial class FindingTraceTests
             }
         }
 
+        // ⚠ І прогони в браузері. Вони живуть в `e2e/` під розширенням
+        // `.spec.ts`, а не `.test.ts`, і без цього рядка знахідка, закрита
+        // прогоном Playwright, вважалася б посиланням у порожнечу —
+        // тобто сторож валив би саме те, що зроблено найретельніше.
+        var e2e = Path.Combine(root, "src", "Ecr.Web", "e2e");
+        if (Directory.Exists(e2e))
+        {
+            foreach (var file in Directory.EnumerateFiles(e2e, "*.spec.ts", SearchOption.AllDirectories))
+            {
+                foreach (Match spec in ClientTestRegex.Matches(File.ReadAllText(file)))
+                {
+                    names.Add(spec.Groups[1].Value);
+                }
+            }
+        }
+
         return names;
     }
 

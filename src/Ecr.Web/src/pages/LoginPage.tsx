@@ -85,41 +85,68 @@ export function LoginPage(): JSX.Element {
           {t('login.title')}
         </Title>
 
-        <Stack gap="sm">
-          <Button onClick={() => void submit('/api/v1/login/windows')} loading={busy}>
-            {t('login.windows')}
-          </Button>
+        {/*
+         * ⛔ Справжня `<form>`, а не набір полів із кнопкою.
+         *
+         * Тут стояв `<Stack>` із `Button onClick`, і Enter у полі пароля
+         * НЕ РОБИВ НІЧОГО: браузер надсилає форму по Enter лише тоді, коли
+         * форма є. Рефлекс «набрав пароль — натиснув Enter» є в кожного, і
+         * на першому ж екрані системи він упирався в тишу; людині без миші
+         * лишалося шукати кнопку табом щоразу (`ФВ-14.16`).
+         *
+         * ⚠ Знайдено прогоном у справжньому браузері (`A7-49`). Жоден
+         * компонентний тест цього не бачить: вони натискають кнопку
+         * напряму, тобто перевіряють обробник, а не спосіб до нього
+         * дійти.
+         */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit(
+              '/api/v1/login/local',
+              { userName: login, password } satisfies LocalLoginRequest,
+            );
+          }}
+        >
+          <Stack gap="sm">
+            {/* ⚠ `type="button"` обов'язковий: усередині форми кнопка без
+                типу — це кнопка НАДСИЛАННЯ, і вхід через Windows
+                перехоплював би Enter замість локального. */}
+            <Button
+              type="button"
+              onClick={() => void submit('/api/v1/login/windows')}
+              loading={busy}
+            >
+              {t('login.windows')}
+            </Button>
 
-          <Divider label={t('login.or')} labelPosition="center" />
+            <Divider label={t('login.or')} labelPosition="center" />
 
-          <TextInput
-            label={t('login.user')}
-            value={login}
-            onChange={(event) => setLogin(event.currentTarget.value)}
-            autoComplete="username"
-          />
+            <TextInput
+              label={t('login.user')}
+              value={login}
+              onChange={(event) => setLogin(event.currentTarget.value)}
+              autoComplete="username"
+            />
 
-          <PasswordInput
-            label={t('login.password')}
-            value={password}
-            onChange={(event) => setPassword(event.currentTarget.value)}
-            autoComplete="current-password"
-          />
+            <PasswordInput
+              label={t('login.password')}
+              value={password}
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              autoComplete="current-password"
+            />
 
-          <Button
-            variant="default"
-            loading={busy}
-            onClick={() => void submit('/api/v1/login/local', { userName: login, password } satisfies LocalLoginRequest)}
-          >
-            {t('login.submit')}
-          </Button>
+            <Button type="submit" variant="default" loading={busy}>
+              {t('login.submit')}
+            </Button>
 
-          <ErrorAlert error={error} />
+            <ErrorAlert error={error} />
 
-          <Text size="xs" c="dimmed">
-            {t('login.hint')}
-          </Text>
-        </Stack>
+            <Text size="xs" c="dimmed">
+              {t('login.hint')}
+            </Text>
+          </Stack>
+        </form>
       </Card>
     </Center>
   );

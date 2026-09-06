@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src",
+    "lint": "eslint src e2e",
     "api:types": "openapi-typescript ../../contracts/openapi.snapshot.json -o src/api/schema.d.ts",
     "test:a11y": "vitest run --config vitest.a11y.config.ts",
     "test:e2e": "playwright test"

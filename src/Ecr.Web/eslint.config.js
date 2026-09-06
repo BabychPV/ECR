@@ -187,4 +187,50 @@ export default [
     files: ['src/**/__tests__/**/*.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
+  {
+    files: ['e2e/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 2023, sourceType: 'module' },
+    },
+    plugins: { '@typescript-eslint': tsPlugin },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  {
+    /*
+     * ⛔ У проході без миші МИШІ НЕМАЄ (`ФВ-14.16`, `D-141`).
+     *
+     * Один клік посеред сценарію робить зеленим прохід, у якому
+     * клавіатурою пройти неможливо — тобто саме те, що ця перевірка мала
+     * б спіймати. Заборона тримається лінтом, а не домовленістю: рецензент
+     * не помітить `.click()` серед сотні рядків, а лінт помітить завжди.
+     *
+     * ⚠ Правило вузьке навмисно — лише цей файл. У решті прогонів клік
+     * законний: `cellStates.spec.ts` міряє пікселі й до способу
+     * навігації байдужий.
+     */
+    files: ['e2e/keyboardPath.spec.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name='click']",
+          message:
+            'У проході без миші клік заборонений — ФВ-14.16: користуйтеся focus() і keyboard.press().',
+        },
+        {
+          selector: "MemberExpression[object.property.name='mouse']",
+          message:
+            'Миша в проході без миші — ФВ-14.16: сценарій має проходитися самою клавіатурою.',
+        },
+        {
+          selector: "CallExpression[callee.property.name=/^(dblclick|hover|tap|dragTo)$/]",
+          message:
+            'Указівні дії заборонені в проході без миші — ФВ-14.16.',
+        },
+      ],
+    },
+  },
 ];

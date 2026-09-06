@@ -61,6 +61,46 @@ export function normalize(png: Buffer): { data: Uint8Array; width: number; heigh
 }
 
 /**
+ * Частка пікселів, що змінилися, **без нормалізації**.
+ *
+ * ⛔ Окрема функція, а не параметр `structuralDifference`. Вони міряють
+ * протилежне, і плутати їх дорого:
+ *   — `structuralDifference` прибирає тон навмисно (`ФВ-14.18`: колір не
+ *     є єдиним носієм) і відповідає на питання «чи лишиться різниця без
+ *     кольору»;
+ *   — ця відповідає на питання «чи змінилося щось видиме взагалі».
+ *
+ * ⚠ Написана після реального падіння: кільце фокуса — це ЗМІНА ТОНУ межі
+ * (`rgb(206,212,218)` → `rgb(84,116,180)`), і нормалізація прибирала її
+ * дочиста. Вимір давав рівно 0.00 %, тобто перевірка доповідала про
+ * відсутнє кільце там, де воно є, — і це був би дефект перевірки, який
+ * змусив би «виправляти» справний код.
+ */
+export function rawDifference(first: Buffer, second: Buffer): number {
+  const a = PNG.sync.read(first);
+  const b = PNG.sync.read(second);
+
+  if (a.width !== b.width || a.height !== b.height) {
+    throw new Error(
+      `Обрізки різного розміру: ${a.width}×${a.height} проти ${b.width}×${b.height}.`,
+    );
+  }
+
+  let different = 0;
+  const pixels = a.width * a.height;
+
+  for (let i = 0; i < pixels; i++) {
+    const offset = i * 4;
+    const first709 = luminance(a.data[offset] ?? 0, a.data[offset + 1] ?? 0, a.data[offset + 2] ?? 0);
+    const second709 = luminance(b.data[offset] ?? 0, b.data[offset + 1] ?? 0, b.data[offset + 2] ?? 0);
+
+    if (Math.abs(first709 - second709) > 12) different++;
+  }
+
+  return different / pixels;
+}
+
+/**
  * Частка пікселів, що відрізняються більш ніж на 12 з 255.
  *
  * ⚠ Поріг 12 — це помітна оку різниця в сірому, але вища за шум згладжування.
