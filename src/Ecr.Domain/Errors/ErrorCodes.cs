@@ -149,6 +149,16 @@ public static class ErrorCodes
     /// <summary>Версії методології не існує (<c>ECR-CALC-0404</c>).</summary>
     public const string MethodologyVersionNotFound = "ECR-CALC-0404";
 
+    /// <summary>
+    /// <c>^</c> у діалекті методологій (<c>ECR-CALC-0431</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ У NCalc це побітове XOR, а не піднесення до степеня: <c>2^3 = 1</c>
+    /// (виміряно). Формула, яка виглядає як степінь, мовчки рахувала б
+    /// інше число, тому оператор відхиляється парсером.
+    /// </remarks>
+    public const string CaretNotPower = "ECR-CALC-0431";
+
     // Робочий процес
     /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
     public const string SubmitBlockedByOrphans = "ECR-SUB-4221";
