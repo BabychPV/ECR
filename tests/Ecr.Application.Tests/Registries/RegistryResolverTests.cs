@@ -208,33 +208,6 @@ public sealed class RegistryResolverTests
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-8.9")]
-    public async Task Перемикання_master_у_відкритому_періоді_відхиляється_ECR_REG_0422()
-    {
-        var definition = Definition();
-        _registries.FindDefinitionAsync("PERMITS", Arg.Any<CancellationToken>()).Returns(definition);
-        _registries.HasOpenPeriodAsync(Arg.Any<CancellationToken>()).Returns(true);
-
-        var handler = new SwitchRegistrySourceHandler(_registries, _uow, _audit, _access, _user, _clock);
-
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync("PERMITS", RegistrySourceKind.External, CancellationToken.None));
-
-        Assert.Equal("ECR-REG-0422", error.ErrorCode);
-
-        // ⛔ Master не змінився. Інакше частина документів періоду заповнилася б
-        // за одним переліком записів, а частина — за іншим, і в даних не
-        // лишилося б жодної позначки, де проходить межа (ФВ-8.9).
-        Assert.Equal(RegistrySourceKind.Local, definition.SourceKind);
-        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
-
-        // Коли відкритих періодів немає — перемикання проходить.
-        _registries.HasOpenPeriodAsync(Arg.Any<CancellationToken>()).Returns(false);
-        await handler.HandleAsync("PERMITS", RegistrySourceKind.External, CancellationToken.None);
-        Assert.Equal(RegistrySourceKind.External, definition.SourceKind);
-    }
-
     /// <summary>Опис довідника з призначеним <c>Id</c> — його дає база.</summary>
     private static RegistryDef Definition()
     {

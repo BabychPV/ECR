@@ -2223,6 +2223,10 @@
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва мовами каталогу."
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/RegistrySourceKind",
+            "description": "Хто master (`ФВ-8.9`). Потрібен тому, хто складає набір для\r\nперемикання: без нього довідник, який уже в цільовому режимі, і той, який\r\nще ні, у переліку виглядають однаково."
           }
         },
         "required": [
@@ -2231,6 +2235,7 @@
           "nameL10n",
           "isHierarchical",
           "isTemporal",
+          "sourceKind",
           "fields"
         ],
         "type": "object"
@@ -2398,6 +2403,14 @@
           "unitId"
         ],
         "type": "object"
+      },
+      "RegistrySourceKind": {
+        "description": "Хто є master для реєстру (ФВ-8.9).",
+        "enum": [
+          "External",
+          "Hybrid",
+          "Local"
+        ]
       },
       "ReopenDocumentRequest": {
         "description": "Запит на відкриття поданого документа.",
@@ -3009,6 +3022,32 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SwitchSourceKindRequest": {
+        "description": "Запит на перемикання master-джерела набору довідників.",
+        "properties": {
+          "reason": {
+            "description": "Причина. Обов'язкова: через рік питання «навіщо перемикали цей набір\r\nразом» — єдине, на яке доведеться відповісти, і відповідь має бути в\r\nжурналі, а не в чиїйсь пам'яті.",
+            "type": "string"
+          },
+          "registryCodes": {
+            "description": "Коди довідників; порожній набір відхиляється.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/RegistrySourceKind",
+            "description": "Нове джерело для всіх перелічених."
+          }
+        },
+        "required": [
+          "registryCodes",
+          "sourceKind",
+          "reason"
+        ],
         "type": "object"
       },
       "TableDto": {
@@ -5688,6 +5727,97 @@
           }
         },
         "summary": "Перелік довідників. Право `Registry.View`.",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/source-kind": {
+      "put": {
+        "description": "⛔ Операція над НАБОРОМ, і сутності «група довідників» немає навмисно\r\n(`ФВ-13.10`): група — це факт одного перемикання, а не властивість\r\nдовідника. Набір складає той, хто перемикає: він єдиний, хто знає, які\r\nдовідники пов'язані <b>сьогодні</b>.\r\n\r\n⚠ Усе або нічого: невідомий код у переліку відхиляє операцію цілком, а\r\nперевірка «немає відкритого періоду» робиться один раз на весь набір.\r\nПоловина блоку в одному режимі, половина в іншому — гірше, ніж відмова.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchSourceKindRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchSourceKindRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchSourceKindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedRowsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedRowsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffectedRowsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перемикає master-джерело <b>набору</b> довідників. Право `Integration.Manage`.",
         "tags": [
           "Registries"
         ]

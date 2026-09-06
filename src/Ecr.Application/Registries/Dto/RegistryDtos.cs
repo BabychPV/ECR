@@ -12,6 +12,11 @@ namespace Ecr.Application.Registries.Dto;
 /// <param name="Code">Код довідника.</param>
 /// <param name="NameL10n">Назва мовами каталогу.</param>
 /// <param name="IsHierarchical">Чи має записи-нащадки.</param>
+/// <param name="SourceKind">
+/// Хто master (<c>ФВ-8.9</c>). Потрібен тому, хто складає набір для
+/// перемикання: без нього довідник, який уже в цільовому режимі, і той, який
+/// ще ні, у переліку виглядають однаково.
+/// </param>
 /// <param name="IsTemporal">Чи мають записи вікно дії; від цього залежить обов'язковість <c>asOf</c>.</param>
 /// <param name="Fields">Поля довідника.</param>
 public sealed record RegistryDefDto(
@@ -20,6 +25,7 @@ public sealed record RegistryDefDto(
     LocalizedText NameL10n,
     bool IsHierarchical,
     bool IsTemporal,
+    Domain.Enums.RegistrySourceKind SourceKind,
     IReadOnlyList<RegistryFieldDto> Fields);
 
 /// <summary>Поле довідника.</summary>

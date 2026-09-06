@@ -13,7 +13,8 @@ public sealed class RegistriesController(
     ListRegistriesHandler listRegistries,
     GetRegistryEntriesHandler getEntries,
     UpsertRegistryEntryHandler upsert,
-    SetEntryValidityHandler setValidity) : ControllerBase
+    SetEntryValidityHandler setValidity,
+    SwitchRegistrySourceHandler switchSource) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -103,7 +104,52 @@ public sealed class RegistriesController(
         // бачити масштаб наслідку, а не лише «ок».
         return Ok(new AffectedRowsResponse(affected));
     }
+
+    /// <summary>
+    /// Перемикає master-джерело <b>набору</b> довідників. Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Операція над НАБОРОМ, і сутності «група довідників» немає навмисно
+    /// (<c>ФВ-13.10</c>): група — це факт одного перемикання, а не властивість
+    /// довідника. Набір складає той, хто перемикає: він єдиний, хто знає, які
+    /// довідники пов'язані <b>сьогодні</b>.
+    ///
+    /// ⚠ Усе або нічого: невідомий код у переліку відхиляє операцію цілком, а
+    /// перевірка «немає відкритого періоду» робиться один раз на весь набір.
+    /// Половина блоку в одному режимі, половина в іншому — гірше, ніж відмова.
+    /// </remarks>
+    [HttpPut("source-kind")]
+    [ProducesResponseType<AffectedRowsResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SwitchSourceKind(
+        [FromBody] SwitchSourceKindRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var changed = await switchSource
+            .HandleAsync(request.RegistryCodes, request.SourceKind, request.Reason, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Повертається, скільки СПРАВДІ змінилося, а не розмір набору: у
+        // наборі постійно трапляються довідники, які вже в цільовому режимі,
+        // і «перемкнуто 3» там, де змінився один, — це неправда в журналі.
+        return Ok(new AffectedRowsResponse(changed));
+    }
 }
+
+/// <summary>Запит на перемикання master-джерела набору довідників.</summary>
+/// <param name="RegistryCodes">Коди довідників; порожній набір відхиляється.</param>
+/// <param name="SourceKind">Нове джерело для всіх перелічених.</param>
+/// <param name="Reason">
+/// Причина. Обов'язкова: через рік питання «навіщо перемикали цей набір
+/// разом» — єдине, на яке доведеться відповісти, і відповідь має бути в
+/// журналі, а не в чиїйсь пам'яті.
+/// </param>
+public sealed record SwitchSourceKindRequest(
+    IReadOnlyList<string> RegistryCodes,
+    Ecr.Domain.Enums.RegistrySourceKind SourceKind,
+    string Reason);
 
 /// <summary>Запит на зміну вікна дії запису довідника.</summary>
 /// <param name="From">Початок дії; <c>null</c> — без обмеження.</param>

@@ -127,6 +127,7 @@ export type AccessMatrixCellDto = Schemas['AccessMatrixCellDto'];
 
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
+export type RegistrySourceKind = Schemas['RegistrySourceKind'];
 
 /** Запис довідника. */
 export type RegistryEntryDto = Schemas['RegistryEntryDto'];
