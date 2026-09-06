@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { createProjectBody } from '@/features/projects/CreateProjectModal';
+import {
+  createProjectBody,
+  createProjectIncomplete,
+} from '@/features/projects/CreateProjectModal';
 
 /**
  * Тіло запиту на створення проєкту — перший крок роботи із системою.
@@ -58,5 +61,45 @@ describe('Тіло запиту на створення проєкту', () => {
     // Код — бізнес-ключ: пробіл на кінці зробив би два різні проєкти
     // однаковими на вигляд і різними для системи.
     expect(createProjectBody(form).code).toBe('KASH_2026');
+  });
+});
+
+/**
+ * Готовність форми до надсилання.
+ *
+ * ⛔ Директива ПК-1 №06 §3 скасувала `D1-09` — «пояс браузера як ПОЧАТКОВЕ
+ * значення». Поле починається порожнім, і саме тому воно має бути в переліку
+ * обов'язкових: доки пояс підставлявся сам, форму можна було надіслати, не
+ * подивившись на нього жодного разу. Конфігуратор в Астані (`Asia/Almaty`,
+ * +06:00) заводив би проєкт для Актау (`Asia/Aqtau`, +05:00), і кожен період
+ * закривався б на годину раніше, ніж чекають на місці. Виправити це вже не
+ * можна: після відкриття першого періоду пояс не змінюється (`ФВ-1.1a`).
+ */
+describe('Готовність форми створення проєкту', () => {
+  const ready = {
+    code: 'KASH_2026',
+    name: { en: 'Kashagan' },
+    timeZoneId: 'Asia/Aqtau',
+    versionId: '42',
+    policyId: '7',
+  };
+
+  it('заповнена форма готова', () => {
+    expect(createProjectIncomplete(ready)).toBe(false);
+  });
+
+  it('без поясу форма НЕ готова', () => {
+    // ⛔ Головне твердження кроку: пояс — обов'язковий і видимий, а не
+    // мовчазна підстановка з браузера.
+    expect(createProjectIncomplete({ ...ready, timeZoneId: null })).toBe(true);
+  });
+
+  it.each([
+    ['код', { code: '   ' }],
+    ['назву', { name: {} }],
+    ['версію шаблону', { versionId: null }],
+    ['політику періодів', { policyId: null }],
+  ])('без обов’язкового поля «%s» форма НЕ готова', (_name, patch) => {
+    expect(createProjectIncomplete({ ...ready, ...patch })).toBe(true);
   });
 });

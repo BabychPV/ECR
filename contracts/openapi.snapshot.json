@@ -681,7 +681,7 @@
             ]
           },
           "timeZoneId": {
-            "description": "Пояс майданчика; після відкриття періоду не змінюється.",
+            "description": "Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після\r\nвідкриття періоду не змінюється. Windows-ідентифікатор або зсув —\r\n`ECR-CFG-4221`.",
             "type": "string"
           },
           "year": {
@@ -2196,7 +2196,7 @@
             "type": "integer"
           },
           "timeZoneId": {
-            "description": "Пояс майданчика, у якому пораховані межі.",
+            "description": "Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`), у якому пораховані\r\nмежі. Клієнт отримує саме ідентифікатор, а не зсув: зсув чинний лише на\r\nмомент відповіді і збрехав би на межі переходу на літній час.",
             "type": "string"
           }
         },
@@ -2448,7 +2448,7 @@
             "description": "Стан проєкту."
           },
           "timeZoneId": {
-            "description": "Пояс майданчика.",
+            "description": "Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`).",
             "type": "string"
           }
         },
@@ -6064,7 +6064,7 @@
         ]
       },
       "post": {
-        "description": "`TimeZoneId` задається тут і **не змінюється** після відкриття\r\nпершого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі\r\nмайданчика, і зміна поясу заднім числом зсунула б уже подану звітність.",
+        "description": "`TimeZoneId` задається тут і **не змінюється** після відкриття\r\nпершого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі\r\nмайданчика, і зміна поясу заднім числом зсунула б уже подану звітність.\r\n\r\n⛔ Тільки ідентифікатор IANA (`Asia/Aqtau`). Windows-ідентифікатор\r\n(`Central Asia Standard Time`) і зсув (`+05:00`) — це\r\n`ECR-CFG-4221`: зсув міняється переходом на літній час, а\r\nWindows-ідентифікатор на зворотному шляху втрачає державу\r\n(`Asia/Aqtau` повертається як `Asia/Tashkent`).",
         "requestBody": {
           "content": {
             "application/*+json": {
@@ -6105,6 +6105,26 @@
               }
             },
             "description": "Created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Створює проєкт. Право `Project.Manage`.",

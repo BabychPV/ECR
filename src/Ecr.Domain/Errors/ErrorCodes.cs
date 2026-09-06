@@ -180,6 +180,24 @@ public static class ErrorCodes
     /// </remarks>
     public const string InvalidCode = "ECR-CFG-0422";
 
+    /// <summary>
+    /// Часовий пояс проєкту не є відомим ідентифікатором IANA
+    /// (<c>ECR-CFG-4221</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий код, а не <see cref="InvalidCode"/>. Форма створення проєкту
+    /// має ОБИДВА поля — код і пояс, — і на обидва сервер відповідав однаковим
+    /// <c>ECR-CFG-0422</c>. Клієнт маршрутизує за кодом, тому підсвітити
+    /// правильне поле він не міг: «Код «KASH-2026» недопустимий» і «поясу
+    /// «Central Asia Standard Time» не існує» приходили як та сама відмова.
+    ///
+    /// ⚠ Один код на всі три причини (порожньо, невідомий ідентифікатор,
+    /// Windows-ідентифікатор замість IANA) — навмисно: клієнт підсвічує ПОЛЕ,
+    /// а яка саме з трьох причин — сказано текстом. Три коди на одне поле
+    /// змусили б клієнт знати їх усі, щоб зробити те саме.
+    /// </remarks>
+    public const string ProjectTimeZoneNotIana = "ECR-CFG-4221";
+
     // Реєстри і одиниці
     public const string RegistryEntryNotFound = "ECR-REG-0404";
     public const string RegistryEntryInUse = "ECR-REG-0409";

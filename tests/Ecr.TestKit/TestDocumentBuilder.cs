@@ -85,7 +85,12 @@ public sealed class TestDocumentBuilder(string connectionString)
         var project = new Project(
             EcrCode.Create($"PRJ{tag}"), Name($"Project {tag}"),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            version.Id, PeriodKind.Monthly, policyId, "Central Asia Standard Time");
+            // IANA, а не `Central Asia Standard Time`: Windows-ідентифікатор
+            // домен більше не приймає (директива ПК-1 №06 §3). Обраний саме
+            // `Asia/Almaty` — це те, у що сама платформа переводить колишнє
+            // значення (виміряно `TryConvertWindowsIdToIanaId`), тож жодна
+            // порахована в тестах межа не зсунулася ні на секунду.
+            version.Id, PeriodKind.Monthly, policyId, "Asia/Almaty");
         db.Projects.Add(project);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 

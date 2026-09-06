@@ -135,5 +135,15 @@ public sealed class PartitionCheckJob(
     }
 
     /// <summary>Ключ поточного місяця (R-A6).</summary>
+    /// <summary>Ключ поточного місяця для підрахунку запасу партицій.</summary>
+    /// <param name="utcNow">Поточний момент у UTC.</param>
+    /// <remarks>
+    /// ⚠ UTC тут СВІДОМО, а не забутий переклад у пояс майданчика
+    /// (<c>H-13</c>, <c>D2-78</c>). Задача обслуговує всю базу — проєкти всіх
+    /// майданчиків одразу, — тож «поясу» в неї немає в принципі. А міряє вона
+    /// не межу, а ЗАПАС: мінімум дві межі попереду
+    /// (<see cref="MinimumBoundariesAhead"/>), тобто щонайменше місяць. Кілька
+    /// годин розбіжності на межі місяця цього числа не міняють.
+    /// </remarks>
     private static int CurrentPeriodKey(DateTime utcNow) => (utcNow.Year * 100) + utcNow.Month;
 }

@@ -94,9 +94,16 @@ public sealed class ProjectsController(
     /// <c>TimeZoneId</c> задається тут і **не змінюється** після відкриття
     /// першого періоду (<c>ECR-PRD-0409</c>): межі періодів рахуються в поясі
     /// майданчика, і зміна поясу заднім числом зсунула б уже подану звітність.
+    ///
+    /// ⛔ Тільки ідентифікатор IANA (<c>Asia/Aqtau</c>). Windows-ідентифікатор
+    /// (<c>Central Asia Standard Time</c>) і зсув (<c>+05:00</c>) — це
+    /// <c>ECR-CFG-4221</c>: зсув міняється переходом на літній час, а
+    /// Windows-ідентифікатор на зворотному шляху втрачає державу
+    /// (<c>Asia/Aqtau</c> повертається як <c>Asia/Tashkent</c>).
     /// </remarks>
     [HttpPost]
     [ProducesResponseType<Contracts.ProjectIdResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Create([FromBody] CreateProjectRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -207,7 +214,11 @@ public sealed class ProjectsController(
 /// <summary>Запит на створення проєкту.</summary>
 /// <param name="Code">Код проєкту.</param>
 /// <param name="NameL10n">Назва мовами каталогу.</param>
-/// <param name="TimeZoneId">Пояс майданчика; після відкриття періоду не змінюється.</param>
+/// <param name="TimeZoneId">
+/// Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після
+/// відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
+/// `ECR-CFG-4221`.
+/// </param>
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="Year">Звітний рік; типово поточний.</param>
 /// <param name="TemplateVersionId">Версія шаблону, за якою заповнюються документи.</param>

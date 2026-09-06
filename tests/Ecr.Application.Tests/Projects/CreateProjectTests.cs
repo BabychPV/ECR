@@ -48,14 +48,14 @@ public sealed class CreateProjectTests
     [InlineData("   ")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-1.1a")]
-    public async Task Без_поясу_проєкт_не_створюється_ECR_CFG_0422(string? timeZoneId)
+    public async Task Без_поясу_проєкт_не_створюється_ECR_CFG_4221(string? timeZoneId)
     {
         // ⛔ Не мовчазний `UTC`. Сервер стоїть де завгодно, а межі періодів
         // рахуються в поясі МАЙДАНЧИКА (`D-68`).
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        var error = await Assert.ThrowsAsync<DomainException>(
             () => Create(timeZoneId!));
 
-        Assert.Equal("ECR-CFG-0422", error.ErrorCode);
+        Assert.Equal("ECR-CFG-4221", error.ErrorCode);
         await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
     }
 
@@ -66,12 +66,67 @@ public sealed class CreateProjectTests
     {
         // ⚠ `TimeZoneNotFoundException` пройшов би нагору як 500, і той, хто
         // надіслав опечатку, побачив би «внутрішня помилка сервера» замість
-        // назви поля, у якому помилився.
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+        // назви поля, у якому помилився. `DomainException` конвеєр мапить у
+        // 422 з кодом і текстом (`ExceptionHandlingMiddleware`).
+        var error = await Assert.ThrowsAsync<DomainException>(
             () => Create("Asia/Atlantis"));
 
-        Assert.Equal("ECR-CFG-0422", error.ErrorCode);
+        Assert.Equal("ECR-CFG-4221", error.ErrorCode);
         Assert.Contains("Asia/Atlantis", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Central Asia Standard Time")]
+    [InlineData("West Asia Standard Time")]
+    [InlineData("UTC+13")]
+    [InlineData("+05:00")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-1.1b")]
+    public async Task Windows_ідентифікатор_і_зсув_не_приймаються(string timeZoneId)
+    {
+        // ⛔ Саме тут була дірка. Обробник перевіряв пояс
+        // `TimeZoneInfo.FindSystemTimeZoneById`, а той на Windows приймає і
+        // Windows-ідентифікатори, і `UTC+13` (виміряно). Тобто вимогу «IANA»
+        // (директива ПК-1 №06 §3) код проходив лише на вигляд: у базу лягало
+        // `Central Asia Standard Time` — рівно те, що стояло в DEFAULT
+        // колонки з першої міграції.
+        var error = await Assert.ThrowsAsync<DomainException>(() => Create(timeZoneId));
+
+        Assert.Equal("ECR-CFG-4221", error.ErrorCode);
+        await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-1.1")]
+    public async Task Звітний_рік_береться_в_поясі_майданчика_а_не_сервера()
+    {
+        // ⛔ 31 грудня 21:00 UTC — це вже 1 січня 03:00 на `Asia/Almaty`
+        // (UTC+6). Тут стояло `clock.UtcNow.Year`, тобто проєкт, створений
+        // на майданчику вночі проти Нового року, отримував МИНУЛИЙ рік:
+        // дванадцять періодів із ключами `202512xx` замість `202601xx`.
+        // `PeriodKey` — ключ партиціонування (R-A6), тож дані поїхали б у
+        // чужі партиції й у чужий архів.
+        _clock.UtcNow.Returns(new DateTime(2025, 12, 31, 21, 0, 0, DateTimeKind.Utc));
+
+        await new CreateProjectHandler(_projects, _periods, _access, _uow, _user, _clock)
+            .HandleAsync(
+                "KASH_2026",
+                new Dictionary<string, string> { ["en"] = "Kashagan" },
+                "Asia/Almaty",
+                PeriodKind.Monthly,
+                year: null,
+                templateVersionId: 42,
+                periodPolicyId: 7,
+                CancellationToken.None);
+
+        var call = _periods.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name == nameof(IPeriodStore.AddProjectAsync));
+
+        var project = (Project)call.GetArguments()[0]!;
+
+        Assert.Equal(2026, project.PeriodStart.Year);
+        Assert.Equal(2026, project.PeriodEnd.Year);
     }
 
     [Fact]

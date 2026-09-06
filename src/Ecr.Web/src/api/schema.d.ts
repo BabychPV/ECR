@@ -1580,6 +1580,12 @@ export interface paths {
          * @description `TimeZoneId` задається тут і **не змінюється** після відкриття
          *     першого періоду (`ECR-PRD-0409`): межі періодів рахуються в поясі
          *     майданчика, і зміна поясу заднім числом зсунула б уже подану звітність.
+         *
+         *     ⛔ Тільки ідентифікатор IANA (`Asia/Aqtau`). Windows-ідентифікатор
+         *     (`Central Asia Standard Time`) і зсув (`+05:00`) — це
+         *     `ECR-CFG-4221`: зсув міняється переходом на літній час, а
+         *     Windows-ідентифікатор на зворотному шляху втрачає державу
+         *     (`Asia/Aqtau` повертається як `Asia/Tashkent`).
          */
         post: {
             parameters: {
@@ -1605,6 +1611,17 @@ export interface paths {
                         "application/json": components["schemas"]["ProjectIdResponse"];
                         "text/json": components["schemas"]["ProjectIdResponse"];
                         "text/plain": components["schemas"]["ProjectIdResponse"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -4130,7 +4147,9 @@ export interface components {
              * @description Версія шаблону, за якою заповнюються документи.
              */
             templateVersionId?: null | number;
-            /** @description Пояс майданчика; після відкриття періоду не змінюється. */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). Обов'язковий; після
+             *     відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
+             *     `ECR-CFG-4221`. */
             timeZoneId: string;
             /**
              * Format: int32
@@ -4786,7 +4805,9 @@ export interface components {
              * @description Проєкт.
              */
             projectId: number;
-            /** @description Пояс майданчика, у якому пораховані межі. */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`), у якому пораховані
+             *     межі. Клієнт отримує саме ідентифікатор, а не зсув: зсув чинний лише на
+             *     момент відповіді і збрехав би на межі переходу на літній час. */
             timeZoneId: string;
         };
         /** @description Період у календарі проєкту. */
@@ -4928,7 +4949,7 @@ export interface components {
             periodKind: components["schemas"]["PeriodKind"];
             /** @description Стан проєкту. */
             status: components["schemas"]["ProjectStatus"];
-            /** @description Пояс майданчика. */
+            /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). */
             timeZoneId: string;
         };
         /** @description Запит на публікацію версії методології. */

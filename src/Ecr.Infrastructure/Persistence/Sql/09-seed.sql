@@ -716,8 +716,11 @@ USING (VALUES
     (N'registries.sourceSwitchHint',     N'en', N'The set is switched as one operation', 1),
     (N'registries.sourceSwitchWarning',  N'en', N'All or nothing: an unknown code rejects the whole operation, and the check for open periods is done once for the set. Not allowed while any period is open: part of the documents would be filled against one list of entries and part against another.', 1),
     (N'registries.sourceReasonHint',     N'en', N'A year from now this is the only question that will need an answer: why these registries were switched together.', 1),
-    (N'periods.timeZone',                N'en', N'Site time zone', 1),
-    (N'periods.timeZoneHint',            N'en', N'Period boundaries and late-edit marks are calculated in this zone. It cannot be changed once the first period is open.', 1),
+    (N'periods.timeZone',                N'en', N'Site time zone (IANA)', 1),
+    -- ⚠ Підказка називає IANA і незмінність разом: поле обов'язкове і без
+    -- початкового значення (H-13), тож користувач має знати обидві причини,
+    -- перш ніж обере — після відкриття першого періоду вибір остаточний.
+    (N'periods.timeZoneHint',            N'en', N'IANA identifier of the site, for example Asia/Aqtau. Period boundaries and late-edit marks are calculated in this zone, and it cannot be changed once the first period is open.', 1),
     (N'periods.templateVersion',         N'en', N'Template version', 1),
     (N'periods.templateVersionHint',     N'en', N'Published versions only: a draft has no frozen structure.', 1),
     (N'periods.policy',                  N'en', N'Period policy', 1),

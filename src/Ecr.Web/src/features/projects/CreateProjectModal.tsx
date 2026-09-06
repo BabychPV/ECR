@@ -16,26 +16,25 @@ import { t } from '@/shared/i18n';
 /** Види періоду; значення збігаються з `PeriodKind` домену. */
 const PeriodKinds = ['Monthly', 'Quarterly', 'Yearly', 'Custom'];
 
-/** Пояс браузера — лише ПОЧАТКОВЕ значення поля, не рішення за користувача. */
-const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
 /**
  * Перелік поясів IANA.
  *
+ * ⛔ `supportedValuesOf('timeZone')` віддає САМЕ ідентифікатори IANA
+ * (`Asia/Aqtau`) — інших сервер не приймає (`ECR-CFG-4221`, директива ПК-1
+ * №06 §3). Вільного введення тут немає навмисно: пояс вічний (`ФВ-1.1a`), і
+ * опечатка в ньому стала б вічною властивістю проєкту.
+ *
  * ⚠ `supportedValuesOf` є не всюди (і немає в старих середовищах). Без
  * запасного варіанта поле лишалося б порожнім, а проєкт — нествореним: сервер
- * відхиляє створення без поясу (`ECR-CFG-0422`, `D-5`).
+ * відхиляє створення без поясу.
  */
 function timeZones(): string[] {
   const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
   const all = typeof supported === 'function' ? supported('timeZone') : [];
 
   const fallback = ['Asia/Almaty', 'Asia/Aqtau', 'Asia/Atyrau', 'Asia/Oral', 'Europe/London', 'UTC'];
-  const list = all.length > 0 ? all : fallback;
 
-  // Пояс браузера має бути в переліку навіть тоді, коли середовище його не
-  // перелічує: інакше попередньо обране значення виглядало б як помилка.
-  return list.includes(browserZone) ? list : [browserZone, ...list];
+  return all.length > 0 ? all : fallback;
 }
 
 /**
@@ -64,13 +63,41 @@ export function createProjectBody(form: {
     nameL10n: form.name,
     periodKind: form.periodKind,
 
-    // ⚠ Часовий пояс — ПРОЄКТУ, а не сервера: межі періоду рахуються в ньому
-    // (`D-6`). Сервер у Європі не має вирішувати, коли закінчився місяць на
-    // місці видобутку.
+    // ⚠ Часовий пояс — ПРОЄКТУ, а не сервера і не браузера: межі періоду
+    // рахуються в ньому (`D-6`). Сервер у Європі не має вирішувати, коли
+    // закінчився місяць на місці видобутку — і браузер конфігуратора теж.
     timeZoneId: form.timeZoneId,
     templateVersionId: Number(form.versionId),
     periodPolicyId: Number(form.policyId),
   };
+}
+
+/**
+ * Чого формі бракує, щоб її можна було надіслати.
+ *
+ * ⛔ Винесене ОКРЕМОЮ чистою функцією з тієї ж причини, що й
+ * {@link createProjectBody} (`D1-12`): рендер Mantine у jsdom для цієї форми
+ * йде понад дві хвилини, тобто такий тест вимкнули б. Перевіряти ж тут є що —
+ * пояс став обов'язковим, і саме забутий пункт у цьому переліку дозволив би
+ * надіслати форму без нього.
+ *
+ * ⚠ `timeZoneId === null` означає «не обрано». Порожній рядок сюди не
+ * потрапляє: `Select` віддає або значення зі списку, або `null`.
+ */
+export function createProjectIncomplete(form: {
+  code: string;
+  name: LocalizedValue;
+  timeZoneId: string | null;
+  versionId: string | null;
+  policyId: string | null;
+}): boolean {
+  return (
+    form.code.trim().length === 0 ||
+    !hasAnyText(form.name) ||
+    form.timeZoneId === null ||
+    form.versionId === null ||
+    form.policyId === null
+  );
 }
 
 /**
@@ -101,11 +128,14 @@ export function CreateProjectModal({
   const [name, setName] = useState<LocalizedValue>({});
   const [periodKind, setPeriodKind] = useState('Monthly');
 
-  // ⚠ Пояс браузера — ПОЧАТКОВЕ значення, а не рішення за користувача
-  // (`D-5`). Конфігуратор часто сидить не там, де майданчик, і саме його
-  // пояс мовчки ставав би вічною властивістю проєкту: після відкриття
-  // першого періоду змінити його вже не можна (`ФВ-1.1a`).
-  const [timeZoneId, setTimeZoneId] = useState(browserZone);
+  // ⛔ Поле починається ПОРОЖНІМ (директива ПК-1 №06 §3 скасувала `D1-09`).
+  // Тут стояв пояс браузера як початкове значення — і це та сама мовчазна
+  // підстановка, тільки на крок пізніше: форму можна було надіслати, жодного
+  // разу не глянувши на поле, і пояс конфігуратора ставав ВІЧНОЮ властивістю
+  // проєкту (`ФВ-1.1a`). Конфігуратор сидить в Астані, майданчик — в Актау,
+  // це +06:00 проти +05:00: кожен період закривався б на годину раніше, ніж
+  // чекають на місці, і помітили б це за скаргою «не встиг подати».
+  const [timeZoneId, setTimeZoneId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [policyId, setPolicyId] = useState<string | null>(null);
 
@@ -145,12 +175,15 @@ export function CreateProjectModal({
       apiFetch<ProjectIdResponse>('/api/v1/projects', {
         method: 'POST',
         body: JSON.stringify(
-          createProjectBody({ code, name, periodKind, timeZoneId, versionId, policyId }),
+          // `timeZoneId` тут уже не `null`: кнопка недоступна, доки пояс не
+          // обрано (`incomplete` нижче).
+          createProjectBody({ code, name, periodKind, timeZoneId: timeZoneId ?? '', versionId, policyId }),
         ),
       }),
     onSuccess: async (result) => {
       setCode('');
       setName({});
+      setTimeZoneId(null);
       setVersionId(null);
       setPolicyId(null);
       onClose();
@@ -159,8 +192,10 @@ export function CreateProjectModal({
     onError: showApiError,
   });
 
-  const incomplete =
-    code.trim().length === 0 || !hasAnyText(name) || versionId === null || policyId === null;
+  // ⛔ Пояс у переліку обов'язкових. Без нього форму можна було надіслати
+  // (браузерне значення підставлялося саме), і сервер приймав її — з чужим
+  // поясом, який після відкриття першого періоду вже не змінити (`ФВ-1.1a`).
+  const incomplete = createProjectIncomplete({ code, name, timeZoneId, versionId, policyId });
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('periods.create')}>
@@ -187,11 +222,14 @@ export function CreateProjectModal({
         allowDeselect={false}
       />
 
-      {/* ⛔ Пояс ВИДИМИЙ і змінюваний (`D-5`). Раніше він надсилався мовчки з
-          браузера конфігуратора, а помилку в ньому не виправити після
-          відкриття першого періоду — побачити її треба тут. */}
+      {/* ⛔ Пояс ВИДИМИЙ, ОБОВ'ЯЗКОВИЙ і без початкового значення (директива
+          ПК-1 №06 §3). Спершу він надсилався мовчки з браузера, потім браузер
+          лише підставляв початкове значення — обидва варіанти дозволяли
+          створити проєкт, жодного разу не подивившись на поле. Помилку тут не
+          виправити після відкриття першого періоду (`ФВ-1.1a`). */}
       <Select
         mt="sm"
+        required
         searchable
         // ⚠ Поясів близько шестисот. Без межі список малюється весь: пошук
         // лишається по ВСЬОМУ переліку, обрізається лише показане.
@@ -200,8 +238,7 @@ export function CreateProjectModal({
         description={t('periods.timeZoneHint')}
         data={timeZones()}
         value={timeZoneId}
-        onChange={(value) => setTimeZoneId(value ?? browserZone)}
-        allowDeselect={false}
+        onChange={setTimeZoneId}
       />
 
       {/* ⚠ Лише ОПУБЛІКОВАНІ версії: чернетка не має ані замороженої
