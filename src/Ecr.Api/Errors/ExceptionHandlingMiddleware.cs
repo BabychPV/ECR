@@ -224,6 +224,14 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode is ErrorCodes.Archiving or ErrorCodes.SourceUnavailable =>
             (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
 
+        // ⚠ Відмова джерела в автентифікації сьогодні доїжджає лише у фонову
+        // задачу (збір ставиться в чергу, `202`), і до HTTP не доходить. Арм
+        // усе одно є: без нього той самий виняток, кинутий із синхронного
+        // шляху, дав би `500` з беззмістовним текстом — тобто найгіршу з
+        // можливих відповідей саме там, де причина відома точно.
+        SourceAuthenticationException e =>
+            (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 

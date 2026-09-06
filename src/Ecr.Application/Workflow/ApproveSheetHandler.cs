@@ -11,6 +11,7 @@ namespace Ecr.Application.Workflow;
 public sealed class ApproveSheetHandler(
     IWorkflowStore workflow,
     IAccessDecisionService access,
+    Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
@@ -99,6 +100,12 @@ public sealed class ApproveSheetHandler(
         // ⛔ Статус ДОКУМЕНТА не чіпається: його немає (D-93). Зведений стан
         // рахується запитом по wf.ApprovalState, і скалярне поле рано чи пізно
         // показало б Approved там, де половина аркушів у Draft.
+
+        // ⛔ А ось статус ЗРІЗУ перераховується (`H-23b`). Він успадковується
+        // від даних (`D-65`), і без цього виклику регуляторна вʼюха назавжди
+        // тримала б стан на момент побудови: аркуші затвердили, а звіт для
+        // регулятора лишився чернетковим і в перелік не потрапив.
+        await reports.RefreshAsync(documentId, key, ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

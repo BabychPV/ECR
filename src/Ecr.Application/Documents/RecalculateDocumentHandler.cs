@@ -38,9 +38,38 @@ public sealed class RecalculateDocumentHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Новий перерахунок ВИТІСНЯЄ попередній над тим самим документом і
+        // періодом (`H-23c`). Дві причини, і жодна не про зручність.
+        //
+        // Перша: два повні перерахунки одного документа пишуть у
+        // `calc.CalculationResult` одночасно і обидва перемикають актуальність
+        // прогону. Числа лишаються правдоподібними, а який прогін переміг —
+        // не скаже ніхто.
+        //
+        // Друга: доти зупинити довгий перерахунок було неможливо взагалі —
+        // `IBackgroundJobScheduler.CancelAsync` не кликав НІХТО. Річний
+        // перерахунок у чинній системі йде двадцять хвилин; наш із дворічною
+        // звіркою буде довшим, і повторний запуск — єдиний спосіб, яким людина
+        // може обірвати той, що пішов не туди.
         return await jobs
-            .EnqueueAsync<IRecalculationJob>(
-                new { DocumentId = documentId, PeriodKey = periodKey.Value }, ct)
+            .EnqueueExclusiveAsync<IRecalculationJob>(
+                TargetOf(documentId, periodKey),
+                new { DocumentId = documentId, PeriodKey = periodKey.Value },
+                ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Ціль перерахунку: документ і період.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <returns>Ключ цілі для витіснення.</returns>
+    /// <remarks>
+    /// ⚠ Саме пара, а не самий документ: перерахунок різних періодів одного
+    /// документа — це різна робота над різними партиціями, і витісняти одне
+    /// одним означало б, що заповнення грудня скасовує перерахунок листопада.
+    /// </remarks>
+    public static string TargetOf(long documentId, PeriodKey periodKey)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"doc{documentId}-p{periodKey.Value}");
 }

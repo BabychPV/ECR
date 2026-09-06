@@ -1,3 +1,5 @@
+using Ecr.Application.Errors;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Infrastructure.Persistence;
@@ -12,12 +14,21 @@ namespace Ecr.Infrastructure.Jobs;
 /// Простій джерела має бути **затримкою, а не втратою** (ФВ-11.3):
 /// обслуговування PI AF відбуватиметься незалежно від нашої згоди. Тому
 /// відмова джерела не робить задачу невдалою — діапазон іде в catch-up.
+/// <para>
+/// ⛔ Виняток один і він наш дефект, а не властивість контуру (<c>H-20</c>):
+/// <c>401</c>/<c>403</c>. Такий збір задачу **валить**, нічого не ставить у
+/// чергу і надсилає алерт негайно, не чекаючи погодинного зведення. Доти збір
+/// із неправильними обліковими даними завершувався успішно з нулем рядків, і
+/// відрізнити його від справного джерела, яке просто мовчить, не міг ніхто.
+/// </para>
 /// </remarks>
 public sealed class CollectionJob(
     ICollectionRunner runner,
     EcrDbContext db,
     IBackgroundJobScheduler jobs,
-    IClock clock) : ICollectionJob
+    IClock clock,
+    INotificationOutbox outbox,
+    Integration.OutboxDispatcher dispatcher) : ICollectionJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "collection";
@@ -42,13 +53,29 @@ public sealed class CollectionJob(
             .ReportAsync(5, $"Збір сутності {request.SourceEntityId} за {from:yyyy-MM-dd}…{to:yyyy-MM-dd}", ct)
             .ConfigureAwait(false);
 
-        // ⚠ Ідемпотентність забезпечує збирач: повторний запуск того самого
-        // діапазону не дублює даних. Тому задача НЕ перевіряє «а чи вже
-        // збирали» — така перевірка була б другим місцем, де живе те саме
-        // правило, і розійшлася б із першим.
-        await runner
-            .RunAsync(request.SourceEntityId, from, to, progress, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            // ⚠ Ідемпотентність забезпечує збирач: повторний запуск того самого
+            // діапазону не дублює даних. Тому задача НЕ перевіряє «а чи вже
+            // збирали» — така перевірка була б другим місцем, де живе те саме
+            // правило, і розійшлася б із першим.
+            await runner
+                .RunAsync(request.SourceEntityId, from, to, progress, ct)
+                .ConfigureAwait(false);
+        }
+        catch (SourceAuthenticationException failure)
+        {
+            await AlertAuthenticationAsync(request.SourceEntityId, failure, ct).ConfigureAwait(false);
+
+            // ⛔ Кидаємо далі. Задача мусить стати `Failed`: `Succeeded` тут
+            // означав би, що система вважає роботу зробленою — і наступного
+            // разу спробує рівно те саме з тими самими обліковими даними.
+            //
+            // ⛔ Watermark НЕ рухається і матеріалізація НЕ ставиться: після
+            // відмови в автентифікації в черзі не лишається нічого, що
+            // повторило б запит.
+            throw;
+        }
 
         if (schedule is not null)
         {
@@ -58,6 +85,54 @@ public sealed class CollectionJob(
         }
 
         await EnqueueMaterializationAsync(request.SourceEntityId, from, to, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ставить у чергу і НЕГАЙНО надсилає алерт про відмову в автентифікації.
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="failure">Відмова, як її сформулював збирач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Негайно, а не зі зведенням (<c>D-125</c>). Зведення ходить щогодини;
+    /// збір, який не автентифікується, не збере нічого й за цю годину, і за
+    /// решту ночі. Алерт, що приходить уранці, повідомляє про втрачений
+    /// нічний прогін, а не запобігає йому.
+    ///
+    /// ⚠ Подія однаково лягає в чергу: без запису в <c>itg.NotificationOutbox</c>
+    /// ненадісланий лист (пошта лежить, транспорт не налаштований) зник би
+    /// безслідно, і «алерт надіслано» означало б лише «ми спробували».
+    ///
+    /// ⚠ Адресати — <c>null</c>: їх визначає політика розсилки за
+    /// <c>sec.User.ReceivesAlerts</c>, як і для решти подій.
+    /// </remarks>
+    private async Task AlertAuthenticationAsync(
+        int sourceEntityId, SourceAuthenticationException failure, CancellationToken ct)
+    {
+        var code = await db.SourceEntities
+            .AsNoTracking()
+            .Where(e => e.Id == sourceEntityId)
+            .Select(e => e.Code)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false)
+            ?? sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        await outbox
+            .EnqueueAsync(
+                CollectionFailure.AlertEventCode,
+                CollectionFailure.AlertSubject(code),
+                failure.Message,
+                recipients: null,
+                ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Порт кладе подію в набір змін і НЕ зберігає його сам — саме щоб
+        // подія їхала комітом того, що її породило. Тут породжувача-транзакції
+        // немає, тому коміт робиться явно, і лише після нього має сенс
+        // відправляти.
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await dispatcher.FlushAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>

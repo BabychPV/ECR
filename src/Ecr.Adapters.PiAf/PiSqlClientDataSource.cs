@@ -231,11 +231,47 @@ public sealed class PiSqlClientDataSource(
         {
             await connection.DisposeAsync().ConfigureAwait(false);
 
+            // ⛔ Відмова в автентифікації відділяється від недоступності
+            // (`H-20`): драйвер повідомляє її SQLSTATE 28000 («invalid
+            // authorization specification»). Без цього розділення неправильний
+            // пароль службового запису виглядав би як тимчасово недоступний
+            // RTQP — тобто збір ішов би в наздоганяння і рапортував успіх.
+            if (IsAuthenticationFailure(ex))
+            {
+                throw new SourceAuthenticationException(
+                    SourceUnavailable,
+                    $"PI SQL Client не приймає облікові дані джерела {source.Code}: {ex.Message}",
+                    new Dictionary<string, object?> { ["dataSource"] = source.Code });
+            }
+
             throw new BusinessRuleException(
                 SourceUnavailable,
                 $"PI SQL Client не з'єднується з {source.Code}: {ex.Message}",
                 new Dictionary<string, object?> { ["dataSource"] = source.Code });
         }
+    }
+
+    /// <summary>SQLSTATE відмови в автентифікації — «invalid authorization specification».</summary>
+    /// <remarks>
+    /// ⚠ Саме SQLSTATE, а не текст повідомлення: текст залежить від драйвера
+    /// й мови ОС, і пошук у ньому підрядка розсипався б на першій же машині з
+    /// іншою локаллю.
+    /// </remarks>
+    private const string AuthenticationSqlState = "28000";
+
+    /// <summary>Чи це відмова саме в автентифікації.</summary>
+    /// <param name="error">Виняток драйвера.</param>
+    private static bool IsAuthenticationFailure(OdbcException error)
+    {
+        foreach (OdbcError item in error.Errors)
+        {
+            if (string.Equals(item.SQLState, AuthenticationSqlState, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Запит із конфігурації або типовий.</summary>

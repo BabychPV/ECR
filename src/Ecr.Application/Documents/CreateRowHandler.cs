@@ -9,6 +9,7 @@ namespace Ecr.Application.Documents;
 public sealed class CreateRowHandler(
     IRowStore rowStore,
     ICellStore cellStore,
+    IDocumentStore documents,
     IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
@@ -74,6 +75,18 @@ public sealed class CreateRowHandler(
         //    рядок і його комірки одним проходом SqlBulkCopy.
         await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
                                       ordinal: existing.Count + 1, ct).ConfigureAwait(false);
+
+        // ⛔ Новий рядок — це зміна документа (`H-23d`). Без цього «додав рядок»
+        // не змінювало ані `ModifiedAt`, ані автора: у переліку документ
+        // виглядав недоторканим із дня створення.
+        //
+        // ⚠ Адресат береться з `instance.DocumentId`, а не з параметра
+        // `documentId`: перший прийшов зі сховища разом із самим екземпляром
+        // таблиці, другий — із запиту, і збігаються вони лише доти, доки
+        // клієнт не помилиться.
+        await documents
+            .TouchAsync(instance.DocumentId, profile.UserId, clock.UtcNow, ct)
+            .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return key;
