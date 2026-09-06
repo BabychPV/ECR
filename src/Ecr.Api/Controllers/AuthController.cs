@@ -15,7 +15,8 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1")]
 public sealed class AuthController(
     LoginHandler login,
-    GetCurrentUserHandler currentUserHandler) : ControllerBase
+    GetCurrentUserHandler currentUserHandler,
+    Ecr.Application.Common.ICurrentUser currentUser) : ControllerBase
 {
     /// <summary>Вхід доменного користувача.</summary>
     /// <remarks>
@@ -38,8 +39,18 @@ public sealed class AuthController(
         }
 
         var userName = User.Identity?.Name ?? sid;
+
+        // ⛔ Групи беруться через `ICurrentUser`, а не другим читанням
+        // `ClaimTypes.GroupSid` тут. Правило «членство лежить у ЦІЙ заявці»
+        // (ФВ-6.15a) має рівно одне формулювання: два розійшлися б тихо, і
+        // розійшовшись, дали б вхід, який мовчить про нуль збігів саме тоді,
+        // коли зміниться спосіб їх читати.
+        //
+        // ⚠ На цьому шляху `HttpContext.User` — принципал Negotiate, тобто
+        // заявки квитка. Після `SignInAsync` там уже наша cookie, у якій груп
+        // немає, — прочитати їх пізніше було б нічим.
         var result = await login
-            .HandleWindowsAsync(sid, userName, userName, RemoteIp, ct)
+            .HandleWindowsAsync(sid, userName, userName, currentUser.GroupSids, RemoteIp, ct)
             .ConfigureAwait(false);
 
         await SignInAsync(result).ConfigureAwait(false);

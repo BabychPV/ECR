@@ -22,6 +22,7 @@ import { TemplatesPage } from '@/pages/admin/TemplatesPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
 import { KitchenSinkPage } from '@/pages/KitchenSinkPage';
+import { MyGroupsPage } from '@/pages/MyGroupsPage';
 
 /**
  * WCAG 2.1 AA на кожному маршруті (`ФВ-14.16`, `D-127`).
@@ -65,6 +66,7 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/sources', SourcesPage],
   ['/admin/jobs', JobsPage],
   ['/admin/health', HealthPage],
+  ['/my-groups', MyGroupsPage],
   ['/_kitchen-sink', KitchenSinkPage],
 ];
 
@@ -104,6 +106,25 @@ function emptyBodyFor(url: string): unknown {
     return { languageCode: 'en', revision: 1, strings: Catalog };
   }
   if (url.includes('/health/')) return { status: 'Healthy', totalDurationMs: 1, checks: [] };
+
+  // ⛔ Діагностика доступу віддає ОБ'ЄКТ, і порожній масив тут зламав би
+  // панель на першому ж `.map`. Це та сама помилка, що й `A7-04`: заглушка,
+  // яка не має форми відповіді, перевіряє саму себе.
+  if (url.includes('/security/my-groups') || url.endsWith('/groups')) {
+    return {
+      userId: 0,
+      userName: 'test',
+      provider: 'Windows',
+      principalSid: null,
+      groupsFromTicket: true,
+      groups: [],
+      unmatchedSids: [],
+      personalRoleCodes: [],
+      effectiveRoleCodes: [],
+      expiredRoleCodes: [],
+      groupAssignmentsInSystem: [],
+    };
+  }
   if (url.includes('/periods')) return { projectId: 0, periods: [] };
   if (url.includes('/me')) {
     return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };

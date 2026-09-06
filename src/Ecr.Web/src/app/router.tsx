@@ -67,6 +67,17 @@ const HealthPage = lazy(async () => ({
 }));
 
 /**
+ * ⛔ Маршрут НЕ під `/admin`: він для кожного, а не для адміністратора. Ролі
+ * доменних користувачів призначаються на AD-групу (`ФВ-6.15`), і людина без
+ * жодного збігу бачить порожні екрани, які не відрізняються від справної
+ * системи без даних (`H-21`). Сховати цю відповідь в адміністрування означало
+ * б лишити її тим, кому вона й не потрібна.
+ */
+const MyGroupsPage = lazy(async () => ({
+  default: (await import('@/pages/MyGroupsPage')).MyGroupsPage,
+}));
+
+/**
  * Межа очікування для маршрутів поза каркасом.
  *
  * ⚠ Сторінка входу рендериться поза `AppLayout`, тобто поза його `<Suspense>`.
@@ -128,6 +139,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <DocumentsPage /> },
       { path: 'change-password', element: <ChangePasswordPage /> },
+      { path: 'my-groups', element: <MyGroupsPage /> },
       { path: 'documents/:id', element: <DocumentPage /> },
       { path: 'admin/templates', element: <TemplatesPage /> },
       { path: 'admin/templates/:id/versions/:versionId', element: <TemplateVersionPage /> },

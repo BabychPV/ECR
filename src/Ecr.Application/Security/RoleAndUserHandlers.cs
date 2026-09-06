@@ -125,6 +125,26 @@ public sealed class CreateRoleHandler(
         //
         // Натомість кожна видача небезпечного права — окремий запис у журналі
         // безпеки: не заборона, а слід.
+        // ⛔ Невідомі коди відсіюються ДО створення ролі (`H-21`, пункт 4
+        // директиви №06 §5). Каталог прав закритий: його оголошує КОД, бо саме
+        // код їх перевіряє, — тож код, якого в каталозі немає, не означає
+        // нічого і ніколи не спрацює.
+        //
+        // ⚠ Мовчазним збереженням це не було лише завдяки зовнішньому ключу
+        // `FK_RolePerm_Perm`: без перевірки запит помирав у SQL, і
+        // адміністратор отримував `500` без жодної згадки, ЯКИЙ саме код
+        // хибний. Тобто роль не створювалася, а причина лишалася в логах бази.
+        //
+        // ⚠ Відмова НАБОРОМ, як і в ролях (`ReplaceRolesAsync`): створити роль
+        // «з того, що знайшлося» гірше за відмову — вона виглядала б робочою і
+        // мовчки не давала частини повноважень.
+        var unknown = await users.FilterUnknownAsync(permissionCodes, ct).ConfigureAwait(false);
+        if (unknown.Count > 0)
+        {
+            throw new NotFoundException(
+                "ECR-SEC-0404", $"Прав не існує в каталозі: {string.Join(", ", unknown)}.");
+        }
+
         var dangerous = await users.FilterDangerousAsync(permissionCodes, ct).ConfigureAwait(false);
 
         var role = new Role(EcrCode.Create(code), new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));

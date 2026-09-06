@@ -128,6 +128,45 @@ public interface IUserStore
     /// </remarks>
     public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct);
 
+    /// <summary>
+    /// Призначення ролей, адресовані особі <b>або</b> будь-якому з переданих
+    /// SID груп — разом із тим, чи діють вони на дату.
+    /// </summary>
+    /// <param name="userId">Користувач; його особисті призначення входять завжди.</param>
+    /// <param name="groupSids">SID груп із квитка сесії; порожньо — лише особисті.</param>
+    /// <param name="asOf">Дата, на яку рахується чинність.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Повертає призначення, а не самі ролі, і <b>разом із нечинними</b>:
+    /// це діагностика (`H-21`), і «роль була, але підміна на час відпустки
+    /// скінчилася» — відповідь, а «ролей немає» — ні. Відфільтрувати нечинні
+    /// в запиті означало б стерти рівно ту різницю, заради якої питали.
+    ///
+    /// ⚠ Чинність рахує <b>доменний метод</b> (<c>RoleAssignment.IsEffectiveOn</c>),
+    /// а не копія його умови в SQL (`H-23a`): друге формулювання того самого
+    /// правила розходиться з першим тихо.
+    /// </remarks>
+    public Task<IReadOnlyList<Security.RoleAssignmentTrace>> ListAssignmentsAsync(
+        int userId, IReadOnlyList<string> groupSids, DateOnly asOf, CancellationToken ct);
+
+    /// <summary>
+    /// Усі призначення, адресовані ГРУПАМ, незалежно від чийогось членства.
+    /// </summary>
+    /// <param name="asOf">Дата, на яку рахується чинність.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Єдина відповідь на «у яку групу мене треба додати». Членство
+    /// приходить із квитка (`ФВ-6.15a`), а квитка чужої сесії в нас немає
+    /// (`P-02`) — тож про чужий запис система не може сказати, у яких він
+    /// групах, зате може сказати, які групи взагалі щось дають. З цим
+    /// адміністратор іде до відділу AD; без цього — нікуди.
+    ///
+    /// ⚠ Перелік видно лише носієві <c>Security.ManageUsers</c>: він показує,
+    /// яка саме AD-група дає адміністративну роль.
+    /// </remarks>
+    public Task<IReadOnlyList<Security.RoleAssignmentTrace>> ListGroupAssignmentsAsync(
+        DateOnly asOf, CancellationToken ct);
+
     /// <summary>Коди прав із переданих, яких у каталозі НЕМАЄ.</summary>
     /// <param name="permissionCodes">Коди, які просять видати.</param>
     /// <param name="ct">Токен скасування.</param>

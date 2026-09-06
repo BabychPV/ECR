@@ -3,6 +3,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Security;
 
@@ -23,8 +24,8 @@ public sealed record LoginResult(
 /// і однакова не лише за текстом, а й за часом: інакше ендпоінт стає засобом
 /// перебору імен, а перебір імен — половина роботи зловмисника.
 /// </remarks>
-public sealed class LoginHandler(
-    IUserStore users, IPasswordHasher hasher, IUnitOfWork uow, IClock clock)
+public sealed partial class LoginHandler(
+    IUserStore users, IPasswordHasher hasher, IUnitOfWork uow, IClock clock, ILogger<LoginHandler> logger)
 {
     /// <summary>
     /// Хеш, об який «перевіряється» пароль неіснуючого користувача.
@@ -96,16 +97,28 @@ public sealed class LoginHandler(
     /// <param name="sid">SID із токена Windows.</param>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="displayName">Ім'я для показу.</param>
+    /// <param name="groupSids">SID груп безпеки з квитка; для діагностики доступу.</param>
     /// <param name="ipAddress">Адреса клієнта.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Нижче рівня входу різниці між провайдерами немає ніде: обидва дають ту
     /// саму cookie і той самий <c>ICurrentUser</c> (ФВ-6.2).
+    ///
+    /// ⚠ <paramref name="groupSids"/> — параметр, а не читання
+    /// <c>ICurrentUser</c> зсередини: на цьому шляху «поточний користувач» ще
+    /// не наш, а Negotiate-принципал, і приховане читання зробило б вхід
+    /// залежним від того, що стоїть у конвеєрі вище.
     /// </remarks>
     public async Task<LoginResult> HandleWindowsAsync(
-        string sid, string userName, string displayName, string? ipAddress, CancellationToken ct)
+        string sid,
+        string userName,
+        string displayName,
+        IReadOnlyList<string> groupSids,
+        string? ipAddress,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sid);
+        ArgumentNullException.ThrowIfNull(groupSids);
 
         var now = clock.UtcNow;
         var user = await users.FindByWindowsSidAsync(sid, ct).ConfigureAwait(false);
@@ -126,9 +139,82 @@ public sealed class LoginHandler(
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Windows, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        await WarnOnEmptyGroupMatchAsync(user.Id, userName, groupSids, now, ct).ConfigureAwait(false);
+
         return new LoginResult(
             user.Id, user.UserName, user.DisplayName, user.SecurityStamp, MustChangePassword: false);
     }
+
+    /// <summary>
+    /// Пише <c>Warning</c>, коли жоден SID групи з квитка не дав ролі.
+    /// </summary>
+    /// <param name="userId">Обліковий запис, який щойно увійшов.</param>
+    /// <param name="userName">Ім'я входу — щоб рядок журналу був адресний.</param>
+    /// <param name="groupSids">SID груп із квитка.</param>
+    /// <param name="now">Момент входу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Саме <c>Warning</c>, а не помилка. Нуль збігів — <b>законний</b> стан
+    /// для нового співробітника, якого ще не додали в жодну групу, і робити з
+    /// нього відмову означало б не пускати в систему тих, кого вона має
+    /// зустріти порожнім, але робочим екраном.
+    ///
+    /// ⛔ Але й не мовчання. `ФВ-6.15` призначає ролі доменних користувачів
+    /// НА ГРУПУ; на живому домені без налаштованих груп нуль збігів дістанеться
+    /// більшості, і виглядатиме це точнісінько як справна система без даних.
+    /// Рядок у журналі — перше місце, де ця тиша стає видимою.
+    ///
+    /// ⚠ У рядку — <b>перелік SID, які не збіглися</b>, а не сам факт. Без
+    /// переліку адміністраторові нема з чим іти до відділу AD: «у когось немає
+    /// прав» — не запит, «група S-1-5-21-… нічого не дає» — запит.
+    ///
+    /// ⚠ Збігом вважається лише ЧИННЕ призначення: строкова підміна, яка
+    /// скінчилася, доступу не дає, і рахувати її збігом означало б мовчати
+    /// саме тоді, коли людина щойно втратила права.
+    ///
+    /// ⚠ Ціна — один індексований запит на ВХІД (не на запит). Профіль доступу
+    /// будується тим самим набором рядків одразу після цього, тож ідеться про
+    /// подвоєння того, що й так робиться раз на сесію.
+    /// </remarks>
+    private async Task WarnOnEmptyGroupMatchAsync(
+        int userId, string userName, IReadOnlyList<string> groupSids, DateTime now, CancellationToken ct)
+    {
+        var assignments = await users
+            .ListAssignmentsAsync(userId, groupSids, DateOnly.FromDateTime(now), ct)
+            .ConfigureAwait(false);
+
+        if (assignments.Any(a => a.IsEffective && a.PrincipalSid is not null))
+        {
+            return;
+        }
+
+        // ⚠ Порожній квиток пишеться окремим словом, а не порожнім переліком:
+        // «SID: —» означає, що Negotiate не поклав у квиток жодної групи, і це
+        // дефект налаштування контуру, а не адміністрування ролей.
+        var sids = groupSids.Count == 0
+            ? "—"
+            : string.Join(", ", groupSids.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal));
+
+        LogNoGroupMatch(
+            logger,
+            userName,
+            groupSids.Count,
+            sids,
+            assignments.Count(a => a.IsEffective && a.PrincipalSid is null));
+    }
+
+    /// <summary>Рядок журналу про вхід без жодного збігу за групами.</summary>
+    /// <param name="logger">Журнал.</param>
+    /// <param name="userName">Ім'я входу.</param>
+    /// <param name="sidCount">Скільки SID груп було в квитку.</param>
+    /// <param name="sids">Перелік SID, які не збіглися.</param>
+    /// <param name="personalRoles">Скільки ролей призначено особисто.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Вхід {UserName}: жоден SID групи з квитка не дав ролі. "
+                  + "SID у квитку: {SidCount} ({Sids}). Особистих призначень: {PersonalRoles}.")]
+    private static partial void LogNoGroupMatch(
+        ILogger logger, string userName, int sidCount, string sids, int personalRoles);
 
     /// <summary>Записує невдалу спробу і зберігає зміни.</summary>
     private async Task FailAsync(

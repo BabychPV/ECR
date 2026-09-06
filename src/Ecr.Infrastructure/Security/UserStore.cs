@@ -367,6 +367,75 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         return users.Count;
     }
 
+    /// <summary>
+    /// Стеля вибірки призначень у діагностиці.
+    /// </summary>
+    /// <remarks>
+    /// Та сама межа, що й у побудові профілю (<c>AccessDecisionService</c>):
+    /// двісті призначень на одну людину — це вже наслідок помилки в
+    /// адмініструванні, і показувати їх усі на екрані все одно немає сенсу.
+    /// </remarks>
+    private const int MaxAssignments = 200;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Ecr.Application.Security.RoleAssignmentTrace>> ListAssignmentsAsync(
+        int userId, IReadOnlyList<string> groupSids, DateOnly asOf, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(groupSids);
+
+        // ⛔ Умова відбору ДОСЛІВНО та сама, що будує профіль
+        // (`AccessDecisionService.LoadAsync`): особисті призначення плюс ті,
+        // що адресовані SID із квитка. Інакший відбір тут був би найгіршим
+        // із можливих дефектів цього екрана — діагностика показувала б не те,
+        // за чим система насправді вирішує доступ.
+        var rows = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+            .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { Assignment = a, r.Code })
+            .Take(MaxAssignments)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(x => Trace(x.Assignment, x.Code, asOf))];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Ecr.Application.Security.RoleAssignmentTrace>> ListGroupAssignmentsAsync(
+        DateOnly asOf, CancellationToken ct)
+    {
+        var rows = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.PrincipalSid != null)
+            .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { Assignment = a, r.Code })
+            .OrderBy(x => x.Assignment.PrincipalSid)
+            .ThenBy(x => x.Code)
+            .Take(MaxAssignments)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(x => Trace(x.Assignment, x.Code, asOf))];
+    }
+
+    /// <summary>Переводить призначення у зріз для діагностики доступу.</summary>
+    /// <param name="assignment">Призначення, вичитане з бази.</param>
+    /// <param name="roleCode">Код ролі — його називають в аудиті й у грантах.</param>
+    /// <param name="asOf">Дата, на яку рахується чинність.</param>
+    /// <remarks>
+    /// ⛔ Чинність рахує ДОМЕН (<c>RoleAssignment.IsEffectiveOn</c>), а не
+    /// копія його умови в запиті (`H-23a`). Помічник існує, щоб цей виклик
+    /// стояв у ОДНОМУ місці: два обходи, кожен зі своїм переліком полів,
+    /// розійшлися б на першій же правці — і розійшлися б тихо.
+    /// </remarks>
+    private static Ecr.Application.Security.RoleAssignmentTrace Trace(
+        RoleAssignment assignment, string roleCode, DateOnly asOf)
+        => new(
+            assignment.RoleId,
+            roleCode,
+            assignment.PrincipalSid,
+            assignment.ValidFrom,
+            assignment.ValidTo,
+            assignment.IsEffectiveOn(asOf));
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> FilterUnknownAsync(
         IReadOnlyList<string> permissionCodes, CancellationToken ct)

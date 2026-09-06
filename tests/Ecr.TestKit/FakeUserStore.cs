@@ -6,6 +6,14 @@ using Ecr.Domain.Enums;
 
 namespace Ecr.TestKit;
 
+/// <summary>Призначення ролі на SID AD-групи — з межами дії або без них.</summary>
+/// <param name="Sid">SID групи.</param>
+/// <param name="RoleCode">Код ролі.</param>
+/// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
+/// <param name="ValidTo">Кінець дії; <c>null</c> — безстроково.</param>
+public sealed record GroupRoleAssignment(
+    string Sid, string RoleCode, DateOnly? ValidFrom = null, DateOnly? ValidTo = null);
+
 /// <summary>Сховище облікових записів у пам'яті.</summary>
 public sealed class FakeUserStore : IUserStore
 {
@@ -14,6 +22,18 @@ public sealed class FakeUserStore : IUserStore
 
     /// <summary>Ролі, призначені через <see cref="GrantRoleAsync"/>.</summary>
     public List<(string UserName, string RoleCode)> Grants { get; } = [];
+
+    /// <summary>
+    /// Ролі, призначені НА ГРУПУ — основний спосіб для доменних користувачів
+    /// (<c>ФВ-6.15</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Фікстура тримає їх окремим переліком саме тому, що система тримає їх
+    /// окремим адресатом: <c>CK_RoleAssign_Principal</c> вимагає РІВНО ОДНОГО
+    /// — або особи, або групи. Звести їх тут в один список означало б, що
+    /// тести не бачать різниці, заради якої існує весь `H-21`.
+    /// </remarks>
+    public List<GroupRoleAssignment> GroupAssignments { get; } = [];
 
     /// <summary>Ролі сховища.</summary>
     public List<RoleView> Roles { get; } = [];
@@ -221,6 +241,81 @@ public sealed class FakeUserStore : IUserStore
     /// <summary>Код ролі за ідентифікатором; порожньо, якщо ролі немає.</summary>
     private string RoleCodeById(int roleId)
         => Roles.FirstOrDefault(r => r.Id == roleId)?.Code ?? string.Empty;
+
+    /// <summary>Ідентифікатор ролі за кодом; нуль, якщо ролі немає.</summary>
+    private int RoleIdByCode(string roleCode)
+        => Roles.FirstOrDefault(r => string.Equals(r.Code, roleCode, StringComparison.Ordinal))?.Id ?? 0;
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<RoleAssignmentTrace>> ListAssignmentsAsync(
+        int userId, IReadOnlyList<string> groupSids, DateOnly asOf, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(groupSids);
+
+        var user = _users.Find(u => u.Id == userId);
+
+        // Особисті призначення фікстура тримає безстроковими — рівно як
+        // `ReplaceRolesAsync`, який ними і керує.
+        var personal = user is null
+            ? new List<RoleAssignmentTrace>()
+            : [.. Grants
+                .Where(g => string.Equals(g.UserName, user.UserName, StringComparison.Ordinal))
+                .Select(g => new RoleAssignmentTrace(
+                    RoleIdByCode(g.RoleCode), g.RoleCode, null, null, null, IsEffective: true))];
+
+        // ⚠ Без урахування регістру — так само, як зіставляє SQL Server із
+        // типовим порівнянням. Фікстура, суворіша за систему, показувала б
+        // «не збіглося» там, де доступ насправді виданий.
+        var byGroup = GroupAssignments
+            .Where(a => groupSids.Contains(a.Sid, StringComparer.OrdinalIgnoreCase))
+            .Select(a => Trace(a, asOf));
+
+        return Task.FromResult<IReadOnlyList<RoleAssignmentTrace>>([.. personal, .. byGroup]);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<RoleAssignmentTrace>> ListGroupAssignmentsAsync(
+        DateOnly asOf, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<RoleAssignmentTrace>>(
+            [.. GroupAssignments.Select(a => Trace(a, asOf))]);
+
+    /// <summary>Переводить призначення на групу у зріз для діагностики.</summary>
+    /// <param name="assignment">Призначення.</param>
+    /// <param name="asOf">Дата, на яку рахується чинність.</param>
+    /// <remarks>
+    /// ⛔ Чинність рахує ДОМЕН (<c>RoleAssignment.IsEffectiveOn</c>), а не
+    /// друга копія умови у фікстурі. Копія збігалася б із доменом рівно до
+    /// першої правки одного з них — і саме тому `H-23a` існує як знахідка.
+    ///
+    /// ⚠ Межі дії виставляються рефлексією: заповнити їх не має чим ЖОДЕН
+    /// прикладний шлях (`D2-61`). Це факт про систему, а не зручність тесту.
+    /// </remarks>
+    private RoleAssignmentTrace Trace(GroupRoleAssignment assignment, DateOnly asOf)
+    {
+        var entity = new RoleAssignment(
+            RoleIdByCode(assignment.RoleCode), userId: null, principalSid: assignment.Sid);
+
+        SetValidity(entity, nameof(RoleAssignment.ValidFrom), assignment.ValidFrom);
+        SetValidity(entity, nameof(RoleAssignment.ValidTo), assignment.ValidTo);
+
+        return new RoleAssignmentTrace(
+            entity.RoleId,
+            assignment.RoleCode,
+            assignment.Sid,
+            assignment.ValidFrom,
+            assignment.ValidTo,
+            entity.IsEffectiveOn(asOf));
+    }
+
+    /// <summary>Виставляє межу дії призначення.</summary>
+    /// <param name="assignment">Призначення.</param>
+    /// <param name="property">Назва властивості межі.</param>
+    /// <param name="value">Значення; <c>null</c> — межі немає.</param>
+    private static void SetValidity(RoleAssignment assignment, string property, DateOnly? value)
+        => typeof(RoleAssignment)
+            .GetProperty(property)!
+            .GetSetMethod(nonPublic: true)!
+            .Invoke(assignment, [value]);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> FilterUnknownAsync(

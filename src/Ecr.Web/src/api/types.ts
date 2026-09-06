@@ -151,6 +151,18 @@ export type UserView = Schemas['UserView'];
 /** Сторінка користувачів. */
 export type UserPage = Schemas['PagedResultOfUserView'];
 
+/**
+ * Звідки взялися (або не взялися) ролі: відповідь на «чому в мене немає
+ * доступу» (`H-21`).
+ */
+export type AccessDiagnosticsView = Schemas['AccessDiagnosticsView'];
+
+/** SID групи з квитка і те, що він дав. */
+export type GroupSidView = Schemas['GroupSidView'];
+
+/** Групове призначення, яке існує в системі. */
+export type GroupAssignmentView = Schemas['GroupAssignmentView'];
+
 /** Календар періодів проєкту. */
 export type PeriodCalendarDto = Schemas['PeriodCalendarDto'];
 
