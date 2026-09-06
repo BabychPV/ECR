@@ -130,6 +130,78 @@ public static class PublishChecks
         return diagnostics;
     }
 
+    /// <summary>
+    /// Розкриті залежності всіх формул версії — для <c>cfg.FormulaDependency</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Таблиця залежностей не наповнювалася НІЧИМ. Наслідок мовчазний і
+    /// найгірший з можливих: граф залежностей порожній, тож каскадний
+    /// перерахунок не бачить похідних комірок — числа лишаються старими без
+    /// жодної помилки на екрані (<c>A7-63</c>).
+    ///
+    /// ⚠ Розбір повторюється, а не переиспользовується з <see cref="Run"/>.
+    /// Публікація — рідкісна операція, а зчепити збереження з перевіркою
+    /// означало б, що жодну з них не можна змінити окремо. Ціна — один
+    /// зайвий розбір на публікацію.
+    ///
+    /// ⚠ Діапазони тут уже РОЗКРИТІ в конкретні <c>RowKey</c>: у рантаймі
+    /// діапазонів не існує (`B03` §4), і саме тому зміна порядку рядків після
+    /// публікації не змінює результат.
+    /// </remarks>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <param name="formulaEngine">Рушій — розбір виразів.</param>
+    /// <returns>Залежності, готові до збереження.</returns>
+    public static IReadOnlyList<FormulaDependency> Dependencies(
+        TemplateVersion version, IFormulaEngine formulaEngine)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(formulaEngine);
+
+        var snapshot = Snapshot(version);
+        var extractor = new DependencyExtractor(new ReferenceResolver(snapshot), new RangeExpander());
+
+        var tables = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .ToDictionary(t => t.Id);
+
+        var result = new List<FormulaDependency>();
+
+        foreach (var table in tables.Values)
+        {
+            foreach (var formula in table.Formulas.Where(f => !f.IsDeleted))
+            {
+                var parsed = formulaEngine.Parse(formula.Expression, formula.Dialect);
+
+                // Непридатний вираз сюди не доходить: публікація вже
+                // відхилена `Run`. Але метод має бути придатним і окремо —
+                // мовчазний `NullReferenceException` при збереженні гірший
+                // за пропущену формулу.
+                if (parsed.Expression is null)
+                {
+                    continue;
+                }
+
+                var dependencies = extractor.Extract(
+                    parsed.Expression.Root, table.Id, RowKeyOf(table, formula), tables);
+
+                foreach (var dependency in dependencies)
+                {
+                    result.Add(FormulaDependency.ForFormula(
+                        formula.Id,
+                        dependency.DependsOnKind,
+                        dependency.TableDefId,
+                        dependency.RowKey,
+                        dependency.ColumnDefId,
+                        dependency.FilterJson,
+                        dependency.PeriodOffset,
+                        dependency.SortOrder));
+                }
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Формули, від яких залежить ця — для топологічного порядку.</summary>
     private static List<int> DependsOn(
         FormulaDef formula,
@@ -151,7 +223,8 @@ public static class PublishChecks
             // за суми, з яких він складається.
             foreach (var candidate in table.Formulas.Where(f => !f.IsDeleted && f.Id != formula.Id))
             {
-                if (Produces(candidate, table, dependency))
+                if (Recalculation.FormulaOutputs.Produces(
+                        candidate, table, dependency.RowKey, dependency.ColumnDefId))
                 {
                     result.Add(candidate.Id);
                 }
@@ -161,27 +234,18 @@ public static class PublishChecks
         return result;
     }
 
-    private static bool Produces(FormulaDef formula, TableDef table, ExtractedDependency dependency)
-    {
-        if (formula.ColumnDefId is { } columnId && dependency.ColumnDefId != columnId
-            && formula.Scope != FormulaScope.Row)
-        {
-            return false;
-        }
-
-        return formula.Scope switch
-        {
-            FormulaScope.Column => formula.ColumnDefId == dependency.ColumnDefId,
-            FormulaScope.Row => RowKeyOf(table, formula) == dependency.RowKey,
-            _ => formula.ColumnDefId == dependency.ColumnDefId
-                 && RowKeyOf(table, formula) == dependency.RowKey,
-        };
-    }
-
+    /// <summary>
+    /// Ключ рядка формули — те саме визначення, що й у рантаймі.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Правило «що обчислює формула» винесене в
+    /// <see cref="Recalculation.FormulaOutputs"/>: воно потрібне і тут, при
+    /// побудові топологічного порядку, і в рантаймі, при побудові зворотного
+    /// індексу. Дві копії розійшлися б на першій правці, і розбіжність була б
+    /// видима лише як неправильне число.
+    /// </remarks>
     private static string? RowKeyOf(TableDef table, FormulaDef formula)
-        => formula.RowDefId is { } rowId
-            ? table.Rows.FirstOrDefault(r => r.Id == rowId)?.RowKeyValue
-            : null;
+        => Recalculation.FormulaOutputs.RowKeyOf(table, formula);
 
     /// <summary>Знімок структури версії — для резолвера посилань і типів.</summary>
     /// <param name="version">Версія, що публікується.</param>

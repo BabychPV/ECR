@@ -74,6 +74,36 @@ public interface ITemplateVersionStore
         Common.CursorRequest page, CancellationToken ct);
 
     /// <summary>
+    /// Замінює розкриті залежності формул версії.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Таблиця <c>cfg.FormulaDependency</c> не наповнювалася НІЧИМ, і
+    /// наслідок був найтихішим з можливих: граф залежностей порожній, тож
+    /// каскадний перерахунок не бачив похідних комірок — числа лишалися
+    /// старими без жодної помилки на екрані (<c>A7-63</c>).
+    ///
+    /// ⚠ Заміна, а не додавання: публікація фіксує граф версії цілком, і
+    /// «доліплювати» до попереднього набору означало б тримати в таблиці
+    /// залежності формул, яких у версії вже немає.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="dependencies">Розкриті залежності всіх її формул.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки залежностей збережено.</returns>
+    public Task<int> ReplaceFormulaDependenciesAsync(
+        int templateVersionId,
+        IReadOnlyList<Domain.Entities.Configuration.FormulaDependency> dependencies,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Розкриті залежності формул версії — основа інкрементного перерахунку.
+    /// </summary>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Domain.Entities.Configuration.FormulaDependency>>
+        ListFormulaDependenciesAsync(int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Правила доступу до періоду цієї версії (<c>ФВ-2.15</c>).
     /// </summary>
     /// <remarks>

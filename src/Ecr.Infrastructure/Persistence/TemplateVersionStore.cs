@@ -200,6 +200,55 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
+    public async Task<int> ReplaceFormulaDependenciesAsync(
+        int templateVersionId,
+        IReadOnlyList<FormulaDependency> dependencies,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dependencies);
+
+        // ⚠ Формули версії — межа заміни. Видаляти «всі залежності з
+        // FormulaDefId у списку нових» було б помилкою: формула, яку з версії
+        // прибрали, лишила б свої залежності назавжди.
+        // ⚠ Навігацій між рівнями структури в моделі немає (вони односторонні
+        // від батька до дітей), тому зв'язок збирається join'ами — так само,
+        // як це робить решта сховища.
+        var formulaIds = await (
+                from formula in db.FormulaDefs.AsNoTracking()
+                join table in db.TableDefs.AsNoTracking() on formula.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == templateVersionId
+                select formula.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var stale = await db.FormulaDependencies
+            .Where(d => d.FormulaDefId != null && formulaIds.Contains(d.FormulaDefId.Value))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.FormulaDependencies.RemoveRange(stale);
+        await db.FormulaDependencies.AddRangeAsync(dependencies, ct).ConfigureAwait(false);
+
+        return dependencies.Count;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FormulaDependency>> ListFormulaDependenciesAsync(
+        int templateVersionId, CancellationToken ct)
+        => await (
+                from dependency in db.FormulaDependencies.AsNoTracking()
+                join formula in db.FormulaDefs.AsNoTracking()
+                    on dependency.FormulaDefId equals formula.Id
+                join table in db.TableDefs.AsNoTracking() on formula.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == templateVersionId
+                orderby dependency.FormulaDefId, dependency.SortOrder
+                select dependency)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<PeriodAccessRuleDef>> ListPeriodAccessRulesAsync(
         int templateVersionId, CancellationToken ct)
         => await db.PeriodAccessRules

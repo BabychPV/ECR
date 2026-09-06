@@ -15,8 +15,11 @@ public sealed class RecalculationServiceTests
 
     private static RecalculationService Service()
         => new(Substitute.For<ICellStore>(),
+               Substitute.For<IRowStore>(),
                Substitute.For<IMetadataCache>(),
-               Substitute.For<IFormulaEngine>());
+               Substitute.For<ITemplateVersionStore>(),
+               Substitute.For<IFormulaEngine>(),
+               Substitute.For<IUnitOfWork>());
 
     private static CellAddress Cell(long rowId, int columnId) => new(Period, rowId, columnId);
 

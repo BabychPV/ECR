@@ -15,6 +15,7 @@ namespace Ecr.Application.Templates;
 /// </remarks>
 public sealed class PublishTemplateVersionHandler(
     IRepository<Domain.Entities.Configuration.TemplateVersion, int> versions,
+    ITemplateVersionStore versionStore,
     IFormulaEngine formulaEngine,
     IMetadataCache metadataCache,
     IUnitCatalog unitCatalog,
@@ -82,6 +83,19 @@ public sealed class PublishTemplateVersionHandler(
                         .ToList(),
                 });
         }
+
+        // ⛔ Граф залежностей фіксується САМЕ ТУТ і зберігається. Діапазони
+        // при цьому вже розкриті в конкретні рядки: у рантаймі діапазонів не
+        // існує (`B03` §4).
+        //
+        // До цього таблиця `cfg.FormulaDependency` не наповнювалася нічим, і
+        // наслідок був найтихішим із можливих: граф порожній, каскадний
+        // перерахунок не бачить похідних комірок, числа лишаються старими —
+        // без жодної помилки на екрані (`A7-63`).
+        var dependencies = PublishChecks.Dependencies(version, formulaEngine);
+        await versionStore
+            .ReplaceFormulaDependenciesAsync(templateVersionId, dependencies, ct)
+            .ConfigureAwait(false);
 
         // Перехід стану. Кидає ECR-TMPL-0409, якщо версія вже опублікована;
         // виняток виходить назовні до SaveChanges, тому часткових змін немає.

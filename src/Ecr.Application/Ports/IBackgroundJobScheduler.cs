@@ -48,6 +48,18 @@ public sealed record JobStatus(string JobId, string State, int Percent, string? 
 /// </remarks>
 public interface IRecalculationJob : IBackgroundJob;
 
+/// <summary>
+/// Маркер задачі каскадного перерахунку ФОРМУЛ ШАБЛОНУ.
+/// </summary>
+/// <remarks>
+/// ⛔ Окремий маркер, а не той самий, що для методологій. Результати формул
+/// шаблону лежать у <c>doc.CellValue</c> з <c>IsCalculated = 1</c>, результати
+/// методологій — у <c>calc.CalculationResult</c> (<c>D-69</c>). До появи цього
+/// маркера правка комірки ставила в чергу задачу МЕТОДОЛОГІЙ із тілом, якого
+/// та не розуміє: розбір давав нулі, і задача не робила нічого (<c>A7-63</c>).
+/// </remarks>
+public interface IFormulaRecalculationJob : IBackgroundJob;
+
 /// <summary>Маркер задачі експорту документа у <c>.xlsx</c>.</summary>
 /// <remarks>
 /// Той самий прийом, що й <see cref="IRecalculationJob"/>: use-case називає
