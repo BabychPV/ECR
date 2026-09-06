@@ -223,7 +223,8 @@ public static class PublishChecks
             // за суми, з яких він складається.
             foreach (var candidate in table.Formulas.Where(f => !f.IsDeleted && f.Id != formula.Id))
             {
-                if (Produces(candidate, table, dependency))
+                if (Recalculation.FormulaOutputs.Produces(
+                        candidate, table, dependency.RowKey, dependency.ColumnDefId))
                 {
                     result.Add(candidate.Id);
                 }
@@ -233,27 +234,18 @@ public static class PublishChecks
         return result;
     }
 
-    private static bool Produces(FormulaDef formula, TableDef table, ExtractedDependency dependency)
-    {
-        if (formula.ColumnDefId is { } columnId && dependency.ColumnDefId != columnId
-            && formula.Scope != FormulaScope.Row)
-        {
-            return false;
-        }
-
-        return formula.Scope switch
-        {
-            FormulaScope.Column => formula.ColumnDefId == dependency.ColumnDefId,
-            FormulaScope.Row => RowKeyOf(table, formula) == dependency.RowKey,
-            _ => formula.ColumnDefId == dependency.ColumnDefId
-                 && RowKeyOf(table, formula) == dependency.RowKey,
-        };
-    }
-
+    /// <summary>
+    /// Ключ рядка формули — те саме визначення, що й у рантаймі.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Правило «що обчислює формула» винесене в
+    /// <see cref="Recalculation.FormulaOutputs"/>: воно потрібне і тут, при
+    /// побудові топологічного порядку, і в рантаймі, при побудові зворотного
+    /// індексу. Дві копії розійшлися б на першій правці, і розбіжність була б
+    /// видима лише як неправильне число.
+    /// </remarks>
     private static string? RowKeyOf(TableDef table, FormulaDef formula)
-        => formula.RowDefId is { } rowId
-            ? table.Rows.FirstOrDefault(r => r.Id == rowId)?.RowKeyValue
-            : null;
+        => Recalculation.FormulaOutputs.RowKeyOf(table, formula);
 
     /// <summary>Знімок структури версії — для резолвера посилань і типів.</summary>
     /// <param name="version">Версія, що публікується.</param>

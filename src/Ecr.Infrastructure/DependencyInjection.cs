@@ -159,6 +159,7 @@ public static class DependencyInjection
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
         // приймав би завдання, і не виконувалося б нічого.
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
+        services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
 
         // ⚠ Кожна задача реєструється ПО ТИПУ: QuartzJobAdapter резолвить її
         // за повним іменем із JobDataMap. Незареєстрована задача приймалася б

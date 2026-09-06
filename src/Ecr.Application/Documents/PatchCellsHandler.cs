@@ -232,8 +232,27 @@ public sealed class PatchCellsHandler(
         // 8. ⚠ Перерахунок ставиться в чергу ПІСЛЯ commit і поза транзакцією:
         //    воркер інакше почав би читати рядки, яких ще не видно, і отримав
         //    би або старі значення, або блокування на піку останнього дня.
-        await jobs.EnqueueAsync<Ports.IRecalculationJob>(
-            new { request.TableInstanceId, request.PeriodKey }, ct).ConfigureAwait(false);
+        //
+        // ⛔ Задача — `IFormulaRecalculationJob`, а не `IRecalculationJob`.
+        //    Раніше сюди ставилася задача МЕТОДОЛОГІЙ, тіла якої вона не
+        //    розуміє: її запит має `ProjectId`/`DocumentId`, а тут
+        //    надсилався `TableInstanceId`. Розбір давав нулі, і після кожної
+        //    правки в чергу лягала задача, яка не могла зробити нічого
+        //    (`A7-63`).
+        //
+        // ⛔ Змінені комірки передаються ЯВНО: саме вони — насіння каскаду.
+        //    Без них перерахунок був би повним на кожну правку, і граф
+        //    залежностей коштував би, не даючи нічого.
+        var seeds = upserts
+            .Select(u => u.Address)
+            .Concat(deletes)
+            .Select(a => new { RowId = a.TableRowId, a.ColumnDefId })
+            .Distinct()
+            .ToList();
+
+        await jobs.EnqueueAsync<Ports.IFormulaRecalculationJob>(
+            new { request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct)
+            .ConfigureAwait(false);
 
         var newVersions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, periodKey, ct)
                                         .ConfigureAwait(false);

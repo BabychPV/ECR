@@ -207,7 +207,8 @@ public sealed class PatchCellsTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-            _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>());
+            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                Arg.Any<object>(), Arg.Any<CancellationToken>());
         });
     }
 
@@ -274,8 +275,28 @@ public sealed class PatchCellsTests
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
             CancellationToken.None);
 
-        await _jobs.Received(1).EnqueueAsync<IRecalculationJob>(
+        // ⛔ Задача — саме `IFormulaRecalculationJob`. Раніше тут стояла
+        // задача МЕТОДОЛОГІЙ, тіла якої вона не розуміє: її запит має
+        // `ProjectId`/`DocumentId`, а надсилався `TableInstanceId`. Розбір
+        // давав нулі, і задача не робила нічого — а цей тест був зелений, бо
+        // питав лише «чи поставили в чергу» (`A7-63`).
+        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
             Arg.Any<object>(), Arg.Any<CancellationToken>());
+
+        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
+            Arg.Any<object>(), Arg.Any<CancellationToken>());
+
+        // ⛔ І тіло несе ЗМІНЕНІ КОМІРКИ — насіння каскаду. Без них
+        // перерахунок був би повним на кожну правку, і граф залежностей
+        // коштував би, не даючи нічого.
+        var payload = _jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync))
+            .Select(c => c.GetArguments()[0])
+            .Last();
+
+        var json = System.Text.Json.JsonSerializer.Serialize(payload);
+        Assert.Contains("\"Cells\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"TableInstanceId\"", json, StringComparison.Ordinal);
 
         // ⚠ Черга — ПІСЛЯ commit і поза транзакцією: воркер інакше почав би
         // читати рядки, яких ще не видно, і отримав би або старі значення,
@@ -283,7 +304,8 @@ public sealed class PatchCellsTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-            _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>());
+            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                Arg.Any<object>(), Arg.Any<CancellationToken>());
         });
     }
 
