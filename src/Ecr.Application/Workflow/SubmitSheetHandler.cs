@@ -21,6 +21,7 @@ public sealed class SubmitSheetHandler(
     ICellStore cellStore,
     IRowStore rowStore,
     IWorkflowStore workflow,
+    IDocumentStore documents,
     IAccessDecisionService access,
 
     // ⛔ `validation` СЮДИ ВПОРСНУТИЙ І НЕ ЧИТАЄТЬСЯ, і це не недогляд
@@ -47,6 +48,7 @@ public sealed class SubmitSheetHandler(
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Аркуша немає в складі документа.</exception>
     /// <exception cref="AccessDeniedException">Немає рівня <c>Submit</c>.</exception>
     /// <exception cref="BusinessRuleException">Валідація або осиротілі рядки.</exception>
     public async Task HandleAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
@@ -55,6 +57,19 @@ public sealed class SubmitSheetHandler(
                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не може подавати аркуші.");
 
         var key = new PeriodKey(periodKey);
+
+        // ⛔ Аркуш мусить входити в СКЛАД документа. Без цієї перевірки
+        // `POST …/submit` на довільний `sheetDefId` — навіть той, якого в
+        // документі ніколи не було, — проходив кодом `204`:
+        // `IWorkflowStore.GetOrCreateAsync` нижче створює новий рядок стану
+        // для БУДЬ-ЯКОГО ідентифікатора, а `CanSubmitAsync` перевіряє права,
+        // не існування (виміряно живим прогоном, директива №09 §6.4, `S-17`).
+        if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false))
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404", $"Аркуша {sheetDefId} немає в складі документа {documentId}.");
+        }
+
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var decision = await access.CanSubmitAsync(profile, documentId, sheetDefId, key, ct)

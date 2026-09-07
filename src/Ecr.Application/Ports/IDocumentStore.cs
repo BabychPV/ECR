@@ -54,6 +54,19 @@ public interface IDocumentStore
     /// <summary>Наступний вільний бізнес-ключ у межах проєкту.</summary>
     public Task<string> NextBusinessKeyAsync(int projectId, int templateVersionId, CancellationToken ct);
 
+    /// <summary>Чи входить аркуш у СКЛАД цього документа.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Питає `doc.DocumentSheet` (склад, зафіксований при створенні
+    /// документа), а не `wf.ApprovalState` (історію подань): аркуш, який іще
+    /// НІКОЛИ не подавали, не має рядка стану, і саме тому подання
+    /// неіснуючого аркуша минуло без жодної відмови — перевіряти було
+    /// нічим (директива №09 §6.4, `S-17`).
+    /// </remarks>
+    public Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct);
+
     /// <summary>Проєкт документа; <c>null</c> — документа немає.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="ct">Токен скасування.</param>

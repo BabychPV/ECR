@@ -229,6 +229,11 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         var document = new Ecr.Domain.Entities.Documents.Document(
             project.Id, $"DOC-{Guid.NewGuid():N}"[..20], user.Id, DateTime.UtcNow);
 
+        // ⚠ Аркуш 20 — той самий, на який тест подає: без нього подання
+        // відхилялося б перевіркою складу документа (`ECR-DOC-0404`, S-17)
+        // раніше, ніж дійшло б до перевірки прав, яку цей тест і заявляє.
+        document.IncludeSheet(20);
+
         db.Periods.Add(period);
         db.Documents.Add(document);
         await db.SaveChangesAsync().ConfigureAwait(false);
