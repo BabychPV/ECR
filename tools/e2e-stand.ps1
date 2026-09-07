@@ -101,6 +101,17 @@ Step 'чиста база і розгортання через sqlcmd'
 
 if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
 
+# ⛔ Позначка ставиться ОДРАЗУ після створення і потрібна лише для одного:
+# щоб `finally` нижче мав що перевірити перед `DROP DATABASE`. Ім'я бази
+# приходить параметром, отже `-Database EcrDev` без цієї перевірки знищив би
+# базу розробника мовчки і безповоротно.
+#
+# ⚠ Урок не новий: рівно такий сторож стоїть у `br07-load-test.ps1:209`
+# із тим самим поясненням. Сюди він не доїхав — і це знайшов аудит, а не
+# випадок, якому пощастило статися на чужій базі.
+& sqlcmd -S $Server -E -C -b -d $Database -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_E2E_Temp', @value = 1;" | Out-Null
+if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
+
 $connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
 $log = Join-Path $root 'artifacts/e2e.api.log'
 
@@ -253,11 +264,28 @@ try {
 finally {
     if ($api -and -not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
 
-    & sqlcmd -S $Server -E -C -b -Q @"
-IF DB_ID('$Database') IS NOT NULL
-BEGIN
-    ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-    DROP DATABASE [$Database];
-END;
-"@ | Out-Null
+    # ⛔ Видаляється ЛИШЕ база з власною позначкою. Без цієї умови скрипт
+    # знищував би будь-що, назване в `-Database`, — включно з базою, у якій
+    # лежить чиясь робота. Рівно такий сторож стоїть у `br07-load-test.ps1:209`;
+    # сюди він не доїхав, і це знайшов аудит, а не випадок.
+    #
+    # ⚠ Два простих запити замість одного складеного: питання «чи існує»
+    # адресується `master`, питання «чи моя» — самій базі. Вкладений динамічний
+    # SQL з підстановкою імені бази — саме те місце, де сторож стає діркою.
+    $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+        -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>$null) `
+        | Select-Object -Last 1
+
+    if ($exists -eq '1') {
+        $mine = (& sqlcmd -S $Server -E -C -b -h -1 -W -d $Database `
+            -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.extended_properties WHERE class = 0 AND name = N'Ecr_E2E_Temp';" 2>$null) `
+            | Select-Object -Last 1
+
+        if ($mine -eq '1') {
+            & sqlcmd -S $Server -E -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
+        }
+        else {
+            Write-Warning "База $Database не має позначки Ecr_E2E_Temp - НЕ чіпаю її."
+        }
+    }
 }

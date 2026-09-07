@@ -238,7 +238,16 @@ internal static class Program
         var project = new Project(
             EcrCode.Create($"P{tag}"), Name($"DataGen {tag}"),
             new DateOnly(options.Year, 1, 1), new DateOnly(options.Year, 12, 31),
-            version.Id, PeriodKind.Monthly, policyId, "Central Asia Standard Time");
+            // ⛔ IANA, не Windows. Літерал `Central Asia Standard Time` стояв тут
+            // із самого початку і перестав працювати 2026-09-07 (`II.7`, `H-13`):
+            // домен відтоді приймає лише IANA. Генератор під зміну не підправили,
+            // і стенд `e2e-stand.ps1` падав на кроці 1 — тобто ВСІ прогони в
+            // браузері не виконувалися жодного разу від тієї зміни.
+            //
+            // ⚠ Не помітив цього ніхто, бо помічати не було чим: крок виведений
+            // із конвеєра як `ci-exempt`, а `npm run test:e2e` наодинці виходить
+            // нулем, мовчки пропустивши 17 прогонів із 20.
+            version.Id, PeriodKind.Monthly, policyId, "Asia/Aqtau");
         db.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
