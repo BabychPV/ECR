@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -8,7 +9,6 @@ namespace Ecr.Application.Documents;
 /// <summary>Додає рядок у динамічну таблицю.</summary>
 public sealed class CreateRowHandler(
     IRowStore rowStore,
-    ICellStore cellStore,
     IDocumentStore documents,
     IMetadataCache metadata,
     IAccessDecisionService access,
@@ -26,6 +26,23 @@ public sealed class CreateRowHandler(
         ArgumentNullException.ThrowIfNull(profile);
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+
+        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ. Без цієї
+        // звірки шлях у URL декоративний: клієнт указав би чужий
+        // `TableInstanceId` і писав би в чужий документ, маючи право лише на
+        // свій. `Patch` цю перевірку робить і пояснює навіщо
+        // (`CellsController.Patch`); сюди вона не доїхала, хоча `documentId`
+        // сюди приходив — і не читався взагалі.
+        //
+        // ⚠ Стоїть в ОБРОБНИКУ, а не в контролері, як у `Patch`: обробник —
+        // єдина точка, повз яку не пройде другий виклик.
+        if (instance.DocumentId != documentId)
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.");
+        }
+
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         var table = snapshot.Sheets
@@ -71,7 +88,46 @@ public sealed class CreateRowHandler(
                 "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.");
         }
 
-        // 4. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
+        // 4. Права. Питаються ДО вставки і з уже відомим ключем.
+        //
+        // ⛔ До цього місця обробник не звертався до `IAccessDecisionService`
+        // ЖОДНОГО разу: залежність була вприснута й не читана, і компілятор
+        // казав це прямо і безкоштовно (`CS9113`). Наслідок вимірювався живим
+        // прогоном: рядок додавався в ЗАКРИТИЙ період. `EditRules` про ту саму
+        // перевірку каже: «Закритий період блокує ВСІХ, включно з `Manage`. Це
+        // головна перевірка моделі доступу: якщо вона пропускає, зламана вся
+        // модель, і жоден інший тест цього не покаже».
+        //
+        // ⚠ Питається рішення на РЯДОК, не на комірки: колонок у цей момент
+        // ніхто не назвав, і вимагати дозволу на кожну означало б відмовляти
+        // там, де одна колонка обчислювана. Комірки перевіряє той, хто їх
+        // пише, — `PatchCellsHandler`.
+        //
+        // ⚠ Ключ уже відомий: від нього залежить `RowIsReadOnly` — опис рядка
+        // в шаблоні шукається саме за ключем.
+        var decisions = await access
+            .CanCreateRowsAsync(profile, tableInstanceId, [key.Value], ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Немає рішення — ВІДМОВА. «Рішення немає, отже можна» — це той
+        // самий дефект, лише переписаний акуратніше.
+        var decision = decisions.TryGetValue(key.Value, out var found)
+            ? found.Row
+            : EditDecision.Deny(EditDenyReason.NoGrant, $"Рішення про доступ на рядок {key.Value} не отримано.");
+
+        if (!decision.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Рядок у цю таблицю додати не можна: {decision.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["reason"] = decision.Reason.ToString(),
+                    ["detail"] = decision.Detail
+                });
+        }
+
+        // 5. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
         //    рядок і його комірки одним проходом SqlBulkCopy.
         await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
                                       ordinal: existing.Count + 1, ct).ConfigureAwait(false);

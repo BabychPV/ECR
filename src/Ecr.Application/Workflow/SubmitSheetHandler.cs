@@ -16,16 +16,31 @@ namespace Ecr.Application.Workflow;
 /// Подання аркуша за період — гранулярність `аркуш × період` (D-38).
 /// Створює **іммутабельний зріз** вхідних даних (ФВ-5.7, ФВ-9.4).
 /// </summary>
+#pragma warning disable CS9113 // див. коментар нижче: параметр лишений навмисно
 public sealed class SubmitSheetHandler(
     ICellStore cellStore,
     IRowStore rowStore,
     IWorkflowStore workflow,
     IAccessDecisionService access,
+
+    // ⛔ `validation` СЮДИ ВПОРСНУТИЙ І НЕ ЧИТАЄТЬСЯ, і це не недогляд
+    // оформлення, а незакрита вимога. `ФВ-5.4`: «Рівні рядка, таблиці й
+    // документа блокують `Submit`». Тут не блокує нічого: подання перевіряє
+    // лише осиротілі рядки, а повну валідацію не кличе жодного разу — при
+    // тому, що документація методу вже обіцяє `BusinessRuleException` із
+    // приводу «валідація або осиротілі рядки».
+    //
+    // ⚠ Параметр лишається САМЕ ТОМУ, що прибрати його — найдешевший спосіб
+    // зробити прогалину невидимою. Доки він тут, `CS9113` показує її при
+    // кожному складанні; знята заборона на рівні дерева (`Directory.Build.props`)
+    // означає, що НАСТУПНИЙ такий параметр стане помилкою складання, а цей
+    // лишається єдиним оголошеним винятком (`Q-146`).
     Validation.ValidationEngine validation,
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock)
+#pragma warning restore CS9113
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>

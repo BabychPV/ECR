@@ -35,8 +35,7 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class MaterializeCollectedDataJob(
     EcrDbContext db,
     ICellPatcher patcher,
-    ICoverageJournal coverage,
-    IClock clock) : IMaterializeCollectedDataJob
+    ICoverageJournal coverage) : IMaterializeCollectedDataJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "materialize-collected";

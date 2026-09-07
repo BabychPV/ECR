@@ -226,6 +226,175 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
+        var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
+
+        var rows = await db.TableRows
+            .AsNoTracking()
+            .Where(r => r.TableInstanceId == tableInstanceId && !r.IsDeleted)
+            .Select(r => new { r.Id, r.RowKey })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var result = new Dictionary<CellAddress, EditDecision>(rows.Count * slice.Columns.Count);
+
+        foreach (var row in rows)
+        {
+            // Вікна чинності записів довідника, на які посилається саме цей
+            // рядок: колонка → вікно. Порожньо — рядок нічого не обрав.
+            var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
+                ? windows
+                : EmptyWindows;
+
+            foreach (var column in slice.Columns)
+            {
+                result[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
+                    Decide(profile, slice, row.RowKey, column, sourceValues);
+            }
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, NewRowAccess>> CanCreateRowsAsync(
+        AccessProfile profile, long tableInstanceId, IReadOnlyCollection<string> rowKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(rowKeys);
+
+        var result = new Dictionary<string, NewRowAccess>(rowKeys.Count, StringComparer.Ordinal);
+
+        if (rowKeys.Count == 0)
+        {
+            return result;
+        }
+
+        var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
+
+        foreach (var rowKey in rowKeys)
+        {
+            // ⛔ Рішення на рядок рахується з колонкою 0 і без ознак
+            // «обчислювана» / «лише для читання»: питання тут інше — чи можна
+            // писати в цей зріз узагалі. Підставити сюди якусь колонку
+            // означало б, що заборона на ОДНУ колонку забороняє створення
+            // рядка цілком, а обчислювана перша колонка — завжди.
+            var rowContext = slice.Shared with
+            {
+                TableDefId = slice.TableDefId,
+                ColumnDefId = 0,
+                ColumnIsComputed = false,
+                ColumnIsReadOnly = false,
+                RowIsReadOnly = RowDefOf(slice, rowKey)?.IsReadOnly ?? false,
+            };
+
+            var columns = new Dictionary<int, EditDecision>(slice.Columns.Count);
+            foreach (var column in slice.Columns)
+            {
+                // ⚠ Вікон чинності в нового рядка немає за визначенням: вони
+                // прив'язані до RowId, а його ще не існує. Порожній словник
+                // тут — факт, а не заглушка.
+                columns[column.Id] = Decide(profile, slice, rowKey, column, EmptyWindows);
+            }
+
+            result[rowKey] = new NewRowAccess(EditRules.CanEdit(profile, rowContext), columns);
+        }
+
+        return result;
+    }
+
+    /// <summary>Рішення по одній комірці зрізу.</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="slice">Спільна для зрізу частина умов.</param>
+    /// <param name="rowKey">Ключ рядка — наявного або того, що створюється.</param>
+    /// <param name="column">Колонка.</param>
+    /// <param name="sourceValues">Вікна чинності записів довідника цього рядка.</param>
+    /// <remarks>
+    /// ⚠ Спільне для наявних і для нових рядків. Різниця між ними — рівно два
+    /// входи: <c>RowId</c> (у нового немає) і вікна чинності довідника (у
+    /// нового порожні). Усе інше — та сама функція, і саме тому вона одна:
+    /// друга копія розійшлася б із першою на першій же зміні правил.
+    /// </remarks>
+    private static EditDecision Decide(
+        AccessProfile profile,
+        SliceContext slice,
+        string rowKey,
+        ColumnDef column,
+        IReadOnlyDictionary<int, SourceValidity> sourceValues)
+    {
+        var def = RowDefOf(slice, rowKey);
+
+        var context = slice.Shared with
+        {
+            TableDefId = slice.TableDefId,
+            ColumnDefId = column.Id,
+            ColumnIsComputed = column.IsComputed,
+            ColumnIsReadOnly = column.IsReadOnly,
+            RowIsReadOnly = def?.IsReadOnly ?? false,
+        };
+
+        var decision = EditRules.CanEdit(profile, context);
+
+        // ⚠ Правила періоду перевіряються ЛИШЕ там, де решта дозволила.
+        // Інакше комірка в закритому періоді доповідала б про вікно дозволу
+        // замість про сам період — причина має бути та, яку користувач здатен
+        // усунути першою.
+        if (decision.IsAllowed && slice.Rules.Rules.Count > 0)
+        {
+            var facts = new PeriodRuleFacts(
+                slice.SheetDefId,
+                slice.TableDefId,
+                def?.RowKind ?? RowKind.Item,
+                (byte)slice.PeriodKey.Sequence,
+                slice.PeriodKey.Year,
+                slice.Rules.CurrentSequence,
+                column.MonthNumber,
+                sourceValues,
+                EmptyExpressions);
+
+            var outcome = PeriodAccessRules.Evaluate(slice.Rules.Rules, facts, profile.RoleIds);
+
+            if (outcome.Blocks)
+            {
+                decision = EditDecision.Deny(outcome.Reason, outcome.Detail);
+            }
+        }
+
+        return decision;
+    }
+
+    /// <summary>Опис рядка з шаблону за його ключем; <c>null</c> — рядок вільний.</summary>
+    private static RowDef? RowDefOf(SliceContext slice, string rowKey)
+        => slice.Snapshot.RowsByKey.TryGetValue((slice.TableDefId, rowKey), out var found) ? found : null;
+
+    /// <summary>Спільна для зрізу частина умов доступу.</summary>
+    /// <param name="PeriodKey">Період екземпляра таблиці.</param>
+    /// <param name="TableDefId">Таблиця версії шаблону.</param>
+    /// <param name="SheetDefId">Аркуш, якому належить таблиця.</param>
+    /// <param name="Shared">Умови, однакові для всіх комірок зрізу.</param>
+    /// <param name="Columns">Колонки саме цієї таблиці.</param>
+    /// <param name="Snapshot">Знімок версії шаблону.</param>
+    /// <param name="Rules">Правила доступу до періоду і те, що їм потрібно.</param>
+    private sealed record SliceContext(
+        PeriodKey PeriodKey,
+        int TableDefId,
+        int SheetDefId,
+        CellAccessContext Shared,
+        IReadOnlyList<ColumnDef> Columns,
+        TemplateVersionSnapshot Snapshot,
+        PeriodRuleContext Rules);
+
+    /// <summary>Збирає все, що спільне для зрізу, ОДИН раз.</summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Винесено з <see cref="CanEditSliceAsync"/> заради
+    /// <see cref="CanCreateRowsAsync"/>: обидва питання — про той самий зріз, і
+    /// друга копія цієї підготовки розійшлася б із першою мовчки. Саме так і
+    /// стався дефект, який <see cref="CanCreateRowsAsync"/> закриває: створення
+    /// пішло іншим шляхом, на якому перевірки просто не було.
+    /// </remarks>
+    private async Task<SliceContext> SliceContextAsync(long tableInstanceId, CancellationToken ct)
+    {
         var instance = await db.TableInstances
             .AsNoTracking()
             .Where(t => t.Id == tableInstanceId)
@@ -254,13 +423,6 @@ public sealed class AccessDecisionService(
                 evaluateAccessWindow: false, ct)
             .ConfigureAwait(false);
 
-        var rows = await db.TableRows
-            .AsNoTracking()
-            .Where(r => r.TableInstanceId == tableInstanceId && !r.IsDeleted)
-            .Select(r => new { r.Id, r.RowKey })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
         var columns = snapshot.ColumnsById.Values
             .Where(c => c.TableDefId == instance.TableDefId)
             .ToList();
@@ -271,63 +433,8 @@ public sealed class AccessDecisionService(
                 snapshot.TemplateVersionId, shared.ProjectId, tableInstanceId, periodKey, ct)
             .ConfigureAwait(false);
 
-        var result = new Dictionary<CellAddress, EditDecision>(rows.Count * columns.Count);
-
-        foreach (var row in rows)
-        {
-            var def = snapshot.RowsByKey.TryGetValue((instance.TableDefId, row.RowKey), out var found)
-                ? found
-                : null;
-
-            // Вікна чинності записів довідника, на які посилається саме цей
-            // рядок: колонка → вікно. Порожньо — рядок нічого не обрав.
-            var sourceValues = ruleContext.SourceWindows.TryGetValue(row.Id, out var windows)
-                ? windows
-                : EmptyWindows;
-
-            foreach (var column in columns)
-            {
-                var context = shared with
-                {
-                    TableDefId = instance.TableDefId,
-                    ColumnDefId = column.Id,
-                    ColumnIsComputed = column.IsComputed,
-                    ColumnIsReadOnly = column.IsReadOnly,
-                    RowIsReadOnly = def?.IsReadOnly ?? false,
-                };
-
-                var decision = EditRules.CanEdit(profile, context);
-
-                // ⚠ Правила періоду перевіряються ЛИШЕ там, де решта
-                // дозволила. Інакше комірка в закритому періоді доповідала б про
-                // вікно дозволу замість про сам період — причина має бути та,
-                // яку користувач здатен усунути першою.
-                if (decision.IsAllowed && ruleContext.Rules.Count > 0)
-                {
-                    var facts = new PeriodRuleFacts(
-                        sheetDefId,
-                        instance.TableDefId,
-                        def?.RowKind ?? RowKind.Item,
-                        (byte)periodKey.Sequence,
-                        periodKey.Year,
-                        ruleContext.CurrentSequence,
-                        column.MonthNumber,
-                        sourceValues,
-                        EmptyExpressions);
-
-                    var outcome = PeriodAccessRules.Evaluate(ruleContext.Rules, facts, profile.RoleIds);
-
-                    if (outcome.Blocks)
-                    {
-                        decision = EditDecision.Deny(outcome.Reason, outcome.Detail);
-                    }
-                }
-
-                result[new CellAddress(periodKey, row.Id, column.Id)] = decision;
-            }
-        }
-
-        return result;
+        return new SliceContext(
+            periodKey, instance.TableDefId, sheetDefId, shared, columns, snapshot, ruleContext);
     }
 
     private static readonly IReadOnlyDictionary<int, SourceValidity> EmptyWindows

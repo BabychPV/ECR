@@ -24,7 +24,7 @@
       Послаблення, потрібні лише тестам (CA1707, xUnit1026), винесені в
       tests/Directory.Build.props і на src/ не діють.
     -->
-    <WarningsNotAsErrors>CA1711;CA1716;CA1720;CA1725;CA1822;CS0169;CS0414;CS9113</WarningsNotAsErrors>
+    <WarningsNotAsErrors>CA1711;CA1716;CA1720;CA1725;CA1822;CS0169;CS0414</WarningsNotAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
 

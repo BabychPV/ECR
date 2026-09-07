@@ -25,7 +25,7 @@ namespace Ecr.Infrastructure.Integration;
 /// навчити основний шлях правилам інтеграції.
 /// </remarks>
 public sealed class IntegrationCellPatcher(
-    EcrDbContext db, PatchCellsHandler patch, IClock clock) : ICellPatcher
+    EcrDbContext db, PatchCellsHandler patch) : ICellPatcher
 {
     /// <inheritdoc />
     public async Task<IntegrationWriteResult> ApplyIntegrationAsync(

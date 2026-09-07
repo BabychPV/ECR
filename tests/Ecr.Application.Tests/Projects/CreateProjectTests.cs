@@ -109,7 +109,7 @@ public sealed class CreateProjectTests
         // чужі партиції й у чужий архів.
         _clock.UtcNow.Returns(new DateTime(2025, 12, 31, 21, 0, 0, DateTimeKind.Utc));
 
-        await new CreateProjectHandler(_projects, _periods, _access, _uow, _user, _clock)
+        await new CreateProjectHandler(_periods, _access, _uow, _user, _clock)
             .HandleAsync(
                 "KASH_2026",
                 new Dictionary<string, string> { ["en"] = "Kashagan" },
@@ -180,7 +180,7 @@ public sealed class CreateProjectTests
     }
 
     private Task<int> Create(string timeZoneId)
-        => new CreateProjectHandler(_projects, _periods, _access, _uow, _user, _clock)
+        => new CreateProjectHandler(_periods, _access, _uow, _user, _clock)
             .HandleAsync(
                 "KASH_2026",
                 new Dictionary<string, string> { ["en"] = "Kashagan" },
