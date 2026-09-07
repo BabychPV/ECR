@@ -1052,6 +1052,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Останні фонові задачі. Право `System.ViewHealth`.
+         * @description ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
+         *     її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
+         *     перевірити те, про що вже здогадався (`ФВ-12.4`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobSummary"][];
+                        "text/json": components["schemas"]["JobSummary"][];
+                        "text/plain": components["schemas"]["JobSummary"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{jobId}": {
         parameters: {
             query?: never;
@@ -5439,6 +5482,25 @@ export interface components {
             /** Format: int32 */
             percent: number;
             state: string;
+        };
+        /** @description Задача в переліку черги — легша за JobStatus. */
+        JobSummary: {
+            /** @description Код задачі (тип). */
+            jobCode: string;
+            /** @description Ідентифікатор. */
+            jobId: string;
+            /**
+             * Format: int32
+             * @description Прогрес у відсотках.
+             */
+            percent: number;
+            /** @description Стан. */
+            state: string;
+            /**
+             * Format: date-time
+             * @description Момент останнього оновлення в UTC.
+             */
+            updatedAt: string;
         };
         JsonElement: unknown;
         /** @description Мова інтерфейсу з реєстру. */

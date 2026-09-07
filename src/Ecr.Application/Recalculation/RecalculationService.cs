@@ -18,6 +18,7 @@ public sealed class RecalculationService(
     IMetadataCache metadata,
     ITemplateVersionStore versions,
     IFormulaEngine formulaEngine,
+    IUnitCatalog unitCatalog,
     IUnitOfWork uow)
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
@@ -196,7 +197,14 @@ public sealed class RecalculationService(
             .ToHashSet();
 
         var values = await LoadValuesAsync(instance, ct).ConfigureAwait(false);
-        var context = new SliceEvaluationContext(snapshot, values, EmptyHeaders, PeriodOf(periodKey));
+
+        // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
+        // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
+        // виразів, а `IUnitCatalog.GetAsync` — ні. До цього тут не було ЖОДНОГО
+        // джерела одиниць, і `CONVERT` у формулі шаблону відмовляв БЕЗУМОВНО,
+        // незалежно від того, чи існує сама конверсія (директива №09 §6.5, `S-22`).
+        var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
+        var context = new SliceEvaluationContext(snapshot, values, EmptyHeaders, PeriodOf(periodKey), catalogue);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.

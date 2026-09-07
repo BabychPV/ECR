@@ -242,6 +242,12 @@ public sealed class QuartzJobScheduler(
                ?? new JobStatus(jobId, "Unknown", 0, null, null);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct)
+        => progress is null
+            ? []
+            : await progress.ListRecentAsync(limit, ct).ConfigureAwait(false);
+
     /// <summary>Налаштування серіалізації payload; спільні на всі виклики.</summary>
     private static readonly System.Text.Json.JsonSerializerOptions PayloadOptions =
         new(JsonSerializerDefaults.Web);

@@ -100,6 +100,26 @@ public static partial class StartupSequence
             }
         }
 
+        // 5a) Застарілі фонові задачі. ⛔ Задача, яку виконував процес, що
+        //     впав, лишається `Running`/`Queued` у базі НАЗАВЖДИ — процеса,
+        //     який мав позначити її `Failed`, уже немає. Без цього кроку така
+        //     задача показує оператору «виконується» місяцями, і ЗБІГ УВАГИ
+        //     (директива №09 §6.5, `S-25`) — без сліду про причину.
+        var progress = scope.ServiceProvider.GetService<IJobProgressStore>();
+        if (progress is not null)
+        {
+            var clock = scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>();
+            var failed = await progress
+                .FailStaleAsync("Застосунок перезапущено: задача не завершилася до зупинки процесу.",
+                    clock.UtcNow, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            if (failed > 0)
+            {
+                LogStaleJobsFailed(logger, failed);
+            }
+        }
+
         // 6) Запас партицій. Дізнатися про це треба на старті, а не вночі
         //    під час архівації, коли межі вже не вистачає.
         var ahead = await PartitionsAheadAsync(
@@ -210,6 +230,9 @@ public static partial class StartupSequence
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Count} застарілих задач позначено Failed.")]
+    private static partial void LogStaleJobsFailed(ILogger logger, int count);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Warning}")]
     private static partial void LogBootstrapWarning(ILogger logger, string warning);

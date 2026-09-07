@@ -1764,6 +1764,41 @@
         ],
         "type": "object"
       },
+      "JobSummary": {
+        "description": "Задача в переліку черги — легша за JobStatus.",
+        "properties": {
+          "jobCode": {
+            "description": "Код задачі (тип).",
+            "type": "string"
+          },
+          "jobId": {
+            "description": "Ідентифікатор.",
+            "type": "string"
+          },
+          "percent": {
+            "description": "Прогрес у відсотках.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "state": {
+            "description": "Стан.",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Момент останнього оновлення в UTC.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "jobCode",
+          "state",
+          "percent",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "JsonElement": {},
       "LanguageDto": {
         "description": "Мова інтерфейсу з реєстру.",
@@ -6769,6 +6804,46 @@
         "summary": "Перевіряє вираз так само, як це зробить публікація.",
         "tags": [
           "Expressions"
+        ]
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "description": "⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає\nїї GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише\nперевірити те, про що вже здогадався (`ФВ-12.4`).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobSummary"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobSummary"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Останні фонові задачі. Право `System.ViewHealth`.",
+        "tags": [
+          "Jobs"
         ]
       }
     },

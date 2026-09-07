@@ -49,14 +49,35 @@ public sealed class RecalculationJob(
 
         var request = Parse(payload);
 
-        var run = new Domain.Entities.Calculations.CalculationRun(
-            request.ProjectId, request.PeriodKey, request.TriggeredByUserId, clock.UtcNow);
+        // ⛔ `ProjectId` визначається з ДОКУМЕНТА, коли payload його не несе, а
+        // не приймається як 0. `RecalculateDocumentHandler` кладе в чергу
+        // `new { DocumentId, PeriodKey }` — без `ProjectId` узагалі; при
+        // розборі в non-nullable `int` це мовчки стає `0`. `CalculationRun`
+        // із `ProjectId = 0` не проходить `FK_CalculationRun_Project`, і
+        // `SaveChangesAsync` нижче кидав `SqlException 547` — виміряно живим
+        // прогоном (директива №09 §1.3).
+        var projectId = request.ProjectId > 0
+            ? request.ProjectId
+            : await db.Documents
+                .AsNoTracking()
+                .Where(d => d.Id == request.DocumentId)
+                .Select(d => d.ProjectId)
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false);
 
-        db.CalculationRuns.Add(run);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        var run = new Domain.Entities.Calculations.CalculationRun(
+            projectId, request.PeriodKey, request.TriggeredByUserId, clock.UtcNow);
 
         try
         {
+            // ⛔ Створення й ПЕРШЕ збереження — ВСЕРЕДИНІ `try`, а не до нього.
+            // Раніше стояли до `try`: коли сам `INSERT` провалювався (рівно
+            // так і сталося з `ProjectId = 0` вище), виняток летів МИМО catch
+            // нижче — і задача лишалася `Running` назавжди, хоча catch
+            // виглядав так, ніби мав це перехопити.
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
             var bindings = await BindingsAsync(request, ct).ConfigureAwait(false);
 
             var profile = await orchestrator
@@ -75,11 +96,28 @@ public sealed class RecalculationJob(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // ⚠ Провал теж ЗАВЕРШУЄ прогін, а не лишає його «Running» назавжди.
-            // Прогін, що висить у стані виконання, виглядає як довгий — і його
-            // чекають замість того, щоб перезапустити.
-            run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            // ⛔ Трекер очищається ПЕРЕД повторним записом. `EcrDbContext` тут
+            // — ТОЙ САМИЙ скоуп-інстанс, яким `QuartzJobAdapter` пише
+            // `itg.JobProgress` (`JobProgressStore`, той самий DI-скоуп): якщо
+            // лишити в трекері сутність, чий `INSERT` щойно провалився,
+            // НАСТУПНЕ `SaveChangesAsync` — навіть чуже, запис прогресу в
+            // `itg.JobProgress` — повторно спробує вставити той самий
+            // зіпсований рядок і провалиться теж. Тоді `QuartzJobAdapter`
+            // не зможе позначити задачу `Failed`, і вона лишиться `Running`
+            // назавжди — це і є справжня причина «задача висить 0 %»
+            // (директива №09 §1.3), а не сам факт «catch не викликається».
+            db.ChangeTracker.Clear();
+
+            // Прогін позначається `Failed` лише якщо його `INSERT` УСПІШНО
+            // відбувся (`run.Id` призначений базою): позначати нема чого,
+            // якщо самого рядка в базі немає.
+            if (run.Id > 0)
+            {
+                db.CalculationRuns.Attach(run);
+                run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
             throw;
         }
     }

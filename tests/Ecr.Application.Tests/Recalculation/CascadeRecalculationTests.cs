@@ -33,6 +33,10 @@ public sealed class CascadeRecalculationTests
     private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
 
+    // ⚠ Порожній довідник за замовчуванням: тести цього класу — про КАСКАД
+    // (яка формула перерахувалась чому), а не про конверсію одиниць.
+    private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+
     private TableDef _table = null!;
     private int _janId;
     private int _febId;
@@ -105,7 +109,11 @@ public sealed class CascadeRecalculationTests
     }
 
     private RecalculationService Service()
-        => new(_cells, _rows, _metadata, _versions, new RealFormulaEngine(), _uow);
+    {
+        _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
+        return new(_cells, _rows, _metadata, _versions, new RealFormulaEngine(), _units, _uow);
+    }
 
     /// <summary>Комірки, які служба віддала на запис.</summary>
     private IReadOnlyList<CellRecord> Applied()

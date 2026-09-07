@@ -51,10 +51,16 @@ public sealed class RecalculateDocumentHandler(
         // перерахунок у чинній системі йде двадцять хвилин; наш із дворічною
         // звіркою буде довшим, і повторний запуск — єдиний спосіб, яким людина
         // може обірвати той, що пішов не туди.
+        // ⚠ `TriggeredByUserId` — тут, а не виводиться з бази: хто натиснув
+        // кнопку, знає лише HTTP-запит, і `currentUser` уже тут інжектований.
+        // `ProjectId` НАВМИСНО не кладеться сюди — його визначає задача з
+        // документа (`RecalculationJob`): payload не мусить нести те, що й так
+        // виводиться з `DocumentId`, і друге джерело правди про проєкт
+        // документа розійшлося б із першим на першій же помилці копіювання.
         return await jobs
             .EnqueueExclusiveAsync<IRecalculationJob>(
                 TargetOf(documentId, periodKey),
-                new { DocumentId = documentId, PeriodKey = periodKey.Value },
+                new { DocumentId = documentId, PeriodKey = periodKey.Value, TriggeredByUserId = currentUser.UserId },
                 ct)
             .ConfigureAwait(false);
     }

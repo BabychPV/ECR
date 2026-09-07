@@ -40,4 +40,24 @@ public interface IJobProgressStore
 
     /// <summary>Стан задачі; <c>null</c> — такої немає.</summary>
     public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
+
+    /// <summary>Останні задачі, найновіші перші.</summary>
+    /// <param name="limit">Скільки повернути.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct);
+
+    /// <summary>
+    /// Позначає застарілі <c>Running</c>/<c>Queued</c> задачі <c>Failed</c>.
+    /// </summary>
+    /// <param name="reason">Причина, що йде в <c>Error</c>.</param>
+    /// <param name="utcNow">Момент позначення в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки записів позначено.</returns>
+    /// <remarks>
+    /// ⛔ Викликається один раз при СТАРТІ застосунку. Задача, яку процес
+    /// виконував у момент падіння, лишається `Running` у базі назавжди — сам
+    /// процес, який мав позначити її `Failed`, уже не існує. Без цього методу
+    /// такий запис показує оператору задачу, що «виконується» місяцями.
+    /// </remarks>
+    public Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct);
 }
