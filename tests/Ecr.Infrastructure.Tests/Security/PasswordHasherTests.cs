@@ -37,8 +37,8 @@ public sealed class PasswordHasherTests
         // ньому ранній вихід дав би найбільшу економію.
         var wrong = string.Concat("X", Password.AsSpan(1));
 
-        var correct = Median(() => _hasher.Verify(Password, hash));
-        var incorrect = Median(() => _hasher.Verify(wrong, hash));
+        var correct = Fastest(() => _hasher.Verify(Password, hash));
+        var incorrect = Fastest(() => _hasher.Verify(wrong, hash));
 
         Assert.False(_hasher.Verify(wrong, hash));
 
@@ -91,18 +91,36 @@ public sealed class PasswordHasherTests
     }
 
     /// <summary>Медіана з кількох вимірів; одне влучання GC не має вирішувати.</summary>
-    private static long Median(Func<bool> action)
+    /// <summary>Найшвидший із заміряних прогонів.</summary>
+    /// <param name="action">Дія, час якої міряється.</param>
+    /// <remarks>
+    /// ⛔ Саме МІНІМУМ, а не медіана. Тут стояла медіана п'яти замірів, і на
+    /// зайнятій машині вона давала відношення 3.22 і 3.93 при межі 3.0 —
+    /// тобто тест червонів від планувальника, а не від раннього виходу.
+    /// Такий тест прибирають на третьому фальшивому падінні, і разом із ним
+    /// прибирають єдину перевірку на атаку за часом.
+    ///
+    /// ⚠ Мінімум не послаблює перевірку, а підсилює її: витіснення потоку
+    /// тільки ДОДАЄ час, тож найшвидший прогін — найближча оцінка справжньої
+    /// вартості. Ранній вихід на неправильному паролі виявився б саме тут,
+    /// і саме найяскравіше.
+    /// </remarks>
+    private static long Fastest(Func<bool> action)
     {
-        var samples = new long[5];
-        for (var i = 0; i < samples.Length; i++)
+        // ⚠ Перший прогін викидається: він платить за JIT похідної функції, і
+        // платить його лише той вимір, який ішов першим.
+        action();
+
+        var best = long.MaxValue;
+
+        for (var i = 0; i < 15; i++)
         {
             var stopwatch = Stopwatch.StartNew();
             action();
             stopwatch.Stop();
-            samples[i] = stopwatch.ElapsedTicks;
+            best = Math.Min(best, stopwatch.ElapsedTicks);
         }
 
-        Array.Sort(samples);
-        return samples[samples.Length / 2];
+        return best;
     }
 }
