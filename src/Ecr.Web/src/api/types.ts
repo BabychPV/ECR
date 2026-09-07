@@ -142,6 +142,31 @@ export type MethodologyDto = Schemas['MethodologyDto'];
 /** Версія методології. */
 export type MethodologyVersionDto = Schemas['MethodologyVersionDto'];
 
+/**
+ * Версія методології в конфігураторі — **включно з чернетками**.
+ *
+ * ⛔ Не те саме, що `MethodologyVersionDto`. Той описує чинні версії, і
+ * `effectiveFrom` у ньому обов'язковий; у чернетки вікна дії немає взагалі.
+ * Один тип на два переліки означав би, що версія без дати потрапляє туди, де
+ * за датою вибирають, чим рахувати період (`ФВ-13.3`).
+ */
+export type MethodologyDraftVersionDto = Schemas['MethodologyDraftVersionDto'];
+
+/** Формула версії методології. */
+export type MethodologyFormulaDto = Schemas['MethodologyFormulaDto'];
+
+/** Створення версії-чернетки: порожньої або як клон наявної. */
+export type CreateMethodologyVersionRequest = Schemas['CreateMethodologyVersionRequest'];
+
+/** Запис формули версії-чернетки. */
+export type SaveMethodologyFormulaRequest = Schemas['SaveMethodologyFormulaRequest'];
+
+/** Рівень драбини виразності версії (`ФВ-9.2`). */
+export type CalculationLevel = Schemas['CalculationLevel'];
+
+/** Що повертає формула: число чи текст. */
+export type FormulaResultType = Schemas['FormulaResultType'];
+
 /** Роль із оголошеними правами. */
 export type RoleView = Schemas['RoleView'];
 

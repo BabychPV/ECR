@@ -20,6 +20,7 @@ import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
+import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
 import { KitchenSinkPage } from '@/pages/KitchenSinkPage';
 import { MyGroupsPage } from '@/pages/MyGroupsPage';
@@ -60,6 +61,7 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/templates', TemplatesPage],
   ['/admin/registries', RegistriesPage],
   ['/admin/methodologies', MethodologiesPage],
+  ['/admin/methodologies/1/versions', MethodologyVersionsPage],
   ['/admin/expressions', ExpressionsPage],
   ['/admin/security', SecurityPage],
   ['/admin/periods', PeriodsPage],

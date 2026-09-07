@@ -64,4 +64,15 @@ public sealed class MethodologyRule : Entity<int>
 
     /// <summary>Неактивне правило не бере участі ні в зіставленні, ні в матриці покриття.</summary>
     public bool IsActive { get; private set; }
+
+    /// <summary>Вмикає або вимикає правило.</summary>
+    /// <param name="isActive">Чи бере правило участь у зіставленні.</param>
+    /// <remarks>
+    /// ⛔ Метод з'явився не заради екрана правил (його ще немає), а заради
+    /// **клону версії**. Конструктор ставить <c>IsActive = true</c>, і клон,
+    /// який не має чим повернути <c>false</c>, вмикав би вимкнене правило —
+    /// тобто тихо змінював би те, ЩО ВЗАГАЛІ рахується (ФВ-13.4), у версії,
+    /// зробленій «щоб нічого не змінювати».
+    /// </remarks>
+    public void SetActive(bool isActive) => IsActive = isActive;
 }

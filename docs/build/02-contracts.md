@@ -2132,6 +2132,23 @@ public interface IJobProgressStore
 }
 ```
 
+#### `IMethodologyDraftStore`
+
+Сховище **редагованої** частини методології (`ФВ-9.15`): усі версії, включно з чернетками, і формули, які в чернетці правлять. Порт окремий від `IMethodologyStore` навмисно — той обслуговує розрахунок і показує лише опубліковане, бо рахувати чернеткою не можна ніколи. Клон версії переносить **весь** вміст джерела; за повнотою переліку стежить архітектурний сторож.
+
+```csharp
+public interface IMethodologyDraftStore
+{
+    public Task<Methodology?> FindAsync(int methodologyId, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyVersion>> GetAllVersionsAsync(int methodologyId, CancellationToken ct);
+    public Task<MethodologyVersion?> FindVersionAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<MethodologyFormula?> FindFormulaAsync(int methodologyVersionId, string code, CancellationToken ct);
+    public void Add(MethodologyFormula formula);
+    public void Remove(MethodologyFormula formula);
+    public Task<int> SaveDraftAsync(MethodologyVersion draft, int? copyFromVersionId, CancellationToken ct);
+}
+```
+
 #### `INotificationOutbox`
 
 Черга сповіщень (itg.NotificationOutbox).
@@ -2601,6 +2618,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
+| `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/formulas` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
+| `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |
@@ -2628,6 +2650,22 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/security/users/{id}/groups` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
+
+> **Методології читаються двома різними маршрутами, і це не дублювання**
+> (`ФВ-9.15`). `GET /methodologies` віддає те, чим **рахують**: лише
+> опубліковані версії, з обчисленою межею вікна дії. `GET
+> /methodologies/{id}/versions` віддає те, що **правлять**: усі версії, включно
+> з чернетками, і без вікна — у чернетки його немає.
+>
+> ⛔ Один маршрут із параметром «показати й чернетки» мав би дві відповіді на
+> питання, чи можна взяти цю версію в розрахунок. Помилка тут не має симптому:
+> незавершена версія порахувала б числа, і побачити це можна було б лише за
+> розбіжністю в поданому звіті.
+>
+> ⚠ Формула адресується **кодом**, а не ключем: код — те, чим на неї
+> посилаються вирази (`!Name`), і саме тому `PUT` створює її й змінює однією
+> дією. Порядок обчислення (`evaluationOrder`) віддається, але не приймається:
+> він топологічний і рахується при публікації (`ФВ-9.4`).
 
 > **Каталог розділений на дві області** (`D-114`). `scope=public` анонімний —
 > сторінка входу потребує підписів кнопок раніше, ніж хтось автентифікований;
