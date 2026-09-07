@@ -107,7 +107,32 @@ $psExe = if ($onWindows) { 'powershell' } else { 'pwsh' }
 
 # ⚠ `-ExecutionPolicy` існує лише у Windows: у PowerShell на Linux політик
 # виконання немає, і параметр там зайвий.
-$psArgs = if ($onWindows) { @('-ExecutionPolicy', 'Bypass', '-File') } else { @('-File') }
+$psPrefix = if ($onWindows) { @('-ExecutionPolicy', 'Bypass') } else { @() }
+
+<#
+.SYNOPSIS
+    Запускає дочірній скрипт окремим процесом PowerShell.
+.DESCRIPTION
+    ⛔ Існує через падіння на агенті: `& $psExe @psArgs (Join-Path …) @sqlArgs`
+    давало `The argument 'F' is not recognized as the name of a script file`.
+    Змішувати розкладання масиву (`@psArgs`) з позиційним аргументом у виклику
+    зовнішньої програми не можна — порядок, у якому PowerShell збирає рядок
+    запуску, при цьому не той, який видно в коді.
+
+    ⚠ Тут список збирається ОДИН і розкладається один раз. Помилка була
+    видима лише на Linux, бо на Windows префікс має три елементи і `-File`
+    опинявся останнім — тобто на машині розробника все працювало.
+#>
+function Invoke-Child {
+    param([string] $Script, [string[]] $Arguments = @())
+
+    $all = @()
+    $all += $psPrefix
+    $all += @('-File', (Join-Path $PSScriptRoot $Script))
+    $all += $Arguments
+
+    & $psExe @all
+}
 
 function Step {
     param([string] $Name, [scriptblock] $Body)
@@ -170,7 +195,16 @@ Step 'Тести .NET' {
         $env:ECR_TEST_SQL = $TestSql
     }
 
-    & dotnet test (Join-Path $root 'Ecr.sln') --no-build -v q --nologo
+    # ⛔ `--logger console;verbosity=normal` — не оздоба. З самим `-v q`
+    # багатослівність журналу успадковує консольний логер, і в конвеєрі
+    # лишається `[FAIL]` з іменем тесту БЕЗ повідомлення. Так сталося з
+    # `OpenApiSnapshotTests`: тест уміє назвати перший розбіжний рядок, а
+    # прочитати його було ніде — довелося відтворювати локально.
+    #
+    # ⚠ На зелених прогонах це нічого не додає: логер друкує подробиці лише
+    # для падінь.
+    & dotnet test (Join-Path $root 'Ecr.sln') --no-build -v q --nologo `
+        --logger 'console;verbosity=normal'
 }
 
 if (-not $SkipDeployment) {
@@ -179,7 +213,7 @@ if (-not $SkipDeployment) {
         if ($SqlServer) { $sqlArgs += @('-Server', $SqlServer) }
         if ($SqlLogin) { $sqlArgs += @('-Login', $SqlLogin, '-Password', $SqlPassword) }
 
-        & $psExe @psArgs (Join-Path $PSScriptRoot 'verify-sql-scripts.ps1') @sqlArgs
+        Invoke-Child -Script 'verify-sql-scripts.ps1' -Arguments $sqlArgs
     }
 }
 
@@ -188,7 +222,7 @@ if (-not $SkipDeployment) {
     # процес і проходить шлях користувача цілком. Саме він ламався в семи
     # місцях і не падав у жодному (`A7-25`…`A7-30`) при 616 зелених тестах.
     Step 'Наскрізний сценарій' {
-        & $psExe @psArgs (Join-Path $PSScriptRoot 'smoke.ps1')
+        Invoke-Child -Script 'smoke.ps1'
     }
 }
 
@@ -273,7 +307,7 @@ if (-not $SkipClient -and -not $SkipDeployment) {
     # собою. Без нього прогони, які потребують входу, мовчки пропускаються
     # (`test.skip`) — а мовчазний пропуск і є те, що ЕТАП 7.5 виловлює.
     Step 'Прогони в браузері' {
-        & $psExe @psArgs (Join-Path $PSScriptRoot 'e2e-stand.ps1')
+        Invoke-Child -Script 'e2e-stand.ps1'
     }
 }
 
