@@ -41,7 +41,23 @@ public sealed class PublishTemplateVersionHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        // ⛔ Саме `GetWithStructureAsync`, а не `IRepository.GetAsync`. Другий —
+        // це `FindAsync` без жодного `Include` при вимкненому лінивому
+        // завантаженні, тож `version.Sheets` приходила ПОРОЖНЬОЮ, і все нижче
+        // працювало на порожнечі: дванадцять перевірок §12 не бачили жодної
+        // формули, `CheckRules` — жодного правила, `Dependencies` — жодної
+        // залежності. Версія з незакритою дужкою і посиланням на неіснуючу
+        // колонку публікувалася кодом `204`.
+        //
+        // ⚠ Одинадцять тестів публікації цього не бачили, бо підставляли мок
+        // репозиторію, який віддавав граф, зібраний рефлексією в пам'яті: мок
+        // відрізнявся від реалізації рівно тим, у чому полягав дефект
+        // (`A7 §4.3`).
+        //
+        // ⚠ `DeprecateAsync` нижче й далі бере версію з репозиторію: їй
+        // потрібен лише стан, і вантажити заради нього всю структуру означало
+        // б платити за відкат ціною публікації.
+        var version = await versionStore.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // Усі дванадцять перевірок із 02b §12 — синтаксис, резолвінг, типи,
         // ациклічність, розкриття діапазонів, сумісність одиниць.

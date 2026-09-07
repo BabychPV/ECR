@@ -30,10 +30,18 @@ public sealed class ValidateExpressionTests
 {
     private static readonly DateTime Now = new(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc);
 
-    private readonly IRepository<TemplateVersion, int> _versions =
-        Substitute.For<IRepository<TemplateVersion, int>>();
+    // ⚠ Мок ПОРТА СХОВИЩА, а не узагальненого репозиторію. Раніше тут стояв
+    // `IRepository<TemplateVersion, int>`, і саме він приховував дефект:
+    // справжня реалізація віддає версію без навігацій, а мок — граф, зібраний
+    // у пам'яті. Мок відрізнявся від реалізації рівно тим, у чому полягав
+    // дефект (`A7 §4.3`); те, що структура справді доїжджає, доводить
+    // інтеграційний `TemplateVersionStructureTests` на живій базі.
+    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
 
-    private readonly ITemplateVersionStore _versionStore = Substitute.For<ITemplateVersionStore>();
+    // ⚠ Репозиторій потрібен публікації лише для `DeprecateAsync`; структуру
+    // вона бере зі сховища (`_versions`).
+    private readonly IRepository<TemplateVersion, int> _repository =
+        Substitute.For<IRepository<TemplateVersion, int>>();
     private readonly IUnitCatalog _catalogue = Substitute.For<IUnitCatalog>();
     private readonly IMetadataCache _cache = Substitute.For<IMetadataCache>();
     private readonly IFormulaEngine _formulas = Substitute.For<IFormulaEngine>();
@@ -48,7 +56,7 @@ public sealed class ValidateExpressionTests
     {
         _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
         _clock.UtcNow.Returns(Now);
-        _versions.GetAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
+        _versions.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
         _catalogue.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
         _user.UserId.Returns(9);
@@ -261,7 +269,7 @@ public sealed class ValidateExpressionTests
     private async Task<IReadOnlyList<DiagnosticInfo>> PublishDiagnosticsAsync()
     {
         var handler = new PublishTemplateVersionHandler(
-            _versions, _versionStore, _formulas, _cache, _catalogue,
+            _repository, _versions, _formulas, _cache, _catalogue,
             _access, _user, _audit, _uow, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(

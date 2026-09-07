@@ -47,13 +47,30 @@ public sealed class PublishTemplateVersionTests
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly ITemplateVersionStore _versionStore = Substitute.For<ITemplateVersionStore>();
     private readonly TemplateVersion _draft;
 
     public PublishTemplateVersionTests()
     {
         _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
         _clock.UtcNow.Returns(Now);
-        _versions.GetAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
+        // ⛔ Структуру віддає СХОВИЩЕ, а не узагальнений репозиторій. Тут стояло
+        // `_versions.GetAsync(...)`, і всі одинадцять тестів цього класу були
+        // зелені саме через це: мок віддавав граф `Sheets → Tables → Formulas`,
+        // зібраний рефлексією в пам'яті (`Structure(...)`), а справжній
+        // `IRepository.GetAsync` — це `FindAsync` без жодного `Include` при
+        // вимкненому лінивому завантаженні, тобто версія з ПОРОЖНІМИ
+        // навігаціями.
+        //
+        // ⚠ Мок відрізнявся від реалізації рівно тим, у чому полягав дефект: у
+        // бою дванадцять перевірок §12 не бачили жодної формули, і версія з
+        // незакритою дужкою публікувалася кодом `204` (`A7 §4.3`, `A2 §3.1`).
+        //
+        // ⚠ Ці одинадцять і далі лишаються на моку — вони про ПРАВИЛА
+        // публікації, і живою базою їх перевіряти дорого. Те, що структура
+        // справді доїжджає, доводить `TemplateVersionStructureTests` на
+        // реальному SQL Server.
+        _versionStore.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
 
         // Порожній довідник за замовчуванням: решта тестів про одиниці не
         // говорить, і перевірка мусить їх пропускати, а не падати.
@@ -74,7 +91,6 @@ public sealed class PublishTemplateVersionTests
         });
     }
 
-    private readonly ITemplateVersionStore _versionStore = Substitute.For<ITemplateVersionStore>();
 
     private PublishTemplateVersionHandler Handler()
         => new(_versions, _versionStore, _formulas, _cache, _catalogue, _access, _user, _audit, _uow, _clock);
