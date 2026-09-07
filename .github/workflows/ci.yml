@@ -1,0 +1,204 @@
+# Конвеєр складання (`II.12`, `H-22` директиви №06, §4 директиви №07).
+#
+# ⛔ Гейти НЕ перелічені тут списком команд. Кожне завдання кличе
+# `tools/verify-all.ps1 -Only '<крок>'` — той самий скрипт, що й у розробника.
+# Два переліки перевірок розійшлися б на першій правці, і розбіжність була б
+# видима не як помилка, а як зелений конвеєр на дереві, де перевірка вже не та.
+#
+# ⛔ `CiPipelineTests` звіряє об'єднання всіх `-Only` цього файла з переліком
+# кроків скрипта. Крок, якого не бере жодне завдання і який не названий у
+# `ci-exempt` нижче, робить тест червоним: «розділити на завдання» і «тихо
+# викинути гейт» інакше виглядали б однаково.
+#
+# ⚠ Кроки, які конвеєр НЕ виконує, і чому — рядки читає сторож, формат значущий:
+# ci-exempt: Наскрізний сценарій — піднімає базу і застосунок під Windows-автентифікацією і `Start-Process -WindowStyle`; не входить у три обов'язкові гейти `H-22`
+# ci-exempt: Прогони в браузері — те саме плюс браузери Playwright; не входить у три обов'язкові гейти `H-22`
+#
+# ⚠ Платформа — Linux, і це не вибір. Сервісні контейнери GitHub Actions
+# працюють лише на Linux-раннерах, а гейт розгортання потребує SQL Server.
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+# ⚠ Новий поштовх у ту саму гілку скасовує попередній прогін: інакше черга
+# заповнюється відповідями на код, якого вже немає.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  # ⛔ Контейнер піднімається КРОКОМ, а не через `services:`, і секрету
+  # репозиторію не потребує. Перша збірка вимагала `SQL_SA_PASSWORD` — і
+  # конвеєр був червоний із першого дня в того, хто його не завів, причому
+  # гейт розгортання при цьому не виконувався ЖОДНОГО разу. Тобто вимога
+  # секрету не захищала нічого, а вимикала перевірку.
+  #
+  # ⚠ Пароль тут не таємниця: контейнер живе хвилини, доступний лише зсередини
+  # агента і не тримає нічого, крім згенерованої схеми. Але сталим його
+  # писати не можна — сталий пароль у файлі одного дня переїде туди, де він
+  # уже щось означає. Тому він **генерується на кожен прогін** і ховається
+  # через `::add-mask::`.
+  #
+  # ⚠ `services:` цього не вміє: службу оголошують до того, як виконався
+  # перший крок, отже значення, обчислене в прогоні, туди не потрапляє.
+  server:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SQL Server у контейнері
+        run: |
+          set -euo pipefail
+          # ⚠ Хвіст `Aa1!` — не прикраса: SQL Server вимагає три категорії
+          # символів із чотирьох, і випадковий рядок їх не гарантує. Без
+          # цього контейнер падає з «Password validation failed», що
+          # читається як зламаний образ.
+          SA="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$SA"
+          echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
+          docker run -d --name ecr-mssql             -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA"             -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # ⚠ `sqlcmd` на розміщеному раннері не стоїть. Гейт розгортання існує
+      # рівно тому, що DBA виконує скрипти НИМ, а не клієнтом .NET: підмінити
+      # його на `SqlConnection` означало б перевіряти інший шлях (`P-17`).
+      - name: sqlcmd
+        run: |
+          set -euo pipefail
+
+          # ⛔ `--batch --yes` і БЕЗ `sudo` на самому `gpg`. Перший варіант
+          # (`| sudo gpg --dearmor -o …`) упав на агенті з `cannot open
+          # '/dev/tty'`: під `sudo` gpg вважає себе інтерактивним і шукає
+          # термінал, якого в конвеєра немає. Ключ розбирається від імені
+          # користувача, і лише готовий файл кладеться під root.
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc             | gpg --dearmor --batch --yes -o microsoft-prod.gpg
+          sudo install -o root -g root -m 644 microsoft-prod.gpg /usr/share/keyrings/microsoft-prod.gpg
+          rm microsoft-prod.gpg
+
+          # ⛔ Випуск Ubuntu береться з `/etc/os-release`, а не зашитий. Тут
+          # стояло `22.04/prod jammy`, а `ubuntu-latest` уже 24.04: зашите
+          # число тихо старіє разом із образом агента, і наслідком буде не
+          # «конвеєр застарів», а «репозиторій пакетів не знайдено».
+          . /etc/os-release
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main"             | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
+
+      # ⛔ Готовність контейнера чекається ЯВНО. `services` вважає службу
+      # піднятою, щойно відповів порт, а SQL Server після цього ще хвилину
+      # відновлює системні бази — і перший же `sqlcmd` падає з «login failed»,
+      # що читається як неправильний пароль.
+      - name: SQL Server відповідає
+        env:
+          SQLCMDPASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+        run: |
+          for i in $(seq 1 90); do
+            if sqlcmd -S localhost,1433 -U sa -C -b -Q "SELECT 1" > /dev/null 2>&1; then
+              echo "SQL Server готовий за ${i} с."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::SQL Server не відповів за 90 с. Журнал контейнера:"
+          docker logs ecr-mssql 2>&1 | tail -40
+          exit 1
+
+      # ⛔ `verify-sql-scripts.ps1` кличе `dotnet ef migrations script`, а
+      # глобальні інструменти .NET лягають у `~/.dotnet/tools`, якого в `PATH`
+      # немає. Без цього рядка гейт розгортання падав би на «dotnet ef не є
+      # командою» — тобто на відсутньому інструменті, а виглядало б це як
+      # зламані міграції.
+      - name: dotnet ef
+        run: |
+          dotnet tool install --global dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # ⛔ Три гейти — ОДИН виклик спільного скрипта. Кликати
+      # `verify-sql-scripts.ps1` повз нього було б коротше і давало б такий
+      # самий зелений прогін — але кожна наступна зміна в тому, ЯК скрипт
+      # запускає гейт розгортання, до конвеєра вже не доходила б.
+      #
+      # ⚠ `sqlcmd` контейнера домену не знає, отже інтегрованої автентифікації
+      # в нього немає — звідси `-SqlLogin`.
+      #
+      # ⛔ Пароль іде ОТОЧЕННЯМ (`ECR_SQL_PASSWORD`), а не аргументом: аргументи
+      # процесу видно всім у переліку процесів агента. Скрипти читають цю
+      # змінну самі, тож у командному рядку його немає взагалі.
+      - name: Складання, тести, розгортання
+        env:
+          ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+          ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ env.ECR_SQL_PASSWORD }};TrustServerCertificate=true'
+        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Тести .NET','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
+
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⚠ .NET тут НЕ ставиться. «Типи клієнта зі знімка» перегенеровує типи
+      # з файла `contracts/openapi.snapshot.json`, який лежить у репозиторії, —
+      # застосунок для цього не потрібен. Кроки складання і тестів `-Only`
+      # відсіює до першої команди, тож `dotnet` не кличеться жодного разу.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Ecr.Web/package-lock.json
+
+      - name: npm ci
+        working-directory: src/Ecr.Web
+        run: npm ci
+
+      # ⚠ Імена кроків не розриваються на кілька рядків: складений згин YAML
+      # дав би те саме, але сторож і людина читали б різне, а помилку в
+      # такому рядку видно лише за наслідком.
+      - name: Гейти клієнта
+        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Безпека залежностей','Аудит інструментів (довідково)','Типи клієнта зі знімка','Типи клієнта','Стиль клієнта','Тести клієнта','Збірка клієнта','Бюджет клієнта'
+
+  # ⛔ Доступність — окремим завданням, і не для краси. `axe` у jsdom дає
+  # близько 35 с на маршрут, і повний обхід іде понад двадцять хвилин. У складі
+  # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
+  a11y:
+    runs-on: ubuntu-latest
+    # ⚠ Замір на машині розробника: 975 с без конкуренції, 1372 с під
+    # навантаженням. Межа взята з ЗАПАСОМ на слабший агент (два ядра проти
+    # восьми), бо саме таймаут і був причиною хибно червоного гейта
+    # (`Q-143`): ставити межу «в обріз» означало б відтворити ту саму ваду
+    # на іншому рівні.
+    #
+    # ⛔ Межа тут — сторож проти ЗАВИСАННЯ, а не мірило швидкості. Якщо
+    # прогін підбереться до неї, правильна відповідь — розділити обхід на
+    # завдання, а не підняти число ще раз.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Ecr.Web/package-lock.json
+
+      - name: npm ci
+        working-directory: src/Ecr.Web
+        run: npm ci
+
+      - name: Доступність
+        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Доступність клієнта'

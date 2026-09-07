@@ -347,7 +347,24 @@ WHERE n.wait_time_ms - ISNULL(o.wait_time_ms, 0) > 0
       'BROKER_TO_FLUSH','SQLTRACE_BUFFER_FLUSH','DIRTY_PAGE_POLL',
       'HADR_FILESTREAM_IOMGR_IOCOMPLETION','SP_SERVER_DIAGNOSTICS_SLEEP',
       'XE_DISPATCHER_WAIT','BROKER_EVENTHANDLER','WAITFOR',
-      'PREEMPTIVE_OS_GETPROCADDRESS','PREEMPTIVE_OS_AUTHENTICATIONOPS')
+      'PREEMPTIVE_OS_GETPROCADDRESS','PREEMPTIVE_OS_AUTHENTICATIONOPS',
+      -- ⛔ Додано 2026-09-07 після прогону, у якому топ-10 очолив
+      -- `QDS_ASYNC_QUEUE` з 7 745 048 мс, а `SOS_WORK_DISPATCHER` — з
+      -- 5 446 387. Обидва — фонові черги, що набігають незалежно від
+      -- навантаження; Query Store при цьому увімкнений на `model`, отже
+      -- успадковується КОЖНОЮ новою базою і потрапляє в кожен замір.
+      --
+      -- ⚠ Перелік існує рівно заради того, щоб у топі стояв діагноз, а
+      -- не шум. Із цією п'ятіркою нагорі справжній сигнал —
+      -- `PAGELATCH_SH`, `ASYNC_NETWORK_IO`, `SOS_SCHEDULER_YIELD` —
+      -- зсувався вниз, і читач бачив «найбільше чекали на Query Store».
+      -- Це та сама вада, що вже була в цьому файлі з `Out-Null`:
+      -- перевірка виконалася і не сказала нічого.
+      'QDS_ASYNC_QUEUE','QDS_PERSIST_TASK_MAIN_LOOP_SLEEP',
+      'QDS_SHUTDOWN_QUEUE','QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP',
+      'SOS_WORK_DISPATCHER','DISPATCHER_QUEUE_SEMAPHORE',
+      'ONDEMAND_TASK_QUEUE','CLR_AUTO_EVENT','BROKER_RECEIVE_WAITFOR',
+      'FT_IFTS_SCHEDULER_IDLE_WAIT','MSQL_XP','SQLTRACE_INCREMENTAL_FLUSH_SLEEP')
 ORDER BY wait_ms DESC;
 '@
 
@@ -383,12 +400,15 @@ else {
     Write-Host "База $Database лишається (використайте -SkipGenerate, щоб перезняти числа)."
 }
 
+# ⚠ Вердикт уже надрукував `Ecr.DataGen`. Тут — ПІДСУМОК із кодом виходу, а
+# не та сама фраза вдруге: два однакові рядки поспіль читаються як «щось
+# сталося двічі», і в журналі прогону це коштувало окремого з'ясування.
 if ($gate -ne 0) {
     Write-Host ''
-    Write-Host 'Гейт BR-07 НЕ пройдено.' -ForegroundColor Red
+    Write-Host "Підсумок: гейт BR-07 НЕ пройдено (код $gate). Числа й очікування — вище." -ForegroundColor Red
     exit 2
 }
 
 Write-Host ''
-Write-Host 'Гейт BR-07 пройдено.' -ForegroundColor Green
+Write-Host 'Підсумок: гейт BR-07 пройдено. Числа й очікування — вище.' -ForegroundColor Green
 exit 0
