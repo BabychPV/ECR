@@ -37,13 +37,16 @@ const Roles = [
  */
 const Routes = [
   { path: '/', name: 'documents' },
+  { path: '/my-groups', name: 'my-groups' },
   { path: '/admin/templates', name: 'templates' },
   { path: '/admin/registries', name: 'registries' },
   { path: '/admin/methodologies', name: 'methodologies' },
+  { path: '/admin/expressions', name: 'expressions' },
   { path: '/admin/units', name: 'units' },
   { path: '/admin/security', name: 'security' },
   { path: '/admin/periods', name: 'periods' },
   { path: '/admin/sources', name: 'sources' },
+  { path: '/admin/mapping', name: 'mapping' },
   { path: '/admin/jobs', name: 'jobs' },
   { path: '/admin/health', name: 'health' },
   { path: '/admin/snapshots', name: 'snapshots' },
