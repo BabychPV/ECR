@@ -170,6 +170,33 @@ public sealed class PeriodAccessRuleTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.20")]
+    public void SourceWindow_рахує_межу_виключно_на_першому_дні_місяця()
+    {
+        // ⛔ Єдина пара дат, на якій закрите й напівінтервальне подання дають
+        // РІЗНІ відповіді, — межа рівно на першому дні місяця (крок `I.10`).
+        // Із закритим порівнянням (`monthStart > to`) червень тут лишався б
+        // доступним, хоча дозвіл скінчився 31 травня: місяць отримував зайву
+        // добу чинності, і жоден інший місяць цього не показував.
+        var rule = PeriodAccessRuleDef
+            .ForSourceWindow(Version, PermitColumn, OutOfWindowBehavior.ReadOnly)
+            .ForSheet(Sheet);
+
+        var untilJune = ((DateOnly?)null, (DateOnly?)new DateOnly(2026, 6, 1));
+
+        Assert.False(Run(rule, Facts(month: 5, permit: untilJune)).Blocks);
+        Assert.True(Run(rule, Facts(month: 6, permit: untilJune)).Blocks);
+
+        // Симетрично знизу: вікно, що відкривається 1 липня, червень не
+        // покриває, а липень покриває цілком.
+        var fromJuly = ((DateOnly?)new DateOnly(2026, 7, 1), (DateOnly?)null);
+
+        Assert.True(Run(rule, Facts(month: 6, permit: fromJuly)).Blocks);
+        Assert.False(Run(rule, Facts(month: 7, permit: fromJuly)).Blocks);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.20")]
     public void SourceWindow_не_блокує_рядок_без_обраного_дозволу()
     {
         // ⛔ Зворотне перетворило б «дозвіл ще не обрали» на «нічого не можна

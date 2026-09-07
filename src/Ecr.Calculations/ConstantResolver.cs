@@ -55,9 +55,13 @@ public sealed class ConstantResolver(IConstantStore constants)
         //    не є кандидатом узагалі; звужувати за нею після вибору за
         //    речовиною означало б інколи не знаходити нічого там, де
         //    правильний варіант існує.
+        //
+        // ⛔ Питає ДОМЕН (`MethodologyConstant.IsValidOn`), а не повторює його
+        //    умову. Копія, що стояла тут, була закритим інтервалом
+        //    (`onDate <= c.ValidTo`) — на день довшим за модель `[from, to)`
+        //    (крок I.10, директива ПК-1 №05 §7).
         var valid = candidates
-            .Where(c => (c.ValidFrom is null || onDate >= c.ValidFrom)
-                        && (c.ValidTo is null || onDate <= c.ValidTo))
+            .Where(c => c.IsValidOn(onDate))
             .ToList();
 
         if (valid.Count == 0)

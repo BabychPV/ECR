@@ -888,7 +888,15 @@ CREATE TABLE dic.RegistryEntry
     Code            nvarchar(100) NOT NULL,
     DisplayL10n     nvarchar(max) NOT NULL,
     ParentEntryId   int           NULL,       -- ієрархія / каскад
-    ValidFrom       date          NULL,       -- темпоральність (ФВ-8.5)
+    -- Темпоральність (ФВ-8.5) — НАПІВІНТЕРВАЛ [ValidFrom, ValidTo):
+    -- ValidFrom — перший чинний день, ValidTo — перший НЕчинний.
+    -- ⛔ Запис, чинний увесь 2024 рік, має ValidTo = '2025-01-01', а не
+    -- '2024-12-31'. Причина в джерелі: там ця межа datetime, і закрите
+    -- подання змушувало зберігати «останню мить» 2024-12-31 23:59:59, слідом
+    -- за якою в 24 рядках корпусу з'явилося 12:59:59 — те саме на вигляд і на
+    -- 11 годин коротше (директива ПК-1 №05 §7, крок I.10).
+    -- ⛔ Сентинелів 9999-02-20 / 9999-12-31 тут не буває: «без обмеження» — NULL.
+    ValidFrom       date          NULL,
     ValidTo         date          NULL,
     Ordinal         int           NOT NULL CONSTRAINT DF_RegEntry_Ord DEFAULT(0),
     IsActive        bit           NOT NULL CONSTRAINT DF_RegEntry_Act DEFAULT(1),
@@ -902,7 +910,9 @@ CREATE TABLE dic.RegistryEntry
     CONSTRAINT UQ_RegistryEntry UNIQUE (RegistryDefId, Code),
     CONSTRAINT FK_RegEntry_Def    FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id),
     CONSTRAINT FK_RegEntry_Parent FOREIGN KEY (ParentEntryId) REFERENCES dic.RegistryEntry (Id),
-    CONSTRAINT CK_RegEntry_Period CHECK (ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo)
+    -- Строге `<`: межа виключна, тому ValidFrom = ValidTo — вікно з нуля днів,
+    -- тобто запис, якого ніколи не видно в списку.
+    CONSTRAINT CK_RegEntry_Period CHECK (ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo)
 );
 GO
 
@@ -1335,6 +1345,8 @@ CREATE TABLE calc.MethodologyConstant
     Value                decimal(28,10) NULL,      -- лише Kind = Numeric і лише коли розібралося
     TextValue            nvarchar(400)  NULL,      -- текст, мітка або СИРИЙ рядок джерела
     UnitId               int            NULL,      -- лише Kind = Numeric: вимір — властивість числа
+    -- Напівінтервал [ValidFrom, ValidTo): ValidTo — перший НЕчинний день
+    -- (крок I.10). Коефіцієнт на 2024 рік — ValidTo = '2025-01-01'.
     ValidFrom            date           NULL,
     ValidTo              date           NULL,
     SubstanceEntryId     int            NULL,      -- прив'язка до речовини
@@ -1344,7 +1356,7 @@ CREATE TABLE calc.MethodologyConstant
     CONSTRAINT FK_MC_Version   FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
     CONSTRAINT FK_MC_Unit      FOREIGN KEY (UnitId)               REFERENCES uom.Unit (Id),
     CONSTRAINT FK_MC_Substance FOREIGN KEY (SubstanceEntryId)     REFERENCES dic.RegistryEntry (Id),
-    CONSTRAINT CK_MC_Period    CHECK (ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo),
+    CONSTRAINT CK_MC_Period    CHECK (ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo),
     -- ⛔ Перелік станів навмисно НЕПОВНИЙ: Kind = 0 з порожнім Value дозволений,
     -- якщо є TextValue. Це рядок, який імпорт не зміг розібрати
     -- (n_ECW_C11_13_ = '-' у 16 формулах, Kp_ECW_C11_13_ = '-' у 4,
@@ -2015,6 +2027,10 @@ CREATE TABLE sec.RoleAssignment
     PrincipalSid nvarchar(200) NULL,       -- AD-група (ФВ-6.15)
     RoleId       int           NOT NULL,
     ScopeJson    nvarchar(max) NULL,       -- звуження за полями IsScopeField
+    -- ⚠ ЄДИНЕ місце схеми, де межі ВКЛЮЧНІ з обох боків (D2-123). Тут дата не
+    -- походить із міграції: її набирає адміністратор із наказу про підміну, у
+    -- якому написано «до 31 травня». Напівінтервал відібрав би права на день
+    -- раніше, ніж написано в наказі.
     ValidFrom    date          NULL,
     ValidTo      date          NULL,
     CONSTRAINT PK_RoleAssignment PRIMARY KEY (Id),
