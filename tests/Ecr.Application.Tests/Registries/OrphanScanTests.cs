@@ -50,6 +50,7 @@ public sealed class OrphanScanTests
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
 
     public OrphanScanTests()
     {
@@ -57,6 +58,9 @@ public sealed class OrphanScanTests
         _user.UserId.Returns(9);
         _user.Language.Returns("en");
         _user.CorrelationId.Returns("test");
+
+        // Предмет цього класу — осиротілі рядки, не склад документа.
+        _documents.HasSheetAsync(Document, Sheet, Arg.Any<CancellationToken>()).Returns(true);
 
         var sheet = new SheetDef(2, EcrCode.Create("Water"), Text("Water"), 1);
         var table = new TableDef(1, EcrCode.Create("Main"), Text("Main"), 1,
@@ -274,7 +278,7 @@ public sealed class OrphanScanTests
 
     private SubmitSheetHandler Submit()
         => new(
-            _cells, _rows, _workflow, _access, validation: null!,
+            _cells, _rows, _workflow, _documents, _access, validation: null!,
             new Ecr.Application.Reporting.ReportSnapshotSync(
                 NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
                 NSubstitute.Substitute.For<IDocumentStore>()),
