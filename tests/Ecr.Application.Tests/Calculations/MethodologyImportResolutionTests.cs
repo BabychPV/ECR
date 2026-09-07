@@ -191,7 +191,6 @@ public sealed class MethodologyImportResolutionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.3")]
     public async Task Імпорт_без_чинної_на_дату_версії_відхиляє_публікацію()
     {
         // ⛔ Версія бібліотеки добирається на ДАТУ ПЕРІОДУ, як будь-яка інша.

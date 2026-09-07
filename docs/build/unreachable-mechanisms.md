@@ -217,18 +217,34 @@
 
 ---
 
-## ⏳ Чекають на свій крок директиви
+## ⛔ Пережили свій крок
 
-| Що | Крок |
-|---|---|
-| Авторство структури шаблону: `ColumnDef.SetUnit`/`SetLookup`/`SetNumericFormat`/`SetPresentation`, `TableDef.AddFormula`/`AddValidationRule`/`SetMaxDynamicRows` | 8 (`B-1`, конструктор) |
-| Фабрики `PeriodAccessRuleDef` — кличуть лише тести | 8: редактор правил доступу в конструкторі |
-| Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope`, `ScriptVersion.MarkCompiled` | 6 (`B-3`) |
-| Конфігурація збору: `DataSource.Configure`, `CollectionSchedule.SetLookback`, `EntityFieldMap.*`, `LegacyMappings.*` | 7 (`B-5`, перегляд мапінгу) |
-| `IAccessDecisionService.CanEditCellAsync` | не потрібен: усі шляхи запису йдуть через зріз; **або прибрати з порту** |
-| `ICellStore.ReadCellsAsync` / `BulkInsertAsync` | використовує `ExcelImporter` і фікстури; лишити |
-| `RegistryEntry.Restore`, `RegistryEntry.SetOrdinal`, `RegistryExternalKey.MarkSynced`, `RegistryEntryLink.SetPayload` | 8 (`B-1`) |
-| `IntegrationLogs.MarkPeriodDone`, `RecordChecksums` | 7 (`B-5`) |
+⛔ **Вирок змінено 2026-09-07 за власним правилом цього файла** (див. нижче):
+«рядок, який не зник разом зі своїм кроком, змінює вирок на ⛔ — механізм, що
+пережив свій екран, уже не готовий раніше, а забутий».
+
+Кроки 6, 7 і 8 директиви №04 закриті (`roadmap.md`: «Кроки директиви №04 —
+1–9 ✔, усі»). Механізми нижче свого екрана так і не дочекалися: авторства
+структури шаблону, методології й конфігурації збору в продукті **не існує** —
+ні ендпоінтів, ні екранів. Це та сама знахідка, яку аудит назвав «44 вимоги
+мають бойовий код і зелені тести і жодного шляху з інтерфейсу».
+
+⚠ Правило застосоване, а не обійдене, саме тому, що обійти його дешево: досить
+було лишити ⏳ і сказати «крок закритий частково». Тоді реєстр перестав би бути
+приладом і став би переліком намірів.
+
+⚠ Два останні рядки таблиці до кроків не прив'язані й вироку не міняють.
+
+| Що | Крок, який його не забрав | Куди це впирається |
+|---|---|---|
+| ⛔ Авторство структури шаблону: `ColumnDef.SetUnit`/`SetLookup`/`SetNumericFormat`/`SetPresentation`, `TableDef.AddFormula`/`AddValidationRule`/`SetMaxDynamicRows` | 8 (`B-1`, конструктор) — закритий, екрана немає | `A10` пункт 5 |
+| ⛔ Фабрики `PeriodAccessRuleDef` — кличуть лише тести | 8: редактор правил доступу — закритий, редактора немає | `A10` пункт 5 |
+| ⛔ Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope`, `ScriptVersion.MarkCompiled` | 6 (`B-3`) — закритий | `A10` пункт 6. ⚠ `SetModes` не кличе ніхто, тобто `NumericMode = Strict` увімкнути **неможливо в принципі** |
+| ⛔ Конфігурація збору: `DataSource.Configure`, `CollectionSchedule.SetLookback`, `EntityFieldMap.*`, `LegacyMappings.*` | 7 (`B-5`, перегляд мапінгу) — закритий | екран показує мапінг, але не дає його заводити |
+| `IAccessDecisionService.CanEditCellAsync` | до кроку не прив'язаний | не потрібен: усі шляхи запису йдуть через зріз; **або прибрати з порту** |
+| `ICellStore.ReadCellsAsync` / `BulkInsertAsync` | до кроку не прив'язаний | використовує `ExcelImporter` і фікстури; лишити |
+| ⛔ `RegistryEntry.Restore`, `RegistryEntry.SetOrdinal`, `RegistryExternalKey.MarkSynced`, `RegistryEntryLink.SetPayload` | 8 (`B-1`) — закритий | `A10` пункт 5 |
+| ⛔ `IntegrationLogs.MarkPeriodDone`, `RecordChecksums` | 7 (`B-5`) — закритий | `A10` пункт 3 (перерахунок і задачі) |
 
 ---
 
