@@ -2616,6 +2616,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |

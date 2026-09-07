@@ -1,5 +1,6 @@
 // src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
@@ -156,6 +157,7 @@ public sealed class MaterializeCollectedDataJob(
             var series = points
                 .Where(p => string.Equals(p.SourcePath, map.SourceField, StringComparison.Ordinal)
                             && p.ValueNumeric is not null)
+                .Select(p => p.ValueNumeric!.Value)
                 .ToList();
 
             if (series.Count == 0)
@@ -165,17 +167,14 @@ public sealed class MaterializeCollectedDataJob(
 
             // ⚠ `Aggregation` не може бути null: пара «рядок + агрегація»
             // нерозривна і на рівні домену, і обмеженням у базі.
-            var value = map.Aggregation switch
-            {
-                AggregationKind.Sum => series.Sum(p => p.ValueNumeric!.Value),
-                AggregationKind.Avg => series.Average(p => p.ValueNumeric!.Value),
-                AggregationKind.Min => series.Min(p => p.ValueNumeric!.Value),
-                AggregationKind.Max => series.Max(p => p.ValueNumeric!.Value),
-                AggregationKind.Last => series[^1].ValueNumeric!.Value,
-                AggregationKind.First => series[0].ValueNumeric!.Value,
-                _ => throw new InvalidOperationException(
-                    $"Мапінг {map.Id} не називає способу згортання: конфігурація неповна."),
-            };
+            //
+            // ⛔ Згортка винесена в `PeriodFold` і НЕ дублюється: другий її
+            // споживач — попередній перегляд мапінгу (`ФВ-13.14`), і власна
+            // копія там показувала б число, якого ця задача не запише.
+            var value = map.Aggregation is { } kind
+                ? PeriodFold.Fold(kind, series)
+                : throw new InvalidOperationException(
+                    $"Мапінг {map.Id} не називає способу згортання: конфігурація неповна.");
 
             result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, value));
         }

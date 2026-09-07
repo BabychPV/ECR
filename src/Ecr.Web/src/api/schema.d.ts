@@ -2805,6 +2805,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{id}/mapping/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
+         *     Право `Integration.Manage`.
+         * @description ⛔ Відповідь несе не лише зв'язки, що зійшлися, а й **розриви**: поле
+         *     джерела, яке не лягає нікуди; мапінг, під який у джерелі немає жодного
+         *     рядка; колонку документа, за якою не стоїть нічого. Перегляд самих лише
+         *     успішних зв'язків відповідав би на питання, якого ніхто не ставить.
+         *
+         *     ⚠ Реальні рядки — це вже зібране (`ext.RawDataPoint`), а не
+         *     читання з джерела наживо: перегляд не має падати разом із мережею до
+         *     чужої системи.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна; `null` — тиждень назад. */
+                    fromUtc?: string;
+                    /** @description Кінець вікна; `null` — «зараз». */
+                    toUtc?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Сутність джерела. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MappingPreview"];
+                        "text/json": components["schemas"]["MappingPreview"];
+                        "text/plain": components["schemas"]["MappingPreview"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/access-matrix": {
         parameters: {
             query?: never;
@@ -4714,6 +4771,112 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Підсумок одного мапінгу. */
+        MappedFieldPreview: {
+            /** @description Спосіб згортання точок періоду. */
+            aggregation: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор мапінгу.
+             */
+            fieldMapId: number;
+            /**
+             * Format: double
+             * @description Число, яке лягло б у комірку; `null` — нічого згортати.
+             */
+            foldedValue: null | number;
+            /** @description Стан мапінгу. */
+            outcome: components["schemas"]["MappingOutcome"];
+            /**
+             * Format: int32
+             * @description Скільки реальних точок вікна під цей мапінг.
+             */
+            pointCount: number;
+            /** @description Поле в джерелі. */
+            sourceField: string;
+            /** @description Одиниця джерела, оголошена в мапінгу (`ФВ-16.9`). */
+            sourceUnitCode: null | string;
+            /** @description Код колонки; `null` — колонки немає. */
+            targetColumnCode: null | string;
+            /**
+             * Format: int32
+             * @description Колонка-адресат.
+             */
+            targetColumnDefId: null | number;
+            /** @description Рядок-адресат; `null` — не матеріалізується. */
+            targetRowKey: null | string;
+            /** @description Одиниця, в якій значення лягає в ECR. */
+            targetUnitCode: null | string;
+        };
+        /**
+         * @description Що станеться з рядком джерела або з мапінгом.
+         * @enum {unknown}
+         */
+        MappingOutcome: "Materialized" | "RawOnly" | "Unmapped" | "TargetMissing" | "NoData";
+        /** @description Перегляд мапінгу на реальних рядках (`ФВ-13.14`). */
+        MappingPreview: {
+            /** @description Код сутності в джерелі. */
+            code: string;
+            /** @description Підпис із каталогу джерела. */
+            displayName: null | string;
+            /** @description Підсумок на кожен мапінг. */
+            fields: components["schemas"]["MappedFieldPreview"][];
+            /**
+             * Format: date-time
+             * @description Початок вікна, включно.
+             */
+            fromUtc: string;
+            /** @description Точок більше за стелю: згорнуті значення неповні. */
+            isTruncated: boolean;
+            /**
+             * Format: int32
+             * @description Скільки реальних точок узято у згортання.
+             */
+            pointsSeen: number;
+            /** @description Реальні рядки джерела з адресою призначення. */
+            rows: components["schemas"]["MappingPreviewRow"][];
+            /**
+             * Format: int32
+             * @description Сутність джерела.
+             */
+            sourceEntityId: number;
+            /**
+             * Format: date-time
+             * @description Кінець вікна, виключно.
+             */
+            toUtc: string;
+            /** @description Колонки документа, за якими не стоїть нічого. */
+            uncoveredColumns: components["schemas"]["UncoveredColumn"][];
+            /** @description Поля джерела, які не лягають нікуди. */
+            unmappedSourceFields: components["schemas"]["UnmappedSourceField"][];
+        };
+        /** @description Реальний рядок джерела разом із адресою, куди він лягає. */
+        MappingPreviewRow: {
+            /** @description Спосіб згортання, оголошений мапінгом. */
+            aggregation: null | string;
+            /** @description Куди лягає цей рядок. */
+            outcome: components["schemas"]["MappingOutcome"];
+            /** @description Якість за класифікацією джерела. */
+            quality: null | string;
+            /** @description Шлях атрибута в джерелі. */
+            sourcePath: string;
+            /** @description Колонка-адресат; `null` — адреси немає. */
+            targetColumnCode: null | string;
+            /** @description Рядок-адресат; `null` — адреси немає. */
+            targetRowKey: null | string;
+            /**
+             * Format: date-time
+             * @description Мітка часу точки.
+             */
+            timestamp: string;
+            /**
+             * Format: double
+             * @description Число в одиниці ДЖЕРЕЛА.
+             */
+            valueNumeric: null | number;
+            /** @description Текст для нечислових атрибутів. */
+            valueString: null | string;
+        };
         /** @description Зміна календарної конвенції (ФВ-16.11). */
         MethodologyCalendarChange: {
             /** @description Конвенція нової. */
@@ -5800,6 +5963,27 @@ export interface components {
          * @enum {unknown}
          */
         UiStringScope: "Public" | "Private";
+        /** @description Колонка документа, за якою не стоїть нічого. */
+        UncoveredColumn: {
+            /** @description Код колонки. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор колонки.
+             */
+            columnDefId: number;
+            /** @description Заголовок колонки. */
+            header: null | string;
+            /** @description Колонка обов'язкова до заповнення. */
+            isRequired: boolean;
+            /** @description Заповнити її не може ніхто: ані людина, ані рушій. */
+            isUnfillable: boolean;
+            /**
+             * Format: int32
+             * @description Таблиця колонки.
+             */
+            tableDefId: number;
+        };
         /** @description Одиниця довідника. */
         UnitRef: {
             /** @description Код: `kg`, `t`, `m3`. */
@@ -5826,6 +6010,21 @@ export interface components {
              * @default 0
              */
             offsetToBase: number;
+        };
+        /** @description Поле джерела, яке не лягає нікуди. */
+        UnmappedSourceField: {
+            /**
+             * Format: date-time
+             * @description Остання мітка часу.
+             */
+            lastSeenUtc: string;
+            /**
+             * Format: int32
+             * @description Скільки його точок у вікні.
+             */
+            pointCount: number;
+            /** @description Шлях атрибута в джерелі. */
+            sourcePath: string;
         };
         /** @description Створений користувач. */
         UserIdResponse: {

@@ -457,3 +457,31 @@ export type ExpressionDialect = Schemas['ExpressionDialect'];
 
 /** Вердикт одного тесту золотого набору (`ФВ-13.7`). */
 export type TestCaseVerdict = Schemas['TestCaseVerdict'];
+
+/**
+ * Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
+ *
+ * ⛔ Тип несе не лише зв'язки, що зійшлися: `unmappedSourceFields` і
+ * `uncoveredColumns` — це **розриви**, і саме заради них перегляд існує.
+ */
+export type MappingPreview = Schemas['MappingPreview'];
+
+/** Реальний рядок джерела разом з адресою, куди він лягає. */
+export type MappingPreviewRow = Schemas['MappingPreviewRow'];
+
+/** Підсумок одного мапінгу: що саме він поклав би в комірку. */
+export type MappedFieldPreview = Schemas['MappedFieldPreview'];
+
+/** Поле джерела, яке не лягає нікуди. */
+export type UnmappedSourceField = Schemas['UnmappedSourceField'];
+
+/** Колонка документа, за якою не стоїть нічого. */
+export type UncoveredColumn = Schemas['UncoveredColumn'];
+
+/**
+ * Що станеться з рядком джерела або з мапінгом.
+ *
+ * ⚠ Тип **згенерований** із серверного переліку: новий різновид розриву
+ * змусить TypeScript обробити випадок, а не мовчки його не показати.
+ */
+export type MappingOutcome = Schemas['MappingOutcome'];

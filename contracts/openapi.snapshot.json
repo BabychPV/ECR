@@ -1785,6 +1785,259 @@
         },
         "type": "object"
       },
+      "MappedFieldPreview": {
+        "description": "Підсумок одного мапінгу.",
+        "properties": {
+          "aggregation": {
+            "description": "Спосіб згортання точок періоду.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fieldMapId": {
+            "description": "Ідентифікатор мапінгу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "foldedValue": {
+            "description": "Число, яке лягло б у комірку; `null` — нічого згортати.",
+            "format": "double",
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/MappingOutcome",
+            "description": "Стан мапінгу."
+          },
+          "pointCount": {
+            "description": "Скільки реальних точок вікна під цей мапінг.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceField": {
+            "description": "Поле в джерелі.",
+            "type": "string"
+          },
+          "sourceUnitCode": {
+            "description": "Одиниця джерела, оголошена в мапінгу (`ФВ-16.9`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetColumnCode": {
+            "description": "Код колонки; `null` — колонки немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetColumnDefId": {
+            "description": "Колонка-адресат.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetRowKey": {
+            "description": "Рядок-адресат; `null` — не матеріалізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetUnitCode": {
+            "description": "Одиниця, в якій значення лягає в ECR.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "fieldMapId",
+          "sourceField",
+          "outcome",
+          "targetRowKey",
+          "targetColumnDefId",
+          "targetColumnCode",
+          "aggregation",
+          "sourceUnitCode",
+          "targetUnitCode",
+          "pointCount",
+          "foldedValue"
+        ],
+        "type": "object"
+      },
+      "MappingOutcome": {
+        "description": "Що станеться з рядком джерела або з мапінгом.",
+        "enum": [
+          "Materialized",
+          "RawOnly",
+          "Unmapped",
+          "TargetMissing",
+          "NoData"
+        ]
+      },
+      "MappingPreview": {
+        "description": "Перегляд мапінгу на реальних рядках (`ФВ-13.14`).",
+        "properties": {
+          "code": {
+            "description": "Код сутності в джерелі.",
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Підпис із каталогу джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fields": {
+            "description": "Підсумок на кожен мапінг.",
+            "items": {
+              "$ref": "#/components/schemas/MappedFieldPreview"
+            },
+            "type": "array"
+          },
+          "fromUtc": {
+            "description": "Початок вікна, включно.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "isTruncated": {
+            "description": "Точок більше за стелю: згорнуті значення неповні.",
+            "type": "boolean"
+          },
+          "pointsSeen": {
+            "description": "Скільки реальних точок узято у згортання.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Реальні рядки джерела з адресою призначення.",
+            "items": {
+              "$ref": "#/components/schemas/MappingPreviewRow"
+            },
+            "type": "array"
+          },
+          "sourceEntityId": {
+            "description": "Сутність джерела.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toUtc": {
+            "description": "Кінець вікна, виключно.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "uncoveredColumns": {
+            "description": "Колонки документа, за якими не стоїть нічого.",
+            "items": {
+              "$ref": "#/components/schemas/UncoveredColumn"
+            },
+            "type": "array"
+          },
+          "unmappedSourceFields": {
+            "description": "Поля джерела, які не лягають нікуди.",
+            "items": {
+              "$ref": "#/components/schemas/UnmappedSourceField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sourceEntityId",
+          "code",
+          "displayName",
+          "fromUtc",
+          "toUtc",
+          "pointsSeen",
+          "isTruncated",
+          "fields",
+          "rows",
+          "unmappedSourceFields",
+          "uncoveredColumns"
+        ],
+        "type": "object"
+      },
+      "MappingPreviewRow": {
+        "description": "Реальний рядок джерела разом із адресою, куди він лягає.",
+        "properties": {
+          "aggregation": {
+            "description": "Спосіб згортання, оголошений мапінгом.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/MappingOutcome",
+            "description": "Куди лягає цей рядок."
+          },
+          "quality": {
+            "description": "Якість за класифікацією джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourcePath": {
+            "description": "Шлях атрибута в джерелі.",
+            "type": "string"
+          },
+          "targetColumnCode": {
+            "description": "Колонка-адресат; `null` — адреси немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetRowKey": {
+            "description": "Рядок-адресат; `null` — адреси немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "timestamp": {
+            "description": "Мітка часу точки.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "valueNumeric": {
+            "description": "Число в одиниці ДЖЕРЕЛА.",
+            "format": "double",
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "valueString": {
+            "description": "Текст для нечислових атрибутів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sourcePath",
+          "timestamp",
+          "valueNumeric",
+          "valueString",
+          "quality",
+          "outcome",
+          "targetRowKey",
+          "targetColumnCode",
+          "aggregation"
+        ],
+        "type": "object"
+      },
       "MethodologyCalendarChange": {
         "description": "Зміна календарної конвенції (ФВ-16.11).",
         "properties": {
@@ -4074,6 +4327,49 @@
           "Private"
         ]
       },
+      "UncoveredColumn": {
+        "description": "Колонка документа, за якою не стоїть нічого.",
+        "properties": {
+          "code": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "columnDefId": {
+            "description": "Ідентифікатор колонки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "header": {
+            "description": "Заголовок колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isRequired": {
+            "description": "Колонка обов'язкова до заповнення.",
+            "type": "boolean"
+          },
+          "isUnfillable": {
+            "description": "Заповнити її не може ніхто: ані людина, ані рушій.",
+            "type": "boolean"
+          },
+          "tableDefId": {
+            "description": "Таблиця колонки.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableDefId",
+          "columnDefId",
+          "code",
+          "header",
+          "isRequired",
+          "isUnfillable"
+        ],
+        "type": "object"
+      },
       "UnitRef": {
         "description": "Одиниця довідника.",
         "properties": {
@@ -4108,6 +4404,31 @@
           "id",
           "code",
           "dimensionId"
+        ],
+        "type": "object"
+      },
+      "UnmappedSourceField": {
+        "description": "Поле джерела, яке не лягає нікуди.",
+        "properties": {
+          "lastSeenUtc": {
+            "description": "Остання мітка часу.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "pointCount": {
+            "description": "Скільки його точок у вікні.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourcePath": {
+            "description": "Шлях атрибута в джерелі.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourcePath",
+          "pointCount",
+          "lastSeenUtc"
         ],
         "type": "object"
       },
@@ -7618,6 +7939,68 @@
           }
         },
         "summary": "Запускає збір для сутності джерела. Право `Integration.Manage`.",
+        "tags": [
+          "Sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/mapping/preview": {
+      "get": {
+        "description": "⛔ Відповідь несе не лише зв'язки, що зійшлися, а й **розриви**: поле\r\nджерела, яке не лягає нікуди; мапінг, під який у джерелі немає жодного\r\nрядка; колонку документа, за якою не стоїть нічого. Перегляд самих лише\r\nуспішних зв'язків відповідав би на питання, якого ніхто не ставить.\r\n\r\n⚠ Реальні рядки — це вже зібране (`ext.RawDataPoint`), а не\r\nчитання з джерела наживо: перегляд не має падати разом із мережею до\r\nчужої системи.",
+        "parameters": [
+          {
+            "description": "Сутність джерела.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Початок вікна; `null` — тиждень назад.",
+            "in": "query",
+            "name": "fromUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна; `null` — «зараз».",
+            "in": "query",
+            "name": "toUtc",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingPreview"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingPreview"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingPreview"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).\r\nПраво `Integration.Manage`.",
         "tags": [
           "Sources"
         ]
