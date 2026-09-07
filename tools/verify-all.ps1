@@ -203,8 +203,42 @@ Step 'Тести .NET' {
     #
     # ⚠ На зелених прогонах це нічого не додає: логер друкує подробиці лише
     # для падінь.
+    #
+    # ⛔ `Ecr.Scenarios.Tests` виключений ЯВНО. Директива №09 §6.7 навмисно
+    # каже: «сценарії пишуться всі 28 одразу, і майже всі падають — це не
+    # марна робота, це прилад». Гейт, який червоніє від очікуваного, — гейт,
+    # який вимкнуть за тиждень. Прогрес сценаріїв — окремий, довідковий крок
+    # нижче; те, що блокує збірку, лишається тут.
     & dotnet test (Join-Path $root 'Ecr.sln') --no-build -v q --nologo `
-        --logger 'console;verbosity=normal'
+        --logger 'console;verbosity=normal' `
+        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests'
+}
+
+Step 'Сценарії директиви №09 (довідково)' {
+    if ($TestSql) {
+        $env:ECR_TEST_SQL = $TestSql
+    }
+
+    # ⛔ НЕ гейт. `roadmap.md` веде число «S: N із 28» як окрему одиницю
+    # обліку прогресу (директива №09 §2) — саме тому, що змішати його з
+    # бінарним «пройшло / не пройшло» конвеєра означало б вимкнути крок,
+    # щойно перших дванадцять сценаріїв стали червоними по суті (авторства
+    # структури шаблону немає в API, `S-04`/`S-05`).
+    #
+    # ⚠ `try/catch` тут — НЕ про акуратність. `$ErrorActionPreference = 'Stop'`
+    # разом із `$PSNativeCommandUseErrorActionPreference` (pwsh 7.3+) робить
+    # ненульовий код виходу нативної команди ТЕРМІНУЮЧИМ винятком: без catch
+    # він вилітає зі скрипт-блока раніше, ніж `$global:LASTEXITCODE = 0`
+    # встигає виконатися, і крок падає так само, якби рядка не було.
+    try {
+        & dotnet test (Join-Path $root 'tests/Ecr.Scenarios.Tests') --no-build -v q --nologo `
+            --logger 'console;verbosity=normal'
+    }
+    catch {
+        Write-Host "   (довідково) $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+
+    $global:LASTEXITCODE = 0
 }
 
 if (-not $SkipDeployment) {
