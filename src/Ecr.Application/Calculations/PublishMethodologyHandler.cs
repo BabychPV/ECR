@@ -86,7 +86,8 @@ public sealed class PublishMethodologyHandler(
         var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var greenTest = await IsGreenAsync(methodology, version, testCases, ct).ConfigureAwait(false);
 
-        await ApplyEvaluationOrderAsync(methodology, version, from, ct).ConfigureAwait(false);
+        var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
+            .ConfigureAwait(false);
 
         // Чотири очі, причина, зелений тест і незайнята дата — усе в домені:
         // правило, розкидане по обробниках, забудеться на другому виклику.
@@ -109,7 +110,10 @@ public sealed class PublishMethodologyHandler(
         // ⛔ Жодного перерахунку тут не планується. Закриті періоди не
         // перераховуються автоматично НІКОЛИ (ФВ-9.7): інакше публікація
         // методології заднім числом мовчки змінює подану звітність.
-        return diff;
+        // ⛔ Попередження йдуть тією самою відповіддю, що й diff. Окремий
+        // канал (журнал, лист) означав би, що той, хто публікує, їх не
+        // побачить — а 186 попереджень у логах не прочитає ніхто.
+        return diff with { Warnings = warnings };
     }
 
     /// <summary>
@@ -127,7 +131,7 @@ public sealed class PublishMethodologyHandler(
     /// написано» (<c>H-3</c>).
     /// </para>
     /// </remarks>
-    private async Task ApplyEvaluationOrderAsync(
+    private async Task<IReadOnlyList<string>> ApplyEvaluationOrderAsync(
         Methodology methodology,
         MethodologyVersion version,
         DateOnly effectiveFrom,
@@ -159,7 +163,7 @@ public sealed class PublishMethodologyHandler(
             // на кого, а ті, що лишилися від попередньої редакції, тягли б
             // методологію в чергу перерахунку без жодної причини.
             await methodologies.ReplaceDependenciesAsync(methodology.Id, [], ct).ConfigureAwait(false);
-            return;
+            return [];
         }
 
         // ⚠ Незбережена формула має Id = 0, і граф зіставляється саме за Id.
@@ -181,7 +185,16 @@ public sealed class PublishMethodologyHandler(
         foreach (var formula in formulas)
         {
             var resolution = Resolve(formula, byCode, imports, dependencies, problems);
-            parsed.Add(new ParsedFormula(formula.Code, formula.ResultType, resolution.Root));
+            // ⛔ Четвертим аргументом — оголошений список. Без нього
+            // звірка пастки 2 отримувала `null` і **мовчала**: вона була
+            // написана, покрита тестами й недосяжна — той самий клас, що
+            // `Q-082`, `Q-086`, `Q-088`.
+            parsed.Add(new ParsedFormula(
+                formula.Code,
+                formula.ResultType,
+                resolution.Root,
+                Ecr.Expressions.Binding.ArgumentDeclarationChecker.Declared(
+                    formula.ArgumentsCsv)));
 
             nodes.Add(new FormulaNode(
                 formula.Id,
@@ -199,7 +212,19 @@ public sealed class PublishMethodologyHandler(
 
         RejectExtensionFunctions(parsed, version.NumericMode);
 
-        problems.AddRange(MethodologyPublishChecks.Check(parsed, constants, outputs));
+        // ⚠ Попередження НЕ валять публікацію (№05 §7): «оголошено,
+        // не вжито» чинна система допускала, і ламати через це міграцію не можна.
+        // Вони йдуть у відповідь публікації, а не в журнал: той, хто публікує,
+        // має побачити їх у ту саму мить, а не знайти через тиждень у логах.
+        var warnings = new List<string>();
+
+        problems.AddRange(MethodologyPublishChecks.Check(
+            parsed,
+            constants,
+            outputs,
+            MethodologyPublishChecks.DefaultContextualArguments,
+            warnings));
+
         Reject(problems);
 
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
@@ -227,6 +252,8 @@ public sealed class PublishMethodologyHandler(
         await methodologies
             .ReplaceDependenciesAsync(methodology.Id, dependencies, ct)
             .ConfigureAwait(false);
+
+        return warnings;
     }
 
     /// <summary>
@@ -578,12 +605,17 @@ public sealed class PublishMethodologyHandler(
 /// <param name="Numeric">Зміна арифметичного режиму.</param>
 /// <param name="Calendar">Зміна календарної конвенції.</param>
 /// <param name="Changes">Розбіжності результатів на золотому наборі.</param>
+/// <param name="Warnings">
+/// Попередження публікації — те, що не валить її, але має бути
+/// показане (№05 §7): оголошений і невжитий аргумент.
+/// </param>
 public sealed record MethodologyPublicationDiff(
     int MethodologyVersionId,
     int? PreviousVersionId,
     MethodologyModeChange Numeric,
     MethodologyCalendarChange Calendar,
-    IReadOnlyList<MethodologyResultDelta> Changes)
+    IReadOnlyList<MethodologyResultDelta> Changes,
+    IReadOnlyList<string>? Warnings = null)
 {
     /// <summary>Чи змінює публікація хоч одне число або режим.</summary>
     public bool IsSignificant

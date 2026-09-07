@@ -1,4 +1,4 @@
-// src/Ecr.Expressions/Binding/ArgumentDeclarationChecker.cs
+﻿// src/Ecr.Expressions/Binding/ArgumentDeclarationChecker.cs
 using Ecr.Expressions.Ast;
 
 namespace Ecr.Expressions.Binding;
@@ -53,6 +53,25 @@ public static class ArgumentDeclarationChecker
             .Where(part => part.Length > 0)
             .ToList();
     }
+
+    /// <summary>
+    /// Оголошений список або <c>null</c>, якщо його не оголошено.
+    /// </summary>
+    /// <param name="argumentsCsv">Значення <c>FInfo_Arguments</c>; <c>null</c> — колонка порожня.</param>
+    /// <returns><c>null</c> — списку немає; інакше — розібраний список.</returns>
+    /// <remarks>
+    /// ⛔ Місце, де розрізняються «списку немає» і «список порожній», і воно
+    /// одне. <see cref="ParseDeclaration"/> на <c>null</c> віддає ПОРОЖНІЙ список — це
+    /// правильно для розбору рядка, але смертельно для виклику: порожній список
+    /// означає «оголошено нуль аргументів», тож будь-який токен у виразі стає
+    /// порушенням.
+    ///
+    /// ⚠ Колонка <c>ArgumentsCsv</c> з'явилася порожньою в УСІХ наявних рядків.
+    /// Якби викликач передав сюди <c>ParseDeclaration(null)</c>, публікація
+    /// відхилила б **кожну** формулу корпусу з першого ж дня.
+    /// </remarks>
+    public static IReadOnlyList<string>? Declared(string? argumentsCsv)
+        => argumentsCsv is null ? null : ParseDeclaration(argumentsCsv);
 
     /// <summary>Усі вживання <c>@Arg</c> у дереві, у порядку обходу.</summary>
     /// <param name="root">Корінь виразу.</param>

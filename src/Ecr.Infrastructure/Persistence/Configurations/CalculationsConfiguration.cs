@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Calculations;
+﻿using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Units;
@@ -157,6 +157,13 @@ public sealed class MethodologyFormulaConfiguration : IEntityTypeConfiguration<M
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
+
+        // ⚠ Без межі довжини і без `IsRequired`: це `FInfo_Arguments` чинної
+        // системи як є, а там трапляються списки на десятки імен (38 токенів
+        // лише в двох формулах `Flert`). Обрізати список при імпорті означало
+        // б оголосити частину аргументів невизначеними — тобто створити рівно ту
+        // помилку, яку ця колонка й має ловити.
+        builder.Property(x => x.ArgumentsCsv);
         builder.Property(x => x.EvaluationOrder).HasDefaultValue(0);
         builder.Property(x => x.ResultType).HasColumnName("ResultType");
 
