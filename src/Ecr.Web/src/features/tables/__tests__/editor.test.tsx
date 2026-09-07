@@ -74,7 +74,7 @@ interface Call {
 }
 
 /** Замокнена мережа; повертає перелік того, що пішло на сервер. */
-function network(relations: unknown[]): Call[] {
+function network(relations: unknown[], isEditable = true): Call[] {
   const calls: Call[] = [];
 
   vi.stubGlobal(
@@ -87,7 +87,7 @@ function network(relations: unknown[]): Call[] {
       const body = ((): unknown => {
         if (url.endsWith('/api/v1/me')) return Me;
         if (url.includes('/structure')) return Structure;
-        if (url.includes('/relations') && method === 'GET') return relations;
+        if (url.includes('/relations') && method === 'GET') return { isEditable, relations };
 
         // Відповідь на запис: сервер повертає збережений зв'язок.
         return {
@@ -102,7 +102,6 @@ function network(relations: unknown[]): Call[] {
           mapJson: null,
           onSourceChange: 0,
           isActive: true,
-          isEditable: true,
         };
       })();
 
@@ -202,29 +201,43 @@ describe('Редактор зв’язків між таблицями', () => {
   });
 
   it('опублікована версія показує зв’язки без кнопок правки', async () => {
-    network([
-      {
-        id: 11,
-        code: 'Rollup7',
-        relationKind: 'Rollup',
-        sourceTableDefId: 5,
-        sourceTableCode: 'Main',
-        targetTableDefId: 6,
-        targetTableCode: 'Consolidation',
-        matchJson: '{"by":"RowKey"}',
-        mapJson: null,
-        onSourceChange: 0,
-        isActive: true,
+    network(
+      [
+        {
+          id: 11,
+          code: 'Rollup7',
+          relationKind: 'Rollup',
+          sourceTableDefId: 5,
+          sourceTableCode: 'Main',
+          targetTableDefId: 6,
+          targetTableCode: 'Consolidation',
+          matchJson: '{"by":"RowKey"}',
+          mapJson: null,
+          onSourceChange: 0,
+          isActive: true,
+        },
+      ],
 
-        // Стан версії каже СЕРВЕР; клієнт не виводить його зі `status` сам.
-        isEditable: false,
-      },
-    ]);
+      // Стан версії каже СЕРВЕР; клієнт не виводить його зі `status` сам.
+      false,
+    );
     render(show());
 
     expect(await screen.findByText('Rollup7')).toBeDefined();
     expect(screen.queryByText('⟦tables.editRelation⟧')).toBeNull();
     expect(screen.queryByText('⟦tables.newRelation⟧')).toBeNull();
     expect(screen.getByText('⟦tables.readOnly⟧')).toBeDefined();
+  });
+
+  it('на опублікованій версії БЕЗ зв’язків кнопки «новий зв’язок» теж немає', async () => {
+    // ⛔ Саме той випадок, заради якого відповідь — конверт. Версія без
+    // зв'язків найчастіша (механізм опційний), і поелементний `isEditable`
+    // тут не сказав би нічого: кнопка стояла б на замороженій версії, а
+    // сервер відмовив би `ECR-TMPL-0409`.
+    network([], false);
+    render(show());
+
+    expect(await screen.findByText('⟦tables.readOnly⟧')).toBeDefined();
+    expect(screen.queryByText('⟦tables.newRelation⟧')).toBeNull();
   });
 });

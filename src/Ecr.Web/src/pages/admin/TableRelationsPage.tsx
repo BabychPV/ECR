@@ -66,12 +66,13 @@ export function TableRelationsPage(): JSX.Element {
 
   const tables = useMemo(() => tableOptions(structure.data), [structure.data]);
 
-  // ⚠ Чи заморожена версія, каже СЕРВЕР: `isEditable` приходить у кожному
-  // зв'язку. Порожній перелік відповіді не дає взагалі — і саме тому за
-  // відсутності зв'язків форма показується (створити перший зв'язок у
-  // чернетці можна), а сервер лишається межею: опублікована версія відхилить
-  // запит сама (`ECR-TMPL-0409`).
-  const frozen = (relations.data ?? []).some((relation) => !relation.isEditable);
+  // ⛔ Чи заморожена версія, каже СЕРВЕР — і каже це в КОНВЕРТІ, а не в
+  // кожному зв'язку. Версія без жодного зв'язку — найчастіший випадок
+  // (механізм опційний), і поелементна відповідь на ньому мовчала б: кнопка
+  // «новий зв'язок» стояла б на опублікованій версії, де сервер однаково
+  // відмовить (`ECR-TMPL-0409`). Показана й непрацездатна кнопка гірша за
+  // відсутню.
+  const frozen = relations.data !== undefined && !relations.data.isEditable;
   const editable = mayEdit && !frozen;
 
   const save = useMutation({
@@ -116,7 +117,7 @@ export function TableRelationsPage(): JSX.Element {
       <AsyncBoundary<TableRelationDto[]>
         isPending={relations.isPending && known}
         error={relations.error}
-        data={known ? relations.data : []}
+        data={known ? relations.data?.relations : []}
         isEmpty={(list) => list.length === 0}
         emptyTitle={t('tables.noRelations')}
         emptyHint={t('tables.noRelationsHint')}
@@ -153,7 +154,7 @@ export function TableRelationsPage(): JSX.Element {
                   <Table.Td>{relation.targetTableCode}</Table.Td>
                   <Table.Td>{onSourceChangeLabel(relation.onSourceChange)}</Table.Td>
                   <Table.Td>
-                    {relation.isEditable && mayEdit && (
+                    {editable && (
                       <Group gap="xs">
                         <Button
                           size="compact-xs"

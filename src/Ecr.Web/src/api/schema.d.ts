@@ -3474,6 +3474,11 @@ export interface paths {
          * Зв'язки між таблицями версії. Право `Template.View`.
          * @description ⚠ Порожній перелік — законна відповідь: механізм опційний
          *     (`ФВ-2.12`), і шаблон без жодного зв'язку працює так само.
+         *
+         *     ⛔ Саме тому відповідь — конверт із `isEditable`, а не голий масив:
+         *     на порожньому переліку масив нічого не каже про стан версії, і клієнт
+         *     показав би кнопку «новий зв'язок» на опублікованій версії, де сервер
+         *     однаково відмовить.
          */
         get: {
             parameters: {
@@ -3493,9 +3498,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["TableRelationDto"][];
-                        "text/json": components["schemas"]["TableRelationDto"][];
-                        "text/plain": components["schemas"]["TableRelationDto"][];
+                        "application/json": components["schemas"]["TableRelationsDto"];
+                        "text/json": components["schemas"]["TableRelationsDto"];
+                        "text/plain": components["schemas"]["TableRelationsDto"];
                     };
                 };
                 /** @description Not Found */
@@ -6376,10 +6381,6 @@ export interface components {
             id: number;
             /** @description Чи діє зв'язок. */
             isActive: boolean;
-            /** @description Чи можна правити зв'язок. Відповідь дає СЕРВЕР за станом версії: клієнт,
-             *     який виводить це сам, тримає другу копію правила «опублікована незмінна»
-             *     (`ФВ-7.1`) — і саме вона розійдеться з доменом на третьому стані. */
-            isEditable: boolean;
             /** @description Які колонки на які; `null` — перенесення немає. */
             mapJson: null | string;
             /** @description Як зіставляються рядки джерела і приймача. */
@@ -6411,6 +6412,13 @@ export interface components {
          * @enum {unknown}
          */
         TableRelationKind: "Mirror" | "Rollup" | "Reference" | "Cascade" | "Check" | "Copy";
+        /** @description Зв'язки версії разом із відповіддю на «чи можна їх правити». */
+        TableRelationsDto: {
+            /** @description Чи дозволяє стан версії структурну правку. */
+            isEditable: boolean;
+            /** @description Зв'язки в порядку коду; порожньо — таблиці незалежні. */
+            relations: components["schemas"]["TableRelationDto"][];
+        };
         /**
          * @description Спосіб формування рядків таблиці.
          * @enum {unknown}

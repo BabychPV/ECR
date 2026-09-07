@@ -1,5 +1,5 @@
 import { apiFetch } from '@/api/client';
-import type { TableRelationDto } from '@/api/types';
+import type { TableRelationDto, TableRelationsDto } from '@/api/types';
 import { relationBody, type RelationDraft } from './relation';
 
 /**
@@ -16,9 +16,16 @@ import { relationBody, type RelationDraft } from './relation';
  * правки — приймає її лише чернетка (`ФВ-7.1`).
  */
 
-/** Зв'язки версії; порожній перелік — норма (механізм опційний). */
-export function tableRelations(templateVersionId: number): Promise<TableRelationDto[]> {
-  return apiFetch<TableRelationDto[]>(
+/**
+ * Зв'язки версії разом зі станом версії.
+ *
+ * ⛔ Конверт, а не масив: порожній перелік — норма (механізм опційний), і саме
+ * на ньому масив нічого не сказав би про те, чи можна правити. Клієнт показав
+ * би кнопку «новий зв'язок» на опублікованій версії, де сервер однаково
+ * відмовить.
+ */
+export function tableRelations(templateVersionId: number): Promise<TableRelationsDto> {
+  return apiFetch<TableRelationsDto>(
     `/api/v1/template-versions/${String(templateVersionId)}/relations`,
   );
 }

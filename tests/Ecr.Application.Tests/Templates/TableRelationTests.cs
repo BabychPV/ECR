@@ -84,7 +84,6 @@ public sealed class TableRelationTests
         Assert.Equal("WaterRollup", saved.Code);
         Assert.Equal("Main", saved.SourceTableCode);
         Assert.Equal("Consolidation", saved.TargetTableCode);
-        Assert.True(saved.IsEditable);
 
         _relations.Received(1).Add(Arg.Any<TableRelationDef>());
 
@@ -166,9 +165,16 @@ public sealed class TableRelationTests
         _store.ListTableRelationsAsync(1, Arg.Any<CancellationToken>())
             .Returns([]);
 
+        var answer = await List().HandleAsync(1, CancellationToken.None);
+
         // ⚠ Механізм опційний: шаблон без жодного зв'язку працює однаково.
         // Порожнеча тут — відповідь, а не незаповнена конфігурація.
-        Assert.Empty(await List().HandleAsync(1, CancellationToken.None));
+        Assert.Empty(answer.Relations);
+
+        // ⛔ І саме на порожньому переліку відповідь про стан версії ще
+        // потрібна: інакше клієнт показав би кнопку «новий зв'язок» там, де
+        // сервер відмовить.
+        Assert.True(answer.IsEditable);
     }
 
     [Fact]
@@ -180,14 +186,15 @@ public sealed class TableRelationTests
             .Returns([Existing()]);
 
         var draft = await List().HandleAsync(1, CancellationToken.None);
-        Assert.True(draft[0].IsEditable);
+        Assert.True(draft.IsEditable);
 
         _draft.Publish(publishedByUserId: 8, utcNow: Now);
 
         // ⛔ Рахує СЕРВЕР. Клієнт, який виводив би це сам, тримав би другу
         // копію правила «опублікована незмінна».
         var published = await List().HandleAsync(1, CancellationToken.None);
-        Assert.False(published[0].IsEditable);
+        Assert.False(published.IsEditable);
+        Assert.Single(published.Relations);
     }
 
     [Fact]

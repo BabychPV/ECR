@@ -4118,10 +4118,6 @@
             "description": "Чи діє зв'язок.",
             "type": "boolean"
           },
-          "isEditable": {
-            "description": "Чи можна правити зв'язок. Відповідь дає СЕРВЕР за станом версії: клієнт,\r\nякий виводить це сам, тримає другу копію правила «опублікована незмінна»\r\n(`ФВ-7.1`) — і саме вона розійдеться з доменом на третьому стані.",
-            "type": "boolean"
-          },
           "mapJson": {
             "description": "Які колонки на які; `null` — перенесення немає.",
             "type": [
@@ -4172,8 +4168,7 @@
           "matchJson",
           "mapJson",
           "onSourceChange",
-          "isActive",
-          "isEditable"
+          "isActive"
         ],
         "type": "object"
       },
@@ -4187,6 +4182,27 @@
           "Check",
           "Copy"
         ]
+      },
+      "TableRelationsDto": {
+        "description": "Зв'язки версії разом із відповіддю на «чи можна їх правити».",
+        "properties": {
+          "isEditable": {
+            "description": "Чи дозволяє стан версії структурну правку.",
+            "type": "boolean"
+          },
+          "relations": {
+            "description": "Зв'язки в порядку коду; порожньо — таблиці незалежні.",
+            "items": {
+              "$ref": "#/components/schemas/TableRelationDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "isEditable",
+          "relations"
+        ],
+        "type": "object"
       },
       "TableRowMode": {
         "description": "Спосіб формування рядків таблиці.",
@@ -9125,7 +9141,7 @@
     },
     "/api/v1/template-versions/{id}/relations": {
       "get": {
-        "description": "⚠ Порожній перелік — законна відповідь: механізм опційний\r\n(`ФВ-2.12`), і шаблон без жодного зв'язку працює так само.",
+        "description": "⚠ Порожній перелік — законна відповідь: механізм опційний\r\n(`ФВ-2.12`), і шаблон без жодного зв'язку працює так само.\r\n\r\n⛔ Саме тому відповідь — конверт із `isEditable`, а не голий масив:\r\nна порожньому переліку масив нічого не каже про стан версії, і клієнт\r\nпоказав би кнопку «новий зв'язок» на опублікованій версії, де сервер\r\nоднаково відмовить.",
         "parameters": [
           {
             "description": "Версія.",
@@ -9144,26 +9160,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TableRelationDto"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/TableRelationsDto"
                 }
               },
               "text/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TableRelationDto"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/TableRelationsDto"
                 }
               },
               "text/plain": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TableRelationDto"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/TableRelationsDto"
                 }
               }
             },

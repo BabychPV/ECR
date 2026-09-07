@@ -162,11 +162,16 @@ public sealed class TemplateVersionsController(
     /// <remarks>
     /// ⚠ Порожній перелік — законна відповідь: механізм опційний
     /// (<c>ФВ-2.12</c>), і шаблон без жодного зв'язку працює так само.
+    ///
+    /// ⛔ Саме тому відповідь — конверт із <c>isEditable</c>, а не голий масив:
+    /// на порожньому переліку масив нічого не каже про стан версії, і клієнт
+    /// показав би кнопку «новий зв'язок» на опублікованій версії, де сервер
+    /// однаково відмовить.
     /// </remarks>
     [HttpGet("relations")]
-    [ProducesResponseType<IReadOnlyList<TableRelationDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<TableRelationsDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<IReadOnlyList<TableRelationDto>>> Relations(
+    public async Task<ActionResult<TableRelationsDto>> Relations(
         int id, CancellationToken ct)
         => Ok(await listRelations.HandleAsync(id, ct).ConfigureAwait(false));
 

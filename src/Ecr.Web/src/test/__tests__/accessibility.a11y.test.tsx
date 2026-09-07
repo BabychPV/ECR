@@ -156,6 +156,11 @@ function emptyBodyFor(url: string): unknown {
   if (url.includes('/structure')) {
     return { templateVersionId: 0, presentationRevision: 0, sheets: [] };
   }
+
+  // ⛔ Зв'язки таблиць віддають КОНВЕРТ із `isEditable`: порожній масив тут
+  // упав би на `relations.data.relations`, і редактор «не мав би порушень»
+  // рівно тому, що не намалювався б.
+  if (url.includes('/relations')) return { isEditable: true, relations: [] };
   if (url.includes('/me')) {
     return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };
   }

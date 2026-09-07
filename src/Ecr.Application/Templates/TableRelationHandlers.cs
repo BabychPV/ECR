@@ -33,9 +33,9 @@ public sealed class ListTableRelationsHandler(
     /// <summary>Читає зв'язки версії.</summary>
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Зв'язки в порядку коду.</returns>
+    /// <returns>Зв'язки в порядку коду разом зі станом версії.</returns>
     /// <exception cref="NotFoundException">Версії немає.</exception>
-    public async Task<IReadOnlyList<TableRelationDto>> HandleAsync(
+    public async Task<TableRelationsDto> HandleAsync(
         int templateVersionId, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
@@ -47,25 +47,29 @@ public sealed class ListTableRelationsHandler(
         var codes = await store.ListTableCodesAsync(templateVersionId, ct).ConfigureAwait(false);
         var relations = await store.ListTableRelationsAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return [.. relations.Select(r => TableRelationMapper.Map(r, codes, !version.IsStructurallyFrozen))];
+        // ⛔ `isEditable` їде в конверті, а не в кожному зв'язку: версія без
+        // жодного зв'язку — найчастіший випадок (механізм опційний), і саме на
+        // ньому поелементна відповідь мовчала б.
+        return new TableRelationsDto(
+            !version.IsStructurallyFrozen,
+            [.. relations.Select(r => TableRelationMapper.Map(r, codes))]);
     }
 }
 
 /// <summary>Складання DTO зв'язку — одне на всі три обробники.</summary>
 /// <remarks>
-/// ⛔ Спільне навмисно: <c>isEditable</c> рахується зі стану версії, і друга
-/// копія цього рахунку — рівно те місце, де відповідь на «чи можна правити»
-/// розійшлася б між переліком і збереженням.
+/// ⛔ Спільне навмисно: підстановка кодів таблиць — єдине місце, де DTO
+/// розходиться з сутністю, і друга копія цієї підстановки давала б різні
+/// підписи в переліку і у відповіді на збереження.
 /// </remarks>
 public static class TableRelationMapper
 {
     /// <summary>Складає DTO зв'язку.</summary>
     /// <param name="relation">Зв'язок.</param>
     /// <param name="tableCodes">Коди таблиць версії: ідентифікатор → код.</param>
-    /// <param name="isEditable">Чи дозволяє стан версії структурну правку.</param>
     /// <returns>Зв'язок для редактора.</returns>
     public static TableRelationDto Map(
-        TableRelationDef relation, IReadOnlyDictionary<int, string> tableCodes, bool isEditable)
+        TableRelationDef relation, IReadOnlyDictionary<int, string> tableCodes)
     {
         ArgumentNullException.ThrowIfNull(relation);
         ArgumentNullException.ThrowIfNull(tableCodes);
@@ -81,8 +85,7 @@ public static class TableRelationMapper
             relation.MatchJson,
             relation.MapJson,
             relation.OnSourceChange,
-            relation.IsActive,
-            isEditable);
+            relation.IsActive);
     }
 
     /// <summary>Код таблиці за ідентифікатором.</summary>
@@ -219,7 +222,7 @@ public sealed class SaveTableRelationHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return TableRelationMapper.Map(existing, tableCodes, isEditable: true);
+        return TableRelationMapper.Map(existing, tableCodes);
     }
 
     /// <summary>Перевіряє, що таблиця належить саме цій версії.</summary>

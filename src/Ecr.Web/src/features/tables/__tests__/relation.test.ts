@@ -89,7 +89,6 @@ describe('Чернетка зв’язку між таблицями', () => {
       mapJson: null,
       onSourceChange: 0,
       isActive: true,
-      isEditable: true,
     };
 
     expect(draftOf(relation).isNew).toBe(false);
