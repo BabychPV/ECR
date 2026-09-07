@@ -98,6 +98,13 @@ public sealed class PublishTemplateVersionTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Коректна_версія_публікується()
     {
+        // ⚠ Структура потрібна: до появи `PublishChecks.CheckStructure`
+        // (`S-09`) цей тест публікував `_draft` БЕЗ жодного аркуша — рівно той
+        // стан, який версія без структури й має, — і мовчки доводив, що
+        // «версія з нулем аркушів публікується». Мінімальна структура без
+        // жодної формули відрізняє «версія коректна» від «версії немає».
+        Structure();
+
         await Handler().PublishAsync(1, userId: 9, CancellationToken.None);
 
         Assert.Equal(TemplateVersionStatus.Published, _draft.Status);
@@ -142,6 +149,21 @@ public sealed class PublishTemplateVersionTests
             Assert.NotNull(d.ColumnDefId);
             Assert.Equal(0, d.SourceKind);
         });
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Версія_без_жодного_аркуша_відхиляє_публікацію()
+    {
+        // ⛔ `_draft` тут НАВМИСНО без `Structure(...)`: саме цей стан
+        // публікувався кодом `204`, виміряно живим прогоном (директива №09
+        // §6.5, `S-09`). Ні `TemplateVersion.Publish` (лише перемикає стан,
+        // ФВ-2.9), ні сервер цієї перевірки не мали.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().PublishAsync(1, userId: 9, CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal(TemplateVersionStatus.Draft, _draft.Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
@@ -310,6 +332,8 @@ public sealed class PublishTemplateVersionTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Публікація_записує_подію_в_аудит()
     {
+        Structure();
+
         await Handler().PublishAsync(1, userId: 9, CancellationToken.None);
 
         await _audit.Received(1).WritePublicationEventAsync(
@@ -328,6 +352,11 @@ public sealed class PublishTemplateVersionTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Невдала_публікація_не_лишає_часткових_змін()
     {
+        // ⚠ Структура потрібна: без неї `CheckStructure` відхилив би раніше,
+        // ніж виконання дійшло б до `version.Publish()`, і тест перевіряв би
+        // не той код помилки.
+        Structure();
+
         // Уже опублікована версія: повторна публікація має бути відхилена.
         _draft.Publish(publishedByUserId: 8, utcNow: Now);
 

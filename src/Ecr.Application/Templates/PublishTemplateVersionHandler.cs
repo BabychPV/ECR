@@ -85,6 +85,12 @@ public sealed class PublishTemplateVersionHandler(
         // відмова на правила означала б два кола виправлень замість одного.
         diagnostics = [.. diagnostics, .. PublishChecks.CheckRules(version)];
 
+        // ⛔ Плюс перевірка СТРУКТУРИ: версія без жодного аркуша публікувалася
+        // кодом `204`, і ні домен, ні сервер цього не бачили (директива №09
+        // §6.5, `S-09`). `TemplateVersion.Publish` навмисно не перевіряє це
+        // сама — валідація цілісності відбувається до виклику (ФВ-2.9).
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckStructure(version)];
+
         if (diagnostics.Count > 0)
         {
             // Усі проблеми одразу, а не перша: інакше користувач публікував би
