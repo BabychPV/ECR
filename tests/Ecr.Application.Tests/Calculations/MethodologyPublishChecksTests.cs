@@ -1,9 +1,11 @@
 // tests/Ecr.Application.Tests/Calculations/MethodologyPublishChecksTests.cs
 using Ecr.Application.Calculations;
+using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Ast;
+using Ecr.Expressions.Binding;
 using Ecr.TestKit;
 using Xunit;
 
@@ -138,6 +140,66 @@ public sealed class MethodologyPublishChecksTests
         Assert.Contains(problems, p => p.Contains("числовій колонці", StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Токен_поза_списком_аргументів_відхиляє_публікацію_кодом_0432()
+    {
+        // ⛔ Упаде, щойно джерелом істини про аргументи стане текст виразу.
+        // Збірка підставить рівно `Total` і `Density`; `@Duration` у вираз не
+        // потрапить, і формула поверне правдоподібне число — не помилку.
+        // Замір корпусу: 38 таких токенів у двох формулах `Flert`.
+        var thrown = Assert.Throws<BusinessRuleException>(() => CheckWithArguments(
+            "Flert_Emission", "@Total * @Density / @Duration", "Total;Density"));
+
+        Assert.Equal("ECR-CALC-0432", thrown.ErrorCode);
+
+        // Поіменно: методологу треба знати, ЯКИЙ токен дописати в список.
+        Assert.Contains("Duration", thrown.Message, StringComparison.Ordinal);
+        Assert.Contains("Flert_Emission", thrown.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Оголошений_і_невжитий_аргумент_публікацію_не_блокує()
+    {
+        // ⚠ Межа правила, і вона дорожча за саме правило: 359 таких аргументів
+        // у 186 формулах корпусу. Відмова тут зупинила б міграцію.
+        var warnings = new List<string>();
+
+        var problems = CheckWithArguments(
+            "Total", "@Fuel * 2", "Fuel;Density", warnings);
+
+        Assert.Empty(problems);
+        Assert.Contains(warnings, w => w.Contains("Density", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Контекстний_аргумент_попередження_не_дає()
+    {
+        // ⛔ Глушник обов'язковий: без нього кожна публікація дає 186
+        // попереджень про системний контекст, їх перестають читати — і разом
+        // із ними перестають бачити ті кілька, що означають описку.
+        var warnings = new List<string>();
+
+        CheckWithArguments("Total", "@Fuel * 2", "Fuel;CalculationDate", warnings);
+
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Формула_без_оголошеного_списку_звірки_аргументів_не_проходить()
+    {
+        // ⛔ «Списку немає» і «список порожній» — різні стани. Колонки під
+        // список у `calc.MethodologyFormula` сьогодні немає (`D2-101`), і
+        // зведення їх до одного відхиляло б КОЖНУ формулу кожної версії.
+        var problems = Check(
+            [Formula("Total", "@Fuel * @Density", FormulaResultType.Number)], [], []);
+
+        Assert.Empty(problems);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private IReadOnlyList<string> Check(
@@ -148,6 +210,22 @@ public sealed class MethodologyPublishChecksTests
             formulas.Select(f => new ParsedFormula(f.Code, f.ResultType, Root(f.Expression))).ToList(),
             constants,
             outputs);
+
+    /// <summary>Одна формула з оголошеним <c>;</c>-списком аргументів.</summary>
+    private IReadOnlyList<string> CheckWithArguments(
+        string code, string expression, string declaration, ICollection<string>? warnings = null)
+        => MethodologyPublishChecks.Check(
+            [
+                new ParsedFormula(
+                    code,
+                    FormulaResultType.Number,
+                    Root(expression),
+                    ArgumentDeclarationChecker.ParseDeclaration(declaration)),
+            ],
+            [],
+            [],
+            contextualArguments: null,
+            warnings: warnings);
 
     /// <summary>
     /// Розбір — СПРАВЖНІЙ: заглушити його означало б перевіряти заглушку.

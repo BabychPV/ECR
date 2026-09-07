@@ -1,8 +1,11 @@
 // src/Ecr.Application/Calculations/MethodologyPublishChecks.cs
 using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Expressions.Ast;
+using Ecr.Expressions.Binding;
 
 namespace Ecr.Application.Calculations;
 
@@ -44,20 +47,66 @@ public static class MethodologyPublishChecks
     private static readonly HashSet<string> NonNumericFunctions =
         new(StringComparer.OrdinalIgnoreCase) { "if", "in" };
 
+    /// <summary>
+    /// Контекстні аргументи методології — ті, що збірка передає <b>кожній</b>
+    /// формулі незалежно від її списку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це глушник другого правила пастки 2, і без нього правило шкідливе:
+    /// замір корпусу дає 359 аргументів «оголошено, не вжито» у 186 формулах —
+    /// майже цілком системний контекст. 186 попереджень на кожну публікацію
+    /// перестають читати за тиждень, і разом із ними перестають бачити ті
+    /// кілька, що означають описку в імені токена.
+    ///
+    /// ⚠ Перелік <b>не виміряний на корпусі</b> — це два імені, названі
+    /// директивою ПК-1 №05 §7. Повний список має прийти від методолога і
+    /// оселитися на ВЕРСІЇ методології (питання <c>Q-090</c>, рішення
+    /// <c>D2-102</c>): контекст різний у різних методологій, і зашитий у код
+    /// він мовчки глушив би там, де глушити не можна. Доки колонки немає,
+    /// викликач передає перелік параметром.
+    /// </remarks>
+    public static IReadOnlyList<string> DefaultContextualArguments { get; } =
+        ["CalculationDate", "Location"];
+
     /// <summary>Перевіряє типи констант і результатів формул версії.</summary>
     /// <param name="formulas">Формули версії з розібраними деревами.</param>
     /// <param name="constants">Усі константи версії, включно з мітками.</param>
     /// <param name="outputs">Оголошені виходи версії.</param>
+    /// <param name="contextualArguments">
+    /// Контекстні аргументи методології; <c>null</c> —
+    /// <see cref="DefaultContextualArguments"/>, порожній перелік — не глушити
+    /// нічого.
+    /// </param>
+    /// <param name="warnings">
+    /// Куди складати попередження, які публікацію <b>не</b> блокують;
+    /// <c>null</c> — попередження нікуди не йдуть.
+    /// </param>
     /// <returns>Перелік проблем; порожній — публікація за типами проходить.</returns>
-    /// <exception cref="ArgumentNullException">Будь-який аргумент — <c>null</c>.</exception>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="formulas"/>, <paramref name="constants"/> або
+    /// <paramref name="outputs"/> — <c>null</c>.
+    /// </exception>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0432</c> — у виразі є токен, якого немає в оголошеному
+    /// списку аргументів формули.
+    /// </exception>
     public static IReadOnlyList<string> Check(
         IReadOnlyList<ParsedFormula> formulas,
         IReadOnlyList<MethodologyConstant> constants,
-        IReadOnlyList<MethodologyOutput> outputs)
+        IReadOnlyList<MethodologyOutput> outputs,
+        IReadOnlyList<string>? contextualArguments = null,
+        ICollection<string>? warnings = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(constants);
         ArgumentNullException.ThrowIfNull(outputs);
+
+        // ⛔ Аргументи звіряються ПЕРШИМИ і кидають окремим кодом, а не лягають
+        // у спільний перелік. Причина не в порядку зручності: доки токен поза
+        // списком, текст виразу і вираз, який збере збірка, — це два різні
+        // вирази, і будь-який висновок про типи зроблено не про той, що
+        // рахуватиметься. Спершу треба звести їх до одного.
+        Audit(formulas, contextualArguments ?? DefaultContextualArguments, warnings);
 
         var problems = new List<string>();
         var byCode = new Dictionary<string, MethodologyConstant>(StringComparer.OrdinalIgnoreCase);
@@ -83,6 +132,84 @@ public static class MethodologyPublishChecks
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// Звіряє текст кожної формули з її <b>оголошеним</b> списком аргументів
+    /// (директива ПК-1 №05 §7, пастка 2).
+    /// </summary>
+    /// <param name="formulas">Формули версії з розібраними деревами.</param>
+    /// <param name="contextual">Контекстні аргументи — глушник другого правила.</param>
+    /// <param name="warnings">Куди складати попередження; <c>null</c> — нікуди.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0432</c> — знайдено токен поза списком.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Формула БЕЗ списку (<c>DeclaredArguments = null</c>) пропускається
+    /// цілком, і це не послаблення. «Списку немає» і «список порожній» — різні
+    /// стани: порожній означає «формула не приймає нічого», тобто кожен її
+    /// токен невизначений і кожен має бути названий; відсутній означає, що
+    /// список ще не доїхав із джерела (<c>calc.MethodologyFormula</c> колонки
+    /// поки не має — <c>D2-101</c>), і судити нема за чим. Звести їх до одного
+    /// означало б відхиляти кожну формулу версії, поки колонки немає.
+    ///
+    /// ⚠ Перелік, а не перша знахідка: 38 токенів корпусу живуть у ДВОХ
+    /// формулах <c>Flert</c>, і методолог, який дописує їх у список по одному
+    /// за прогін, зробить 38 прогонів.
+    /// </remarks>
+    private static void Audit(
+        IReadOnlyList<ParsedFormula> formulas,
+        IReadOnlyList<string> contextual,
+        ICollection<string>? warnings)
+    {
+        var undeclared = new List<string>();
+
+        foreach (var formula in formulas)
+        {
+            if (formula.Root is null || formula.DeclaredArguments is null)
+            {
+                continue;
+            }
+
+            var audit = ArgumentDeclarationChecker.Audit(
+                formula.Root, formula.DeclaredArguments, contextual);
+
+            undeclared.AddRange(audit.Undeclared.Select(
+                usage => $"«{formula.Code}»: @{usage.Name} (позиція "
+                         + usage.Position.ToString(CultureInfo.InvariantCulture) + ")"));
+
+            if (warnings is null)
+            {
+                continue;
+            }
+
+            foreach (var name in audit.UnusedDeclared)
+            {
+                // ⚠ Саме попередження: чинна система це допускала масово, і
+                // відмова публікації тут зупинила б міграцію корпусу. Але
+                // мовчати теж не можна — оголошений і невжитий аргумент
+                // найчастіше означає, що у виразі те саме ім'я написане з
+                // описки інакше, і ТОЙ токен уже нічого не отримає.
+                warnings.Add(
+                    $"Формула «{formula.Code}»: аргумент «{name}» оголошений у списку, але у "
+                    + "виразі не вживається — найчастіше це описка в імені токена.");
+            }
+        }
+
+        if (undeclared.Count == 0)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.FormulaArgumentNotDeclared,
+            "Джерело істини про аргументи формули — оголошений список, а не текст виразу: "
+            + "збірка підставляє рівно те, що в ньому перелічено, тож токен поза списком у "
+            + "вираз не потрапляє і формула рахується з невизначеним параметром — повертаючи "
+            + "правдоподібне число, а не помилку. Токенів поза списком: "
+            + undeclared.Count.ToString(CultureInfo.InvariantCulture) + " — "
+            + string.Join("; ", undeclared) + ".",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["undeclared"] = undeclared });
     }
 
     /// <summary>
@@ -327,4 +454,20 @@ public static class MethodologyPublishChecks
 /// Корінь дерева; <c>null</c> — вираз не розібрався, і типи тут не предмет
 /// (синтаксис ловить окрема перевірка).
 /// </param>
-public sealed record ParsedFormula(string Code, FormulaResultType ResultType, AstNode? Root);
+/// <param name="DeclaredArguments">
+/// Оголошений список аргументів (<c>FormulaDef.Arguments</c>, перенос
+/// <c>FInfo_Arguments</c>), уже розібраний із <c>;</c>-рядка; <c>null</c> —
+/// списку немає, і звірка з текстом не робиться.
+/// </param>
+/// <remarks>
+/// ⛔ <c>DeclaredArguments</c> — джерело істини про аргументи, а не текст
+/// виразу (директива ПК-1 №05 §7). <c>null</c> тут означає рівно «список ще не
+/// доїхав із джерела», а не «аргументів немає»: колонки під нього в
+/// <c>calc.MethodologyFormula</c> сьогодні немає (<c>D2-101</c>), і поки її не
+/// буде, звірка мовчить.
+/// </remarks>
+public sealed record ParsedFormula(
+    string Code,
+    FormulaResultType ResultType,
+    AstNode? Root,
+    IReadOnlyList<string>? DeclaredArguments = null);
