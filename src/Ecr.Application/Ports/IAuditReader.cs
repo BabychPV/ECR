@@ -25,6 +25,25 @@ public sealed record CellChangeView(
     string Origin,
     bool IsLateEdit);
 
+/// <summary>Структурна зміна в журналі, як її бачить читач.</summary>
+/// <param name="ChangedAt">Момент зміни в UTC.</param>
+/// <param name="EntityType">Сутність: <c>cfg.RegistryDef</c>, <c>cfg.RegistryRuleDef</c>.</param>
+/// <param name="EntityId">Ідентифікатор сутності; <c>0</c> — операція над набором.</param>
+/// <param name="Operation">Що зробили: <c>SaveRules</c>, <c>SwitchSourceSet</c>.</param>
+/// <param name="OldJson">Стан до зміни.</param>
+/// <param name="NewJson">Стан після зміни.</param>
+/// <param name="ChangeReason">Причина, якщо її вимагала операція.</param>
+/// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
+public sealed record StructureChangeView(
+    DateTime ChangedAt,
+    string EntityType,
+    int EntityId,
+    string Operation,
+    string? OldJson,
+    string? NewJson,
+    string? ChangeReason,
+    int ChangedByUserId);
+
 /// <summary>
 /// Читання аудиту. Журнал **тільки читається**: методів зміни тут немає і не
 /// буде — журнал, який можна відредагувати, не є доказом.
@@ -47,4 +66,25 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<PagedResult<CellChangeView>> ReadCellChangesAsync(
         DateTime from, DateTime to, long? documentId, CursorRequest page, CancellationToken ct);
+
+    /// <summary>
+    /// Історія структурних змін однієї сутності конфігурації.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ключ пошуку — пара «тип + ідентифікатор», і типів передається
+    /// <b>кілька</b>: історія довідника складається зі змін самого
+    /// <c>cfg.RegistryDef</c> і його правил. Питати їх окремими запитами
+    /// означало б зшивати два впорядкованих потоки в застосунку і
+    /// перемішувати сторінки.
+    ///
+    /// ⚠ <c>aud.StructureChange</c> не партиційована за часом, на відміну від
+    /// <c>aud.CellChange</c>: структурних змін одиниці на день, і вікно тут не
+    /// обов'язкове. Обмежує обсяг <paramref name="limit"/>.
+    /// </remarks>
+    /// <param name="entityTypes">Типи сутностей; порожній набір — нічого.</param>
+    /// <param name="entityId">Ідентифікатор сутності.</param>
+    /// <param name="limit">Скільки останніх записів віддати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<StructureChangeView>> ReadStructureChangesAsync(
+        IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct);
 }

@@ -31,8 +31,27 @@ const TemplatesPage = lazy(async () => ({
 const TemplateVersionPage = lazy(async () => ({
   default: (await import('@/pages/admin/TemplateVersionPage')).TemplateVersionPage,
 }));
+/**
+ * ⚠ Окремий маршрут, а не вкладка в редакторі версії. Зв'язки таблиць
+ * налаштовують заходом «а звідки в цій таблиці числа» (`ФВ-2.13`), і на таку
+ * відповідь треба вміти дати посилання; версія при цьому лишається в адресі,
+ * бо зв'язок належить саме їй.
+ */
+const TableRelationsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/TableRelationsPage')).TableRelationsPage,
+}));
 const RegistriesPage = lazy(async () => ({
   default: (await import('@/pages/admin/RegistriesPage')).RegistriesPage,
+}));
+
+/**
+ * ⚠ Окремий маршрут, а не вкладка в переліку довідників (`ФВ-8.12`). Перелік
+ * відповідає на «які значення можна обрати», конструктор — на «як цей довідник
+ * улаштований»: різні питання, різні права і різна аудиторія. На друге треба
+ * вміти дати посилання (`ФВ-14.29`).
+ */
+const RegistryConstructorPage = lazy(async () => ({
+  default: (await import('@/pages/admin/RegistryConstructorPage')).RegistryConstructorPage,
 }));
 const MethodologiesPage = lazy(async () => ({
   default: (await import('@/pages/admin/MethodologiesPage')).MethodologiesPage,
@@ -155,7 +174,12 @@ export const router = createBrowserRouter([
       { path: 'documents/:id', element: <DocumentPage /> },
       { path: 'admin/templates', element: <TemplatesPage /> },
       { path: 'admin/templates/:id/versions/:versionId', element: <TemplateVersionPage /> },
+      {
+        path: 'admin/templates/:id/versions/:versionId/relations',
+        element: <TableRelationsPage />,
+      },
       { path: 'admin/registries', element: <RegistriesPage /> },
+      { path: 'admin/registries/:code/definition', element: <RegistryConstructorPage /> },
       { path: 'admin/methodologies', element: <MethodologiesPage /> },
       { path: 'admin/methodologies/:id/versions', element: <MethodologyVersionsPage /> },
       { path: 'admin/expressions', element: <ExpressionsPage /> },

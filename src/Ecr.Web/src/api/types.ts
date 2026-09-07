@@ -129,12 +129,69 @@ export type AccessMatrixDto = Schemas['AccessMatrixDto'];
 export type AccessMatrixSheetDto = Schemas['AccessMatrixSheetDto'];
 export type AccessMatrixCellDto = Schemas['AccessMatrixCellDto'];
 
+/** Зв'язок між таблицями версії (`ФВ-2.12`). */
+export type TableRelationDto = Schemas['TableRelationDto'];
+
+/**
+ * Зв'язки версії разом із відповіддю на «чи можна їх правити».
+ *
+ * ⛔ Конверт, а не масив. Механізм опційний, тому версія без жодного зв'язку —
+ * найчастіший випадок, і саме на ньому масив нічого не сказав би про стан
+ * версії. `isEditable` рахує СЕРВЕР: клієнт, який виводив би це зі `status`,
+ * тримав би другу копію правила «опублікована незмінна» (`ФВ-7.1`).
+ */
+export type TableRelationsDto = Schemas['TableRelationsDto'];
+
+/** Вид зв'язку між таблицями. */
+export type TableRelationKind = Schemas['TableRelationKind'];
+
+/** Запис зв'язку між таблицями чернетки. */
+export type SaveTableRelationRequest = Schemas['SaveTableRelationRequest'];
+
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
 export type RegistrySourceKind = Schemas['RegistrySourceKind'];
 
 /** Запис довідника. */
 export type RegistryEntryDto = Schemas['RegistryEntryDto'];
+
+/**
+ * Повний опис довідника для конструктора (`ФВ-8.12`).
+ *
+ * ⛔ Не те саме, що `RegistryDefDto`. Той описує довідник у ПЕРЕЛІКУ — назва,
+ * ознаки, поля; цей везе ще й зв'язки, правила і мапінг, тобто три запити до
+ * трьох різних схем. Один тип на обидва випадки означав би або три зайві
+ * запити на кожне відкриття переліку, або три порожні масиви в ньому — і
+ * порожнеча в переліку не відрізнялася б від «правил немає».
+ */
+export type RegistryDefinitionDto = Schemas['RegistryDefinitionDto'];
+
+/** Поле довідника в конструкторі. */
+export type RegistryFieldDto = Schemas['RegistryFieldDto'];
+
+/** Зв'язок довідника: посилання поля або вид M:N. */
+export type RegistryRelationDto = Schemas['RegistryRelationDto'];
+
+/** Правило цілісності довідника — один із чотирьох видів (`H-10`). */
+export type RegistryRuleDto = Schemas['RegistryRuleDto'];
+
+/** Мапінг зовнішнього поля на поле довідника. */
+export type RegistryMappingDto = Schemas['RegistryMappingDto'];
+
+/** Запис історії опису довідника. */
+export type RegistryHistoryEntryDto = Schemas['RegistryHistoryEntryDto'];
+
+/** Поле у формі збереження опису. */
+export type RegistryFieldSaveDto = Schemas['RegistryFieldSaveDto'];
+
+/** Правило у формі збереження опису. */
+export type RegistryRuleSaveDto = Schemas['RegistryRuleSaveDto'];
+
+/** Запит на збереження опису довідника. */
+export type SaveRegistryDefinitionDto = Schemas['SaveRegistryDefinitionDto'];
+
+/** Нова версія опису після збереження. */
+export type RegistryDefinitionVersionResponse = Schemas['RegistryDefinitionVersionResponse'];
 
 /** Методологія з версіями. */
 export type MethodologyDto = Schemas['MethodologyDto'];

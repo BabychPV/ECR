@@ -52,6 +52,11 @@ public static class DependencyInjection
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
 
+        // Зв'язки між таблицями версії (ФВ-2.12, ФВ-2.13)
+        services.AddScoped<ListTableRelationsHandler>();
+        services.AddScoped<SaveTableRelationHandler>();
+        services.AddScoped<DeleteTableRelationHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();
@@ -121,6 +126,12 @@ public static class DependencyInjection
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
+
+        // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
+        // мапінг і історія опису.
+        services.AddScoped<Registries.GetRegistryDefinitionHandler>();
+        services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
+        services.AddScoped<Registries.GetRegistryHistoryHandler>();
 
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
         services.AddScoped<Expressions.ValidateExpressionHandler>();

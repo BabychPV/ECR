@@ -16,10 +16,12 @@ import { HealthPage } from '@/pages/admin/HealthPage';
 import { JobsPage } from '@/pages/admin/JobsPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { RegistriesPage } from '@/pages/admin/RegistriesPage';
+import { RegistryConstructorPage } from '@/pages/admin/RegistryConstructorPage';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
+import { TableRelationsPage } from '@/pages/admin/TableRelationsPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
 import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
@@ -60,7 +62,9 @@ const Pages: [string, () => JSX.Element][] = [
   ['/change-password', ChangePasswordPage],
   ['/', DocumentsPage],
   ['/admin/templates', TemplatesPage],
+  ['/admin/templates/1/versions/1/relations', TableRelationsPage],
   ['/admin/registries', RegistriesPage],
+  ['/admin/registries/:code/definition', RegistryConstructorPage],
   ['/admin/methodologies', MethodologiesPage],
   ['/admin/methodologies/1/versions', MethodologyVersionsPage],
   ['/admin/expressions', ExpressionsPage],
@@ -148,6 +152,37 @@ function emptyBodyFor(url: string): unknown {
       uncoveredColumns: [],
     };
   }
+  // ⛔ Структура версії — ОБ'ЄКТ із аркушами; порожній масив тут упав би на
+  // `structure.sheets`, і редактор зв'язків «не мав би порушень доступності»
+  // рівно тому, що не намалювався б.
+  if (url.includes('/structure')) {
+    return { templateVersionId: 0, presentationRevision: 0, sheets: [] };
+  }
+
+  // ⛔ Зв'язки таблиць віддають КОНВЕРТ із `isEditable`: порожній масив тут
+  // упав би на `relations.data.relations`, і редактор «не мав би порушень»
+  // рівно тому, що не намалювався б.
+  if (url.includes('/relations')) return { isEditable: true, relations: [] };
+
+  // ⛔ Опис довідника віддає ОБ'ЄКТ із чотирма переліками (`ФВ-8.12`).
+  // Порожній масив тут упав би на першому `.map`, і тест перевіряв би власну
+  // заглушку — та сама помилка, що й `A7-04`.
+  if (url.includes('/definition')) {
+    return {
+      id: 0,
+      code: 'test',
+      nameL10n: { values: {} },
+      isTemporal: false,
+      sourceKind: 'Local',
+      definitionVersion: 1,
+      dataRevision: 0,
+      fields: [],
+      relations: [],
+      rules: [],
+      mappings: [],
+    };
+  }
+
   if (url.includes('/me')) {
     return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };
   }
@@ -187,7 +222,16 @@ suite('Доступність маршрутів', () => {
     const violations = await findViolations(container);
 
     expect(violations, report(violations)).toHaveLength(0);
-  }, 120_000);
+
+    // ⛔ Межа береться з КОНФІГУ, а не задається тут числом. Третій аргумент
+    // `it.each` перекриває `testTimeout`, і саме тому підняття межі в
+    // `vitest.a11y.config.ts` не давало нічого: конфіг казав 400 с, тест —
+    // 120 с, вигравав тест, а повідомлення про падіння називало 120 000 мс і
+    // виглядало як межа конфігу.
+    //
+    // ⚠ Це та сама вада, що й скрізь у цьому корпусі: два джерела істини для
+    // одного числа. Одне з них мовчки перемагає, і читач бачить не ту причину.
+  });
 });
 
 /**

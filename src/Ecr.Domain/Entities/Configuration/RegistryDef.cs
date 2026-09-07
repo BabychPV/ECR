@@ -50,6 +50,45 @@ public sealed class RegistryDef : Entity<int>
     public void BumpDataRevision() => DataRevision++;
 
     /// <summary>
+    /// Інкремент версії <b>визначення</b> — складу полів і правил (ФВ-8.12).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремо від <see cref="BumpDataRevision"/>, і це не дублювання: перша
+    /// росте від зміни ЗАПИСІВ і входить у ключ кешу списків, друга — від
+    /// зміни ОПИСУ. Змішати їх означало б скидати кеш тисяч записів на кожне
+    /// перейменування поля і не скидати нічого там, де поле з'явилося.
+    /// </remarks>
+    public void BumpDefinitionVersion() => DefinitionVersion++;
+
+    /// <summary>Додає поле до опису довідника.</summary>
+    /// <param name="field">Поле; має належати цьому ж довіднику.</param>
+    /// <exception cref="DomainException">
+    /// Поле належить іншому довіднику або код повторюється — <c>ECR-REG-0422</c>.
+    /// </exception>
+    public void AddField(RegistryFieldDef field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+
+        if (field.RegistryDefId != Id)
+        {
+            throw new DomainException(
+                "ECR-REG-0422",
+                $"Поле «{field.Code}» належить довіднику {field.RegistryDefId}, а не {Id}.");
+        }
+
+        // ⚠ Дубль коду ловиться тут, а не лише унікальним індексом. Індекс
+        // віддав би помилку провайдера на SaveChanges — тобто після того, як
+        // решта змін набору вже пройшла валідацію, і без назви поля в тексті.
+        if (_fields.Exists(f => string.Equals(f.Code, field.Code, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new DomainException(
+                "ECR-REG-0422", $"Поле з кодом «{field.Code}» у довіднику «{Code}» вже є.");
+        }
+
+        _fields.Add(field);
+    }
+
+    /// <summary>
     /// Перемикає master. Дозволено **лише поза відкритим періодом** —
     /// перевірка виконується в use-case, тут лише зміна стану (ФВ-8.9).
     /// </summary>

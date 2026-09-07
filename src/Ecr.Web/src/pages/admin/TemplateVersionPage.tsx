@@ -158,6 +158,24 @@ export function TemplateVersionPage(): JSX.Element {
                 вже не заповнити. */}
             {can(session.data, 'Template.View') && <AccessMatrix templateVersionId={id} />}
 
+            {/* ⛔ Зв'язки таблиць (`ФВ-2.12`, `ФВ-2.13`) — окрема сторінка, і
+                вхід у неї стоїть саме тут: питання «звідки в цій таблиці
+                числа» ставлять, дивлячись на структуру. Без цього посилання
+                редактор існував би лише за адресою, яку треба знати. */}
+            {can(session.data, 'Template.View') && (
+              <Button
+                size="xs"
+                variant="default"
+                onClick={() =>
+                  void navigate(
+                    `/admin/templates/${templateId ?? ''}/versions/${String(id)}/relations`,
+                  )
+                }
+              >
+                {t('version.relations')}
+              </Button>
+            )}
+
             {/* ⛔ Клон — єдиний спосіб змінити структуру після публікації
                 (`ФВ-7.1`). Кнопка є завжди, коли є право правити шаблони:
                 клонувати чернетку теж законно. */}

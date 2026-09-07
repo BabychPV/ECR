@@ -239,6 +239,40 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
     }
 }
 
+/// <summary>Конфігурація <see cref="RegistryRuleDef"/> — правил довідника.</summary>
+/// <remarks>
+/// ⛔ Обмеження <c>CK_RegRule_Kind</c> тримає перелік із <b>чотирьох</b> видів
+/// на рівні бази (<c>H-10</c>). Перевірки в конструкторі сутності мало: записи
+/// приходять і скриптами міграції, а вид поза переліком дає правило, яке рушій
+/// не знає — воно не спрацьовує ніколи і виглядає при цьому налаштованим.
+/// </remarks>
+public sealed class RegistryRuleDefConfiguration : IEntityTypeConfiguration<RegistryRuleDef>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<RegistryRuleDef> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("RegistryRuleDef", "cfg", t => t.HasCheckConstraint(
+            "CK_RegRule_Kind", "RuleKind BETWEEN 0 AND 3"));
+
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.RuleKind).HasConversion<byte>();
+        builder.Property(x => x.Severity).HasConversion<byte>();
+        builder.Property(x => x.Expression).HasMaxLength(4000).IsRequired();
+        builder.Property(x => x.ParametersJson).HasColumnType("nvarchar(max)");
+        builder.LocalizedText(x => x.MessageL10n).HasColumnName("MessageL10n");
+        builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_RegRule_Act");
+
+        builder.HasIndex(x => new { x.RegistryDefId, x.Code })
+               .IsUnique().HasDatabaseName("UQ_RegistryRuleDef");
+
+        builder.HasOne<RegistryDef>().WithMany().HasForeignKey(x => x.RegistryDefId)
+               .HasConstraintName("FK_RegRule_Registry");
+    }
+}
+
 /// <summary>Конфігурація <see cref="CalculationBinding"/>.</summary>
 public sealed class CalculationBindingConfiguration : IEntityTypeConfiguration<CalculationBinding>
 {

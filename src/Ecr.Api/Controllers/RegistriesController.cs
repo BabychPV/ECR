@@ -14,7 +14,10 @@ public sealed class RegistriesController(
     GetRegistryEntriesHandler getEntries,
     UpsertRegistryEntryHandler upsert,
     SetEntryValidityHandler setValidity,
-    SwitchRegistrySourceHandler switchSource) : ControllerBase
+    SwitchRegistrySourceHandler switchSource,
+    GetRegistryDefinitionHandler getDefinition,
+    SaveRegistryDefinitionHandler saveDefinition,
+    GetRegistryHistoryHandler getHistory) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -41,6 +44,68 @@ public sealed class RegistriesController(
     public async Task<ActionResult<IReadOnlyList<RegistryEntryDto>>> Entries(
         string code, [FromQuery] DateOnly asOf, [FromQuery] long? parentEntryId, CancellationToken ct)
         => Ok(await getEntries.HandleAsync(code, asOf, parentEntryId, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Повний опис довідника для конструктора. Право <c>Registry.View</c>.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Поля, зв'язки, правила і мапінг — ОДНІЄЮ відповіддю (<c>ФВ-8.12</c>).
+    /// Вони описують один об'єкт і читаються разом; чотири запити давали б
+    /// чотири різні моменти часу на одному екрані.
+    /// </remarks>
+    [HttpGet("{code}/definition")]
+    [ProducesResponseType<RegistryDefinitionDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RegistryDefinitionDto>> Definition(
+        string code, CancellationToken ct)
+        => Ok(await getDefinition.HandleAsync(code, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Зберігає опис довідника: поля і правила. Право <c>Registry.EditDefinition</c>.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="dto">Повний стан опису після правки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Приймається ПОВНИЙ стан, а не набір правок. Опис довідника — це
+    /// кілька десятків полів і одиниці правил; часткова правка вимагала б від
+    /// клієнта тримати список того, що він змінив, і перша ж помилка в цьому
+    /// списку давала б розбіжність, яку видно лише через рік.
+    /// </remarks>
+    [HttpPut("{code}/definition")]
+    [ProducesResponseType<RegistryDefinitionVersionResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SaveDefinition(
+        string code, [FromBody] SaveRegistryDefinitionDto dto, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var version = await saveDefinition.HandleAsync(code, dto, ct).ConfigureAwait(false);
+
+        // Повертається нова версія опису: саме вона відрізняє «збережено» від
+        // «збережено і нічого не змінилося» для того, хто відкрив екран удруге.
+        return Ok(new RegistryDefinitionVersionResponse(version));
+    }
+
+    /// <summary>
+    /// Історія змін опису довідника. Право <c>Registry.View</c>.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Історія ОПИСУ, а не записів: зміни записів живуть у журналі комірок і
+    /// в самих вікнах чинності. Питання, на яке відповідає цей маршрут, —
+    /// «чому тут з'явилося це поле».
+    /// </remarks>
+    [HttpGet("{code}/history")]
+    [ProducesResponseType<IReadOnlyList<RegistryHistoryEntryDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<RegistryHistoryEntryDto>>> History(
+        string code, CancellationToken ct)
+        => Ok(await getHistory.HandleAsync(code, ct).ConfigureAwait(false));
 
     /// <summary>Створює або оновлює запис. Право <c>Registry.EditData</c>.</summary>
     /// <param name="code">Код довідника.</param>
@@ -155,6 +220,10 @@ public sealed record SwitchSourceKindRequest(
 /// <param name="From">Початок дії; <c>null</c> — без обмеження.</param>
 /// <param name="To">Кінець дії; <c>null</c> — без обмеження.</param>
 public sealed record SetValidityRequest(DateOnly? From, DateOnly? To);
+
+/// <summary>Нова версія опису довідника після збереження.</summary>
+/// <param name="DefinitionVersion">Версія опису; росте від зміни складу полів і правил.</param>
+public sealed record RegistryDefinitionVersionResponse(int DefinitionVersion);
 
 /// <summary>Ідентифікатор запису довідника.</summary>
 /// <param name="Id">Запис.</param>
