@@ -1,6 +1,7 @@
 ﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Select, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
 import {
@@ -73,6 +74,21 @@ export function RegistriesPage(): JSX.Element {
             {selected !== undefined && can(session.data, 'Registry.EditData') && (
               <Button size="xs" onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
+              </Button>
+            )}
+
+            {/* ⛔ Вхід у конструктор (`ФВ-8.12`). Опис довідника — поля,
+                зв'язки, правила, мапінг — не мав в інтерфейсі жодного
+                споживача: подивитися, за яким правилом довідник перевіряє
+                свої записи, було ніде. */}
+            {selected !== undefined && (
+              <Button
+                component={Link}
+                to={`/admin/registries/${encodeURIComponent(selected.code)}/definition`}
+                size="xs"
+                variant="default"
+              >
+                {t('registries.constructor')}
               </Button>
             )}
 

@@ -122,6 +122,12 @@ public static class DependencyInjection
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
 
+        // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
+        // мапінг і історія опису.
+        services.AddScoped<Registries.GetRegistryDefinitionHandler>();
+        services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
+        services.AddScoped<Registries.GetRegistryHistoryHandler>();
+
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
         services.AddScoped<Expressions.ValidateExpressionHandler>();
         services.AddScoped<Expressions.GetExpressionMetadataHandler>();
