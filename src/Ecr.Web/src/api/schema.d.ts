@@ -3463,6 +3463,204 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Зв'язки між таблицями версії. Право `Template.View`.
+         * @description ⚠ Порожній перелік — законна відповідь: механізм опційний
+         *     (`ФВ-2.12`), і шаблон без жодного зв'язку працює так само.
+         *
+         *     ⛔ Саме тому відповідь — конверт із `isEditable`, а не голий масив:
+         *     на порожньому переліку масив нічого не каже про стан версії, і клієнт
+         *     показав би кнопку «новий зв'язок» на опублікованій версії, де сервер
+         *     однаково відмовить.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableRelationsDto"];
+                        "text/json": components["schemas"]["TableRelationsDto"];
+                        "text/plain": components["schemas"]["TableRelationsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/relations/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує зв'язок між таблицями чернетки. Право `Template.Edit`.
+         * @description ⛔ Це і є `ФВ-2.13`: зв'язки налаштовуються у вебі, а не в конфігах
+         *     чи коді. Тому маршрут існує окремо від патча презентації — той свідомо
+         *     відхиляє все структурне, а зв'язок структурний.
+         *
+         *     ⚠ `PUT` за кодом: створення й зміна — та сама дія, бо адресу задає
+         *     викликач (`D2-147`). Стан версії перевіряє домен, а не ця дія:
+         *     опублікована відхиляє правку сама (`ECR-TMPL-0409`, `ФВ-7.1`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код зв'язку. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveTableRelationRequest"];
+                    "application/json": components["schemas"]["SaveTableRelationRequest"];
+                    "text/json": components["schemas"]["SaveTableRelationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableRelationDto"];
+                        "text/json": components["schemas"]["TableRelationDto"];
+                        "text/plain": components["schemas"]["TableRelationDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає зв'язок із чернетки. Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код зв'язку. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/structure": {
         parameters: {
             query?: never;
@@ -5963,6 +6161,32 @@ export interface components {
              *     числову колонку результату. */
             resultType: components["schemas"]["FormulaResultType"];
         };
+        /** @description Налаштування зв'язку між таблицями (`ФВ-2.12`). */
+        SaveTableRelationRequest: {
+            /** @description Чи діє зв'язок. */
+            isActive: boolean;
+            /** @description Які колонки на які; `null` — перенесення немає. */
+            mapJson: null | string;
+            /** @description Як зіставляються рядки джерела і приймача. */
+            matchJson: string;
+            /**
+             * Format: uint8
+             * @description Реакція на зміну джерела: 0 Recalc, 1 Warn, 2 Block.
+             */
+            onSourceChange: number;
+            /** @description Вид зв'язку. */
+            relationKind: components["schemas"]["TableRelationKind"];
+            /**
+             * Format: int32
+             * @description Таблиця-джерело; має належати цій версії.
+             */
+            sourceTableDefId: number;
+            /**
+             * Format: int32
+             * @description Таблиця-приймач; має належати цій версії.
+             */
+            targetTableDefId: number;
+        };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {
             /** @description Чи отримує людина алерти про збої. */
@@ -6145,6 +6369,56 @@ export interface components {
          * @enum {unknown}
          */
         TableLayoutKind: "MonthsInColumns" | "MonthsInRows" | "Static" | "PerPeriodInstance";
+        /** @description Зв'язок між таблицями версії, як його бачить редактор (`ФВ-2.12`,
+         *     `ФВ-2.13`). */
+        TableRelationDto: {
+            /** @description Код — його ідентичність і адреса в API. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор зв'язку.
+             */
+            id: number;
+            /** @description Чи діє зв'язок. */
+            isActive: boolean;
+            /** @description Які колонки на які; `null` — перенесення немає. */
+            mapJson: null | string;
+            /** @description Як зіставляються рядки джерела і приймача. */
+            matchJson: string;
+            /**
+             * Format: uint8
+             * @description Реакція на зміну джерела: 0 Recalc, 1 Warn, 2 Block.
+             */
+            onSourceChange: number;
+            /** @description Вид зв'язку. */
+            relationKind: components["schemas"]["TableRelationKind"];
+            /** @description Код таблиці-джерела. */
+            sourceTableCode: string;
+            /**
+             * Format: int32
+             * @description Таблиця-джерело.
+             */
+            sourceTableDefId: number;
+            /** @description Код таблиці-приймача. */
+            targetTableCode: string;
+            /**
+             * Format: int32
+             * @description Таблиця-приймач.
+             */
+            targetTableDefId: number;
+        };
+        /**
+         * @description Вид зв'язку між таблицями (ФВ-2.12).
+         * @enum {unknown}
+         */
+        TableRelationKind: "Mirror" | "Rollup" | "Reference" | "Cascade" | "Check" | "Copy";
+        /** @description Зв'язки версії разом із відповіддю на «чи можна їх правити». */
+        TableRelationsDto: {
+            /** @description Чи дозволяє стан версії структурну правку. */
+            isEditable: boolean;
+            /** @description Зв'язки в порядку коду; порожньо — таблиці незалежні. */
+            relations: components["schemas"]["TableRelationDto"][];
+        };
         /**
          * @description Спосіб формування рядків таблиці.
          * @enum {unknown}

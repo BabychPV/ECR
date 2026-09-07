@@ -27,7 +27,13 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-2.12")]
+
+    // ⛔ Трейт `ФВ-2.12` знято. Він стояв тут із самого початку і був хибним:
+    // вимога про ЗВ'ЯЗКИ МІЖ ТАБЛИЦЯМИ (`TableRelationDef`) була позначена
+    // покритою тестом кешу метаданих, який зв'язків не читає і не створює.
+    // Матриця трасування показувала зелене там, де механізму не існувало
+    // взагалі — той самий клас, що й `ФВ-9.15` цієї ночі. Вимогу тепер
+    // покривають `TableRelationDefTests` і `TableRelationTests`.
     public async Task Повторне_читання_не_звертається_до_БД()
     {
         var doc = await ArrangeAsync();

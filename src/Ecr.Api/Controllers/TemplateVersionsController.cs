@@ -20,6 +20,9 @@ public sealed class TemplateVersionsController(
     PatchPresentationHandler patchPresentation,
     GetTemplateStructureHandler structure,
     GetAccessMatrixHandler accessMatrix,
+    ListTableRelationsHandler listRelations,
+    SaveTableRelationHandler saveRelation,
+    DeleteTableRelationHandler deleteRelation,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -151,6 +154,86 @@ public sealed class TemplateVersionsController(
     public async Task<ActionResult<AccessMatrixDto>> AccessMatrix(int id, CancellationToken ct)
         => await accessMatrix.HandleAsync(id, ct).ConfigureAwait(false);
 
+    /// <summary>
+    /// Зв'язки між таблицями версії. Право <c>Template.View</c>.
+    /// </summary>
+    /// <param name="id">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Порожній перелік — законна відповідь: механізм опційний
+    /// (<c>ФВ-2.12</c>), і шаблон без жодного зв'язку працює так само.
+    ///
+    /// ⛔ Саме тому відповідь — конверт із <c>isEditable</c>, а не голий масив:
+    /// на порожньому переліку масив нічого не каже про стан версії, і клієнт
+    /// показав би кнопку «новий зв'язок» на опублікованій версії, де сервер
+    /// однаково відмовить.
+    /// </remarks>
+    [HttpGet("relations")]
+    [ProducesResponseType<TableRelationsDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TableRelationsDto>> Relations(
+        int id, CancellationToken ct)
+        => Ok(await listRelations.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Записує зв'язок між таблицями чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="code">Код зв'язку.</param>
+    /// <param name="request">Налаштування зв'язку.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Це і є <c>ФВ-2.13</c>: зв'язки налаштовуються у вебі, а не в конфігах
+    /// чи коді. Тому маршрут існує окремо від патча презентації — той свідомо
+    /// відхиляє все структурне, а зв'язок структурний.
+    ///
+    /// ⚠ <c>PUT</c> за кодом: створення й зміна — та сама дія, бо адресу задає
+    /// викликач (<c>D2-147</c>). Стан версії перевіряє домен, а не ця дія:
+    /// опублікована відхиляє правку сама (<c>ECR-TMPL-0409</c>, <c>ФВ-7.1</c>).
+    /// </remarks>
+    [HttpPut("relations/{code}")]
+    [ProducesResponseType<TableRelationDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TableRelationDto>> SaveRelation(
+        int id, string code, [FromBody] SaveTableRelationRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveRelation
+            .HandleAsync(
+                id,
+                code,
+                new SaveTableRelationCommand(
+                    request.SourceTableDefId,
+                    request.TargetTableDefId,
+                    request.RelationKind,
+                    request.MatchJson,
+                    request.MapJson,
+                    request.OnSourceChange,
+                    request.IsActive),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає зв'язок із чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="code">Код зв'язку.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("relations/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteRelation(int id, string code, CancellationToken ct)
+    {
+        await deleteRelation.HandleAsync(id, code, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
@@ -168,6 +251,23 @@ public sealed record DeprecateVersionRequest(string Reason);
 /// <summary>Запит на клонування версії.</summary>
 /// <param name="NewVersion">Номер нової версії.</param>
 public sealed record CloneVersionRequest(string NewVersion);
+
+/// <summary>Налаштування зв'язку між таблицями (<c>ФВ-2.12</c>).</summary>
+/// <param name="SourceTableDefId">Таблиця-джерело; має належати цій версії.</param>
+/// <param name="TargetTableDefId">Таблиця-приймач; має належати цій версії.</param>
+/// <param name="RelationKind">Вид зв'язку.</param>
+/// <param name="MatchJson">Як зіставляються рядки джерела і приймача.</param>
+/// <param name="MapJson">Які колонки на які; <c>null</c> — перенесення немає.</param>
+/// <param name="OnSourceChange">Реакція на зміну джерела: 0 Recalc, 1 Warn, 2 Block.</param>
+/// <param name="IsActive">Чи діє зв'язок.</param>
+public sealed record SaveTableRelationRequest(
+    int SourceTableDefId,
+    int TargetTableDefId,
+    Ecr.Domain.Enums.TableRelationKind RelationKind,
+    string MatchJson,
+    string? MapJson,
+    byte OnSourceChange,
+    bool IsActive);
 
 /// <summary>Нова ревізія презентаційного шару.</summary>
 /// <param name="PresentationRevision">Ревізія; входить у ключ кешу метаданих (D-16).</param>

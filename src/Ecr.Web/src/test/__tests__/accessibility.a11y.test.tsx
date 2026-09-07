@@ -20,6 +20,7 @@ import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
+import { TableRelationsPage } from '@/pages/admin/TableRelationsPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
 import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
@@ -60,6 +61,7 @@ const Pages: [string, () => JSX.Element][] = [
   ['/change-password', ChangePasswordPage],
   ['/', DocumentsPage],
   ['/admin/templates', TemplatesPage],
+  ['/admin/templates/1/versions/1/relations', TableRelationsPage],
   ['/admin/registries', RegistriesPage],
   ['/admin/methodologies', MethodologiesPage],
   ['/admin/methodologies/1/versions', MethodologyVersionsPage],
@@ -148,6 +150,17 @@ function emptyBodyFor(url: string): unknown {
       uncoveredColumns: [],
     };
   }
+  // ⛔ Структура версії — ОБ'ЄКТ із аркушами; порожній масив тут упав би на
+  // `structure.sheets`, і редактор зв'язків «не мав би порушень доступності»
+  // рівно тому, що не намалювався б.
+  if (url.includes('/structure')) {
+    return { templateVersionId: 0, presentationRevision: 0, sheets: [] };
+  }
+
+  // ⛔ Зв'язки таблиць віддають КОНВЕРТ із `isEditable`: порожній масив тут
+  // упав би на `relations.data.relations`, і редактор «не мав би порушень»
+  // рівно тому, що не намалювався б.
+  if (url.includes('/relations')) return { isEditable: true, relations: [] };
   if (url.includes('/me')) {
     return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };
   }

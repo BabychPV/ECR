@@ -258,6 +258,69 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+    /// <summary>Ідентифікатори таблиць версії — основа всіх трьох запитів про зв'язки.</summary>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <returns>Запит, що дає ідентифікатори таблиць версії.</returns>
+    /// <remarks>
+    /// ⚠ Один вираз на три виклики навмисно: шлях від таблиці до версії
+    /// (<c>TableDef → SheetDef → TemplateVersion</c>) — саме те місце, де
+    /// друга копія тихо забула б з'єднання і повернула б зв'язки чужої версії.
+    /// </remarks>
+    private IQueryable<int> TableIdsOfVersion(int templateVersionId)
+        => db.TableDefs
+             .AsNoTracking()
+             .Join(db.SheetDefs.AsNoTracking(),
+                   t => t.SheetDefId,
+                   s => s.Id,
+                   (t, s) => new { t.Id, s.TemplateVersionId })
+             .Where(x => x.TemplateVersionId == templateVersionId)
+             .Select(x => x.Id);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TableRelationDef>> ListTableRelationsAsync(
+        int templateVersionId, CancellationToken ct)
+    {
+        var tables = TableIdsOfVersion(templateVersionId);
+
+        return await db.TableRelations
+            .AsNoTracking()
+            .Where(r => tables.Contains(r.SourceTableDefId))
+            .OrderBy(r => r.Code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task<TableRelationDef?> FindTableRelationAsync(
+        int templateVersionId, string code, CancellationToken ct)
+    {
+        var tables = TableIdsOfVersion(templateVersionId);
+
+        // ⛔ БЕЗ AsNoTracking: цю сутність зараз змінить `Update`, і без
+        // відстеження `SaveChanges` не побачив би жодної правки.
+        return db.TableRelations
+            .Where(r => r.Code == code && tables.Contains(r.SourceTableDefId))
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, string>> ListTableCodesAsync(
+        int templateVersionId, CancellationToken ct)
+    {
+        var rows = await db.TableDefs
+            .AsNoTracking()
+            .Join(db.SheetDefs.AsNoTracking(),
+                  t => t.SheetDefId,
+                  s => s.Id,
+                  (t, s) => new { t.Id, t.Code, s.TemplateVersionId })
+            .Where(x => x.TemplateVersionId == templateVersionId)
+            .Select(x => new { x.Id, x.Code })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(x => x.Id, x => x.Code);
+    }
+
     /// <inheritdoc />
     public async Task<int> ApplyPresentationAsync(
         int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct)

@@ -2582,6 +2582,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/access-matrix` | `Template.View` | 3 |
+| `GET` | `/api/v1/template-versions/{id}/relations` | `Template.View` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/relations/{code}` | `Template.Edit` | 7 |
+| `DELETE` | `/api/v1/template-versions/{id}/relations/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/projects` | `Document.View` | 1 |
 | `POST` | `/api/v1/projects` | `Project.Manage` | 1 |
 | `GET` | `/api/v1/projects/period-policies` | `Project.Manage` | 1 |
@@ -2693,6 +2696,24 @@ public sealed class NotFoundException(string errorCode, string message)
 > `groupsFromTicket: false` **явно**: порожній перелік груп там означає «ми не
 > знаємо», а не «людина в жодній групі не перебуває», і сплутати ці два стани
 > — рівно той дефект, заради якого маршрути й заведені.
+
+> **Зв'язки таблиць живуть під ВЕРСІЄЮ, а не під шаблоном** (`ФВ-2.12`,
+> `ФВ-2.13`). Зв'язок посилається на `cfg.TableDef.Id`, а таблиці належать
+> версії; маршрут під шаблоном мусив би питати «якої версії таблиця», тобто
+> той самий ідентифікатор іншим шляхом. Версія в адресі ще й задає межу
+> правки: `PUT` і `DELETE` приймає лише **чернетка** — опублікована версія
+> структурно заморожена (`ФВ-7.1`, `ECR-TMPL-0409`), і зв'язок є структурою,
+> бо від нього залежить, звідки в таблиці беруться числа.
+>
+> ⚠ Зв'язок адресується **кодом** (`UQ_TableRelationDef`), як і формула
+> методології (`D2-147`): код задає викликач, тому `PUT` створює зв'язок і
+> змінює його однією дією, а повторний запит із тим самим тілом дає той самий
+> стан.
+>
+> ⛔ Окремого маршруту «перелік таблиць версії» немає навмисно: таблиці для
+> вибору джерела й приймача бере `GET …/structure`. Другий перелік тих самих
+> таблиць розійшовся б із першим на першій же зміні структури, і форма
+> пропонувала б вибрати таблицю, якої у версії вже немає.
 
 ---
 
