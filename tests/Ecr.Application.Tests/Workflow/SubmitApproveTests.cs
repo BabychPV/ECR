@@ -56,6 +56,12 @@ public sealed class SubmitApproveTests
         _workflow.LockPeriodAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(OpenPeriod());
 
+        // ⚠ Дозвіл за замовчуванням: предмет більшості тестів цього класу —
+        // ПОДАННЯ й ПОГОДЖЕННЯ, а не склад документа. Тест на відсутній
+        // аркуш підставляє `false` сам, окремо (`S-17`).
+        _documents.HasSheetAsync(Document, Arg.Any<int>(), Arg.Any<CancellationToken>())
+                  .Returns(true);
+
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());
@@ -122,7 +128,7 @@ public sealed class SubmitApproveTests
         => new(_reportSnapshots, _documents);
 
     private SubmitSheetHandler Submit()
-        => new(_cells, _rows, _workflow, _access,
+        => new(_cells, _rows, _workflow, _documents, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                Reports(), _uow, _user, _clock);
 
@@ -131,6 +137,29 @@ public sealed class SubmitApproveTests
     private ApproveSheetHandler Approve() => new(_workflow, _access, Reports(), _uow, _user, _clock, _audit);
 
     private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock);
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-3.2")]
+    public async Task Подання_аркуша_якого_немає_в_складі_документа_відхиляється()
+    {
+        // ⛔ Директива №09 §6.4, `S-17`: до цієї перевірки `POST …/submit` на
+        // ДОВІЛЬНИЙ `sheetDefId` — навіть той, якого в документі ніколи не
+        // було, — проходив кодом `204`. `IWorkflowStore.GetOrCreateAsync`
+        // створює новий рядок стану для будь-якого ідентифікатора, а
+        // `CanSubmitAsync` перевіряє права, не існування.
+        const int unknownSheet = 999;
+        _documents.HasSheetAsync(Document, unknownSheet, Arg.Any<CancellationToken>()).Returns(false);
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(
+            () => Submit().HandleAsync(Document, unknownSheet, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-DOC-0404", error.ErrorCode);
+
+        // Ані рядка стану, ані зрізу: відмова має спинити подання ДО того, як
+        // з'явиться будь-який слід неіснуючого аркуша.
+        await _workflow.DidNotReceive().GetOrCreateAsync(
+            Arg.Any<long>(), unknownSheet, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Подання_НЕ_породжує_сповіщення()

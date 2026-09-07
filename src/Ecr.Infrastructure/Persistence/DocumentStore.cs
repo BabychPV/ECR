@@ -175,6 +175,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     }
 
     /// <inheritdoc />
+    public async Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct)
+        => await db.DocumentSheets
+            .AsNoTracking()
+            .AnyAsync(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId && s.IsIncluded, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int?> FindProjectIdAsync(long documentId, CancellationToken ct)
         => await db.Documents
             .AsNoTracking()
