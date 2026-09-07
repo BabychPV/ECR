@@ -80,10 +80,23 @@ jobs:
       - name: sqlcmd
         run: |
           set -euo pipefail
-          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-            | sudo gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" \
-            | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+
+          # ⛔ `--batch --yes` і БЕЗ `sudo` на самому `gpg`. Перший варіант
+          # (`| sudo gpg --dearmor -o …`) упав на агенті з `cannot open
+          # '/dev/tty'`: під `sudo` gpg вважає себе інтерактивним і шукає
+          # термінал, якого в конвеєра немає. Ключ розбирається від імені
+          # користувача, і лише готовий файл кладеться під root.
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc             | gpg --dearmor --batch --yes -o microsoft-prod.gpg
+          sudo install -o root -g root -m 644 microsoft-prod.gpg /usr/share/keyrings/microsoft-prod.gpg
+          rm microsoft-prod.gpg
+
+          # ⛔ Випуск Ubuntu береться з `/etc/os-release`, а не зашитий. Тут
+          # стояло `22.04/prod jammy`, а `ubuntu-latest` уже 24.04: зашите
+          # число тихо старіє разом із образом агента, і наслідком буде не
+          # «конвеєр застарів», а «репозиторій пакетів не знайдено».
+          . /etc/os-release
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main"             | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+
           sudo apt-get update
           sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
           echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
