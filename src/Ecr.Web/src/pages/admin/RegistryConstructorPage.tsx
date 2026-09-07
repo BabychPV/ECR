@@ -58,6 +58,15 @@ export function RegistryConstructorPage(): JSX.Element {
       apiFetch<RegistryDefinitionDto>(
         `/api/v1/registries/${encodeURIComponent(code)}/definition`,
       ),
+
+    // ⛔ Фонового перечитування тут бути не може. Правила — форма, і відповідь
+    // сервера засіває чернетку: перечитування при поверненні фокуса стерло б
+    // недописане правило рівно в той момент, коли людина перемкнулася в
+    // сусіднє вікно подивитися шлях тега. Опис довідника міняють одиниці разів
+    // на рік, тож ціна «застарілих» даних тут нульова, а ціна втраченої
+    // правки — уся робота за сеанс.
+    refetchOnWindowFocus: false,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
   const history = useQuery({
