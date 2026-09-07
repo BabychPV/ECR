@@ -83,14 +83,16 @@ public sealed class RegistryResolverTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Дозвіл_що_втратив_чинність_до_періоду_не_потрапляє()
     {
-        var expired = Entry(102, Permits, "PERMIT_OLD", from: new DateOnly(2020, 1, 1), to: new DateOnly(2026, 3, 30));
+        // Дозвіл, чинний по 30 березня включно, — у напівінтервалі це
+        // `[…, 31 березня)` (крок `I.10`).
+        var expired = Entry(102, Permits, "PERMIT_OLD", from: new DateOnly(2020, 1, 1), to: new DateOnly(2026, 3, 31));
         var current = Entry(101, Permits, "PERMIT_A", from: new DateOnly(2025, 1, 1), to: null);
 
         var resolved = _resolver.Resolve([expired, current], [], MarchPeriod, parentEntryId: null);
 
-        // ⚠ Межа включна: дозвіл, чинний «до 30 березня», у звіті за 31 березня
-        // вже нечинний, але у звіті за 30-те — ще чинний. Помилка на день тут
-        // не видима нікому, крім того, хто звіряє з паперовим дозволом.
+        // ⚠ Верхня межа ВИКЛЮЧНА: у звіті за 31 березня дозвіл уже нечинний,
+        // у звіті за 30-те — ще чинний. Помилка на день тут не видима нікому,
+        // крім того, хто звіряє з паперовим дозволом.
         Assert.Equal([101L], resolved);
         Assert.Contains(102L, _resolver.Resolve([expired], [], new DateOnly(2026, 3, 30), null));
     }
@@ -111,7 +113,7 @@ public sealed class RegistryResolverTests
     public void Резолвінг_робиться_на_дату_періоду_а_не_на_поточну_дату()
     {
         // Дозвіл, чинний у березні і закритий у червні. Сьогодні — жовтень.
-        var permit = Entry(101, Permits, "PERMIT_A", from: new DateOnly(2025, 1, 1), to: new DateOnly(2026, 6, 30));
+        var permit = Entry(101, Permits, "PERMIT_A", from: new DateOnly(2025, 1, 1), to: new DateOnly(2026, 7, 1));
 
         var forPeriod = _resolver.Resolve([permit], [], MarchPeriod, parentEntryId: null);
         var forToday = _resolver.Resolve([permit], [], DateOnly.FromDateTime(Now), parentEntryId: null);

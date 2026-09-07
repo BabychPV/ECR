@@ -29,9 +29,13 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        // ⛔ Строге `<`, а не `<=`: межа ВИКЛЮЧНА (`[ValidFrom, ValidTo)`,
+        // крок I.10). `ValidFrom = ValidTo` — це вікно з нуля днів, тобто
+        // запис, якого ніколи не видно в списку; ловити його треба базою, а не
+        // на екрані, бо масова вставка імпортера повз домен не проходить.
         builder.ToTable("RegistryEntry", "dic", t => t.HasCheckConstraint(
             "CK_RegEntry_Period",
-            "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo"));
+            "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo"));
 
         builder.HasKey(x => x.Id).HasName("PK_RegistryEntry");
         builder.Property(x => x.Id).HasConversion<int>().ValueGeneratedOnAdd();

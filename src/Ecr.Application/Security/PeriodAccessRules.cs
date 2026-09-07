@@ -1,6 +1,7 @@
 using System.Globalization;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
 
@@ -45,9 +46,21 @@ public readonly record struct PeriodRuleFacts(
     IReadOnlyDictionary<string, bool> ExpressionResults);
 
 /// <summary>Вікно чинності запису довідника, на який посилається рядок.</summary>
-/// <param name="ValidFrom"><c>null</c> — без початкової межі.</param>
-/// <param name="ValidTo"><c>null</c> — без кінцевої.</param>
-public readonly record struct SourceValidity(DateOnly? ValidFrom, DateOnly? ValidTo);
+/// <param name="ValidFrom">Перший чинний день; <c>null</c> — без початкової межі.</param>
+/// <param name="ValidTo">
+/// **Перший НЕчинний день** (виключно); <c>null</c> — без кінцевої межі.
+/// </param>
+/// <remarks>
+/// ⚠ Поля повторюють <c>RegistryEntry.ValidFrom</c>/<c>ValidTo</c> дослівно —
+/// і в тому самому, напівінтервальному сенсі. Правило про них формулює
+/// <see cref="ValidityWindow"/>, тому тут вони лишаються просто перенесеними
+/// значеннями (<see cref="Window"/>), а не другою умовою.
+/// </remarks>
+public readonly record struct SourceValidity(DateOnly? ValidFrom, DateOnly? ValidTo)
+{
+    /// <summary>Те саме вікно в термінах домену.</summary>
+    public ValidityWindow Window => new(ValidFrom, ValidTo);
+}
 
 /// <summary>Результат перевірки правил доступу до періоду.</summary>
 /// <param name="Reason">Причина заборони; <see cref="EditDenyReason.None"/> — дозволено.</param>
@@ -243,22 +256,26 @@ public static class PeriodAccessRules
         // 15 червня, червень усе-таки покриває: викид за першу половину
         // місяця стався в межах дозволу, і заборонити ввід означало б
         // втратити реальні дані.
+        //
+        // ⛔ Місяць теж напівінтервал: `[1 червня, 1 липня)`. Раніше він був
+        // закритий (`monthEnd = останній день`) і звірявся із закритим вікном
+        // — два подання однієї межі там, де досить одного (крок I.10).
         var monthStart = new DateOnly(facts.PeriodYear, month, 1);
-        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        var nextMonthStart = monthStart.AddMonths(1);
 
-        var startsAfter = window.ValidTo is { } to && monthStart > to;
-        var endsBefore = window.ValidFrom is { } from && monthEnd < from;
-
-        if (!startsAfter && !endsBefore)
+        if (window.Window.OverlapsSegment(monthStart, nextMonthStart))
         {
             return PeriodRuleOutcome.Allowed;
         }
 
+        // ⚠ Людині показується ОСТАННІЙ ЧИННИЙ день, а не виключна межа:
+        // «дозвіл діяв до 31 грудня» — те, що написано в самому дозволі,
+        // а «до 1 січня» читач сприйняв би як помилку на день.
         return Deny(
             rule,
             EditDenyReason.OutsidePermitWindow,
             $"Місяць {month:00}.{facts.PeriodYear} поза вікном дії "
-            + $"({Show(window.ValidFrom)} — {Show(window.ValidTo)}).");
+            + $"({Show(window.ValidFrom)} — {Show(window.Window.LastValidDay)}).");
     }
 
     /// <summary>Довільна умова над значеннями рядка.</summary>

@@ -5,9 +5,9 @@ using Ecr.Domain.ValueObjects;
 namespace Ecr.Domain.Entities.Dictionaries;
 
 /// <summary>
-/// Запис довідника. **Темпоральний**: чинність задається вікном
-/// <see cref="ValidFrom"/>…<see cref="ValidTo"/>, і саме вона визначає, чи
-/// можна обрати запис у періоді (ФВ-8.5).
+/// Запис довідника. **Темпоральний**: чинність задається напівінтервалом
+/// <c>[</c><see cref="ValidFrom"/>, <see cref="ValidTo"/><c>)</c>, і саме вона
+/// визначає, чи можна обрати запис у періоді (ФВ-8.5).
 /// </summary>
 /// <remarks>
 /// Фізично не видаляється ніколи, поки на нього посилаються дані (ФВ-8.6,
@@ -49,11 +49,25 @@ public sealed class RegistryEntry : Entity<long>
     public string Code { get; private set; } = null!;
     public LocalizedText DisplayL10n { get; private set; } = null!;
 
-    /// <summary>Початок вікна чинності; <c>null</c> — «завжди від початку».</summary>
+    /// <summary>Перший чинний день; <c>null</c> — «завжди від початку».</summary>
     public DateOnly? ValidFrom { get; private set; }
 
-    /// <summary>Кінець вікна; <c>null</c> — «без обмеження».</summary>
+    /// <summary>
+    /// **Перший НЕчинний день** (виключна межа); <c>null</c> — «без обмеження».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Виключна, а не включна (директива ПК-1 №05 §7, пастка 5, крок
+    /// <c>I.10</c>). Запис, чинний увесь 2024 рік, має тут <c>2025-01-01</c>,
+    /// а не <c>2024-12-31</c>. Причина не в смаку: у джерелі ця межа —
+    /// <c>datetime</c>, і закрите подання змушувало зберігати «останню мить»
+    /// <c>2024-12-31 23:59:59</c>, слідом за яким у 24 рядках корпусу
+    /// з'явилося <c>12:59:59</c> — те саме на вигляд і на одинадцять годин
+    /// коротше. Див. <c>LegacyValidityImport</c>.
+    /// </remarks>
     public DateOnly? ValidTo { get; private set; }
+
+    /// <summary>Вікно чинності як напівінтервал <c>[ValidFrom, ValidTo)</c>.</summary>
+    public ValidityWindow Window => new(ValidFrom, ValidTo);
 
     /// <summary>
     /// Порядок у списку. Саме він, а не <see cref="Code"/>, визначає, як
@@ -71,28 +85,43 @@ public sealed class RegistryEntry : Entity<long>
     public DateTime? DeletedAt { get; private set; }
     public int? DeletedByUserId { get; private set; }
 
-    /// <summary>Чинний на дату. Межі **включні** з обох боків.</summary>
-    public bool IsValidOn(DateOnly date)
-        => (ValidFrom is null || date >= ValidFrom)
-        && (ValidTo   is null || date <= ValidTo);
+    /// <summary>Чинний на дату: напівінтервал <c>[ValidFrom, ValidTo)</c>.</summary>
+    /// <param name="date">Дата в календарі майданчика.</param>
+    /// <returns><c>true</c> — запис можна обрати в цю дату (<c>ФВ-8.5</c>).</returns>
+    /// <remarks>
+    /// ⛔ Умова тут не пишеться — її формулює <see cref="ValidityWindow"/>, і
+    /// формулює один раз на всю систему. Другий примірник тієї самої умови
+    /// прожив би рівно до першої правки одного з них, а розходження на день
+    /// не ламає нічого видимого: запис просто перестає (чи не перестає)
+    /// пропонуватися в списку.
+    /// </remarks>
+    public bool IsValidOn(DateOnly date) => Window.Contains(date);
 
     /// <summary>
     /// Змінює вікно чинності. Викликає перерахунок <c>IsOrphaned</c> на рядках,
     /// що посилаються на цей запис (ФВ-8.13a) — але **не тут**: сутність не
     /// знає про документи. Цим займається <c>SetEntryValidityHandler</c>.
     /// </summary>
-    /// <param name="from">Початок вікна; <c>null</c> — від початку.</param>
-    /// <param name="to">Кінець вікна; <c>null</c> — без обмеження.</param>
-    /// <exception cref="DomainException">Кінець раніший за початок — <c>ECR-REG-0422</c>.</exception>
+    /// <param name="from">Перший чинний день; <c>null</c> — від початку.</param>
+    /// <param name="to">
+    /// Перший НЕчинний день (виключно); <c>null</c> — без обмеження.
+    /// </param>
+    /// <exception cref="DomainException">Порожнє вікно — <c>ECR-REG-0422</c>.</exception>
     public void SetValidity(DateOnly? from, DateOnly? to)
     {
         // Порожнє вікно — не «нічого не чинне», а помилка вводу: запис, який
         // не чинний ніколи, неможливо ні обрати, ні пояснити.
-        if (from is { } start && to is { } end && end < start)
+        //
+        // ⚠ Рівність меж теж порожня, і саме тут напівінтервал відрізняється
+        // від закритого подання: `[2026-06-30, 2026-06-30)` не містить жодного
+        // дня, тоді як закрите `2026-06-30 … 2026-06-30` містило рівно один.
+        // Пропустити рівність означало б завести запис, якого ніколи не видно
+        // в списку, і шукати причину в правах.
+        if (new ValidityWindow(from, to).IsEmpty)
         {
             throw new DomainException(
                 "ECR-REG-0422",
-                $"Кінець вікна чинності {end} раніший за початок {start}.");
+                $"Порожнє вікно чинності: виключний кінець {to} не пізніший за початок {from}.");
         }
 
         ValidFrom = from;

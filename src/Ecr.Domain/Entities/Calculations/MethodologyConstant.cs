@@ -71,8 +71,21 @@ public sealed class MethodologyConstant : Entity<int>
     /// <summary>Одиниця; <c>null</c> для тексту й мітки — вимір у них не має сенсу.</summary>
     public int? UnitId { get; private set; }
 
+    /// <summary>Перший чинний день; <c>null</c> — від початку.</summary>
     public DateOnly? ValidFrom { get; private set; }
+
+    /// <summary>
+    /// **Перший НЕчинний день** (виключна межа); <c>null</c> — без обмеження.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Виключна, як і всюди в системі (директива ПК-1 №05 §7, пастка 5).
+    /// Коефіцієнт емісії, чинний увесь 2024 рік, має тут <c>2025-01-01</c>.
+    /// </remarks>
     public DateOnly? ValidTo { get; private set; }
+
+    /// <summary>Вікно чинності як напівінтервал <c>[ValidFrom, ValidTo)</c>.</summary>
+    public ValidityWindow Window => new(ValidFrom, ValidTo);
+
     public long? SubstanceEntryId { get; private set; }
 
     /// <summary>
@@ -260,16 +273,35 @@ public sealed class MethodologyConstant : Entity<int>
         SubstanceEntryId = substanceEntryId;
     }
 
+    /// <summary>
+    /// Чи чинна константа на дату: напівінтервал <c>[ValidFrom, ValidTo)</c>.
+    /// </summary>
+    /// <param name="date">Дата періоду.</param>
+    /// <returns><c>true</c> — константа є кандидатом на цю дату.</returns>
+    /// <remarks>
+    /// ⛔ Це ЄДИНЕ формулювання темпорального відбору констант. Копія цієї
+    /// умови жила в <c>ConstantResolver.ResolveAsync</c> — і була закритою
+    /// (<c>onDate &lt;= ValidTo</c>), тобто на день довшою за модель. Ціна
+    /// розходження тут — не відмова, а ЧИСЛО: у день межі до виразу
+    /// підставився б старий коефіцієнт емісії, звіт вийшов би правдоподібним,
+    /// і жоден тест доступу цього не побачив би.
+    /// </remarks>
+    public bool IsValidOn(DateOnly date) => Window.Contains(date);
+
     /// <summary>Задає вікно чинності.</summary>
-    /// <param name="from">Початок; <c>null</c> — від початку.</param>
-    /// <param name="to">Кінець; <c>null</c> — без обмеження.</param>
+    /// <param name="from">Перший чинний день; <c>null</c> — від початку.</param>
+    /// <param name="to">
+    /// Перший НЕчинний день (виключно); <c>null</c> — без обмеження.
+    /// </param>
     /// <exception cref="DomainException">Порожнє вікно — <c>ECR-CALC-0422</c>.</exception>
     public void SetValidity(DateOnly? from, DateOnly? to)
     {
-        if (from is { } start && to is { } end && end < start)
+        // ⚠ Рівність меж — порожнє вікно, а не «один день»: межа виключна.
+        if (new ValidityWindow(from, to).IsEmpty)
         {
             throw new DomainException(
-                "ECR-CALC-0422", $"Кінець вікна чинності {end} раніший за початок {start}.");
+                "ECR-CALC-0422",
+                $"Порожнє вікно чинності: виключний кінець {to} не пізніший за початок {from}.");
         }
 
         ValidFrom = from;

@@ -231,8 +231,11 @@ public sealed class MethodologyConstantConfiguration : IEntityTypeConfiguration<
 
         builder.ToTable("MethodologyConstant", "calc", t =>
         {
+            // ⛔ Строге `<`: межа ВИКЛЮЧНА (`[ValidFrom, ValidTo)`, крок I.10).
+            // Рівність меж дала б константу, чинну нуль днів, — і резолвер
+            // мовчки взяв би сусідню.
             t.HasCheckConstraint(
-                "CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo");
+                "CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo");
 
             // ⛔ Перелік станів навмисно НЕПОВНИЙ: `Kind = 0` із `Value IS NULL`
             // дозволений. Це рядок, який імпорт не зміг розібрати
