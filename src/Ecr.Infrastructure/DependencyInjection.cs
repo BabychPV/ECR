@@ -1,4 +1,4 @@
-using Ecr.Application.Ports;
+﻿using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
+        services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
         services.AddScoped<IOrphanScanner, OrphanScanner>();

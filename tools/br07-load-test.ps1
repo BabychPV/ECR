@@ -118,6 +118,17 @@ function Invoke-Sql {
     }
 }
 
+# ⛔ Окремий помічник, бо `Invoke-Sql` глушить вивід у `Out-Null`. Спочатку
+# зняття очікувань йшло через нього — запит виконався, рядки були,
+# і всі вони потрапляли в нікуди. На екрані це виглядало як «очікувань нема»,
+# тобто як відповідь — а не як втрачений замір.
+function Show-Sql {
+    param([string] $Db, [string] $Query)
+
+    & sqlcmd -S $Server -E -C -b -I -W -s ' | ' -d $Db -Q "SET NOCOUNT ON; $Query"
+    if ($LASTEXITCODE -ne 0) { throw "sqlcmd повернув $LASTEXITCODE на $Query" }
+}
+
 function Get-SqlScalar {
     param([string] $Db, [string] $Query)
 
@@ -295,10 +306,51 @@ Write-Host "Заміри гейта BR-07 (замір №6 — $LoadSeconds с)�
 Write-Host '⚠ На інстансі не має працювати нічого іншого: лічильник ескалацій'
 Write-Host '  блокувань SQL Server дає на весь інстанс, а не на базу.'
 
+# ⛔ Знімок очікувань ДО заміру. Без нього числа гейта кажуть ЛИШЕ,
+# що бюджет не витриманий, але не кажуть ЧОМУ — а `PAGELATCH_EX` і `WRITELOG`
+# означають протилежні діагнози: перше — черга за останню сторінку
+# індексу (лікується `OPTIMIZE_FOR_SEQUENTIAL_KEY`), друге — диск під журналом
+# (лікується залізом). Діагноз на дотик коштує тижня чужої роботи.
+Invoke-Sql -Db $Database -Query @'
+-- Звичайна таблиця в тимчасовій базі, а НЕ `##`-тимчасова:
+-- глобальна тимчасова живе, поки відкрита сесія, що її створила, а
+-- кожен виклик `sqlcmd` — це своя сесія. Знімок зник би одразу.
+IF OBJECT_ID('dbo.Br07Waits') IS NOT NULL DROP TABLE dbo.Br07Waits;
+SELECT wait_type, waiting_tasks_count, wait_time_ms, signal_wait_time_ms
+INTO dbo.Br07Waits FROM sys.dm_os_wait_stats;
+'@
+
 & dotnet run --project $datagen --no-build -c Release -- `
     --gate --load-seconds $LoadSeconds --connection $connection
 
 $gate = $LASTEXITCODE
+
+# ⚠ Різниця, а не абсолютне значення: `sys.dm_os_wait_stats` рахує від
+# старту інстанса, тож без віднімання верх таблиці займуть
+# фонові очікування, які накопичилися за добу до прогону.
+Write-Host ''
+Write-Host 'Очікування за час заміру (топ-10 за часом):'
+Show-Sql -Db $Database -Query @'
+SELECT TOP 10
+       n.wait_type,
+       n.waiting_tasks_count - ISNULL(o.waiting_tasks_count, 0) AS tasks,
+       n.wait_time_ms       - ISNULL(o.wait_time_ms, 0)         AS wait_ms,
+       n.signal_wait_time_ms - ISNULL(o.signal_wait_time_ms, 0) AS signal_ms
+FROM sys.dm_os_wait_stats n
+LEFT JOIN dbo.Br07Waits o ON o.wait_type = n.wait_type
+WHERE n.wait_time_ms - ISNULL(o.wait_time_ms, 0) > 0
+  -- Фонові очікування службових потоків: вони ростуть завжди й
+  -- витіснили б з топ-10 те, що стосується справи.
+  AND n.wait_type NOT IN (
+      'SLEEP_TASK','BROKER_TASK_STOP','LAZYWRITER_SLEEP','XE_TIMER_EVENT',
+      'REQUEST_FOR_DEADLOCK_SEARCH','LOGMGR_QUEUE','CHECKPOINT_QUEUE',
+      'BROKER_TO_FLUSH','SQLTRACE_BUFFER_FLUSH','DIRTY_PAGE_POLL',
+      'HADR_FILESTREAM_IOMGR_IOCOMPLETION','SP_SERVER_DIAGNOSTICS_SLEEP',
+      'XE_DISPATCHER_WAIT','BROKER_EVENTHANDLER','WAITFOR',
+      'PREEMPTIVE_OS_GETPROCADDRESS','PREEMPTIVE_OS_AUTHENTICATIONOPS')
+ORDER BY wait_ms DESC;
+'@
+
 
 $sizeMb = Get-SqlScalar -Db $Database -Query @"
 SELECT CONVERT(int, SUM(size) * 8 / 1024) FROM sys.database_files

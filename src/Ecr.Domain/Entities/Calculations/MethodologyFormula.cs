@@ -61,6 +61,46 @@ public sealed class MethodologyFormula : Entity<int>
         EvaluationOrder = order;
     }
 
+    /// <summary>Замінює вираз формули.</summary>
+    /// <param name="expression">Новий вираз діалекту методологій.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0422</c> — порожній вираз.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Метод <b>internal</b>, і це не оформлення. Формула не знає, чи
+    /// опублікована її версія, — знає це <see cref="MethodologyVersion"/>.
+    /// Публічний сетер означав би другий шлях зміни виразу, на якому перевірки
+    /// «опублікована версія незмінна» (ФВ-13.2) немає, і саме ним скористався б
+    /// перший обробник, якому вона здалася зайвою. Єдиний вхід —
+    /// <see cref="MethodologyVersion.EditFormula"/>.
+    /// <para>
+    /// ⚠ Порожній вираз відхиляється тут, а не в формі. Формула без виразу не
+    /// зникає з розрахунку: вона лишається оголошеним виходом і дає нуль, який
+    /// нічим не відрізняється від порахованого.
+    /// </para>
+    /// </remarks>
+    internal void SetExpression(string expression)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Формула «{Code}» без виразу: порожній вираз не прибирає формулу з розрахунку, "
+                + "а робить її тихим нулем.");
+        }
+
+        Expression = expression;
+    }
+
+    /// <summary>Знімає одиницю результату.</summary>
+    /// <remarks>
+    /// ⛔ Без цього методу числову формулу з тоннами неможливо було б перевести
+    /// в текстову взагалі: <see cref="SetResultType"/> відхиляє текст на
+    /// формулі з одиницею, а зняти одиницю не було чим. Заборона, яка не має
+    /// виходу, — це не інваріант, а глухий кут.
+    /// </remarks>
+    internal void ClearOutputUnit() => OutputUnitId = null;
+
     /// <summary>Оголошує одиницю результату формули (ФВ-16.6).</summary>
     /// <param name="unitId">Одиниця з <c>uom.Unit</c>.</param>
     /// <exception cref="DomainException">

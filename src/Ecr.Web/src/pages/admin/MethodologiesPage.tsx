@@ -14,6 +14,7 @@ import {
   Textarea,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type {
   MethodologyDto,
@@ -140,6 +141,20 @@ export function MethodologiesPage(): JSX.Element {
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs">
+                    {/* ⛔ Вхід у конфігуратор версій. Без нього чернетки не
+                        видно НІДЕ: цей перелік за побудовою показує лише
+                        опубліковані версії — те, чим рахують, — і кнопка
+                        «Опублікувати» поруч стояла для версій, яких він не
+                        містить (`ФВ-9.15`). */}
+                    <Button
+                      size="compact-xs"
+                      variant="light"
+                      component={Link}
+                      to={`/admin/methodologies/${String(methodology.id)}/versions`}
+                    >
+                      {t('methodologies.versionsTitle')}
+                    </Button>
+
                     {methodology.versions.map((version) => (
                       <Group key={version.id} gap="xs">
                         <Badge variant={version.status === 'Published' ? 'filled' : 'light'}>
