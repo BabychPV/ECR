@@ -42,7 +42,14 @@ const Items: NavItem[] = [
   { path: '/admin/expressions', labelKey: 'nav.expressions', permission: 'Calculation.View' },
   { path: '/admin/units', labelKey: 'nav.units', permission: 'Calculation.View' },
   { path: '/admin/security', labelKey: 'nav.security', permission: 'Security.ManageRoles' },
-  { path: '/admin/periods', labelKey: 'nav.periods', permission: 'Period.Manage' },
+  // ⛔ Було `Period.Manage` — права з такою назвою немає в каталозі
+  // (`sec.Permission`); seed заводить лише `Period.Configure` і
+  // `Period.Reopen`. Пункт меню не з'являвся НІКОМУ, включно з
+  // `PeriodAdministrator`, чий шаблон `Period.%` розгортається проти
+  // каталогу й теж не знаходив там нічого (директива №09 `S-02`).
+  // `Period.Configure` — базове право сторінки (`PeriodsPage.tsx:187`);
+  // саме `Reopen`-кнопка всередині додатково перевіряє `Period.Reopen`.
+  { path: '/admin/periods', labelKey: 'nav.periods', permission: 'Period.Configure' },
   { path: '/admin/sources', labelKey: 'nav.sources', permission: 'Integration.Manage' },
   { path: '/admin/mapping', labelKey: 'nav.mapping', permission: 'Integration.Manage' },
   { path: '/admin/jobs', labelKey: 'nav.jobs', permission: 'System.ViewHealth' },
