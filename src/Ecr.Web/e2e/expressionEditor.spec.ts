@@ -22,9 +22,13 @@ const Operator = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 
 test.describe('Редактор виразів (ФВ-9.15a)', () => {
+  // ⚠ Гейт більше не вирішує долю набору: без стенда падає весь набір
+  // (`e2e/globalSetup.ts`). Він працює лише під `ECR_E2E_OPTIONAL`, коли
+  // пропуск оголошений свідомо, — і змінна названа в тексті навмисно, щоб
+  // рядок «немає стенда» не читався знову як норма.
   test.skip(
     PeriodKey === '',
-    'Немає стенда: запускати через tools/e2e-stand.ps1, інакше перевіряти нічого.',
+    'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
   test.beforeEach(async ({ page }) => {

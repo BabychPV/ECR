@@ -30,7 +30,6 @@ public sealed class MethodologyVersionOrderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.3")]
     public void Пізніша_дата_виграє()
     {
         var later = Key("2026-06-01", "1.0.0.0");
@@ -43,7 +42,6 @@ public sealed class MethodologyVersionOrderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.3")]
     public void За_рівних_дат_виграє_старша_версія()
     {
         // ⛔ Головне твердження. Доти тут вигравав «перший рядок вибірки», і
@@ -57,7 +55,6 @@ public sealed class MethodologyVersionOrderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.3")]
     public void Десята_версія_старша_за_дев_яту()
     {
         // ⛔ Порядкове порівняння рядків поставило б `1.10` ПЕРЕД `1.9`, бо
@@ -71,7 +68,6 @@ public sealed class MethodologyVersionOrderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.3")]
     public void Нерозбірний_номер_поступається_розбірному()
     {
         // ⚠ Не з естетики: про версію, номер якої ми не розуміємо, не можна
@@ -85,7 +81,6 @@ public sealed class MethodologyVersionOrderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.3")]
     public void Повний_збіг_дати_і_номера_вирішується_сталою_відповіддю()
     {
         // ⚠ Тут будь-яка відповідь однаково довільна — але вона має бути ТІЄЮ

@@ -165,7 +165,6 @@ public sealed class MethodologyVersionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-9.3")]
     public void Виведена_з_обігу_версія_не_перекриває_нову_від_тієї_самої_дати()
     {
         // ⛔ Діра, якої коментар над `VersionOn` обіцяв не допустити. Перевірка
