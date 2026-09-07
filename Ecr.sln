@@ -51,6 +51,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ecr.Adapters.Tests", "tests
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ecr.Legacy.Probe", "tests\Ecr.Legacy.Probe\Ecr.Legacy.Probe.csproj", "{33FE4D10-5791-4B06-9A25-F25496641C76}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ecr.Scenarios.Tests", "tests\Ecr.Scenarios.Tests\Ecr.Scenarios.Tests.csproj", "{AEC8427C-F398-453A-B9F5-5658DB7B969D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -313,6 +315,18 @@ Global
 		{33FE4D10-5791-4B06-9A25-F25496641C76}.Release|x64.Build.0 = Release|Any CPU
 		{33FE4D10-5791-4B06-9A25-F25496641C76}.Release|x86.ActiveCfg = Release|Any CPU
 		{33FE4D10-5791-4B06-9A25-F25496641C76}.Release|x86.Build.0 = Release|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Debug|x64.Build.0 = Debug|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Debug|x86.Build.0 = Debug|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Release|x64.ActiveCfg = Release|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Release|x64.Build.0 = Release|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Release|x86.ActiveCfg = Release|Any CPU
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -339,5 +353,6 @@ Global
 		{C0000003-0000-0000-0000-000000000003} = {33333333-3333-3333-3333-333333333333}
 		{E3F6DE9C-34A9-477D-9FD6-961217DD45DF} = {22222222-2222-2222-2222-222222222222}
 		{33FE4D10-5791-4B06-9A25-F25496641C76} = {22222222-2222-2222-2222-222222222222}
+		{AEC8427C-F398-453A-B9F5-5658DB7B969D} = {22222222-2222-2222-2222-222222222222}
 	EndGlobalSection
 EndGlobal

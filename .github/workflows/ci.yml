@@ -154,7 +154,7 @@ jobs:
         env:
           ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
           ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ env.ECR_SQL_PASSWORD }};TrustServerCertificate=true'
-        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Тести .NET','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
+        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Тести .NET','Сценарії директиви №09 (довідково)','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
 
   client:
     runs-on: ubuntu-latest

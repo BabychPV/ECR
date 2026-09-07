@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Сценарний шар (директива §2-§3): нова одиниця обліку прогресу — сценарії
+    S-01..S-28, кожен з яких проходить (або свідомо падає) на чистій реальній
+    базі ЧЕРЕЗ HTTP, без жодного доступу до DbContext/*Store/обробників.
+
+    ⛔ Правило 1 (§3.2) обмежує посилання цього проєкту трьома речами:
+    Ecr.Api (щоб узяти Program), Ecr.TestKit (лише SqlServerFixture) і
+    пакетами для HTTP-тестування. Жодного ProjectReference на
+    Ecr.Application / Ecr.Domain / Ecr.Infrastructure немає і не буде:
+    сценарій, який бачить ці збірки, спокусився б піти в них напряму, і
+    саме цю спокусу правило усуває фізично, а не домовленістю.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Ecr.Scenarios.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ecr.Api\Ecr.Api.csproj" />
+    <ProjectReference Include="..\Ecr.TestKit\Ecr.TestKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+</Project>
