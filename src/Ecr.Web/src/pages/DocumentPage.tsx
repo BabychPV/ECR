@@ -1,5 +1,5 @@
-﻿import type { JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Stack, Tabs, Text } from '@mantine/core';
+﻿import { Suspense, lazy, type JSX } from 'react';
+import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -10,7 +10,6 @@ import type {
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
-import { DocumentGrid } from '@/features/grid/DocumentGrid';
 import { ExportButton } from '@/features/export/ExportButton';
 import { ImportPanel } from '@/features/import/ImportPanel';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
@@ -20,6 +19,23 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/**
+ * Сітка вантажиться окремим чанком.
+ *
+ * ⛔ Не оптимізація «про запас», а ліки, прописані самим гейтом бюджету:
+ * `RevoGrid` — 79,1 % джерел чанка сторінки, і саме через нього маршрут
+ * важив 259,2 КБ при межі 250 (`D-132`, `H-4`). Статичний імпорт означав,
+ * що ядро сітки вантажить КОЖЕН, хто відкрив документ, — разом із тими,
+ * хто дивиться його зведення і до таблиць не доходить.
+ *
+ * ⚠ Видимої затримки це не додає, і ось чому: сітка й до того не могла
+ * намалюватися раніше за свій зріз даних — вона тягне його власним
+ * запитом. Чанк вантажиться паралельно з тим самим очікуванням.
+ */
+const DocumentGrid = lazy(async () => ({
+  default: (await import('@/features/grid/DocumentGrid')).DocumentGrid,
+}));
 
 /**
  * Екран документа: вибір періоду, вкладки аркушів, таблиці, робочий процес.
@@ -184,19 +200,37 @@ export function DocumentPage(): JSX.Element {
         </Tabs.List>
       </Tabs>
 
-      {active?.tables.map((table) => (
-        <Stack key={table.tableInstanceId} gap="xs">
-          <Text fw={600}>{localized(table.tableNameL10n)}</Text>
-          <DocumentGrid
-            documentId={documentId}
-            tableInstanceId={table.tableInstanceId}
-            periodKey={periodKey}
-            readOnly={readOnly}
-            allowsDynamicRows={table.allowsDynamicRows}
-            maxDynamicRows={table.maxDynamicRows}
-          />
-        </Stack>
-      ))}
+      {/* ⚠ Межа ОДНА на всі таблиці аркуша, а не на кожну: чанк у них
+          спільний, тож окремі межі дали б кілька заглушок на одне й те саме
+          очікування. Заголовки таблиць лишаються поза нею — вони відомі до
+          завантаження сітки, і ховати їх означало б показувати менше, ніж
+          маємо. */}
+      <Suspense
+        fallback={
+          <Stack gap="xs">
+            {active?.tables.map((table) => (
+              <Stack key={table.tableInstanceId} gap="xs">
+                <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+                <Skeleton height={240} radius="sm" />
+              </Stack>
+            ))}
+          </Stack>
+        }
+      >
+        {active?.tables.map((table) => (
+          <Stack key={table.tableInstanceId} gap="xs">
+            <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+            <DocumentGrid
+              documentId={documentId}
+              tableInstanceId={table.tableInstanceId}
+              periodKey={periodKey}
+              readOnly={readOnly}
+              allowsDynamicRows={table.allowsDynamicRows}
+              maxDynamicRows={table.maxDynamicRows}
+            />
+          </Stack>
+        ))}
+      </Suspense>
     </Stack>
       )}
     </AsyncBoundary>

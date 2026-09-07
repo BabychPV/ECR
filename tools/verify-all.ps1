@@ -48,7 +48,10 @@
     Логін SQL-автентифікації для гейта розгортання. Без нього — інтегрована.
 
 .PARAMETER SqlPassword
-    Пароль до `SqlLogin`.
+    Пароль до `SqlLogin`. За замовчуванням — `ECR_SQL_PASSWORD` з оточення.
+
+    ⛔ Оточення, а не аргумент: аргументи процесу видно всім у переліку
+    процесів. На агенті конвеєра це означало б пароль на видноті.
 
     ⛔ Ці три існують, щоб конвеєр кликав гейт розгортання ЧЕРЕЗ цей скрипт, а
     не повз нього. Обхід виглядав би однаково зеленим — і мовчки перестав би
@@ -70,7 +73,7 @@ param(
     [switch] $ListSteps,
     [string] $SqlServer,
     [string] $SqlLogin,
-    [string] $SqlPassword
+    [string] $SqlPassword = $env:ECR_SQL_PASSWORD
 )
 
 $ErrorActionPreference = 'Stop'

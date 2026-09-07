@@ -37,6 +37,14 @@ public sealed partial class CiPipelineTests
     [GeneratedRegex(@"'([^']*)'")]
     private static partial Regex Quoted();
 
+    /// <summary>Пароль, присвоєний сталою, а не змінною.</summary>
+    /// <remarks>
+    /// ⚠ Значення, що починається з <c>$</c> або <c>${{</c>, — це посилання
+    /// на змінну чи вираз, і воно дозволене. Усе інше — стала.
+    /// </remarks>
+    [GeneratedRegex(@"MSSQL_SA_PASSWORD\s*[:=]\s*[""']?(?![$\s])[^\s""']+")]
+    private static partial Regex LiteralPassword();
+
     /// <summary>Названий виняток: <c># ci-exempt: крок — причина</c>.</summary>
     [GeneratedRegex(@"^#\s*ci-exempt:\s*(.+?)\s+—\s+(\S.*)$", RegexOptions.Multiline)]
     private static partial Regex Exempt();
@@ -117,35 +125,33 @@ public sealed partial class CiPipelineTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Конвеєр_не_несе_пароля_текстом()
+    public void Пароль_контейнера_не_сталий_і_прихований()
     {
         // ⛔ `D-11` / `ФВ-6.11`: у файлах живуть ІМЕНА секретів, не значення.
         // Пароль контейнера — спокуса саме тут: база одноразова, і «та це ж
         // тимчасово» звучить переконливо рівно до першого копіювання файла.
+        //
+        // ⚠ Перша збірка вимагала секрету репозиторію — і виявилося, що це
+        // вимикає гейт розгортання в кожного, хто секрету не завів: завдання
+        // не запускалося ЖОДНОГО разу. Вимога, яка нічого не захищає і при
+        // цьому спиняє перевірку, гірша за її відсутність. Тепер пароль
+        // генерується на прогін; правило лишається те саме — сталого немає.
         var workflow = Workflow();
 
-        var literals = new[] { "MSSQL_SA_PASSWORD: '", "MSSQL_SA_PASSWORD: \"", "SQLCMDPASSWORD: '" };
+        // Присвоєння сталою: значення, яке не починається з `$` або `${{`.
+        var literal = LiteralPassword().Match(workflow);
 
-        var offenders = literals
-            .Where(literal => workflow.Contains(literal, StringComparison.Ordinal))
-            .ToList();
+        Assert.False(
+            literal.Success,
+            literal.Success ? $"Сталий пароль у конвеєрі: {literal.Value}" : string.Empty);
 
-        Assert.Empty(offenders);
-        Assert.Contains("secrets.SQL_SA_PASSWORD", workflow, StringComparison.Ordinal);
+        // ⛔ Згенерований пароль без маски потрапляє в журнал прогону, який
+        // видно всім, хто бачить репозиторій. Одноразовість цього не рятує:
+        // журнал переживає контейнер.
+        Assert.Contains("::add-mask::", workflow, StringComparison.Ordinal);
+        Assert.Contains("openssl rand", workflow, StringComparison.Ordinal);
     }
 
-    /// <summary>Кроки, названі в `-Only` завдань — без рядків-коментарів.</summary>
-    /// <param name="workflow">Текст конвеєра.</param>
-    /// <remarks>
-    /// ⛔ Коментарі відкидаються, і знайшов це сам сторож на першому ж
-    /// прогоні: заголовок файла пояснює формат словами
-    /// <c>-Only '&lt;крок&gt;'</c>, і перевірка прочитала пояснення як
-    /// налаштування. Тобто читати весь файл суцільним текстом означало б
-    /// стерегти конвеєр разом із розповіддю про нього.
-    ///
-    /// ⚠ Винятки, навпаки, живуть САМЕ в коментарях (<c># ci-exempt:</c>) —
-    /// тому розбір іде порядково, а не одним виразом на весь файл.
-    /// </remarks>
     private static List<string> Covered(string workflow)
         => workflow.Split('\n')
             .Where(line => !line.TrimStart().StartsWith('#'))

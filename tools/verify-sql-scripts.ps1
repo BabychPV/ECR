@@ -43,7 +43,7 @@ param(
     [string] $Server = 'localhost\SQLEXPRESS',
     [string] $Database = 'EcrSqlScriptCheck',
     [string] $Login,
-    [string] $Password
+    [string] $Password = $env:ECR_SQL_PASSWORD
 )
 
 $ErrorActionPreference = 'Stop'

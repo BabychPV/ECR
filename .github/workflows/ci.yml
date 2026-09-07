@@ -38,40 +38,37 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
 
 jobs:
-  # ⛔ Окремим завданням, і навмисно ПЕРЕД тим, що піднімає контейнер. Порожній
-  # `SQL_SA_PASSWORD` валить сам контейнер, і завдання падає ДО першого кроку —
-  # у журналі лишається збій запуску служби, за яким до справжньої причини не
-  # дійти. Тут причина названа словами.
-  preflight:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Секрет SQL_SA_PASSWORD оголошено
-        env:
-          SA_PASSWORD: ${{ secrets.SQL_SA_PASSWORD }}
-        run: |
-          if [ -z "$SA_PASSWORD" ]; then
-            echo "::error::Немає секрету SQL_SA_PASSWORD. Гейт розгортання піднімає контейнер mssql, і без пароля контейнер не стартує. Задайте секрет у Settings → Secrets and variables → Actions."
-            exit 1
-          fi
-          echo "Секрет на місці."
-
+  # ⛔ Контейнер піднімається КРОКОМ, а не через `services:`, і секрету
+  # репозиторію не потребує. Перша збірка вимагала `SQL_SA_PASSWORD` — і
+  # конвеєр був червоний із першого дня в того, хто його не завів, причому
+  # гейт розгортання при цьому не виконувався ЖОДНОГО разу. Тобто вимога
+  # секрету не захищала нічого, а вимикала перевірку.
+  #
+  # ⚠ Пароль тут не таємниця: контейнер живе хвилини, доступний лише зсередини
+  # агента і не тримає нічого, крім згенерованої схеми. Але сталим його
+  # писати не можна — сталий пароль у файлі одного дня переїде туди, де він
+  # уже щось означає. Тому він **генерується на кожен прогін** і ховається
+  # через `::add-mask::`.
+  #
+  # ⚠ `services:` цього не вміє: службу оголошують до того, як виконався
+  # перший крок, отже значення, обчислене в прогоні, туди не потрапляє.
   server:
-    needs: preflight
     runs-on: ubuntu-latest
-
-    services:
-      mssql:
-        # ⚠ 2019 — як цільовий сервер (`04-environment.md`). Developer Edition,
-        # отже партиціювання доступне і скрипти перевіряються повністю.
-        image: mcr.microsoft.com/mssql/server:2019-latest
-        env:
-          ACCEPT_EULA: 'Y'
-          MSSQL_SA_PASSWORD: ${{ secrets.SQL_SA_PASSWORD }}
-        ports:
-          - 1433:1433
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: SQL Server у контейнері
+        run: |
+          set -euo pipefail
+          # ⚠ Хвіст `Aa1!` — не прикраса: SQL Server вимагає три категорії
+          # символів із чотирьох, і випадковий рядок їх не гарантує. Без
+          # цього контейнер падає з «Password validation failed», що
+          # читається як зламаний образ.
+          SA="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$SA"
+          echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
+          docker run -d --name ecr-mssql             -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA"             -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -97,16 +94,17 @@ jobs:
       # що читається як неправильний пароль.
       - name: SQL Server відповідає
         env:
-          SQLCMDPASSWORD: ${{ secrets.SQL_SA_PASSWORD }}
+          SQLCMDPASSWORD: ${{ env.ECR_SQL_PASSWORD }}
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             if sqlcmd -S localhost,1433 -U sa -C -b -Q "SELECT 1" > /dev/null 2>&1; then
               echo "SQL Server готовий за ${i} с."
               exit 0
             fi
             sleep 1
           done
-          echo "::error::SQL Server не відповів за 60 с."
+          echo "::error::SQL Server не відповів за 90 с. Журнал контейнера:"
+          docker logs ecr-mssql 2>&1 | tail -40
           exit 1
 
       # ⛔ `verify-sql-scripts.ps1` кличе `dotnet ef migrations script`, а
@@ -126,11 +124,15 @@ jobs:
       #
       # ⚠ `sqlcmd` контейнера домену не знає, отже інтегрованої автентифікації
       # в нього немає — звідси `-SqlLogin`.
+      #
+      # ⛔ Пароль іде ОТОЧЕННЯМ (`ECR_SQL_PASSWORD`), а не аргументом: аргументи
+      # процесу видно всім у переліку процесів агента. Скрипти читають цю
+      # змінну самі, тож у командному рядку його немає взагалі.
       - name: Складання, тести, розгортання
         env:
-          ECR_CI_SA_PASSWORD: ${{ secrets.SQL_SA_PASSWORD }}
-          ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ secrets.SQL_SA_PASSWORD }};TrustServerCertificate=true'
-        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Тести .NET','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa -SqlPassword "$ECR_CI_SA_PASSWORD"
+          ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+          ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ env.ECR_SQL_PASSWORD }};TrustServerCertificate=true'
+        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Тести .NET','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
 
   client:
     runs-on: ubuntu-latest
