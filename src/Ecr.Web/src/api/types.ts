@@ -129,6 +129,21 @@ export type AccessMatrixDto = Schemas['AccessMatrixDto'];
 export type AccessMatrixSheetDto = Schemas['AccessMatrixSheetDto'];
 export type AccessMatrixCellDto = Schemas['AccessMatrixCellDto'];
 
+/**
+ * Зв'язок між таблицями версії (`ФВ-2.12`).
+ *
+ * ⚠ `isEditable` рахує СЕРВЕР зі стану версії. Клієнт, який виводив би це сам
+ * зі `status`, тримав би другу копію правила «опублікована незмінна»
+ * (`ФВ-7.1`) — і саме вона розійшлася б із доменом.
+ */
+export type TableRelationDto = Schemas['TableRelationDto'];
+
+/** Вид зв'язку між таблицями. */
+export type TableRelationKind = Schemas['TableRelationKind'];
+
+/** Запис зв'язку між таблицями чернетки. */
+export type SaveTableRelationRequest = Schemas['SaveTableRelationRequest'];
+
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
 export type RegistrySourceKind = Schemas['RegistrySourceKind'];

@@ -116,6 +116,54 @@ public interface ITemplateVersionStore
         ListPeriodAccessRulesAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Зв'язки між таблицями цієї версії (<c>ФВ-2.12</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>cfg.TableRelationDef</c> не має власного <c>TemplateVersionId</c>:
+    /// версія дістається через <c>TableDef → SheetDef</c>. Тому питати цю
+    /// таблицю без з'єднання не можна — вибірка «за кодом» повернула б зв'язок
+    /// чужої версії, а код унікальний у межах усієї бази.
+    ///
+    /// ⚠ Межі сторінки немає з тієї самої причини, що й у правил доступу:
+    /// зв'язків у версії одиниці, і це СТРУКТУРА, а не дані.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Зв'язки в порядку коду.</returns>
+    public Task<IReadOnlyList<Domain.Entities.Configuration.TableRelationDef>>
+        ListTableRelationsAsync(int templateVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Знаходить зв'язок версії за кодом; <c>null</c> — такого немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Повертає ВІДСТЕЖУВАНУ сутність: її змінює <c>PUT</c>. Копія без
+    /// відстеження прийняла б <c>Update</c> і не записала б нічого — правка
+    /// «пройшла б» і зникла.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="code">Код зв'язку.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Зв'язок або <c>null</c>.</returns>
+    public Task<Domain.Entities.Configuration.TableRelationDef?>
+        FindTableRelationAsync(int templateVersionId, string code, CancellationToken ct);
+
+    /// <summary>
+    /// Коди таблиць версії: ідентифікатор → код.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це і є перевірка належності. Ідентифікатори таблиць приходять із
+    /// мережі, і без неї зв'язок можна було б завести між таблицями РІЗНИХ
+    /// версій: обмеження зовнішнього ключа таке прийняло б, а версія перестала
+    /// б бути замкненою одиницею — клон переніс би половину зв'язку.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор таблиці → її код.</returns>
+    public Task<IReadOnlyDictionary<int, string>> ListTableCodesAsync(
+        int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Застосовує презентаційні зміни до структури версії.
     /// </summary>
     /// <remarks>

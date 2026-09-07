@@ -52,6 +52,11 @@ public static class DependencyInjection
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
 
+        // Зв'язки між таблицями версії (ФВ-2.12, ФВ-2.13)
+        services.AddScoped<ListTableRelationsHandler>();
+        services.AddScoped<SaveTableRelationHandler>();
+        services.AddScoped<DeleteTableRelationHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();

@@ -3617,6 +3617,55 @@
         ],
         "type": "object"
       },
+      "SaveTableRelationRequest": {
+        "description": "Налаштування зв'язку між таблицями (`ФВ-2.12`).",
+        "properties": {
+          "isActive": {
+            "description": "Чи діє зв'язок.",
+            "type": "boolean"
+          },
+          "mapJson": {
+            "description": "Які колонки на які; `null` — перенесення немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "matchJson": {
+            "description": "Як зіставляються рядки джерела і приймача.",
+            "type": "string"
+          },
+          "onSourceChange": {
+            "description": "Реакція на зміну джерела: 0 Recalc, 1 Warn, 2 Block.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "relationKind": {
+            "$ref": "#/components/schemas/TableRelationKind",
+            "description": "Вид зв'язку."
+          },
+          "sourceTableDefId": {
+            "description": "Таблиця-джерело; має належати цій версії.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targetTableDefId": {
+            "description": "Таблиця-приймач; має належати цій версії.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sourceTableDefId",
+          "targetTableDefId",
+          "relationKind",
+          "matchJson",
+          "mapJson",
+          "onSourceChange",
+          "isActive"
+        ],
+        "type": "object"
+      },
       "SetAlertsRequest": {
         "description": "Запит на зміну отримання алертів.",
         "properties": {
@@ -4051,6 +4100,92 @@
           "MonthsInRows",
           "Static",
           "PerPeriodInstance"
+        ]
+      },
+      "TableRelationDto": {
+        "description": "Зв'язок між таблицями версії, як його бачить редактор (`ФВ-2.12`,\r\n`ФВ-2.13`).",
+        "properties": {
+          "code": {
+            "description": "Код — його ідентичність і адреса в API.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор зв'язку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи діє зв'язок.",
+            "type": "boolean"
+          },
+          "isEditable": {
+            "description": "Чи можна правити зв'язок. Відповідь дає СЕРВЕР за станом версії: клієнт,\r\nякий виводить це сам, тримає другу копію правила «опублікована незмінна»\r\n(`ФВ-7.1`) — і саме вона розійдеться з доменом на третьому стані.",
+            "type": "boolean"
+          },
+          "mapJson": {
+            "description": "Які колонки на які; `null` — перенесення немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "matchJson": {
+            "description": "Як зіставляються рядки джерела і приймача.",
+            "type": "string"
+          },
+          "onSourceChange": {
+            "description": "Реакція на зміну джерела: 0 Recalc, 1 Warn, 2 Block.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "relationKind": {
+            "$ref": "#/components/schemas/TableRelationKind",
+            "description": "Вид зв'язку."
+          },
+          "sourceTableCode": {
+            "description": "Код таблиці-джерела.",
+            "type": "string"
+          },
+          "sourceTableDefId": {
+            "description": "Таблиця-джерело.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targetTableCode": {
+            "description": "Код таблиці-приймача.",
+            "type": "string"
+          },
+          "targetTableDefId": {
+            "description": "Таблиця-приймач.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "relationKind",
+          "sourceTableDefId",
+          "sourceTableCode",
+          "targetTableDefId",
+          "targetTableCode",
+          "matchJson",
+          "mapJson",
+          "onSourceChange",
+          "isActive",
+          "isEditable"
+        ],
+        "type": "object"
+      },
+      "TableRelationKind": {
+        "description": "Вид зв'язку між таблицями (ФВ-2.12).",
+        "enum": [
+          "Mirror",
+          "Rollup",
+          "Reference",
+          "Cascade",
+          "Check",
+          "Copy"
         ]
       },
       "TableRowMode": {
@@ -8983,6 +9118,286 @@
           }
         },
         "summary": "Публікує версію. Право `Template.Publish`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/relations": {
+      "get": {
+        "description": "⚠ Порожній перелік — законна відповідь: механізм опційний\r\n(`ФВ-2.12`), і шаблон без жодного зв'язку працює так само.",
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableRelationDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableRelationDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableRelationDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Зв'язки між таблицями версії. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/relations/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код зв'язку.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає зв'язок із чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⛔ Це і є `ФВ-2.13`: зв'язки налаштовуються у вебі, а не в конфігах\r\nчи коді. Тому маршрут існує окремо від патча презентації — той свідомо\r\nвідхиляє все структурне, а зв'язок структурний.\r\n\r\n⚠ `PUT` за кодом: створення й зміна — та сама дія, бо адресу задає\r\nвикликач (`D2-147`). Стан версії перевіряє домен, а не ця дія:\r\nопублікована відхиляє правку сама (`ECR-TMPL-0409`, `ФВ-7.1`).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код зв'язку.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTableRelationRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTableRelationRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTableRelationRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableRelationDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableRelationDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableRelationDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує зв'язок між таблицями чернетки. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]
