@@ -88,6 +88,22 @@ public static class OpenApiSnapshot
 
                 return items;
 
+            // ⛔ Переноси рядків ВСЕРЕДИНІ значень теж зводяться до самого
+            // LF, і це не косметика. Описи в документі приходять із
+            // XML-коментарів вихідних файлів, а ті на Windows мають CRLF: у
+            // JSON пара CR+LF лежить ЕКРАНОВАНОЮ, тобто чотирма звичайними
+            // символами тексту. Заміна переносів у серіалізованому документі
+            // їх не бачить — там немає жодного справжнього переносу.
+            //
+            // ⚠ Наслідок: знімок, знятий на Windows, не міг збігтися з
+            // документом, зібраним на Linux, ЖОДНОГО разу — контракт залежав
+            // від того, хто його зібрав. Знайшов це перший прогін конвеєра;
+            // локально тест був зелений завжди, бо там обидві сторони CRLF.
+            case JsonValue value when value.TryGetValue<string>(out var text):
+                return JsonValue.Create(
+                    text.Replace("\r\n", "\n", StringComparison.Ordinal)
+                        .Replace("\r", "\n", StringComparison.Ordinal));
+
             default:
                 return node.DeepClone();
         }
