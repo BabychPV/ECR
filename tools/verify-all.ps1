@@ -30,6 +30,34 @@
     Рядок з'єднання для інтеграційних тестів. За замовчуванням береться
     `ECR_TEST_SQL` з оточення; без нього тести шукатимуть Docker.
 
+.PARAMETER Only
+    Виконати лише названі кроки. Існує заради конвеєра: гейти йдуть різними
+    завданнями паралельно, інакше доступність (понад двадцять хвилин) тримала
+    б усе решту.
+
+    ⛔ Пропуск кроку через `-Only` НЕ означає, що крок можна не виконати.
+    `CiPipelineTests` звіряє об'єднання `-Only` всіх завдань конвеєра з цим
+    переліком: крок, якого не бере жодне завдання, робить тест червоним.
+    Без цього «розділити на завдання» і «тихо викинути гейт» виглядали б
+    однаково.
+
+.PARAMETER SqlServer
+    Екземпляр SQL Server для гейта розгортання. За замовчуванням локальний.
+
+.PARAMETER SqlLogin
+    Логін SQL-автентифікації для гейта розгортання. Без нього — інтегрована.
+
+.PARAMETER SqlPassword
+    Пароль до `SqlLogin`.
+
+    ⛔ Ці три існують, щоб конвеєр кликав гейт розгортання ЧЕРЕЗ цей скрипт, а
+    не повз нього. Обхід виглядав би однаково зеленим — і мовчки перестав би
+    отримувати кожну наступну зміну в тому, ЯК гейт запускається.
+
+.PARAMETER ListSteps
+    Надрукувати імена кроків і вийти. Це вхід для сторожа: перелік кроків
+    здобувається із самого скрипта, а не переписується в тест.
+
 .EXAMPLE
     powershell -File tools/verify-all.ps1
 #>
@@ -37,7 +65,12 @@
 param(
     [switch] $SkipDeployment,
     [switch] $SkipClient,
-    [string] $TestSql = $env:ECR_TEST_SQL
+    [string] $TestSql = $env:ECR_TEST_SQL,
+    [string[]] $Only,
+    [switch] $ListSteps,
+    [string] $SqlServer,
+    [string] $SqlLogin,
+    [string] $SqlPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,9 +78,45 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $client = Join-Path $root 'src/Ecr.Web'
 $failures = @()
+$declared = @()
+
+# ⛔ Сервісні контейнери GitHub Actions працюють ЛИШЕ на Linux-раннерах, отже
+# конвеєр, якому потрібен SQL Server, не має вибору платформи. До цієї правки
+# скрипт був Windows-only в двох місцях — `npm.cmd` і `& powershell`, — і
+# кожне з них падало б на агенті так, що причина виглядала б як зламаний код.
+#
+# ⚠ `$IsWindows` немає у Windows PowerShell 5.1: там змінна не визначена й
+# читається як `$false`. Тому питаємо ще й редакцію — інакше на машині
+# розробника скрипт шукав би `npm` без розширення і не знаходив.
+# ⛔ `-Only 'a','b'` через `powershell -File` приходить ОДНИМ рядком
+# `'a,b'`: кому розбирає мова, а не парсер параметрів, і при запуску файла
+# мови тут немає. Наслідок був би найгіршим із можливих — жодне ім'я не
+# збіглося б, ЖОДЕН крок не виконався, а конвеєр вийшов би нулем і показав
+# зелене. Знайдено прогоном на машині розробника, до першого запуску конвеєра.
+#
+# ⚠ Розбір безпечний: у назвах кроків ком немає і бути не може — вони імена,
+# а не переліки.
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
+$onWindows = $IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop'
+$npm = if ($onWindows) { 'npm.cmd' } else { 'npm' }
+$psExe = if ($onWindows) { 'powershell' } else { 'pwsh' }
+
+# ⚠ `-ExecutionPolicy` існує лише у Windows: у PowerShell на Linux політик
+# виконання немає, і параметр там зайвий.
+$psArgs = if ($onWindows) { @('-ExecutionPolicy', 'Bypass', '-File') } else { @('-File') }
 
 function Step {
     param([string] $Name, [scriptblock] $Body)
+
+    # ⚠ Ім'я записується ДО будь-якого пропуску: перелік кроків має бути
+    # повним незалежно від того, які з них виконуються цього разу. Інакше
+    # `-ListSteps` віддавав би різне при різних прапорцях, і сторож звіряв би
+    # конвеєр із випадковою підмножиною.
+    $script:declared += $Name
+
+    if ($ListSteps) { return }
+    if ($Only -and $Name -notin $Only) { return }
 
     Write-Host ''
     Write-Host "── $Name" -ForegroundColor Cyan
@@ -76,7 +145,16 @@ function Step {
 # ⚠ Знайдено аудитом: прогін показав ✗ на кроці складання при цілком
 # справному дереві, і на з'ясування причини пішло більше часу, ніж на цей
 # рядок.
-Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Stop-Process -Force
+if (-not $ListSteps) {
+    Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Stop-Process -Force
+}
+
+# ⚠ При переліку прапорці пропуску знімаються: питання «які кроки взагалі
+# існують» не залежить від того, що вміє ця машина.
+if ($ListSteps) {
+    $SkipDeployment = $false
+    $SkipClient = $false
+}
 
 Step 'Складання' {
     & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo
@@ -94,7 +172,11 @@ Step 'Тести .NET' {
 
 if (-not $SkipDeployment) {
     Step 'Розгортання під sqlcmd' {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'verify-sql-scripts.ps1')
+        $sqlArgs = @()
+        if ($SqlServer) { $sqlArgs += @('-Server', $SqlServer) }
+        if ($SqlLogin) { $sqlArgs += @('-Login', $SqlLogin, '-Password', $SqlPassword) }
+
+        & $psExe @psArgs (Join-Path $PSScriptRoot 'verify-sql-scripts.ps1') @sqlArgs
     }
 }
 
@@ -103,7 +185,7 @@ if (-not $SkipDeployment) {
     # процес і проходить шлях користувача цілком. Саме він ламався в семи
     # місцях і не падав у жодному (`A7-25`…`A7-30`) при 616 зелених тестах.
     Step 'Наскрізний сценарій' {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'smoke.ps1')
+        & $psExe @psArgs (Join-Path $PSScriptRoot 'smoke.ps1')
     }
 }
 
@@ -122,10 +204,10 @@ if (-not $SkipClient) {
         # ⚠ Для dev-залежностей гейт НЕ ставиться: він блокував би роботу
         # через чужі релізи, і його вимкнули б разом із робочим. Їхній стан
         # виводиться довідково нижче.
-        Step 'Безпека залежностей' { & npm.cmd audit --omit=dev --audit-level=high }
+        Step 'Безпека залежностей' { & $npm audit --omit=dev --audit-level=high }
 
         Step 'Аудит інструментів (довідково)' {
-            & npm.cmd audit
+            & $npm audit
             # ⚠ Ненульовий код тут НЕ є помилкою: це довідка, а не гейт.
             $global:LASTEXITCODE = 0
         }
@@ -135,7 +217,7 @@ if (-not $SkipClient) {
         # оновили, а типи — ні: рівно той стан, у якому клієнт описує форму
         # відповіді сам і розходиться з сервером мовчки (`A7-36`).
         Step 'Типи клієнта зі знімка' {
-            & npm.cmd run api:types
+            & $npm run api:types
             if ($LASTEXITCODE -ne 0) { return }
 
             & git -C $root diff --exit-code -- 'src/Ecr.Web/src/api/schema.d.ts'
@@ -144,17 +226,17 @@ if (-not $SkipClient) {
             }
         }
 
-        Step 'Типи клієнта' { & npm.cmd run typecheck }
-        Step 'Стиль клієнта' { & npm.cmd run lint }
-        Step 'Тести клієнта' { & npm.cmd run test }
+        Step 'Типи клієнта' { & $npm run typecheck }
+        Step 'Стиль клієнта' { & $npm run lint }
+        Step 'Тести клієнта' { & $npm run test }
 
         # ⛔ Доступність — окремим кроком, бо повільна: `axe` у jsdom обробляє
         # одну сторінку близько 35 секунд. Усередині звичайного `npm test` це
         # додавало б хвилини до кожного прогону під час роботи, і перевірку
         # зрештою вимкнули б. Поріг блокуючий: нуль `critical` і `serious`
         # на КОЖНОМУ маршруті (ФВ-14.16, D-127).
-        Step 'Доступність клієнта' { & npm.cmd run test:a11y }
-        Step 'Збірка клієнта' { & npm.cmd run build }
+        Step 'Доступність клієнта' { & $npm run test:a11y }
+        Step 'Збірка клієнта' { & $npm run build }
 
         # ⛔ Гейт бюджету (`D-132`). До нього бюджет був записаний у двох
         # документах і не перевірявся ніде: `07-checkpoints.md` стверджував,
@@ -163,7 +245,7 @@ if (-not $SkipClient) {
         # який не перевіряють, не існує» — описувало власний стан.
         #
         # ⚠ Обов'язково ПІСЛЯ збірки: гейт зважує `dist/`, а не вихідний код.
-        Step 'Бюджет клієнта' { & npm.cmd run budget }
+        Step 'Бюджет клієнта' { & $npm run budget }
     }
     finally {
         Pop-Location
@@ -182,11 +264,25 @@ if (-not $SkipClient -and -not $SkipDeployment) {
     # собою. Без нього прогони, які потребують входу, мовчки пропускаються
     # (`test.skip`) — а мовчазний пропуск і є те, що ЕТАП 7.5 виловлює.
     Step 'Прогони в браузері' {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'e2e-stand.ps1')
+        & $psExe @psArgs (Join-Path $PSScriptRoot 'e2e-stand.ps1')
     }
 }
 
+if ($ListSteps) {
+    $declared | ForEach-Object { Write-Output $_ }
+    exit 0
+}
+
 Write-Host ''
+
+# ⛔ Названий крок, якого не існує, — це друкарська помилка в конвеєрі, і без
+# цієї перевірки вона виглядала б як зелений прогін: `-Only 'Тести .NET '`
+# із зайвим пробілом просто не виконав би нічого.
+$unknown = $Only | Where-Object { $_ -notin $declared }
+if ($unknown) {
+    Write-Host "Немає таких кроків: $($unknown -join ', ')" -ForegroundColor Red
+    exit 2
+}
 
 if ($failures.Count -gt 0) {
     Write-Host "Невдалих перевірок: $($failures.Count)" -ForegroundColor Red

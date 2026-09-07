@@ -22,13 +22,28 @@
 .PARAMETER Database
     Ім'я тимчасової бази. Створюється і видаляється цим самим скриптом.
 
+.PARAMETER Login
+    Логін SQL-автентифікації. Без нього йде інтегрована (`-E`) — так працює
+    DBA і так працює розробник. З ним — конвеєр: сервісний контейнер
+    `mssql` домену не знає, і Windows-автентифікації в нього немає.
+
+.PARAMETER Password
+    Пароль до `Login`. Передається сюди рядком, а до `sqlcmd` — через
+    `SQLCMDPASSWORD`, а НЕ аргументом `-P`.
+
+    ⛔ Аргументи процесу видно всім у `ps`/`Get-CimInstance Win32_Process`, і
+    на агенті конвеєра це означає пароль у переліку процесів. Оточення
+    дочірнього процесу такої видимості не має.
+
 .EXAMPLE
     powershell -File tools/verify-sql-scripts.ps1
 #>
 [CmdletBinding()]
 param(
     [string] $Server = 'localhost\SQLEXPRESS',
-    [string] $Database = 'EcrSqlScriptCheck'
+    [string] $Database = 'EcrSqlScriptCheck',
+    [string] $Login,
+    [string] $Password
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,10 +57,17 @@ $sql = Join-Path $root 'src/Ecr.Infrastructure/Persistence/Sql'
 $artifacts = Join-Path $root 'artifacts'
 $migration = Join-Path $artifacts 'migration.sql'
 
+if ($Login) {
+    # ⚠ Саме через оточення: `-P` поклав би пароль у командний рядок, який на
+    # агенті читає будь-який процес.
+    $env:SQLCMDPASSWORD = $Password
+}
+
 function Invoke-Sql {
     param([string] $Db, [string] $Query, [string] $File)
 
-    $arguments = @('-S', $Server, '-E', '-C', '-b', '-I', '-d', $Db)
+    $auth = if ($Login) { @('-U', $Login) } else { @('-E') }
+    $arguments = @('-S', $Server) + $auth + @('-C', '-b', '-I', '-d', $Db)
     if ($File) { $arguments += @('-i', $File) } else { $arguments += @('-Q', $Query) }
 
     & sqlcmd @arguments | Out-Null
@@ -80,6 +102,21 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Створюю тимчасову базу $Database…"
 Invoke-Sql -Db 'master' -Query "IF DB_ID('$Database') IS NOT NULL DROP DATABASE [$Database]; CREATE DATABASE [$Database];"
+
+# ⛔ Позначка ОБОВ'ЯЗКОВА, і не для швидкості. `01-filegroups.sql` робить малі
+# файли лише тоді, коли база — Express (`EngineEdition = 4`) або позначена
+# цією властивістю. Контейнер `mcr.microsoft.com/mssql/server` — Developer
+# Edition (`EngineEdition = 3`), отже без позначки скрипт відводить файли
+# повного розміру: локально це вже коштувало **152 ГБ** і зупинило роботу
+# помилкою «operating system error 112».
+#
+# ⚠ На хостованому агенті вільного місця близько 14 ГБ, тож падіння було б не
+# «скрипти зламані», а «не вистачило диска» — повідомлення, за яким до
+# справжньої причини не дійти.
+#
+# ⚠ Той самий рядок, що й у `SqlServerFixture.MarkAsSmallAsync`: перевірка
+# розгортання і тести мусять отримувати ОДНАКОВУ фізичну модель.
+Invoke-Sql -Db $Database -Query "EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;"
 
 try {
     # ⛔ Перелік і порядок — з `09-commands.md` §3. `07` переносить таблиці на
