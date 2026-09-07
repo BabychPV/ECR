@@ -14,7 +14,9 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/sources")]
 [Authorize]
 public sealed class SourcesController(
-    ListSourceEntitiesHandler list, CollectFromSourceHandler collect) : ControllerBase
+    ListSourceEntitiesHandler list,
+    CollectFromSourceHandler collect,
+    Ecr.Application.Sources.PreviewMappingHandler preview) : ControllerBase
 {
     /// <summary>
     /// Перелік сутностей збору. Право <c>Integration.Manage</c>.
@@ -53,6 +55,33 @@ public sealed class SourcesController(
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
+
+    /// <summary>
+    /// Перегляд мапінгу на реальних рядках джерела (<c>ФВ-13.14</c>).
+    /// Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <param name="id">Сутність джерела.</param>
+    /// <param name="fromUtc">Початок вікна; <c>null</c> — тиждень назад.</param>
+    /// <param name="toUtc">Кінець вікна; <c>null</c> — «зараз».</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Відповідь несе не лише зв'язки, що зійшлися, а й **розриви**: поле
+    /// джерела, яке не лягає нікуди; мапінг, під який у джерелі немає жодного
+    /// рядка; колонку документа, за якою не стоїть нічого. Перегляд самих лише
+    /// успішних зв'язків відповідав би на питання, якого ніхто не ставить.
+    ///
+    /// ⚠ Реальні рядки — це вже зібране (<c>ext.RawDataPoint</c>), а не
+    /// читання з джерела наживо: перегляд не має падати разом із мережею до
+    /// чужої системи.
+    /// </remarks>
+    [HttpGet("{id:int}/mapping/preview")]
+    [ProducesResponseType<Ecr.Application.Sources.MappingPreview>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> MappingPreview(
+        int id,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        CancellationToken ct)
+        => Ok(await preview.HandleAsync(id, fromUtc, toUtc, ct).ConfigureAwait(false));
 }
 
 /// <summary>Запит на збір.</summary>

@@ -37,6 +37,9 @@ const RegistriesPage = lazy(async () => ({
 const MethodologiesPage = lazy(async () => ({
   default: (await import('@/pages/admin/MethodologiesPage')).MethodologiesPage,
 }));
+const MethodologyVersionsPage = lazy(async () => ({
+  default: (await import('@/pages/admin/MethodologyVersionsPage')).MethodologyVersionsPage,
+}));
 const ExpressionsPage = lazy(async () => ({
   default: (await import('@/pages/admin/ExpressionsPage')).ExpressionsPage,
 }));
@@ -48,6 +51,15 @@ const PeriodsPage = lazy(async () => ({
 }));
 const SourcesPage = lazy(async () => ({
   default: (await import('@/pages/admin/SourcesPage')).SourcesPage,
+}));
+
+/**
+ * ⚠ Окремий маршрут, а не вкладка в `/admin/sources`. Перелік джерел
+ * відповідає на «чи збирається», перегляд мапінгу — на «куди лягає»; це різні
+ * питання, і на друге треба вміти дати посилання (`ФВ-14.29`).
+ */
+const MappingPreviewPage = lazy(async () => ({
+  default: (await import('@/pages/admin/MappingPreviewPage')).MappingPreviewPage,
 }));
 const JobsPage = lazy(async () => ({ default: (await import('@/pages/admin/JobsPage')).JobsPage }));
 const SnapshotsPage = lazy(async () => ({
@@ -145,10 +157,12 @@ export const router = createBrowserRouter([
       { path: 'admin/templates/:id/versions/:versionId', element: <TemplateVersionPage /> },
       { path: 'admin/registries', element: <RegistriesPage /> },
       { path: 'admin/methodologies', element: <MethodologiesPage /> },
+      { path: 'admin/methodologies/:id/versions', element: <MethodologyVersionsPage /> },
       { path: 'admin/expressions', element: <ExpressionsPage /> },
       { path: 'admin/security', element: <SecurityPage /> },
       { path: 'admin/periods', element: <PeriodsPage /> },
       { path: 'admin/sources', element: <SourcesPage /> },
+      { path: 'admin/mapping', element: <MappingPreviewPage /> },
       { path: 'admin/jobs', element: <JobsPage /> },
       { path: 'admin/snapshots', element: <SnapshotsPage /> },
       { path: 'admin/audit', element: <AuditPage /> },

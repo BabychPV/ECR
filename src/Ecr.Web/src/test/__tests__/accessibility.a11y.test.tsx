@@ -18,8 +18,10 @@ import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { RegistriesPage } from '@/pages/admin/RegistriesPage';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
+import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
+import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
 import { KitchenSinkPage } from '@/pages/KitchenSinkPage';
 import { MyGroupsPage } from '@/pages/MyGroupsPage';
@@ -60,10 +62,12 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/templates', TemplatesPage],
   ['/admin/registries', RegistriesPage],
   ['/admin/methodologies', MethodologiesPage],
+  ['/admin/methodologies/1/versions', MethodologyVersionsPage],
   ['/admin/expressions', ExpressionsPage],
   ['/admin/security', SecurityPage],
   ['/admin/periods', PeriodsPage],
   ['/admin/sources', SourcesPage],
+  ['/admin/mapping', MappingPreviewPage],
   ['/admin/jobs', JobsPage],
   ['/admin/health', HealthPage],
   ['/my-groups', MyGroupsPage],
@@ -126,6 +130,24 @@ function emptyBodyFor(url: string): unknown {
     };
   }
   if (url.includes('/periods')) return { projectId: 0, periods: [] };
+
+  // ⛔ Перегляд мапінгу віддає ОБ'ЄКТ із чотирма переліками. Порожній масив
+  // тут упав би на першому `.map`, і тест перевіряв би власну заглушку.
+  if (url.includes('/mapping/preview')) {
+    return {
+      sourceEntityId: 0,
+      code: 'test',
+      displayName: null,
+      fromUtc: '2026-09-01T00:00:00Z',
+      toUtc: '2026-09-08T00:00:00Z',
+      pointsSeen: 0,
+      isTruncated: false,
+      fields: [],
+      rows: [],
+      unmappedSourceFields: [],
+      uncoveredColumns: [],
+    };
+  }
   if (url.includes('/me')) {
     return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };
   }

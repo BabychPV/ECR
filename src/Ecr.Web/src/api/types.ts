@@ -142,6 +142,31 @@ export type MethodologyDto = Schemas['MethodologyDto'];
 /** Версія методології. */
 export type MethodologyVersionDto = Schemas['MethodologyVersionDto'];
 
+/**
+ * Версія методології в конфігураторі — **включно з чернетками**.
+ *
+ * ⛔ Не те саме, що `MethodologyVersionDto`. Той описує чинні версії, і
+ * `effectiveFrom` у ньому обов'язковий; у чернетки вікна дії немає взагалі.
+ * Один тип на два переліки означав би, що версія без дати потрапляє туди, де
+ * за датою вибирають, чим рахувати період (`ФВ-13.3`).
+ */
+export type MethodologyDraftVersionDto = Schemas['MethodologyDraftVersionDto'];
+
+/** Формула версії методології. */
+export type MethodologyFormulaDto = Schemas['MethodologyFormulaDto'];
+
+/** Створення версії-чернетки: порожньої або як клон наявної. */
+export type CreateMethodologyVersionRequest = Schemas['CreateMethodologyVersionRequest'];
+
+/** Запис формули версії-чернетки. */
+export type SaveMethodologyFormulaRequest = Schemas['SaveMethodologyFormulaRequest'];
+
+/** Рівень драбини виразності версії (`ФВ-9.2`). */
+export type CalculationLevel = Schemas['CalculationLevel'];
+
+/** Що повертає формула: число чи текст. */
+export type FormulaResultType = Schemas['FormulaResultType'];
+
 /** Роль із оголошеними правами. */
 export type RoleView = Schemas['RoleView'];
 
@@ -457,3 +482,31 @@ export type ExpressionDialect = Schemas['ExpressionDialect'];
 
 /** Вердикт одного тесту золотого набору (`ФВ-13.7`). */
 export type TestCaseVerdict = Schemas['TestCaseVerdict'];
+
+/**
+ * Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
+ *
+ * ⛔ Тип несе не лише зв'язки, що зійшлися: `unmappedSourceFields` і
+ * `uncoveredColumns` — це **розриви**, і саме заради них перегляд існує.
+ */
+export type MappingPreview = Schemas['MappingPreview'];
+
+/** Реальний рядок джерела разом з адресою, куди він лягає. */
+export type MappingPreviewRow = Schemas['MappingPreviewRow'];
+
+/** Підсумок одного мапінгу: що саме він поклав би в комірку. */
+export type MappedFieldPreview = Schemas['MappedFieldPreview'];
+
+/** Поле джерела, яке не лягає нікуди. */
+export type UnmappedSourceField = Schemas['UnmappedSourceField'];
+
+/** Колонка документа, за якою не стоїть нічого. */
+export type UncoveredColumn = Schemas['UncoveredColumn'];
+
+/**
+ * Що станеться з рядком джерела або з мапінгом.
+ *
+ * ⚠ Тип **згенерований** із серверного переліку: новий різновид розриву
+ * змусить TypeScript обробити випадок, а не мовчки його не показати.
+ */
+export type MappingOutcome = Schemas['MappingOutcome'];

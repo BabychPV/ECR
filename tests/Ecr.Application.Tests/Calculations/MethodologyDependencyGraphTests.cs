@@ -165,6 +165,32 @@ public sealed class MethodologyDependencyGraphTests
         Assert.Contains(SelfReferenceId, node.DependsOnFormulaDefIds);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.14")]
+    public async Task Оголошений_список_аргументів_доходить_від_сутності_до_перевірки()
+    {
+        // ⛔ Стережеться ЛАНКА, а не звірка. Звірка була написана й
+        // покрита дванадцятьма мутаціями — і мовчала у продуктиві: колонки
+        // під `FInfo_Arguments` не існувало, тож `DeclaredArguments` завжди був
+        // `null`, а на `null` звірка за домовленістю мовчить (`Q-091`).
+        //
+        // ⚠ Тест йде через СПРАВЖНІЙ обробник публікації навмисно:
+        // виклик `MethodologyPublishChecks.Check` напряму доводить лише, що
+        // звірка вміє відмовляти, і нічого — про те, чи є єй що читати.
+        var declared = Formula(ShortNameId, "k1", "@FuelConsumption * 2");
+        declared.SetArguments("Duration");
+
+        _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns(new List<MethodologyFormula> { declared });
+
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0432", error.ErrorCode);
+        Assert.Contains("FuelConsumption", error.Message, StringComparison.Ordinal);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private PublishMethodologyHandler Handler()

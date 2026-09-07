@@ -35,7 +35,15 @@ public sealed class TypeChecker
                 return symbol.Kind switch
                 {
                     SymbolKind.Argument => context.GetArgumentType(symbol.Name),
-                    SymbolKind.Constant => ExpressionValueType.Number,
+
+                    // ⛔ Тут стояло `ExpressionValueType.Number` — «константа
+                    // завжди число». Після появи `ConstantKind` це неправда:
+                    // з 6507 констант корпусу 108 нечислові, і ~90 із них
+                    // ужиті операндом порівняння. Жорстке `Number` робило б
+                    // `CST.k1_CategorySelection_ = 'Summer'` «порівнянням
+                    // різних типів», тобто ~90 хибних помилок публікації —
+                    // щойно перевірку типів увімкнуть для методологій.
+                    SymbolKind.Constant => context.GetConstantType(symbol.Name),
                     _ => ExpressionValueType.Null,
                 };
 
@@ -237,4 +245,24 @@ public interface ITypeContext
 
     /// <summary>Тип аргументу методології.</summary>
     public ExpressionValueType GetArgumentType(string name);
+
+    /// <summary>Тип значення константи методології (<c>CST.&lt;код&gt;</c>).</summary>
+    /// <param name="code">Код константи — те, що стоїть після <c>CST.</c>.</param>
+    /// <returns>Тип константи; <c>Null</c> — контекст про неї не знає.</returns>
+    /// <remarks>
+    /// ⛔ Реалізація за замовчуванням віддає <c>Null</c>, а не <c>Number</c>, і
+    /// різниця не стилістична. <c>Null</c> сумісний з усім (§6.2), тобто
+    /// контекст, який про константи нічого не знає, нічого про них і не
+    /// стверджує. <c>Number</c> — це твердження, і саме воно перетворювало
+    /// <c>CST.k1_CategorySelection_ = 'Summer'</c> на «порівняння різних
+    /// типів»: ~90 хибних помилок публікації на законних текстових
+    /// константах корпусу.
+    ///
+    /// ⚠ Ціна замовчування названа: контекст без реалізації не спіймає й
+    /// СПРАВЖНЬОЇ несумісності — текстової константи в множенні. Її сьогодні
+    /// ловить окрема перевірка публікації методології
+    /// (<c>MethodologyPublishChecks</c>, позиційний обхід), і доки контекст
+    /// методологій не реалізує цей метод, вона там і лишається єдиною.
+    /// </remarks>
+    public ExpressionValueType GetConstantType(string code) => ExpressionValueType.Null;
 }

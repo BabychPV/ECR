@@ -1,6 +1,7 @@
 // src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Domain.Entities.Calculations;
 
@@ -204,6 +205,148 @@ public sealed class MethodologyVersion : Entity<int>
         }
 
         Status = TemplateVersionStatus.Deprecated;
+    }
+
+    /// <summary>
+    /// Клон цієї версії як **чернетка**: єдиний спосіб змінити опубліковану
+    /// (ФВ-9.1, ФВ-13.2).
+    /// </summary>
+    /// <param name="newVersion">Номер нової версії; унікальний у межах методології.</param>
+    /// <param name="createdByUserId">Автор клону. Саме він **не зможе** його опублікувати (D-40).</param>
+    /// <param name="utcNow">Час створення в UTC.</param>
+    /// <returns>Чернетку без вікна дії і без контрольної суми.</returns>
+    /// <remarks>
+    /// ⛔ Режими переносяться, а не беруться за замовчуванням. Конструктор
+    /// ставить <see cref="Domain.Enums.NumericMode.Legacy"/> і
+    /// <see cref="Domain.Enums.CalendarMode.Actual"/> — правильно для НОВОЇ
+    /// методології і руйнівно для клону: версія, зроблена «щоб виправити одну
+    /// формулу», мовчки перерахувала б усі числа іншою арифметикою і на іншій
+    /// тривалості періоду (ФВ-9.9, ФВ-16.11). Ані diff публікації, ані golden
+    /// set цього б не назвали причиною — вони показують результат, а не режим.
+    /// <para>
+    /// ⚠ Дочірні записи (формули, константи, правила) сюди не переносяться:
+    /// сутність їх не бачить і бачити не повинна. Копіює їх сховище —
+    /// <c>IMethodologyDraftStore</c>, — і воно ж відповідає за те, щоб не
+    /// забути жодного набору.
+    /// </para>
+    /// </remarks>
+    public MethodologyVersion CloneAsDraft(string newVersion, int createdByUserId, DateTime utcNow)
+    {
+        var draft = new MethodologyVersion(MethodologyId, newVersion, Level, createdByUserId, utcNow);
+        draft.SetModes(NumericMode, CalendarMode, TraceLevel);
+
+        return draft;
+    }
+
+    /// <summary>Заводить формулу в цій версії. Лише для чернетки (ФВ-9.15).</summary>
+    /// <param name="code">Код формули — те, на що посилається <c>!Name</c>.</param>
+    /// <param name="expression">Вираз діалекту методологій.</param>
+    /// <param name="resultType">Що формула повертає: число чи текст.</param>
+    /// <param name="outputUnitId">Одиниця результату; <c>null</c> — безрозмірна або текстова.</param>
+    /// <returns>Нову формулу, прив'язану до цієї версії.</returns>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка; <c>ECR-CALC-0422</c> —
+    /// порожній вираз або одиниця на текстовому результаті.
+    /// </exception>
+    public MethodologyFormula AddFormula(
+        EcrCode code, string expression, FormulaResultType resultType, int? outputUnitId)
+    {
+        RequireDraft("склад формул");
+
+        var formula = new MethodologyFormula(Id, code, expression);
+        Apply(formula, expression, resultType, outputUnitId);
+
+        return formula;
+    }
+
+    /// <summary>Змінює формулу цієї версії. Лише для чернетки (ФВ-9.15).</summary>
+    /// <param name="formula">Формула, яка вже належить цій версії.</param>
+    /// <param name="expression">Новий вираз.</param>
+    /// <param name="resultType">Що формула повертає.</param>
+    /// <param name="outputUnitId">Одиниця результату; <c>null</c> — зняти.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або формула чужа;
+    /// <c>ECR-CALC-0422</c> — порожній вираз або одиниця на текстовому результаті.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Правка йде **через версію**, а не через саму формулу, і саме тому
+    /// <see cref="MethodologyFormula.SetExpression"/> недоступний за межами
+    /// домену. Формула не знає, опублікована її версія чи ні; знає це версія —
+    /// і поки шлях один, «редагувати можна лише чернетку» тримає домен, а не
+    /// пам'ять того, хто пише обробник.
+    /// </remarks>
+    public void EditFormula(
+        MethodologyFormula formula, string expression, FormulaResultType resultType, int? outputUnitId)
+    {
+        ArgumentNullException.ThrowIfNull(formula);
+
+        RequireDraft("формули");
+        RequireOwn(formula);
+
+        Apply(formula, expression, resultType, outputUnitId);
+    }
+
+    /// <summary>Дозволяє прибрати формулу з цієї версії. Лише для чернетки.</summary>
+    /// <param name="formula">Формула, яка вже належить цій версії.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або формула чужа.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Сама сутність нічого не видаляє: колекції формул у версії немає, і
+    /// заводити її заради видалення означало б тягнути десятки рядків на кожне
+    /// читання версії. Метод **дозволяє** видалення, а виконує його сховище —
+    /// але без цього дозволу воно не має права виконати нічого.
+    /// </remarks>
+    public void RemoveFormula(MethodologyFormula formula)
+    {
+        ArgumentNullException.ThrowIfNull(formula);
+
+        RequireDraft("склад формул");
+        RequireOwn(formula);
+    }
+
+    /// <summary>Ставить формулі вираз, тип результату і одиницю.</summary>
+    /// <param name="formula">Формула цієї версії.</param>
+    /// <param name="expression">Вираз.</param>
+    /// <param name="resultType">Тип результату.</param>
+    /// <param name="outputUnitId">Одиниця; <c>null</c> — зняти.</param>
+    /// <remarks>
+    /// ⛔ Порядок кроків несучий. <c>SetOutputUnit</c> відхиляє одиницю на
+    /// текстовому результаті, а <c>SetResultType</c> — текст на формулі, де
+    /// одиниця вже стоїть. Тому одиниця знімається ПЕРШОЮ: інакше числову
+    /// формулу з тоннами неможливо було б перевести в текст узагалі — і не
+    /// через заборону, а через порядок викликів.
+    /// </remarks>
+    private static void Apply(
+        MethodologyFormula formula, string expression, FormulaResultType resultType, int? outputUnitId)
+    {
+        formula.SetExpression(expression);
+        formula.ClearOutputUnit();
+        formula.SetResultType(resultType);
+
+        if (outputUnitId is { } unit)
+        {
+            formula.SetOutputUnit(unit);
+        }
+    }
+
+    /// <summary>Відхиляє формулу, яка належить іншій версії.</summary>
+    /// <param name="formula">Формула, яку править виклик.</param>
+    /// <remarks>
+    /// ⛔ Не формальність. Формула адресується власним ключем, а версія —
+    /// своїм; обробник, який прочитав їх окремо, без цієї перевірки правив би
+    /// формулу ОПУБЛІКОВАНОЇ версії, тримаючи в руках чернетку — і перевірка
+    /// стану версії була б зелена, бо дивилася б не на ту версію.
+    /// </remarks>
+    private void RequireOwn(MethodologyFormula formula)
+    {
+        if (formula.MethodologyVersionId != Id)
+        {
+            throw new DomainException(
+                "ECR-CALC-0409",
+                $"Формула «{formula.Code}» належить версії {formula.MethodologyVersionId}, "
+                + $"а не {Id}: правити її через цю версію не можна.");
+        }
     }
 
     /// <summary>Відхиляє зміну опублікованої версії.</summary>

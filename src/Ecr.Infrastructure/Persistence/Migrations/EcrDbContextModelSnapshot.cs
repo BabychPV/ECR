@@ -297,7 +297,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_MC_Kind", "(Kind = 0 AND UnitId IS NOT NULL AND (Value IS NOT NULL OR TextValue IS NOT NULL)) OR (Kind <> 0 AND Value IS NULL AND UnitId IS NULL AND TextValue IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo");
+                            t.HasCheckConstraint("CK_MC_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo");
                         });
                 });
 
@@ -334,6 +334,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ArgumentsCsv")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -1635,7 +1638,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.ToTable("RegistryEntry", "dic", t =>
                         {
-                            t.HasCheckConstraint("CK_RegEntry_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom <= ValidTo");
+                            t.HasCheckConstraint("CK_RegEntry_Period", "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo");
                         });
                 });
 

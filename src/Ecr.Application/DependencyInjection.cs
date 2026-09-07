@@ -1,4 +1,4 @@
-using Ecr.Application.Documents;
+﻿using Ecr.Application.Documents;
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -129,6 +129,11 @@ public static class DependencyInjection
         services.AddScoped<Calculations.ListMethodologiesHandler>();
         services.AddScoped<Calculations.PublishMethodologyHandler>();
         services.AddScoped<Calculations.SimulateMethodologyHandler>();
+        services.AddScoped<Calculations.ListMethodologyVersionsHandler>();
+        services.AddScoped<Calculations.CreateMethodologyVersionHandler>();
+        services.AddScoped<Calculations.ListMethodologyFormulasHandler>();
+        services.AddScoped<Calculations.SaveMethodologyFormulaHandler>();
+        services.AddScoped<Calculations.DeleteMethodologyFormulaHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
 
@@ -153,6 +158,9 @@ public static class DependencyInjection
         services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.GetJobStatusHandler>();
+
+        // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
+        services.AddScoped<Sources.PreviewMappingHandler>();
 
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();

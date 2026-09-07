@@ -47,6 +47,33 @@ public sealed class MethodologyFormula : Entity<int>
     /// </remarks>
     public FormulaResultType ResultType { get; private set; }
 
+    /// <summary>
+    /// Оголошені аргументи — <c>;</c>-список, як у <c>FInfo_Arguments</c>
+    /// (директива ПК-1 №05 §7, пастка 2). <c>null</c> — список не оголошено.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це **джерело істини про аргументи**, а не текст виразу. Чинна збірка
+    /// підставляє рівно те, що перелічено тут; токен, якого в списку немає, у
+    /// вираз **не потрапляє** — і формула рахується з невизначеним параметром
+    /// без жодної ознаки збою. Саме тому <c>ECR-CALC-0432</c> — помилка
+    /// публікації, а не попередження.
+    ///
+    /// ⚠ Зберігається **як написано**, без нормалізації. Заміну <c>.</c> на
+    /// <c>_</c> і зняття регістру робить звірка
+    /// (<c>ArgumentDeclarationChecker</c>), а не запис: нормалізувати при
+    /// збереженні означало б утратити те, що набрав методолог, і показувати
+    /// йому в редакторі чуже.
+    ///
+    /// ⚠ <c>null</c> і порожній рядок — різні речі. <c>null</c> означає «списку
+    /// немає», і тоді звірка мовчить; порожній — «оголошено нуль аргументів»,
+    /// і тоді будь-який токен у виразі є порушенням.
+    /// </remarks>
+    public string? ArgumentsCsv { get; private set; }
+
+    /// <summary>Оголошує список аргументів формули.</summary>
+    /// <param name="argumentsCsv"><c>;</c>-список; <c>null</c> — списку немає.</param>
+    public void SetArguments(string? argumentsCsv) => ArgumentsCsv = argumentsCsv;
+
     /// <summary>Проставляє порядок, отриманий із графа залежностей.</summary>
     /// <param name="order">Позиція в топологічному порядку.</param>
     /// <remarks>
@@ -60,6 +87,46 @@ public sealed class MethodologyFormula : Entity<int>
         ArgumentOutOfRangeException.ThrowIfNegative(order);
         EvaluationOrder = order;
     }
+
+    /// <summary>Замінює вираз формули.</summary>
+    /// <param name="expression">Новий вираз діалекту методологій.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0422</c> — порожній вираз.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Метод <b>internal</b>, і це не оформлення. Формула не знає, чи
+    /// опублікована її версія, — знає це <see cref="MethodologyVersion"/>.
+    /// Публічний сетер означав би другий шлях зміни виразу, на якому перевірки
+    /// «опублікована версія незмінна» (ФВ-13.2) немає, і саме ним скористався б
+    /// перший обробник, якому вона здалася зайвою. Єдиний вхід —
+    /// <see cref="MethodologyVersion.EditFormula"/>.
+    /// <para>
+    /// ⚠ Порожній вираз відхиляється тут, а не в формі. Формула без виразу не
+    /// зникає з розрахунку: вона лишається оголошеним виходом і дає нуль, який
+    /// нічим не відрізняється від порахованого.
+    /// </para>
+    /// </remarks>
+    internal void SetExpression(string expression)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Формула «{Code}» без виразу: порожній вираз не прибирає формулу з розрахунку, "
+                + "а робить її тихим нулем.");
+        }
+
+        Expression = expression;
+    }
+
+    /// <summary>Знімає одиницю результату.</summary>
+    /// <remarks>
+    /// ⛔ Без цього методу числову формулу з тоннами неможливо було б перевести
+    /// в текстову взагалі: <see cref="SetResultType"/> відхиляє текст на
+    /// формулі з одиницею, а зняти одиницю не було чим. Заборона, яка не має
+    /// виходу, — це не інваріант, а глухий кут.
+    /// </remarks>
+    internal void ClearOutputUnit() => OutputUnitId = null;
 
     /// <summary>Оголошує одиницю результату формули (ФВ-16.6).</summary>
     /// <param name="unitId">Одиниця з <c>uom.Unit</c>.</param>
