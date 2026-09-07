@@ -2420,6 +2420,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Повний опис довідника для конструктора. Право `Registry.View`.
+         * @description ⛔ Поля, зв'язки, правила і мапінг — ОДНІЄЮ відповіддю (`ФВ-8.12`).
+         *     Вони описують один об'єкт і читаються разом; чотири запити давали б
+         *     чотири різні моменти часу на одному екрані.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDto"];
+                        "text/json": components["schemas"]["RegistryDefinitionDto"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.
+         * @description ⛔ Приймається ПОВНИЙ стан, а не набір правок. Опис довідника — це
+         *     кілька десятків полів і одиниці правил; часткова правка вимагала б від
+         *     клієнта тримати список того, що він змінив, і перша ж помилка в цьому
+         *     списку давала б розбіжність, яку видно лише через рік.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveRegistryDefinitionDto"];
+                    "application/json": components["schemas"]["SaveRegistryDefinitionDto"];
+                    "text/json": components["schemas"]["SaveRegistryDefinitionDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionVersionResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries": {
         parameters: {
             query?: never;
@@ -2568,6 +2685,63 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Історія змін опису довідника. Право `Registry.View`.
+         * @description ⚠ Історія ОПИСУ, а не записів: зміни записів живуть у журналі комірок і
+         *     в самих вікнах чинності. Питання, на яке відповідає цей маршрут, —
+         *     «чому тут з'явилося це поле».
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryHistoryEntryDto"][];
+                        "text/json": components["schemas"]["RegistryHistoryEntryDto"][];
+                        "text/plain": components["schemas"]["RegistryHistoryEntryDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5904,6 +6078,49 @@ export interface components {
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
         };
+        /** @description Повний опис довідника для конструктора (`ФВ-8.12`): поля, зв'язки,
+         *     правила, мапінг. */
+        RegistryDefinitionDto: {
+            /** @description Код довідника. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ревізія даних; росте від зміни записів.
+             */
+            dataRevision: number;
+            /**
+             * Format: int32
+             * @description Версія опису; росте від зміни складу полів і правил.
+             */
+            definitionVersion: number;
+            /** @description Поля довідника в порядку показу. */
+            fields: components["schemas"]["RegistryFieldDto"][];
+            /**
+             * Format: int32
+             * @description Ідентифікатор довідника.
+             */
+            id: number;
+            /** @description Чи мають записи вікно чинності. */
+            isTemporal: boolean;
+            /** @description Мапінг зовнішніх полів на поля довідника (`ФВ-8.11`). */
+            mappings: components["schemas"]["RegistryMappingDto"][];
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Зв'язки: посилання полів і види M:N, наявні в даних. */
+            relations: components["schemas"]["RegistryRelationDto"][];
+            /** @description Правила цілісності — чотири види (`H-10`). */
+            rules: components["schemas"]["RegistryRuleDto"][];
+            /** @description Хто master (`ФВ-8.9`). */
+            sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
+        /** @description Нова версія опису довідника після збереження. */
+        RegistryDefinitionVersionResponse: {
+            /**
+             * Format: int32
+             * @description Версія опису; росте від зміни складу полів і правил.
+             */
+            definitionVersion: number;
+        };
         /** @description Запис довідника для UI і резолвінгу. У комірці зберігається
          *     long RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому
          *     перейменування не змінює історичні дані. */
@@ -5981,6 +6198,149 @@ export interface components {
              * @description Одиниця для числових полів; `null` — безрозмірне.
              */
             unitId: null | number;
+        };
+        /** @description Поле, яке зберігає конструктор. */
+        RegistryFieldSaveDto: {
+            /** @description Код поля; у наявного не змінюється. */
+            code: string;
+            /** @description Тип значення; у наявного не змінюється. */
+            dataType: string;
+            /**
+             * Format: int32
+             * @description `null` — нове поле; інакше — правка наявного.
+             */
+            id: null | number;
+            /** @description Чи входить у бізнес-ключ; у наявного не змінюється. */
+            isKey: boolean;
+            /** @description Обов'язковість. */
+            isRequired: boolean;
+            /**
+             * Format: int32
+             * @description Довідник-джерело; у наявного не змінюється.
+             */
+            lookupRegistryDefId: null | number;
+            /** @description Підпис мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Порядок у переліку.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Одиниця значення.
+             */
+            unitId: null | number;
+        };
+        /** @description Запис історії довідника (`ФВ-8.12`). */
+        RegistryHistoryEntryDto: {
+            /** @description Причина зміни. */
+            changeReason: null | string;
+            /**
+             * Format: date-time
+             * @description Момент зміни в UTC.
+             */
+            changedAt: string;
+            /**
+             * Format: int32
+             * @description Автор.
+             */
+            changedByUserId: number;
+            /** @description Що змінилося: опис довідника чи правило. */
+            entityType: string;
+            /** @description Стан після зміни. */
+            newJson: null | string;
+            /** @description Стан до зміни. */
+            oldJson: null | string;
+            /** @description Дія: `SaveDefinition`, `SwitchSourceSet`. */
+            operation: string;
+        };
+        /** @description Мапінг зовнішнього поля на поле довідника. */
+        RegistryMappingDto: {
+            /** @description Поле довідника, куди лягає значення. */
+            fieldCode: string;
+            /**
+             * Format: int32
+             * @description Запис `ext.EntityFieldMap`.
+             */
+            fieldMapId: number;
+            /** @description Чи діє мапінг. */
+            isActive: boolean;
+            /** @description Сутність джерела. */
+            sourceCode: string;
+            /** @description Поле або тег у джерелі. */
+            sourceField: string;
+            /** @description Одиниця джерела; `null` — безрозмірне. */
+            sourceUnitCode: null | string;
+            /** @description Одиниця поля; `null` — безрозмірне. */
+            targetUnitCode: null | string;
+            /** @description Згортання точок періоду; `null` — не згортається. */
+            transformCode: null | string;
+        };
+        /** @description Зв'язок довідника з іншим довідником (`ФВ-8.4`). */
+        RegistryRelationDto: {
+            /** @description Поле-посилання; `null` для M:N — там поля немає. */
+            fieldCode: null | string;
+            /** @description Вид: `Hierarchy`, `Cascade` або `Association`. */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Скільки зв'язків цього виду в даних; `null` для полів.
+             */
+            linkCount: null | number;
+            /** @description Вид відношення M:N; `null` для зв'язків через поле. */
+            linkKind: null | string;
+            /** @description Код довідника-цілі; `null` для M:N. */
+            targetRegistryCode: null | string;
+            /**
+             * Format: int32
+             * @description Довідник-ціль; `null` для M:N.
+             */
+            targetRegistryDefId: null | number;
+        };
+        /** @description Правило цілісності довідника. */
+        RegistryRuleDto: {
+            /** @description Код правила. */
+            code: string;
+            /** @description Предикат діалектом виразів ECR. */
+            expression: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор правила; `0` — нове.
+             */
+            id: number;
+            /** @description Чи діє правило. */
+            isActive: boolean;
+            /** @description Текст порушення мовами каталогу. */
+            messageL10n: components["schemas"]["LocalizedText"];
+            /** @description Параметри виду правила; `null` — немає. */
+            parametersJson: null | string;
+            /** @description Вид: один із чотирьох (`H-10`). */
+            ruleKind: string;
+            /** @description Рівень порушення. */
+            severity: string;
+        };
+        /** @description Правило, яке зберігає конструктор. */
+        RegistryRuleSaveDto: {
+            /** @description Код правила; у наявного не змінюється. */
+            code: string;
+            /** @description Предикат. */
+            expression: string;
+            /**
+             * Format: int32
+             * @description `null` — нове правило; інакше — правка наявного.
+             */
+            id: null | number;
+            /** @description Чи діє правило. */
+            isActive: boolean;
+            /** @description Текст порушення. */
+            messageL10n: components["schemas"]["LocalizedText"];
+            /** @description Параметри виду правила. */
+            parametersJson: null | string;
+            /** @description Вид правила; у наявного не змінюється. */
+            ruleKind: string;
+            /** @description Рівень порушення. */
+            severity: string;
         };
         /**
          * @description Хто є master для реєстру (ФВ-8.9).
@@ -6160,6 +6520,16 @@ export interface components {
              *     повертає `'Сверхнорматив'` як ЗНАЧЕННЯ, і без типу воно пішло б у
              *     числову колонку результату. */
             resultType: components["schemas"]["FormulaResultType"];
+        };
+        /** @description Запит на збереження опису довідника. */
+        SaveRegistryDefinitionDto: {
+            /** @description Повний перелік полів після правки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни. Обов'язкова: опис довідника змінює те, як читаються ВЖЕ
+             *     збережені записи, і питання «чому тут з'явилося це поле» ставлять через рік. */
+            reason: string;
+            /** @description Повний перелік правил після правки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
         };
         /** @description Налаштування зв'язку між таблицями (`ФВ-2.12`). */
         SaveTableRelationRequest: {

@@ -3099,6 +3099,98 @@
         ],
         "type": "object"
       },
+      "RegistryDefinitionDto": {
+        "description": "Повний опис довідника для конструктора (`ФВ-8.12`): поля, зв'язки,\r\nправила, мапінг.",
+        "properties": {
+          "code": {
+            "description": "Код довідника.",
+            "type": "string"
+          },
+          "dataRevision": {
+            "description": "Ревізія даних; росте від зміни записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "definitionVersion": {
+            "description": "Версія опису; росте від зміни складу полів і правил.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fields": {
+            "description": "Поля довідника в порядку показу.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryFieldDto"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "Ідентифікатор довідника.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isTemporal": {
+            "description": "Чи мають записи вікно чинності.",
+            "type": "boolean"
+          },
+          "mappings": {
+            "description": "Мапінг зовнішніх полів на поля довідника (`ФВ-8.11`).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryMappingDto"
+            },
+            "type": "array"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          },
+          "relations": {
+            "description": "Зв'язки: посилання полів і види M:N, наявні в даних.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRelationDto"
+            },
+            "type": "array"
+          },
+          "rules": {
+            "description": "Правила цілісності — чотири види (`H-10`).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleDto"
+            },
+            "type": "array"
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/RegistrySourceKind",
+            "description": "Хто master (`ФВ-8.9`)."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "isTemporal",
+          "sourceKind",
+          "definitionVersion",
+          "dataRevision",
+          "fields",
+          "relations",
+          "rules",
+          "mappings"
+        ],
+        "type": "object"
+      },
+      "RegistryDefinitionVersionResponse": {
+        "description": "Нова версія опису довідника після збереження.",
+        "properties": {
+          "definitionVersion": {
+            "description": "Версія опису; росте від зміни складу полів і правил.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "definitionVersion"
+        ],
+        "type": "object"
+      },
       "RegistryEntryDto": {
         "description": "Запис довідника для UI і резолвінгу. У комірці зберігається\r\nlong RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому\r\nперейменування не змінює історичні дані.",
         "properties": {
@@ -3260,6 +3352,346 @@
           "isScopeField",
           "lookupRegistryDefId",
           "unitId"
+        ],
+        "type": "object"
+      },
+      "RegistryFieldSaveDto": {
+        "description": "Поле, яке зберігає конструктор.",
+        "properties": {
+          "code": {
+            "description": "Код поля; у наявного не змінюється.",
+            "type": "string"
+          },
+          "dataType": {
+            "description": "Тип значення; у наявного не змінюється.",
+            "type": "string"
+          },
+          "id": {
+            "description": "`null` — нове поле; інакше — правка наявного.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "isKey": {
+            "description": "Чи входить у бізнес-ключ; у наявного не змінюється.",
+            "type": "boolean"
+          },
+          "isRequired": {
+            "description": "Обов'язковість.",
+            "type": "boolean"
+          },
+          "lookupRegistryDefId": {
+            "description": "Довідник-джерело; у наявного не змінюється.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Підпис мовами каталогу."
+          },
+          "ordinal": {
+            "description": "Порядок у переліку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unitId": {
+            "description": "Одиниця значення.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "dataType",
+          "ordinal",
+          "isRequired",
+          "isKey",
+          "lookupRegistryDefId",
+          "unitId"
+        ],
+        "type": "object"
+      },
+      "RegistryHistoryEntryDto": {
+        "description": "Запис історії довідника (`ФВ-8.12`).",
+        "properties": {
+          "changeReason": {
+            "description": "Причина зміни.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedAt": {
+            "description": "Момент зміни в UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByUserId": {
+            "description": "Автор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entityType": {
+            "description": "Що змінилося: опис довідника чи правило.",
+            "type": "string"
+          },
+          "newJson": {
+            "description": "Стан після зміни.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldJson": {
+            "description": "Стан до зміни.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "operation": {
+            "description": "Дія: `SaveDefinition`, `SwitchSourceSet`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changedAt",
+          "entityType",
+          "operation",
+          "oldJson",
+          "newJson",
+          "changeReason",
+          "changedByUserId"
+        ],
+        "type": "object"
+      },
+      "RegistryMappingDto": {
+        "description": "Мапінг зовнішнього поля на поле довідника.",
+        "properties": {
+          "fieldCode": {
+            "description": "Поле довідника, куди лягає значення.",
+            "type": "string"
+          },
+          "fieldMapId": {
+            "description": "Запис `ext.EntityFieldMap`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи діє мапінг.",
+            "type": "boolean"
+          },
+          "sourceCode": {
+            "description": "Сутність джерела.",
+            "type": "string"
+          },
+          "sourceField": {
+            "description": "Поле або тег у джерелі.",
+            "type": "string"
+          },
+          "sourceUnitCode": {
+            "description": "Одиниця джерела; `null` — безрозмірне.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetUnitCode": {
+            "description": "Одиниця поля; `null` — безрозмірне.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "transformCode": {
+            "description": "Згортання точок періоду; `null` — не згортається.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "fieldMapId",
+          "fieldCode",
+          "sourceCode",
+          "sourceField",
+          "transformCode",
+          "sourceUnitCode",
+          "targetUnitCode",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryRelationDto": {
+        "description": "Зв'язок довідника з іншим довідником (`ФВ-8.4`).",
+        "properties": {
+          "fieldCode": {
+            "description": "Поле-посилання; `null` для M:N — там поля немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "Вид: `Hierarchy`, `Cascade` або `Association`.",
+            "type": "string"
+          },
+          "linkCount": {
+            "description": "Скільки зв'язків цього виду в даних; `null` для полів.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "linkKind": {
+            "description": "Вид відношення M:N; `null` для зв'язків через поле.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetRegistryCode": {
+            "description": "Код довідника-цілі; `null` для M:N.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetRegistryDefId": {
+            "description": "Довідник-ціль; `null` для M:N.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "fieldCode",
+          "targetRegistryDefId",
+          "targetRegistryCode",
+          "linkKind",
+          "linkCount"
+        ],
+        "type": "object"
+      },
+      "RegistryRuleDto": {
+        "description": "Правило цілісності довідника.",
+        "properties": {
+          "code": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "expression": {
+            "description": "Предикат діалектом виразів ECR.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор правила; `0` — нове.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи діє правило.",
+            "type": "boolean"
+          },
+          "messageL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Текст порушення мовами каталогу."
+          },
+          "parametersJson": {
+            "description": "Параметри виду правила; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ruleKind": {
+            "description": "Вид: один із чотирьох (`H-10`).",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Рівень порушення.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "ruleKind",
+          "expression",
+          "severity",
+          "messageL10n",
+          "parametersJson",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryRuleSaveDto": {
+        "description": "Правило, яке зберігає конструктор.",
+        "properties": {
+          "code": {
+            "description": "Код правила; у наявного не змінюється.",
+            "type": "string"
+          },
+          "expression": {
+            "description": "Предикат.",
+            "type": "string"
+          },
+          "id": {
+            "description": "`null` — нове правило; інакше — правка наявного.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "isActive": {
+            "description": "Чи діє правило.",
+            "type": "boolean"
+          },
+          "messageL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Текст порушення."
+          },
+          "parametersJson": {
+            "description": "Параметри виду правила.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ruleKind": {
+            "description": "Вид правила; у наявного не змінюється.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Рівень порушення.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "ruleKind",
+          "expression",
+          "severity",
+          "messageL10n",
+          "parametersJson",
+          "isActive"
         ],
         "type": "object"
       },
@@ -3614,6 +4046,35 @@
           "expression",
           "resultType",
           "outputUnitId"
+        ],
+        "type": "object"
+      },
+      "SaveRegistryDefinitionDto": {
+        "description": "Запит на збереження опису довідника.",
+        "properties": {
+          "fields": {
+            "description": "Повний перелік полів після правки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryFieldSaveDto"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "description": "Причина зміни. Обов'язкова: опис довідника змінює те, як читаються ВЖЕ\r\nзбережені записи, і питання «чому тут з'явилося це поле» ставлять через рік.",
+            "type": "string"
+          },
+          "rules": {
+            "description": "Повний перелік правил після правки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleSaveDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields",
+          "rules",
+          "reason"
         ],
         "type": "object"
       },
@@ -7925,6 +8386,169 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/definition": {
+      "get": {
+        "description": "⛔ Поля, зв'язки, правила і мапінг — ОДНІЄЮ відповіддю (`ФВ-8.12`).\r\nВони описують один об'єкт і читаються разом; чотири запити давали б\r\nчотири різні моменти часу на одному екрані.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Повний опис довідника для конструктора. Право `Registry.View`.",
+        "tags": [
+          "Registries"
+        ]
+      },
+      "put": {
+        "description": "⛔ Приймається ПОВНИЙ стан, а не набір правок. Опис довідника — це\r\nкілька десятків полів і одиниці правил; часткова правка вимагала б від\r\nклієнта тримати список того, що він змінив, і перша ж помилка в цьому\r\nсписку давала б розбіжність, яку видно лише через рік.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDto"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDto"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/entries": {
       "get": {
         "description": "asOf обов'язковий за змістом: довідники темпоральні,\r\nі «поточний» набір записів залежить від дати періоду, а не від «сьогодні».\r\nМовчазна підстановка сьогоднішньої дати давала б інші числа при\r\nперерахунку старого періоду.",
@@ -8144,6 +8768,77 @@
           }
         },
         "summary": "Змінює вікно дії запису. Право `Registry.EditData`.",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/history": {
+      "get": {
+        "description": "⚠ Історія ОПИСУ, а не записів: зміни записів живуть у журналі комірок і\r\nв самих вікнах чинності. Питання, на яке відповідає цей маршрут, —\r\n«чому тут з'явилося це поле».",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegistryHistoryEntryDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegistryHistoryEntryDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RegistryHistoryEntryDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Історія змін опису довідника. Право `Registry.View`.",
         "tags": [
           "Registries"
         ]
