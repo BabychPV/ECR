@@ -403,6 +403,39 @@ public static class PublishChecks
         return diagnostics;
     }
 
+    /// <summary>Версія без структури не публікується.</summary>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <remarks>
+    /// ⛔ Цієї перевірки не було ні в домені (<see cref="TemplateVersion.Publish"/>
+    /// свідомо лише перемикає стан — валідація цілісності відбувається ДО
+    /// виклику, ФВ-2.9), ні на сервері. Версія з нулем аркушів публікувалася
+    /// кодом <c>204</c> — виміряно живим прогоном (директива №09 §6.5, `S-09`).
+    ///
+    /// ⚠ Порожня версія — не помилка виразу, тому перевірка стоїть окремо від
+    /// <see cref="Run"/>: там немає жодної формули, над якою можна було б
+    /// звітувати позицію. <c>Position</c>/<c>Length</c> — <c>0</c>/<c>1</c>,
+    /// як і в діагностиці циклу графа, коли проблема не належить одному місцю
+    /// в тексті виразу.
+    /// </remarks>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckStructure(TemplateVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        if (version.Sheets.Any(s => !s.IsDeleted))
+        {
+            return [];
+        }
+
+        return
+        [
+            new ExpressionDiagnostic(
+                "ECR-TMPL-0422",
+                $"Версію {version.Version} неможливо опублікувати: у ній немає жодного аркуша. " +
+                "Публікація без структури не має сенсу — рахувати нічим.",
+                0, 1),
+        ];
+    }
+
     /// <summary>
     /// Правила з перетинними областями дії і різними рівнями (<c>ФВ-5.10</c>).
     /// </summary>
