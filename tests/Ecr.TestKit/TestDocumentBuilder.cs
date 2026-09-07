@@ -28,9 +28,29 @@ public sealed class TestDocumentBuilder(string connectionString)
     /// <param name="periodKey">Ключ періоду (<c>Year*100 + Sequence</c>).</param>
     /// <param name="columnCount">Скільки колонок у таблиці.</param>
     /// <param name="rowCount">Скільки рядків створити в екземплярі.</param>
+    /// <param name="rowMode">
+    /// Режим рядків таблиці. За замовчуванням <c>Fixed</c> — саме його чекає
+    /// решта тестів, які вже користуються будівником.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ <paramref name="rowMode"/> став параметром заради тестів ЗАПИСУ:
+    /// <c>CreateRowHandler</c> питає <c>TableDef.AllowsDynamicRows</c> і на
+    /// <c>Fixed</c> відмовляє законно, тож наскрізний шлях «додати рядок»
+    /// на типовій таблиці будівника не пройшов би взагалі.
+    ///
+    /// ⛔ Для такого тесту потрібен саме <c>Mixed</c>, а не <c>Dynamic</c>:
+    /// будівник заводить <c>RowDef</c>-и, а <c>TableDef.AddRow</c> у режимі
+    /// <c>Dynamic</c> кидає виняток — тобто <c>MetadataCache</c> не зміг би
+    /// зібрати знімок структури, і кожен запит до такого документа падав би
+    /// у <c>500</c> ще до перевірки прав.
+    /// </remarks>
     public async Task<TestDocument> BuildAsync(
-        int periodKey = 202601, int columnCount = 3, int rowCount = 4, CancellationToken ct = default)
+        int periodKey = 202601,
+        int columnCount = 3,
+        int rowCount = 4,
+        TableRowMode rowMode = TableRowMode.Fixed,
+        CancellationToken ct = default)
     {
         // Унікальний суфікс: коди в cfg.* унікальні, а фікстура на колекцію
         // одна, тож два тести підряд інакше зіткнулися б на UQ_Template_Code.
@@ -54,7 +74,7 @@ public sealed class TestDocumentBuilder(string connectionString)
 
         var table = new TableDef(
             sheet.Id, EcrCode.Create($"TBL{tag}"), Name($"Table {tag}"), 1,
-            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            TableLayoutKind.PerPeriodInstance, rowMode);
         db.TableDefs.Add(table);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 

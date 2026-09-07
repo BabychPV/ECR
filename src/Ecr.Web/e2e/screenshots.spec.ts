@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { normalize } from './greyscale';
+import { Routes } from './routes';
 
 /**
  * Знімки всіх маршрутів під двома ролями × двома темами × двома щільностями
@@ -27,32 +28,10 @@ const Roles = [
   { name: 'admin', user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' },
 ];
 
-/**
- * Маршрути застосунку.
- *
- * ⚠ Перелік узгоджений із `router.tsx` руками — і це його слабке місце:
- * доданий маршрут сюди не потрапить сам. Автоматичного джерела немає, бо
- * маршрути оголошені всередині JSX; тому нижче стоїть перевірка на кількість,
- * яка падає, щойно маршрутів у роутері стало більше.
+/*
+ * ⚠ Перелік маршрутів переїхав у `./routes.ts`, а сторож дрейфу — у vitest
+ * (`src/app/__tests__/routes.test.ts`). Причина в кінці цього файла.
  */
-const Routes = [
-  { path: '/', name: 'documents' },
-  { path: '/my-groups', name: 'my-groups' },
-  { path: '/admin/templates', name: 'templates' },
-  { path: '/admin/registries', name: 'registries' },
-  { path: '/admin/methodologies', name: 'methodologies' },
-  { path: '/admin/expressions', name: 'expressions' },
-  { path: '/admin/units', name: 'units' },
-  { path: '/admin/security', name: 'security' },
-  { path: '/admin/periods', name: 'periods' },
-  { path: '/admin/sources', name: 'sources' },
-  { path: '/admin/mapping', name: 'mapping' },
-  { path: '/admin/jobs', name: 'jobs' },
-  { path: '/admin/health', name: 'health' },
-  { path: '/admin/snapshots', name: 'snapshots' },
-  { path: '/admin/audit', name: 'audit' },
-  { path: '/admin/ui-strings', name: 'ui-strings' },
-];
 
 const OutputDirectory = path.resolve('../../artifacts/screenshots');
 
@@ -66,9 +45,13 @@ async function signIn(page: Page, user: string, password: string): Promise<void>
 }
 
 test.describe('Знімки маршрутів (D-142)', () => {
+  // ⚠ Цей гейт більше не вирішує долю набору: без стенда ВЕСЬ набір падає в
+  // `globalSetup.ts`. Він лишається робочим лише під `ECR_E2E_OPTIONAL`, коли
+  // пропуск оголошений свідомо, — і саме тому в тексті названа змінна: інакше
+  // рядок «немає стенда» знову читався б як норма.
   test.skip(
     (process.env['ECR_E2E_PERIOD'] ?? '') === '',
-    'Немає стенда: запускати через tools/e2e-stand.ps1.',
+    'ECR_E2E_OPTIONAL: стенда немає, знімки пропущено. Стенд: tools/e2e-stand.ps1.',
   );
 
   for (const role of Roles) {
@@ -131,33 +114,22 @@ test.describe('Знімки маршрутів (D-142)', () => {
     }
   }
 
-  test('перелік маршрутів не відстав від роутера', async () => {
-    // ⛔ Перелік вище — рукописний, і саме тому тут стоїть ця перевірка.
-    // Доданий маршрут не потрапить у знімки сам, і мовчазна прогалина в
-    // артефактах — це рівно той дефект, який ЕТАП 7.5 і виловлює: перевірка,
-    // яка виглядає повною і такою не є.
-    const { readFile } = await import('node:fs/promises');
-    const router = await readFile(path.resolve('src/app/router.tsx'), 'utf8');
-
-    const declared = [...router.matchAll(/path:\s*'([^']+)'/g)]
-      .map((m) => (m[1] ?? '').replace(/^\//, ''))
-
-      // ⛔ Поза переліком навмисно: вхід і зміна пароля живуть ДО сесії, а
-      // каталог компонентів існує лише в розробці (`D7-09`) — знімати
-      // сторінку, якої немає у виробничій збірці, означало б класти в
-      // артефакти те, чого замовник не побачить ніколи.
-      .filter((p) => p !== 'login' && p !== 'change-password' && !p.startsWith('_'))
-      .filter((p) => !p.includes(':'));
-
-    // `index: true` для кореня описаний окремо і в перелік шляхів не
-    // потрапляє — тому мінус один не потрібен, але корінь у нашому переліку є.
-    const covered = new Set(Routes.map((r) => r.path.replace(/^\//, '')));
-
-    const missing = declared.filter((p) => !covered.has(p));
-
-    expect(
-      missing,
-      'ці маршрути оголошені в роутері й не потрапляють у знімки',
-    ).toEqual([]);
-  });
 });
+
+/*
+ * ⛔ Сторож «перелік маршрутів не відстав від роутера» ЖИВ ТУТ і не виконувався
+ * ніде. Стенд йому не потрібен — він читає `src/app/router.tsx` файлом, — але
+ * лежав усередині `describe`, гейтованого на `ECR_E2E_PERIOD`, і мовчки
+ * пропускався разом зі знімками. Його власний коментар називав це «перевіркою,
+ * яка виглядає повною і такою не є», перебуваючи рівно в цьому стані.
+ *
+ * ⛔ Він переїхав у vitest — `src/app/__tests__/routes.test.ts`, — а не в
+ * сусідній `describe` без гейта. Причина: тут його виконував би лише
+ * `npm run test:e2e`, тобто команда, яку без стенда не запускають, і в конвеєрі
+ * (крок «Прогони в браузері» — `ci-exempt`) його не було б однаково. Під vitest
+ * він іде в кожному `npm run test` і в кожному прогоні конвеєра — без браузера,
+ * без бази, за мілісекунди.
+ *
+ * ⚠ Спільним лишився ЛИШЕ перелік (`./routes.ts`): якщо його розкопіювати,
+ * сторож стерегтиме свою копію, а знімки зніматимуть іншу.
+ */

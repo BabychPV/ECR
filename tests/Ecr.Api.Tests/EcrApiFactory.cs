@@ -82,7 +82,39 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
 
         builder.UseEnvironment("Development");
         builder.ConfigureLogging(logging =>
-            logging.AddProvider(new CapturingLoggerProvider(ServerErrors, ServerLog)));
+        {
+            // ⛔ Типові постачальники прибираються ЦІЛКОМ, і головний тут —
+            // `EventLog`. `WebApplication.CreateBuilder` додає його на Windows
+            // мовчки, а він пише в журнал подій ОС і, на відміну від решти,
+            // після закриття хосту КИДАЄ `ObjectDisposedException`
+            // ('EventLogInternal').
+            //
+            // ⛔ Ціна цього була не косметичною. Quartz тримає постачальника
+            // логів у СТАТИЧНОМУ полі процесу: його ставить перший піднятий
+            // застосунок, а кожен тест піднімає свій. Коли фонова задача
+            // падає (а вона падає — див. нижче), Quartz пише про це через
+            // фабрику логів ПЕРШОГО застосунку, якого вже немає;
+            // `Logger.Log` збирає виняток постачальника в
+            // `AggregateException`, той виходить із `JobRunShell.Run`, а
+            // `QuartzHostedService.StopAsync` віддає його з
+            // `WebApplicationFactory.Dispose()`. Тест червонів на `Dispose`,
+            // маючи всі перевірки зеленими, і робив це приблизно раз на п'ять
+            // прогонів — тобто виглядав як «плаваючий» без жодної причини.
+            //
+            // ⚠ Сама задача падає з іншої причини, і вона теж процесна:
+            // Quartz реєструє планувальник у статичному `SchedulerRepository`
+            // за іменем, тож застосунок, піднятий другим, отримує планувальник
+            // ПЕРШОГО. Задача виконується у вже звільненому контейнері й
+            // помирає на `IMemoryCache`. Для проду це нічого не означає — там
+            // один застосунок на процес, — але жоден тест, який ставить задачу
+            // в чергу, без цього не буде стабільним.
+            //
+            // ⚠ Нічого не втрачається: увесь лог і так збирає
+            // `CapturingLoggerProvider`, і саме з нього тести беруть причину
+            // невдачі.
+            logging.ClearProviders();
+            logging.AddProvider(new CapturingLoggerProvider(ServerErrors, ServerLog));
+        });
     }
 
     private sealed class CapturingLoggerProvider(
