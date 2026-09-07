@@ -52,7 +52,28 @@ public interface IBackgroundJobScheduler
 
     /// <summary>Стан виконання для UI прогресу.</summary>
     public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
+
+    /// <summary>
+    /// Останні задачі, найновіші перші — для черги в інтерфейсі.
+    /// </summary>
+    /// <param name="limit">Скільки повернути.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ До цього методу задачу можна було переглянути, лише знаючи її GUID
+    /// (<c>GET /jobs/{jobId}</c>): збій перерахунку був видимий десь, але не
+    /// БУВ ЗНАЙДЕНИЙ, доки хтось не назве точний ідентифікатор
+    /// (директива №09 §6.5, `S-25`; `ФВ-12.4`).
+    /// </remarks>
+    public Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct);
 }
+
+/// <summary>Задача в переліку черги — легша за <see cref="JobStatus"/>.</summary>
+/// <param name="JobId">Ідентифікатор.</param>
+/// <param name="JobCode">Код задачі (тип).</param>
+/// <param name="State">Стан.</param>
+/// <param name="Percent">Прогрес у відсотках.</param>
+/// <param name="UpdatedAt">Момент останнього оновлення в UTC.</param>
+public sealed record JobSummary(string JobId, string JobCode, string State, int Percent, DateTime UpdatedAt);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob

@@ -14,12 +14,18 @@ public sealed class RecalculationServiceTests
     private static readonly PeriodKey Period = new(202601);
 
     private static RecalculationService Service()
-        => new(Substitute.For<ICellStore>(),
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
+        return new(Substitute.For<ICellStore>(),
                Substitute.For<IRowStore>(),
                Substitute.For<IMetadataCache>(),
                Substitute.For<ITemplateVersionStore>(),
                Substitute.For<IFormulaEngine>(),
+               units,
                Substitute.For<IUnitOfWork>());
+    }
 
     private static CellAddress Cell(long rowId, int columnId) => new(Period, rowId, columnId);
 

@@ -9,8 +9,21 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/jobs")]
 [Authorize]
-public sealed class JobsController(GetJobStatusHandler status) : ControllerBase
+public sealed class JobsController(GetJobStatusHandler status, ListJobsHandler list) : ControllerBase
 {
+    /// <summary>
+    /// Останні фонові задачі. Право <c>System.ViewHealth</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
+    /// її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
+    /// перевірити те, про що вже здогадався (`ФВ-12.4`).
+    /// </remarks>
+    [HttpGet]
+    [ProducesResponseType<IReadOnlyList<JobSummary>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<JobSummary>>> List(CancellationToken ct)
+        => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
+
     /// <summary>
     /// Стан задачі за її ідентифікатором. Право <c>System.ViewHealth</c>.
     /// </summary>

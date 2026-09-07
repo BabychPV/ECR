@@ -82,4 +82,39 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .Select(p => new JobStatus(p.JobId, p.State, p.Percent, p.Message, p.Error))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct)
+        => await db.JobProgresses
+            .AsNoTracking()
+            .OrderByDescending(p => p.UpdatedAt)
+            .Take(limit)
+            .Select(p => new JobSummary(p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct)
+    {
+        // ⛔ Завантажуються сутності, а не масовий UPDATE: `Finish` — доменний
+        // метод, і обходити його прямим SQL означало б повторити його правила
+        // (обнулення `Message`, запис `Error`) другим місцем, яке одного дня
+        // розійдеться з першим.
+        var stale = await db.JobProgresses
+            .Where(p => p.State == "Running" || p.State == "Queued")
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var entry in stale)
+        {
+            entry.Finish("Failed", reason, utcNow);
+        }
+
+        if (stale.Count > 0)
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
+        return stale.Count;
+    }
 }

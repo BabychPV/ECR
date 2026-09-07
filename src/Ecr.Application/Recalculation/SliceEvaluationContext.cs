@@ -1,4 +1,7 @@
+using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Services;
 using Ecr.Expressions;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
@@ -30,17 +33,25 @@ public sealed class SliceEvaluationContext : IEvaluationContext
     private readonly Dictionary<int, TableDef> _tables;
     private readonly IReadOnlyDictionary<CellKey, ExpressionValue> _values;
     private readonly IReadOnlyDictionary<string, ExpressionValue> _headers;
+    private readonly UnitCatalogSnapshot _units;
+    private static readonly UnitConverter Converter = new();
 
     /// <summary>Створює контекст над завантаженими значеннями.</summary>
     /// <param name="snapshot">Структура версії шаблону.</param>
     /// <param name="values">Значення комірок: період, таблиця, рядок, колонка → значення.</param>
     /// <param name="headers">Поля шапки документа.</param>
     /// <param name="period">Календарний контекст періоду.</param>
+    /// <param name="units">
+    /// Знімок довідника одиниць — для <see cref="Convert"/>. Передається
+    /// готовим, а не читається звідси: <see cref="IUnitCatalog.GetAsync"/>
+    /// асинхронний, а цей контекст — синхронний діалект виразів.
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
         IReadOnlyDictionary<string, ExpressionValue> headers,
-        PeriodContext period)
+        PeriodContext period,
+        UnitCatalogSnapshot units)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -48,6 +59,7 @@ public sealed class SliceEvaluationContext : IEvaluationContext
         _tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
         _values = values ?? throw new ArgumentNullException(nameof(values));
         _headers = headers ?? throw new ArgumentNullException(nameof(headers));
+        _units = units ?? throw new ArgumentNullException(nameof(units));
         Period = period;
     }
 
@@ -127,8 +139,66 @@ public sealed class SliceEvaluationContext : IEvaluationContext
         => _headers.TryGetValue(name, out var value) ? value : ExpressionValue.Null;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ До цієї правки метод відмовляв БЕЗУМОВНО — незалежно від того, чи
+    /// існує сама конверсія в довіднику. Функція `CONVERT` каталогу
+    /// існувала і в бою не працювала жодного разу (директива №09 §6.5, `S-22`).
+    ///
+    /// ⚠ Однакові коди — тотожність без звернення до довідника: формула,
+    /// написана `CONVERT(x, "t", "t")`, не має ставати помилкою через
+    /// відсутність одиниці в знімку.
+    ///
+    /// ⚠ Explicit-конверсія (`uom.Conversion`, `LegacyPinned`) тут НЕ
+    /// застосовується: це діалект ШАБЛОНУ, а не методології, і мапінг
+    /// «джерело → ціль» із власним коефіцієнтом належить методології
+    /// (`ФВ-16.3`). Тут — лише маршрут через базову одиницю розмірності.
+    /// </remarks>
     public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)
-        => ExpressionValue.Error(ExpressionErrors.BadUnit);
+    {
+        if (string.Equals(fromUnitCode, toUnitCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        if (!_units.Units.TryGetValue(fromUnitCode, out var from)
+            || !_units.Units.TryGetValue(toUnitCode, out var to))
+        {
+            // ⚠ Одиниці немає в довіднику — це помилка ВВЕДЕННЯ (одрук у коді
+            // формули), а не привід удавати конверсію.
+            return ExpressionValue.Error(ExpressionErrors.BadUnit);
+        }
+
+        var numeric = value.Value switch
+        {
+            decimal d => d,
+            double d => (decimal)d,
+            int i => i,
+            _ => (decimal?)null,
+        };
+
+        if (numeric is null)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadUnit);
+        }
+
+        try
+        {
+            var converted = Converter.Convert(
+                numeric.Value,
+                new UnitSpec(from.Id, from.Code, from.DimensionId, from.FactorToBase, from.OffsetToBase),
+                new UnitSpec(to.Id, to.Code, to.DimensionId, to.FactorToBase, to.OffsetToBase),
+                explicitConversion: null);
+
+            return ExpressionValue.Number(converted);
+        }
+        catch (DomainException)
+        {
+            // ⛔ Різні розмірності — те саме `#UNIT`, яке відмова видавала й
+            // раніше. Різниця в тому, що ТЕПЕР до цього коду доходять лише
+            // справжні розбіжності розмірностей, а не будь-який виклик CONVERT.
+            return ExpressionValue.Error(ExpressionErrors.BadUnit);
+        }
+    }
 
     /// <summary>Значення комірки; відсутня комірка — це <c>null</c>, а не помилка (02b §6.3).</summary>
     private ExpressionValue Value(int tableDefId, string? rowKey, int columnDefId, int periodOffset)

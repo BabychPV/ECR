@@ -260,6 +260,9 @@ export type ReportSnapshotSummary = Schemas['ReportSnapshotSummary'];
 /** Стан фонової задачі. */
 export type JobStatus = Schemas['JobStatus'];
 
+/** Задача в переліку черги — легша за {@link JobStatus}. */
+export type JobSummary = Schemas['JobSummary'];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Тіла запитів.
 //

@@ -129,3 +129,36 @@ public sealed class GetJobStatusHandler(
         return string.Equals(status.State, "Unknown", StringComparison.Ordinal) ? null : status;
     }
 }
+
+/// <summary>
+/// Перелік останніх фонових задач. Право <c>System.ViewHealth</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ До цього обробника задачу можна було побачити лише знаючи її GUID
+/// (`GET /jobs/{jobId}`): збій перерахунку був видимий у базі й недосяжний з
+/// інтерфейсу — оператор бачив «щось не порахувалося» без жодного способу
+/// дізнатися, яка задача і чому (директива №09 §6.5, `S-25`; `ФВ-12.4`).
+/// </remarks>
+public sealed class ListJobsHandler(
+    IBackgroundJobScheduler jobs,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Стеля переліку: більше — сторінка, якої тут немає навмисно.</summary>
+    /// <remarks>
+    /// ⚠ Це журнал того, що ЩОЙНО сталося, не архів: адміністратор дивиться
+    /// на нього одразу після дії, а не гортає місяцями назад.
+    /// </remarks>
+    private const int Limit = 50;
+
+    /// <summary>Останні задачі, найновіші перші.</summary>
+    /// <param name="ct">Скасування.</param>
+    public async Task<IReadOnlyList<JobSummary>> HandleAsync(CancellationToken ct)
+    {
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        return await jobs.ListRecentAsync(Limit, ct).ConfigureAwait(false);
+    }
+}

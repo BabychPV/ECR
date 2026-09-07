@@ -1,8 +1,8 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Card, Group, Progress, Stack, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Card, Group, Progress, Stack, Table, Text, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { JobStatus } from '@/api/types';
+import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -94,7 +94,68 @@ export function JobsPage(): JSX.Element {
         </Card>
         )}
       </AsyncBoundary>
+
+      {/*
+       * ⛔ До цього розділу задачу можна було побачити лише знаючи її GUID:
+       * збій перерахунку існував у базі й був НЕДОСЯЖНИЙ з інтерфейсу
+       * (директива №09 §6.5, `S-25`; `ФВ-12.4`). Перелік — журнал того, що
+       * ЩОЙНО сталося, а не архів: рядок клацається і підставляє id вище.
+       */}
+      <RecentJobs onPick={setJobId} />
     </>
+  );
+}
+
+/** Опитувати перелік, доки на екрані є задача не в кінцевому стані. */
+const ListPollMs = 3000;
+
+function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Element {
+  const jobs = useQuery({
+    queryKey: ['jobs'],
+    queryFn: () => apiFetch<JobSummary[]>('/api/v1/jobs'),
+    refetchInterval: (query) => {
+      const list = query.state.data ?? [];
+
+      return list.some((j) => j.state === 'Queued' || j.state === 'Running') ? ListPollMs : false;
+    },
+  });
+
+  return (
+    <AsyncBoundary<JobSummary[]>
+      isPending={jobs.isPending}
+      error={jobs.error}
+      data={jobs.data}
+      isEmpty={(list) => list.length === 0}
+      emptyTitle={t('jobs.recentEmpty')}
+      onRetry={() => void jobs.refetch()}
+    >
+      {(list) => (
+        <Table>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>{t('jobs.recentCode')}</Table.Th>
+              <Table.Th>{t('jobs.recentState')}</Table.Th>
+              <Table.Th />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {list.map((job) => (
+              <Table.Tr key={job.jobId}>
+                <Table.Td>{job.jobCode}</Table.Td>
+                <Table.Td>
+                  <Badge color={stateColor(job.state)}>{job.state}</Badge>
+                </Table.Td>
+                <Table.Td>
+                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                    {t('jobs.recentWatch')}
+                  </Button>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
+    </AsyncBoundary>
   );
 }
 

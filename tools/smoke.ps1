@@ -269,6 +269,24 @@ try {
 
     if ($written -ne 4242.42) { Fail "прочитано '$written' замість 4242.42" }
 
+    # ⛔ Перерахунок і ЧЕКАННЯ КІНЦЕВОГО СТАНУ, а не самого лише `202`. Задача
+    # ставилася в чергу з payload, що губив `ProjectId`, і `SaveChangesAsync`
+    # на створенні `CalculationRun` падав до `try`: `catch`, який мав
+    # позначити `Failed`, не спрацьовував, і задача лишалася `Running`
+    # назавжди без жодного видимого сліду (директива №09 §1.3, `S-25`; `W3`).
+    Step 'перерахунок і очікування кінцевого стану'
+    $recalc = Call POST "/api/v1/documents/$documentId/recalculate" @{ periodKey = $periodKey } -Expect @(202)
+
+    $recalcState = $null
+    foreach ($i in 1..120) {
+        Start-Sleep -Milliseconds 500
+        $recalcStatus = Call GET "/api/v1/jobs/$($recalc.jobId)"
+        $recalcState = $recalcStatus.state
+        if ($recalcState -in @('Succeeded', 'Failed')) { break }
+    }
+
+    if ($recalcState -ne 'Succeeded') { Fail "перерахунок завершився станом '$recalcState': $($recalcStatus.error)" }
+
     # ⛔ Валідація мусить повернути ТОЙ САМИЙ період. `A7-28`: сервер читав його
     # не звідти, отримував нуль і відповідав «помилок немає», нічого не
     # перевіривши.
