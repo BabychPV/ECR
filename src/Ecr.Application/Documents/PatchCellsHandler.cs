@@ -128,9 +128,19 @@ public sealed class PatchCellsHandler(
                 new Dictionary<string, object?> { ["conflicts"] = conflicts });
         }
 
-        // 5. Права — ОДНИМ викликом на весь зріз. Поштучна перевірка комірок
-        //    не вкладається в бюджет 300 мс.
+        // 5. Права — ОДНИМ викликом на зріз і ОДНИМ на створювані рядки.
+        //    Поштучна перевірка комірок не вкладається в бюджет 300 мс.
+        //
+        // ⛔ Створення і оновлення питаються ОКРЕМО, і це не симетрія заради
+        // симетрії. Рішення зрізу ключуються `CellAddress`, у якій є `RowId`;
+        // у рядка, якого ще немає, його немає — тож `updates` і `creations`
+        // принципово не вміщаються в один запит. Саме тут і був дефект: адреси
+        // збиралися лише з `updates`, на батчі з самих створень
+        // `addresses.Count == 0`, і ВЕСЬ блок прав пропускався. Запис у
+        // ЗАКРИТИЙ період віддавав `200` і клав значення в базу.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        var denied = new List<EditDecision>();
+
         var addresses = new List<CellAddress>();
         foreach (var row in updates)
         {
@@ -152,23 +162,65 @@ public sealed class PatchCellsHandler(
             // Перевіряємо лише ті адреси, які справді змінюються: рішення
             // приходять на весь зріз, але відхиляти батч через заборонену
             // комірку, якої ніхто не чіпав, було б неправильно.
-            var denied = addresses
+            denied.AddRange(addresses
                 .Where(a => decisions.TryGetValue(a, out var d) && !d.IsAllowed)
-                .Select(a => new KeyValuePair<CellAddress, EditDecision>(a, decisions[a]))
-                .ToList();
-            if (denied.Count > 0)
+                .Select(a => decisions[a]));
+        }
+
+        if (creations.Count > 0)
+        {
+            var newRows = await access
+                .CanCreateRowsAsync(profile, request.TableInstanceId, creations.Select(r => r.RowKey).ToList(), ct)
+                .ConfigureAwait(false);
+
+            foreach (var row in creations)
             {
-                var first = denied[0].Value;
-                throw new AccessDeniedException(
-                    "ECR-ACCS-0403",
-                    $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
-                    new Dictionary<string, object?>
+                // ⛔ Немає рішення — ВІДМОВА. Служба зобов'язана відповісти на
+                // кожен запитаний ключ, і протилежне замовчування («рішення
+                // немає, отже можна») — це той самий дефект, лише переписаний
+                // акуратніше.
+                if (!newRows.TryGetValue(row.RowKey, out var allowed))
+                {
+                    denied.Add(EditDecision.Deny(
+                        EditDenyReason.NoGrant,
+                        $"Рішення про доступ на рядок {row.RowKey} не отримано."));
+                    continue;
+                }
+
+                if (!allowed.Row.IsAllowed)
+                {
+                    denied.Add(allowed.Row);
+                    continue;
+                }
+
+                // ⚠ Колонки перевіряються ОКРЕМО від рядка: грант оголошується
+                // в тому числі на колонку (`ResourceKind.Column`), тож «писати
+                // в цю таблицю можна» і «писати в цю колонку можна» — різні
+                // відповіді, і друга потрібна саме там, де рядок створюють.
+                foreach (var cell in row.Cells)
+                {
+                    var columnDefId = ColumnDefIdOf(columns, cell.ColumnCode);
+
+                    if (allowed.Columns.TryGetValue(columnDefId, out var decision) && !decision.IsAllowed)
                     {
-                        ["deniedCount"] = denied.Count,
-                        ["reason"] = first.Reason.ToString(),
-                        ["detail"] = first.Detail
-                    });
+                        denied.Add(decision);
+                    }
+                }
             }
+        }
+
+        if (denied.Count > 0)
+        {
+            var first = denied[0];
+            throw new AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["deniedCount"] = denied.Count,
+                    ["reason"] = first.Reason.ToString(),
+                    ["detail"] = first.Detail
+                });
         }
 
         // 6. Розкладка на три операції (R-B4): значення → upsert,

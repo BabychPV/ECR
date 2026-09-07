@@ -120,7 +120,6 @@ public sealed record PeriodPolicyDto(
 
 /// <summary>Створення проєкту. Право <c>Project.Manage</c>.</summary>
 public sealed class CreateProjectHandler(
-    IProjectStore projects,
     IPeriodStore periods,
     IAccessDecisionService access,
     IUnitOfWork uow,

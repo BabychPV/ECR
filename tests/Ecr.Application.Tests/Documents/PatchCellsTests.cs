@@ -60,6 +60,17 @@ public sealed class PatchCellsTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+
+        // ⚠ Створення за замовчуванням ДОЗВОЛЕНЕ: тести, які не про права, не
+        // мають падати на правах. Заборону підставляє той тест, який про неї.
+        //
+        // ⛔ Порожній словник тут був би пасткою: обробник мусить трактувати
+        // відсутність рішення як ВІДМОВУ, інакше повертається рівно той дефект,
+        // який ці тести закривають, — «рішення немає, отже можна».
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(call => NewRows(call.ArgAt<IReadOnlyCollection<string>>(2), EditDecision.Allow(), EditDecision.Allow()));
     }
 
     private static void SetId(ColumnDef column, int id)
@@ -77,6 +88,17 @@ public sealed class PatchCellsTests
         => new(_cells, _rows, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _audit, _jobs, _uow, _user, _clock);
+
+    /// <summary>Відповідь служби доступу на створення рядків.</summary>
+    /// <param name="keys">Ключі, про які питали.</param>
+    /// <param name="row">Рішення на рядок.</param>
+    /// <param name="column">Рішення на колонку <c>Volume</c>.</param>
+    private static Dictionary<string, NewRowAccess> NewRows(
+        IReadOnlyCollection<string> keys, EditDecision row, EditDecision column)
+        => keys.ToDictionary(
+            k => k,
+            _ => new NewRowAccess(row, new Dictionary<int, EditDecision> { [VolumeColumnId] = column }),
+            StringComparer.Ordinal);
 
     private static PatchCellsRequest Request(params PatchRow[] rows)
         => new(TableInstance, Period, "UserEdit", rows);
@@ -181,6 +203,90 @@ public sealed class PatchCellsTests
         // сіра, інакше він піде до адміністратора, а той — до розробника.
         Assert.Equal(nameof(EditDenyReason.PeriodClosed), ex.Details!["reason"]);
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-4.4")]
+    public async Task Заборона_відхиляє_і_створення_рядка_а_не_лише_оновлення()
+    {
+        // ⛔ Це перетин двох осей, кожну з яких набір перевіряв ОКРЕМО:
+        // «створення» (`Рядок_без_базової_версії_трактується_як_створення`) і
+        // «заборона» (`Заборонена_комірка_відхиляє_батч_із_причиною`). Перший
+        // не налаштовував прав узагалі, другий ішов виключно шляхом оновлення.
+        // Дефект жив рівно в їхньому перетині: адреси для перевірки збиралися
+        // тільки з `updates`, тож на створенні `addresses.Count == 0` і весь
+        // блок прав пропускався.
+        //
+        // ⚠ Виміряно живим прогоном, не виведено: `PATCH` у період `state = 3`
+        // (`Closed`) із `baseVersion: null` віддавав `200` і клав значення в
+        // базу — при тому, що той самий рядок з `baseVersion` віддавав `403`.
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(call => NewRows(
+                   call.ArgAt<IReadOnlyCollection<string>>(2),
+                   EditDecision.Deny(EditDenyReason.PeriodClosed, "Період закрито 05.02.2026"),
+                   EditDecision.Deny(EditDenyReason.PeriodClosed, "Період закрито 05.02.2026")));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7009999", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Equal(nameof(EditDenyReason.PeriodClosed), ex.Details!["reason"]);
+
+        // Ані рядка, ані комірок: відмова має спинити батч ПОВНІСТЮ.
+        await _rows.DidNotReceive().CreateRowAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.8")]
+    public async Task Заборона_на_КОЛОНЦІ_відхиляє_створення_попри_дозвіл_на_рядок()
+    {
+        // ⛔ Друга половина перевірки, і вона не зайва: грант оголошується в
+        // тому числі на колонку (`ResourceKind.Column`), тож «писати в цю
+        // таблицю можна» і «писати в цю колонку можна» — різні відповіді.
+        // Перевіряй ми лише рішення на рядок, `isDeny`-грант на колонку не
+        // спрацював би саме там, де рядок створюють.
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(call => NewRows(
+                   call.ArgAt<IReadOnlyCollection<string>>(2),
+                   EditDecision.Allow(),
+                   EditDecision.Deny(EditDenyReason.NoGrant)));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7009999", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Equal(nameof(EditDenyReason.NoGrant), ex.Details!["reason"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.8")]
+    public async Task Рішення_на_створюваний_рядок_не_прийшло_це_відмова_а_не_дозвіл()
+    {
+        // ⛔ Напрям замовчування — половина цієї вимоги. Служба зобов'язана
+        // повернути рішення на КОЖЕН запитаний ключ; якщо не повернула,
+        // єдина безпечна відповідь — відмовити. Протилежне замовчування
+        // («немає рішення, отже можна») і є той самий дефект, лише переписаний
+        // акуратніше.
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<string, NewRowAccess>(StringComparer.Ordinal));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7009999", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        await _rows.DidNotReceive().CreateRowAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
