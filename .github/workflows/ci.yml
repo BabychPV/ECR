@@ -27,6 +27,12 @@ on:
 permissions:
   contents: read
 
+# ⚠ Новий поштовх у ту саму гілку скасовує попередній прогін: інакше черга
+# заповнюється відповідями на код, якого вже немає.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
@@ -103,8 +109,15 @@ jobs:
           echo "::error::SQL Server не відповів за 60 с."
           exit 1
 
+      # ⛔ `verify-sql-scripts.ps1` кличе `dotnet ef migrations script`, а
+      # глобальні інструменти .NET лягають у `~/.dotnet/tools`, якого в `PATH`
+      # немає. Без цього рядка гейт розгортання падав би на «dotnet ef не є
+      # командою» — тобто на відсутньому інструменті, а виглядало б це як
+      # зламані міграції.
       - name: dotnet ef
-        run: dotnet tool install --global dotnet-ef
+        run: |
+          dotnet tool install --global dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # ⛔ Три гейти — ОДИН виклик спільного скрипта. Кликати
       # `verify-sql-scripts.ps1` повз нього було б коротше і давало б такий
@@ -124,14 +137,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ⚠ Потрібен і .NET: крок «Типи клієнта зі знімка» звіряє `schema.d.ts`
-      # зі знімком контракту, а знімок лежить у репозиторії — перегенерація
-      # йде з файла, не із застосунку. Але `verify-all.ps1` спільний, і його
-      # перші рядки чіпають `dotnet`.
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
+      # ⚠ .NET тут НЕ ставиться. «Типи клієнта зі знімка» перегенеровує типи
+      # з файла `contracts/openapi.snapshot.json`, який лежить у репозиторії, —
+      # застосунок для цього не потрібен. Кроки складання і тестів `-Only`
+      # відсіює до першої команди, тож `dotnet` не кличеться жодного разу.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -153,12 +162,11 @@ jobs:
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
     runs-on: ubuntu-latest
+    # ⚠ Замір: повний обхід іде 1231 с. Межа вдвічі більша — щоб зависання
+    # відрізнялося від повільності, а не з'їдало годину черги.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
 
       - uses: actions/setup-node@v4
         with:
