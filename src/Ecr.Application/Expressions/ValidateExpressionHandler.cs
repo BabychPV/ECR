@@ -24,7 +24,7 @@ namespace Ecr.Application.Expressions;
 /// означав би, що клієнт мусить повторити ту саму арифметику назад.
 /// </remarks>
 public sealed class ValidateExpressionHandler(
-    IRepository<TemplateVersion, int> versions,
+    ITemplateVersionStore versions,
     IUnitCatalog unitCatalog,
     IFormulaEngine formulaEngine,
     Security.IAccessDecisionService access,
@@ -148,7 +148,12 @@ public sealed class ValidateExpressionHandler(
             .RequireAsync(access, currentUser, "Template.View", ct)
             .ConfigureAwait(false);
 
-        var version = await versions.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        // ⛔ `GetWithStructureAsync`, а не `IRepository.GetAsync`: другий вантажить
+        // версію БЕЗ навігацій, і знімок виходив порожнім. Наслідок був не
+        // тонкий: `GET /expressions/metadata` на версії з трьома колонками
+        // віддавав `"headers":[]`, а перевірка виразу — `ECR-TMPL-4222`
+        // «таблиці, у якій живе формула, немає у знімку».
+        var version = await versions.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
         var snapshot = PublishChecks.Snapshot(version);
         var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
 

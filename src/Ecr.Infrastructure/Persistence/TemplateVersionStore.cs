@@ -94,6 +94,20 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
+    public async Task<TemplateVersion> GetWithStructureAsync(int templateVersionId, CancellationToken ct)
+        => await db.TemplateVersions
+               // ⚠ БЕЗ AsNoTracking, на відміну від `CloneAsync`: публікація
+               // міняє стан версії й проставляє формулам порядок обчислення.
+               .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Columns)
+               .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
+               .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
+               .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+               .FirstOrDefaultAsync(v => v.Id == templateVersionId, ct)
+               .ConfigureAwait(false)
+           ?? throw new NotFoundException(
+               "ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.");
+
+    /// <inheritdoc />
     public async Task<int> CloneAsync(
         int sourceVersionId, string newVersion, int userId, DateTime utcNow, CancellationToken ct)
     {

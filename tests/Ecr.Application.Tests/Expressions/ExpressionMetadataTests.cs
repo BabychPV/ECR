@@ -28,8 +28,13 @@ public sealed class ExpressionMetadataTests
 {
     private static readonly DateTime Now = new(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc);
 
-    private readonly IRepository<TemplateVersion, int> _versions =
-        Substitute.For<IRepository<TemplateVersion, int>>();
+    // ⚠ Мок ПОРТА СХОВИЩА, а не узагальненого репозиторію. Раніше тут стояв
+    // `IRepository<TemplateVersion, int>`, і саме він приховував дефект:
+    // справжня реалізація віддає версію без навігацій, а мок — граф, зібраний
+    // у пам'яті. Мок відрізнявся від реалізації рівно тим, у чому полягав
+    // дефект (`A7 §4.3`); те, що структура справді доїжджає, доводить
+    // інтеграційний `TemplateVersionStructureTests` на живій базі.
+    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
 
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IUnitCatalog _catalogue = Substitute.For<IUnitCatalog>();
@@ -264,6 +269,6 @@ public sealed class ExpressionMetadataTests
         version.GetType().GetField("_sheets", BindingFlags.Instance | BindingFlags.NonPublic)!
                .SetValue(version, new List<SheetDef> { sheet });
 
-        _versions.GetAsync(1, Arg.Any<CancellationToken>()).Returns(version);
+        _versions.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(version);
     }
 }

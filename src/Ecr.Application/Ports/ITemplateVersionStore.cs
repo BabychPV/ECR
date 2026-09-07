@@ -40,6 +40,43 @@ public interface ITemplateVersionStore
     /// </remarks>
     public Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
 
+    /// <summary>
+    /// Версія разом із <b>усією</b> структурою: аркуші → таблиці → колонки,
+    /// рядки, формули, правила валідації.
+    /// </summary>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Відстежувана сутність із заповненими навігаціями.</returns>
+    /// <exception cref="Errors.NotFoundException">
+    /// <c>ECR-TMPL-0404</c> — версії немає.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Метод існує тому, що <c>IRepository.GetAsync</c> — це <c>FindAsync</c>
+    /// БЕЗ жодного <c>Include</c>, а ліниве завантаження вимкнене. Публікація
+    /// брала версію звідти й отримувала <b>порожню</b> колекцію <c>Sheets</c>:
+    /// дванадцять перевірок §12 не бачили жодної формули, перевірки правил —
+    /// жодного правила, граф залежностей виходив порожнім. Версія з
+    /// незакритою дужкою І посиланням на неіснуючу колонку публікувалася
+    /// кодом <c>204</c>.
+    ///
+    /// ⚠ Наслідок ширший за публікацію: на тому самому порожньому знімку
+    /// <c>GET /expressions/metadata</c> віддавав <c>"headers":[]</c>, а
+    /// <c>POST /expressions/validate</c> — <c>ECR-TMPL-4222</c> «таблиці, у
+    /// якій живе формула, немає у знімку». Редактор виразів на реальній версії
+    /// не працював узагалі.
+    ///
+    /// ⛔ Сутність ВІДСТЕЖУВАНА, на відміну від <see cref="CloneAsync"/>:
+    /// публікація міняє стан версії й порядок обчислення формул, і копія без
+    /// відстеження прийняла б зміни та не записала жодної.
+    ///
+    /// ⚠ Узагальнити <c>IRepository</c> замість цього не можна: він
+    /// параметризований типом, і «вантажити з навігаціями» довелося б
+    /// оголошувати для кожної сутності окремо — тобто зробити з нього другу,
+    /// гіршу копію LINQ, чого його коментар прямо уникає.
+    /// </remarks>
+    public Task<Domain.Entities.Configuration.TemplateVersion> GetWithStructureAsync(
+        int templateVersionId, CancellationToken ct);
+
     /// <summary>Створює порожню чернетку версії.</summary>
     public Task<int> CreateDraftAsync(
         int templateId, string versionNumber, int userId, DateTime utcNow, CancellationToken ct);
