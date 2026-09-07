@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
