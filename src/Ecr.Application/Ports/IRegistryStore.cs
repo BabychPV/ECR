@@ -79,4 +79,77 @@ public interface IRegistryStore
 
     /// <summary>Додає значення поля запису.</summary>
     public void AddValue(RegistryValue value);
+
+    /// <summary>
+    /// Правила довідника — усі, включно з вимкненими (<c>ФВ-8.12</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Вимкнені теж: конструктор має показувати правило, яке колись діяло,
+    /// інакше пояснити стан наявних записів нічим. Фільтрує споживач.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryRuleDef>> ListRulesAsync(int registryDefId, CancellationToken ct);
+
+    /// <summary>Додає правило; ідентифікатор з'являється після збереження.</summary>
+    /// <param name="rule">Правило.</param>
+    public void AddRule(RegistryRuleDef rule);
+
+    /// <summary>
+    /// Мапінг зовнішніх полів на поля цього довідника (<c>ФВ-8.11</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Читається, а не редагується. Мапінг заводять на екрані джерела, де
+    /// поруч є перелік тегів; у конструкторі довідника він потрібен, щоб
+    /// відповісти на питання «звідки береться це поле» — без нього поле
+    /// <c>IsExternallyManaged</c> виглядає як звичайне, а правити його марно.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryFieldMapping>> ListFieldMappingsAsync(
+        int registryDefId, CancellationToken ct);
+
+    /// <summary>
+    /// Види зв'язків M:N, які насправді трапляються в записах цього довідника.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Питається БАЗА, а не опис: таблиці <c>cfg.RegistryRelationDef</c> у
+    /// схемі немає (`02a-db-schema.md` §5, <c>Q-027</c>), і вид зв'язку живе
+    /// рядком у <c>dic.RegistryEntryLink.LinkKind</c>. Тому «зв'язки» в
+    /// конструкторі — це те, що є в даних, а не те, що хтось оголосив.
+    ///
+    /// ⚠ Повертаються згорнуті пари «вид → кількість», а не самі зв'язки:
+    /// їх у <c>Permit</c> десятки тисяч, і тягти їх заради переліку видів
+    /// означало б вивантажити половину довідника на кожне відкриття екрана.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryLinkKindStat>> ListLinkKindsAsync(
+        int registryDefId, CancellationToken ct);
 }
+
+/// <summary>Вид зв'язку M:N і скільки таких зв'язків у довіднику.</summary>
+/// <param name="LinkKind">Вид відношення: <c>permit-water-body</c>, <c>permit-pollutant</c>.</param>
+/// <param name="Count">Скільки зв'язків цього виду.</param>
+public sealed record RegistryLinkKindStat(string LinkKind, int Count);
+
+/// <summary>
+/// Одне правило мапінгу, що наповнює поле довідника із зовнішнього джерела.
+/// </summary>
+/// <param name="FieldMapId">Запис <c>ext.EntityFieldMap</c>.</param>
+/// <param name="RegistryFieldDefId">Поле довідника, куди лягає значення.</param>
+/// <param name="SourceCode">Код сутності джерела (<c>ext.SourceEntity.Code</c>).</param>
+/// <param name="SourceField">Поле або тег у джерелі.</param>
+/// <param name="TransformCode">Згортання точок періоду; <c>null</c> — не згортається.</param>
+/// <param name="SourceUnitCode">Одиниця джерела; <c>null</c> — безрозмірне.</param>
+/// <param name="TargetUnitCode">Одиниця поля; <c>null</c> — безрозмірне.</param>
+/// <param name="IsActive">Чи діє мапінг.</param>
+public sealed record RegistryFieldMapping(
+    int FieldMapId,
+    int RegistryFieldDefId,
+    string SourceCode,
+    string SourceField,
+    string? TransformCode,
+    string? SourceUnitCode,
+    string? TargetUnitCode,
+    bool IsActive);

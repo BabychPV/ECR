@@ -758,6 +758,31 @@ CREATE TABLE cfg.RegistryFieldDef
 );
 GO
 
+-- Правила цілісності довідника (ФВ-8.12, директива №06 H-10).
+-- ⛔ Видів рівно ЧОТИРИ. П'ятим у reference/design/07 §340 стояв
+-- ValidityWindow, і його тут немає навмисно: вікно чинності — це поля
+-- ValidFrom/ValidTo самого запису (ФВ-8.5), а не правило. Два джерела істини
+-- про чинність розійшлися б мовчки — рівно на межі вікна.
+CREATE TABLE cfg.RegistryRuleDef
+(
+    Id             int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId  int           NOT NULL,
+    Code           nvarchar(64)  NOT NULL,
+    RuleKind       tinyint       NOT NULL,   -- RegistryRuleKind: 0 RequiredWhen … 3 CrossRegistry
+    Expression     nvarchar(4000) NOT NULL,
+    Severity       tinyint       NOT NULL,   -- ValidationSeverity
+    MessageL10n    nvarchar(max) NOT NULL,
+    ParametersJson nvarchar(max) NULL,       -- поле, група унікальності, цільовий довідник
+    IsActive       bit           NOT NULL CONSTRAINT DF_RegRule_Act DEFAULT(1),
+    CONSTRAINT PK_RegistryRuleDef PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryRuleDef UNIQUE (RegistryDefId, Code),
+    CONSTRAINT FK_RegRule_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id),
+    -- Перелік закритий на рівні бази: вид поза ним дає правило, якого рушій
+    -- не знає — воно не спрацьовує ніколи і виглядає при цьому налаштованим.
+    CONSTRAINT CK_RegRule_Kind CHECK (RuleKind BETWEEN 0 AND 3)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding

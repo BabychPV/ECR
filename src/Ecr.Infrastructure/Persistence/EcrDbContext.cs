@@ -39,6 +39,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<SheetGroupRule> SheetGroupRules => Set<SheetGroupRule>();
     public DbSet<RegistryDef> RegistryDefs => Set<RegistryDef>();
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
+    public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom

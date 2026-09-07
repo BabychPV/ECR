@@ -16,6 +16,7 @@ import { HealthPage } from '@/pages/admin/HealthPage';
 import { JobsPage } from '@/pages/admin/JobsPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 import { RegistriesPage } from '@/pages/admin/RegistriesPage';
+import { RegistryConstructorPage } from '@/pages/admin/RegistryConstructorPage';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
@@ -63,6 +64,7 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/templates', TemplatesPage],
   ['/admin/templates/1/versions/1/relations', TableRelationsPage],
   ['/admin/registries', RegistriesPage],
+  ['/admin/registries/:code/definition', RegistryConstructorPage],
   ['/admin/methodologies', MethodologiesPage],
   ['/admin/methodologies/1/versions', MethodologyVersionsPage],
   ['/admin/expressions', ExpressionsPage],
@@ -161,6 +163,26 @@ function emptyBodyFor(url: string): unknown {
   // упав би на `relations.data.relations`, і редактор «не мав би порушень»
   // рівно тому, що не намалювався б.
   if (url.includes('/relations')) return { isEditable: true, relations: [] };
+
+  // ⛔ Опис довідника віддає ОБ'ЄКТ із чотирма переліками (`ФВ-8.12`).
+  // Порожній масив тут упав би на першому `.map`, і тест перевіряв би власну
+  // заглушку — та сама помилка, що й `A7-04`.
+  if (url.includes('/definition')) {
+    return {
+      id: 0,
+      code: 'test',
+      nameL10n: { values: {} },
+      isTemporal: false,
+      sourceKind: 'Local',
+      definitionVersion: 1,
+      dataRevision: 0,
+      fields: [],
+      relations: [],
+      rules: [],
+      mappings: [],
+    };
+  }
+
   if (url.includes('/me')) {
     return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };
   }

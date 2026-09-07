@@ -155,6 +155,44 @@ export type RegistrySourceKind = Schemas['RegistrySourceKind'];
 /** Запис довідника. */
 export type RegistryEntryDto = Schemas['RegistryEntryDto'];
 
+/**
+ * Повний опис довідника для конструктора (`ФВ-8.12`).
+ *
+ * ⛔ Не те саме, що `RegistryDefDto`. Той описує довідник у ПЕРЕЛІКУ — назва,
+ * ознаки, поля; цей везе ще й зв'язки, правила і мапінг, тобто три запити до
+ * трьох різних схем. Один тип на обидва випадки означав би або три зайві
+ * запити на кожне відкриття переліку, або три порожні масиви в ньому — і
+ * порожнеча в переліку не відрізнялася б від «правил немає».
+ */
+export type RegistryDefinitionDto = Schemas['RegistryDefinitionDto'];
+
+/** Поле довідника в конструкторі. */
+export type RegistryFieldDto = Schemas['RegistryFieldDto'];
+
+/** Зв'язок довідника: посилання поля або вид M:N. */
+export type RegistryRelationDto = Schemas['RegistryRelationDto'];
+
+/** Правило цілісності довідника — один із чотирьох видів (`H-10`). */
+export type RegistryRuleDto = Schemas['RegistryRuleDto'];
+
+/** Мапінг зовнішнього поля на поле довідника. */
+export type RegistryMappingDto = Schemas['RegistryMappingDto'];
+
+/** Запис історії опису довідника. */
+export type RegistryHistoryEntryDto = Schemas['RegistryHistoryEntryDto'];
+
+/** Поле у формі збереження опису. */
+export type RegistryFieldSaveDto = Schemas['RegistryFieldSaveDto'];
+
+/** Правило у формі збереження опису. */
+export type RegistryRuleSaveDto = Schemas['RegistryRuleSaveDto'];
+
+/** Запит на збереження опису довідника. */
+export type SaveRegistryDefinitionDto = Schemas['SaveRegistryDefinitionDto'];
+
+/** Нова версія опису після збереження. */
+export type RegistryDefinitionVersionResponse = Schemas['RegistryDefinitionVersionResponse'];
+
 /** Методологія з версіями. */
 export type MethodologyDto = Schemas['MethodologyDto'];
 

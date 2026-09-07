@@ -85,6 +85,64 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             TotalCount: null);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<StructureChangeView>> ReadStructureChangesAsync(
+        IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entityTypes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        if (entityTypes.Count == 0)
+        {
+            return [];
+        }
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⛔ Типи підставляються ІМЕНОВАНИМИ параметрами, а не склеюванням
+        // рядків: перелік приходить із коду, але правило «жодного значення в
+        // текст запиту» не має винятків — виняток «тут же наше» і є тим, як
+        // склеювання потрапляє в місце, де значення вже чуже.
+        var names = entityTypes.Select((_, i) => $"@t{i.ToString(CultureInfo.InvariantCulture)}").ToList();
+        for (var i = 0; i < entityTypes.Count; i++)
+        {
+            command.Parameters.AddWithValue(names[i], entityTypes[i]);
+        }
+
+        command.CommandText = $"""
+            SELECT TOP (@take)
+                   ChangedAt, EntityType, EntityId, Operation,
+                   OldJson, NewJson, ChangeReason, ChangedByUserId
+              FROM aud.StructureChange
+             WHERE EntityType IN ({string.Join(", ", names)})
+                   AND EntityId = @entityId
+             ORDER BY ChangedAt DESC, Id DESC;
+            """;
+
+        command.Parameters.AddWithValue("@take", limit);
+        command.Parameters.AddWithValue("@entityId", entityId);
+
+        var rows = new List<StructureChangeView>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new StructureChangeView(
+                DateTime.SpecifyKind(reader.GetDateTime(0), DateTimeKind.Utc),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5),
+                reader.IsDBNull(6) ? null : reader.GetString(6),
+                reader.GetInt32(7)));
+        }
+
+        return rows;
+    }
+
     /// <summary>Формат дати для повідомлень; не для запитів.</summary>
     internal static string Format(DateTime moment)
         => moment.ToString("O", CultureInfo.InvariantCulture);
