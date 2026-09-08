@@ -1,0 +1,119 @@
+# Доказовий конвеєр двовузлового процесу.
+#
+# ⛔ Імена джобів у цьому файлі — ЧАСТИНА КОНТРАКТУ. `acceptance` кожної
+# директиви виражається саме ними, і захист гілки `main` вимагає рівно цих
+# п'ять. Перейменувати джоб = зламати всі відкриті директиви одночасно.
+#
+# Розподіл із наявним `ci.yml`:
+#   ci.yml    — важкі перевірки: SQL Server у контейнері, інтеграційні тести,
+#               розгортання під sqlcmd, клієнт, доступність. Іде довго.
+#   evidence.yml — швидкі бар'єри процесу: збірка, юніт-тести і три сторожі,
+#               яких машина може перевірити за хвилини. Саме вони гейтують PR.
+# Обидва потрібні: перший доводить, що система працює; другий — що процес не
+# обходять.
+
+name: Evidence
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: restore
+        run: dotnet restore Ecr.sln
+      - name: build
+        # `--no-incremental` навмисно: інкрементна збірка показує стан МИНУЛОЇ
+        # компіляції і виглядає як стан дерева. На цьому вже один раз
+        # загубилося попередження про невикористану залежність, яке вказувало
+        # на відсутню перевірку прав.
+        run: dotnet build Ecr.sln -c Release --no-incremental --no-restore
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: restore
+        run: dotnet restore Ecr.sln
+      - name: test
+        # Інтеграційні виключені СВІДОМО: вони вимагають SQL Server і живуть у
+        # `ci.yml`, де контейнер піднімається кроком. Тут — швидкий гейт, який
+        # має відповідати за хвилини, інакше його почнуть обходити.
+        run: >
+          dotnet test Ecr.sln -c Release --no-build --no-restore
+          --filter "Category!=Integration"
+          --logger 'console;verbosity=normal'
+
+  scope-guard:
+    name: scope-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/guards/scope-guard.sh
+
+  contracts-guard:
+    name: contracts-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: contracts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/guards/contracts-guard.sh
+
+  honesty-guard:
+    name: honesty-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: honesty
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/guards/honesty-guard.sh

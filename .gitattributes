@@ -1,0 +1,5 @@
+# Хуки виконує bash із Git for Windows. З CRLF він падає з
+# `bad interpreter: /bin/sh^M`, і бар'єри мовчки перестають працювати —
+# найгірший можливий наслідок, бо виглядає як «усе гаразд».
+.githooks/* text eol=lf
+*.sh text eol=lf
