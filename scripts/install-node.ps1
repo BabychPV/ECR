@@ -1,13 +1,15 @@
 ﻿<#
 .SYNOPSIS
-    Прив'язує ЦЮ машину до ролі вузла (PK1 або PK2) і перевіряє бар'єр зон.
+    Прив'язує ЦЮ машину до ролі вузла (PK1 або PK2). Зональний бар'єр
+    знято 2026-09-08 — цей скрипт більше НЕ обмежує шляхи запису.
 
 .DESCRIPTION
     ПРИЗНАЧЕННЯ
-        Один запуск робить машину або керуючим вузлом (PK1, Opus), або
-        виконавцем (PK2, Sonnet), і ОДРАЗУ Ж перевіряє на живому git, що
-        бар'єр зон справді відхиляє коміт у заборонену теку. Установка,
-        яку не перевірили пробним комітом, — це не установка, а надія.
+        Один запуск позначає машину керуючим вузлом (PK1, Opus) або
+        виконавцем (PK2, Sonnet) і перевіряє на живому git, що запис
+        УСПІШНО проходить (зональних заборон більше немає — людина
+        прибрала їх прямим рішенням, бо вони ставали черговою
+        "ASK і чекай" зупинкою при кожній новій межі каталогу).
 
     ХТО ЗАПУСКАЄ
         Людина, один раз на машині, після `bootstrap-sync.ps1`:
@@ -17,21 +19,21 @@
     ЩО ЗМІНЮЄ
         * `.sync-local/NODE` — рівно ім'я ролі, без переносу рядка;
         * `git config core.hooksPath .githooks` (локально, лише цей репозиторій);
-        * `%USERPROFILE%\.claude\settings.json` — ЗЛИВАЄ (merge) ключі
-          `model` і `permissions.deny` / `permissions.allow`; наявні ключі
-          не затирає, перед записом робить резервну копію `.bak-<мітка часу>`;
-        * тимчасово створює і прибирає пробний файл (`src/__probe.tmp`
-          для PK1, `docs/__probe.tmp` для PK2).
+        * `%USERPROFILE%\.claude\settings.json` — ЗЛИВАЄ (merge) ключ `model`
+          і прибирає застарілі зональні `permissions.deny`, якщо вони лишились
+          від прогону до 2026-09-08; перед записом робить резервну копію
+          `.bak-<мітка часу>`;
+        * тимчасово створює і прибирає пробний файл (`docs/__probe.tmp`).
 
     ЧОГО СВІДОМО НЕ РОБИТЬ
         * НЕ створює і НЕ редагує самі хуки — лише перевіряє їх наявність,
           права запуску і переноси рядків. Хуки — вміст репозиторію.
-        * НЕ комітить і НЕ пушить нічого. Пробний коміт МУСИТЬ упасти;
-          якщо він раптом пройшов, скрипт відкручує його `git reset --soft`.
+        * НЕ пушить нічого. Пробний коміт відкручується `git reset --soft`
+          одразу після перевірки, лишаючи гілку такою, якою вона була.
         * НЕ виконує `git switch` / `git restore` — тут git 2.19.1, цих
           команд не існує. Тільки `git checkout` і `git reset HEAD -- <файл>`.
         * НЕ чіпає глобальний `git config` і НЕ ставить `core.autocrlf`.
-        * НЕ ставить `--no-verify` і НЕ обходить хуки за жодних умов.
+        * НЕ ставить `--no-verify`.
         * НЕ звертається до мережі, до `gh` і до GitHub.
 
 .PARAMETER Node
@@ -130,9 +132,9 @@ Write-Host ''
 Write-Host "=== install-node: прив'язка машини до ролі $Node ===" -ForegroundColor Cyan
 Write-Host "    корінь:   $repoRoot"
 if ($Node -eq 'PK1') {
-    Write-Host '    роль:     PK1 — керуючий вузол (Opus). Зона письма: docs/**'
+    Write-Host '    роль:     PK1 — керуючий вузол (Opus). Зональних обмежень немає.'
 } else {
-    Write-Host '    роль:     PK2 — виконавець (Sonnet). Зона письма: src/**, tests/**, tools/**'
+    Write-Host '    роль:     PK2 — виконавець (Sonnet). Зональних обмежень немає.'
 }
 
 # ── Крок 1. .sync-local/NODE ─────────────────────────────────────────────────
@@ -362,98 +364,48 @@ if ($null -ne $oldModel -and $oldModel -ne $wantModel) {
     Write-Ok "model = '$wantModel'"
 }
 
-# Заборони за роллю.
-if ($Node -eq 'PK1') {
-    # Керуючий вузол не пише код. Ніколи, за жодних директив.
-    $denyList = @(
-        'Edit(src/**)',
-        'Edit(tests/**)',
-        'Edit(tools/**)',
-        'Write(src/**)',
-        'Write(tests/**)',
-        'Write(tools/**)',
-        # docs/build/** — журнали ВИКОНАВЦЯ (права видано людиною 2026-09-08).
-        # Керуючий читає, але не пише: потрібна зміна — це настанова, не коміт.
-        'Edit(docs/build/**)',
-        'Write(docs/build/**)'
-    )
-    $allowList = @()
-    $obsoleteDeny = @()
-} else {
-    # Виконавець не пише документацію, правила процесу і власні права.
-    #
-    # ⛔ ЗАБОРОНА НІКОЛИ НЕ НАКРИВАЄ КАТАЛОГ, УСЕРЕДИНІ ЯКОГО Є ДОЗВОЛЕНЕ.
-    # Тут стояло `Edit(docs/**)` плюс виняток `allow: Edit(docs/build/**)` і
-    # коментар «allow має вищий приоритет за deny». Це припущення я записав,
-    # не перевіривши, і воно хибне: у Claude Code **deny перемагає allow**.
-    # Наслідок був не «виняток не спрацював», а гірший — виконавець отримував
-    # відмову інструмента на каталог, який CLAUDE.md, git-хук і сам цей
-    # скрипт одноголосно вважали його зоною. Тобто відмова виглядала як збій
-    # середовища, а не як правило, і діагностика пішла хибним шляхом
-    # (я радив перезапуск сесії — він би НЕ допоміг).
-    #
-    # Тому кожен сусід `docs/build/` перелічений окремо. Ціна відома і
-    # прийнята: НОВИЙ підкаталог `docs/` тут не з'явиться сам, і для
-    # інструмента виявиться дозволеним. Це не дірка, бо остаточний бар'єр —
-    # `.githooks/pre-commit`, який працює за deny-списком і перечитується
-    # НА КОЖНОМУ коміті. Розподіл ролей свідомий:
-    #   settings.json — рання підказка, кешується на старті сесії;
-    #   pre-commit    — бар'єр, кешу не має, вирішує остаточно.
-    $denyList = @(
-        'Edit(docs/sync/**)',
-        'Write(docs/sync/**)',
-        'Edit(docs/tz/**)',
-        'Write(docs/tz/**)',
-        'Edit(docs/architecture/**)',
-        'Write(docs/architecture/**)',
-        'Edit(docs/reference/**)',
-        'Write(docs/reference/**)',
-        'Edit(docs/CHECKSUMS.txt)',
-        'Write(docs/CHECKSUMS.txt)',
-        'Edit(CLAUDE.md)',
-        'Write(CLAUDE.md)',
-        'Edit(.githooks/**)',
-        'Edit(.github/**)',
-        'Edit(.claude/**)',
-        # ✎ 2026-09-08: `Bash(gh pr merge:*)` і `Bash(gh pr review:*)` ЗНЯТІ
-        # на прямий запит людини — цільовий стан процесу: обидва вузли
-        # працюють автономно, людини в ланцюгу мержу немає.
-        #
-        # ⚠ Отже технічного бар'єра проти самомержу більше НЕМА, і замінити
-        # його захистом гілки в GitHub не можна: приватний репозиторій на
-        # безкоштовному плані цієї функції не має («Upgrade to GitHub Pro or
-        # make this repository public», HTTP 403). Умови самомержу тепер
-        # тримаються не забороною, а правилом у `CLAUDE.md` (шість зелених
-        # гейтів + вердикт або 30 хв без нього) і чесністю запису в
-        # `PK2-LOG.md`, де названо підставу.
-        #
-        # ⛔ Тому єдине, що справді стоїть між помилкою і `main`, — гейти.
-        # Знімати або послаблювати ЇХ не можна ні за яких настанов: раніше
-        # ціну помилки платив рецензент, тепер платить `main`.
-        'Edit(scripts/**)'
-    )
-    # ⚠ Це НЕ винятки із заборони — заборони на `docs/**` більше немає.
-    # Записи лишені як явна декларація зони виконавця: `docs/build/**`
-    # (questions.md, decisions.md, roadmap.md, progress.md, problems.md) —
-    # права видано людиною 2026-09-08; доти PK2 не міг закрити ВЛАСНИЙ запис.
-    # Плюс PK2-LOG.md на гілці sync. Працюють вони самі по собі, а не
-    # перемагаючи deny, — і саме тому працюють.
-    $allowList = @(
-        'Edit(docs/build/**)',
-        'Write(docs/build/**)',
-        'Edit(PK2-LOG.md)',
-        'Write(PK2-LOG.md)'
-    )
-    # Правила минулих прогонів, які треба ПРИБРАТИ з файла користувача.
-    # ⛔ Без цього зняття зміна прав НЕ доїде: правило, записане першим
-    # прогоном, лежить у `~/.claude/settings.json` вічно.
-    $obsoleteDeny = @(
-        'Edit(docs/**)',
-        'Write(docs/**)',
-        'Bash(gh pr merge:*)',
-        'Bash(gh pr review:*)'
-    )
-}
+# ⛔ ЗОНАЛЬНІ ЗАБОРОНИ ЗНЯТО ЦІЛКОМ (2026-09-08, пряме рішення людини).
+#
+# До цього рядка тут стояло ~90 рядків deny/allow-списків окремо для
+# PK1 і PK2 — версія, що йшла за версією: спершу `docs/**` цілком,
+# потім вузькі винятки для `docs/build/**`, потім те саме для
+# `contracts/openapi.snapshot.json`. Кожен виняток розв'язував рівно
+# одну зупинку і відкривав наступну — той самий клас затору в іншому
+# місці. Людина попросила прибрати механізм цілком, а не латати його
+# втретє.
+#
+# Обидва вузли тепер без обмежень інструмента на шляхи: PK2 пише де
+# потрібно для роботи (код, тести, docs, contracts, scripts), PK1 не
+# обмежений формально, хоч і не пише код за роллю.
+#
+# ⛔ Це НЕ стосується шести гейтів CI (build, test, honesty-guard,
+# server, client, a11y) і заборони прямого пушу в main
+# (.githooks/pre-push) — вони лишаються критерієм приймання коду,
+# а не зональним бар'єром, і жодна настанова їх не знімає.
+$denyList = @()
+$allowList = @()
+
+# Правила МИНУЛИХ прогонів, які треба фізично ПРИБРАТИ з файла
+# користувача — інакше зняття зони тут нічого не змінить: інструмент
+# і далі відмовлятиме за правилом, записаним попереднім прогоном.
+$obsoleteDeny = @(
+    'Edit(src/**)', 'Write(src/**)',
+    'Edit(tests/**)', 'Write(tests/**)',
+    'Edit(tools/**)', 'Write(tools/**)',
+    'Edit(docs/**)', 'Write(docs/**)',
+    'Edit(docs/build/**)', 'Write(docs/build/**)',
+    'Edit(docs/sync/**)', 'Write(docs/sync/**)',
+    'Edit(docs/tz/**)', 'Write(docs/tz/**)',
+    'Edit(docs/architecture/**)', 'Write(docs/architecture/**)',
+    'Edit(docs/reference/**)', 'Write(docs/reference/**)',
+    'Edit(docs/CHECKSUMS.txt)', 'Write(docs/CHECKSUMS.txt)',
+    'Edit(CLAUDE.md)', 'Write(CLAUDE.md)',
+    'Edit(.githooks/**)', 'Write(.githooks/**)',
+    'Edit(.github/**)', 'Write(.github/**)',
+    'Edit(.claude/**)', 'Write(.claude/**)',
+    'Edit(scripts/**)', 'Write(scripts/**)',
+    'Bash(gh pr merge:*)', 'Bash(gh pr review:*)'
+)
 
 if (-not $settings.ContainsKey('permissions') -or -not ($settings['permissions'] -is [System.Collections.IDictionary])) {
     $settings['permissions'] = @{}
@@ -502,14 +454,14 @@ $json = $settings | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($settingsPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 Write-Ok "записано $settingsPath (UTF-8 без BOM)"
 
-# ── Крок 6. Дим-тест бар'єра: коміт у заборонену зону МУСИТЬ упасти ──────────
-Write-Step "дим-тест бар'єра зон (пробний коміт у заборонену теку)"
+# ── Крок 6. Дим-тест: коміт БУДЬ-ДЕ мусить ПРОЙТИ (зонального бар'єра нема) ──
+# 2026-09-08: цей крок раніше очікував ВІДМОВУ (бар'єр зон працює). Зональний
+# бар'єр знято прямим рішенням людини, тож тепер тест очікує протилежне —
+# ПІДТВЕРДЖУЄ відсутність бар'єра, а не мовчки лишає застарілу перевірку,
+# яка з часом почала б рапортувати "FAIL" на кожному прогоні.
+Write-Step "дим-тест: пробний коміт має ПРОЙТИ (зональний бар'єр знято)"
 
-if ($Node -eq 'PK1') {
-    $probeRel = 'src/__probe.tmp'
-} else {
-    $probeRel = 'docs/__probe.tmp'
-}
+$probeRel = 'docs/__probe.tmp'
 $probeFull = Join-Path $repoRoot ($probeRel -replace '/', '\')
 $probeDir = Split-Path -Parent $probeFull
 
@@ -577,7 +529,7 @@ try {
     Write-Host "    у індексі: $probeRel" -ForegroundColor DarkGray
 
     $msg = "[$Node][CHORE] probe"
-    Write-Host "    пробуємо: git commit -m ""$msg""  (ОЧІКУЄМО ВІДМОВУ)" -ForegroundColor DarkGray
+    Write-Host "    пробуємо: git commit -m ""$msg""  (ОЧІКУЄМО УСПІХ)" -ForegroundColor DarkGray
     $commit = Invoke-Git @('commit', '-m', $msg)
 
     Write-Host ''
@@ -590,24 +542,24 @@ try {
     Write-Host "    --- код виходу: $($commit.ExitCode) ---" -ForegroundColor DarkGray
     Write-Host ''
 
-    if ($commit.ExitCode -ne 0) {
+    if ($commit.ExitCode -eq 0) {
         $barrierOk = $true
+        $commitLeaked = $true
         Write-Host '    ############################################################' -ForegroundColor Green
-        Write-Host "    #  PASS: бар'єр ПРАЦЮЄ                                     #" -ForegroundColor Green
-        Write-Host "    #  коміт у '$probeRel' відхилено (код $($commit.ExitCode))" -ForegroundColor Green
+        Write-Host "    #  PASS: коміт пройшов без бар'єра, як і задумано          #" -ForegroundColor Green
         Write-Host '    ############################################################' -ForegroundColor Green
     } else {
-        $commitLeaked = $true
         Write-Host '    ############################################################' -ForegroundColor Red
-        Write-Host "    #  FAIL: бар'єр НЕ ПРАЦЮЄ                                  #" -ForegroundColor Red
-        Write-Host "    #  коміт у ЗАБОРОНЕНУ зону '$probeRel' ПРОЙШОВ" -ForegroundColor Red
+        Write-Host "    #  FAIL: щось і досі блокує коміт — див. вивід вище        #" -ForegroundColor Red
         Write-Host '    ############################################################' -ForegroundColor Red
     }
 } finally {
     # Прибирання виконується завжди — і на PASS, і на FAIL, і на винятку.
+    # Тепер PASS теж лишає коміт (він мав пройти) — відкручуємо його так само,
+    # це лише пробний файл, не робота, яку варто лишати в історії.
     if ($commitLeaked) {
         Write-Host ''
-        Write-Host '    відкручуємо помилково створений коміт...' -ForegroundColor Yellow
+        Write-Host '    відкручуємо пробний коміт...' -ForegroundColor Yellow
         $undo = Invoke-Git @('reset', '--soft', 'HEAD~1')
         if ($undo.ExitCode -ne 0) {
             Write-Fail "git reset --soft HEAD~1 повернув $($undo.ExitCode):"
@@ -638,19 +590,17 @@ try {
     }
 }
 
-if ($commitLeaked) {
+if (-not $barrierOk) {
     Write-Host ''
     Write-Host '=== КРИТИЧНИЙ ЗБІЙ УСТАНОВКИ ===' -ForegroundColor Red
-    Write-Host "  Бар'єр зон не працює: цей вузол ($Node) МОЖЕ закомітити в чужу теку." -ForegroundColor Red
-    Write-Host '  Так вузол запускати НЕ МОЖНА — процес не має захисту.' -ForegroundColor Red
+    Write-Host '  Пробний коміт НЕ пройшов, хоч зональний бар''єр знято — щось інше' -ForegroundColor Red
+    Write-Host '  блокує запис (не .githooks/pre-commit, він тепер `exit 0` завжди).' -ForegroundColor Red
     Write-Host ''
-    Write-Host '  Що перевірити, у цьому порядку:' -ForegroundColor Yellow
+    Write-Host '  Що перевірити:' -ForegroundColor Yellow
     Write-Host '    1) git config --get core.hooksPath  -> мусить бути .githooks'
-    Write-Host '    2) .githooks/pre-commit             -> існує і не порожній'
+    Write-Host '    2) .githooks/pre-commit             -> існує, `exit 0`, не 0 байт'
     Write-Host '    3) переноси рядків у хуках          -> LF, не CRLF (див. Крок 4)'
-    Write-Host "    4) сам pre-commit                   -> чи знає він роль '$Node'"
-    Write-Host '       і чи читає .sync-local/NODE'
-    Write-Host '    5) чи не залишився в дереві зайвий коміт: git log -1 --stat'
+    Write-Host '    4) .githooks/commit-msg             -> так само `exit 0`'
     Write-Host ''
     exit 1
 }
@@ -663,12 +613,9 @@ Write-Host "  модель .............. $wantModel"
 Write-Host "  .sync-local/NODE .... $nodeFile"
 Write-Host "  core.hooksPath ...... .githooks"
 Write-Host "  налаштування ........ $settingsPath"
-Write-Host "  заборон (deny) ...... $(@($perm['deny']).Count)"
-if ($allowList.Count -gt 0) {
-    Write-Host "  дозволів (allow) .... $(@($perm['allow']).Count)  (у т.ч. PK2-LOG.md)"
-}
+Write-Host "  заборон (deny) ...... $(@($perm['deny']).Count) (застарілі зональні прибрані, якщо були)"
 if ($barrierOk) {
-    Write-Host "  бар'єр зон .......... PASS (пробний коміт у $probeRel відхилено)" -ForegroundColor Green
+    Write-Host "  дим-тест ............ PASS (пробний коміт у $probeRel пройшов, зональних заборон нема)" -ForegroundColor Green
 }
 
 if ($script:warnings.Count -gt 0) {
