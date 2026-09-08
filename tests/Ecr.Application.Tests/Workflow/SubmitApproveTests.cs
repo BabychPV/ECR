@@ -1,4 +1,4 @@
-using Ecr.Application.Common;
+﻿using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -25,6 +25,9 @@ public sealed class SubmitApproveTests
     private const int Water = 20;
     private const int Waste = 21;
     private const int Period = 202601;
+
+    /// <summary>Єдиний екземпляр таблиці документа за цей період.</summary>
+    private const long TableInstance = 500;
     private static readonly DateTime Now = new(2026, 2, 5, 10, 0, 0, DateTimeKind.Utc);
 
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
@@ -70,12 +73,67 @@ public sealed class SubmitApproveTests
 
         _rows.GetOrphanFlagsAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
-        _cells.ReadSliceAsync(Document, Arg.Any<CancellationToken>())
+
+        // ⚠ Екземпляри таблиць і знімок структури: подання кличе валідацію
+        // (`ФВ-5.4`, `W8`), а вона питає обидва. Порожній набір правил тут
+        // навмисний — предмет цих тестів робочий процес, а не валідація;
+        // тест про блокування підставляє правило сам.
+        _rows.GetTableInstancesAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns([new TableInstanceRef(TableInstance, Document, TableDefId: 3, TemplateVersionId: TemplateVersion, PeriodKey: Period)]);
+        _rows.GetRowIdsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(Snapshot());
+        // ⚠ Ключ — `TableInstanceId` (500), а не `DocumentId`: саме так
+        // адресується зріз (`ICellStore.ReadSliceAsync`). Доти обробник
+        // передавав сюди `documentId`, і фікстура повторювала ту саму
+        // помилку — тобто перевіряла зріз, набраний із неіснуючого
+        // екземпляра таблиці.
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>())
               .Returns(new List<CellRecord>
               {
                   new(new CellAddress(new PeriodKey(Period), 1001, 11), 3,
                       new CellValueData { ValueNumeric = 12500m }),
               });
+    }
+
+    /// <summary>Версія шаблону, за якою живе документ цих тестів.</summary>
+    private const int TemplateVersion = 2;
+
+    /// <summary>
+    /// Знімок структури: аркуш <c>Water</c> з однією таблицею й колонкою.
+    /// </summary>
+    /// <param name="rule">Правило валідації таблиці; <c>null</c> — без правил.</param>
+    private static Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot(
+        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null)
+    {
+        var column = new Ecr.Domain.Entities.Configuration.ColumnDef(
+            tableDefId: 3, EcrCode.Create("Volume"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(column, 11);
+
+        var sheet = new Ecr.Domain.Entities.Configuration.SheetDef(
+            TemplateVersion, EcrCode.Create("WATER"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(sheet, Water);
+
+        var table = new Ecr.Domain.Entities.Configuration.TableDef(
+            sheetDefId: Water, EcrCode.Create("MAIN"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(table, 3);
+
+        table.AddColumn(column);
+        if (rule is not null)
+        {
+            table.AddValidationRule(rule);
+        }
+
+        sheet.AddTable(table);
+
+        return new Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot(
+            TemplateVersion, PresentationRevision: 0, Sheets: [sheet],
+            ColumnsById: new Dictionary<int, Ecr.Domain.Entities.Configuration.ColumnDef> { [11] = column },
+            RowsByKey: new Dictionary<(int, string), Ecr.Domain.Entities.Configuration.RowDef>());
     }
 
     private static AccessProfile Profile()
@@ -122,13 +180,14 @@ public sealed class SubmitApproveTests
     private readonly IReportSnapshotBuilder _reportSnapshots = Substitute.For<IReportSnapshotBuilder>();
 
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
+    private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
 
     /// <summary>Проведення стану аркушів у зрізи звітності.</summary>
     private Ecr.Application.Reporting.ReportSnapshotSync Reports()
         => new(_reportSnapshots, _documents);
 
     private SubmitSheetHandler Submit()
-        => new(_cells, _rows, _workflow, _documents, _access,
+        => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                Reports(), _uow, _user, _clock);
 
@@ -242,11 +301,62 @@ public sealed class SubmitApproveTests
         // них «перерахувати як тоді» неможливо, і поданий звіт стає незвіряним.
         Assert.Equal(Document, snapshot.DocumentId);
         Assert.Equal(Water, snapshot.SheetDefId);
+
+        // ⛔ Версія шаблону — СПРАВЖНЯ. Тут стояв нуль, і сам тест його не
+        // перевіряв: зріз, створений заради відповіді «за якою структурою це
+        // подавали», не ніс структури взагалі (директива №09 `W8` п.5).
+        Assert.Equal(TemplateVersion, snapshot.TemplateVersionId);
         Assert.Equal((byte)CalendarMode.Actual, snapshot.CalendarMode);
         Assert.Equal(Now, snapshot.SubmittedAt);
         Assert.Contains("12500", snapshot.PayloadJson, StringComparison.Ordinal);
         Assert.Equal(64, snapshot.ContentHash.Length);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Блокувальна_помилка_валідації_відхиляє_подання()
+    {
+        // Правило рівня РЯДКА: `[Volume] <= 100`, а в комірці 12500.
+        WithRule("[Volume] <= 100");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        // ⛔ Це те, чого подання не робило зовсім: `ValidationEngine` був
+        // упорснутий і не читаний, аркуш із блокувальними помилками подавався
+        // кодом 204 і йшов далі по маршруту погодження як придатний
+        // (директива №09 `W8` п.5, `S-28`).
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+
+        // ⚠ І НІЧОГО не сталося: ні зрізу, ні зміни стану. Подання, яке
+        // відмовило, але встигло заморозити зріз, лишило б документ у стані,
+        // якого не було ні до, ні після.
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Попередження_валідації_подання_не_блокує()
+    {
+        // ⚠ Блокує лише `Error`. Попередження — привід подивитися, а не
+        // причина не подати звіт у строк (R-B3, D-90).
+        WithRule("[Volume] <= 100", ValidationSeverity.Warning);
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
+    /// <summary>Підставляє знімок структури з одним правилом валідації рядка.</summary>
+    private void WithRule(string expression, ValidationSeverity severity = ValidationSeverity.Error)
+        => _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(
+            Snapshot(new Ecr.Domain.Entities.Configuration.ValidationRule(
+                tableDefId: 3, EcrCode.Create("CAP"), severity, scope: 1, expression,
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume is over the cap" }))));
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Поданий_аркуш_не_редагується_навіть_у_стані_Grace()
@@ -314,7 +424,7 @@ public sealed class SubmitApproveTests
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
         await Reopen().HandleAsync(Document, Water, Period, "правка", CancellationToken.None);
 
-        _cells.ReadSliceAsync(Document, Arg.Any<CancellationToken>())
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>())
               .Returns(new List<CellRecord>
               {
                   new(new CellAddress(new PeriodKey(Period), 1001, 11), 3,

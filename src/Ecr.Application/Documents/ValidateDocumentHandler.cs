@@ -64,15 +64,14 @@ public sealed class ValidateDocumentHandler(
             var cells = await cellStore
                 .ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
 
-            var context = new SliceContext(table, cells);
+            // ⛔ Рядки екземпляра читаються ЯВНО: правило рівня рядка має
+            // назвати `RowKey`, а зі самих комірок його не взяти — рядок без
+            // жодного значення в зрізі не з'являється взагалі (`ФВ-3.8`), і
+            // саме він найчастіше і порушує «поле обов'язкове».
+            var rowIds = await rowStore
+                .GetRowIdsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
 
-            // Рівні 1 (рядок), 2 (таблиця) і 3 (документ) — окремими проходами:
-            // правило рівня таблиці бачить усі рядки, і запускати його на
-            // кожному рядку означало б повторити те саме порушення N разів.
-            foreach (var scope in ScopeLevels)
-            {
-                messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, context));
-            }
+            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds));
         }
 
         var summary = new ValidationSummary(
@@ -94,38 +93,4 @@ public sealed class ValidateDocumentHandler(
         return messages;
     }
 
-    /// <summary>Рівні правил: 1 рядок, 2 таблиця, 3 документ.</summary>
-    private static readonly byte[] ScopeLevels = [1, 2, 3];
-
-    /// <summary>Значення зрізу як джерело для виразів правил.</summary>
-    private sealed class SliceContext(TableDef table, IReadOnlyList<CellRecord> cells) : IValidationContext
-    {
-        private readonly Dictionary<(long Row, int Column), object?> _values =
-            cells.ToDictionary(
-                c => (c.Address.TableRowId, c.Address.ColumnDefId),
-                c => (object?)(c.Value.ValueNumeric ?? (object?)c.Value.ValueString));
-
-        /// <inheritdoc />
-        public object? GetCell(string columnCode)
-        {
-            // Рівень таблиці й документа не мають «поточного рядка», тому
-            // однойменний метод повертає перше значення колонки: правило,
-            // написане без рядка, і має на увазі саме таблицю цілком.
-            var column = table.Columns.FirstOrDefault(c => c.Code == columnCode);
-            return column is null
-                ? null
-                : _values.FirstOrDefault(v => v.Key.Column == column.Id).Value;
-        }
-
-        /// <inheritdoc />
-        public object? GetCell(string rowKey, string columnCode)
-        {
-            var row = table.Rows.FirstOrDefault(r => r.RowKeyValue == rowKey);
-            var column = table.Columns.FirstOrDefault(c => c.Code == columnCode);
-
-            return row is null || column is null
-                ? null
-                : _values.GetValueOrDefault((row.Id, column.Id));
-        }
-    }
 }

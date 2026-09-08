@@ -78,6 +78,24 @@ public interface IDocumentStore
     /// </remarks>
     public Task<int?> FindProjectIdAsync(long documentId, CancellationToken ct);
 
+    /// <summary>Версія шаблону, за якою живе документ.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="Errors.NotFoundException">Документа немає.</exception>
+    /// <remarks>
+    /// ⛔ Заведений тому, що <c>SubmissionSnapshot.TemplateVersionId</c>
+    /// писався НУЛЕМ (директива №09 `W8` п.5): іммутабельний зріз подання —
+    /// це відповідь на питання «за якою структурою це подавали», і без версії
+    /// він на нього не відповідає. Нуль при цьому не помітний нізвідки: він
+    /// виглядає як значення, і виявиться неправдою лише тоді, коли зріз
+    /// знадобиться — тобто через рік, при звірці.
+    ///
+    /// ⚠ Один запит через ланцюг документ → проєкт: версія живе на ПРОЄКТІ,
+    /// а не на документі (той самий ланцюг, що в
+    /// <c>IRowStore.ResolveTableInstanceAsync</c>).
+    /// </remarks>
+    public Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct);
+
     /// <summary>
     /// Фіксує зміну документа: <c>ModifiedAt</c> і <c>ModifiedByUserId</c>.
     /// </summary>
