@@ -63,6 +63,14 @@ jobs:
           global-json-file: global.json
       - name: restore
         run: dotnet restore Ecr.sln
+      - name: build
+        # ⛔ Збірка ТУТ, а не з джоба `build`: джоби йдуть на різних раннерах і
+        # результату один одного не бачать. Перша редакція мала `--no-build`
+        # без цього кроку — і `dotnet test` падав повідомленням
+        # «The argument <dll> is invalid», яке про справжню причину не каже
+        # нічого. Так само робить робочий `ci.yml`: спершу «Складання», потім
+        # «Тести .NET», в одному завданні.
+        run: dotnet build Ecr.sln -c Release --no-restore
       - name: test
         # Інтеграційні виключені СВІДОМО: вони вимагають SQL Server і живуть у
         # `ci.yml`, де контейнер піднімається кроком. Тут — швидкий гейт, який
