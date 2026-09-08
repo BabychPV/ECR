@@ -207,14 +207,24 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                   // результати всіх прогонів разом — числа виросли б кратно
                   // кількості перерахунків і лишилися б правдоподібними.
                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus
+
+            // ⛔ Сортування стоїть ДО проєкції, і це не косметика. Поки
+            // `OrderBy` висів на вже спроєктованому `ResultRow`, EF не міг
+            // перекласти запит узагалі: `ResultRow` — тип застосунку, і
+            // впорядкувати за його властивістю в SQL нема як. Побудова зрізу
+            // від цього не «була повільною» — вона падала
+            // `InvalidOperationException` («could not be translated») на
+            // КОЖНОМУ виклику, тобто не завершилася успіхом жодного разу за
+            // весь час існування `rpt.*`. Не бачив цього ніхто: `ReportDef`
+            // не створювало ніщо, тож до цього рядка виконання не доходило —
+            // побудова відмовляла раніше, `ECR-RPT-0404` (директива №09
+            // `W7`, сценарій `S-27`).
+            orderby result.DocumentId, result.SourceRowKey, result.OutputCode
             select new ResultRow(
                 result.DocumentId, result.SourceRowKey, result.OutputCode,
                 result.Value, result.SubstanceEntryId);
 
         var results = await query
-            .OrderBy(r => r.DocumentId)
-            .ThenBy(r => r.SourceRowKey)
-            .ThenBy(r => r.OutputCode)
             .Take(MaxRows)
             .ToListAsync(ct)
             .ConfigureAwait(false);

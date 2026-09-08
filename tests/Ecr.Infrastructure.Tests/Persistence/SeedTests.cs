@@ -17,9 +17,9 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 38;
+    private const int ExpectedPermissions = 39;
 
-    private const int ExpectedDangerous = 8;
+    private const int ExpectedDangerous = 9;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -72,6 +72,38 @@ public sealed class SeedTests(SqlServerFixture sql)
         // каталозі, не можна ні видати, ні перевірити.
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Period.Reopen' AND IsDangerous = 1"));
+
+        // ⛔ `Report.EditDefinition` — НЕБЕЗПЕЧНЕ, і саме це число тут
+        // важливе. Вбудований `Approver` має шаблон `Report.%`, і право,
+        // позначене безпечним, дісталося б кожному погоджувачу мовчки —
+        // авторство державної форми (`ФВ-10.4`) роздалося б правкою одного
+        // рядка каталогу.
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.EditDefinition' AND IsDangerous = 1"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.4")]
+    [Trait("Requirement", "ФВ-10.7")]
+    public async Task Seed_заводить_один_опис_звіту_з_опублікованою_версією()
+    {
+        // ⛔ Без цього рядка звітність існує і не працює: побудова зрізу
+        // резолвить версію ЗА КОДОМ, а `rpt.ReportDef` не створювало ніщо —
+        // ні код, ні seed, ні тести. Чиста база відмовляла `ECR-RPT-0404` на
+        // будь-який код, який можна було ввести (директива №09 `W7`).
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM rpt.ReportDef WHERE Code = N'IEC' AND IsActive = 1 AND IsRegulatory = 1"));
+
+        // ⚠ Версія саме ОПУБЛІКОВАНА (Status = 1). Чернетка дала б рівно те,
+        // від чого seed і рятує: опис, за яким побудова однаково відмовляє.
+        Assert.Equal(1, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM rpt.ReportVersion AS v
+            JOIN rpt.ReportDef     AS d ON d.Id = v.ReportDefId
+            WHERE d.Code = N'IEC' AND v.Status = 1
+            """));
     }
 
     [Fact]
