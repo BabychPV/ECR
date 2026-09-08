@@ -9,17 +9,18 @@ namespace Ecr.Scenarios.Tests;
 /// <summary>§6.2 директиви — авторство структури, ядро MVP: S-03..S-09.</summary>
 /// <remarks>
 /// ⛔ `docs/build/02-contracts.md` §9 і `contracts/openapi.snapshot.json`
-/// перелічують РІВНО два маршрути запису над версією шаблону:
-/// <c>POST /templates/{id}/versions</c> (нова версія) і
-/// <c>PATCH /template-versions/{id}/presentation</c> (лише презентаційний
-/// шар — підписи, стилі, формати; структурні поля він відхиляє за
-/// побудовою, ФВ-7.2). Маршруту, що додає аркуш, таблицю, колонку чи рядок
-/// у ЧЕРНЕТКУ версії, немає — ні тут, ні серед контролерів
+/// перелічують маршрути запису над версією шаблону: <c>POST
+/// /templates/{id}/versions</c> (нова версія), <c>PATCH
+/// /template-versions/{id}/presentation</c> (лише презентаційний шар —
+/// підписи, стилі, формати; структурні поля він відхиляє за побудовою,
+/// ФВ-7.2) і, з `W5.0`, <c>PUT /template-versions/{id}/sheets/{code}</c>
+/// (аркуш чернетки, S-04). Маршруту, що додає ТАБЛИЦЮ, колонку чи рядок,
+/// усе ще немає — ні серед контролерів
 /// (<c>src/Ecr.Api/Controllers/TemplateVersionsController.cs</c>,
-/// <c>TemplatesController.cs</c>). S-04..S-08 тому не можуть піти далі
-/// першого кроку: сценарій викликає очікуваний маршрут і фіксує, що шляху
-/// немає (`404`) — так, як прямо дозволяє директива, коли контракту немає
-/// ніде.
+/// <c>TemplatesController.cs</c>), ні деінде. S-05..S-08 тому не можуть
+/// піти далі першого кроку: сценарій викликає очікуваний маршрут і фіксує,
+/// що шляху немає (`404`) — так, як прямо дозволяє директива, коли
+/// контракту немає ніде.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class StructureScenarios(SqlServerFixture sql)
@@ -63,17 +64,20 @@ public sealed class StructureScenarios(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// S-04. Аркуш, таблиця, колонки, рядки — через API.
+    /// S-04. Аркуш — через API (таблиця, колонки, рядки лишаються S-05..S-08).
     /// </summary>
     /// <remarks>
-    /// ⛔ Немає жодного маршруту, що додає <c>SheetDef</c> у чернетку версії.
-    /// Сценарій робить очікуваний виклик (<c>POST …/sheets</c>) і фіксує його
-    /// відсутність — це і є доказ, що ФВ-2.1..ФВ-2.5 не мають шляху через API.
+    /// ⛔ `W5.0` додав <c>PUT /template-versions/{id}/sheets/{code}</c>:
+    /// адреса аркуша — його КОД, і задає його викликач (`D2-147`), тому дія
+    /// одна — створення і зміна не розрізняються. Перевірка йде через ту саму
+    /// точку входу, якою читає клієнт (<c>GET …/structure</c>), а не через
+    /// `SELECT` (Правило 3 §3.2) — інакше зелений тест доводив би лише запис
+    /// у базу, а не те, що адміністратор БАЧИТЬ доданий аркуш.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-04")]
-    public async Task Аркуш_таблиця_колонки_рядки_через_API()
+    public async Task Аркуш_через_API()
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
@@ -81,12 +85,28 @@ public sealed class StructureScenarios(SqlServerFixture sql)
 
         var versionId = await CreateEmptyDraftVersionAsync(admin.Client, "S04");
 
-        var addSheet = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/template-versions/{versionId}/sheets", UriKind.Relative),
-            new { code = "SHEET1", nameL10n = new Dictionary<string, string> { ["en"] = "Sheet 1" }, ordinal = 1 });
+        var addSheet = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1", UriKind.Relative),
+            new
+            {
+                nameL10n = new Dictionary<string, string> { ["en"] = "Sheet 1" },
+                ordinal = 1,
+                sheetGroup = (string?)null,
+                isMandatory = true,
+                isVisible = true,
+            });
+        Assert.Equal(HttpStatusCode.OK, addSheet.StatusCode);
 
-        // Доказ дефекту, не продукту: маршруту додавання аркуша не існує.
-        Assert.Equal(HttpStatusCode.NotFound, addSheet.StatusCode);
+        var structure = await admin.Client.GetAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/structure", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, structure.StatusCode);
+
+        var sheets = (await structure.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("sheets").EnumerateArray().ToList();
+
+        // ⛔ Не лише "непорожньо": код і саме той аркуш, який щойно додали —
+        // порожня перевірка пройшла б і на випадковому чужому аркуші.
+        Assert.Contains(sheets, s => s.GetProperty("code").GetString() == "SHEET1");
     }
 
     /// <summary>

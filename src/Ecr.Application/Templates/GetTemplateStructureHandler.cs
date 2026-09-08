@@ -1,19 +1,28 @@
 // src/Ecr.Application/Templates/GetTemplateStructureHandler.cs
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Templates.Dto;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Templates;
 
 /// <summary>
-/// Структура опублікованої версії — **з кешу, без звернення до БД**.
-/// Ключ `v{id}:r{rev}` (ФВ-2.5) робить інвалідацію непотрібною: інша
-/// ревізія — інший ключ.
+/// Структура версії — **з кешу, без звернення до БД** для самого дерева
+/// аркушів/таблиць/колонок.
 /// </summary>
+/// <remarks>
+/// Ключ `v{id}:r{rev}` (ФВ-2.5) робить інвалідацію непотрібною для
+/// презентаційних правок: інша ревізія — інший ключ. Структурні правки
+/// чернетки (<c>PUT …/sheets/{code}</c>) ревізію не піднімають — вони
+/// скидають кеш явно (<see cref="IMetadataCache.InvalidateAsync"/>), тим
+/// самим способом, що й публікація.
+/// </remarks>
 public sealed class GetTemplateStructureHandler(
     IMetadataCache metadata,
     IUnitCatalog units,
+    IRepository<TemplateVersion, int> versions,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -34,6 +43,14 @@ public sealed class GetTemplateStructureHandler(
         // запиту ще до того, як почнеться читання даних.
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
 
+        // ⚠ Легкий запит поверх кешованого дерева — той самий клас, що й
+        // запит ревізії в `MetadataCache.GetAsync` сам: PK-пошук, не Include.
+        // Статус — НЕ частина кешованого знімка (`ФВ-2.5` прив'язує кеш до
+        // структури, а не до стану), тому питається окремо і завжди свіжий.
+        var version = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                ErrorCodes.TemplateNotFound, $"Версії шаблону {templateVersionId} не існує.");
+
         // ⛔ Одиниці розв'язуються і тут: конфігуратор без позначень
         // показував би «тип: Decimal» і жодної підказки, у чому саме
         // вимірюється колонка (`ФВ-16.1`).
@@ -47,11 +64,14 @@ public sealed class GetTemplateStructureHandler(
                 sheet.Code,
                 sheet.NameL10n,
                 sheet.Ordinal,
+                sheet.SheetGroup,
+                sheet.IsMandatory,
+                sheet.IsVisible,
                 [.. sheet.Tables.OrderBy(t => t.Ordinal).Select(table => Table(table, symbolById))]))
             .ToList();
 
         return new TemplateStructureDto(
-            snapshot.TemplateVersionId, snapshot.PresentationRevision, sheets);
+            snapshot.TemplateVersionId, snapshot.PresentationRevision, !version.IsStructurallyFrozen, sheets);
     }
 
     private static TableDto Table(TableDef table, IReadOnlyDictionary<int, string> symbols)

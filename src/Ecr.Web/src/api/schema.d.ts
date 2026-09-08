@@ -3878,6 +3878,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/sheets/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує аркуш чернетки. Право `Template.Edit`.
+         * @description ⛔ Перший вертикальний зріз авторства структури шаблону через API
+         *     (`ФВ-2.1`..`ФВ-2.5`): до цього аркуш, таблицю, колонку чи рядок
+         *     створював лише офлайновий генератор тестових даних.
+         *
+         *     ⚠ `PUT` за кодом — та сама форма, що й `relations/{code}`
+         *     вище: створення й зміна є однією дією, бо адресу задає викликач
+         *     (`D2-147`). Стан версії перевіряє домен: опублікована відхиляє
+         *     правку сама (`ECR-TMPL-0409`, `ФВ-7.1`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код аркуша. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveSheetDefRequest"];
+                    "application/json": components["schemas"]["SaveSheetDefRequest"];
+                    "text/json": components["schemas"]["SaveSheetDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SheetDto"];
+                        "text/json": components["schemas"]["SheetDto"];
+                        "text/plain": components["schemas"]["SheetDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає аркуш із чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код аркуша. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/structure": {
         parameters: {
             query?: never;
@@ -6593,6 +6731,24 @@ export interface components {
             /** @description Повний перелік правил після правки. */
             rules: components["schemas"]["RegistryRuleSaveDto"][];
         };
+        /** @description Налаштування аркуша чернетки (`ФВ-2.1`). */
+        SaveSheetDefRequest: {
+            /** @description Чи обов'язковий аркуш для складу документа. */
+            isMandatory: boolean;
+            /** @description Видимість аркуша. */
+            isVisible: boolean;
+            /** @description Назва аркуша мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description `null` — новий аркуш стає останнім за порядком.
+             */
+            ordinal: null | number;
+            /** @description Група для правил складу документа; `null` — поза групами. */
+            sheetGroup: null | string;
+        };
         /** @description Налаштування зв'язку між таблицями (`ФВ-2.12`). */
         SaveTableRelationRequest: {
             /** @description Чи діє зв'язок. */
@@ -6660,12 +6816,27 @@ export interface components {
             to: null | string;
         };
         SheetDto: {
+            /** @description Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`. */
             code: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
             id: number;
+            /** @description Чи обов'язковий аркуш для складу документа. */
+            isMandatory: boolean;
+            /** @description Видимість; презентаційне поле (`ФВ-7.2`). */
+            isVisible: boolean;
+            /** @description Назва аркуша всіма мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Порядок відображення; не ідентичність.
+             */
             ordinal: number;
+            /** @description Група для правил складу документа; `null` — поза групами. */
+            sheetGroup: null | string;
+            /** @description Таблиці аркуша в порядку `Ordinal`. */
             tables: components["schemas"]["TableDto"][];
         };
         /** @description Аркуш × період — адреса операції робочого процесу. */
@@ -6949,13 +7120,25 @@ export interface components {
             /** @description Вид рядка: `Item`, `Group`, `Balance`, `Note`. */
             rowKind: string;
         };
-        /** @description Структура опублікованої версії — те, що віддається клієнту й кешується за
-         *     ключем `v{id}:r{rev}` (`ФВ-2.5`). */
+        /** @description Структура версії — те, що віддається клієнту й кешується за ключем
+         *     `v{id}:r{rev}` (`ФВ-2.5`). */
         TemplateStructureDto: {
-            /** Format: int32 */
+            /** @description Чи дозволяє стан версії структурну правку (`ФВ-7.1`). Рахує СЕРВЕР —
+             *     той самий прапорець, що й bool TableRelationsDto.IsEditable:
+             *     клієнт, який виводив би його зі статусу самостійно, тримав би другу копію
+             *     правила «опублікована незмінна». */
+            isEditable: boolean;
+            /**
+             * Format: int32
+             * @description Ревізія презентаційного шару; частина ключа кешу.
+             */
             presentationRevision: number;
+            /** @description Аркуші в порядку `Ordinal`. */
             sheets: components["schemas"]["SheetDto"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Версія шаблону.
+             */
             templateVersionId: number;
         };
         /** @description Шаблон у переліку. */

@@ -4113,6 +4113,49 @@
         ],
         "type": "object"
       },
+      "SaveSheetDefRequest": {
+        "description": "Налаштування аркуша чернетки (`ФВ-2.1`).",
+        "properties": {
+          "isMandatory": {
+            "description": "Чи обов'язковий аркуш для складу документа.",
+            "type": "boolean"
+          },
+          "isVisible": {
+            "description": "Видимість аркуша.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва аркуша мовами каталогу.",
+            "type": "object"
+          },
+          "ordinal": {
+            "description": "`null` — новий аркуш стає останнім за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetGroup": {
+            "description": "Група для правил складу документа; `null` — поза групами.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "nameL10n",
+          "ordinal",
+          "sheetGroup",
+          "isMandatory",
+          "isVisible"
+        ],
+        "type": "object"
+      },
       "SaveTableRelationRequest": {
         "description": "Налаштування зв'язку між таблицями (`ФВ-2.12`).",
         "properties": {
@@ -4263,20 +4306,40 @@
       "SheetDto": {
         "properties": {
           "code": {
+            "description": "Код — ідентичність аркуша й адреса в `PUT …/sheets/{code}`.",
             "type": "string"
           },
           "id": {
+            "description": "Ідентифікатор.",
             "format": "int32",
             "type": "integer"
+          },
+          "isMandatory": {
+            "description": "Чи обов'язковий аркуш для складу документа.",
+            "type": "boolean"
+          },
+          "isVisible": {
+            "description": "Видимість; презентаційне поле (`ФВ-7.2`).",
+            "type": "boolean"
           },
           "nameL10n": {
-            "$ref": "#/components/schemas/LocalizedText"
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша всіма мовами каталогу."
           },
           "ordinal": {
+            "description": "Порядок відображення; не ідентичність.",
             "format": "int32",
             "type": "integer"
           },
+          "sheetGroup": {
+            "description": "Група для правил складу документа; `null` — поза групами.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "tables": {
+            "description": "Таблиці аркуша в порядку `Ordinal`.",
             "items": {
               "$ref": "#/components/schemas/TableDto"
             },
@@ -4288,6 +4351,9 @@
           "code",
           "nameL10n",
           "ordinal",
+          "sheetGroup",
+          "isMandatory",
+          "isVisible",
           "tables"
         ],
         "type": "object"
@@ -4933,19 +4999,26 @@
         "type": "object"
       },
       "TemplateStructureDto": {
-        "description": "Структура опублікованої версії — те, що віддається клієнту й кешується за\nключем `v{id}:r{rev}` (`ФВ-2.5`).",
+        "description": "Структура версії — те, що віддається клієнту й кешується за ключем\n`v{id}:r{rev}` (`ФВ-2.5`).",
         "properties": {
+          "isEditable": {
+            "description": "Чи дозволяє стан версії структурну правку (`ФВ-7.1`). Рахує СЕРВЕР —\nтой самий прапорець, що й bool TableRelationsDto.IsEditable:\nклієнт, який виводив би його зі статусу самостійно, тримав би другу копію\nправила «опублікована незмінна».",
+            "type": "boolean"
+          },
           "presentationRevision": {
+            "description": "Ревізія презентаційного шару; частина ключа кешу.",
             "format": "int32",
             "type": "integer"
           },
           "sheets": {
+            "description": "Аркуші в порядку `Ordinal`.",
             "items": {
               "$ref": "#/components/schemas/SheetDto"
             },
             "type": "array"
           },
           "templateVersionId": {
+            "description": "Версія шаблону.",
             "format": "int32",
             "type": "integer"
           }
@@ -4953,6 +5026,7 @@
         "required": [
           "templateVersionId",
           "presentationRevision",
+          "isEditable",
           "sheets"
         ],
         "type": "object"
@@ -10175,6 +10249,213 @@
           }
         },
         "summary": "Записує зв'язок між таблицями чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/sheets/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код аркуша.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає аркуш із чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⛔ Перший вертикальний зріз авторства структури шаблону через API\n(`ФВ-2.1`..`ФВ-2.5`): до цього аркуш, таблицю, колонку чи рядок\nстворював лише офлайновий генератор тестових даних.\n\n⚠ `PUT` за кодом — та сама форма, що й `relations/{code}`\nвище: створення й зміна є однією дією, бо адресу задає викликач\n(`D2-147`). Стан версії перевіряє домен: опублікована відхиляє\nправку сама (`ECR-TMPL-0409`, `ФВ-7.1`).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код аркуша.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSheetDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSheetDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSheetDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SheetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує аркуш чернетки. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

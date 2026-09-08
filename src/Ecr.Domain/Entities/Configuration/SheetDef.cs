@@ -40,6 +40,43 @@ public sealed class SheetDef : Entity<int>
     /// <summary>Змінює порядок — **презентаційна** операція, дозволена після публікації.</summary>
     public void Reorder(int ordinal) => Ordinal = ordinal;
 
+    /// <summary>
+    /// Змінює назву аркуша.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>NameL10n</c> — поле презентаційного шару (<see
+    /// cref="Services.ChangeClassifier.PresentationFields"/>), тому цей
+    /// сеттер викликає і <c>PUT …/sheets/{code}</c> (структурна правка
+    /// чернетки), і <c>PATCH …/presentation</c> (опублікована версія) —
+    /// **той самий метод**, а не дві копії: інакше правило «як міняється
+    /// назва» жило б у двох місцях і розійшлося б на першій же зміні одного
+    /// з них.
+    /// </remarks>
+    public void Rename(LocalizedText name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        NameL10n = name;
+    }
+
+    /// <summary>Групує аркуш для правил складу документа (<c>SheetGroupRule</c>).</summary>
+    /// <param name="group"><c>null</c> — аркуш поза групами.</param>
+    public void SetGroup(string? group) => SheetGroup = group;
+
+    /// <summary>Позначає аркуш обов'язковим для складу документа.</summary>
+    public void SetMandatory(bool mandatory) => IsMandatory = mandatory;
+
+    /// <summary>
+    /// Видимість аркуша.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Те саме поле, що й у <see cref="Services.ChangeClassifier.PresentationFields"/>
+    /// (<c>SheetDef.IsVisible</c>): він презентаційний, тобто його дозволено
+    /// міняти і в опублікованій версії через <c>PATCH …/presentation</c>, і
+    /// тут — у чернетці разом із рештою полів аркуша через <c>PUT
+    /// …/sheets/{code}</c>.
+    /// </remarks>
+    public void SetVisible(bool visible) => IsVisible = visible;
+
     /// <summary>Додає таблицю до аркуша.</summary>
     /// <exception cref="DomainException">Таблиця з таким кодом уже є на аркуші.</exception>
     public void AddTable(TableDef table)

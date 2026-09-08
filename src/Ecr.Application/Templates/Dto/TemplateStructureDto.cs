@@ -7,16 +7,40 @@ using Ecr.Domain.ValueObjects;
 namespace Ecr.Application.Templates.Dto;
 
 /// <summary>
-/// Структура опублікованої версії — те, що віддається клієнту й кешується за
-/// ключем <c>v{id}:r{rev}</c> (`ФВ-2.5`).
+/// Структура версії — те, що віддається клієнту й кешується за ключем
+/// <c>v{id}:r{rev}</c> (`ФВ-2.5`).
 /// </summary>
+/// <remarks>
+/// ⚠ Ім'я лишилося з часів, коли ендпоінт бачив лише опубліковані версії:
+/// тепер той самий <c>GET …/structure</c> обслуговує і чернетку — саме на
+/// ньому редактор аркушів (<c>PUT …/sheets/{code}</c>) читає поточний склад.
+/// </remarks>
+/// <param name="TemplateVersionId">Версія шаблону.</param>
+/// <param name="PresentationRevision">Ревізія презентаційного шару; частина ключа кешу.</param>
+/// <param name="IsEditable">
+/// Чи дозволяє стан версії структурну правку (<c>ФВ-7.1</c>). Рахує СЕРВЕР —
+/// той самий прапорець, що й <see cref="TableRelationsDto.IsEditable"/>:
+/// клієнт, який виводив би його зі статусу самостійно, тримав би другу копію
+/// правила «опублікована незмінна».
+/// </param>
+/// <param name="Sheets">Аркуші в порядку <c>Ordinal</c>.</param>
 public sealed record TemplateStructureDto(
     int TemplateVersionId,
     int PresentationRevision,
+    bool IsEditable,
     IReadOnlyList<SheetDto> Sheets);
 
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Код — ідентичність аркуша й адреса в <c>PUT …/sheets/{code}</c>.</param>
+/// <param name="NameL10n">Назва аркуша всіма мовами каталогу.</param>
+/// <param name="Ordinal">Порядок відображення; не ідентичність.</param>
+/// <param name="SheetGroup">Група для правил складу документа; <c>null</c> — поза групами.</param>
+/// <param name="IsMandatory">Чи обов'язковий аркуш для складу документа.</param>
+/// <param name="IsVisible">Видимість; презентаційне поле (<c>ФВ-7.2</c>).</param>
+/// <param name="Tables">Таблиці аркуша в порядку <c>Ordinal</c>.</param>
 public sealed record SheetDto(
     int Id, string Code, LocalizedText NameL10n, int Ordinal,
+    string? SheetGroup, bool IsMandatory, bool IsVisible,
     IReadOnlyList<TableDto> Tables);
 
 public sealed record TableDto(
