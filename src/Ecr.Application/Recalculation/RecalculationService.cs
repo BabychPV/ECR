@@ -135,12 +135,76 @@ public sealed class RecalculationService(
     {
         ArgumentNullException.ThrowIfNull(dirty);
 
+        // ⛔ Порожнє насіння — це «нема чого рахувати», а НЕ «перерахувати
+        // все». На шляху правки комірки зворотне прочитання перетворило б
+        // кожне натискання Tab на прогін по всьому документу. Повний
+        // перерахунок має власний вхід — <see cref="RecalculateAllAsync"/>.
         if (dirty.IsEmpty)
         {
             return 0;
         }
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+
+        return await RunAsync(instance, dirty, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Перераховує ВСІ формули шаблону документа за період, а не лише
+    /// залежні від щойно змінених комірок.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки комірок перераховано.</returns>
+    /// <remarks>
+    /// ⛔ Окремий метод, а НЕ прапорець на <see cref="RecalculateAsync"/>.
+    /// Прапорець довелося б поєднати з порожнім <see cref="DirtySet"/>, тобто
+    /// зробити «порожньо» значущим значенням — рівно та двозначність
+    /// «немає / порожньо», яку в цьому дереві вже виправляли одного разу
+    /// (<c>D2-332</c>, `SaveMethodologyFormulaRequest.ArgumentsCsv`). Тут вона
+    /// коштувала б дорожче: помилка означала б повний перерахунок документа
+    /// на кожну правку комірки.
+    ///
+    /// ⛔ Існує, бо формула шаблону перераховується ЛИШЕ від запису в комірку
+    /// (<c>PatchCellsHandler</c>). Формула, додана або змінена в шаблоні ПІСЛЯ
+    /// того, як дані вже введені, не перераховувалася б ніколи — і методологія
+    /// порахувала б свій результат зі застарілих входів
+    /// (<c>CalculationInputBuilder</c> читає той самий <c>doc.CellValue</c>),
+    /// видавши новий прогін із новою контрольною сумою від старих чисел.
+    ///
+    /// ⚠ Знімки (<c>IsSnapshot</c>) не перераховуються і тут: знімок на те й
+    /// знімок, що зафіксував стан на момент подання. Крос-аркушні rollup,
+    /// навпаки, рахуються ОДРАЗУ — цей прогін уже фоновий, і відкласти
+    /// означало б не порахувати ніколи.
+    /// </remarks>
+    public async Task<int> RecalculateAllAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var instances = await rowStore
+            .GetTableInstancesAsync(documentId, periodKey, ct)
+            .ConfigureAwait(false);
+
+        if (instances.Count == 0)
+        {
+            return 0;
+        }
+
+        // ⚠ Один прогін на ВЕРСІЮ ШАБЛОНУ, а не на екземпляр таблиці: тіло
+        // нижче однаково читає всі таблиці документа за період і будує план
+        // на весь знімок структури. Прогін на кожен екземпляр перерахував би
+        // ті самі формули стільки разів, скільки в документі таблиць.
+        var written = 0;
+        foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
+        {
+            written += await RunAsync(group.First(), dirty: null, ct).ConfigureAwait(false);
+        }
+
+        return written;
+    }
+
+    /// <summary>Спільне тіло обох входів: <c>dirty is null</c> — повний прогін.</summary>
+    private async Task<int> RunAsync(TableInstanceRef instance, DirtySet? dirty, CancellationToken ct)
+    {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
@@ -168,16 +232,31 @@ public sealed class RecalculationService(
         }
 
         var plan = RecalculationPlanBuilder.Build(snapshot, dependencies, rowIdsByTable, periodKey);
-        var affected = Plan(dirty, plan);
 
-        // ⛔ Крос-аркушні rollup рахуються ТУТ САМО, а не «колись». Відкладення
-        // має сенс на інтерактивному шляху, де людина чекає на кожному Tab;
-        // цей прогін уже фоновий, і відкласти означало б не порахувати ніколи
-        // — саме те, чим був увесь `A7-63`.
-        var rollups = DeferredRollups.ToList();
-        _deferred.Clear();
+        List<int> targets;
 
-        if (affected.Count == 0 && rollups.Count == 0)
+        if (dirty is null)
+        {
+            // ⛔ Повний прогін бере формули з ПЛАНУ, а не з насіння: формула,
+            // додана в шаблон після введення даних, не має жодної брудної
+            // комірки — і саме тому в інкрементний набір не потрапляє ніколи.
+            targets = [.. plan.AllFormulas().Where(id => !plan.IsSnapshot(id))];
+        }
+        else
+        {
+            var affected = Plan(dirty, plan);
+
+            // ⛔ Крос-аркушні rollup рахуються ТУТ САМО, а не «колись».
+            // Відкладення має сенс на інтерактивному шляху, де людина чекає на
+            // кожному Tab; цей прогін уже фоновий, і відкласти означало б не
+            // порахувати ніколи — саме те, чим був увесь `A7-63`.
+            var rollups = DeferredRollups.ToList();
+            _deferred.Clear();
+
+            targets = [.. affected, .. rollups];
+        }
+
+        if (targets.Count == 0)
         {
             return 0;
         }
@@ -188,10 +267,15 @@ public sealed class RecalculationService(
             .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
             .ToDictionary(pair => pair.Formula.Id);
 
-        // ⛔ Формули з предикатом динамічного діапазону виключаються ЯВНО.
-        // Обчислити предикат тут нічим: він читає інші колонки кожного рядка,
-        // а не ту, на яку посилається. Мовчазне «порожній набір» дало б суму
-        // без доданків — тобто неправильне число замість старого.
+        // ⛔ Формули з предикатом динамічного діапазону виключаються ЯВНО —
+        // і на інкрементному шляху, і на повному. Обчислити предикат нічим
+        // НІ ТУТ, НІ ТАМ: єдина реалізація —
+        // `SliceEvaluationContext.GetCellsByPredicate`, і вона повертає `#REF`
+        // безумовно, бо предикат читає інші колонки кожного рядка, а не ту, на
+        // яку посилається. Фоновий прогін не має жодного додаткового джерела
+        // даних — той самий контекст, ті самі значення, — тож включити ці
+        // формули означало б витратити обчислення на гарантований `#REF`
+        // (директива №10 `W10.0`, `D2-338`).
         var predicated = dependencies
             .Where(d => d is { FormulaDefId: not null, RowKey: null, FilterJson: not null })
             .Select(d => d.FormulaDefId!.Value)
@@ -211,7 +295,7 @@ public sealed class RecalculationService(
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
         var byInstance = new Dictionary<long, List<CellRecord>>();
 
-        foreach (var formulaId in affected.Concat(rollups))
+        foreach (var formulaId in targets)
         {
             if (predicated.Contains(formulaId) || !formulas.TryGetValue(formulaId, out var owner))
             {
@@ -561,6 +645,21 @@ public sealed class RecalculationPlan
 
     /// <summary>Порядок обчислення формули.</summary>
     public int EvaluationOrder(int formulaDefId) => _order.GetValueOrDefault(formulaDefId, int.MaxValue);
+
+    /// <summary>Усі оголошені формули плану в порядку обчислення.</summary>
+    /// <remarks>
+    /// ⚠ Єдиний шлях дістати формулу, від якої НІЩО не брудне.
+    /// <see cref="DependentsOf"/> і <see cref="DependentsOfFormula"/> обидва
+    /// починаються з насіння, тож формула, додана в шаблон після введення
+    /// даних, не з'явилася б у жодному наборі — і не перерахувалася б ніколи.
+    ///
+    /// ⚠ Другий ключ сортування — сам ідентифікатор: порядок обчислення не
+    /// унікальний, а обхід словника не має гарантованого порядку. Без нього
+    /// два прогони на тих самих даних могли б дати різну послідовність запису
+    /// (<c>ФВ-9.5</c>).
+    /// </remarks>
+    public IReadOnlyList<int> AllFormulas()
+        => [.. _order.OrderBy(pair => pair.Value).ThenBy(pair => pair.Key).Select(pair => pair.Key)];
 
     /// <summary>Чи читає формула інший аркуш.</summary>
     public bool IsCrossSheet(int formulaDefId) => _crossSheet.Contains(formulaDefId);
