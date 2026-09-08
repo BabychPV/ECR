@@ -4216,6 +4216,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує формулу колонки чи рядка чернетки (`W5.3`). Право `Template.Edit`.
+         * @description ⚠ Адреса — `(tableDefId, scope, target)`, а не код: `FormulaDef`
+         *     не має власної ідентичності окремо від колонки чи рядка, який обчислює
+         *     (див. `FormulaDefHandlers.cs`).
+         *
+         *     ⛔ `target` означає РІЗНЕ залежно від `scope`, і це навмисно:
+         *     при `column` це вже присвоєний сервером числовий
+         *     `ColumnDefId` (той самий, що й `TemplateColumnDto.Id`), а при
+         *     `row` — `RowKey` ТЕКСТОМ. `RowDef.Id` не годиться за
+         *     адресу: структура версії (`TemplateRowDto`) взагалі не показує
+         *     клієнту числового ідентифікатора рядка, лише `RowKey` — адресація
+         *     через `Id` зробила б цю гілку викликаною лише з Swagger. Оскільки
+         *     `RowKey` унікальний лише В МЕЖАХ ТАБЛИЦІ (бізнес-ключ, не
+         *     сурогатний), таблицю названо в адресі явно — той самий сегмент
+         *     `tableDefId`, що й для колонки, заради однієї форми адреси на обидві
+         *     області.
+         *
+         *     ⚠ `PUT` — та сама форма, що й `sheets/{code}`: створення й
+         *     зміна є однією дією, бо адресу задає викликач, а не сервер (`D2-147`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить ціль. */
+                    tableDefId: number;
+                    /** @description `column` чи `row` — обмежено маршрутом нижче. */
+                    scope: string;
+                    /** @description `ColumnDefId` числом при `column`; `RowKey` текстом при `row`. */
+                    target: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveFormulaDefRequest"];
+                    "application/json": components["schemas"]["SaveFormulaDefRequest"];
+                    "text/json": components["schemas"]["SaveFormulaDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FormulaDto"];
+                        "text/json": components["schemas"]["FormulaDto"];
+                        "text/plain": components["schemas"]["FormulaDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає формулу з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить ціль. */
+                    tableDefId: number;
+                    /** @description `column` чи `row`. */
+                    scope: string;
+                    /** @description `ColumnDefId` числом при `column`; `RowKey` текстом при `row`. */
+                    target: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}": {
         parameters: {
             query?: never;
@@ -5979,11 +6135,45 @@ export interface components {
             /** Format: date-time */
             lastModified?: null | string;
         };
+        /** @description Формула для відповіді клієнту. */
+        FormulaDto: {
+            /**
+             * Format: int32
+             * @description Колонка, якщо `Scope == Column`.
+             */
+            columnDefId: null | number;
+            /** @description Діалект виразу. */
+            dialect: components["schemas"]["ExpressionDialect"];
+            /** @description Текст виразу. */
+            expression: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Рядок, якщо `Scope == Row` (сурогатний ключ; адреса запиту — `RowKey`).
+             */
+            rowDefId: null | number;
+            /** @description Область: `Column` чи `Row`. */
+            scope: components["schemas"]["FormulaScope"];
+            /**
+             * Format: int32
+             * @description Таблиця, якій належить формула.
+             */
+            tableDefId: number;
+        };
         /**
          * @description Тип результату формули методології (директива ПК-1 №05, поправка 2-біс).
          * @enum {unknown}
          */
         FormulaResultType: "Number" | "Text";
+        /**
+         * @description Область дії формули.
+         * @enum {unknown}
+         */
+        FormulaScope: "Column" | "Row" | "Cell";
         /**
          * @description Рівень ресурсного гранта. Порядок значень значущий: більше = ширше.
          * @enum {unknown}
@@ -7233,6 +7423,13 @@ export interface components {
              * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
              */
             unitId: null | number;
+        };
+        /** @description Налаштування формули чернетки (`W5.3`). */
+        SaveFormulaDefRequest: {
+            /** @description Діалект, за яким читається вираз. */
+            dialect: components["schemas"]["ExpressionDialect"];
+            /** @description Текст виразу. */
+            expression: string;
         };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {

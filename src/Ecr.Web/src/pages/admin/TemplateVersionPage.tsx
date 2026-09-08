@@ -28,6 +28,9 @@ import { columnDraftOf, emptyColumnDraft, type ColumnDefDto, type ColumnDraft } 
 import { RowEditor } from '@/features/templates/RowEditor';
 import { deleteRow, saveRow } from '@/features/templates/rowApi';
 import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
+import { FormulaEditor } from '@/features/templates/FormulaEditor';
+import { saveFormula } from '@/features/templates/formulaApi';
+import { emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -62,6 +65,7 @@ export function TemplateVersionPage(): JSX.Element {
   const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
   const [sheetDraft, setSheetDraft] = useState<SheetDraft | null>(null);
+  const [formulaDraft, setFormulaDraft] = useState<FormulaDraft | null>(null);
 
   // ⚠ Чернетка таблиці несе код аркуша окремо від самого `TableDraft`
   // (W5.1): таблиця адресується ДВОМА кодами (`sheets/{sheetCode}/tables/{code}`),
@@ -256,6 +260,28 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
       showDone(t('rows.deleted'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Запис формули колонки чи рядка (`W5.3`) — наступний зріз авторства
+   * структури шаблону через API, за зразком аркуша вище.
+   *
+   * ⚠ Структура версії (`GET …/structure`) поки не показує наявних формул —
+   * той самий рід пропуску, що й `SheetDto.tables` у W5.0 («заводить наступний
+   * зріз»): додати `Formulas` до `TableDto` означало б правити
+   * `TemplateStructureDto.cs`/`GetTemplateStructureHandler.cs`, а вони поза
+   * межами цього зрізу (SCOPE). Тому кнопка нижче завжди відкриває ПОРОЖНЮ
+   * форму: побачити наявний текст формули, не пам'ятаючи його, поки не можна —
+   * записати новий (що замінить старий) можна.
+   */
+  const saveFormulaMutation = useMutation({
+    mutationFn: (draft: FormulaDraft) => saveFormula(id, draft),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setFormulaDraft(null);
+      showDone(t('formulas.saved'));
     },
     onError: showApiError,
   });
@@ -581,6 +607,17 @@ export function TemplateVersionPage(): JSX.Element {
                                             >
                                               {t('columns.delete')}
                                             </Button>
+                                            <Button
+                                              size="compact-xs"
+                                              variant="subtle"
+                                              onClick={() =>
+                                                setFormulaDraft(
+                                                  emptyFormulaDraft(table.id, 'Column', String(column.id)),
+                                                )
+                                              }
+                                            >
+                                              {t('formulas.edit')}
+                                            </Button>
                                           </>
                                         )}
                                       </Group>
@@ -667,6 +704,15 @@ export function TemplateVersionPage(): JSX.Element {
                                                   }
                                                 >
                                                   {t('rows.delete')}
+                                                </Button>
+                                                <Button
+                                                  size="compact-xs"
+                                                  variant="subtle"
+                                                  onClick={() =>
+                                                    setFormulaDraft(emptyFormulaDraft(table.id, 'Row', row.rowKey))
+                                                  }
+                                                >
+                                                  {t('formulas.edit')}
                                                 </Button>
                                               </Group>
                                             )}
@@ -793,6 +839,25 @@ export function TemplateVersionPage(): JSX.Element {
             onChange={(draft) => setRowEdit({ tableId: rowEdit.tableId, draft })}
             onSubmit={() => saveRowMutation.mutate(rowEdit)}
             onCancel={() => setRowEdit(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        opened={formulaDraft !== null}
+        onClose={() => setFormulaDraft(null)}
+        title={t('formulas.edit')}
+        size="lg"
+      >
+        {formulaDraft !== null && (
+          <FormulaEditor
+            draft={formulaDraft}
+            templateVersionId={id}
+            disabled={!canEditSheets}
+            saving={saveFormulaMutation.isPending}
+            onChange={setFormulaDraft}
+            onSubmit={() => saveFormulaMutation.mutate(formulaDraft)}
+            onCancel={() => setFormulaDraft(null)}
           />
         )}
       </Modal>
