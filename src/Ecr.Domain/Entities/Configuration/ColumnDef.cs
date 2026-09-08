@@ -59,6 +59,26 @@ public sealed class ColumnDef : Entity<int>
     /// <summary>Позиція колонки в таблиці.</summary>
     public void Reorder(int ordinal) => Ordinal = ordinal;
 
+    /// <summary>
+    /// Змінює заголовок колонки.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До появи <c>PUT …/tables/{tableId}/columns/{code}</c> (<c>W5.2</c>)
+    /// сеттера не існувало: колонку створював лише офлайновий генератор
+    /// тестових даних, і повторний запис тим самим кодом (<c>D2-147</c>) не
+    /// мав як змінити щойно введений заголовок. Той самий випадок, що й
+    /// <see cref="SheetDef.Rename"/> у <c>W5.0</c>.
+    ///
+    /// ⚠ <c>HeaderL10n</c> — поле презентаційного шару (<see
+    /// cref="Services.ChangeClassifier.PresentationFields"/>), тож дозволене і
+    /// в опублікованій версії — так само, як назва аркуша.
+    /// </remarks>
+    public void Rename(LocalizedText header)
+    {
+        ArgumentNullException.ThrowIfNull(header);
+        HeaderL10n = header;
+    }
+
     /// <summary>Обов'язковість заповнення.</summary>
     public void SetRequired(bool required) => IsRequired = required;
 
@@ -131,6 +151,31 @@ public sealed class ColumnDef : Entity<int>
         DefaultValue = defaultValue;
         DisplayFormat = displayFormat;
         StyleId = styleId;
+    }
+
+    /// <summary>
+    /// Приховує колонку від показу, лишаючи в структурі.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>IsHidden</c> — поле презентаційного шару (<see
+    /// cref="Services.ChangeClassifier.PresentationFields"/>) ще ДО цього
+    /// сеттера: класифікатор уже чекав на нього. ⛔ Сеттера просто не було —
+    /// колонку створював лише офлайновий генератор, і ховати щойно створене
+    /// не було звідки: той самий випадок, що й <see cref="SheetDef.SetVisible"/>
+    /// у <c>W5.0</c>.
+    /// </remarks>
+    public void SetHidden(bool hidden) => IsHidden = hidden;
+
+    /// <summary>
+    /// Логічне видалення: фізично запис лишається, бо на нього посилаються
+    /// комірки документів навіть у чернетці (ФВ-7.6) — той самий підхід, що
+    /// й <see cref="SheetDef.SoftDelete"/>.
+    /// </summary>
+    public void SoftDelete(int userId, DateTime utcNow)
+    {
+        IsDeleted = true;
+        DeletedAt = utcNow;
+        DeletedByUserId = userId;
     }
 
     /// <summary>Перевіряє, чи значення сумісне з типом і обмеженнями колонки.</summary>

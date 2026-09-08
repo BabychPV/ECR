@@ -4216,6 +4216,284 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує колонку таблиці чернетки. Право `Template.Edit`.
+         * @description ⛔ Другий вертикальний зріз авторства структури шаблону через API
+         *     (`W5.2`, за зразком `sheets/{code}` вище, `W5.0`).
+         *
+         *     ⚠ Таблиця адресується числовим `tableId`, а не парою кодів
+         *     аркуша й таблиці — та сама форма, що й `SaveTableRelationRequest`
+         *     вище (`SourceTableDefId`/`TargetTableDefId`): клієнт уже має
+         *     `TableDto.Id` з попереднього `GET …/structure`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить колонка. */
+                    tableId: number;
+                    /** @description Код колонки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveColumnDefRequest"];
+                    "application/json": components["schemas"]["SaveColumnDefRequest"];
+                    "text/json": components["schemas"]["SaveColumnDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ColumnDefDto"];
+                        "text/json": components["schemas"]["ColumnDefDto"];
+                        "text/plain": components["schemas"]["ColumnDefDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає колонку з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить колонка. */
+                    tableId: number;
+                    /** @description Код колонки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує рядок фіксованої таблиці чернетки. Право `Template.Edit`.
+         * @description ⛔ Третій вертикальний зріз авторства структури шаблону через API
+         *     (`W5.2`). Рядок і колонка — сиблінги під тією самою таблицею, тому
+         *     адресуються однаково: `tables/{tableId}`, а не кодом таблиці.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить рядок. */
+                    tableId: number;
+                    /** @description Ключ рядка. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveRowDefRequest"];
+                    "application/json": components["schemas"]["SaveRowDefRequest"];
+                    "text/json": components["schemas"]["SaveRowDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowDefDto"];
+                        "text/json": components["schemas"]["RowDefDto"];
+                        "text/plain": components["schemas"]["RowDefDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає рядок із чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить рядок. */
+                    tableId: number;
+                    /** @description Ключ рядка. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates": {
         parameters: {
             query?: never;
@@ -5221,6 +5499,12 @@ export interface components {
             yourValue: unknown;
         };
         /**
+         * @description Тип даних колонки. Розширюваний: нові значення додаються без міграції схеми
+         *     (ФВ-2.4). Зберігається як `tinyint`.
+         * @enum {unknown}
+         */
+        CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /**
          * @description Клас структурної зміни (документ 10 «Еволюція схеми»).
          * @enum {unknown}
          */
@@ -5269,6 +5553,32 @@ export interface components {
             pointsRetrieved: number;
             /** @description Статус: `Succeeded`, `Degraded`, `Failed`. */
             status: string;
+        };
+        /** @description Колонка у відповіді на запис/читання через цей обробник. */
+        ColumnDefDto: {
+            code: string;
+            dataType: components["schemas"]["CellDataType"];
+            defaultValue: null | string;
+            displayFormat: null | string;
+            headerL10n: components["schemas"]["LocalizedText"];
+            /** Format: int32 */
+            id: number;
+            isHidden: boolean;
+            isReadOnly: boolean;
+            isRequired: boolean;
+            lookupFilter: null | string;
+            /** Format: int32 */
+            lookupRegistryDefId: null | number;
+            /** Format: int32 */
+            ordinal: number;
+            /** Format: uint8 */
+            precision: null | number;
+            /** Format: uint8 */
+            scale: null | number;
+            /** Format: int32 */
+            styleId: null | number;
+            /** Format: int32 */
+            unitId: null | number;
         };
         /** @description Опис колонки для клієнта. */
         ColumnDto: {
@@ -6822,6 +7132,18 @@ export interface components {
             /** @description Права ролі. */
             permissions: string[];
         };
+        /** @description Рядок у відповіді на запис/читання через цей обробник. */
+        RowDefDto: {
+            /** Format: int32 */
+            id: number;
+            isReadOnly: boolean;
+            labelL10n: components["schemas"]["LocalizedText"];
+            /** Format: int32 */
+            ordinal: number;
+            parentRowKey: null | string;
+            rowKey: string;
+            rowKind: components["schemas"]["RowKind"];
+        };
         /** @description Рядок зі значеннями. Ключ у Cells — код колонки. */
         RowDto: {
             /** @description Значення; ключ — код колонки. Присутній ключ зі значенням
@@ -6856,6 +7178,62 @@ export interface components {
             /** @description Ключ рядка; на нього посилаються формули й аудит. */
             rowKey: string;
         };
+        /**
+         * @description Роль рядка у звіті.
+         * @enum {unknown}
+         */
+        RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Налаштування колонки таблиці чернетки (`W5.2`). */
+        SaveColumnDefRequest: {
+            /** @description Тип даних; незмінний після створення. */
+            dataType: components["schemas"]["CellDataType"];
+            /** @description Значення за замовчуванням порожньої комірки. */
+            defaultValue: null | string;
+            /** @description Формат відображення; презентаційне поле. */
+            displayFormat: null | string;
+            /** @description Заголовок колонки мовами каталогу. */
+            headerL10n: {
+                [key: string]: string;
+            };
+            /** @description Видимість колонки; презентаційне поле. */
+            isHidden: boolean;
+            /** @description Заборона ручного вводу. */
+            isReadOnly: boolean;
+            /** @description Обов'язковість заповнення. */
+            isRequired: boolean;
+            /** @description Звуження списку довідника. */
+            lookupFilter: null | string;
+            /**
+             * Format: int32
+             * @description Довідник; лише для колонки типу `Lookup`.
+             */
+            lookupRegistryDefId: null | number;
+            /**
+             * Format: int32
+             * @description `null` — нова колонка стає останньою за порядком.
+             */
+            ordinal: null | number;
+            /**
+             * Format: uint8
+             * @description Точність для `Decimal`.
+             */
+            precision: null | number;
+            /**
+             * Format: uint8
+             * @description Масштаб для `Decimal`.
+             */
+            scale: null | number;
+            /**
+             * Format: int32
+             * @description Стиль показу; презентаційне поле.
+             */
+            styleId: null | number;
+            /**
+             * Format: int32
+             * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
+             */
+            unitId: null | number;
+        };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {
             /** @description Вираз діалекту методологій. */
@@ -6880,6 +7258,24 @@ export interface components {
             reason: string;
             /** @description Повний перелік правил після правки. */
             rules: components["schemas"]["RegistryRuleSaveDto"][];
+        };
+        /** @description Налаштування рядка фіксованої таблиці чернетки (`W5.2`). */
+        SaveRowDefRequest: {
+            /** @description Заборона ручного вводу. */
+            isReadOnly: boolean;
+            /** @description Підпис рядка мовами каталогу. */
+            labelL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description `null` — новий рядок стає останнім за порядком.
+             */
+            ordinal: null | number;
+            /** @description Ключ батьківського рядка в тій самій таблиці; `null` — корінь. */
+            parentRowKey: null | string;
+            /** @description Роль рядка; незмінна після створення. */
+            rowKind: components["schemas"]["RowKind"];
         };
         /** @description Налаштування аркуша чернетки (`ФВ-2.1`). */
         SaveSheetDefRequest: {

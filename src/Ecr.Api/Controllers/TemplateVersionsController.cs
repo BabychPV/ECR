@@ -27,6 +27,10 @@ public sealed class TemplateVersionsController(
     DeleteSheetDefHandler deleteSheet,
     SaveTableDefHandler saveTable,
     DeleteTableDefHandler deleteTable,
+    SaveColumnDefHandler saveColumn,
+    DeleteColumnDefHandler deleteColumn,
+    SaveRowDefHandler saveRow,
+    DeleteRowDefHandler deleteRow,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -342,6 +346,48 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>
+    /// Записує колонку таблиці чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належить колонка.</param>
+    /// <param name="code">Код колонки.</param>
+    /// <param name="request">Налаштування колонки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Другий вертикальний зріз авторства структури шаблону через API
+    /// (`W5.2`, за зразком <c>sheets/{code}</c> вище, `W5.0`).
+    ///
+    /// ⚠ Таблиця адресується числовим <c>tableId</c>, а не парою кодів
+    /// аркуша й таблиці — та сама форма, що й <c>SaveTableRelationRequest</c>
+    /// вище (<c>SourceTableDefId</c>/<c>TargetTableDefId</c>): клієнт уже має
+    /// <c>TableDto.Id</c> з попереднього <c>GET …/structure</c>.
+    /// </remarks>
+    [HttpPut("tables/{tableId:int}/columns/{code}")]
+    [ProducesResponseType<ColumnDefDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ColumnDefDto>> SaveColumn(
+        int id, int tableId, string code, [FromBody] SaveColumnDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveColumn
+            .HandleAsync(
+                id,
+                tableId,
+                code,
+                new SaveColumnDefCommand(
+                    request.HeaderL10n, request.Ordinal, request.DataType,
+                    request.IsRequired, request.IsReadOnly, request.IsHidden,
+                    request.Precision, request.Scale,
+                    request.DefaultValue, request.DisplayFormat, request.StyleId,
+                    request.LookupRegistryDefId, request.LookupFilter, request.UnitId),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
     /// Прибирає таблицю з аркуша чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
     /// </summary>
     /// <param name="id">Версія-чернетка.</param>
@@ -355,6 +401,77 @@ public sealed class TemplateVersionsController(
     public async Task<IActionResult> DeleteTable(int id, string sheetCode, string code, CancellationToken ct)
     {
         await deleteTable.HandleAsync(id, sheetCode, code, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Прибирає колонку з чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належить колонка.</param>
+    /// <param name="code">Код колонки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("tables/{tableId:int}/columns/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteColumn(int id, int tableId, string code, CancellationToken ct)
+    {
+        await deleteColumn.HandleAsync(id, tableId, code, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Записує рядок фіксованої таблиці чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належить рядок.</param>
+    /// <param name="code">Ключ рядка.</param>
+    /// <param name="request">Налаштування рядка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Третій вертикальний зріз авторства структури шаблону через API
+    /// (`W5.2`). Рядок і колонка — сиблінги під тією самою таблицею, тому
+    /// адресуються однаково: <c>tables/{tableId}</c>, а не кодом таблиці.
+    /// </remarks>
+    [HttpPut("tables/{tableId:int}/rows/{code}")]
+    [ProducesResponseType<RowDefDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RowDefDto>> SaveRow(
+        int id, int tableId, string code, [FromBody] SaveRowDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveRow
+            .HandleAsync(
+                id,
+                tableId,
+                code,
+                new SaveRowDefCommand(
+                    request.LabelL10n, request.Ordinal, request.RowKind,
+                    request.ParentRowKey, request.IsReadOnly),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає рядок із чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належить рядок.</param>
+    /// <param name="code">Ключ рядка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("tables/{tableId:int}/rows/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteRow(int id, int tableId, string code, CancellationToken ct)
+    {
+        await deleteRow.HandleAsync(id, tableId, code, ct).ConfigureAwait(false);
 
         return NoContent();
     }
@@ -423,3 +540,47 @@ public sealed record SaveTableDefRequest(
     Ecr.Domain.Enums.TableLayoutKind LayoutKind,
     Ecr.Domain.Enums.TableRowMode RowMode,
     int? MaxDynamicRows);
+
+/// <summary>Налаштування колонки таблиці чернетки (<c>W5.2</c>).</summary>
+/// <param name="HeaderL10n">Заголовок колонки мовами каталогу.</param>
+/// <param name="Ordinal"><c>null</c> — нова колонка стає останньою за порядком.</param>
+/// <param name="DataType">Тип даних; незмінний після створення.</param>
+/// <param name="IsRequired">Обов'язковість заповнення.</param>
+/// <param name="IsReadOnly">Заборона ручного вводу.</param>
+/// <param name="IsHidden">Видимість колонки; презентаційне поле.</param>
+/// <param name="Precision">Точність для <c>Decimal</c>.</param>
+/// <param name="Scale">Масштаб для <c>Decimal</c>.</param>
+/// <param name="DefaultValue">Значення за замовчуванням порожньої комірки.</param>
+/// <param name="DisplayFormat">Формат відображення; презентаційне поле.</param>
+/// <param name="StyleId">Стиль показу; презентаційне поле.</param>
+/// <param name="LookupRegistryDefId">Довідник; лише для колонки типу <c>Lookup</c>.</param>
+/// <param name="LookupFilter">Звуження списку довідника.</param>
+/// <param name="UnitId">Одиниця значень колонки (ФВ-16.1); не для типу <c>Unit</c>.</param>
+public sealed record SaveColumnDefRequest(
+    IReadOnlyDictionary<string, string> HeaderL10n,
+    int? Ordinal,
+    Ecr.Domain.Enums.CellDataType DataType,
+    bool IsRequired,
+    bool IsReadOnly,
+    bool IsHidden,
+    byte? Precision,
+    byte? Scale,
+    string? DefaultValue,
+    string? DisplayFormat,
+    int? StyleId,
+    int? LookupRegistryDefId,
+    string? LookupFilter,
+    int? UnitId);
+
+/// <summary>Налаштування рядка фіксованої таблиці чернетки (<c>W5.2</c>).</summary>
+/// <param name="LabelL10n">Підпис рядка мовами каталогу.</param>
+/// <param name="Ordinal"><c>null</c> — новий рядок стає останнім за порядком.</param>
+/// <param name="RowKind">Роль рядка; незмінна після створення.</param>
+/// <param name="ParentRowKey">Ключ батьківського рядка в тій самій таблиці; <c>null</c> — корінь.</param>
+/// <param name="IsReadOnly">Заборона ручного вводу.</param>
+public sealed record SaveRowDefRequest(
+    IReadOnlyDictionary<string, string> LabelL10n,
+    int? Ordinal,
+    Ecr.Domain.Enums.RowKind RowKind,
+    string? ParentRowKey,
+    bool IsReadOnly);
