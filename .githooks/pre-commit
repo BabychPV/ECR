@@ -132,8 +132,8 @@ while IFS= read -r FILE; do
             [Cc][Oo][Nn][Tt][Rr][Aa][Cc][Tt][Ss]/*)
                 add_violation "$FILE" "шлях належить зоні contracts/** — вона заборонена для ОБОХ вузлів і змінюється лише окремою узгодженою процедурою."
                 ;;
-            [Dd][Oo][Cc][Ss]/[Ss][Yy][Nn][Cc]/[Pp][Kk]2/*)
-                add_violation "$FILE" "шлях належить зоні PK2: docs/sync/pk2/** (звіти виконавця). Вузол PK1 читає цю теку, але не пише в неї."
+            [Pp][Kk]2-[Ll][Oo][Gg].[Mm][Dd])
+                add_violation "$FILE" "PK2-LOG.md — лог ВИКОНАВЦЯ на гілці sync. Вузол PK1 його ЧИТАЄ (git show origin/sync:PK2-LOG.md), але не пише в нього НІКОЛИ. Свої записи — у PK1-LOG.md."
                 ;;
             *.[Cc][Ss][Pp][Rr][Oo][Jj])
                 add_violation "$FILE" "шлях належить зоні PK2: *.csproj (файли проєктів). Вузол PK1 не має права його змінювати."
@@ -163,12 +163,15 @@ while IFS= read -r FILE; do
             *.[Ss][Ll][Nn]) : ;;
             [Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*.[Pp][Rr][Oo][Pp][Ss]) : ;;
             */[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*.[Pp][Rr][Oo][Pp][Ss]) : ;;
-            [Dd][Oo][Cc][Ss]/[Ss][Yy][Nn][Cc]/[Dd][Ee][Ll][Tt][Aa].[Mm][Dd]) : ;;
+            [Pp][Kk]2-[Ll][Oo][Gg].[Mm][Dd]) : ;;
+            [Pp][Kk]1-[Ll][Oo][Gg].[Mm][Dd])
+                add_violation "$FILE" "PK1-LOG.md — лог КЕРУЮЧОГО на гілці sync. Вузол PK2 його ЧИТАЄ (git show origin/sync:PK1-LOG.md), але не пише в нього НІКОЛИ. Свої записи — у PK2-LOG.md."
+                ;;
             [Cc][Oo][Nn][Tt][Rr][Aa][Cc][Tt][Ss]/*)
                 add_violation "$FILE" "шлях належить зоні contracts/** — вона заборонена для ОБОХ вузлів і змінюється лише окремою узгодженою процедурою."
                 ;;
             [Dd][Oo][Cc][Ss]/*)
-                add_violation "$FILE" "шлях належить зоні PK1: docs/** (документація). Вузол PK2 має право писати лише у docs/sync/DELTA.md."
+                add_violation "$FILE" "шлях належить зоні PK1: docs/** (документація). Вузол PK2 у docs/ не пише зовсім: його лог — PK2-LOG.md на гілці sync."
                 ;;
             [Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd])
                 add_violation "$FILE" "шлях належить зоні PK1: CLAUDE.md (інструкції для агента). Вузол PK2 не має права його змінювати."
@@ -186,7 +189,7 @@ while IFS= read -r FILE; do
                 add_violation "$FILE" "шлях належить зоні PK1: scripts/** (сервісні скрипти). Вузол PK2 не має права його змінювати."
                 ;;
             *)
-                add_violation "$FILE" "шлях поза дозволеною зоною PK2. Вузол PK2 може писати лише у: src/**, tests/**, tools/**, *.csproj, *.sln, Directory.*.props, docs/sync/DELTA.md."
+                add_violation "$FILE" "шлях поза дозволеною зоною PK2. Вузол PK2 може писати лише у: src/**, tests/**, tools/**, *.csproj, *.sln, Directory.*.props (у main) і PK2-LOG.md (на гілці sync)."
                 ;;
         esac
     fi
@@ -203,7 +206,7 @@ if [ "$NODE" = "PK1" ]; then
     HANDOFF="передайте роботу вузлу PK2 через директиву в docs/sync/."
 else
     NODE_ROLE="PK2 (вузол-виконавець)"
-    HANDOFF="опишіть потребу у docs/sync/DELTA.md і дочекайтеся директиви від PK1."
+    HANDOFF="опишіть потребу записом ASK у PK2-LOG.md (гілка sync) і дочекайтеся настанови від PK1."
 fi
 
 printf '%s\n' "======================================================================" >&2

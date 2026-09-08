@@ -382,11 +382,11 @@ if ($Node -eq 'PK1') {
         'Edit(scripts/**)'
     )
     # ЄДИНИЙ виняток із заборони docs/**: журнал відхилень. PK2 мусить
-    # мати змогу дописати DELTA-запис — інакше відхилення просто зникне.
+    # мати змогу дописати запис у свій лог PK2-LOG.md (гілка sync) — інакше відхилення просто зникне.
     # allow має вищий приоритет за deny, тому виняток працює.
     $allowList = @(
-        'Edit(docs/sync/DELTA.md)',
-        'Write(docs/sync/DELTA.md)'
+        'Edit(PK2-LOG.md)',
+        'Write(PK2-LOG.md)'
     )
 }
 
@@ -579,7 +579,7 @@ Write-Host "  core.hooksPath ...... .githooks"
 Write-Host "  налаштування ........ $settingsPath"
 Write-Host "  заборон (deny) ...... $(@($perm['deny']).Count)"
 if ($allowList.Count -gt 0) {
-    Write-Host "  дозволів (allow) .... $(@($perm['allow']).Count)  (у т.ч. docs/sync/DELTA.md)"
+    Write-Host "  дозволів (allow) .... $(@($perm['allow']).Count)  (у т.ч. PK2-LOG.md)"
 }
 if ($barrierOk) {
     Write-Host "  бар'єр зон .......... PASS (пробний коміт у $probeRel відхилено)" -ForegroundColor Green
@@ -599,9 +599,7 @@ if ($script:warnings.Count -gt 0) {
 Write-Host ''
 Write-Host '  Наступні кроки:' -ForegroundColor Yellow
 Write-Host '    * мітки GitHub (один раз на репозиторій, з будь-якої машини):'
-Write-Host '          powershell -ExecutionPolicy Bypass -File scripts\gh-setup-labels.ps1'
 Write-Host '    * автоматичний цикл (Планувальник завдань Windows):'
-Write-Host '          powershell -ExecutionPolicy Bypass -File scripts\sync-node-gh.ps1'
 Write-Host ''
 
 exit 0
