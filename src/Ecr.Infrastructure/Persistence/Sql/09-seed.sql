@@ -50,6 +50,15 @@ USING (VALUES
   (N'Calculation.Recalculate',  N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
   (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
+  -- ⚠ НЕБЕЗПЕЧНЕ (1) навмисно, і не через ризик втратити дані. Причина в
+  -- фільтрі нижче: `Approver` має шаблон `Report.%`, виданий тоді, коли всі
+  -- права цієї родини були «дивитися, будувати, подавати, вивантажувати».
+  -- `Report.EditDefinition` — інша річ: це авторство ДЕРЖАВНОЇ ФОРМИ
+  -- (`ФВ-10.4`), і мовчки роздати його кожному погоджувачу лише тому, що воно
+  -- починається на `Report.`, означало б змінити повноваження людей правкою
+  -- одного рядка каталогу. Адміністратор видає його свідомо, і в журналі
+  -- безпеки видно, хто це зробив (`DangerousPermissionsGranted`).
+  (N'Report.EditDefinition',    N'Report',      1),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
@@ -906,6 +915,37 @@ USING (VALUES
     (N'snapshots.current',               N'en', N'current', 1),
     (N'snapshots.empty',                 N'en', N'No snapshots built yet', 1),
     (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
+    (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
+    (N'snapshots.noPublished',           N'en', N'No report definition has a published version yet: a snapshot can only be built from one.', 1),
+
+    -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
+    -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.
+    (N'reportDefs.title',                N'en', N'Report definitions', 1),
+    (N'reportDefs.manage',               N'en', N'Report definitions', 1),
+    (N'reportDefs.empty',                N'en', N'No report is described yet: a snapshot has nothing to be built from.', 1),
+    (N'reportDefs.code',                 N'en', N'Report code', 1),
+    (N'reportDefs.codeHint',             N'en', N'The address of the report; a snapshot is built by this code and it cannot be renamed later.', 1),
+    (N'reportDefs.regulatory',           N'en', N'regulatory', 1),
+    (N'reportDefs.regulatoryHint',       N'en', N'Decides which statuses the rpt.v_* view lets through — not how important the report is.', 1),
+    (N'reportDefs.inactive',             N'en', N'withdrawn', 1),
+    (N'reportDefs.version',              N'en', N'Version', 1),
+    (N'reportDefs.versionHint',          N'en', N'Unique within the report; up to 20 characters.', 1),
+    (N'reportDefs.versions',             N'en', N'Versions', 1),
+    (N'reportDefs.noVersions',           N'en', N'no versions', 1),
+    (N'reportDefs.columns',              N'en', N'Snapshot columns', 1),
+    (N'reportDefs.columnsHint',          N'en', N'The column code is the key of a snapshot row — it is what the report looks values up by.', 1),
+    (N'reportDefs.columnCode',           N'en', N'Column code', 1),
+    (N'reportDefs.columnKind',           N'en', N'Value type', 1),
+    (N'reportDefs.addColumn',            N'en', N'Add column', 1),
+    (N'reportDefs.removeColumn',         N'en', N'Remove column', 1),
+    (N'reportDefs.add',                  N'en', N'Add report definition', 1),
+    (N'reportDefs.added',                N'en', N'The report definition has been created as a draft version.', 1),
+    (N'reportDefs.newVersion',           N'en', N'Add version', 1),
+    (N'reportDefs.versionAdded',         N'en', N'The draft version has been created.', 1),
+    (N'reportDefs.forReport',            N'en', N'Report', 1),
+    (N'reportDefs.forReportHint',        N'en', N'A published version cannot be edited: change it by adding a new version.', 1),
+    (N'reportDefs.publish',              N'en', N'Publish', 1),
+    (N'reportDefs.published',            N'en', N'The version has been published; snapshots will be built from it.', 1),
 
     -- Редактор рядків інтерфейсу.
     (N'nav.uiStrings',                   N'en', N'Interface texts', 1),
@@ -1190,4 +1230,51 @@ USING (VALUES
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
      VALUES (s.[Key], s.Lang, s.Val, s.Scope, SYSUTCDATETIME());
+GO
+
+-- ── Опис звіту: одна державна форма з каталогу ФВ-10.7 ───────────────────
+-- ⛔ Рівно ОДИН опис, і це не заготовка «на потім». `rpt.ReportDef` і
+-- `rpt.ReportVersion` не створювало НІЩО — ні код, ні seed, ні тести, — тому
+-- `POST /reports/{code}/build` відмовляв `ECR-RPT-0404` на будь-який код:
+-- звітність існувала і не могла спрацювати жодного разу. Одна реальна форма
+-- в seed робить чисту базу здатною побудувати зріз одразу, а не після того,
+-- як хтось здогадається завести опис руками (директива №09, W7).
+--
+-- ⚠ `IEC` — з каталогу державних форм ТЗ (`ФВ-10.7`): Industrial
+-- Environmental Control, квартальна. Решта шести (230 A1/B1/B4, PermitInfo,
+-- 20986 Primary Water Use, 2-ТП водгосп, IEC Water, 2-ТП відходи) сюди НЕ
+-- йдуть: seed, що заводить сім форм, кожна з яких описана тими самими
+-- п'ятьма колонками, виглядав би готовим каталогом і не був би ним —
+-- `ФВ-10.9` вимагає для кожної форми ВЛАСНОГО критерію звірки. Решта
+-- заводиться через `POST /api/v1/reports` (`Report.EditDefinition`).
+MERGE rpt.ReportDef AS t
+USING (VALUES (N'IEC',
+               N'{"en":"Industrial Environmental Control (quarterly)","ru":"Производственный экологический контроль (квартал)","kz":"Өндірістік экологиялық бақылау (тоқсан)"}',
+               1)) AS s (Code, NameL10n, IsRegulatory)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsRegulatory, IsActive)
+     VALUES (s.Code, s.NameL10n, s.IsRegulatory, 1);
+GO
+
+-- ⚠ Версія одразу `Published` (Status = 1), а не чернетка: сховище описів
+-- бере ЛИШЕ опубліковане (`IReportDefinitionStore.FindCurrentVersionIdAsync`),
+-- і чернетка в seed дала б рівно те, від чого seed і рятує, — опис, за яким
+-- побудова однаково відмовляє.
+--
+-- ⚠ Колонки — ті самі п'ять, які будівник зрізу справді пише в
+-- `rpt.ReportRow` (`ReportSnapshotBuilder.AggregateAsync`), і в тому форматі,
+-- який читає `ReportColumnSpec.Parse`. Опис, що обіцяє колонки, яких у зрізі
+-- не буде, гірший за відсутній.
+MERGE rpt.ReportVersion AS t
+USING (
+    SELECT d.Id AS ReportDefId, v.[Version], v.ColumnsJson, v.RulesJson
+    FROM (VALUES (N'IEC', N'1.0',
+                  N'[{"code":"DocumentId","kind":"number"},{"code":"RowKey","kind":"text"},{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]',
+                  N'{"rowSource":"CalculationResults"}'))
+         AS v (Code, [Version], ColumnsJson, RulesJson)
+    JOIN rpt.ReportDef AS d ON d.Code = v.Code
+) AS s
+ON t.ReportDefId = s.ReportDefId AND t.[Version] = s.[Version]
+WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, RulesJson, CreatedAt)
+     VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
 GO
