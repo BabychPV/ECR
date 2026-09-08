@@ -231,6 +231,44 @@ internal static class Provisioning
     }
 
     /// <summary>
+    /// Видає КІЛЬКА ресурсних грантів ролі одним <c>PUT</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Набір грантів РОЛІ замінюється ЦІЛКОМ (<c>ReplaceResourceGrantsHandler</c>),
+    /// а не додається по одному: другий виклик <see cref="GrantAsync"/> стер би
+    /// перший. Для сценаріїв, де позитивний грант і <c>isDeny</c> мають діяти
+    /// РАЗОМ (ФВ-6.6 — заборона на ширшому рівні перекриває дозвіл на вужчому),
+    /// обидва мусять піти в одному запиті.
+    /// </remarks>
+    public static async Task GrantManyAsync(
+        EcrApiFactory app, int roleId,
+        params (string ResourceKind, int ResourceId, string Level, bool IsDeny)[] grants)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        ArgumentNullException.ThrowIfNull(grants);
+
+        var bootstrap = await BootstrapAdministratorAsync(app).ConfigureAwait(false);
+        var response = await bootstrap
+            .PutAsJsonAsync(
+                new Uri($"/api/v1/roles/{roleId}/grants", UriKind.Relative),
+                new
+                {
+                    grants = grants.Select(g => new
+                    {
+                        resourceKind = g.ResourceKind,
+                        resourceId = g.ResourceId,
+                        level = g.Level,
+                        isDeny = g.IsDeny,
+                    }),
+                })
+            .ConfigureAwait(false);
+
+        Assert.True(
+            response.IsSuccessStatusCode,
+            $"гранти ролі {roleId}: {response.StatusCode}: {app.ErrorsText}");
+    }
+
+    /// <summary>
     /// Повторний вхід тим самим користувачем — коли попередня cookie
     /// застаріла через зміну ролей чи грантів.
     /// </summary>
