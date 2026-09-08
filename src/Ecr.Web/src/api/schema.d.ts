@@ -4388,7 +4388,8 @@ export interface paths {
         };
         /**
          * Структура версії для клієнта. Право `Template.View`.
-         * @description Кешується за ключем `v{id}:r{rev}` (ФВ-2.5); віддається з `ETag`.
+         * @description Кешується за ключем `v{id}:r{rev}` (ФВ-2.5, `D-16`) — але
+         *     лише для ОПУБЛІКОВАНОЇ версії; віддається з `ETag`.
          */
         get: {
             parameters: {
