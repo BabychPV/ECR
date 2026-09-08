@@ -86,7 +86,13 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.4")]
-    [Trait("Requirement", "ФВ-10.7")]
+
+    // ⚠ Трейта `ФВ-10.7` тут навмисно НЕМАЄ, хоча посіяний `IEC` узятий саме
+    // з її каталогу. Вимога звільнена (`contracts/trace-exempt.md`): каталог
+    // державних форм — перелік того, ЩО має бути, а не поведінка системи, і
+    // один посіяний рядок із семи її не покриває. Трейт зробив би вимогу
+    // «покритою і звільненою водночас» — суперечність, яку ловить
+    // `RequirementCensusTests`.
     public async Task Seed_заводить_один_опис_звіту_з_опублікованою_версією()
     {
         // ⛔ Без цього рядка звітність існує і не працює: побудова зрізу
