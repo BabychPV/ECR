@@ -592,6 +592,13 @@ USING (VALUES
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
+
+    -- ⛔ Окремий стан, а не той самий текст: «немає колонок» і «немає рядків»
+    -- лікуються по-різному, і фіксована таблиця без рядків раніше не мала
+    -- жодного повідомлення взагалі — вона малювалася як звичайна сітка,
+    -- у яку просто нема куди вводити (директива №09 `W8` п.2, `S-13`).
+    (N'grid.emptyFixedTable',            N'en', N'This table has no rows for the selected period', 1),
+    (N'grid.emptyFixedTableHint',        N'en', N'Rows of a fixed table come from the template: the version in force for this period defines none.', 1),
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),
