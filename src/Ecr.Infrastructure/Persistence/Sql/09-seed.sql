@@ -360,6 +360,18 @@ USING (VALUES
     (N'document.validate',               N'en', N'Validate', 1),
     (N'document.validationClean',        N'en', N'Validation passed with no errors.', 1),
     (N'document.validationErrors',       N'en', N'Validation found {count} error(s).', 1),
+
+    -- ⛔ Перелік зауважень — НА ЕКРАНІ, а не числом у тості (`ФВ-14.24`,
+    -- директива №09 `W8` п.3). Число без переліку не веде до жодної дії:
+    -- оператор дізнавався, що щось не так, і не дізнавався ні що саме, ні де.
+    (N'document.validationTitle',        N'en', N'Validation findings', 1),
+    (N'document.validationCleanHint',    N'en', N'The last run found nothing to fix for this period.', 1),
+    (N'document.validationHint',         N'en', N'An error blocks submitting the sheet; a warning does not.', 1),
+    (N'document.validationSeverity',     N'en', N'Level', 1),
+    (N'document.validationRow',          N'en', N'Row', 1),
+    (N'document.validationColumn',       N'en', N'Column', 1),
+    (N'document.validationRule',         N'en', N'Rule', 1),
+    (N'document.validationMessage',      N'en', N'What is wrong', 1),
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
     (N'document.export',                 N'en', N'Export to Excel', 1),
@@ -624,6 +636,13 @@ USING (VALUES
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
     (N'workflow.recalcQueued',           N'en', N'Recalculation queued as job {job}.', 1),
+
+    -- ⛔ Відгук на «Перерахувати» (директива №09 `W8` п.7). Доти було рівно
+    -- одне «поставлено в чергу як {job}» — GUID, який нікуди не ввести, і
+    -- жодного слова про те, чим усе скінчилося.
+    (N'workflow.recalcRunning',          N'en', N'Recalculating…', 1),
+    (N'workflow.recalcDone',             N'en', N'Recalculation finished: the figures are up to date.', 1),
+    (N'workflow.recalcFailed',           N'en', N'Recalculation failed. Open Jobs to see why.', 1),
     (N'workflow.reason',                 N'en', N'Reason', 1),
     (N'workflow.rejectTitle',            N'en', N'Reject the sheet', 1),
     (N'workflow.rejectHint',             N'en', N'Say what has to be corrected: the author sees this text and nothing else.', 1),

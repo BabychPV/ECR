@@ -374,6 +374,17 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True((int)patch.StatusCode is >= 400 and < 500, $"чужий TableInstanceId мав дати 4xx, а дав {patch.StatusCode}");
     }
 
+    /// <remarks>
+    /// ⛔ Сценарій довів дефект, глибший за той, який називала директива.
+    /// Повідомлень не було не тому, що правил не було звідки взяти, — правило
+    /// заводилося ще з `W5.4`. <c>MetadataCache</c> не вантажив
+    /// <c>cfg.ValidationRule</c> ВЗАГАЛІ: <c>ValidateDocumentHandler</c> читає
+    /// рівно <c>table.ValidationRules</c> цього знімка, тож
+    /// <c>POST …/validate</c> відповідав «зауважень немає» на будь-яких даних
+    /// при будь-яких заведених правилах. Другий шар — рівень рядка виконувався
+    /// одним проходом і ставив <c>rowKey: null</c> завжди: список повідомляв,
+    /// ЩО не так, і не повідомляв, ДЕ.
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-19")]
@@ -381,25 +392,70 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S19", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S19",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (admin, _, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S19");
+        // Правило рівня рядка: значення колонки `A` не більше за 100.
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S19", "[A] <= 100");
+        admin = doc.Admin;
+
+        var tables = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
+
+        // Число, яке правило порушує.
+        await PatchAsync(app, admin, doc, tableInstanceId, 101m);
 
         var validate = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/validate", UriKind.Relative),
-            new { periodKey });
+            new Uri($"/api/v1/documents/{doc.DocumentId}/validate", UriKind.Relative),
+            new { periodKey = doc.PeriodKey });
         Assert.Equal(HttpStatusCode.OK, validate.StatusCode);
 
-        var body = await validate.Content.ReadFromJsonAsync<JsonElement>();
-        var messages = body.GetProperty("messages");
+        var messages = (await validate.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("messages").EnumerateArray().ToList();
 
-        // Доказ: непорожній список ІЗ адресою комірки (rowKey/columnCode), а
-        // не просто число. Без правил валідації (S-06 недосяжний) список
-        // природно порожній — це і є видима межа продукту.
-        Assert.True(messages.GetArrayLength() > 0, $"валідація документа {documentId} не повернула жодного повідомлення: без S-06 правил взяти нема звідки.");
-        Assert.True(
-            messages.EnumerateArray().Any(m => m.GetProperty("rowKey").ValueKind != JsonValueKind.Null),
-            "жодне повідомлення валідації не містить адреси рядка.");
+        // ⛔ Доказ сценарію: непорожній список ІЗ адресою рядка, а не число.
+        Assert.NotEmpty(messages);
+        var violation = messages.Find(m => m.GetProperty("severity").GetString() == "Error");
+        Assert.True(violation.ValueKind != JsonValueKind.Undefined, $"жодного Error серед повідомлень: {app.ErrorsText}");
+        Assert.Equal(doc.RowKeys[0], violation.GetProperty("rowKey").GetString());
+
+        // ⛔ І другий бік того самого: результат ЧИТАЄТЬСЯ окремим `GET`, тобто
+        // переживає перезавантаження сторінки. Доти підсумок зберігався і не
+        // мав жодного читача (`IValidationResultStore.GetLatestAsync`), а
+        // перелік зауважень жив рівно до оновлення вкладки.
+        var read = await admin.Client.GetAsync(new Uri(
+            $"/api/v1/documents/{doc.DocumentId}/validation?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+
+        var stored = (await read.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(messages.Count, stored.Count);
+        Assert.Contains(stored, m => m.GetProperty("rowKey").GetString() == doc.RowKeys[0]);
+    }
+
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-19")]
+    public async Task Непроведена_перевірка_це_404_а_не_порожній_перелік()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(
+            app, "S19b",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S19b");
+        admin = doc.Admin;
+
+        var read = await admin.Client.GetAsync(new Uri(
+            $"/api/v1/documents/{doc.DocumentId}/validation?periodKey={doc.PeriodKey}", UriKind.Relative));
+
+        // ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді. Показати
+        // першу замість другої означає повідомити неправду про готовність
+        // документа рівно тоді, коли на неї спираються, подаючи звітність.
+        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
     }
 
     /// <remarks>

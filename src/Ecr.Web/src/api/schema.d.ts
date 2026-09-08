@@ -932,6 +932,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Останній результат перевірки. Право `Document.View`.
+         * @description ⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).
+         *     Підсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:
+         *     `IValidationResultStore.GetLatestAsync` не мав жодного виклику.
+         *     Ціна видна на екрані — перелік зауважень жив рівно до перезавантаження
+         *     сторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ
+         *     перевірку заново.
+         *
+         *     ⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:
+         *     «зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
+         *     першу замість другої означає повідомити неправду про готовність.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationResultResponse"];
+                        "text/json": components["schemas"]["ValidationResultResponse"];
+                        "text/plain": components["schemas"]["ValidationResultResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expressions/metadata": {
         parameters: {
             query?: never;

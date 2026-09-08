@@ -1,16 +1,19 @@
-import { useState, type JSX } from 'react';
+﻿import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group } from '@mantine/core';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
   ApproveSheetRequest,
   DocumentPeriodRequest,
+  JobStatus,
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { outcomeOf, pollInterval } from './jobFollow';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
 
@@ -115,14 +118,94 @@ export function SheetActions({
     onError: showApiError,
   });
 
+  /**
+   * Перерахунок: постановка в чергу і **стеження за нею**.
+   *
+   * ⛔ Тут була одна нотифікація «поставлено в чергу як `4f2c…`» — і на цьому
+   * все (директива №09 `W8` п.7). Перерахунок іде у фон, і зворотного зв'язку
+   * не було жодного: оператор не дізнавався ні коли числа оновилися, ні що
+   * задача впала. Він бачив GUID і не мав куди його ввести — той самий
+   * дефект, який експорт уже пройшов (`ExportButton.tsx`), і виправлений тим
+   * самим прийомом.
+   *
+   * ⚠ Сітка перечитується САМЕ на завершенні, а не на постановці в чергу:
+   * оновити її одразу означало б показати старі числа під написом
+   * «перераховано».
+   */
+  const [recalcJobId, setRecalcJobId] = useState<string | null>(null);
+
   const recalculate = useMutation({
     mutationFn: () =>
       apiEnqueue(`/api/v1/documents/${documentId}/recalculate`, {
         periodKey,
       } satisfies DocumentPeriodRequest),
-    onSuccess: (job) => showDone(t('workflow.recalcQueued', { job: job.jobId })),
+    onSuccess: (job) => {
+      setRecalcJobId(job.jobId);
+      showDone(t('workflow.recalcQueued', { job: job.jobId }));
+    },
     onError: showApiError,
   });
+
+  const recalcJob = useQuery({
+    queryKey: ['job', recalcJobId],
+    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(recalcJobId ?? '')}`),
+    enabled: recalcJobId !== null,
+
+    // ⚠ Правило опитування — у чистому модулі `jobFollow.ts`: саме його не
+    // було, і саме його треба перевіряти окремо від компонента.
+    refetchInterval: (query) => pollInterval(query.state.data?.state),
+
+    // ⚠ `retry: false` і мовчазна зупинка на відмові: `GET /jobs/{id}` вимагає
+    // окремого права (`System.ViewHealth`, `Q-154`), і оператор без нього має
+    // лишитися з поставленою задачею, а не з червоним сповіщенням про право,
+    // якого він не просив.
+    retry: false,
+  });
+
+  /*
+   * ⛔ Стан задачі, якого НЕ ВДАЛОСЯ прочитати, — це не «ще виконується».
+   * `GET /jobs/{id}` вимагає окремого права (`System.ViewHealth`, `Q-154`), і
+   * без нього кнопка крутилася б вічно: оператор бачив би «перераховується»
+   * на задачі, стан якої йому просто не показують. Тому відмова читання
+   * зупиняє стеження мовчки — задача поставлена, і про це вже сказано.
+   */
+  const outcome = recalcJobId === null
+    ? null
+    : outcomeOf(recalcJob.data?.state, recalcJob.isError);
+
+  const recalcRunning = outcome === 'running';
+
+  // ⛔ Про КІНЕЦЬ повідомляється рівно один раз на задачу: опитування триває
+  // кілька тактів після завершення (React Query віддає ті самі дані з кешу), і
+  // без цієї позначки оператор отримав би серію однакових сповіщень.
+  const reported = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (recalcJobId === null || outcome === null || outcome === 'running') return;
+
+    // Стан прочитати не вдалося — мовчимо: задача поставлена, і про це вже
+    // сказано; повідомляти про право, якого оператор не просив, нема сенсу.
+    if (outcome === 'unknown') return;
+    if (reported.current === recalcJobId) return;
+
+    reported.current = recalcJobId;
+
+    if (outcome === 'succeeded') {
+      showDone(t('workflow.recalcDone'));
+
+      // ⚠ Сітка перечитується САМЕ тут: оновити її на постановці в чергу
+      // означало б показати старі числа під написом «перераховано».
+      void queryClient.invalidateQueries({ queryKey: ['table-slice'] });
+      void queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
+
+      return;
+    }
+
+    notifications.show({
+      color: 'red',
+      message: recalcJob.data?.message ?? t('workflow.recalcFailed'),
+    });
+  }, [recalcJobId, outcome, recalcJob.data?.message, queryClient, documentId, periodKey]);
 
   const me = session.data;
 
@@ -133,10 +216,10 @@ export function SheetActions({
           <Button
             size="xs"
             variant="default"
-            loading={recalculate.isPending}
+            loading={recalculate.isPending || recalcRunning}
             onClick={() => recalculate.mutate()}
           >
-            {t('workflow.recalculate')}
+            {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>
         )}
 

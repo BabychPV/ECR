@@ -108,6 +108,7 @@ public static class DependencyInjection
         services.AddScoped<Validation.ValidationEngine>();
         services.AddScoped<Recalculation.RecalculationService>();
         services.AddScoped<ValidateDocumentHandler>();
+        services.AddScoped<GetValidationResultHandler>();
         services.AddScoped<Templates.PublishTemplateVersionHandler>();
 
         // Безпека (модулі 3.1–3.3)
