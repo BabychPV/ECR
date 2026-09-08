@@ -12,7 +12,23 @@ public sealed class TableRow
 {
     private TableRow() { }
 
-    public TableRow(PeriodKey periodKey, long id, long tableInstanceId, RowKey rowKey, int ordinal, DateTime utcNow)
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <param name="id">Ідентифікатор із <c>SEQUENCE</c>.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="rowKey">Бізнес-ідентичність рядка.</param>
+    /// <param name="ordinal">Порядок на екрані.</param>
+    /// <param name="utcNow">Момент створення.</param>
+    /// <param name="rowDefId">
+    /// Опис рядка з шаблону; <c>null</c> — рядок, який додав користувач.
+    /// </param>
+    /// <remarks>
+    /// ⛔ <see cref="RowDefId"/> існував як поле і не заповнювався ніколи:
+    /// рядків із шаблону не будував ніхто, тому «рядок із <c>RowDef</c>» був
+    /// станом, якого в базі не бувало (директива №09 `W8` п.2, `S-13`).
+    /// </remarks>
+    public TableRow(
+        PeriodKey periodKey, long id, long tableInstanceId, RowKey rowKey, int ordinal, DateTime utcNow,
+        int? rowDefId = null)
     {
         PeriodKeyValue = periodKey.Value;
         Id = id;
@@ -20,6 +36,7 @@ public sealed class TableRow
         RowKeyValue = rowKey.Value;
         Ordinal = ordinal;
         ModifiedAt = utcNow;
+        RowDefId = rowDefId;
     }
 
     public int PeriodKeyValue { get; private set; }

@@ -112,7 +112,7 @@ public sealed class CascadeRecalculationTests
     {
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
-        return new(_cells, _rows, _metadata, _versions, new RealFormulaEngine(), _units, _uow);
+        return new(_cells, _rows, Substitute.For<IPeriodStore>(), _metadata, _versions, new RealFormulaEngine(), _units, _uow);
     }
 
     /// <summary>Комірки, які служба віддала на запис.</summary>

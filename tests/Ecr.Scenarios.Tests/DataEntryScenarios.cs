@@ -19,6 +19,18 @@ namespace Ecr.Scenarios.Tests;
 [Collection("SqlServer")]
 public sealed class DataEntryScenarios(SqlServerFixture sql)
 {
+    /// <remarks>
+    /// ⛔ Сценарій переписаний із «доказу межі» на доказ РЕАЛЬНОЇ поведінки
+    /// (директива №09 `W8` п.2): `W5` дав шлях завести `RowDef` через API, а
+    /// `W8` — те, чого бракувало далі. Бракувало двох речей одразу, і кожна
+    /// сама по собі робила фіксовану таблицю непридатною:
+    /// <list type="number">
+    /// <item>`doc.TableRow` за описами `cfg.RowDef` не будував НІХТО —
+    /// екземпляр таблиці створювався порожнім назавжди;</item>
+    /// <item>зріз збирав перелік рядків із КОМІРОК, тому рядок без жодного
+    /// значення в ньому не існував — навіть якби його створили.</item>
+    /// </list>
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-13")]
@@ -26,29 +38,47 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S13", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S13",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (admin, var projectId, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S13");
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S13");
+        admin = doc.Admin;
 
         var tables = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
 
         var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(
             tableArray.GetArrayLength() > 0,
-            $"документ {documentId} проєкту {projectId} не має жодної таблиці: без маршруту додавання таблиці " +
-            "(S-04) неможливо дати документу Fixed-таблицю з рядками.");
+            $"документ {doc.DocumentId} проєкту {doc.ProjectId} не має жодної таблиці: {app.ErrorsText}");
 
-        var tableInstanceId = tableArray[0].GetProperty("tableInstanceId").GetInt64();
+        // ⚠ Таблиця саме `Fixed`: рядків у неї оператор не додає.
+        var table = tableArray[0];
+        Assert.False(table.GetProperty("allowsDynamicRows").GetBoolean());
+
+        var tableInstanceId = table.GetProperty("tableInstanceId").GetInt64();
         var slice = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables/{tableInstanceId}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables/{tableInstanceId}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, slice.StatusCode);
 
         var sliceBody = await slice.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(
-            sliceBody.GetProperty("rows").GetArrayLength() > 0,
-            "Fixed-таблиця мала віддати власні рядки з RowDef без жодного POST /rows, а рядків немає.");
+        var rows = sliceBody.GetProperty("rows").EnumerateArray().ToList();
+
+        // ⛔ Доказ сценарію: рядки прийшли БЕЗ жодного `POST …/rows` і
+        // без жодного записаного значення — тобто саме з `RowDef`.
+        Assert.Equal(doc.RowKeys.Count, rows.Count);
+        foreach (var rowKey in doc.RowKeys)
+        {
+            Assert.Contains(rows, r => r.GetProperty("rowKey").GetString() == rowKey);
+        }
+
+        // ⚠ І з підписами: фіксований рядок упізнають за назвою, а не за
+        // ключем. Тут стояло `Label: null` на кожному рядку — поле контракту
+        // існувало й не несло нічого.
+        Assert.All(rows, r => Assert.False(
+            string.IsNullOrWhiteSpace(r.GetProperty("label").GetString()),
+            "рядок фіксованої таблиці прийшов без підпису з RowDef."));
     }
 
     [Fact]
@@ -344,6 +374,17 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True((int)patch.StatusCode is >= 400 and < 500, $"чужий TableInstanceId мав дати 4xx, а дав {patch.StatusCode}");
     }
 
+    /// <remarks>
+    /// ⛔ Сценарій довів дефект, глибший за той, який називала директива.
+    /// Повідомлень не було не тому, що правил не було звідки взяти, — правило
+    /// заводилося ще з `W5.4`. <c>MetadataCache</c> не вантажив
+    /// <c>cfg.ValidationRule</c> ВЗАГАЛІ: <c>ValidateDocumentHandler</c> читає
+    /// рівно <c>table.ValidationRules</c> цього знімка, тож
+    /// <c>POST …/validate</c> відповідав «зауважень немає» на будь-яких даних
+    /// при будь-яких заведених правилах. Другий шар — рівень рядка виконувався
+    /// одним проходом і ставив <c>rowKey: null</c> завжди: список повідомляв,
+    /// ЩО не так, і не повідомляв, ДЕ.
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-19")]
@@ -351,27 +392,79 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S19", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S19",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (admin, _, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S19");
+        // Правило рівня рядка: значення колонки `A` не більше за 100.
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S19", "[A] <= 100");
+        admin = doc.Admin;
+
+        var tables = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
+
+        // Число, яке правило порушує.
+        await PatchAsync(app, admin, doc, tableInstanceId, 101m);
 
         var validate = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/validate", UriKind.Relative),
-            new { periodKey });
+            new Uri($"/api/v1/documents/{doc.DocumentId}/validate", UriKind.Relative),
+            new { periodKey = doc.PeriodKey });
         Assert.Equal(HttpStatusCode.OK, validate.StatusCode);
 
-        var body = await validate.Content.ReadFromJsonAsync<JsonElement>();
-        var messages = body.GetProperty("messages");
+        var messages = (await validate.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("messages").EnumerateArray().ToList();
 
-        // Доказ: непорожній список ІЗ адресою комірки (rowKey/columnCode), а
-        // не просто число. Без правил валідації (S-06 недосяжний) список
-        // природно порожній — це і є видима межа продукту.
-        Assert.True(messages.GetArrayLength() > 0, $"валідація документа {documentId} не повернула жодного повідомлення: без S-06 правил взяти нема звідки.");
-        Assert.True(
-            messages.EnumerateArray().Any(m => m.GetProperty("rowKey").ValueKind != JsonValueKind.Null),
-            "жодне повідомлення валідації не містить адреси рядка.");
+        // ⛔ Доказ сценарію: непорожній список ІЗ адресою рядка, а не число.
+        Assert.NotEmpty(messages);
+        var violation = messages.Find(m => m.GetProperty("severity").GetString() == "Error");
+        Assert.True(violation.ValueKind != JsonValueKind.Undefined, $"жодного Error серед повідомлень: {app.ErrorsText}");
+        Assert.Equal(doc.RowKeys[0], violation.GetProperty("rowKey").GetString());
+
+        // ⛔ І другий бік того самого: результат ЧИТАЄТЬСЯ окремим `GET`, тобто
+        // переживає перезавантаження сторінки. Доти підсумок зберігався і не
+        // мав жодного читача (`IValidationResultStore.GetLatestAsync`), а
+        // перелік зауважень жив рівно до оновлення вкладки.
+        var read = await admin.Client.GetAsync(new Uri(
+            $"/api/v1/documents/{doc.DocumentId}/validation?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+
+        var stored = (await read.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(messages.Count, stored.Count);
+        Assert.Contains(stored, m => m.GetProperty("rowKey").GetString() == doc.RowKeys[0]);
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-19")]
+    public async Task Непроведена_перевірка_це_404_а_не_порожній_перелік()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(
+            app, "S19b",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S19b");
+        admin = doc.Admin;
+
+        var read = await admin.Client.GetAsync(new Uri(
+            $"/api/v1/documents/{doc.DocumentId}/validation?periodKey={doc.PeriodKey}", UriKind.Relative));
+
+        // ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді. Показати
+        // першу замість другої означає повідомити неправду про готовність
+        // документа рівно тоді, коли на неї спираються, подаючи звітність.
+        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+    }
+
+    /// <remarks>
+    /// ⛔ Сценарій довго не міг дійти до головного: без реальної таблиці
+    /// (`S-04`…`S-09`) не було що змінювати. Тепер він змінює комірку ДВІЧІ —
+    /// і саме друга правка доводить те, заради чого журнал ведуть: «було 7,
+    /// стало 9». Перша правка старого значення не має чесно (комірки не
+    /// існувало, `ФВ-3.8`), і саме тому одного запису тут замало.
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-20")]
@@ -379,53 +472,92 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S20", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Security.ViewAudit"]);
+            app, "S20",
+            [
+                "Project.Manage", "Document.View", "Document.Create", "Template.Edit",
+                "Template.Publish", "Security.ViewAudit",
+            ]);
 
-        (admin, _, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S20");
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S20");
+        admin = doc.Admin;
 
         var tables = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
         var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(tableArray.GetArrayLength() > 0, $"документ {documentId} не має жодної таблиці — нема що змінювати для аудиту.");
+        Assert.True(tableArray.GetArrayLength() > 0, $"документ {doc.DocumentId} не має жодної таблиці: {app.ErrorsText}");
         var tableInstanceId = tableArray[0].GetProperty("tableInstanceId").GetInt64();
 
-        var slice = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables/{tableInstanceId}", UriKind.Relative));
-        var sliceBody = await slice.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(sliceBody.GetProperty("rows").GetArrayLength() > 0, $"таблиця {tableInstanceId} не має жодного рядка.");
-        var row = sliceBody.GetProperty("rows")[0];
-        var rowKey = row.GetProperty("rowKey").GetString()!;
-        var columnCode = sliceBody.GetProperty("columns")[0].GetProperty("code").GetString()!;
-
         var from = DateTime.UtcNow.AddMinutes(-1);
-        var patch = await admin.Client.PatchAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/cells", UriKind.Relative),
-            new
-            {
-                tableInstanceId,
-                periodKey,
-                origin = "UserEdit",
-                rows = new[]
-                {
-                    new { rowKey, baseVersion = row.GetProperty("rowVersion").GetString(), cells = new object[] { new { columnCode, value = 7m } } },
-                },
-            });
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+
+        // Перша правка: комірки ще не існувало — «було» лишається порожнім.
+        await PatchAsync(app, admin, doc, tableInstanceId, 7m);
+
+        // Друга: саме вона має лягти в журнал як «було 7, стало 9».
+        await PatchAsync(app, admin, doc, tableInstanceId, 9m);
 
         var to = DateTime.UtcNow.AddMinutes(1);
         var audit = await admin.Client.GetAsync(new Uri(
-            $"/api/v1/audit/cells?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}&documentId={documentId}&limit=50",
+            $"/api/v1/audit/cells?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}&documentId={doc.DocumentId}&limit=50",
             UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
 
-        var auditBody = await audit.Content.ReadFromJsonAsync<JsonElement>();
-        var items = auditBody.GetProperty("items");
-        Assert.True(items.GetArrayLength() > 0, $"журнал аудиту порожній для щойно зміненої комірки документа {documentId}.");
+        var items = (await audit.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("items").EnumerateArray().ToList();
+        Assert.True(items.Count >= 2, $"журнал аудиту не має двох записів для документа {doc.DocumentId}: {app.ErrorsText}");
 
-        var entry = items[0];
-        Assert.Equal(rowKey, entry.GetProperty("rowKey").GetString());
-        Assert.True(entry.TryGetProperty("newValue", out _), "запис аудиту не несе нового значення.");
+        // ⛔ Доказ сценарію: запис із НОВИМ значенням 9 несе і адресу рядка, і
+        // старе значення. Обидва поля писалися константами (`RowKey`
+        // порожнім рядком, `OldValue` — `null`), тож журнал відповідав «стало
+        // 9» і не міг сказати ні де, ні що було до того.
+        var second = items.Find(i => i.GetProperty("newValue").GetString() == "9");
+        Assert.True(second.ValueKind != JsonValueKind.Undefined, "у журналі немає запису про другу правку.");
+        Assert.Equal(doc.RowKeys[0], second.GetProperty("rowKey").GetString());
+
+        // ⚠ Порівняння ЧИСЛОМ, а не рядком: «нове» приходить із запиту
+        // (`9`), а «старе» — з бази, де воно лежить із масштабом колонки
+        // (`7.0000000000`). Це реальна поведінка, і підганяти під неї
+        // очікування рядком означало б зафіксувати спосіб форматування
+        // замість факту.
+        Assert.Equal(
+            7m,
+            decimal.Parse(
+                second.GetProperty("oldValue").GetString()!,
+                System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Пише число в першу комірку першого рядка, звіряючи версію.</summary>
+    private static async Task PatchAsync(
+        EcrApiFactory app, Provisioning.Administrator admin, RealDocument doc,
+        long tableInstanceId, decimal value)
+    {
+        var slice = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables/{tableInstanceId}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, slice.StatusCode);
+
+        var row = (await slice.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("rows").EnumerateArray()
+            .First(r => r.GetProperty("rowKey").GetString() == doc.RowKeys[0]);
+
+        var patch = await admin.Client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId,
+                periodKey = doc.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = doc.RowKeys[0],
+                        baseVersion = row.GetProperty("rowVersion").GetString(),
+                        cells = new object[] { new { columnCode = doc.ColumnCode, value } },
+                    },
+                },
+            });
+
+        Assert.True(patch.StatusCode == HttpStatusCode.OK, $"{patch.StatusCode}: {app.ErrorsText}");
     }
 
     /// <summary>
@@ -463,6 +595,195 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
 
         return (admin, projectId, documentId, periodKey);
+    }
+
+    /// <summary>Реальний документ: аркуш, фіксована таблиця, колонка, два рядки.</summary>
+    /// <param name="Admin">Адміністратор із чинною сесією ПІСЛЯ гранта.</param>
+    /// <param name="ProjectId">Проєкт.</param>
+    /// <param name="DocumentId">Документ.</param>
+    /// <param name="PeriodKey">Період, у якому працює сценарій.</param>
+    /// <param name="SheetDefId">Аркуш — ним подають і затверджують.</param>
+    /// <param name="TableDefId">Опис таблиці.</param>
+    /// <param name="ColumnCode">Код єдиної числової колонки.</param>
+    /// <param name="RowKeys">Ключі рядків, які шаблон задає фіксованій таблиці.</param>
+    internal sealed record RealDocument(
+        Provisioning.Administrator Admin,
+        int ProjectId,
+        long DocumentId,
+        int PeriodKey,
+        int SheetDefId,
+        int TableDefId,
+        string ColumnCode,
+        IReadOnlyList<string> RowKeys);
+
+    /// <summary>
+    /// Будує документ із РЕАЛЬНОЮ структурою через ті самі маршрути, якими це
+    /// робить адміністратор.
+    /// </summary>
+    /// <param name="app">Піднятий застосунок.</param>
+    /// <param name="admin">Адміністратор; повертається НОВИЙ, з чинною сесією.</param>
+    /// <param name="prefix">Префікс кодів — свій у кожного сценарію.</param>
+    /// <param name="validationExpression">
+    /// Вираз правила валідації рівня РЯДКА (<c>Scope = 1</c>); <c>null</c> —
+    /// правил не заводити.
+    /// </param>
+    /// <remarks>
+    /// ⛔ Це не «фікстура зручності». До `W5` такого шляху не існувало в API
+    /// взагалі, і саме тому `S-13`…`S-21`, `S-25`, `S-28` доводили
+    /// відсутність маршруту замість поведінки. Тепер ланцюжок реальний і
+    /// повний: шаблон → версія → аркуш → таблиця → колонка → рядки →
+    /// (правило) → публікація → проєкт → активація → документ. Жодного
+    /// <c>SELECT</c> і жодного обходу HTTP (Правило 1, §3.2).
+    ///
+    /// ⚠ Версія ПУБЛІКУЄТЬСЯ: проєкт у проді працює на опублікованій, і саме
+    /// на ній перевіряються кеш метаданих, план перерахунку і зріз.
+    /// </remarks>
+    internal static async Task<RealDocument> ArrangeRealDocumentAsync(
+        EcrApiFactory app, Provisioning.Administrator admin, string prefix,
+        string? validationExpression = null)
+    {
+        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, prefix);
+
+        var addSheet = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1", UriKind.Relative),
+            new
+            {
+                nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} sheet" },
+                ordinal = 1,
+                sheetGroup = (string?)null,
+                isMandatory = true,
+                isVisible = true,
+            });
+        Assert.True(addSheet.StatusCode == HttpStatusCode.OK, $"{addSheet.StatusCode}: {app.ErrorsText}");
+        var sheetDefId = (await addSheet.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        var addTable = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1/tables/TABLE1", UriKind.Relative),
+            new
+            {
+                nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} table" },
+                ordinal = 1,
+                layoutKind = "PerPeriodInstance",
+
+                // ⛔ Саме `Fixed`: склад рядків задає шаблон, а не оператор —
+                // це і є таблиця, яку `S-13` вимагає бачити з рядками.
+                rowMode = "Fixed",
+                maxDynamicRows = (int?)null,
+            });
+        Assert.True(addTable.StatusCode == HttpStatusCode.OK, $"{addTable.StatusCode}: {app.ErrorsText}");
+        var tableDefId = (await addTable.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        var addColumn = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/columns/A", UriKind.Relative),
+            new
+            {
+                headerL10n = new Dictionary<string, string> { ["en"] = "A" },
+                ordinal = 1,
+                dataType = "Decimal",
+                isRequired = false,
+                isReadOnly = false,
+                isHidden = false,
+                precision = (byte?)null,
+                scale = (byte?)null,
+                defaultValue = (string?)null,
+                displayFormat = (string?)null,
+                styleId = (int?)null,
+                lookupRegistryDefId = (int?)null,
+                lookupFilter = (string?)null,
+                unitId = (int?)null,
+            });
+        Assert.True(addColumn.StatusCode == HttpStatusCode.OK, $"{addColumn.StatusCode}: {app.ErrorsText}");
+
+        string[] rowKeys = ["R1", "R2"];
+        for (var i = 0; i < rowKeys.Length; i++)
+        {
+            var addRow = await admin.Client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/rows/{rowKeys[i]}", UriKind.Relative),
+                new
+                {
+                    labelL10n = new Dictionary<string, string> { ["en"] = $"Row {i + 1}" },
+                    ordinal = i + 1,
+                    rowKind = "Item",
+                    parentRowKey = (string?)null,
+                    isReadOnly = false,
+                });
+            Assert.True(addRow.StatusCode == HttpStatusCode.OK, $"{addRow.StatusCode}: {app.ErrorsText}");
+        }
+
+        if (validationExpression is not null)
+        {
+            var addRule = await admin.Client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/validation-rules/{prefix}RULE", UriKind.Relative),
+                new
+                {
+                    severity = "Error",
+
+                    // ⚠ Рівень РЯДКА (1): саме він має назвати адресу — рядок,
+                    // у якому порушення. Комірковий (0) блокує запис і сюди не
+                    // дійшов би, а табличний (2) адреси рядка не має.
+                    scope = (byte)1,
+                    expression = validationExpression,
+                    messageL10n = new Dictionary<string, string> { ["en"] = "A must stay under the cap" },
+                    columnDefId = (int?)null,
+                    isActive = true,
+                });
+            Assert.True(addRule.StatusCode == HttpStatusCode.OK, $"{addRule.StatusCode}: {app.ErrorsText}");
+        }
+
+        var publish = await admin.Client.PostAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative), content: null);
+        Assert.True(publish.StatusCode == HttpStatusCode.NoContent, $"{publish.StatusCode}: {app.ErrorsText}");
+
+        var policiesResponse = await admin.Client.GetAsync(
+            new Uri("/api/v1/projects/period-policies", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, policiesResponse.StatusCode);
+        var policyId = (await policiesResponse.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("id").GetInt32();
+
+        var code = $"{prefix}_{Guid.NewGuid():N}"[..20];
+        var createProject = await admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/projects", UriKind.Relative),
+            new
+            {
+                code,
+                nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} project" },
+                timeZoneId = "Asia/Almaty",
+                periodKind = "Monthly",
+                year = DateTime.UtcNow.Year,
+                templateVersionId = versionId,
+                periodPolicyId = policyId,
+            });
+        Assert.True(createProject.StatusCode == HttpStatusCode.Created, $"{createProject.StatusCode}: {app.ErrorsText}");
+        var projectId = (await createProject.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("projectId").GetInt32();
+
+        await ProjectAndPeriodScenarios.ActivateProjectAsync(admin.Client, projectId);
+        await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
+        admin = await Provisioning.ReauthenticateAsync(app, admin);
+
+        // ⛔ Період береться ВІДКРИТИЙ, а не «перший у календарі». Записувати
+        // можна лише у відкритий (`ФВ-1.12`), і саме `W8` зробив його
+        // відкритим одразу після активації (`S-11`) — доти цього періоду тут
+        // просто не існувало б.
+        var periodsResponse = await admin.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, periodsResponse.StatusCode);
+        var periods = (await periodsResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("periods").EnumerateArray().ToList();
+
+        var open = periods.Find(p => string.Equals(p.GetProperty("state").GetString(), "Open", StringComparison.Ordinal));
+        Assert.True(
+            open.ValueKind != JsonValueKind.Undefined,
+            $"у проєкті {projectId} немає жодного відкритого періоду — писати нема куди.");
+        var periodKey = open.GetProperty("periodKey").GetInt32();
+
+        var createDoc = await admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/documents", UriKind.Relative),
+            new { projectId, templateVersionId = versionId, sheetDefIds = new[] { sheetDefId } });
+        Assert.True(createDoc.StatusCode == HttpStatusCode.Created, $"{createDoc.StatusCode}: {app.ErrorsText}");
+        var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
+
+        return new RealDocument(
+            admin, projectId, documentId, periodKey, sheetDefId, tableDefId, "A", rowKeys);
     }
 
     /// <summary>Проєкт зі звітним роком 2019 — усі періоди давно поза HardClose.</summary>

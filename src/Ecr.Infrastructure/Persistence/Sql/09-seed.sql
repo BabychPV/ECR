@@ -50,6 +50,15 @@ USING (VALUES
   (N'Calculation.Recalculate',  N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
   (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
+  -- ⚠ НЕБЕЗПЕЧНЕ (1) навмисно, і не через ризик втратити дані. Причина в
+  -- фільтрі нижче: `Approver` має шаблон `Report.%`, виданий тоді, коли всі
+  -- права цієї родини були «дивитися, будувати, подавати, вивантажувати».
+  -- `Report.EditDefinition` — інша річ: це авторство ДЕРЖАВНОЇ ФОРМИ
+  -- (`ФВ-10.4`), і мовчки роздати його кожному погоджувачу лише тому, що воно
+  -- починається на `Report.`, означало б змінити повноваження людей правкою
+  -- одного рядка каталогу. Адміністратор видає його свідомо, і в журналі
+  -- безпеки видно, хто це зробив (`DangerousPermissionsGranted`).
+  (N'Report.EditDefinition',    N'Report',      1),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
@@ -360,6 +369,18 @@ USING (VALUES
     (N'document.validate',               N'en', N'Validate', 1),
     (N'document.validationClean',        N'en', N'Validation passed with no errors.', 1),
     (N'document.validationErrors',       N'en', N'Validation found {count} error(s).', 1),
+
+    -- ⛔ Перелік зауважень — НА ЕКРАНІ, а не числом у тості (`ФВ-14.24`,
+    -- директива №09 `W8` п.3). Число без переліку не веде до жодної дії:
+    -- оператор дізнавався, що щось не так, і не дізнавався ні що саме, ні де.
+    (N'document.validationTitle',        N'en', N'Validation findings', 1),
+    (N'document.validationCleanHint',    N'en', N'The last run found nothing to fix for this period.', 1),
+    (N'document.validationHint',         N'en', N'An error blocks submitting the sheet; a warning does not.', 1),
+    (N'document.validationSeverity',     N'en', N'Level', 1),
+    (N'document.validationRow',          N'en', N'Row', 1),
+    (N'document.validationColumn',       N'en', N'Column', 1),
+    (N'document.validationRule',         N'en', N'Rule', 1),
+    (N'document.validationMessage',      N'en', N'What is wrong', 1),
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
     (N'document.export',                 N'en', N'Export to Excel', 1),
@@ -685,6 +706,13 @@ USING (VALUES
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
+
+    -- ⛔ Окремий стан, а не той самий текст: «немає колонок» і «немає рядків»
+    -- лікуються по-різному, і фіксована таблиця без рядків раніше не мала
+    -- жодного повідомлення взагалі — вона малювалася як звичайна сітка,
+    -- у яку просто нема куди вводити (директива №09 `W8` п.2, `S-13`).
+    (N'grid.emptyFixedTable',            N'en', N'This table has no rows for the selected period', 1),
+    (N'grid.emptyFixedTableHint',        N'en', N'Rows of a fixed table come from the template: the version in force for this period defines none.', 1),
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),
@@ -710,6 +738,13 @@ USING (VALUES
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
     (N'workflow.recalcQueued',           N'en', N'Recalculation queued as job {job}.', 1),
+
+    -- ⛔ Відгук на «Перерахувати» (директива №09 `W8` п.7). Доти було рівно
+    -- одне «поставлено в чергу як {job}» — GUID, який нікуди не ввести, і
+    -- жодного слова про те, чим усе скінчилося.
+    (N'workflow.recalcRunning',          N'en', N'Recalculating…', 1),
+    (N'workflow.recalcDone',             N'en', N'Recalculation finished: the figures are up to date.', 1),
+    (N'workflow.recalcFailed',           N'en', N'Recalculation failed. Open Jobs to see why.', 1),
     (N'workflow.reason',                 N'en', N'Reason', 1),
     (N'workflow.rejectTitle',            N'en', N'Reject the sheet', 1),
     (N'workflow.rejectHint',             N'en', N'Say what has to be corrected: the author sees this text and nothing else.', 1),
@@ -999,6 +1034,37 @@ USING (VALUES
     (N'snapshots.current',               N'en', N'current', 1),
     (N'snapshots.empty',                 N'en', N'No snapshots built yet', 1),
     (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
+    (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
+    (N'snapshots.noPublished',           N'en', N'No report definition has a published version yet: a snapshot can only be built from one.', 1),
+
+    -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
+    -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.
+    (N'reportDefs.title',                N'en', N'Report definitions', 1),
+    (N'reportDefs.manage',               N'en', N'Report definitions', 1),
+    (N'reportDefs.empty',                N'en', N'No report is described yet: a snapshot has nothing to be built from.', 1),
+    (N'reportDefs.code',                 N'en', N'Report code', 1),
+    (N'reportDefs.codeHint',             N'en', N'The address of the report; a snapshot is built by this code and it cannot be renamed later.', 1),
+    (N'reportDefs.regulatory',           N'en', N'regulatory', 1),
+    (N'reportDefs.regulatoryHint',       N'en', N'Decides which statuses the rpt.v_* view lets through — not how important the report is.', 1),
+    (N'reportDefs.inactive',             N'en', N'withdrawn', 1),
+    (N'reportDefs.version',              N'en', N'Version', 1),
+    (N'reportDefs.versionHint',          N'en', N'Unique within the report; up to 20 characters.', 1),
+    (N'reportDefs.versions',             N'en', N'Versions', 1),
+    (N'reportDefs.noVersions',           N'en', N'no versions', 1),
+    (N'reportDefs.columns',              N'en', N'Snapshot columns', 1),
+    (N'reportDefs.columnsHint',          N'en', N'The column code is the key of a snapshot row — it is what the report looks values up by.', 1),
+    (N'reportDefs.columnCode',           N'en', N'Column code', 1),
+    (N'reportDefs.columnKind',           N'en', N'Value type', 1),
+    (N'reportDefs.addColumn',            N'en', N'Add column', 1),
+    (N'reportDefs.removeColumn',         N'en', N'Remove column', 1),
+    (N'reportDefs.add',                  N'en', N'Add report definition', 1),
+    (N'reportDefs.added',                N'en', N'The report definition has been created as a draft version.', 1),
+    (N'reportDefs.newVersion',           N'en', N'Add version', 1),
+    (N'reportDefs.versionAdded',         N'en', N'The draft version has been created.', 1),
+    (N'reportDefs.forReport',            N'en', N'Report', 1),
+    (N'reportDefs.forReportHint',        N'en', N'A published version cannot be edited: change it by adding a new version.', 1),
+    (N'reportDefs.publish',              N'en', N'Publish', 1),
+    (N'reportDefs.published',            N'en', N'The version has been published; snapshots will be built from it.', 1),
 
     -- Редактор рядків інтерфейсу.
     (N'nav.uiStrings',                   N'en', N'Interface texts', 1),
@@ -1283,4 +1349,51 @@ USING (VALUES
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
      VALUES (s.[Key], s.Lang, s.Val, s.Scope, SYSUTCDATETIME());
+GO
+
+-- ── Опис звіту: одна державна форма з каталогу ФВ-10.7 ───────────────────
+-- ⛔ Рівно ОДИН опис, і це не заготовка «на потім». `rpt.ReportDef` і
+-- `rpt.ReportVersion` не створювало НІЩО — ні код, ні seed, ні тести, — тому
+-- `POST /reports/{code}/build` відмовляв `ECR-RPT-0404` на будь-який код:
+-- звітність існувала і не могла спрацювати жодного разу. Одна реальна форма
+-- в seed робить чисту базу здатною побудувати зріз одразу, а не після того,
+-- як хтось здогадається завести опис руками (директива №09, W7).
+--
+-- ⚠ `IEC` — з каталогу державних форм ТЗ (`ФВ-10.7`): Industrial
+-- Environmental Control, квартальна. Решта шести (230 A1/B1/B4, PermitInfo,
+-- 20986 Primary Water Use, 2-ТП водгосп, IEC Water, 2-ТП відходи) сюди НЕ
+-- йдуть: seed, що заводить сім форм, кожна з яких описана тими самими
+-- п'ятьма колонками, виглядав би готовим каталогом і не був би ним —
+-- `ФВ-10.9` вимагає для кожної форми ВЛАСНОГО критерію звірки. Решта
+-- заводиться через `POST /api/v1/reports` (`Report.EditDefinition`).
+MERGE rpt.ReportDef AS t
+USING (VALUES (N'IEC',
+               N'{"en":"Industrial Environmental Control (quarterly)","ru":"Производственный экологический контроль (квартал)","kz":"Өндірістік экологиялық бақылау (тоқсан)"}',
+               1)) AS s (Code, NameL10n, IsRegulatory)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsRegulatory, IsActive)
+     VALUES (s.Code, s.NameL10n, s.IsRegulatory, 1);
+GO
+
+-- ⚠ Версія одразу `Published` (Status = 1), а не чернетка: сховище описів
+-- бере ЛИШЕ опубліковане (`IReportDefinitionStore.FindCurrentVersionIdAsync`),
+-- і чернетка в seed дала б рівно те, від чого seed і рятує, — опис, за яким
+-- побудова однаково відмовляє.
+--
+-- ⚠ Колонки — ті самі п'ять, які будівник зрізу справді пише в
+-- `rpt.ReportRow` (`ReportSnapshotBuilder.AggregateAsync`), і в тому форматі,
+-- який читає `ReportColumnSpec.Parse`. Опис, що обіцяє колонки, яких у зрізі
+-- не буде, гірший за відсутній.
+MERGE rpt.ReportVersion AS t
+USING (
+    SELECT d.Id AS ReportDefId, v.[Version], v.ColumnsJson, v.RulesJson
+    FROM (VALUES (N'IEC', N'1.0',
+                  N'[{"code":"DocumentId","kind":"number"},{"code":"RowKey","kind":"text"},{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"},{"code":"SubstanceEntryId","kind":"number"}]',
+                  N'{"rowSource":"CalculationResults"}'))
+         AS v (Code, [Version], ColumnsJson, RulesJson)
+    JOIN rpt.ReportDef AS d ON d.Code = v.Code
+) AS s
+ON t.ReportDefId = s.ReportDefId AND t.[Version] = s.[Version]
+WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, RulesJson, CreatedAt)
+     VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
 GO

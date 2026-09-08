@@ -118,4 +118,21 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
 
         return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<Ecr.Domain.Enums.PeriodState?> FindPeriodStateAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        // Той самий ланцюг документ → проєкт → період, що й у меж: `PeriodKey`
+        // не унікальний глобально, і без проєкту питання «який стан у 202601»
+        // відповіді не має.
+        var query =
+            from document in db.Documents.AsNoTracking()
+            join period in db.Periods.AsNoTracking()
+                on document.ProjectId equals period.ProjectId
+            where document.Id == documentId && period.PeriodKeyValue == periodKey
+            select (Ecr.Domain.Enums.PeriodState?)period.State;
+
+        return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
+    }
 }

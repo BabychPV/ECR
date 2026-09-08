@@ -15,6 +15,7 @@ namespace Ecr.Application.Recalculation;
 public sealed class RecalculationService(
     ICellStore cellStore,
     IRowStore rowStore,
+    IPeriodStore periods,
     IMetadataCache metadata,
     ITemplateVersionStore versions,
     IFormulaEngine formulaEngine,
@@ -240,6 +241,17 @@ public sealed class RecalculationService(
             return 0;
         }
 
+        // ⛔ `IsLateEdit` ОБЧИСЛЮЄТЬСЯ і тут (`D-70`, директива №09 `W8` п.6).
+        // Похідне число, пораховане в `Grace`, — така сама пізня зміна, як і
+        // введене руками: у звіт воно піде тим самим шляхом, і відрізняти їх
+        // за походженням означало б залишити половину пізніх значень
+        // непоміченими. «Хто змінив» тут і далі система (`SystemUserId`) —
+        // це різні питання: КОЛИ і ХТО.
+        var periodState = await periods
+            .FindPeriodStateAsync(instance.DocumentId, periodKey.Value, ct)
+            .ConfigureAwait(false);
+        var isLateEdit = periodState == Domain.Enums.PeriodState.Grace;
+
         // ⚠ Один запис на екземпляр: перерахунок торкається десятків комірок,
         // і окрема транзакція на кожну перетворила б фонову задачу на джерело
         // блокувань саме тоді, коли документ активно правлять.
@@ -252,7 +264,7 @@ public sealed class RecalculationService(
                     Deletes: [],
                     TouchedRowIds: [.. records.Select(u => u.Address.TableRowId).Distinct()],
                     ChangedByUserId: SystemUserId,
-                    IsLateEdit: false),
+                    isLateEdit),
                 ct).ConfigureAwait(false);
         }
 

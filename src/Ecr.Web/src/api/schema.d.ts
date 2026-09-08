@@ -991,6 +991,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Останній результат перевірки. Право `Document.View`.
+         * @description ⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).
+         *     Підсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:
+         *     `IValidationResultStore.GetLatestAsync` не мав жодного виклику.
+         *     Ціна видна на екрані — перелік зауважень жив рівно до перезавантаження
+         *     сторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ
+         *     перевірку заново.
+         *
+         *     ⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:
+         *     «зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
+         *     першу замість другої означає повідомити неправду про готовність.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationResultResponse"];
+                        "text/json": components["schemas"]["ValidationResultResponse"];
+                        "text/plain": components["schemas"]["ValidationResultResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expressions/metadata": {
         parameters: {
             query?: never;
@@ -3677,6 +3744,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перелік описів звітів. Право `Report.ViewRegulatory`.
+         * @description ⚠ Версії приходять разом з описом, а не окремим запитом: побудувати
+         *     зріз можна лише за ОПУБЛІКОВАНОЮ версією, і перелік, у якому цього не
+         *     видно, показував би звіти, кожен другий з яких відмовляє на побудову
+         *     без пояснення.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportDefinitionDto"][];
+                        "text/json": components["schemas"]["ReportDefinitionDto"][];
+                        "text/plain": components["schemas"]["ReportDefinitionDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Заводить опис звіту разом із першою версією-чернеткою.
+         *     Право `Report.EditDefinition`.
+         * @description ⚠ Колонки й правила приходять СТРУКТУРОЮ, а не рядком JSON: у базі це
+         *     справді JSON (`ФВ-10.4` — опис звіту є даними), але клієнт, який
+         *     складає його сам, рано чи пізно складе такий, якого побудова не
+         *     прочитає, і дізнається про це порожнім зрізом.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateReportDefRequest"];
+                    "application/json": components["schemas"]["CreateReportDefRequest"];
+                    "text/json": components["schemas"]["CreateReportDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportDefinitionDto"];
+                        "text/json": components["schemas"]["ReportDefinitionDto"];
+                        "text/plain": components["schemas"]["ReportDefinitionDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/snapshots": {
         parameters: {
             query?: never;
@@ -3764,6 +3933,151 @@ export interface paths {
                         "application/json": components["schemas"]["JobAcceptedResponse"];
                         "text/json": components["schemas"]["JobAcceptedResponse"];
                         "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Заводить нову версію-чернетку наявного опису. Право `Report.EditDefinition`.
+         * @description ⛔ Єдиний спосіб змінити опублікований опис: опублікована версія
+         *     незмінна, бо на її колонки посилаються вже побудовані зрізи, які читає
+         *     SSRS. Дії «правити версію» немає навмисно.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Опис звіту. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateReportVersionRequest"];
+                    "application/json": components["schemas"]["CreateReportVersionRequest"];
+                    "text/json": components["schemas"]["CreateReportVersionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportVersionDto"];
+                        "text/json": components["schemas"]["ReportVersionDto"];
+                        "text/plain": components["schemas"]["ReportVersionDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{id}/versions/{vid}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Публікує версію опису звіту. Право `Report.EditDefinition`.
+         * @description ⛔ Побудова бере ЛИШЕ опубліковану версію — чернетка зрізу не дає
+         *     взагалі. Опис звіту правлять саме тоді, коли ще не впевнені в ньому, і
+         *     зріз за чернеткою потрапив би в регуляторну вʼюху нарівні зі справжнім.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Опис звіту. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportVersionDto"];
+                        "text/json": components["schemas"]["ReportVersionDto"];
+                        "text/plain": components["schemas"]["ReportVersionDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -7157,6 +7471,31 @@ export interface components {
              */
             year?: null | number;
         };
+        /** @description Запит на створення опису звіту разом із першою версією. */
+        CreateReportDefRequest: {
+            /** @description Код звіту; ним адресується побудова зрізу. */
+            code: string;
+            /** @description Колонки зрізу: код і тип значення. */
+            columns: components["schemas"]["ReportColumnCommand"][];
+            /** @description Чи звіт іде регулятору: від цього залежить фільтр статусів у вʼюсі
+             *     `rpt.v_*` (`D-65`), а не «важливість». */
+            isRegulatory: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            rules: null | components["schemas"]["ReportRulesCommand"];
+            /** @description Номер першої версії. */
+            version: string;
+        };
+        /** @description Запит на створення версії-чернетки опису звіту. */
+        CreateReportVersionRequest: {
+            /** @description Колонки зрізу. */
+            columns: components["schemas"]["ReportColumnCommand"][];
+            rules: null | components["schemas"]["ReportRulesCommand"];
+            /** @description Номер версії; унікальний у межах опису. */
+            version: string;
+        };
         /** @description Запит на створення ролі. */
         CreateRoleRequest: {
             /** @description Код ролі. */
@@ -8747,6 +9086,38 @@ export interface components {
             /** @description Коди ролей; порожній набір прибирає всі. */
             roleCodes: string[];
         };
+        /** @description Колонка зрізу в описі версії звіту. */
+        ReportColumnCommand: {
+            /** @description Код колонки; він же ключ у рядку зрізу. */
+            code: string;
+            /** @description Тип значення: `text`, `number` або `date`. */
+            kind: string;
+        };
+        /** @description Опис звіту разом із його версіями. */
+        ReportDefinitionDto: {
+            /** @description Код звіту — саме ним будується зріз. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор опису.
+             */
+            id: number;
+            /** @description Чи звіт в обігу. */
+            isActive: boolean;
+            /** @description Чи звіт іде регулятору. Не позначка «важливий»: від неї залежить, який
+             *     фільтр статусів піде у вʼюху `rpt.v_*` (`D-65`). */
+            isRegulatory: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Версії, найновіша першою. */
+            versions: components["schemas"]["ReportVersionDto"][];
+        };
+        /** @description Правила відбору рядків зрізу. */
+        ReportRulesCommand: {
+            /** @description Звідки беруться рядки. Єдине відоме будівнику значення —
+             *     string ReportDefinitionSpec.CalculationResults. */
+            rowSource: string;
+        };
         /** @description Зріз у переліку. */
         ReportSnapshotSummary: {
             /**
@@ -8785,6 +9156,28 @@ export interface components {
             rowCount: number;
             /** @description Статус даних зрізу (D-65). */
             status: string;
+        };
+        /** @description Версія опису звіту. */
+        ReportVersionDto: {
+            /** @description Опис колонок зрізу. */
+            columnsJson: string;
+            /**
+             * Format: date-time
+             * @description Коли створено.
+             */
+            createdAt: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор версії.
+             */
+            id: number;
+            /** @description Правила відбору рядків. */
+            rulesJson: string;
+            /** @description `Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою
+             *             (Task&lt;int?&gt; IReportDefinitionStore.FindCurrentVersionIdAsync(string code, CancellationToken ct)). */
+            status: string;
+            /** @description Номер версії; унікальний у межах опису. */
+            version: string;
         };
         /** @description Ресурсний грант у вигляді, придатному для передавання. */
         ResourceGrantDto: {

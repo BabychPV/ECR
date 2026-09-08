@@ -23,6 +23,7 @@ public sealed class PatchCellsHandler(
     ICellStore cellStore,
     IRowStore rowStore,
     IDocumentStore documents,
+    IPeriodStore periods,
     IMetadataCache metadata,
     IAccessDecisionService access,
     Validation.ValidationEngine validation,
@@ -231,11 +232,21 @@ public sealed class PatchCellsHandler(
         var deletes = new List<CellAddress>();
         var touched = new List<long>();
 
+        // ⛔ Зворотна мапа `TableRow.Id` → `RowKey` збирається ТУТ, а не в
+        // аудиті: рядок, який щойно створили, у `rowIds` не потрапляє ніколи
+        // (та мапа прочитана до вставки), а саме його ключ і треба записати.
+        // До цього аудит писав `RowKey: string.Empty` на кожному записі —
+        // тобто колонка, заведена «щоб журнал читався без join», не давала
+        // жодної адреси, і за журналом неможливо було сказати, ЯКИЙ рядок
+        // змінили (директива №09 `W8` п.4).
+        var rowKeyById = rowIds.ToDictionary(pair => pair.Value, pair => pair.Key);
+
         foreach (var row in creations)
         {
             var id = await rowStore.CreateRowAsync(
                 request.TableInstanceId, periodKey, RowKey.Create(row.RowKey), ordinal: 0, ct).ConfigureAwait(false);
             touched.Add(id);
+            rowKeyById[id] = row.RowKey;
             Distribute(row, id, periodKey, columnDefs, instance.TableDefId, upserts, deletes);
         }
 
@@ -269,10 +280,36 @@ public sealed class PatchCellsHandler(
 
         var now = clock.UtcNow;
 
+        // 6b. ⛔ Стан ПЕРЕД записом: старі значення і те, чи є правка пізньою.
+        //     Обидва читаються ДО `ApplyAsync` — після нього старого значення
+        //     вже немає ніде, а саме воно і є половиною запису аудиту.
+        //
+        //     ⚠ Один запит на батч, не на комірку: адреси відомі всі одразу
+        //     (`ICellStore.ReadCellsAsync`), і бюджет 300 мс на 100 комірок
+        //     інакше не витримати.
+        var addressesToWrite = upserts.Select(u => u.Address).Concat(deletes).ToList();
+        var previous = addressesToWrite.Count == 0
+            ? new Dictionary<CellAddress, CellValueData>()
+            : (IReadOnlyDictionary<CellAddress, CellValueData>)await cellStore
+                .ReadCellsAsync(addressesToWrite, ct).ConfigureAwait(false);
+
+        // ⛔ `IsLateEdit` ОБЧИСЛЮЄТЬСЯ (`D-70`, директива №09 `W8` п.6). Тут
+        // стояв літерал `false` — у трьох місцях одразу, — при тому що
+        // `Period.IsLateEditWindow` існував і не мав жодного читача. Журнал,
+        // у якому пізніх правок не буває ніколи, гірший за відсутність
+        // колонки: він відповідає на питання, і відповідає неправдою.
+        //
+        // ⚠ `Reopen` теж сюди входить: він переводить період саме в `Grace`
+        // (`Period.Reopen`), тому окремої умови не потрібно.
+        var periodState = await periods
+            .FindPeriodStateAsync(instance.DocumentId, request.PeriodKey, ct)
+            .ConfigureAwait(false);
+        var isLateEdit = periodState == PeriodState.Grace;
+
         // 7. Одна транзакція: значення, «дотик» рядків і аудит. Аудит поза
         //    транзакцією дав би журнал, у якому є зміни, яких у даних немає.
         await cellStore.ApplyAsync(
-            new CellChangeSet(request.TableInstanceId, upserts, deletes, touched, userId, IsLateEdit: false),
+            new CellChangeSet(request.TableInstanceId, upserts, deletes, touched, userId, isLateEdit),
             ct).ConfigureAwait(false);
 
         await rowStore.TouchRowsAsync(touched, now, ct).ConfigureAwait(false);
@@ -288,7 +325,10 @@ public sealed class PatchCellsHandler(
         await documents.TouchAsync(instance.DocumentId, userId, now, ct).ConfigureAwait(false);
 
         await audit.WriteCellChangesAsync(
-            BuildAuditRecords(request, upserts, deletes, userId, now, instance.DocumentId), ct).ConfigureAwait(false);
+            BuildAuditRecords(
+                request, upserts, deletes, userId, now, instance.DocumentId,
+                rowKeyById, previous, isLateEdit),
+            ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -438,30 +478,61 @@ public sealed class PatchCellsHandler(
                 $"Колонки «{code}» немає в цій версії шаблону.",
                 new Dictionary<string, object?> { ["columnCode"] = code });
 
+    /// <summary>Записи аудиту для застосованого батчу.</summary>
+    /// <remarks>
+    /// ⛔ Три поля тут стояли константами і робили журнал непридатним рівно
+    /// для того, заради чого його ведуть (директива №09 `W8`, пп. 4 і 6):
+    /// <list type="bullet">
+    /// <item><c>RowKey</c> — <c>string.Empty</c>: колонка, заведена «щоб
+    /// журнал читався без join», не давала адреси взагалі;</item>
+    /// <item><c>OldValue</c> — <c>null</c>: запис «стало 7» без «було 5» не
+    /// відповідає на єдине питання, заради якого в журнал дивляться;</item>
+    /// <item><c>IsLateEdit</c> — <c>false</c>: пізніх правок не бувало ніколи,
+    /// хоч саме вони цікавлять того, хто звіряє звітність.</item>
+    /// </list>
+    /// Сховище (<c>AuditWriter</c>) при цьому писало всі три чесно — дефект
+    /// був вище, у тому, що йому передавали.
+    /// </remarks>
     private static List<CellChangeRecord> BuildAuditRecords(
         PatchCellsRequest request, List<CellRecord> upserts,
-        List<CellAddress> deletes, int userId, DateTime now, long documentId)
+        List<CellAddress> deletes, int userId, DateTime now, long documentId,
+        IReadOnlyDictionary<long, string> rowKeyById,
+        IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        bool isLateEdit)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
 
         foreach (var u in upserts)
         {
             records.Add(new CellChangeRecord(
-                now, u.Address, DocumentId: documentId, RowKey: string.Empty,
-                OldValue: null, NewValue: Describe(u.Value),
-                userId, request.Origin, IsLateEdit: false, CorrelationId: null));
+                now, u.Address, DocumentId: documentId,
+                RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
+                OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
+                userId, request.Origin, isLateEdit, CorrelationId: null));
         }
 
         foreach (var d in deletes)
         {
             records.Add(new CellChangeRecord(
-                now, d, DocumentId: documentId, RowKey: string.Empty,
-                OldValue: null, NewValue: null,
-                userId, request.Origin, IsLateEdit: false, CorrelationId: null));
+                now, d, DocumentId: documentId,
+                RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
+                OldValue: Was(previous, d), NewValue: null,
+                userId, request.Origin, isLateEdit, CorrelationId: null));
         }
 
         return records;
     }
+
+    /// <summary>Значення комірки ДО запису; <c>null</c> — комірки не було.</summary>
+    /// <remarks>
+    /// ⚠ «Комірки не було» і «комірка була порожня» — різні стани (R-B4), і
+    /// перший чесно лишається <c>null</c>: незаповнена комірка не
+    /// матеріалізується взагалі (`ФВ-3.8`), тож приписати їй порожній рядок
+    /// означало б вигадати запис, якого не існувало.
+    /// </remarks>
+    private static string? Was(
+        IReadOnlyDictionary<CellAddress, CellValueData> previous, CellAddress address)
+        => previous.TryGetValue(address, out var value) ? Describe(value) : null;
 
     private static string? Describe(CellValueData v)
         => v.IsEmpty ? string.Empty

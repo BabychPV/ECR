@@ -227,12 +227,20 @@ public sealed class CreateProjectHandler(
 /// ⚠ Активація вимагає, щоб у проєкті БУЛИ періоди. Активний проєкт без
 /// періодів — це та сама мовчазна непрацездатність, тільки на крок далі:
 /// відкривати нема чого, а стан каже, що все гаразд.
+///
+/// ⛔ Активація САМА переводить періоди в належний стан — тією ж транзакцією
+/// (директива №09 `W8` п.1, `S-11`). Доти єдиним, хто кликав
+/// <c>Period.AdvanceTo</c>, був <c>PeriodStateJob</c> на годинному розкладі:
+/// щойно активований проєкт до години показував «період ще не відкрито», хоч
+/// за датами він давно відкритий. Причина неправдива, а перевірити її
+/// оператору нічим — саме той клас дрібниці, що ламає довіру до всього екрана.
 /// </remarks>
 public sealed class ActivateProjectHandler(
     IPeriodStore periods,
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IUnitOfWork uow,
+    Domain.Services.PeriodStateCalculator periodStates,
     IClock clock)
 {
     /// <summary>Право на активацію.</summary>
@@ -271,7 +279,35 @@ public sealed class ActivateProjectHandler(
                 "У проєкті немає жодного періоду: активувати нічого.");
         }
 
-        project.Activate(clock.UtcNow);
+        var now = clock.UtcNow;
+        project.Activate(now);
+
+        // ⛔ Стани періодів рахуються ТУТ САМО, а не чекають годинного прогону
+        // `PeriodStateJob` (директива №09 `W8` п.1, `S-11`). Рішення те саме —
+        // спільний `PeriodStateCalculator.Plan`, — тому «примусовий прогін
+        // задачі» і «явний перехід» дають однаковий результат; різниця лише в
+        // тому, що тут немає ні черги, ні гонки: перехід лягає тією ж
+        // транзакцією, що й сама активація.
+        //
+        // ⚠ Межі періодів уже пораховані календарем (`PeriodCalendar`,
+        // побічний ефект `GET …/periods`), інакше активації не було б на чому
+        // спрацювати — вона вимагає непорожнього календаря.
+        var zone = Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo();
+
+        foreach (var (period, target) in periodStates.Plan(project.Periods, now, zone))
+        {
+            period.AdvanceTo(target, now);
+        }
+
+        // ⚠ Поточний період — теж зараз, а не за годину: інакше щойно
+        // активований проєкт лишався б без поточного періоду, і кожен екран,
+        // що на нього спирається, показував би порожнечу. «Пін» людини не
+        // чіпаємо (D-77).
+        if (project.CurrentPeriodMode == Domain.Enums.CurrentPeriodMode.Auto)
+        {
+            project.SetCurrentPeriodAutomatically(
+                periodStates.SelectCurrentPeriod(project.Periods)?.Id, now);
+        }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

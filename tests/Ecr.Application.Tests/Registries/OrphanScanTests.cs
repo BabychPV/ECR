@@ -278,7 +278,9 @@ public sealed class OrphanScanTests
 
     private SubmitSheetHandler Submit()
         => new(
-            _cells, _rows, _workflow, _documents, _access, validation: null!,
+            _cells, _rows, _workflow, _documents, _metadata,
+            _access,
+            new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             new Ecr.Application.Reporting.ReportSnapshotSync(
                 NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
                 NSubstitute.Substitute.For<IDocumentStore>()),

@@ -98,18 +98,46 @@ public sealed class GetTableSliceHandler(
         //    дійти до клієнта, інакше «свідомо порожньо» перетвориться на
         //    «не заповнювали» і підставиться дефолт (R-B4). Передається як
         //    присутній ключ зі значенням null.
-        var rows = cells
+        //
+        // ⛔ Перелік рядків будується з САМИХ РЯДКІВ, а не з комірок
+        // (директива №09 `W8` п.2, `S-13`). Групування по `cells` означало, що
+        // рядок без жодної комірки в зрізі не існує — тобто щойно створений
+        // документ віддавав ПОРОЖНЮ фіксовану таблицю, у яку нема куди
+        // вводити перше число. Порожнеча була не станом даних, а наслідком
+        // способу побудови відповіді.
+        var cellsByRow = cells
             .GroupBy(c => c.Address.TableRowId)
-            .Select(g => new RowDto(
-                RowKey: keyById.TryGetValue(g.Key, out var k) ? k : g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                Ordinal: 0,
-                RowKind: table.RowMode.ToString(),
-                Label: null,
-                RowVersion: keyById.TryGetValue(g.Key, out var vk) && versions.TryGetValue(vk, out var v) ? v : string.Empty,
-                Cells: g.ToDictionary(
-                    c => columnCodeById.TryGetValue(c.Address.ColumnDefId, out var code) ? code : c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    c => Unwrap(c.Value)),
-                IsOrphaned: orphans.TryGetValue(g.Key, out var orph) && orph))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Підписи й порядок — з опису рядка шаблону (`RowDef`). Раніше тут
+        // стояли `Ordinal: 0` і `Label: null` на КОЖНОМУ рядку: поля контракту
+        // існували й не несли нічого, а фіксована таблиця приходила на екран
+        // без назв рядків — тобто без того єдиного, за чим оператор упізнає,
+        // куди він пише.
+        var rowDefs = table.Rows
+            .Where(r => !r.IsDeleted)
+            .ToDictionary(r => r.RowKeyValue, StringComparer.Ordinal);
+
+        var rows = rowIds
+            .Select(pair => new
+            {
+                RowKey = pair.Key,
+                RowId = pair.Value,
+                Def = rowDefs.GetValueOrDefault(pair.Key),
+            })
+            .OrderBy(r => r.Def?.Ordinal ?? int.MaxValue)
+            .ThenBy(r => r.RowId)
+            .Select(r => new RowDto(
+                RowKey: r.RowKey,
+                Ordinal: r.Def?.Ordinal ?? 0,
+                RowKind: r.Def is null ? table.RowMode.ToString() : r.Def.RowKind.ToString(),
+                Label: r.Def?.LabelL10n.Get(language),
+                RowVersion: versions.GetValueOrDefault(r.RowKey) ?? string.Empty,
+                Cells: (cellsByRow.GetValueOrDefault(r.RowId) ?? [])
+                    .ToDictionary(
+                        c => columnCodeById.TryGetValue(c.Address.ColumnDefId, out var code) ? code : c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        c => Unwrap(c.Value)),
+                IsOrphaned: orphans.TryGetValue(r.RowId, out var orph) && orph))
             .ToList();
 
         // 5. Компактна мапа заборон: grid має одразу знати, що сіре і чому,

@@ -8,6 +8,7 @@ import type { ColumnDto, CreateRowRequest, TableSliceDto } from '@/api/types';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
+import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, decide, guardOf } from './permissions';
@@ -385,6 +386,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data, save, touchHistory],
   );
 
+  // ⚠ Правило порожнечі — у чистому модулі `emptiness.ts`, а не тут: воно
+  // різне для фіксованої і динамічної таблиці (`S-13`), і саме тому має бути
+  // перевіреним окремо від сітки, яку в jsdom не рендерять.
+  const sliceEmpty = useCallback(
+    (loaded: TableSliceDto) => isSliceEmpty(loaded, allowsDynamicRows),
+    [allowsDynamicRows],
+  );
+
+  /** Чи справа саме в колонках — від цього залежить, що написано в порожньому стані. */
+  const noColumns = isMissingColumns(data);
+
   return (
     /*
      * ⛔ Чотири стани і тут (`ФВ-14.21`). Раніше зріз мав два: «вантажиться» і
@@ -397,9 +409,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       isPending={slice.isPending}
       error={slice.error}
       data={data}
-      isEmpty={(loaded) => loaded.columns.length === 0}
-      emptyTitle={t('grid.emptyTable')}
-      emptyHint={t('grid.emptyTableHint')}
+      isEmpty={sliceEmpty}
+      emptyTitle={noColumns ? t('grid.emptyTable') : t('grid.emptyFixedTable')}
+      emptyHint={noColumns ? t('grid.emptyTableHint') : t('grid.emptyFixedTableHint')}
       skeleton="table"
       onRetry={() => void slice.refetch()}
     >

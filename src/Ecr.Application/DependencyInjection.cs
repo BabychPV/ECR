@@ -108,6 +108,7 @@ public static class DependencyInjection
         services.AddScoped<Validation.ValidationEngine>();
         services.AddScoped<Recalculation.RecalculationService>();
         services.AddScoped<ValidateDocumentHandler>();
+        services.AddScoped<GetValidationResultHandler>();
         services.AddScoped<Templates.PublishTemplateVersionHandler>();
 
         // Безпека (модулі 3.1–3.3)
@@ -214,6 +215,14 @@ public static class DependencyInjection
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();
         services.AddScoped<Reporting.BuildReportSnapshotHandler>();
+
+        // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
+        // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні
+        // тести, — тому побудова зрізу не мала за що зачепитися.
+        services.AddScoped<Reporting.ListReportDefsHandler>();
+        services.AddScoped<Reporting.CreateReportDefHandler>();
+        services.AddScoped<Reporting.CreateReportVersionHandler>();
+        services.AddScoped<Reporting.PublishReportVersionHandler>();
         services.AddScoped<Integration.ListSourceEntitiesHandler>();
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.GetJobStatusHandler>();

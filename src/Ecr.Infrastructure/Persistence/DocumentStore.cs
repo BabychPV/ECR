@@ -191,6 +191,23 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct)
+    {
+        // Один запит через увесь ланцюг: документ → проєкт. Версія живе на
+        // проєкті — той самий ланцюг, що в `RowStore.ResolveTableInstanceAsync`.
+        var found = await (
+            from document in db.Documents.AsNoTracking()
+            where document.Id == documentId
+            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+            select (int?)project.TemplateVersionId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return found ?? throw new Ecr.Application.Errors.NotFoundException(
+            "ECR-DOC-0404", $"Документ {documentId} не знайдено.");
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Документ береться ВІДСТЕЖУВАНИМ: «дотик» — це зміна сутності, і
     /// зберегти її має той самий <c>SaveChanges</c>, що й дані, які його

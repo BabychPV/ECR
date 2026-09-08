@@ -69,6 +69,29 @@ public interface IPeriodStore
     /// </remarks>
     public Task<PeriodBounds?> FindPeriodBoundsAsync(
         long documentId, int periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Стан періоду документа; <c>null</c> — такого періоду немає.
+    /// </summary>
+    /// <param name="documentId">Документ — через нього знаходиться проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Заведений заради <c>IsLateEdit</c> (<c>D-70</c>), який до цього
+    /// стояв літералом <c>false</c> у ВСІХ трьох місцях, де пишеться зміна
+    /// комірки: <c>Period.IsLateEditWindow</c> існував і не мав жодного
+    /// читача (директива №09 `W8` п.6). Наслідок — журнал, у якому пізніх
+    /// правок не буває ніколи: правку в <c>Grace</c> і після <c>Reopen</c> не
+    /// відрізнити від правки в строк, при тому що саме ця відмінність
+    /// цікавить того, хто звіряє звітність.
+    ///
+    /// ⚠ Окремо від <see cref="FindProjectAsync"/> з тієї самої причини, що й
+    /// <see cref="GetPeriodStatesAsync"/>: на шляху запису комірок бюджет —
+    /// 300 мс на 100 комірок, і завантаження агрегата проєкту з усіма
+    /// періодами заради одного значення в нього не вкладається.
+    /// </remarks>
+    public Task<Ecr.Domain.Enums.PeriodState?> FindPeriodStateAsync(
+        long documentId, int periodKey, CancellationToken ct);
 }
 
 /// <summary>Стан одного періоду.</summary>
