@@ -163,14 +163,26 @@ while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
     #  нечутливі до регістру сервери трактують PK2/x і pk2/x однаково).
     # -----------------------------------------------------------------
     PREFIX_OK=0
-    if [ "$NODE" = "PK1" ]; then
-        case "$REMOTE_BRANCH" in
-            [Pp][Kk]1/?*) PREFIX_OK=1 ;;
-        esac
-    else
-        case "$REMOTE_BRANCH" in
-            [Pp][Kk]2/?*) PREFIX_OK=1 ;;
-        esac
+
+    # ⛔ ВИНЯТОК: `sync` — спільна шина повідомлень обох вузлів, і в неї
+    # надсилають обидва. Розподіл там тримається не префіксом гілки, а
+    # власником ФАЙЛУ: PK1 пише лише PK1-LOG.md, PK2 — лише PK2-LOG.md
+    # (це стереже pre-commit). Вимагати тут префікса означало б зробити
+    # спільну гілку недосяжною для обох.
+    case "$REMOTE_BRANCH" in
+        [Ss][Yy][Nn][Cc]) PREFIX_OK=1 ;;
+    esac
+
+    if [ "$PREFIX_OK" -eq 0 ]; then
+        if [ "$NODE" = "PK1" ]; then
+            case "$REMOTE_BRANCH" in
+                [Pp][Kk]1/?*) PREFIX_OK=1 ;;
+            esac
+        else
+            case "$REMOTE_BRANCH" in
+                [Pp][Kk]2/?*) PREFIX_OK=1 ;;
+            esac
+        fi
     fi
 
     if [ "$PREFIX_OK" -eq 0 ]; then

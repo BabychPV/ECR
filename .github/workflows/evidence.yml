@@ -1,8 +1,16 @@
 # Доказовий конвеєр двовузлового процесу.
 #
-# ⛔ Імена джобів у цьому файлі — ЧАСТИНА КОНТРАКТУ. `acceptance` кожної
-# директиви виражається саме ними, і захист гілки `main` вимагає рівно цих
-# п'ять. Перейменувати джоб = зламати всі відкриті директиви одночасно.
+# ⛔ Імена джобів — ЧАСТИНА КОНТРАКТУ. «Готово, коли» у настановах виражається
+# саме ними, і захист гілки `main` вимагає рівно цих трьох. Перейменувати джоб
+# = зламати всі відкриті настанови одночасно.
+#
+# ⚠ Тут було ще два сторожі — `scope-guard` і `contracts-guard`. Обидва
+# трималися на GitHub Issues: читали `Closes #N`, розбирали `scope:` з тіла
+# issue, дивилися на мітку `type:contract`. Керуючий шар на issues скасовано
+# (обмін — два файли на гілці `sync`), тому сторожі пішли разом із ним.
+# ⛔ Один із них до того ж завалив правомірну роботу: `contracts-guard` брав
+# теку `contracts/` цілим каталогом і зупинив PR за дописування журналу
+# знахідок. Сторож, який зупиняє правомірну роботу, вчить обходити себе.
 #
 # Розподіл із наявним `ci.yml`:
 #   ci.yml    — важкі перевірки: SQL Server у контейнері, інтеграційні тести,
@@ -79,38 +87,6 @@ jobs:
           dotnet test Ecr.sln -c Release --no-build --no-restore
           --filter "Category!=Integration"
           --logger 'console;verbosity=normal'
-
-  scope-guard:
-    name: scope-guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: scope
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash .github/guards/scope-guard.sh
-
-  contracts-guard:
-    name: contracts-guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: contracts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash .github/guards/contracts-guard.sh
 
   honesty-guard:
     name: honesty-guard
