@@ -20,6 +20,15 @@ namespace Ecr.Application.Ports;
 /// </remarks>
 public interface IMethodologyDraftStore
 {
+    /// <summary>Ідентифікатори всіх активних методологій, за кодом.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Саме ідентифікатори, а не самі методології: перелік читає ЦІЛУ
+    /// методологію (з версіями) за кожним із них далі, і повертати тут те саме
+    /// вдруге означало б завантажити граф двічі.
+    /// </remarks>
+    public Task<IReadOnlyList<int>> ListActiveIdsAsync(CancellationToken ct);
+
     /// <summary>Методологія за кодом; <c>null</c> — такої немає.</summary>
     /// <param name="code">Код методології.</param>
     /// <param name="ct">Токен скасування.</param>
