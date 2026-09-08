@@ -23,6 +23,19 @@ namespace Ecr.Application.Tests.Registries;
 /// Тому тести перевіряють не «перемкнулося», а **атомарність набору** і
 /// **повноту запису**.
 /// </remarks>
+// ⛔ Трейт `ФВ-6.12` знятий (директива №09 §8.2). Вимога каже, що
+// НЕБЕЗПЕЧНІ права (`Calculation.Publish`, `Integration.Manage`,
+// `Period.Reopen`) видаються поіменно і не входять до складених ролей, а
+// seed створює ролі порожніми за ними. Жодна перевірка тут цього не
+// торкається: вона питає заглушку про профіль, який сама ж і задала, і
+// дивиться, чи відмовив обробник. Це про гатування входу в обробник,
+// а не про склад ролей.
+//
+// ⚠ Самі перевірки ЛИШАЮТЬСЯ — «без права обробник відмовляє і нічого
+// не зберігає» варте перевірки саме по собі (`A7-53`). Змінилася НЕ
+// поведінка, а ЗАЯВКА про те, що вони покривають. Саму `ФВ-6.12` доводить
+// `Ecr.Infrastructure.Tests/Persistence/SeedTests` на живій базі: ролі seed справді
+// порожні за небезпечними правами.
 public sealed class SwitchRegistrySourceTests
 {
     private static readonly DateTime Now = new(2026, 10, 15, 8, 0, 0, DateTimeKind.Utc);
@@ -187,7 +200,6 @@ public sealed class SwitchRegistrySourceTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-6.12")]
     public async Task Без_права_Integration_Manage_набір_не_перемикається()
     {
         // ⚠ Право небезпечне (`ФВ-6.12`) і в seed його не має ніхто: воно

@@ -23,6 +23,19 @@ namespace Ecr.Application.Tests.Projects;
 /// помітили б це лише тоді, коли хтось не встиг подати форму «вчасно», бо
 /// період закрився на кілька годин раніше.
 /// </remarks>
+// ⛔ Трейт `ФВ-6.12` знятий (директива №09 §8.2). Вимога каже, що
+// НЕБЕЗПЕЧНІ права (`Calculation.Publish`, `Integration.Manage`,
+// `Period.Reopen`) видаються поіменно і не входять до складених ролей, а
+// seed створює ролі порожніми за ними. Жодна перевірка тут цього не
+// торкається: вона питає заглушку про профіль, який сама ж і задала, і
+// дивиться, чи відмовив обробник. Це про гатування входу в обробник,
+// а не про склад ролей.
+//
+// ⚠ Самі перевірки ЛИШАЮТЬСЯ — «без права обробник відмовляє і нічого
+// не зберігає» варте перевірки саме по собі (`A7-53`). Змінилася НЕ
+// поведінка, а ЗАЯВКА про те, що вони покривають. Саму `ФВ-6.12` доводить
+// `Ecr.Infrastructure.Tests/Persistence/SeedTests` на живій базі: ролі seed справді
+// порожні за небезпечними правами.
 public sealed class CreateProjectTests
 {
     private static readonly DateTime Now = new(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc);
@@ -166,7 +179,6 @@ public sealed class CreateProjectTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.12")]
     public async Task Без_права_Project_Manage_перелік_політик_недоступний()
     {
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())

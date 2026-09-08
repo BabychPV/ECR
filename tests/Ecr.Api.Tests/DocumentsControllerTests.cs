@@ -1,11 +1,17 @@
 ﻿// tests/Ecr.Api.Tests/DocumentsControllerTests.cs
 using System.Net;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using Ecr.Api.Controllers;
+using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Enums;
+using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -14,6 +20,8 @@ namespace Ecr.Api.Tests;
 [Collection("SqlServer")]
 public sealed class DocumentsControllerTests(SqlServerFixture sql)
 {
+    private const string Password = "Api-Docs-Probe-2026!";
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Контролер_лише_делегує_обробнику()
@@ -61,18 +69,27 @@ public sealed class DocumentsControllerTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-6.14")]
     public async Task Помилка_повертається_як_ProblemDetails_із_кодом()
     {
+        // ⛔ Запит іде ПІД КОРИСТУВАЧЕМ. Тут стояло дострокове `return` на
+        // `401` із коментарем «анонім не доходить до обробника — і це теж
+        // коректна відповідь»: анонімний запит зупиняє автентифікація ЩЕ ДО
+        // конвеєра помилок, тож `401` приходив завжди, і жоден рядок нижче не
+        // виконувався ніколи. Порожній тест у вигляді справжнього (директива
+        // №09 §8.2); той самий різновид уже виправлено в
+        // `ErrorContractTests.Тіло_помилки_містить_код_і_ідентифікатор_кореляції`.
         using var app = new EcrApiFactory(sql);
-        using var client = app.CreateClient();
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
 
-        var response = await client.GetAsync(new Uri("/api/v1/documents/1", UriKind.Relative));
+        // Документа з таким номером немає — відмова обробника має дійти до
+        // клієнта конвеєром помилок, а не заглушкою автентифікації.
+        var response = await client
+            .GetAsync(new Uri("/api/v1/documents/999999", UriKind.Relative))
+            .ConfigureAwait(true);
 
-        // Анонім не доходить до обробника — і це теж коректна відповідь із кодом.
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            return;
-        }
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
 
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.False(string.IsNullOrWhiteSpace(body), $"Порожнє тіло на {response.StatusCode}: {app.ErrorsText}");
+
         var json = JsonDocument.Parse(body).RootElement;
 
         // Клієнт розрізняє причини за КОДОМ, а не за текстом: текст
@@ -80,5 +97,34 @@ public sealed class DocumentsControllerTests(SqlServerFixture sql)
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         Assert.Matches(@"^ECR-[A-Z]+-\d{4}$", json.GetProperty("errorCode").GetString()!);
         Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("correlationId").GetString()));
+    }
+
+    /// <summary>Клієнт із чинним сеансом локального користувача.</summary>
+    private async Task<HttpClient> SignedInAsync(EcrApiFactory app)
+    {
+        var name = $"docs_{Guid.NewGuid():N}"[..20];
+
+        var options = new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .Options;
+
+        await using (var db = new EcrDbContext(options))
+        {
+            var user = new User(name, name, AuthProvider.Local);
+            user.SetPassword(new PasswordHasher().Hash(Password));
+
+            db.Users.Add(user);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        var client = app.CreateClient();
+
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = Password }).ConfigureAwait(false);
+
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        return client;
     }
 }

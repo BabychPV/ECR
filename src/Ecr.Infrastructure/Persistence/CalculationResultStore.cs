@@ -24,9 +24,14 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 
-        // sp_sequence_get_range недоступний поза SQL Server (у тестах —
-        // SQLite), тому провайдер визначає спосіб. Обидва дають безперервний
-        // діапазон, і саме це важливо.
+        // sp_sequence_get_range недоступний поза SQL Server, тому провайдер
+        // визначає спосіб. Обидва дають безперервний діапазон, і саме це
+        // важливо.
+        //
+        // ⚠ «У тестах — SQLite» звідси прибрано: другого провайдера в дереві
+        // немає, тести з базою йдуть на справжньому SQL Server. Гілка нижче —
+        // запас на провайдера без послідовностей, а не описання чинного
+        // прогону.
         if (!db.Database.IsSqlServer())
         {
             var last = await db.CalculationResults

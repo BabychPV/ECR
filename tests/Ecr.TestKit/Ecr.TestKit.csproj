@@ -21,7 +21,10 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="Testcontainers.MsSql" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- ⛔ `Microsoft.EntityFrameworkCore.Sqlite` прибрано: `UseSqlite` не мав
+         у `tests/` жодного місця виклику. Усі тести з базою йдуть через
+         `SqlServerFixture` на справжній SQL Server, і посилання лише
+         підтримувало думку, що десь є дешевший провайдер «під тести». -->
   </ItemGroup>
 
   <ItemGroup>
