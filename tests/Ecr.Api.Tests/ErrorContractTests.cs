@@ -211,6 +211,68 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("correlationId").GetString()));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відкликана_роль_прибирає_застарілу_cookie_а_не_лише_відмовляє()
+    {
+        // ⛔ Виявлено НЕ тестуванням, а ручною звіркою S-04..S-07 в браузері
+        // (`W5.9`): після зміни ролей інший вкладка з дереву — і БУКВАЛЬНО
+        // все, включно з `/logout` і публічним `GET /ui-strings` — почало
+        // віддавати 401 назавжди, без жодного способу вийти з цього стану
+        // інакше, ніж стерти cookie руками. Причина — `Response.Clear()` в
+        // `ExceptionHandlingMiddleware` стирає й `Set-Cookie`, який
+        // `SecurityStampMiddleware` щойно додав через `SignOutAsync` перед
+        // тим, як кинути виняток.
+        using var app = new EcrApiFactory(sql);
+        using var manager = app.CreateClient();
+
+        // ⚠ Без cookie-handler'а клієнта: інакше `HttpClientHandler` сам
+        // перехопив би `Set-Cookie` в СВІЙ `CookieContainer`, і саме той
+        // заголовок, який тест перевіряє, ніколи не дійшов би до
+        // `response.Headers` — тест перевіряв би порожнечу замість фактичної
+        // поведінки сервера.
+        using var target = app.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            HandleCookies = false,
+        });
+
+        var (managerName, targetName, targetId) = await ArrangeRevocationAsync().ConfigureAwait(true);
+
+        var managerLogin = await manager.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = managerName, password = LoginPassword }).ConfigureAwait(true);
+        Assert.True(managerLogin.IsSuccessStatusCode, $"{managerLogin.StatusCode}: {app.ErrorsText}");
+
+        var targetLogin = await target.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = targetName, password = LoginPassword }).ConfigureAwait(true);
+        Assert.True(targetLogin.IsSuccessStatusCode, $"{targetLogin.StatusCode}: {app.ErrorsText}");
+
+        var loginCookie = targetLogin.Headers.TryGetValues("Set-Cookie", out var loginSetCookie)
+            ? loginSetCookie.Select(c => c.Split(';')[0]).ToList()
+            : throw new InvalidOperationException("Вхід не повернув cookie: тест переказує неправильну адресу.");
+
+        // Ціль тримає СТАРУ cookie далі, поки менеджер крутить її штамп.
+        var replaceRoles = await manager.PutAsJsonAsync(
+            new Uri($"/api/v1/users/{targetId}/roles", UriKind.Relative),
+            new { roleCodes = Array.Empty<string>() }).ConfigureAwait(true);
+        Assert.True(replaceRoles.IsSuccessStatusCode, $"{replaceRoles.StatusCode}: {app.ErrorsText}");
+
+        using var staleMeRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("/api/v1/me", UriKind.Relative));
+        staleMeRequest.Headers.Add("Cookie", loginCookie);
+        var staleRequest = await target.SendAsync(staleMeRequest).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, staleRequest.StatusCode);
+
+        // ⛔ Головне твердження: без фіксу цей заголовок відсутній, і клієнт
+        // носить мертву cookie до кінця її строку — 401 на КОЖЕН наступний
+        // запит, навіть на /logout і на публічні маршрути.
+        Assert.True(
+            staleRequest.Headers.TryGetValues("Set-Cookie", out var setCookie) && setCookie.Any(),
+            "Відповідь на застарілу cookie має її прибрати (Set-Cookie), а не лишити носити далі.");
+    }
+
     /// <summary>Пароль користувача сценаріїв; у відповіді не з'являється ніде.</summary>
     private const string LoginPassword = "Contract-2026-Check!";
 
@@ -260,5 +322,47 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return (name, document.Id);
+    }
+
+    /// <summary>
+    /// Менеджер із правом <c>Security.ManageUsers</c> і ціль, чиї ролі він
+    /// зможе замінити.
+    /// </summary>
+    private async Task<(string ManagerName, string TargetName, int TargetId)> ArrangeRevocationAsync()
+    {
+        var managerName = $"manager_{Guid.NewGuid():N}"[..20];
+
+        await using var db = new Ecr.Infrastructure.Persistence.EcrDbContext(
+            new DbContextOptionsBuilder<Ecr.Infrastructure.Persistence.EcrDbContext>()
+                .UseSqlServer(sql.ConnectionString)
+                .Options);
+
+        var hasher = new Ecr.Infrastructure.Security.PasswordHasher();
+
+        var manager = new Ecr.Domain.Entities.Security.User(
+            managerName, managerName, Ecr.Domain.Enums.AuthProvider.Local);
+        manager.SetPassword(hasher.Hash(LoginPassword));
+        db.Users.Add(manager);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var role = new Ecr.Domain.Entities.Security.Role(
+            Ecr.Domain.ValueObjects.EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
+            new Ecr.Domain.ValueObjects.LocalizedText(
+                new Dictionary<string, string> { ["en"] = "Revocation test manager" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.Add(new Ecr.Domain.Entities.Security.RolePermission(role.Id, "Security.ManageUsers"));
+        db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, manager.Id, principalSid: null));
+
+        // Ціль: будь-який користувач, чий штамп менеджер згодом крутне.
+        var targetName = $"target_{Guid.NewGuid():N}"[..20];
+        var target = new Ecr.Domain.Entities.Security.User(
+            targetName, "Revocation target", Ecr.Domain.Enums.AuthProvider.Local);
+        target.SetPassword(hasher.Hash(LoginPassword));
+        db.Users.Add(target);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (managerName, targetName, target.Id);
     }
 }

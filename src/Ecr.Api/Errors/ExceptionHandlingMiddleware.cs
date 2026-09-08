@@ -116,9 +116,23 @@ public sealed partial class ExceptionHandlingMiddleware(
             }
         }
 
+        // ⛔ `Response.Clear()` стирає ВСІ заголовки, включно з `Set-Cookie`,
+        // який міг лишити обробник ВИЩЕ по конвеєру перед тим, як кинути
+        // виняток (наприклад, `SecurityStampMiddleware.SignOutAsync` при
+        // відкликаній ролі). Без збереження цього заголовка клієнт носив би
+        // мертву cookie до кінця її строку — і отримував 401 на КОЖЕН запит,
+        // разом з публічними (`GET /ui-strings`) і навіть на сам `/logout`,
+        // без жодного способу вийти з цього стану інакше, ніж вручну стерти
+        // cookie в браузері.
+        var setCookie = context.Response.Headers.SetCookie;
+
         context.Response.Clear();
         context.Response.StatusCode = status;
         context.Response.ContentType = ProblemJson;
+        if (setCookie.Count > 0)
+        {
+            context.Response.Headers.SetCookie = setCookie;
+        }
 
         await JsonSerializer.SerializeAsync(
             context.Response.Body,
