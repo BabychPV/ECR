@@ -2,6 +2,7 @@ using System.Text.Json;
 using Ecr.Application.Localization;
 using Ecr.Application.Templates;
 using Ecr.Application.Templates.Dto;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -33,6 +34,11 @@ public sealed class TemplateVersionsController(
     DeleteRowDefHandler deleteRow,
     SaveFormulaDefHandler saveFormula,
     DeleteFormulaDefHandler deleteFormula,
+    SaveValidationRuleHandler saveValidationRule,
+    DeleteValidationRuleHandler deleteValidationRule,
+    CreatePeriodAccessRuleHandler createPeriodAccessRule,
+    SavePeriodAccessRuleHandler savePeriodAccessRule,
+    DeletePeriodAccessRuleHandler deletePeriodAccessRule,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -564,6 +570,151 @@ public sealed class TemplateVersionsController(
             $"Невідома область формули «{scope}»: очікується column або row."),
     };
 
+    /// <summary>
+    /// Записує правило валідації таблиці чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належить правило.</param>
+    /// <param name="code">Код правила; унікальний у межах таблиці.</param>
+    /// <param name="request">Налаштування правила.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Вкладено в ТАБЛИЦЮ (<c>tables/{tableId}</c>), а не в аркуш чи версію:
+    /// сама сутність адресується таблицею
+    /// (<c>UQ_ValidationRule</c> на <c>(TableDefId, Code)</c>), і той самий код
+    /// у різних таблицях версії — різні правила. <c>PUT</c> за кодом — та сама
+    /// форма, що й <c>sheets/{code}</c> вище (<c>D2-147</c>).
+    /// </remarks>
+    [HttpPut("tables/{tableId:int}/validation-rules/{code}")]
+    [ProducesResponseType<ValidationRuleDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ValidationRuleDto>> SaveValidationRule(
+        int id, int tableId, string code, [FromBody] SaveValidationRuleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveValidationRule
+            .HandleAsync(
+                id,
+                tableId,
+                code,
+                new SaveValidationRuleCommand(
+                    request.Severity, request.Scope, request.Expression, request.MessageL10n,
+                    request.ColumnDefId, request.IsActive),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає правило валідації з таблиці чернетки (фізично). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належить правило.</param>
+    /// <param name="code">Код правила.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("tables/{tableId:int}/validation-rules/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteValidationRule(int id, int tableId, string code, CancellationToken ct)
+    {
+        await deleteValidationRule.HandleAsync(id, tableId, code, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Заводить нове правило доступу до періоду чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="request">Вид і налаштування правила.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ <c>POST</c>, а НЕ <c>PUT</c> за кодом, на відміну від
+    /// <c>sheets/{code}</c> і <c>validation-rules/{code}</c> вище:
+    /// <c>PeriodAccessRuleDef</c> не має поля <c>Code</c> і жодного
+    /// унікального індексу (лише <c>CK_PAR_Target</c>/<c>CK_PAR_Range</c>/
+    /// <c>CK_PAR_Kind</c>) — єдина адреса, яку сутність має, це <c>Id</c>,
+    /// призначений базою вже ПІСЛЯ створення. Детальніше —
+    /// <c>PeriodAccessRuleHandlers.cs</c>.
+    /// </remarks>
+    [HttpPost("period-access-rules")]
+    [ProducesResponseType<PeriodAccessRuleDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PeriodAccessRuleDto>> CreatePeriodAccessRule(
+        int id, [FromBody] SavePeriodAccessRuleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await createPeriodAccessRule
+            .HandleAsync(
+                id,
+                new CreatePeriodAccessRuleCommand(
+                    request.RuleKind, request.OnOutOfWindow, request.SheetDefId, request.TableDefId,
+                    request.RoleId, request.RowKind, request.FromSequence, request.ToSequence,
+                    request.SourceColumnDefId, request.RelativeOffset, request.ConditionExpr),
+                ct)
+            .ConfigureAwait(false);
+
+        return Created(
+            $"/api/v1/template-versions/{id}/period-access-rules/{created.Id}", created);
+    }
+
+    /// <summary>
+    /// Змінює наявне правило доступу до періоду. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="ruleId">Правило.</param>
+    /// <param name="request">Нові прив'язка й поведінка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ <c>PUT</c> за <c>id</c>, а не за кодом: <c>id</c> — єдина адреса, яку
+    /// правило має ПІСЛЯ створення. Вид правила (<see cref="Ecr.Domain.Enums.PeriodAccessRuleKind"/>)
+    /// і його специфічний параметр тут не редагуються — див.
+    /// <c>PeriodAccessRuleHandlers.cs</c>.
+    /// </remarks>
+    [HttpPut("period-access-rules/{ruleId:int}")]
+    [ProducesResponseType<PeriodAccessRuleDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PeriodAccessRuleDto>> SavePeriodAccessRule(
+        int id, int ruleId, [FromBody] UpdatePeriodAccessRuleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await savePeriodAccessRule
+            .HandleAsync(
+                id,
+                ruleId,
+                new UpdatePeriodAccessRuleCommand(
+                    request.OnOutOfWindow, request.SheetDefId, request.TableDefId, request.RoleId,
+                    request.RowKind),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає правило доступу до періоду (фізично). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="ruleId">Правило.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("period-access-rules/{ruleId:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeletePeriodAccessRule(int id, int ruleId, CancellationToken ct)
+    {
+        await deletePeriodAccessRule.HandleAsync(id, ruleId, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
@@ -679,3 +830,57 @@ public sealed record SaveRowDefRequest(
 public sealed record SaveFormulaDefRequest(
     Ecr.Domain.Enums.ExpressionDialect Dialect,
     string Expression);
+
+
+/// <summary>Налаштування правила валідації (<c>ФВ-2.1</c>, продовжено на <c>ValidationRule</c>).</summary>
+/// <param name="Severity">Рівень: <c>Info</c>, <c>Warning</c>, <c>Error</c>.</param>
+/// <param name="Scope">0 Cell, 1 Row, 2 Table, 3 Document.</param>
+/// <param name="Expression">Предикат нашою мовою.</param>
+/// <param name="MessageL10n">Текст порушення мовами каталогу.</param>
+/// <param name="ColumnDefId">Колонка, до якої прив'язане правило; <c>null</c> — до всіх колонок таблиці.</param>
+/// <param name="IsActive">Чи діє правило.</param>
+public sealed record SaveValidationRuleRequest(
+    ValidationSeverity Severity,
+    byte Scope,
+    string Expression,
+    IReadOnlyDictionary<string, string> MessageL10n,
+    int? ColumnDefId,
+    bool IsActive);
+
+/// <summary>Вид і налаштування нового правила доступу до періоду (<c>ФВ-2.15</c>).</summary>
+/// <param name="RuleKind">Вид правила; визначає обов'язковий параметр нижче.</param>
+/// <param name="OnOutOfWindow">Поведінка поза вікном; не <c>Hide</c>.</param>
+/// <param name="SheetDefId">Аркуш, якого стосується правило.</param>
+/// <param name="TableDefId">Таблиця, якої стосується правило.</param>
+/// <param name="RoleId"><c>null</c> — правило діє для всіх ролей.</param>
+/// <param name="RowKind"><c>null</c> — на всі види рядків.</param>
+/// <param name="FromSequence">Для <c>EditablePeriodOnly</c>: від якого номера періоду.</param>
+/// <param name="ToSequence">Для <c>EditablePeriodOnly</c>: до якого номера періоду.</param>
+/// <param name="SourceColumnDefId">Для <c>SourceWindow</c>: колонка-джерело вікна; обов'язкова.</param>
+/// <param name="RelativeOffset">Для <c>RelativeWindow</c>: зсув ±N періодів; обов'язковий, додатний.</param>
+/// <param name="ConditionExpr">Для <c>Expression</c>: булевий вираз; обов'язковий.</param>
+public sealed record SavePeriodAccessRuleRequest(
+    PeriodAccessRuleKind RuleKind,
+    OutOfWindowBehavior OnOutOfWindow,
+    int? SheetDefId,
+    int? TableDefId,
+    int? RoleId,
+    RowKind? RowKind,
+    byte? FromSequence,
+    byte? ToSequence,
+    int? SourceColumnDefId,
+    short? RelativeOffset,
+    string? ConditionExpr);
+
+/// <summary>Прив'язка й поведінка наявного правила доступу до періоду (<c>ФВ-2.15</c>).</summary>
+/// <param name="OnOutOfWindow">Поведінка поза вікном; не <c>Hide</c>.</param>
+/// <param name="SheetDefId">Аркуш, якого стосується правило.</param>
+/// <param name="TableDefId">Таблиця, якої стосується правило.</param>
+/// <param name="RoleId"><c>null</c> — правило діє для всіх ролей.</param>
+/// <param name="RowKind"><c>null</c> — на всі види рядків.</param>
+public sealed record UpdatePeriodAccessRuleRequest(
+    OutOfWindowBehavior OnOutOfWindow,
+    int? SheetDefId,
+    int? TableDefId,
+    int? RoleId,
+    RowKind? RowKind);

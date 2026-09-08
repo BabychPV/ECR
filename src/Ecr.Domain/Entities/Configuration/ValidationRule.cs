@@ -57,4 +57,39 @@ public sealed class ValidationRule : Entity<int>
     /// неможливою (R-B3).
     /// </summary>
     public bool BlocksSave => Severity == ValidationSeverity.Error && Scope == 0;
+
+    /// <summary>Перезаписує налаштування правила.</summary>
+    /// <remarks>
+    /// ⛔ Сеттер потрібен для <c>PUT …/validation-rules/{code}</c>
+    /// (авторство структури шаблону, W5.4, продовження зрізу ФВ-2.1..ФВ-2.5
+    /// на <c>ValidationRule</c>): до цього кожне поле, крім <see cref="Code"/>
+    /// і <see cref="TableDefId"/> (адреса й батько — не змінюються), задавав
+    /// лише конструктор, і повторний виклик тим самим кодом не мав як
+    /// оновити наявне правило.
+    ///
+    /// ⚠ <see cref="Code"/> і <see cref="TableDefId"/> тут НЕ змінюються
+    /// навмисно — так само, як <see cref="SheetDef.Code"/> в
+    /// <see cref="SheetDef.Rename"/>: код — це ідентичність і адреса в API,
+    /// а таблиця-батько — те, через що правило взагалі знайшли.
+    /// </remarks>
+    /// <param name="severity">Рівень: <c>Info</c>, <c>Warning</c>, <c>Error</c>.</param>
+    /// <param name="scope">0 Cell, 1 Row, 2 Table, 3 Document.</param>
+    /// <param name="expression">Предикат нашою мовою.</param>
+    /// <param name="message">Текст порушення мовами каталогу.</param>
+    /// <param name="columnDefId">Колонка, до якої прив'язане правило; <c>null</c> — до всіх колонок таблиці.</param>
+    /// <param name="isActive">Чи діє правило.</param>
+    public void Update(
+        ValidationSeverity severity, byte scope, string expression, LocalizedText message,
+        int? columnDefId, bool isActive)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expression);
+
+        Severity = severity;
+        Scope = scope;
+        ColumnDefId = columnDefId;
+        Expression = expression;
+        MessageL10n = message;
+        IsActive = isActive;
+    }
 }

@@ -160,6 +160,25 @@ export type SaveSheetDefRequest = Schemas['SaveSheetDefRequest'];
 /** Тіло запиту `PUT .../sheets/{sheetCode}/tables/{code}` (`W5.1`). */
 export type SaveTableDefRequest = Schemas['SaveTableDefRequest'];
 
+/**
+ * Правило валідації таблиці (W5.4, продовження `ФВ-2.1` на
+ * `ValidationRule`) — тіло й відповідь `PUT …/tables/{tableId}/validation-rules/{code}`.
+ */
+export type ValidationRuleDto = Schemas['ValidationRuleDto'];
+export type SaveValidationRuleRequest = Schemas['SaveValidationRuleRequest'];
+export type ValidationSeverity = Schemas['ValidationSeverity'];
+
+/**
+ * Правило доступу до періоду (`ФВ-2.15`, W5.4). Три дії, а не PUT-за-кодом:
+ * сутність не має природного коду (`periodAccessRule.ts`).
+ */
+export type PeriodAccessRuleDto = Schemas['PeriodAccessRuleDto'];
+export type CreatePeriodAccessRuleRequest = Schemas['SavePeriodAccessRuleRequest'];
+export type UpdatePeriodAccessRuleRequest = Schemas['UpdatePeriodAccessRuleRequest'];
+export type PeriodAccessRuleKind = Schemas['PeriodAccessRuleKind'];
+export type OutOfWindowBehavior = Schemas['OutOfWindowBehavior'];
+export type RowKind = Schemas['RowKind'];
+
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
 export type RegistrySourceKind = Schemas['RegistrySourceKind'];
