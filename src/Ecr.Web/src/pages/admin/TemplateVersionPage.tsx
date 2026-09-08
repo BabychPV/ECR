@@ -15,6 +15,13 @@ import { PresentationEditor } from '@/features/templates/PresentationEditor';
 import { SheetEditor } from '@/features/templates/SheetEditor';
 import { deleteSheet, saveSheet } from '@/features/templates/sheetApi';
 import { draftOf, emptyDraft, type SheetDraft } from '@/features/templates/sheet';
+import { TableEditor } from '@/features/templates/TableEditor';
+import { deleteTable, saveTable } from '@/features/templates/tableApi';
+import {
+  draftOf as tableDraftOf,
+  emptyDraft as emptyTableDraft,
+  type TableDraft,
+} from '@/features/templates/table';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -49,6 +56,14 @@ export function TemplateVersionPage(): JSX.Element {
   const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
   const [sheetDraft, setSheetDraft] = useState<SheetDraft | null>(null);
+
+  // ⚠ Чернетка таблиці несе код аркуша окремо від самого `TableDraft`
+  // (W5.1): таблиця адресується ДВОМА кодами (`sheets/{sheetCode}/tables/{code}`),
+  // а форма керує лише другим — код аркуша задає контекст, у якому її
+  // відкрили, і сам не редагується.
+  const [tableDraft, setTableDraft] = useState<{ sheetCode: string; draft: TableDraft } | null>(
+    null,
+  );
 
   const structure = useQuery({
     queryKey: ['template-version', id],
@@ -142,6 +157,32 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
       showDone(t('sheets.deleted'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Запис таблиці (`W5.1`) — другий вертикальний зріз авторства структури
+   * шаблону через API, той самий патерн, що й аркуш вище.
+   */
+  const saveTableMutation = useMutation({
+    mutationFn: (args: { sheetCode: string; draft: TableDraft }) =>
+      saveTable(id, args.sheetCode, args.draft),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setTableDraft(null);
+      showDone(t('tableDef.saved'));
+    },
+    onError: showApiError,
+  });
+
+  /** Видалення таблиці — м'яко, `ФВ-7.6`. */
+  const deleteTableMutation = useMutation({
+    mutationFn: (args: { sheetCode: string; code: string }) =>
+      deleteTable(id, args.sheetCode, args.code),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      showDone(t('tableDef.deleted'));
     },
     onError: showApiError,
   });
@@ -308,11 +349,70 @@ export function TemplateVersionPage(): JSX.Element {
                         </Group>
                       )}
 
+                      {canEditSheets && (
+                        <Group justify="flex-end" mb="xs">
+                          <Button
+                            size="compact-xs"
+                            variant="default"
+                            onClick={() =>
+                              setTableDraft({
+                                sheetCode: sheet.code,
+                                draft: emptyTableDraft(
+                                  sheet.tables.length === 0
+                                    ? 0
+                                    : Math.max(...sheet.tables.map((t2) => t2.ordinal)) + 1,
+                                ),
+                              })
+                            }
+                          >
+                            {t('tableDef.add')}
+                          </Button>
+                        </Group>
+                      )}
+
                       {sheet.tables.map((table) => (
                         <div key={table.id}>
-                          <Text fw={600} mt="sm">
-                            {table.code} · {table.rowMode}
-                          </Text>
+                          <Group gap="xs" mt="sm">
+                            <Text fw={600}>
+                              {localized(table.nameL10n) || table.code}{' '}
+                              <Text span c="dimmed">
+                                ({table.code}) · {table.rowMode}
+                              </Text>
+                            </Text>
+                            {canEditSheets && (
+                              <>
+                                <Button
+                                  size="compact-xs"
+                                  variant="subtle"
+                                  onClick={() =>
+                                    setTableDraft({
+                                      sheetCode: sheet.code,
+                                      draft: tableDraftOf(table),
+                                    })
+                                  }
+                                >
+                                  {t('tableDef.edit')}
+                                </Button>
+                                <Button
+                                  size="compact-xs"
+                                  variant="subtle"
+                                  color="red"
+                                  loading={
+                                    deleteTableMutation.isPending &&
+                                    deleteTableMutation.variables?.code === table.code
+                                  }
+                                  onClick={() =>
+                                    deleteTableMutation.mutate({
+                                      sheetCode: sheet.code,
+                                      code: table.code,
+                                    })
+                                  }
+                                >
+                                  {t('tableDef.delete')}
+                                </Button>
+                              </>
+                            )}
+                          </Group>
                           <Table striped withTableBorder mt="xs">
                             <Table.Thead>
                               <Table.Tr>
@@ -427,6 +527,23 @@ export function TemplateVersionPage(): JSX.Element {
             onChange={setSheetDraft}
             onSubmit={() => saveSheetMutation.mutate(sheetDraft)}
             onCancel={() => setSheetDraft(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        opened={tableDraft !== null}
+        onClose={() => setTableDraft(null)}
+        title={tableDraft?.draft.isNew === true ? t('tableDef.add') : t('tableDef.edit')}
+      >
+        {tableDraft !== null && (
+          <TableEditor
+            draft={tableDraft.draft}
+            disabled={!canEditSheets}
+            saving={saveTableMutation.isPending}
+            onChange={(draft) => setTableDraft({ sheetCode: tableDraft.sheetCode, draft })}
+            onSubmit={() => saveTableMutation.mutate(tableDraft)}
+            onCancel={() => setTableDraft(null)}
           />
         )}
       </Modal>

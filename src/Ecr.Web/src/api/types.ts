@@ -157,6 +157,9 @@ export type SaveTableRelationRequest = Schemas['SaveTableRelationRequest'];
  */
 export type SaveSheetDefRequest = Schemas['SaveSheetDefRequest'];
 
+/** Тіло запиту `PUT .../sheets/{sheetCode}/tables/{code}` (`W5.1`). */
+export type SaveTableDefRequest = Schemas['SaveTableDefRequest'];
+
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
 export type RegistrySourceKind = Schemas['RegistrySourceKind'];

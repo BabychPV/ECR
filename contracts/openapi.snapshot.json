@@ -4156,6 +4156,50 @@
         ],
         "type": "object"
       },
+      "SaveTableDefRequest": {
+        "description": "Налаштування таблиці на аркуші чернетки (`W5.1`).",
+        "properties": {
+          "layoutKind": {
+            "$ref": "#/components/schemas/TableLayoutKind",
+            "description": "Розкладка: як періоди лягають на структуру."
+          },
+          "maxDynamicRows": {
+            "description": "Стеля кількості рядків, якщо таблиця приймає додані користувачем; `null` — без стелі.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва таблиці мовами каталогу.",
+            "type": "object"
+          },
+          "ordinal": {
+            "description": "`null` — нова таблиця стає останньою на аркуші за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowMode": {
+            "$ref": "#/components/schemas/TableRowMode",
+            "description": "Спосіб формування рядків."
+          }
+        },
+        "required": [
+          "nameL10n",
+          "ordinal",
+          "layoutKind",
+          "rowMode",
+          "maxDynamicRows"
+        ],
+        "type": "object"
+      },
       "SaveTableRelationRequest": {
         "description": "Налаштування зв'язку між таблицями (`ФВ-2.12`).",
         "properties": {
@@ -4612,32 +4656,48 @@
       "TableDto": {
         "properties": {
           "code": {
+            "description": "Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`.",
             "type": "string"
           },
           "columns": {
+            "description": "Колонки таблиці в порядку `Ordinal`.",
             "items": {
               "$ref": "#/components/schemas/TemplateColumnDto"
             },
             "type": "array"
           },
           "id": {
+            "description": "Ідентифікатор.",
             "format": "int32",
             "type": "integer"
           },
           "layoutKind": {
-            "$ref": "#/components/schemas/TableLayoutKind"
+            "$ref": "#/components/schemas/TableLayoutKind",
+            "description": "Розкладка: як періоди лягають на структуру."
           },
           "maxDynamicRows": {
+            "description": "Стеля кількості рядків, якщо таблиця приймає додані користувачем.",
             "format": "int32",
             "type": [
               "null",
               "integer"
             ]
           },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва таблиці всіма мовами каталогу (`ФВ-2.1`-подібний зріз, `W5.1`). До\nцього поля тут не було: `GET …/structure` віддавав таблицю без назви,\nбо єдиним її творцем був офлайновий генератор тестових даних, якому підпис\nу веб-формі не був потрібен."
+          },
+          "ordinal": {
+            "description": "Порядок відображення на аркуші; не ідентичність.",
+            "format": "int32",
+            "type": "integer"
+          },
           "rowMode": {
-            "$ref": "#/components/schemas/TableRowMode"
+            "$ref": "#/components/schemas/TableRowMode",
+            "description": "Спосіб формування рядків."
           },
           "rows": {
+            "description": "Рядки таблиці в порядку `Ordinal`.",
             "items": {
               "$ref": "#/components/schemas/TemplateRowDto"
             },
@@ -4647,6 +4707,8 @@
         "required": [
           "id",
           "code",
+          "nameL10n",
+          "ordinal",
           "layoutKind",
           "rowMode",
           "maxDynamicRows",
@@ -10456,6 +10518,231 @@
           }
         },
         "summary": "Записує аркуш чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код аркуша, якому належить таблиця.",
+            "in": "path",
+            "name": "sheetCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Код таблиці.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає таблицю з аркуша чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⛔ Другий вертикальний зріз авторства структури шаблону через API\n(`W5.1`), той самий патерн, що й `sheets/{code}` вище\n(`W5.0`).\n\n⚠ Таблиця адресується ДВОМА кодами — `{sheetCode}/tables/{code}`,\nа не голим кодом версії, як аркуш: код таблиці унікальний лише в межах\nсвого аркуша (void SheetDef.AddTable(TableDef table)),\nтож без коду аркуша в адресі дві таблиці з однаковим кодом на різних\nаркушах були б нерозрізнимі маршрутом. Батько — аркуш — адресується\nсаме своїм кодом, а не ідентифікатором, з тієї самої причини, що й сам\nаркуш у `sheets/{code}`: адресу задає викликач (`D2-147`), а\nідентифікатор аркуша до першого читання структури клієнту невідомий.\n\n⚠ `PUT` за кодом: створення й зміна — одна ідемпотентна дія. Стан\nверсії перевіряє домен: опублікована відхиляє правку сама\n(`ECR-TMPL-0409`, `ФВ-7.1`).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код аркуша, якому належить таблиця.",
+            "in": "path",
+            "name": "sheetCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Код таблиці.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTableDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTableDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveTableDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TableDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує таблицю на аркуші чернетки. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

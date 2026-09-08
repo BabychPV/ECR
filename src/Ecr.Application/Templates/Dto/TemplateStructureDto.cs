@@ -43,8 +43,23 @@ public sealed record SheetDto(
     string? SheetGroup, bool IsMandatory, bool IsVisible,
     IReadOnlyList<TableDto> Tables);
 
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Код — ідентичність таблиці й адреса в <c>PUT …/sheets/{sheetCode}/tables/{code}</c>.</param>
+/// <param name="NameL10n">
+/// Назва таблиці всіма мовами каталогу (`ФВ-2.1`-подібний зріз, `W5.1`). До
+/// цього поля тут не було: <c>GET …/structure</c> віддавав таблицю без назви,
+/// бо єдиним її творцем був офлайновий генератор тестових даних, якому підпис
+/// у веб-формі не був потрібен.
+/// </param>
+/// <param name="Ordinal">Порядок відображення на аркуші; не ідентичність.</param>
+/// <param name="LayoutKind">Розкладка: як періоди лягають на структуру.</param>
+/// <param name="RowMode">Спосіб формування рядків.</param>
+/// <param name="MaxDynamicRows">Стеля кількості рядків, якщо таблиця приймає додані користувачем.</param>
+/// <param name="Columns">Колонки таблиці в порядку <c>Ordinal</c>.</param>
+/// <param name="Rows">Рядки таблиці в порядку <c>Ordinal</c>.</param>
 public sealed record TableDto(
-    int Id, string Code, TableLayoutKind LayoutKind, TableRowMode RowMode,
+    int Id, string Code, LocalizedText NameL10n, int Ordinal,
+    TableLayoutKind LayoutKind, TableRowMode RowMode,
     int? MaxDynamicRows,
     IReadOnlyList<TemplateColumnDto> Columns,
     IReadOnlyList<TemplateRowDto> Rows);

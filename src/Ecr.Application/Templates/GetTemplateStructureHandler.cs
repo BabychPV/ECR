@@ -74,10 +74,17 @@ public sealed class GetTemplateStructureHandler(
             snapshot.TemplateVersionId, snapshot.PresentationRevision, !version.IsStructurallyFrozen, sheets);
     }
 
+    // ⚠ Сигнатура тримає крок за `TableDto` (W5.1: `NameL10n`/`Ordinal`
+    // додано, щоб редактор таблиці міг попередньо заповнити форму зі
+    // структури, а не лише зі свіжого `PUT`). Це єдиний виробник DTO —
+    // конструктор запису вимагає значення для кожного поля, тож зміна форми
+    // `TableDto` без цього рядка просто не збереться.
     private static TableDto Table(TableDef table, IReadOnlyDictionary<int, string> symbols)
         => new(
             table.Id,
             table.Code,
+            table.NameL10n,
+            table.Ordinal,
             table.LayoutKind,
             table.RowMode,
             table.MaxDynamicRows,

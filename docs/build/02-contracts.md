@@ -2587,6 +2587,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/relations/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/sheets/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{code}` | `Template.Edit` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
+| `DELETE` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/projects` | `Document.View` | 1 |
 | `POST` | `/api/v1/projects` | `Project.Manage` | 1 |
 | `GET` | `/api/v1/projects/period-policies` | `Project.Manage` | 1 |

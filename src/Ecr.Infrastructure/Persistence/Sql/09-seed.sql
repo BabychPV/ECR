@@ -1036,7 +1036,34 @@ USING (VALUES
     (N'sheets.visible',                  N'en', N'Visible', 1),
     (N'sheets.visibleHint',              N'en', N'Hidden sheets stay in the structure but do not show on the form.', 1),
     (N'sheets.errCode',                  N'en', N'Give the sheet a code: it is how the sheet is addressed.', 1),
-    (N'sheets.errName',                  N'en', N'Give the sheet a name in at least one language.', 1)
+    (N'sheets.errName',                  N'en', N'Give the sheet a name in at least one language.', 1),
+    -- Редактор таблиць (W5.1) — другий вертикальний зріз авторства структури,
+    -- той самий патерн, що й аркуші вище.
+    (N'tableDef.add',                    N'en', N'Add table', 1),
+    (N'tableDef.edit',                   N'en', N'Edit', 1),
+    (N'tableDef.delete',                 N'en', N'Remove', 1),
+    (N'tableDef.save',                   N'en', N'Save table', 1),
+    (N'tableDef.saved',                  N'en', N'The table has been saved.', 1),
+    (N'tableDef.deleted',                N'en', N'The table has been removed.', 1),
+    (N'tableDef.code',                   N'en', N'Code', 1),
+    (N'tableDef.codeHint',               N'en', N'The address of the table in the API. It cannot be renamed later.', 1),
+    (N'tableDef.name',                   N'en', N'Name', 1),
+    (N'tableDef.nameHint',               N'en', N'Shown to the person filling in the form.', 1),
+    (N'tableDef.layoutKind',             N'en', N'Layout', 1),
+    (N'tableDef.layoutKindHint',         N'en', N'How periods lay out across the table structure.', 1),
+    (N'tableDef.rowMode',                N'en', N'Rows', 1),
+    (N'tableDef.rowModeHint',            N'en', N'Whether rows come from the template or the person filling in the form adds them.', 1),
+    (N'tableDef.maxDynamicRows',         N'en', N'Row limit', 1),
+    (N'tableDef.maxDynamicRowsHint',     N'en', N'Caps how many rows a person can add; leave empty for no limit.', 1),
+    (N'tableDef.layoutMonthsInColumns',  N'en', N'Months in columns', 1),
+    (N'tableDef.layoutMonthsInRows',     N'en', N'Months in rows', 1),
+    (N'tableDef.layoutStatic',           N'en', N'Static (independent of period)', 1),
+    (N'tableDef.layoutPerPeriodInstance', N'en', N'Separate instance per period', 1),
+    (N'tableDef.rowModeFixed',           N'en', N'Fixed by the template', 1),
+    (N'tableDef.rowModeDynamic',         N'en', N'Added by the person filling in the form', 1),
+    (N'tableDef.rowModeMixed',           N'en', N'Fixed plus rows the person adds', 1),
+    (N'tableDef.errCode',                N'en', N'Give the table a code: it is how the table is addressed.', 1),
+    (N'tableDef.errName',                N'en', N'Give the table a name in at least one language.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
