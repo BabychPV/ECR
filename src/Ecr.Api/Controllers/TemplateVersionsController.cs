@@ -135,7 +135,10 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>Структура версії для клієнта. Право <c>Template.View</c>.</summary>
-    /// <remarks>Кешується за ключем <c>v{id}:r{rev}</c> (ФВ-2.5); віддається з <c>ETag</c>.</remarks>
+    /// <remarks>
+    /// Кешується за ключем <c>v{id}:r{rev}</c> (ФВ-2.5, <c>D-16</c>) — але
+    /// лише для ОПУБЛІКОВАНОЇ версії; віддається з <c>ETag</c>.
+    /// </remarks>
     [HttpGet("structure")]
     [ProducesResponseType<TemplateStructureDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status304NotModified)]
@@ -143,14 +146,26 @@ public sealed class TemplateVersionsController(
     {
         var dto = await structure.HandleAsync(id, ct).ConfigureAwait(false);
 
-        // ETag = v{id}:r{rev} — той самий ключ, що й у кеші метаданих (ФВ-2.5).
-        // Одне значення на дві ролі: інвалідація не потрібна ні тут, ні там.
-        var etag = $"\"v{dto.TemplateVersionId}:r{dto.PresentationRevision}\"";
-        Response.Headers[HeaderNames.ETag] = etag;
-
-        if (UiStringResolver.IsNotModified(Request.Headers[HeaderNames.IfNoneMatch], etag))
+        // ⛔ `D-16` каже «опублікована версія структурно незмінна» — і саме
+        // тому кешувати за `PresentationRevision` безпечно: воно піднімається
+        // на КОЖНУ зміну, яку опублікована версія взагалі може зазнати. Але
+        // `W5` додав структурні правки ЧЕРНЕТКИ (`PUT …/sheets`,
+        // `…/tables`, `…/columns`…) — вони НЕ підіймають `PresentationRevision`
+        // (це не презентаційна правка), тож `ETag` чернетки лишається
+        // «дійсним» для клієнта, хоча структура за ним уже інша. Знайдено
+        // живим прогоном (`W5.9`): аркуш, щойно доданий через `PUT`, зникав
+        // із наступного ж `GET` — 304 повертав старе тіло з довіри до ETag,
+        // якого структурний запис не міняв. Кеш чинний лише там, де інваріант
+        // `D-16` і досі правда, — на опублікованій версії.
+        if (!dto.IsEditable)
         {
-            return StatusCode(StatusCodes.Status304NotModified);
+            var etag = $"\"v{dto.TemplateVersionId}:r{dto.PresentationRevision}\"";
+            Response.Headers[HeaderNames.ETag] = etag;
+
+            if (UiStringResolver.IsNotModified(Request.Headers[HeaderNames.IfNoneMatch], etag))
+            {
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
         }
 
         return dto;

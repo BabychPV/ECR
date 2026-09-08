@@ -11870,7 +11870,7 @@
     },
     "/api/v1/template-versions/{id}/structure": {
       "get": {
-        "description": "Кешується за ключем `v{id}:r{rev}` (ФВ-2.5); віддається з `ETag`.",
+        "description": "Кешується за ключем `v{id}:r{rev}` (ФВ-2.5, `D-16`) — але\nлише для ОПУБЛІКОВАНОЇ версії; віддається з `ETag`.",
         "parameters": [
           {
             "in": "path",
