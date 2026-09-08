@@ -188,6 +188,17 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
         {
             modelBuilder.HasSequence<long>("TableInstanceSeq", "doc").StartsAt(1).IncrementsBy(1);
             modelBuilder.HasSequence<long>("TableRowSeq", "doc").StartsAt(1).IncrementsBy(1);
+
+            // ⛔ Послідовності результатів розрахунку НЕ БУЛО, хоча
+            // `CalculationResultStore.ReserveResultIdRangeAsync` читає її
+            // поіменно через `sp_sequence_get_range`. Відсутність не мала
+            // симптому рівно тому, що результат методології не записувався
+            // ніколи: прив'язку `cfg.CalculationBinding` не створювало ніщо
+            // (директива №09, `W6` §3), тож до цього рядка коду не доходив
+            // жоден прогін. Перша ж заведена з нуля методологія падала
+            // «Invalid object name 'calc.CalculationResultSeq'» — уже після
+            // того, як усі числа пораховані.
+            modelBuilder.HasSequence<long>("CalculationResultSeq", "calc").StartsAt(1).IncrementsBy(1);
         }
     }
 

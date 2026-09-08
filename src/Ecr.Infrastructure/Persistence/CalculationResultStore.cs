@@ -204,32 +204,40 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
     /// за часом» показав би суміш: половина чисел від нової версії методології,
     /// половина від старої, і жодної ознаки на екрані.
     ///
-    /// ⚠ Приєднання до <c>calc.CalculationRun</c>, а не окремий запит за
-    /// актуальним прогоном: прогонів на період може бути кілька (кожен документ
-    /// перераховується окремо), і «актуальний прогін періоду» — не одне число.
+    /// ⚠ Актуальність питається ПІДЗАПИТОМ (<c>EXISTS</c>), а не з'єднанням:
+    /// прогонів на період може бути кілька (кожен документ перераховується
+    /// окремо), тож «актуальний прогін періоду» — не одне число, а з'єднання з
+    /// проєкцією в тип, на полях якого потім сортують, EF перекласти не може
+    /// взагалі.
     /// </remarks>
     public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct)
-        => await db.CalculationResults
+    {
+        var rows = await db.CalculationResults
             .AsNoTracking()
-            .Where(r => r.DocumentId == documentId && r.PeriodKey == periodKey)
-            .Join(
-                db.CalculationRuns.AsNoTracking()
-                    .Where(run => run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus),
-                r => r.CalculationRunId,
-                run => run.Id,
-                (r, _) => new CalculationResultRow(
-                    r.MethodologyVersionId,
-                    r.SourceRowKey,
-                    r.OutputCode,
-                    r.Value,
-                    r.UnitId,
-                    r.SubstanceEntryId))
+            .Where(r => r.DocumentId == documentId
+                        && r.PeriodKey == periodKey
+                        && db.CalculationRuns.Any(
+                            run => run.Id == r.CalculationRunId
+                                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus))
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
             .Take(MaxResults)
+            .Select(r => new
+            {
+                r.MethodologyVersionId,
+                r.SourceRowKey,
+                r.OutputCode,
+                r.Value,
+                r.UnitId,
+                r.SubstanceEntryId,
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return rows.ConvertAll(r => new CalculationResultRow(
+            r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));
+    }
 
     /// <summary>Наступний ідентифікатор кроку трейсу.</summary>
     private async Task<long> NextStepIdAsync(CancellationToken ct)
