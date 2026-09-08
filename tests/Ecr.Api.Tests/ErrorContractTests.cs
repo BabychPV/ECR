@@ -155,6 +155,27 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Дублікат_ключа_рядка_повертає_409_а_не_422()
+    {
+        // ⛔ ECR-ROW-0409 доїжджав клієнтові як 422 (Q-150): цифри коду
+        // кажуть 409, але він падав у загальний арм BusinessRuleException,
+        // не маючи власного — так само, як PasswordChangeRequired/AccountLocked/
+        // Archiving до того, як для них завели окремі арми.
+        var exception = new Ecr.Application.Errors.BusinessRuleException(
+            ErrorCodes.RowDuplicate, "Рядок із ключем R1 у цій таблиці вже існує.");
+
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var (status, code, _, _) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+
+        Assert.Equal(409, status);
+        Assert.Equal(ErrorCodes.RowDuplicate, code);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.8")]

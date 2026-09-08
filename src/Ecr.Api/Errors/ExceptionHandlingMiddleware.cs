@@ -212,7 +212,7 @@ public sealed partial class ExceptionHandlingMiddleware(
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         // ⚠ Каталог кодує HTTP у самому коді (`ECR-<ДОМЕН>-<HTTP><порядковий>`),
-        // і три коди виходять за межі 422. Розбирати номер із рядка було б
+        // і чотири коди виходять за межі 422. Розбирати номер із рядка було б
         // спритно і крихко: `4223` — це 422, а `0503` — 503, і одна помилка в
         // правилі розбору тихо переназначила б статус усьому каталогу.
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PasswordChangeRequired =>
@@ -223,6 +223,14 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         BusinessRuleException e when e.ErrorCode is ErrorCodes.Archiving or ErrorCodes.SourceUnavailable =>
             (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
+
+        // ⛔ `ECR-ROW-0409` доїжджав клієнтові як 422: код називає конфлікт
+        // ключа рядка (уже існує, вичерпано межу, таблиця не приймає нових
+        // рядків), а загальний арм нижче віддавав його як помилку введення.
+        // Клієнт, що читає HTTP-статус раніше за код (типовий шаблон обробки
+        // помилок сітки), бачив «дані невірні» замість «спробуйте інший ключ».
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RowDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         // ⚠ Відмова джерела в автентифікації сьогодні доїжджає лише у фонову
         // задачу (збір ставиться в чергу, `202`), і до HTTP не доходить. Арм
