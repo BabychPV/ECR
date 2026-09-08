@@ -93,6 +93,89 @@ public sealed class TemplateBuilder
         return row;
     }
 
+    /// <summary>Додає формулу до таблиці.</summary>
+    /// <param name="table">Таблиця, якій належить формула.</param>
+    /// <param name="expression">Текст виразу — <b>сирий</b>, як його зберігає API.</param>
+    /// <param name="scope">Область дії; за замовчуванням — колонка.</param>
+    /// <param name="column">Колонка, на яку пишеться формула (для <c>Column</c>).</param>
+    /// <param name="row">Рядок, на який пишеться формула (для <c>Row</c>).</param>
+    /// <param name="dialect">Діалект; за замовчуванням — шаблонний.</param>
+    /// <remarks>
+    /// ⛔ Прив'язка йде через <see cref="FormulaDef.AssignColumn"/> і
+    /// <see cref="FormulaDef.AssignRow"/> — тобто через ту саму точку входу,
+    /// якою користується API (<c>W5.3</c>). Тести виставляли
+    /// <c>ColumnDefId</c> рефлексією, поки публічного сеттера не існувало; це
+    /// давало формулу у формі, якої в бою не буває, і перевірка тримала
+    /// власну правду про те, як виглядає прив'язана формула.
+    ///
+    /// ⚠ Ідентифікатор роздається з того самого лічильника, що й решті
+    /// сутностей: <c>FormulaDefId</c> — ключ ребра в графі залежностей, і без
+    /// нього перевірити порядок обчислення не було б чим.
+    /// </remarks>
+    public FormulaDef Formula(
+        TableDef table,
+        string expression,
+        FormulaScope scope = FormulaScope.Column,
+        ColumnDef? column = null,
+        RowDef? row = null,
+        ExpressionDialect dialect = ExpressionDialect.Template)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var formula = new FormulaDef(table.Id, scope, expression, dialect);
+        SetId(formula, _nextId++);
+
+        if (column is not null)
+        {
+            formula.AssignColumn(column.Id);
+        }
+
+        if (row is not null)
+        {
+            formula.AssignRow(row.Id);
+        }
+
+        table.AddFormula(formula);
+        return formula;
+    }
+
+    /// <summary>
+    /// Складає <see cref="TemplateVersion"/> з уже доданих аркушів.
+    /// </summary>
+    /// <param name="templateId">Шаблон, якому належить версія.</param>
+    /// <param name="version">Номер версії.</param>
+    /// <param name="createdByUserId">Автор.</param>
+    /// <param name="utcNow">Момент створення в UTC.</param>
+    /// <remarks>
+    /// ⛔ Аркуші додаються публічним <see cref="TemplateVersion.AddSheet"/>, а
+    /// не підстановкою приватного поля <c>_sheets</c> рефлексією. Різниця не
+    /// косметична: підстановка обходила перевірку унікальності коду аркуша і
+    /// давала граф, якого в бою не існує — саме те, у чому директива №09 §8.2
+    /// звинувачує <c>PublishTemplateVersionTests</c>.
+    ///
+    /// ⚠ Версія тут — ЧЕРНЕТКА. Публікацію робить сам тест: інакше будівник
+    /// вирішував би за нього, у якому стані перевіряти правило.
+    /// </remarks>
+    public TemplateVersion Version(
+        int templateId = 1,
+        string version = "1.0.0.0",
+        int createdByUserId = 7,
+        DateTime? utcNow = null)
+    {
+        var result = new TemplateVersion(
+            templateId, version, createdByUserId,
+            utcNow ?? new DateTime(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc));
+
+        SetId(result, TemplateVersionId);
+
+        foreach (var sheet in _sheets)
+        {
+            result.AddSheet(sheet);
+        }
+
+        return result;
+    }
+
     /// <summary>Позначає рядок видаленим (soft delete, ФВ-7.6).</summary>
     public static void Delete(RowDef row)
     {

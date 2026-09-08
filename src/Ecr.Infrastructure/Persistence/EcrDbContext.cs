@@ -179,11 +179,16 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
         // одним проходом SqlBulkCopy (B02 §2.3). CACHE 1000 — компроміс між
         // круглими втратами при перезапуску і зверненнями до системних таблиць.
         //
-        // Оголошуються лише для SQL Server. Це не умовна модель «під тести»:
-        // послідовність тут — фізичний об'єкт SQL Server, який читається через
-        // sp_sequence_get_range, і в провайдера без послідовностей (SQLite,
-        // на якому йдуть не-Integration тести) вона не має ні реалізації, ні
-        // сенсу — EF просто падає на CREATE SEQUENCE.
+        // Оголошуються лише для SQL Server. Послідовність тут — фізичний
+        // об'єкт SQL Server, який читається через sp_sequence_get_range, і в
+        // провайдера без послідовностей вона не має ні реалізації, ні сенсу:
+        // EF просто падає на CREATE SEQUENCE.
+        //
+        // ⚠ Другого провайдера в дереві НЕМАЄ. Тут стояло «SQLite, на якому
+        // йдуть не-Integration тести» — і це була неправда: `UseSqlite` не мав
+        // у `tests/` жодного місця виклику, а посилання на пакет висіло в
+        // `Ecr.TestKit.csproj` мертвим. Обидва прибрано. Умова лишається
+        // навмисно: вона описує ФІЗИЧНУ межу об'єкта, а не режим тестів.
         if (Database.IsSqlServer())
         {
             modelBuilder.HasSequence<long>("TableInstanceSeq", "doc").StartsAt(1).IncrementsBy(1);

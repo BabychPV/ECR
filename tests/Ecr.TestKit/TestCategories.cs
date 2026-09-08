@@ -25,4 +25,18 @@ public static class TestCategories
 
     /// <summary>Архітектурні правила — блокуючі в CI.</summary>
     public const string Architecture = "Architecture";
+
+    /// <summary>Назва трейта «чим саме є ця перевірка».</summary>
+    public const string Check = "Check";
+
+    /// <summary>
+    /// Перевірка читає ТЕКСТ вихідних файлів і не виконує застосунок.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Позначка існує, щоб зелений результат такої перевірки не рахували за
+    /// підтвердження поведінки: статичний сторож лишається зеленим під будь-якою
+    /// мутацією, яка зберігає текст. Поведінку доводять сценарні й інтеграційні
+    /// тести (директива №09 §8.2).
+    /// </remarks>
+    public const string Static = "Static";
 }

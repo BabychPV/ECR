@@ -79,11 +79,28 @@ public sealed class CellsControllerTests(SqlServerFixture sql)
         // входу (`A7-09`) — на кожну спробу і без жодного сліду.
         Assert.NotEqual(HttpStatusCode.BadRequest, response.StatusCode);
 
-        // Документа з таким номером немає, і це правильна відповідь: вона про
-        // ДАНІ, а не про форму запиту.
-        Assert.Contains(
-            response.StatusCode,
-            new[] { HttpStatusCode.NotFound, HttpStatusCode.Forbidden, HttpStatusCode.UnprocessableEntity });
+        // ⛔ Тут стояло `Assert.Contains(status, [NotFound, Forbidden,
+        // UnprocessableEntity])` — три СЕМАНТИЧНО РІЗНІ відмови, злиті в одне
+        // твердження, яке не вміє їх розрізнити (директива №09 §8.2). «Немає
+        // такої адреси», «немає права» і «дані не проходять правило» — це три
+        // різні екрани для користувача і три різні дії у відповідь; перевірка,
+        // якій байдуже, котра з них прийшла, не помітила б підміни жодної на
+        // жодну.
+        //
+        // ⚠ Відповідь тут ОДНОЗНАЧНА і не залежить від прав: `CellsController.Patch`
+        // першою дією резолвить `TableInstanceId` (`RowStore.ResolveTableInstanceAsync`),
+        // екземпляра `1` у базі немає, і це `NotFoundException("ECR-DOC-0404")` —
+        // ДО будь-якої перевірки прав і будь-якої валідації. Тобто 403 і 422
+        // тут не є припустимими відповідями: поява кожної з них означала б, що
+        // порядок перевірок у контролері змінився і адреса тепер витікає тому,
+        // хто прав не має.
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.False(string.IsNullOrWhiteSpace(text), $"Порожнє тіло на {response.StatusCode}: {app.ErrorsText}");
+
+        var problem = JsonDocument.Parse(text).RootElement;
+        Assert.Equal("ECR-DOC-0404", problem.GetProperty("errorCode").GetString());
     }
 
     [Fact]

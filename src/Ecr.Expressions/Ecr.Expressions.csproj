@@ -8,8 +8,15 @@
     <ProjectReference Include="..\Ecr.Domain\Ecr.Domain.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="NCalcSync" />
-  </ItemGroup>
+  <!--
+    ⛔ Посилання на `NCalcSync` прибрано: `using NCalc` не мав у `src/` жодного
+    місця виклику. Обчислювач тут власний (`Evaluation/Evaluator.cs` поверх
+    `IEvaluationArithmetic`), а NCalc згадується лише в поясненнях до
+    `Legacy`-семантики. Мертве посилання коштувало дорожче за нуль: воно
+    обіцяло, що числа рахує саме той пакет, який стоїть у чинній системі.
+
+    ⚠ Живий NCalc 1.3.8 лишається рівно в одному місці — `tests/Ecr.Legacy.Probe`
+    (вимірювальний стенд, у поставку не входить). Це інший пакет і інша версія.
+  -->
 
 </Project>
