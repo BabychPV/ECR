@@ -42,7 +42,14 @@ public sealed class FormulaDefConfiguration : IEntityTypeConfiguration<FormulaDe
         builder.Property(x => x.IsSnapshot).HasDefaultValue(false, "DF_Formula_Snap");
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_Formula_Del");
 
-        builder.HasOne<TableDef>().WithMany().HasForeignKey(x => x.TableDefId)
+        // ⛔ `.WithMany(t => t.Formulas)` обов'язково: інакше `TableDef.Formulas`
+        // лишається неоголошеною навігацією, і EF заводить ДРУГИЙ, тіньовий
+        // зовнішній ключ (`TableDefId1`) саме під неї — з ним публікація
+        // (яка читає структуру через цю навігацію) і кеш метаданих (який читає
+        // напряму за `TableDefId`) бачать різні формули за однакового запису
+        // (`Q-163`). Той самий прийом уже застосований нижче для
+        // `RegistryDef.Fields`.
+        builder.HasOne<TableDef>().WithMany(t => t.Formulas).HasForeignKey(x => x.TableDefId)
                .HasConstraintName("FK_Formula_Table");
     }
 }
