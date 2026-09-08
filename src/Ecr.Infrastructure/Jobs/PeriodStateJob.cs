@@ -38,6 +38,12 @@ public sealed class PeriodStateJob(
     /// Винесено окремо від <see cref="ExecuteAsync"/> навмисно: рішення про
     /// стан періоду має бути перевіреним без бази, бо саме воно вирішує, чи
     /// можна редагувати документ.
+    ///
+    /// ⛔ Саме рішення живе тепер у домені (<see cref="PeriodStateCalculator.Plan"/>),
+    /// а не тут: доки воно лежало в <c>Ecr.Infrastructure</c>, прикладний шар
+    /// не мав до нього шляху, і активація проєкту не могла відкрити період
+    /// сама — вона чекала наступного годинного прогону (директива №09 `W8`,
+    /// `S-11`). Тут лишився перехідник до вже наявних викликів.
     /// </remarks>
     public static IReadOnlyList<Transition> Plan(
         IReadOnlyList<Period> periods,
@@ -45,35 +51,11 @@ public sealed class PeriodStateJob(
         TimeZoneInfo siteTimeZone,
         PeriodStateCalculator calculator)
     {
-        ArgumentNullException.ThrowIfNull(periods);
         ArgumentNullException.ThrowIfNull(calculator);
 
-        var transitions = new List<Transition>();
-
-        foreach (var period in periods)
-        {
-            var target = calculator.Calculate(period, utcNow, siteTimeZone);
-
-            // Уже в цільовому стані — не чіпаємо. Повторний запуск задачі має
-            // бути безслідним: інакше StateChangedAt оновлювався б щогодини і
-            // журнал перестав би відповідати, коли період справді змінився.
-            if (target == period.State)
-            {
-                continue;
-            }
-
-            // ⚠ Назад задача не переводить НІКОЛИ. `Closed → Grace` — виключно
-            // рішення адміністратора через Reopen; збій розрахунку не має
-            // тихо відкривати закритий період.
-            if (period.State == PeriodState.Closed)
-            {
-                continue;
-            }
-
-            transitions.Add(new Transition(period, target));
-        }
-
-        return transitions;
+        return [.. calculator
+            .Plan(periods, utcNow, siteTimeZone)
+            .Select(t => new Transition(t.Period, t.Target))];
     }
 
     /// <inheritdoc />
