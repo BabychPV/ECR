@@ -99,6 +99,63 @@ public sealed class CascadeRecalculationTests
         await _metadata.DidNotReceiveWithAnyArgs().GetAsync(default, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Формула_додана_після_введення_даних_не_потрапляє_в_жоден_dirty_set()
+    {
+        // ⛔ Найтихіший випадок з усіх: формулу додали в шаблон ПІСЛЯ того, як
+        // дані вже введені. Її залежностей у графі ще немає, і жодна правка
+        // комірки її не зачепить — тобто інкрементний шлях не перерахує її
+        // НІКОЛИ, хоч би скільки разів правили дані.
+        Arrange(jan: 10m, feb: 5m, withDependencies: false);
+
+        var written = await Service()
+            .RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        Assert.Equal(0, written);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Повний_перерахунок_рахує_формулу_якої_немає_в_жодному_dirty_set()
+    {
+        // ⛔ Той самий шаблон, що й у тесті вище: формула, до якої
+        // інкрементний шлях не дотягується жодним насінням. Повний
+        // перерахунок мусить порахувати її саме тому, що бере формули з
+        // ПЛАНУ, а не з насіння.
+        Arrange(jan: 10m, feb: 5m, withDependencies: false);
+
+        var written = await Service()
+            .RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(1, written);
+
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(_totalId, upsert.Address.ColumnDefId);
+        Assert.Equal(15m, upsert.Value.ValueNumeric);
+        Assert.True(upsert.Value.IsCalculated);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Повний_перерахунок_документа_без_екземплярів_нічого_не_читає()
+    {
+        // ⚠ Документа за цей період немає — рахувати нема де. Це не помилка:
+        // прогін запускають і на документ, у якому за період ще нічого не
+        // заведено.
+        Arrange(jan: 10m, feb: 5m);
+        _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var written = await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(0, written);
+        await _metadata.DidNotReceiveWithAnyArgs().GetAsync(default, default);
+    }
+
     /// <summary>Змінена комірка першого рядка в заданій колонці.</summary>
     private static DirtySet Dirty(int columnDefId)
     {
@@ -127,7 +184,13 @@ public sealed class CascadeRecalculationTests
     /// <summary>
     /// Таблиця з двома місяцями і підсумком; підсумок — формула колонки.
     /// </summary>
-    private void Arrange(decimal jan, decimal feb)
+    /// <param name="jan">Значення січня.</param>
+    /// <param name="feb">Значення лютого.</param>
+    /// <param name="withDependencies">
+    /// <c>false</c> — граф залежностей формули порожній: саме так виглядає
+    /// формула, додана в шаблон після того, як дані вже введені.
+    /// </param>
+    private void Arrange(decimal jan, decimal feb, bool withDependencies = true)
     {
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("Water");
@@ -174,9 +237,12 @@ public sealed class CascadeRecalculationTests
         // ⚠ Граф — саме той, який зберігає публікація: формула підсумку
         // залежить від двох місячних колонок того самого рядка.
         _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(
-        [
-            FormulaDependency.ForFormula(_formulaId, 0, _table.Id, "7001001", _janId, null, null, 0),
-            FormulaDependency.ForFormula(_formulaId, 0, _table.Id, "7001001", _febId, null, null, 1),
-        ]);
+            withDependencies
+                ?
+                [
+                    FormulaDependency.ForFormula(_formulaId, 0, _table.Id, "7001001", _janId, null, null, 0),
+                    FormulaDependency.ForFormula(_formulaId, 0, _table.Id, "7001001", _febId, null, null, 1),
+                ]
+                : []);
     }
 }

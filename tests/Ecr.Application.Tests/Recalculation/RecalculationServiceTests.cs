@@ -126,4 +126,43 @@ public sealed class RecalculationServiceTests
         Assert.Equal(first, second);
         Assert.Equal([1, 2, 3], first);
     }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Усі_формули_плану_віддаються_в_порядку_обчислення()
+    {
+        // ⛔ Формула 7 не має ЖОДНОГО ребра: у шаблоні вона є, а в графі — ні.
+        // Через `DependentsOf`/`DependentsOfFormula` до неї не дотягнутися
+        // нічим, бо обидва починаються з насіння.
+        var plan = new RecalculationPlan();
+        plan.Declare(30, evaluationOrder: 2);
+        plan.Declare(10, evaluationOrder: 0);
+        plan.Declare(7, evaluationOrder: 1);
+        plan.DependsOnCell(30, Cell(1001, 11));
+        plan.DependsOnCell(10, Cell(1001, 11));
+
+        var dirty = new DirtySet();
+        dirty.Add(Cell(1001, 11));
+
+        Assert.DoesNotContain(7, Service().Plan(dirty, plan));
+
+        // ⚠ Порядок — той самий, що й в інкрементному шляху: узятий із
+        // публікації, а не з порядку оголошення.
+        Assert.Equal([10, 7, 30], plan.AllFormulas());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.5")]
+    public void Порядок_усіх_формул_детермінований_при_однакових_порядках_обчислення()
+    {
+        // ⚠ Порядок обчислення НЕ унікальний, а обхід словника не має
+        // гарантованого порядку: без другого ключа сортування два прогони на
+        // тих самих даних могли б писати комірки в різній послідовності.
+        var plan = new RecalculationPlan();
+        plan.Declare(50, evaluationOrder: 0);
+        plan.Declare(20, evaluationOrder: 0);
+        plan.Declare(40, evaluationOrder: 0);
+
+        Assert.Equal([20, 40, 50], plan.AllFormulas());
+    }
 }
