@@ -286,12 +286,17 @@ function ConvertTo-HashtableDeep {
 
 # Об'єднання списку рядків без дублікатів, з ЗБЕРЕЖЕННЯМ наявних елементів.
 function Merge-StringList {
-    param($Existing, [string[]] $Additional)
+    # ⛔ `-Obsolete` існує тому, що злиття, яке лише ДОДАЄ, робить розширення
+    # прав неможливим: правило, записане минулим прогоном, лежить у файлі
+    # користувача вічно. Саме так `Edit(docs/**)` пережив видачу прав на
+    # `docs/build/**` і продовжував блокувати виконавця.
+    param($Existing, [string[]] $Additional, [string[]] $Obsolete = @())
 
     $list = New-Object System.Collections.ArrayList
     foreach ($item in @($Existing)) {
         if ($null -ne $item -and ([string]$item).Trim() -ne '') {
             $s = [string]$item
+            if ($Obsolete -contains $s) { continue }
             if (-not $list.Contains($s)) { [void] $list.Add($s) }
         }
     }
@@ -373,11 +378,38 @@ if ($Node -eq 'PK1') {
         'Write(docs/build/**)'
     )
     $allowList = @()
+    $obsoleteDeny = @()
 } else {
     # Виконавець не пише документацію, правила процесу і власні права.
+    #
+    # ⛔ ЗАБОРОНА НІКОЛИ НЕ НАКРИВАЄ КАТАЛОГ, УСЕРЕДИНІ ЯКОГО Є ДОЗВОЛЕНЕ.
+    # Тут стояло `Edit(docs/**)` плюс виняток `allow: Edit(docs/build/**)` і
+    # коментар «allow має вищий приоритет за deny». Це припущення я записав,
+    # не перевіривши, і воно хибне: у Claude Code **deny перемагає allow**.
+    # Наслідок був не «виняток не спрацював», а гірший — виконавець отримував
+    # відмову інструмента на каталог, який CLAUDE.md, git-хук і сам цей
+    # скрипт одноголосно вважали його зоною. Тобто відмова виглядала як збій
+    # середовища, а не як правило, і діагностика пішла хибним шляхом
+    # (я радив перезапуск сесії — він би НЕ допоміг).
+    #
+    # Тому кожен сусід `docs/build/` перелічений окремо. Ціна відома і
+    # прийнята: НОВИЙ підкаталог `docs/` тут не з'явиться сам, і для
+    # інструмента виявиться дозволеним. Це не дірка, бо остаточний бар'єр —
+    # `.githooks/pre-commit`, який працює за deny-списком і перечитується
+    # НА КОЖНОМУ коміті. Розподіл ролей свідомий:
+    #   settings.json — рання підказка, кешується на старті сесії;
+    #   pre-commit    — бар'єр, кешу не має, вирішує остаточно.
     $denyList = @(
-        'Edit(docs/**)',
-        'Write(docs/**)',
+        'Edit(docs/sync/**)',
+        'Write(docs/sync/**)',
+        'Edit(docs/tz/**)',
+        'Write(docs/tz/**)',
+        'Edit(docs/architecture/**)',
+        'Write(docs/architecture/**)',
+        'Edit(docs/reference/**)',
+        'Write(docs/reference/**)',
+        'Edit(docs/CHECKSUMS.txt)',
+        'Write(docs/CHECKSUMS.txt)',
         'Edit(CLAUDE.md)',
         'Write(CLAUDE.md)',
         'Edit(.githooks/**)',
@@ -393,18 +425,20 @@ if ($Node -eq 'PK1') {
         'Bash(gh pr review:*)',
         'Edit(scripts/**)'
     )
-    # Винятки із заборони docs/**: власні журнали виконавця. `docs/build/**`
+    # ⚠ Це НЕ винятки із заборони — заборони на `docs/**` більше немає.
+    # Записи лишені як явна декларація зони виконавця: `docs/build/**`
     # (questions.md, decisions.md, roadmap.md, progress.md, problems.md) —
     # права видано людиною 2026-09-08; доти PK2 не міг закрити ВЛАСНИЙ запис.
-    # Плюс PK2-LOG.md на гілці sync. PK2 мусить
-    # мати змогу писати в них — інакше журнал бреше про стан.
-    # allow має вищий приоритет за deny, тому виняток працює.
+    # Плюс PK2-LOG.md на гілці sync. Працюють вони самі по собі, а не
+    # перемагаючи deny, — і саме тому працюють.
     $allowList = @(
         'Edit(docs/build/**)',
         'Write(docs/build/**)',
         'Edit(PK2-LOG.md)',
         'Write(PK2-LOG.md)'
     )
+    # Правила минулих прогонів, які треба ПРИБРАТИ з файла користувача.
+    $obsoleteDeny = @('Edit(docs/**)', 'Write(docs/**)')
 }
 
 if (-not $settings.ContainsKey('permissions') -or -not ($settings['permissions'] -is [System.Collections.IDictionary])) {
@@ -414,16 +448,37 @@ $perm = $settings['permissions']
 
 $existingDeny = $null
 if ($perm.ContainsKey('deny')) { $existingDeny = $perm['deny'] }
-$perm['deny'] = Merge-StringList -Existing $existingDeny -Additional $denyList
+$denyBefore = @(@($existingDeny) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+$perm['deny'] = Merge-StringList -Existing $existingDeny -Additional $denyList -Obsolete $obsoleteDeny
 Write-Ok ("permissions.deny: {0} правил" -f @($perm['deny']).Count)
 foreach ($rule in @($perm['deny'])) { Write-Host "             deny  $rule" -ForegroundColor DarkGray }
 
+$removed = @($denyBefore | Where-Object { @($perm['deny']) -notcontains $_ })
+foreach ($rule in $removed) { Write-Host "             ЗНЯТО deny  $rule" -ForegroundColor Yellow }
+
+$allowBefore = @()
+if ($perm.ContainsKey('allow')) {
+    $allowBefore = @(@($perm['allow']) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+}
 if ($allowList.Count -gt 0) {
-    $existingAllow = $null
-    if ($perm.ContainsKey('allow')) { $existingAllow = $perm['allow'] }
-    $perm['allow'] = Merge-StringList -Existing $existingAllow -Additional $allowList
+    $perm['allow'] = Merge-StringList -Existing $perm['allow'] -Additional $allowList
     Write-Ok ("permissions.allow: {0} правил" -f @($perm['allow']).Count)
     foreach ($rule in @($perm['allow'])) { Write-Host "             allow $rule" -ForegroundColor DarkGray }
+}
+
+# ⛔ Права Claude Code читаються ОДИН РАЗ на старті сесії. Отже цей скрипт,
+# запущений усередині вже живої сесії, міняє файл на диску — і не міняє
+# нічого в тому процесі, який його запустив. Без цього попередження зміна
+# прав виглядає як «права видано, а інструмент відмовляє», і діагностика
+# йде не туди: саме це й сталося 2026-09-08 на вузлі PK2.
+$rulesChanged = ($removed.Count -gt 0) -or
+    (@($perm['deny']).Count -ne $denyBefore.Count) -or
+    (($allowList.Count -gt 0) -and (@($perm['allow']).Count -ne $allowBefore.Count))
+if ($rulesChanged) {
+    Write-Host ''
+    Write-Host '  ⛔ ПРАВИЛА ПРАВ ЗМІНИЛИСЯ. Перезапусти сесію Claude Code.' -ForegroundColor Yellow
+    Write-Host '     Права читаються на старті сесії; цей процес їх не перечитає.' -ForegroundColor Yellow
+    Write-Host '     Без перезапуску інструмент відмовлятиме попри новий дозвіл.' -ForegroundColor Yellow
 }
 
 $json = $settings | ConvertTo-Json -Depth 10
