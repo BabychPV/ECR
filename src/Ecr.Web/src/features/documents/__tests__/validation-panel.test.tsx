@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import type { ValidationMessageDto } from '@/api/types';
+import type { ValidationFindingDto } from '@/api/types';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 
 /**
@@ -16,16 +16,17 @@ import { ValidationPanel } from '@/features/documents/ValidationPanel';
  * ⚠ Каталог рядків тут не завантажений, тому підписи приходять ключами в
  * `⟦…⟧`. Перевіряються ДАНІ: адреса рядка, код правила, текст.
  */
-const Message = (over: Partial<ValidationMessageDto> = {}): ValidationMessageDto => ({
+const Message = (over: Partial<ValidationFindingDto> = {}): ValidationFindingDto => ({
   severity: 'Error',
   ruleCode: 'CAP',
   message: 'Volume is over the cap',
   rowKey: 'R1',
   columnCode: null,
+  blocksSave: true,
   ...over,
 });
 
-function Panel(props: { messages: readonly ValidationMessageDto[] | null }): JSX.Element {
+function Panel(props: { messages: readonly ValidationFindingDto[] | null }): JSX.Element {
   return (
     <MantineProvider>
       <ValidationPanel messages={props.messages} />

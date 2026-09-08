@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { Alert, Badge, Group, Stack, Table, Text } from '@mantine/core';
-import type { ValidationMessageDto } from '@/api/types';
+import type { ValidationFindingDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 
 /** Що показувати в панелі зауважень. */
@@ -13,7 +13,7 @@ export interface ValidationPanelProps {
    * напис під документом, якого ніхто не перевіряв, — це та сама неправда, що
    * й порожній дашборд замість збою (`A7-04`).
    */
-  messages: readonly ValidationMessageDto[] | null;
+  messages: readonly ValidationFindingDto[] | null;
 }
 
 /**

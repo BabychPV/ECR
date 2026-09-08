@@ -7043,6 +7043,50 @@
         ],
         "type": "object"
       },
+      "ValidationFindingDto": {
+        "description": "Одне зауваження перевірки.",
+        "properties": {
+          "blocksSave": {
+            "description": "Чи блокує збереження.",
+            "type": "boolean"
+          },
+          "columnCode": {
+            "description": "Колонка; `null` — зауваження до рядка.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "message": {
+            "description": "Текст, уже локалізований.",
+            "type": "string"
+          },
+          "rowKey": {
+            "description": "Рядок; `null` — зауваження до таблиці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ruleCode": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Рівень: `Error`, `Warning`, `Info`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "ruleCode",
+          "message",
+          "rowKey",
+          "columnCode",
+          "blocksSave"
+        ],
+        "type": "object"
+      },
       "ValidationMessageDto": {
         "description": "Повідомлення валідації.",
         "properties": {
@@ -7093,7 +7137,7 @@
           "messages": {
             "description": "Зауваження ВСІХ рівнів.",
             "items": {
-              "$ref": "#/components/schemas/ValidationMessageDto"
+              "$ref": "#/components/schemas/ValidationFindingDto"
             },
             "type": "array"
           },
