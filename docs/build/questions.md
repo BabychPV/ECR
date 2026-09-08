@@ -197,7 +197,7 @@
 | Q-149 | CONFLICT | провал фонового перерахунку не видно ніде, крім `itg.JobProgress`: клієнт отримав `200`, каскад формул не порахувався | OPEN |
 | Q-150 | CONFLICT | `ECR-ROW-0409` віддається як HTTP 422, хоча цифри коду кодують 409 | RESOLVED |
 | Q-151 | CONFLICT | другий вхід перерахунку (`RunCalculationHandler`) недосяжний з API і семантично несумісний із job, який ставить у чергу — payload без `DocumentId` | OPEN |
-| Q-152 | TOOLING | `dotnet ef` не запускається локально (розбіжність версій інструмента й EF Core проєкту) — перевірити перед `W5.9` | OPEN |
+| Q-152 | TOOLING | `dotnet ef` не запускається локально (розбіжність версій інструмента й EF Core проєкту) — перевірити перед `W5.9` | RESOLVED |
 
 ---
 
@@ -6509,10 +6509,21 @@ src/Ecr.Infrastructure --startup-project src/Ecr.Api` падає з
 консолідовану в `W5.9`). Виправлення інструмента — самостійна задача, не
 блокує жодного щойно зробленого зрізу.
 
-#### Що потрібно від людини
+#### Розв'язання
 
-Нічого термінового: перевірити (чи то оновленням `dotnet-ef` до версії 10,
-чи локальним `dotnet tool` маніфестом проєкту) перед тим, як виконувати
-`W5.9`, бо та задача вимагає реально згенерувати й застосувати міграцію.
+`dotnet tool update --global dotnet-ef --version 10.0.11` (версія рівно
+пакетів `Directory.Packages.props`) — і команда запускається. Друга
+дрібниця: `--startup-project` мав бути `src/Ecr.Infrastructure`, а не
+`src/Ecr.Api` (`Ecr.Api` не посилається на `EntityFrameworkCore.Design`
+напряму) — той самий проєкт, що й в `--project`, точнісінько як уже робить
+`tools/verify-sql-scripts.ps1`.
 
-**Статус:** OPEN
+`dotnet ef migrations has-pending-model-changes --project
+src/Ecr.Infrastructure --startup-project src/Ecr.Infrastructure` →
+**"No changes have been made to the model since the last migration."**
+
+Отже `W5.9` МІГРАЦІЇ не потребує: увесь `W5.0`…`W5.4` писав API/мутатори
+над полями, які вже існували в моделі (заводив їх колись офлайновий
+`Ecr.DataGen`) — жодного нового стовпця жоден зі зрізів не додав.
+
+**Статус:** RESOLVED
