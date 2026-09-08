@@ -248,6 +248,16 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True(createRow.StatusCode == HttpStatusCode.Forbidden, $"{createRow.StatusCode}: {app.ErrorsText}");
     }
 
+    /// <remarks>
+    /// ⛔ Директива `DIR-007` (`Q-161`): попередня версія стукала у
+    /// <c>/documents/1/rows</c> — адресу, яка НЕ належить щойно збудованому
+    /// проєкту. <c>403</c> приходив і тоді, і на справній системі, і на
+    /// зламаній: прибери крок архівації — і відповідь лишалася б тією самою,
+    /// бо документ №1 просто чужий. Тепер адреса РЕАЛЬНА (той-таки проєкт), а
+    /// причина відмови перевіряється явно: без цього <c>PeriodClosed</c>
+    /// (період уже закритий на момент запису — `S-16`) видав би той самий
+    /// <c>403</c>, і мутаційний доказ нижче саме це й ловить.
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-17")]
@@ -255,9 +265,10 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S17a", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S17a", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        var projectId = await CreateOldProjectAsync(admin.Client, "S17a");
+        var structure = await BuildTemplateStructureAsync(admin.Client, "S17a", "Dynamic", null, app);
+        var projectId = await CreateOldProjectAsync(admin.Client, "S17a", structure.VersionId);
         await ProjectAndPeriodScenarios.ActivateProjectAsync(admin.Client, projectId);
         await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
         admin = await Provisioning.ReauthenticateAsync(app, admin);
@@ -265,37 +276,89 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         var closedPeriodKey = await AwaitPeriodStateAsync(admin.Client, projectId, "Closed", TimeSpan.FromSeconds(20));
         Assert.True(closedPeriodKey.HasValue, $"жоден період проєкту {projectId} не закрився — архівацію (яка вимагає всіх закритих) перевірити нема на чому.");
 
+        var createDoc = await admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/documents", UriKind.Relative),
+            new { projectId, templateVersionId = structure.VersionId, sheetDefIds = new[] { structure.SheetDefId } });
+        Assert.True(createDoc.StatusCode == HttpStatusCode.Created, $"{createDoc.StatusCode}: {app.ErrorsText}");
+        var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
+
+        // Читання адреси не залежить від стану періоду чи проєкту — беремо
+        // tableInstanceId ДО архівації, як і S-16 бере його в закритому періоді.
+        var tables = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId}/tables?periodKey={closedPeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(tableArray.GetArrayLength() > 0, $"документ {documentId} не має жодної таблиці: {app.ErrorsText}");
+        var tableInstanceId = tableArray[0].GetProperty("tableInstanceId").GetInt64();
+
         var archive = await admin.Client.PostAsync(
             new Uri($"/api/v1/projects/{projectId}/archive", UriKind.Relative), content: null);
         Assert.Equal(HttpStatusCode.NoContent, archive.StatusCode);
 
         var createRow = await admin.Client.PostAsJsonAsync(
-            new Uri("/api/v1/documents/1/rows", UriKind.Relative),
-            new { tableInstanceId = 1L, rowKey = (string?)null });
+            new Uri($"/api/v1/documents/{documentId}/rows", UriKind.Relative),
+            new { tableInstanceId, rowKey = (string?)null });
 
-        // Проєкт заархівований — новий рядок для нього неможливий у принципі.
+        // ⛔ Доказ сценарію: РЕАЛЬНА адреса (документ і таблиця саме цього
+        // проєкту) і причина відмови, названа явно — не лише статус. Період
+        // тут теж закритий (`S-16` доводить, що цього досить для 403 самого
+        // по собі), тому саме `reason` відрізняє «заархівовано» від «просто
+        // закритий період».
         Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+        var body = await createRow.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ProjectArchived", body.GetProperty("reason").GetString());
     }
 
+    /// <remarks>
+    /// ⛔ Директива `DIR-007` (`Q-161`): попередня версія давала забороненому
+    /// користувачеві РІВНО ОДИН грант — <c>isDeny</c> на проєкт, у якому він
+    /// однаково не мав жодного позитивного дозволу. Приберіть той грант — і
+    /// <c>403</c> лишався б тим самим, бо «немає гранта взагалі» і «є явна
+    /// заборона» невідрізнимі, коли позитивного гранта нема ніде. Тепер
+    /// заборона й дозвіл дані РАЗОМ, точно за прикладом із
+    /// <c>EditRules.Effective</c>: «Deny на проєкті перекриває Manage на
+    /// аркуші» — тут перекривається Manage на ТАБЛИЦІ.
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-17")]
     public async Task IsDeny_грант_блокує_новий_рядок()
     {
         using var app = new EcrApiFactory(sql);
-        var owner = await Provisioning.AdministratorAsync(app, "S17bOwner", ["Project.Manage", "Template.Edit", "Document.View"]);
-        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(owner.Client, "S17b", "Asia/Almaty");
-        await ProjectAndPeriodScenarios.ActivateProjectAsync(owner.Client, projectId);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S17bOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        var doc = await ArrangeRealDocumentAsync(app, owner, "S17b", rowMode: "Dynamic");
+        owner = doc.Admin;
+
+        var tables = await owner.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
 
         var denied = await Provisioning.AdministratorAsync(app, "S17bDeny", ["Document.View", "Document.Create"]);
-        await Provisioning.GrantAsync(app, denied.RoleId, "Project", projectId, "Manage", isDeny: true);
+
+        // ⛔ Обидва гранти ОДНИМ PUT (`GrantManyAsync`): набір грантів ролі
+        // замінюється цілком, і другий окремий виклик стер би перший.
+        await Provisioning.GrantManyAsync(
+            app, denied.RoleId,
+            ("Table", doc.TableDefId, "Manage", false),
+            ("Project", doc.ProjectId, "Manage", true));
         denied = await Provisioning.ReauthenticateAsync(app, denied);
 
         var createRow = await denied.Client.PostAsJsonAsync(
-            new Uri("/api/v1/documents/1/rows", UriKind.Relative),
-            new { tableInstanceId = 1L, rowKey = (string?)null });
+            new Uri($"/api/v1/documents/{doc.DocumentId}/rows", UriKind.Relative),
+            new { tableInstanceId, rowKey = (string?)null });
 
+        // ⛔ Доказ сценарію: без Manage на таблиці Forbidden доводив би лише
+        // «немає гранта», а не «isDeny перекрив дозвіл». Причина в тілі —
+        // те саме, що прийшло б і за просту відсутність гранта (`NoGrant`),
+        // тому дискримінатор — саме мутація нижче, а не сам код причини.
         Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+        var body = await createRow.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("NoGrant", body.GetProperty("reason").GetString());
     }
 
     [Fact]
