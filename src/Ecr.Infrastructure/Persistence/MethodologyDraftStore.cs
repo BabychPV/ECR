@@ -20,6 +20,16 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     private const int MaxChildren = 10_000;
 
     /// <inheritdoc />
+    public async Task<Methodology?> FindByCodeAsync(string code, CancellationToken ct)
+        => await db.Methodologies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.Code == code, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddMethodology(Methodology methodology) => db.Methodologies.Add(methodology);
+
+    /// <inheritdoc />
     public async Task<Methodology?> FindAsync(int methodologyId, CancellationToken ct)
         => await db.Methodologies
             .Include(m => m.Versions)
@@ -64,7 +74,83 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyConstant>> GetConstantsByCodeAsync(
+        int methodologyVersionId, string code, CancellationToken ct)
+        => await db.MethodologyConstants
+            .Where(c => c.MethodologyVersionId == methodologyVersionId && c.Code == code)
+            .OrderBy(c => c.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<MethodologyRule?> FindRuleAsync(
+        int methodologyVersionId, string code, CancellationToken ct)
+        => await db.MethodologyRules
+            .FirstOrDefaultAsync(
+                r => r.MethodologyVersionId == methodologyVersionId && r.Code == code, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<MethodologyOutput?> FindOutputAsync(
+        int methodologyVersionId, string code, CancellationToken ct)
+        => await db.MethodologyOutputs
+            .FirstOrDefaultAsync(
+                o => o.MethodologyVersionId == methodologyVersionId && o.Code == code, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<MethodologyTestCaseEntity?> FindTestCaseAsync(
+        int methodologyVersionId, string code, CancellationToken ct)
+        => await db.MethodologyTestCases
+            .FirstOrDefaultAsync(
+                t => t.MethodologyVersionId == methodologyVersionId && t.Code == code, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Без фільтра <c>IsActive</c> — на відміну від
+    /// <see cref="MethodologyStore.GetRulesAsync"/>. Той обслуговує ПРОГІН і
+    /// показує лише те, чим зіставляють; конфігуратор показує те, що правлять, а
+    /// вимкнене правило, невидиме в редакторі, неможливо ні ввімкнути, ні
+    /// назвати причиною порожнього розрахунку.
+    /// </remarks>
+    public async Task<IReadOnlyList<MethodologyRule>> GetAllRulesAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyRules
+            .AsNoTracking()
+            .Where(r => r.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(r => r.Priority)
+            .ThenBy(r => r.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyTestCaseEntity>> GetTestCaseEntitiesAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyTestCases
+            .AsNoTracking()
+            .Where(t => t.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(t => t.Code)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public void Add(MethodologyFormula formula) => db.MethodologyFormulas.Add(formula);
+
+    /// <inheritdoc />
+    public void Add(MethodologyConstant constant) => db.MethodologyConstants.Add(constant);
+
+    /// <inheritdoc />
+    public void Add(MethodologyRule rule) => db.MethodologyRules.Add(rule);
+
+    /// <inheritdoc />
+    public void Add(MethodologyOutput output) => db.MethodologyOutputs.Add(output);
+
+    /// <inheritdoc />
+    public void Add(MethodologyTestCaseEntity testCase) => db.MethodologyTestCases.Add(testCase);
 
     /// <inheritdoc />
     public void Remove(MethodologyFormula formula) => db.MethodologyFormulas.Remove(formula);
@@ -141,6 +227,13 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             {
                 clone.SetOutputUnit(unit);
             }
+
+            // ⛔ Оголошений список аргументів переноситься теж, і <c>null</c>
+            // переноситься як <c>null</c>. Клон без нього означав би, що звірка
+            // пастки 2 (`ECR-CALC-0432`) мовчить у КОЖНІЙ новій редакції: список
+            // є в опублікованій версії й зникає в тій, яку зараз правлять, —
+            // тобто саме там, де описку в імені токена ще можна виправити.
+            clone.SetArguments(source.ArgumentsCsv);
 
             // ⚠ `EvaluationOrder` НЕ переноситься: він топологічний і
             // рахується при публікації (ФВ-9.4). Скопійований, він виглядав би

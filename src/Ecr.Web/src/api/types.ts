@@ -249,6 +249,72 @@ export type CreateMethodologyVersionRequest = Schemas['CreateMethodologyVersionR
 /** Запис формули версії-чернетки. */
 export type SaveMethodologyFormulaRequest = Schemas['SaveMethodologyFormulaRequest'];
 
+/**
+ * Методологія-контейнер у конфігураторі — **без** версій.
+ *
+ * ⛔ Не те саме, що `MethodologyDto`. Той віддає перелік для РОЗРАХУНКУ і за
+ * побудовою містить лише методології з опублікованою версією: щойно заведена
+ * в ньому не з'являється взагалі.
+ */
+export type MethodologySummaryDto = Schemas['MethodologySummaryDto'];
+
+/** Заведення методології з нуля: код, назва, природа, група. */
+export type CreateMethodologyRequest = Schemas['CreateMethodologyRequest'];
+
+/** Природа методології: обирається правилом, зашита в модуль або бібліотека. */
+export type MethodologyKind = Schemas['MethodologyKind'];
+
+/** Константа версії методології. */
+export type MethodologyConstantDto = Schemas['MethodologyConstantDto'];
+
+/** Запис константи версії-чернетки. */
+export type SaveMethodologyConstantRequest = Schemas['SaveMethodologyConstantRequest'];
+
+/** Природа значення константи: число, текст або мітка категорії. */
+export type ConstantKind = Schemas['ConstantKind'];
+
+/** Правило відбору рядків документа (`ФВ-13.3`). */
+export type MethodologyRuleDto = Schemas['MethodologyRuleDto'];
+
+/** Запис правила відбору рядків. */
+export type SaveMethodologyRuleRequest = Schemas['SaveMethodologyRuleRequest'];
+
+/** Оголошений вихід версії — те, що методологія повертає. */
+export type MethodologyOutputDto = Schemas['MethodologyOutputDto'];
+
+/** Оголошення виходу версії. */
+export type SaveMethodologyOutputRequest = Schemas['SaveMethodologyOutputRequest'];
+
+/** Тест золотого набору версії (`ФВ-13.7`). */
+export type MethodologyTestCaseDto = Schemas['MethodologyTestCaseDto'];
+
+/** Запис тесту золотого набору. */
+export type SaveMethodologyTestCaseRequest = Schemas['SaveMethodologyTestCaseRequest'];
+
+/** Зміна режимів обчислення версії-чернетки. */
+export type SetMethodologyModesRequest = Schemas['SetMethodologyModesRequest'];
+
+/** Прив'язка виходу методології до колонки документа (`D-69`). */
+export type CalculationBindingDto = Schemas['CalculationBindingDto'];
+
+/** Запис прив'язки виходу до колонки. */
+export type SaveCalculationBindingRequest = Schemas['SaveCalculationBindingRequest'];
+
+/** Число, яке дав актуальний прогін розрахунку на документі. */
+export type CalculationResultDto = Schemas['CalculationResultDto'];
+
+/** Diff публікації методології: що саме зміниться в числах (`ФВ-9.6`). */
+export type MethodologyPublicationDiff = Schemas['MethodologyPublicationDiff'];
+
+/** Арифметичний режим версії: `Legacy` відтворює числа чинної системи. */
+export type NumericMode = Schemas['NumericMode'];
+
+/** Джерело тривалості періоду (`ФВ-16.11`). */
+export type CalendarMode = Schemas['CalendarMode'];
+
+/** Обсяг журналу обчислення (`ФВ-9.13`). */
+export type TraceLevel = Schemas['TraceLevel'];
+
 /** Рівень драбини виразності версії (`ФВ-9.2`). */
 export type CalculationLevel = Schemas['CalculationLevel'];
 

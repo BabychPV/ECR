@@ -1749,6 +1749,49 @@ public interface ICalculationResultStore
 
     /// <summary>Інвалідує залежні зрізи <c>rpt.*</c> після завершення прогону.</summary>
     public Task InvalidateReportSnapshotsAsync(long calculationRunId, CancellationToken ct);
+
+    /// <summary>Числа <b>актуального</b> прогону для документа й періоду (`W6`).</summary>
+    public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
+        long documentId, int periodKey, CancellationToken ct);
+}
+```
+
+> Уведений за директивою №09, `W6`. Прив'язку результату методології до колонки
+> документа (`cfg.CalculationBinding`, `D-69`) доти не створювало **ніщо** — ні
+> обробник, ні контролер, ні тест, — і наслідок був повністю мовчазний:
+> `RecalculationJob.BindingsAsync` віддавав порожній перелік, оркестратор
+> одразу повертав порожній профіль, задача завершувалася `Succeeded` і не
+> рахувала нічого. Порожній набір прив'язок помилкою не є, тож ані стан задачі,
+> ані журнал про це не казали.
+>
+> ⛔ Порт окремий від `IMethodologyDraftStore`, і межа тут за ВЛАСНИКОМ, а не за
+> зручністю: усе, що вміє той порт, належить ВЕРСІЇ методології і живе в схемі
+> `calc`, а прив'язка належить ШАБЛОНУ — вона посилається на `cfg.ColumnDef`,
+> переживає всі версії методології одразу (ключ `MethodologyId`, не
+> `MethodologyVersionId`) і клонуванням версії не копіюється взагалі.
+
+```csharp
+// src/Ecr.Application/Ports/ICalculationBindingStore.cs
+
+using Ecr.Domain.Entities.Configuration;
+
+namespace Ecr.Application.Ports;
+
+public interface ICalculationBindingStore
+{
+    /// <summary>Прив'язка за трійкою <c>UQ_CalculationBinding</c>; відстежувана.</summary>
+    public Task<CalculationBinding?> FindAsync(
+        int columnDefId, int methodologyId, string outputCode, CancellationToken ct);
+
+    /// <summary>Усі прив'язки методології, включно з вимкненими.</summary>
+    public Task<IReadOnlyList<CalculationBinding>> ListAsync(
+        int methodologyId, CancellationToken ct);
+
+    /// <summary>Таблиця колонки; <c>TableDefId</c> прив'язки виводиться, а не приймається.</summary>
+    public Task<int?> FindTableOfColumnAsync(int columnDefId, CancellationToken ct);
+
+    /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
+    public void Add(CalculationBinding binding);
 }
 ```
 
@@ -2640,11 +2683,24 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
+| `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/formulas` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}` | `Calculation.EditConstant` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rules` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/rules/{code}` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/outputs/{code}` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/tests` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |

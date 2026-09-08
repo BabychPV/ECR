@@ -161,6 +161,22 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ Шостий запит — ФОРМУЛИ ШАБЛОНУ, і без нього перерахунок формул
+        // не рахував нічого (директива №09 `W6`/`W8`, `S-21`; `Q-158`/`Q-160`
+        // — той самий клас прогалини, що й `ValidationRule` вище).
+        // `RecalculationService` бере формули рівно звідси —
+        // `tables.Values.SelectMany(t => t.Formulas...)` — а знімок їх не
+        // вантажив: колонки, рядки, правила були, формул не було. Формула
+        // зберігалася через `PUT .../formulas/column/{columnId}` (`W5.3`),
+        // проходила перевірку публікації (той самий інший шлях завантаження
+        // структури, що й для правил) і не рахувалася ЖОДНОГО разу.
+        var formulas = await db.FormulaDefs
+            .AsNoTracking()
+            .Where(f => tableIds.Contains(f.TableDefId) && !f.IsDeleted)
+            .OrderBy(f => f.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         // Граф збирається в пам'яті: так кожна сутність приїжджає рівно один
         // раз. Складається він доменними AddColumn/AddRow/AddTable, а не
         // окремим «швидким» шляхом: перевірки на дублікати кодів мають бути
@@ -169,6 +185,7 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
         var columnsByTable = columns.ToLookup(c => c.TableDefId);
         var rowsByTable = rows.ToLookup(r => r.TableDefId);
         var rulesByTable = validationRules.ToLookup(r => r.TableDefId);
+        var formulasByTable = formulas.ToLookup(f => f.TableDefId);
 
         foreach (var table in tables)
         {
@@ -185,6 +202,11 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
             foreach (var rule in rulesByTable[table.Id])
             {
                 table.AddValidationRule(rule);
+            }
+
+            foreach (var formula in formulasByTable[table.Id])
+            {
+                table.AddFormula(formula);
             }
         }
 

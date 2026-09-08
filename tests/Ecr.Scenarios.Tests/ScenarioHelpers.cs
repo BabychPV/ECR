@@ -52,18 +52,27 @@ internal static class ScenarioHelpers
     /// <c>202</c> з <c>jobId</c> одразу, а результат стає відомий пізніше.
     /// Сценарій, який читає стан одразу після <c>202</c>, перевіряв би чергу,
     /// а не результат.
+    ///
+    /// ⛔ <c>jobId</c> ЕКРАНУЄТЬСЯ. Планувальник складає його з імені задачі,
+    /// адреси документа й GUID через <c>#</c>
+    /// (<c>IRecalculationJob#doc1-p202609#…</c>), а <c>#</c> в URI починає
+    /// фрагмент: неекранований ідентифікатор перетворював запит на
+    /// <c>/api/v1/jobs/IRecalculationJob</c>, тобто на <c>404</c>. Опитування
+    /// при цьому не падало — воно тихо повертало «стану немає», і сценарій
+    /// звинувачував перерахунок у тому, що той не завершився. Клієнт
+    /// (<c>api/client.ts</c>, <c>JobsPage.tsx</c>) екранує його з першого дня;
+    /// не екранував лише цей помічник.
     /// </remarks>
     public static async Task<JsonElement> AwaitJobAsync(
         HttpClient client, string jobId, TimeSpan timeout, CancellationToken ct = default)
     {
         var deadline = DateTime.UtcNow + timeout;
         JsonElement last = default;
+        var address = new Uri($"/api/v1/jobs/{Uri.EscapeDataString(jobId)}", UriKind.Relative);
 
         while (DateTime.UtcNow < deadline)
         {
-            var response = await client
-                .GetAsync(new Uri($"/api/v1/jobs/{jobId}", UriKind.Relative), ct)
-                .ConfigureAwait(false);
+            var response = await client.GetAsync(address, ct).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
             {

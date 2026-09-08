@@ -64,4 +64,44 @@ public interface ICalculationResultStore
     /// </remarks>
     public Task SwitchCurrentRunAsync(
         long calculationRunId, string modulesProfileJson, CancellationToken ct);
+
+    /// <summary>
+    /// Числа <b>актуального</b> прогону для документа й періоду.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Результати в порядку рядка й коду виходу; порожньо — прогону немає.</returns>
+    /// <remarks>
+    /// ⛔ Читання живе в тому самому порту, що й запис, бо предмет один:
+    /// <c>calc.CalculationResult</c> партиційована за періодом, а «актуальність»
+    /// живе на ПРОГОНІ (<c>CalculationRun.CurrentStatus</c>), не на рядку. Другий
+    /// порт мав би повторити обидва ці знання — і саме там вони й розійшлися б.
+    ///
+    /// ⛔ Береться саме актуальний прогін, а не останній за часом. Прогін, який
+    /// упав, лишає по собі частину рядків; віддати їх означало б показати в
+    /// звіті числа, половина яких порахована старою версією методології.
+    ///
+    /// ⚠ Без цього методу результат методології не було видно НІДЕ (<c>D-69</c>:
+    /// у <c>doc.CellValue</c> він не потрапляє). Перерахунок завершувався
+    /// успіхом, число лягало в базу — і єдиним способом його побачити був
+    /// <c>SELECT</c>.
+    /// </remarks>
+    public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
+        long documentId, int periodKey, CancellationToken ct);
 }
+
+/// <summary>Один рядок актуального результату розрахунку.</summary>
+/// <param name="MethodologyVersionId">Версія, що дала число: без неї його неможливо пояснити.</param>
+/// <param name="SourceRowKey">Рядок документа; <c>null</c> — рівень таблиці.</param>
+/// <param name="OutputCode">Код виходу методології.</param>
+/// <param name="Value">Значення; <c>decimal</c>, ніколи <c>float</c> (<c>D-30</c>).</param>
+/// <param name="UnitId">Одиниця результату — обов'язкова (ФВ-16.6).</param>
+/// <param name="SubstanceEntryId">Речовина; <c>null</c> — вихід без речовини.</param>
+public sealed record CalculationResultRow(
+    int MethodologyVersionId,
+    string? SourceRowKey,
+    string OutputCode,
+    decimal Value,
+    int UnitId,
+    long? SubstanceEntryId);

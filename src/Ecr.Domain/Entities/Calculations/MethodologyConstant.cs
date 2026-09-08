@@ -311,4 +311,72 @@ public sealed class MethodologyConstant : Entity<int>
     /// <summary>Записує джерело значення.</summary>
     /// <param name="source">Опис джерела.</param>
     public void SetSource(string? source) => Source = source;
+
+    /// <summary>
+    /// Переписує значення наявної константи — число або текст.
+    /// </summary>
+    /// <param name="value">Число; <c>null</c> — константа стає нечисловою.</param>
+    /// <param name="unitId">Одиниця числа; для числа обов'язкова (ФВ-16.1).</param>
+    /// <param name="text">Текст; ужитий, коли <paramref name="value"/> — <c>null</c>.</param>
+    /// <param name="kind">Вид константи після зміни.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0422</c> — числова без одиниці, нечислова з порожнім текстом
+    /// або суперечність між видом і поданим значенням.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Метод <c>internal</c>, як і <c>MethodologyFormula.SetExpression</c>, і з
+    /// тієї самої причини: константа не знає, опублікована її версія чи ні.
+    /// Єдиний вхід — <see cref="MethodologyVersion.EditConstant"/>.
+    ///
+    /// ⛔ Обидва поля значення переписуються ЩОРАЗУ, зокрема в <c>null</c>.
+    /// Інакше константа, переведена з тексту в число, зберегла б старий
+    /// <see cref="TextValue"/> — і <see cref="IsResolved"/> вважав би розібраним
+    /// те, що ним не є, а <c>ConstantResolver</c> підставив би у вираз число,
+    /// поруч із яким лежить суперечливий текст.
+    /// </remarks>
+    internal void Rewrite(decimal? value, int? unitId, string? text, ConstantKind kind)
+    {
+        if (kind == ConstantKind.Numeric)
+        {
+            if (unitId is not { } unit)
+            {
+                throw new DomainException(
+                    "ECR-CALC-0422",
+                    $"Числова константа «{Code}» без одиниці: перевірка розмірностей "
+                    + "без неї неможлива (ФВ-16.1).");
+            }
+
+            if (value is not { } number)
+            {
+                throw new DomainException(
+                    "ECR-CALC-0422",
+                    $"Константа «{Code}» оголошена числовою без значення: порожнє число — "
+                    + "не «нуль за замовчуванням», а рішення, якого ніхто не ухвалив.");
+            }
+
+            Kind = ConstantKind.Numeric;
+            Value = number;
+            TextValue = null;
+            UnitId = unit;
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Константа «{Code}» виду {kind} без тексту: порожній рядок не є "
+                + "ні міткою категорії, ні значенням (поправка 2-біс директиви ПК-1 №05).");
+        }
+
+        Kind = kind;
+        Value = null;
+        TextValue = text;
+
+        // ⚠ Одиниця знімається разом із числом: вимір — властивість числа
+        // (ФВ-16.6), і залишена на тексті вона брала б участь у перевірці
+        // розмірностей при публікації, порівнюючи тонни зі словом.
+        UnitId = null;
+    }
 }

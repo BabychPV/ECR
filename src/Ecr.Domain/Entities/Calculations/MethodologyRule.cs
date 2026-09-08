@@ -75,4 +75,32 @@ public sealed class MethodologyRule : Entity<int>
     /// зробленій «щоб нічого не змінювати».
     /// </remarks>
     public void SetActive(bool isActive) => IsActive = isActive;
+
+    /// <summary>Переписує предикат і пріоритет наявного правила.</summary>
+    /// <param name="matchJson">Новий структурований предикат.</param>
+    /// <param name="priority">Новий пріоритет; менше значення — вищий.</param>
+    /// <exception cref="DomainException">Порожній предикат — <c>ECR-CALC-0422</c>.</exception>
+    /// <remarks>
+    /// ⛔ Метод <c>internal</c>: єдиний вхід — <see cref="MethodologyVersion.EditRule"/>,
+    /// бо правило не знає, опублікована його версія чи ні.
+    ///
+    /// ⛔ Порожній рядок відхиляється, а «вся таблиця» пишеться як <c>{}</c>.
+    /// Різниця не косметична: <c>MethodologyResolver.Matches</c> ловить
+    /// <c>JsonException</c> і вважає зламаний предикат таким, що не збігається
+    /// НІ З ЧИМ, — тобто правило з порожнім рядком мовчки не рахувало б жодного
+    /// рядка документа, і побачити це можна було б лише за нулями у звіті.
+    /// </remarks>
+    internal void Update(string matchJson, int priority)
+    {
+        if (string.IsNullOrWhiteSpace(matchJson))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Правило «{Code}» без предиката: порожній рядок не збігається з жодним рядком "
+                + "документа, а «вся таблиця» записується як `{}`.");
+        }
+
+        MatchJson = matchJson;
+        Priority = priority;
+    }
 }

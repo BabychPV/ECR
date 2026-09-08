@@ -190,6 +190,55 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
     /// </remarks>
     private const int MaxSupersededRuns = 100;
 
+    /// <summary>Стеля вибірки результатів на один документ і період.</summary>
+    /// <remarks>
+    /// Рядків стільки, скільки виходів × речовин × рядків таблиці; десятки
+    /// тисяч — уже ознака того, що прив'язку поставили на не ту таблицю.
+    /// </remarks>
+    private const int MaxResults = 50_000;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Прогін добирається за <c>Status = Current</c>, а не за максимальним
+    /// <c>Id</c>. Прогін, який упав, лишає по собі частину рядків, і «останній
+    /// за часом» показав би суміш: половина чисел від нової версії методології,
+    /// половина від старої, і жодної ознаки на екрані.
+    ///
+    /// ⚠ Актуальність питається ПІДЗАПИТОМ (<c>EXISTS</c>), а не з'єднанням:
+    /// прогонів на період може бути кілька (кожен документ перераховується
+    /// окремо), тож «актуальний прогін періоду» — не одне число, а з'єднання з
+    /// проєкцією в тип, на полях якого потім сортують, EF перекласти не може
+    /// взагалі.
+    /// </remarks>
+    public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        var rows = await db.CalculationResults
+            .AsNoTracking()
+            .Where(r => r.DocumentId == documentId
+                        && r.PeriodKey == periodKey
+                        && db.CalculationRuns.Any(
+                            run => run.Id == r.CalculationRunId
+                                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus))
+            .OrderBy(r => r.SourceRowKey)
+            .ThenBy(r => r.OutputCode)
+            .Take(MaxResults)
+            .Select(r => new
+            {
+                r.MethodologyVersionId,
+                r.SourceRowKey,
+                r.OutputCode,
+                r.Value,
+                r.UnitId,
+                r.SubstanceEntryId,
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.ConvertAll(r => new CalculationResultRow(
+            r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));
+    }
+
     /// <summary>Наступний ідентифікатор кроку трейсу.</summary>
     private async Task<long> NextStepIdAsync(CancellationToken ct)
     {

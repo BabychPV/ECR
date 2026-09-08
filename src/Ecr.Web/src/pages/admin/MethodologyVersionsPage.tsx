@@ -14,6 +14,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import type {
+  CalculationLevel,
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
   UnitRef,
@@ -33,6 +34,14 @@ import {
   mayEditContent,
   type FormulaDraft,
 } from '@/features/methodologies/draft';
+import {
+  MethodologyBindingsPanel,
+  MethodologyConstantsPanel,
+  MethodologyModesForm,
+  MethodologyOutputsPanel,
+  MethodologyRulesPanel,
+  MethodologyTestsPanel,
+} from '@/features/methodologies/MethodologyContentPanels';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -71,6 +80,13 @@ export function MethodologyVersionsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [newVersion, setNewVersion] = useState('');
   const [copyFrom, setCopyFrom] = useState<string | null>(null);
+
+  // ⛔ Рівень драбини виразності (`ФВ-9.2`) став вибором, а не константою.
+  // Тут стояло зашите `'Configuration'` із поясненням «клон бере рівень із
+  // джерела» — правдивим рівно наполовину: для ПОРОЖНЬОЇ чернетки, тобто для
+  // першої версії щойно заведеної методології, рівень не мав звідки взятися
+  // взагалі, і будь-яка нова методологія народжувалася першим рівнем мовчки.
+  const [level, setLevel] = useState<CalculationLevel>('Configuration');
   const [editing, setEditing] = useState<FormulaDraft | null>(null);
 
   const versions = useQuery({
@@ -109,9 +125,9 @@ export function MethodologyVersionsPage(): JSX.Element {
         copyFromVersionId: copyFrom === null ? null : Number(copyFrom),
 
         // ⚠ Рівень має значення лише для ПОРОЖНЬОЇ чернетки: клон бере його з
-        // джерела. Тому вибору рівня тут немає — він був би питанням без
-        // наслідку у вісімдесяти відсотках випадків.
-        level: 'Configuration',
+        // джерела, бо версія, що змінила рівень, — уже інша методологія, а не
+        // її нова редакція. Тому поле і ховається, коли обрано джерело.
+        level,
       }),
     onSuccess: async (draft) => {
       await queryClient.invalidateQueries({ queryKey: ['methodology-versions', methodologyId] });
@@ -221,6 +237,14 @@ export function MethodologyVersionsPage(): JSX.Element {
       )}
 
       {selected !== undefined && (
+        <MethodologyModesForm
+          methodologyId={methodologyId}
+          version={selected}
+          editable={editable}
+        />
+      )}
+
+      {selected !== undefined && (
         <>
           <Group justify="space-between">
             <Text fw={600}>{t('methodologies.formulas')}</Text>
@@ -236,6 +260,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                     expression: '',
                     resultType: 'Number',
                     outputUnitId: null,
+                    argumentsCsv: '',
                     isNew: true,
                   })
                 }
@@ -294,6 +319,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                                   expression: formula.expression,
                                   resultType: formula.resultType,
                                   outputUnitId: formula.outputUnitId,
+                                  argumentsCsv: formula.argumentsCsv ?? '',
                                   isNew: false,
                                 })
                               }
@@ -320,6 +346,45 @@ export function MethodologyVersionsPage(): JSX.Element {
               </Table>
             )}
           </AsyncBoundary>
+
+          {/* ⛔ П'ять панелей стоять на ОДНОМУ екрані з формулами, а не по
+              вкладках. Методологія не рахує нічого, поки бракує бодай однієї:
+              формула без константи дає нуль, версія без оголошеного виходу
+              нічого не записує, без правила відбору не зачіпає жодного рядка,
+              без золотого набору не публікується (`ФВ-9.12`), а без прив'язки
+              перерахунок завершується успіхом і не рахує нічого. Розкидані по
+              вкладках, вони виглядали б необов'язковими. */}
+          <MethodologyConstantsPanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+            editable={editable}
+          />
+
+          <MethodologyOutputsPanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+            editable={editable}
+          />
+
+          <MethodologyRulesPanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+            editable={editable}
+          />
+
+          <MethodologyTestsPanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+            editable={editable}
+          />
+
+          {/* ⚠ Прив'язка належить МЕТОДОЛОГІЇ, а не версії: вона переживає всі
+              версії одразу і клонуванням не копіюється. Тому право на неї
+              питається окремо — від стану версії воно не залежить. */}
+          <MethodologyBindingsPanel
+            methodologyId={methodologyId}
+            editable={can(session.data, 'Calculation.EditRule')}
+          />
         </>
       )}
 
@@ -354,6 +419,26 @@ export function MethodologyVersionsPage(): JSX.Element {
             }))}
             onChange={setCopyFrom}
           />
+
+          {/* ⛔ Показується лише для ПОРОЖНЬОЇ чернетки: клон бере рівень із
+              джерела, і поле вводу поруч із обраним джерелом обіцяло б вибір,
+              якого сервер не зробить. */}
+          {copyFrom === null && (
+            <Select
+              label={t('methodologies.level')}
+              description={t('methodologies.levelHint')}
+              allowDeselect={false}
+              value={level}
+              data={[
+                { value: 'Configuration', label: 'Configuration' },
+                { value: 'Script', label: 'Script' },
+                { value: 'Module', label: 'Module' },
+              ]}
+              onChange={(value) =>
+                setLevel(value === 'Script' ? 'Script' : value === 'Module' ? 'Module' : 'Configuration')
+              }
+            />
+          )}
 
           <Button
             disabled={newVersion.trim().length === 0}
@@ -412,6 +497,19 @@ export function MethodologyVersionsPage(): JSX.Element {
                   // уже зроблено правильно.
                   outputUnitId: value === 'Text' ? null : editing.outputUnitId,
                 })
+              }
+            />
+
+            {/* ⛔ Оголошений список аргументів. Доти його не було чим
+                заповнити, і звірка пастки 2 (`ECR-CALC-0432`) отримувала
+                `null` на кожній формулі й мовчала: перевірка була написана,
+                покрита тестами й недосяжна. */}
+            <TextInput
+              label={t('methodologies.arguments')}
+              description={t('methodologies.argumentsHint')}
+              value={editing.argumentsCsv}
+              onChange={(event) =>
+                setEditing({ ...editing, argumentsCsv: event.currentTarget.value })
               }
             />
 

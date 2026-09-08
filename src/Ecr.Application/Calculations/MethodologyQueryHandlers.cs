@@ -162,7 +162,7 @@ public sealed class SimulateMethodologyHandler(
                 outputs[value.OutputCode] = value.Value;
             }
 
-            trace.AddRange(simulated.Trace.Select(s => $"{s.StepOrder}. {s.StepCode} = {s.Value}"));
+            trace.AddRange(simulated.Trace.Select(Describe));
 
             if (published is null || published.Id == version.Id)
             {
@@ -193,6 +193,37 @@ public sealed class SimulateMethodologyHandler(
         // числа, і питання «яким прогоном пораховано цей звіт» отримало б
         // відповіді, яких ніхто не запускав.
         return new SimulationResultDto(outputs, diff, trace, verdicts, GoldenSet.IsGreen(verdicts));
+    }
+
+    /// <summary>Крок трейсу рядком — разом із причиною, чому значення таке.</summary>
+    /// <param name="step">Крок, який видав рушій.</param>
+    /// <returns>Рядок для екрана прогону.</returns>
+    /// <remarks>
+    /// ⛔ Причина маскування дописується, а не лишається в базі. Замаскований
+    /// нуль — це число, ЯКЕ НЕ ВІДРІЗНИТИ від порахованого (<c>H-24d-1</c>):
+    /// рядок «<c>3. EMISSION = 0</c>» виглядає як звичайний результат ділення, і
+    /// саме тому <c>MaskedZeroReason</c> взагалі існує. Доти трейс прогону
+    /// показував значення й мовчав про причину — тобто те єдине, заради чого
+    /// маскування записують.
+    ///
+    /// ⚠ Дописується СУФІКСОМ, а не новим форматом: перша половина рядка
+    /// лишається тією самою, якою її вже читають на екрані прогону.
+    /// </remarks>
+    private static string Describe(CalculationTraceStep step)
+    {
+        var line = $"{step.StepOrder}. {step.StepCode} = {step.Value}";
+
+        // ⚠ `TraceJson` тут несе КОД ПОМИЛКИ-значення: саме його кладе туди
+        // `GenericCalculationModule` (`s.Error` у п'ятій позиції). Ім'я поля
+        // ширше за вміст, але вміст саме такий.
+        if (!string.IsNullOrWhiteSpace(step.TraceJson))
+        {
+            line += $" [{step.TraceJson}]";
+        }
+
+        return step.Masked == Domain.Enums.MaskedZeroReason.None
+            ? line
+            : $"{line} [masked: {step.Masked}]";
     }
 
     private static MethodologyDescriptor Descriptor(

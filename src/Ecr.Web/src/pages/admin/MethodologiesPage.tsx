@@ -7,6 +7,7 @@ import {
   Modal,
   NumberInput,
   ScrollArea,
+  Select,
   Stack,
   Table,
   Text,
@@ -18,10 +19,13 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type {
   MethodologyDto,
+  MethodologyKind,
+  MethodologyPublicationDiff,
   PublishMethodologyRequest,
   SimulateMethodologyRequest,
   SimulationResultDto,
 } from '@/api/types';
+import { createMethodology } from '@/features/methodologies/api';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -52,6 +56,23 @@ export function MethodologiesPage(): JSX.Element {
   const [reason, setReason] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState('');
 
+  // ⛔ Diff публікації БІЛЬШЕ НЕ ВИКИДАЄТЬСЯ. Сервер віддає його рівно тому, що
+  // публікація — найнебезпечніша операція системи: вона змінює числа, які вже
+  // подані регуляторові (`ФВ-9.6`). Клієнт мовчки ковтав відповідь, тож той,
+  // хто щойно натиснув кнопку, не бачив ані зміни режиму, ані розбіжностей на
+  // золотому наборі, ані попереджень публікації — тобто саме те, заради чого
+  // diff і рахується.
+  const [diff, setDiff] = useState<MethodologyPublicationDiff | null>(null);
+
+  // Заведення методології з нуля: доти ідентифікатор методології не було
+  // звідки взяти взагалі, і конфігуратор версій працював лише над тим, що
+  // завіз офлайновий генератор тестових даних.
+  const [creating, setCreating] = useState(false);
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<MethodologyKind>('DataDriven');
+  const [group, setGroup] = useState('');
+
   // Яку версію проганяємо; `null` — діалог симуляції закритий.
   const [simulating, setSimulating] = useState<{ id: number; versionId: number } | null>(null);
   const [simulationPeriod, setSimulationPeriod] = useState(currentPeriodKey());
@@ -62,9 +83,28 @@ export function MethodologiesPage(): JSX.Element {
     queryFn: () => apiFetch<MethodologyDto[]>('/api/v1/methodologies'),
   });
 
+  const create = useMutation({
+    mutationFn: () =>
+      createMethodology({
+        code,
+        nameL10n: { en: name },
+        kind,
+        group: group.trim() === '' ? null : group,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['methodologies'] });
+      setCreating(false);
+      setCode('');
+      setName('');
+      setGroup('');
+      showDone(t('methodologies.created'));
+    },
+    onError: showApiError,
+  });
+
   const publish = useMutation({
     mutationFn: (target: { id: number; versionId: number; reason: string; from: string }) =>
-      apiFetch(`/api/v1/methodologies/${target.id}/versions/${target.versionId}/publish`, {
+      apiFetch<MethodologyPublicationDiff>(`/api/v1/methodologies/${target.id}/versions/${target.versionId}/publish`, {
         method: 'POST',
         body: JSON.stringify({
           changeReason: target.reason,
@@ -74,11 +114,16 @@ export function MethodologiesPage(): JSX.Element {
           effectiveFrom: target.from,
         } satisfies PublishMethodologyRequest),
       }),
-    onSuccess: async () => {
+    onSuccess: async (published) => {
       await queryClient.invalidateQueries({ queryKey: ['methodologies'] });
       setPublishing(null);
       setReason('');
       setEffectiveFrom('');
+
+      // ⚠ Diff показується ПІСЛЯ публікації, а не замість неї: перед нею те
+      // саме питання відповідає прогін без запису (`ФВ-13.5`, кнопка поруч).
+      // Тут — звіт про те, що щойно змінилося в числах.
+      setDiff(published);
       showDone(t('methodologies.published'));
     },
     onError: showApiError,
@@ -111,7 +156,16 @@ export function MethodologiesPage(): JSX.Element {
 
   return (
     <>
-      <PageHeader title={t('methodologies.title')} />
+      <PageHeader
+        title={t('methodologies.title')}
+        actions={
+          can(session.data, 'Calculation.EditFormula') && (
+            <Button variant="default" onClick={() => setCreating(true)}>
+              {t('methodologies.newMethodology')}
+            </Button>
+          )
+        }
+      />
       <AsyncBoundary<MethodologyDto[]>
         isPending={methodologies.isPending}
         error={methodologies.error}
@@ -207,6 +261,120 @@ export function MethodologiesPage(): JSX.Element {
         </Table>
         )}
       </AsyncBoundary>
+
+      <Modal
+        opened={creating}
+        onClose={() => setCreating(false)}
+        title={t('methodologies.newMethodologyTitle')}
+      >
+        <Stack gap="sm">
+          <TextInput
+            label={t('methodologies.code')}
+            description={t('methodologies.methodologyCodeHint')}
+            value={code}
+            onChange={(event) => setCode(event.currentTarget.value)}
+            data-autofocus
+          />
+
+          <TextInput
+            label={t('methodologies.name')}
+            value={name}
+            onChange={(event) => setName(event.currentTarget.value)}
+          />
+
+          {/* ⛔ Природа методології — несуче поле, а не описове. `Bespoke`-модулі
+              правила прив'язки не мають у принципі, а `Library` не рахує ні для
+              кого — і саме на цьому тримається перевірка публікації. */}
+          <Select
+            label={t('methodologies.kind')}
+            description={t('methodologies.kindHint')}
+            allowDeselect={false}
+            value={kind}
+            data={[
+              { value: 'DataDriven', label: 'DataDriven' },
+              { value: 'Bespoke', label: 'Bespoke' },
+              { value: 'Library', label: 'Library' },
+            ]}
+            onChange={(value) =>
+              setKind(value === 'Bespoke' ? 'Bespoke' : value === 'Library' ? 'Library' : 'DataDriven')
+            }
+          />
+
+          <TextInput
+            label={t('methodologies.group')}
+            description={t('methodologies.groupHint')}
+            value={group}
+            onChange={(event) => setGroup(event.currentTarget.value)}
+          />
+
+          <Button
+            disabled={code.trim().length === 0 || name.trim().length === 0}
+            loading={create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {t('methodologies.create')}
+          </Button>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={diff !== null}
+        onClose={() => setDiff(null)}
+        title={t('methodologies.diffTitle')}
+        size="lg"
+      >
+        {diff !== null && (
+          <Stack gap="sm">
+            {/* ⛔ Обидва режими — обов'язково (`D-78`): їх зміна не видна в
+                жодному рядку формули, а числа змінюються всі — 3.3 % між Actual і
+                Fixed360 на тих самих даних. */}
+            <Text size="sm">
+              {t('methodologies.diffNumeric')}: {diff.numeric.before} → {diff.numeric.after}
+            </Text>
+            <Text size="sm">
+              {t('methodologies.diffCalendar')}: {diff.calendar.before} → {diff.calendar.after}
+            </Text>
+
+            <Text fw={600}>{t('methodologies.diffChanges')}</Text>
+            {diff.changes.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                {t('methodologies.diffNone')}
+              </Text>
+            ) : (
+              <Table striped withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>{t('methodologies.testCode')}</Table.Th>
+                    <Table.Th>{t('methodologies.output')}</Table.Th>
+                    <Table.Th>{t('methodologies.before')}</Table.Th>
+                    <Table.Th>{t('methodologies.after')}</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {diff.changes.map((change) => (
+                    <Table.Tr key={`${change.testCode}:${change.outputCode}:${String(change.substanceEntryId)}`}>
+                      <Table.Td>{change.testCode}</Table.Td>
+                      <Table.Td>{change.outputCode}</Table.Td>
+                      <Table.Td>{change.before ?? '—'}</Table.Td>
+                      <Table.Td>{change.after}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
+
+            {/* ⚠ Попередження не валять публікацію, але й мовчати про них
+                не можна: оголошений і невжитий аргумент найчастіше означає
+                описку в імені токена. */}
+            {(diff.warnings ?? []).length > 0 && (
+              <>
+                <Text fw={600}>{t('methodologies.warnings')}</Text>
+                <Code block>{(diff.warnings ?? []).join('\n')}</Code>
+              </>
+            )}
+          </Stack>
+        )}
+      </Modal>
 
       <Modal
         opened={publishing !== null}

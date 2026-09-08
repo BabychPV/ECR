@@ -305,6 +305,163 @@ public sealed class MethodologyVersion : Entity<int>
         RequireOwn(formula);
     }
 
+    /// <summary>Заводить числову константу в цій версії. Лише для чернетки (ФВ-16.1).</summary>
+    /// <param name="code">Код константи — те, що стоїть після <c>CST.</c>.</param>
+    /// <param name="value">Значення.</param>
+    /// <param name="unitId">Одиниця; для числа обов'язкова.</param>
+    /// <returns>Нову константу, прив'язану до цієї версії.</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    /// <remarks>
+    /// ⛔ Вхід у константи — через ВЕРСІЮ, як і у формули, і з тієї самої
+    /// причини: константа не знає, опублікована її версія чи ні. Обробник, який
+    /// створив би її конструктором напряму, дописав би коефіцієнт емісії в
+    /// опубліковану версію — тобто змінив би вже подані числа без diff-у й сліду.
+    /// </remarks>
+    public MethodologyConstant AddNumericConstant(EcrCode code, decimal value, int unitId)
+    {
+        RequireDraft("склад констант");
+
+        return new MethodologyConstant(Id, code, value, unitId);
+    }
+
+    /// <summary>Заводить текстову константу або мітку категорії. Лише для чернетки.</summary>
+    /// <param name="code">Код константи.</param>
+    /// <param name="text">Текст; порожній рядок не приймається.</param>
+    /// <param name="kind">Текст або мітка категорії.</param>
+    /// <returns>Нову константу.</returns>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка; <c>ECR-CALC-0422</c> — вид
+    /// числовий або текст порожній.
+    /// </exception>
+    public MethodologyConstant AddTextConstant(EcrCode code, string text, ConstantKind kind)
+    {
+        RequireDraft("склад констант");
+
+        return MethodologyConstant.OfText(Id, code, text, kind);
+    }
+
+    /// <summary>Змінює константу цієї версії. Лише для чернетки.</summary>
+    /// <param name="constant">Константа, яка вже належить цій версії.</param>
+    /// <param name="value">Число; <c>null</c> — константа стає текстовою.</param>
+    /// <param name="unitId">Одиниця числа.</param>
+    /// <param name="text">Текст; ужитий, коли <paramref name="value"/> — <c>null</c>.</param>
+    /// <param name="kind">Вид константи після зміни.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або константа чужа.
+    /// </exception>
+    public void EditConstant(
+        MethodologyConstant constant, decimal? value, int? unitId, string? text, ConstantKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(constant);
+
+        RequireDraft("константи");
+        RequireOwn(constant.MethodologyVersionId, "Константа", constant.Code);
+
+        constant.Rewrite(value, unitId, text, kind);
+    }
+
+    /// <summary>Заводить правило відбору рядків у цій версії. Лише для чернетки (ФВ-13.3).</summary>
+    /// <param name="code">Код правила, унікальний у межах версії.</param>
+    /// <param name="matchJson">Структурований предикат зіставлення рядків.</param>
+    /// <param name="priority">Пріоритет; менше значення — вищий.</param>
+    /// <returns>Нове правило.</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    public MethodologyRule AddRule(EcrCode code, string matchJson, int priority)
+    {
+        RequireDraft("склад правил");
+
+        return new MethodologyRule(Id, code, matchJson, priority);
+    }
+
+    /// <summary>Змінює правило цієї версії. Лише для чернетки.</summary>
+    /// <param name="rule">Правило, яке вже належить цій версії.</param>
+    /// <param name="matchJson">Новий предикат.</param>
+    /// <param name="priority">Новий пріоритет.</param>
+    /// <param name="isActive">Чи бере правило участь у зіставленні.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або правило чуже.
+    /// </exception>
+    public void EditRule(MethodologyRule rule, string matchJson, int priority, bool isActive)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        RequireDraft("правила");
+        RequireOwn(rule.MethodologyVersionId, "Правило", rule.Code);
+
+        rule.Update(matchJson, priority);
+        rule.SetActive(isActive);
+    }
+
+    /// <summary>Оголошує вихід версії. Лише для чернетки (ФВ-16.6).</summary>
+    /// <param name="code">Код виходу — те, на що посилається прив'язка.</param>
+    /// <param name="unitId">Одиниця результату; обов'язкова.</param>
+    /// <param name="ordinal">Порядок у переліку виходів.</param>
+    /// <returns>Новий вихід.</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    public MethodologyOutput AddOutput(EcrCode code, int unitId, int ordinal)
+    {
+        RequireDraft("склад виходів");
+
+        return new MethodologyOutput(Id, code, unitId, ordinal);
+    }
+
+    /// <summary>Змінює оголошений вихід цієї версії. Лише для чернетки.</summary>
+    /// <param name="output">Вихід, який уже належить цій версії.</param>
+    /// <param name="unitId">Нова одиниця результату.</param>
+    /// <param name="ordinal">Новий порядок.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або вихід чужий.
+    /// </exception>
+    public void EditOutput(MethodologyOutput output, int unitId, int ordinal)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        RequireDraft("виходи");
+        RequireOwn(output.MethodologyVersionId, "Вихід", output.Code);
+
+        output.Update(unitId, ordinal);
+    }
+
+    /// <summary>Заводить тест золотого набору. Лише для чернетки (ФВ-13.7).</summary>
+    /// <param name="code">Код тесту, унікальний у межах версії.</param>
+    /// <param name="inputJson">Вхід прогону у формі <c>CalculationInput</c>.</param>
+    /// <param name="expectedJson">Очікувані виходи: код виходу → число.</param>
+    /// <param name="tolerance">Допуск; нуль — точна рівність.</param>
+    /// <returns>Новий тест.</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    /// <remarks>
+    /// ⛔ Тести правляться лише в чернетці, як і формули. Дописаний в
+    /// опубліковану версію тест перетворив би «зелений набір на момент
+    /// публікації» на «зелений набір сьогодні» — тобто зняв би саме ту
+    /// властивість, заради якої ФВ-9.12 його вимагає.
+    /// </remarks>
+    public MethodologyTestCaseEntity AddTestCase(
+        string code, string inputJson, string expectedJson, decimal tolerance)
+    {
+        RequireDraft("склад тестів");
+
+        return new MethodologyTestCaseEntity(Id, code, inputJson, expectedJson, tolerance);
+    }
+
+    /// <summary>Змінює тест цієї версії. Лише для чернетки.</summary>
+    /// <param name="testCase">Тест, який уже належить цій версії.</param>
+    /// <param name="inputJson">Вхід прогону.</param>
+    /// <param name="expectedJson">Очікувані виходи.</param>
+    /// <param name="tolerance">Допуск.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або тест чужий.
+    /// </exception>
+    public void EditTestCase(
+        MethodologyTestCaseEntity testCase, string inputJson, string expectedJson, decimal tolerance)
+    {
+        ArgumentNullException.ThrowIfNull(testCase);
+
+        RequireDraft("тести");
+        RequireOwn(testCase.MethodologyVersionId, "Тест", testCase.Code);
+
+        testCase.Update(inputJson, expectedJson, tolerance);
+    }
+
     /// <summary>Ставить формулі вираз, тип результату і одиницю.</summary>
     /// <param name="formula">Формула цієї версії.</param>
     /// <param name="expression">Вираз.</param>
@@ -346,6 +503,27 @@ public sealed class MethodologyVersion : Entity<int>
                 "ECR-CALC-0409",
                 $"Формула «{formula.Code}» належить версії {formula.MethodologyVersionId}, "
                 + $"а не {Id}: правити її через цю версію не можна.");
+        }
+    }
+
+    /// <summary>Відхиляє дочірній запис, який належить іншій версії.</summary>
+    /// <param name="ownerVersionId">Версія, якій запис належить насправді.</param>
+    /// <param name="what">Як називається запис у повідомленні.</param>
+    /// <param name="code">Код запису.</param>
+    /// <remarks>
+    /// ⛔ Та сама причина, що й у <see cref="RequireOwn(MethodologyFormula)"/>,
+    /// і саме тому перевірка спільна: обробник читає версію і дочірній запис
+    /// ОКРЕМИМИ запитами, і без звірки правив би вміст опублікованої версії,
+    /// тримаючи в руках чернетку.
+    /// </remarks>
+    private void RequireOwn(int ownerVersionId, string what, string code)
+    {
+        if (ownerVersionId != Id)
+        {
+            throw new DomainException(
+                "ECR-CALC-0409",
+                $"{what} «{code}» належить версії {ownerVersionId}, а не {Id}: "
+                + "правити його через цю версію не можна.");
         }
     }
 
