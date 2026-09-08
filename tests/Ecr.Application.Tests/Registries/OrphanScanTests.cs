@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Registries/OrphanScanTests.cs
+// tests/Ecr.Application.Tests/Registries/OrphanScanTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Errors;

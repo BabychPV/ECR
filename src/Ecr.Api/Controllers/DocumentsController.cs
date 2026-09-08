@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Domain.ValueObjects;
 using Ecr.Application.Workflow;

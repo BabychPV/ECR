@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Ports;
+using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
