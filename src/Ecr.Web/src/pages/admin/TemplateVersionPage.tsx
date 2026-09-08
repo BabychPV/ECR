@@ -21,7 +21,6 @@ import {
   draftOf as tableDraftOf,
   emptyDraft as emptyTableDraft,
   type TableDraft,
-  type TableStructureDto,
 } from '@/features/templates/table';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
@@ -361,11 +360,7 @@ export function TemplateVersionPage(): JSX.Element {
                                 draft: emptyTableDraft(
                                   sheet.tables.length === 0
                                     ? 0
-                                    : Math.max(
-                                        ...(sheet.tables as TableStructureDto[]).map(
-                                          (t2) => t2.ordinal,
-                                        ),
-                                      ) + 1,
+                                    : Math.max(...sheet.tables.map((t2) => t2.ordinal)) + 1,
                                 ),
                               })
                             }
@@ -375,7 +370,7 @@ export function TemplateVersionPage(): JSX.Element {
                         </Group>
                       )}
 
-                      {(sheet.tables as TableStructureDto[]).map((table) => (
+                      {sheet.tables.map((table) => (
                         <div key={table.id}>
                           <Group gap="xs" mt="sm">
                             <Text fw={600}>

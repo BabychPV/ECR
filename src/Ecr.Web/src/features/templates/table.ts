@@ -1,30 +1,12 @@
 import type { TableDto } from '@/api/types';
-import type { LocalizedText } from '@/shared/i18n/localized';
 import type { LocalizedValue } from '@/shared/ui/LocalizedInput';
-
-/**
- * Таблиця у структурі версії — з назвою й порядком (`W5.1`).
- *
- * ⛔ Розширює згенерований `TableDto`, а не замінює його. Сервер уже віддає
- * `nameL10n` і `ordinal` (W5.1 додав їх у `TableDto` саме для того, щоб
- * редактор міг попередньо заповнити форму — без цього поля другий `PUT`
- * тим самим кодом стирав би назву мовчки), але `schema.d.ts` генерується
- * окремим кроком (`npm run api:types` проти живого OpenAPI знімка) і в цьому
- * зрізі не перегенерований. Це той самий виняток, що й `CellConflictDto` в
- * `api/types.ts`: тимчасове ручне оголошення там, де згенерований тип ще не
- * встиг за сервером.
- */
-export type TableStructureDto = TableDto & {
-  readonly nameL10n: LocalizedText;
-  readonly ordinal: number;
-};
 
 /**
  * Чернетка таблиці в редакторі (`W5.1`).
  *
- * ⚠ Окремий тип від {@link TableStructureDto} — той самий довід, що й
- * `SheetDraft` проти `SheetDto`: у DTO є `id`, `columns` і `rows`, усі три
- * рахує сервер, і форма ними не керує.
+ * ⚠ Окремий тип від `TableDto` — той самий довід, що й `SheetDraft` проти
+ * `SheetDto`: у DTO є `id`, `columns` і `rows`, усі три рахує сервер, і форма
+ * ними не керує.
  */
 export interface TableDraft {
   /** Код таблиці; після створення не змінюється — це його адреса в API. */
@@ -70,7 +52,7 @@ export function emptyDraft(nextOrdinal: number): TableDraft {
 }
 
 /** Чернетка з наявної таблиці — для правки. */
-export function draftOf(table: TableStructureDto): TableDraft {
+export function draftOf(table: TableDto): TableDraft {
   return {
     code: table.code,
     nameL10n: { ...(table.nameL10n.values ?? {}) },

@@ -1,5 +1,5 @@
 import { apiFetch } from '@/api/client';
-import type { TableDto } from '@/api/types';
+import type { SaveTableDefRequest, TableDto } from '@/api/types';
 import type { TableDraft } from './table';
 
 /**
@@ -10,24 +10,6 @@ import type { TableDraft } from './table';
  * (`/sheets/{sheetCode}/tables/{code}`) — код таблиці унікальний лише в межах
  * свого аркуша, так само, як на сервері (`SheetDef.AddTable`).
  */
-
-/**
- * Тіло запиту `PUT …/tables/{code}`.
- *
- * ⛔ Оголошено тут руками, а не як псевдонім згенерованого типу (на відміну
- * від решти тіл запитів у `api/types.ts`): `SaveTableDefRequest` з'явився на
- * сервері в цьому самому зрізі (`W5.1`), а `schema.d.ts` генерується окремим
- * кроком проти живого OpenAPI і в цьому зрізі не перегенерований. Форма
- * повторює `SaveTableDefRequest` контролера поле в поле; коли схему
- * перегенерують, це оголошення можна прибрати на користь `Schemas['SaveTableDefRequest']`.
- */
-export interface SaveTableDefRequest {
-  nameL10n: Record<string, string>;
-  ordinal: number | null;
-  layoutKind: TableDto['layoutKind'];
-  rowMode: TableDto['rowMode'];
-  maxDynamicRows: number | null;
-}
 
 /**
  * Записує таблицю; створює її, якщо коду ще немає.

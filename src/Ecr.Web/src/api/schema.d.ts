@@ -4016,6 +4016,156 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує таблицю на аркуші чернетки. Право `Template.Edit`.
+         * @description ⛔ Другий вертикальний зріз авторства структури шаблону через API
+         *     (`W5.1`), той самий патерн, що й `sheets/{code}` вище
+         *     (`W5.0`).
+         *
+         *     ⚠ Таблиця адресується ДВОМА кодами — `{sheetCode}/tables/{code}`,
+         *     а не голим кодом версії, як аркуш: код таблиці унікальний лише в межах
+         *     свого аркуша (void SheetDef.AddTable(TableDef table)),
+         *     тож без коду аркуша в адресі дві таблиці з однаковим кодом на різних
+         *     аркушах були б нерозрізнимі маршрутом. Батько — аркуш — адресується
+         *     саме своїм кодом, а не ідентифікатором, з тієї самої причини, що й сам
+         *     аркуш у `sheets/{code}`: адресу задає викликач (`D2-147`), а
+         *     ідентифікатор аркуша до першого читання структури клієнту невідомий.
+         *
+         *     ⚠ `PUT` за кодом: створення й зміна — одна ідемпотентна дія. Стан
+         *     версії перевіряє домен: опублікована відхиляє правку сама
+         *     (`ECR-TMPL-0409`, `ФВ-7.1`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код аркуша, якому належить таблиця. */
+                    sheetCode: string;
+                    /** @description Код таблиці. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveTableDefRequest"];
+                    "application/json": components["schemas"]["SaveTableDefRequest"];
+                    "text/json": components["schemas"]["SaveTableDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableDto"];
+                        "text/json": components["schemas"]["TableDto"];
+                        "text/plain": components["schemas"]["TableDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає таблицю з аркуша чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код аркуша, якому належить таблиця. */
+                    sheetCode: string;
+                    /** @description Код таблиці. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/structure": {
         parameters: {
             query?: never;
@@ -6749,6 +6899,27 @@ export interface components {
             /** @description Група для правил складу документа; `null` — поза групами. */
             sheetGroup: null | string;
         };
+        /** @description Налаштування таблиці на аркуші чернетки (`W5.1`). */
+        SaveTableDefRequest: {
+            /** @description Розкладка: як періоди лягають на структуру. */
+            layoutKind: components["schemas"]["TableLayoutKind"];
+            /**
+             * Format: int32
+             * @description Стеля кількості рядків, якщо таблиця приймає додані користувачем; `null` — без стелі.
+             */
+            maxDynamicRows: null | number;
+            /** @description Назва таблиці мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description `null` — нова таблиця стає останньою на аркуші за порядком.
+             */
+            ordinal: null | number;
+            /** @description Спосіб формування рядків. */
+            rowMode: components["schemas"]["TableRowMode"];
+        };
         /** @description Налаштування зв'язку між таблицями (`ФВ-2.12`). */
         SaveTableRelationRequest: {
             /** @description Чи діє зв'язок. */
@@ -6957,14 +7128,35 @@ export interface components {
             sourceKind: components["schemas"]["RegistrySourceKind"];
         };
         TableDto: {
+            /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
             code: string;
+            /** @description Колонки таблиці в порядку `Ordinal`. */
             columns: components["schemas"]["TemplateColumnDto"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
             id: number;
+            /** @description Розкладка: як періоди лягають на структуру. */
             layoutKind: components["schemas"]["TableLayoutKind"];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Стеля кількості рядків, якщо таблиця приймає додані користувачем.
+             */
             maxDynamicRows: null | number;
+            /** @description Назва таблиці всіма мовами каталогу (`ФВ-2.1`-подібний зріз, `W5.1`). До
+             *     цього поля тут не було: `GET …/structure` віддавав таблицю без назви,
+             *     бо єдиним її творцем був офлайновий генератор тестових даних, якому підпис
+             *     у веб-формі не був потрібен. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Порядок відображення на аркуші; не ідентичність.
+             */
+            ordinal: number;
+            /** @description Спосіб формування рядків. */
             rowMode: components["schemas"]["TableRowMode"];
+            /** @description Рядки таблиці в порядку `Ordinal`. */
             rows: components["schemas"]["TemplateRowDto"][];
         };
         /**

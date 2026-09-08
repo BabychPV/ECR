@@ -13,14 +13,16 @@ namespace Ecr.Scenarios.Tests;
 /// /templates/{id}/versions</c> (нова версія), <c>PATCH
 /// /template-versions/{id}/presentation</c> (лише презентаційний шар —
 /// підписи, стилі, формати; структурні поля він відхиляє за побудовою,
-/// ФВ-7.2) і, з `W5.0`, <c>PUT /template-versions/{id}/sheets/{code}</c>
-/// (аркуш чернетки, S-04). Маршруту, що додає ТАБЛИЦЮ, колонку чи рядок,
-/// усе ще немає — ні серед контролерів
+/// ФВ-7.2), з `W5.0` <c>PUT /template-versions/{id}/sheets/{code}</c>
+/// (аркуш чернетки, S-04) і з `W5.1` <c>PUT
+/// /template-versions/{id}/sheets/{sheetCode}/tables/{code}</c> (таблиця
+/// аркуша, теж S-04). Маршруту, що додає КОЛОНКУ чи РЯДОК, усе ще немає —
+/// ні серед контролерів
 /// (<c>src/Ecr.Api/Controllers/TemplateVersionsController.cs</c>,
-/// <c>TemplatesController.cs</c>), ні деінде. S-05..S-08 тому не можуть
-/// піти далі першого кроку: сценарій викликає очікуваний маршрут і фіксує,
-/// що шляху немає (`404`) — так, як прямо дозволяє директива, коли
-/// контракту немає ніде.
+/// <c>TemplatesController.cs</c>), ні деінде (буде `W5.2`). S-05..S-07
+/// тому не можуть піти далі першого кроку: сценарій викликає очікуваний
+/// маршрут і фіксує, що шляху немає (`404`) — так, як прямо дозволяє
+/// директива, коли контракту немає ніде.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class StructureScenarios(SqlServerFixture sql)
@@ -64,20 +66,23 @@ public sealed class StructureScenarios(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// S-04. Аркуш — через API (таблиця, колонки, рядки лишаються S-05..S-08).
+    /// S-04. Аркуш і таблиця — через API (колонки, рядки лишаються S-05..S-07,
+    /// коли `W5.2` додасть свої маршрути).
     /// </summary>
     /// <remarks>
-    /// ⛔ `W5.0` додав <c>PUT /template-versions/{id}/sheets/{code}</c>:
-    /// адреса аркуша — його КОД, і задає його викликач (`D2-147`), тому дія
-    /// одна — створення і зміна не розрізняються. Перевірка йде через ту саму
-    /// точку входу, якою читає клієнт (<c>GET …/structure</c>), а не через
-    /// `SELECT` (Правило 3 §3.2) — інакше зелений тест доводив би лише запис
-    /// у базу, а не те, що адміністратор БАЧИТЬ доданий аркуш.
+    /// ⛔ `W5.0` додав <c>PUT /template-versions/{id}/sheets/{code}</c>,
+    /// `W5.1` — <c>PUT …/sheets/{sheetCode}/tables/{code}</c>: адреса — КОД
+    /// (аркуша, потім таблиці в межах аркуша), і задає його викликач
+    /// (`D2-147`), тому дія одна — створення і зміна не розрізняються.
+    /// Перевірка йде через ту саму точку входу, якою читає клієнт
+    /// (<c>GET …/structure</c>), а не через `SELECT` (Правило 3 §3.2) —
+    /// інакше зелений тест доводив би лише запис у базу, а не те, що
+    /// адміністратор БАЧИТЬ додані аркуш і таблицю.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-04")]
-    public async Task Аркуш_через_API()
+    public async Task Аркуш_і_таблиця_через_API()
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
@@ -97,6 +102,19 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             });
         Assert.Equal(HttpStatusCode.OK, addSheet.StatusCode);
 
+        var addTable = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1/tables/TABLE1", UriKind.Relative),
+            new
+            {
+                nameL10n = new Dictionary<string, string> { ["en"] = "Table 1" },
+                ordinal = 1,
+                layoutKind = "PerPeriodInstance",
+                rowMode = "Fixed",
+                maxDynamicRows = (int?)null,
+            });
+        Assert.True(
+            addTable.StatusCode == HttpStatusCode.OK, $"{addTable.StatusCode}: {app.ErrorsText}");
+
         var structure = await admin.Client.GetAsync(
             new Uri($"/api/v1/template-versions/{versionId}/structure", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, structure.StatusCode);
@@ -104,9 +122,12 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         var sheets = (await structure.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("sheets").EnumerateArray().ToList();
 
-        // ⛔ Не лише "непорожньо": код і саме той аркуш, який щойно додали —
-        // порожня перевірка пройшла б і на випадковому чужому аркуші.
+        // ⛔ Не лише "непорожньо": код і саме той аркуш/таблиця, які щойно
+        // додали — порожня перевірка пройшла б і на випадковому чужому.
         Assert.Contains(sheets, s => s.GetProperty("code").GetString() == "SHEET1");
+        var sheet1 = sheets.Single(s => s.GetProperty("code").GetString() == "SHEET1");
+        var tables = sheet1.GetProperty("tables").EnumerateArray().ToList();
+        Assert.Contains(tables, tb => tb.GetProperty("code").GetString() == "TABLE1");
     }
 
     /// <summary>
