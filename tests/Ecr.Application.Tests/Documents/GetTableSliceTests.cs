@@ -16,6 +16,19 @@ namespace Ecr.Application.Tests.Documents;
 /// Читання зрізу — бюджет **p95 400 мс** на ~5 000 комірок (tz/08 §8.2).
 /// Саме тому права перевіряються одним викликом, а не покомірково.
 /// </summary>
+// ⛔ Трейт `ФВ-6.13` знятий (директива №09 §8.2). Вимога каже про
+// ВПОРЯДКОВАНІ рівні доступу (`None` → `Read` → … → `Manage`, вищий
+// включає нижчі), а тут рішення про доступ віддає ЗАГЛУШКА
+// (`Substitute.For<IAccessDecisionService>`), яка повертає те, що їй
+// сказали. Гратчастку рівнів вона не виконує жодного разу, тож
+// зелений результат тут не є доказом `ФВ-6.13`.
+//
+// ⚠ Самі перевірки ЛИШАЮТЬСЯ і корисні: вони доводять, що обробник
+// ПИТАЄ службу рішень і шанує відмову (не ставить задачу, не віддає
+// зріз). Змінилася НЕ поведінка, а ЗАЯВКА про те, що вони покривають.
+// Саму `ФВ-6.13` доводять `Ecr.Domain.Tests/Security/ResourceGrantTests` (гратчастка
+// рівнів без жодного мока) і `Ecr.Api.Tests/CellWriteRoundTripTests` (через HTTP на
+// живій базі).
 public sealed class GetTableSliceTests
 {
     private const long TableInstance = 500;
@@ -120,7 +133,6 @@ public sealed class GetTableSliceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.13")]
     public async Task Без_права_Document_View_зріз_не_читається()
     {
         // ⛔ `A7-53`. Ендпоінт оголошував право в контракті й не перевіряв
@@ -144,7 +156,6 @@ public sealed class GetTableSliceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.13")]
     public async Task Без_гранта_на_проєкт_зріз_не_читається()
     {
         // ⛔ `A7-55`. Функціональне право каже «цей користувач узагалі працює
