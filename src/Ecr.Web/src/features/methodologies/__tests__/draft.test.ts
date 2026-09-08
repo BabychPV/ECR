@@ -77,6 +77,7 @@ describe('Конфігуратор методологій', () => {
       expression: "'Сверхнорматив'",
       resultType: 'Text',
       outputUnitId: 3,
+      argumentsCsv: '',
       isNew: false,
     } as const;
 
@@ -89,6 +90,32 @@ describe('Конфігуратор методологій', () => {
     // Числовий результат одиницю зберігає — на ній тримається перевірка
     // розмірностей при публікації.
     expect(formulaBody({ ...draft, resultType: 'Number' }).outputUnitId).toBe(3);
+  });
+
+  it('пастка 2: порожнє поле аргументів — це «списку немає», а не «нуль аргументів»', () => {
+    const draft = {
+      versionId: 5,
+      code: 'gsec',
+      expression: '@Flow * CST.k1',
+      resultType: 'Number',
+      outputUnitId: 3,
+      argumentsCsv: '',
+      isNew: true,
+    } as const;
+
+    // ⛔ Порожній список означав би «формула не приймає нічого», і тоді КОЖЕН
+    // токен виразу є порушенням (`ECR-CALC-0432`). Людина, яка просто не
+    // заповнила поле, дістала б відмову публікації на цілком робочій формулі —
+    // і так було б із кожною формулою корпусу, бо колонка з'явилася порожньою
+    // в усіх рядків.
+    expect(formulaBody(draft).argumentsCsv).toBeNull();
+
+    // ⚠ Пробіли по краях знімаються, а сам список іде як написано: заміну `.`
+    // на `_` і зняття регістру робить звірка на сервері, а не форма — інакше
+    // методолог бачив би в редакторі не те, що набрав.
+    expect(formulaBody({ ...draft, argumentsCsv: '  Flow;Land.Category ' }).argumentsCsv).toBe(
+      'Flow;Land.Category',
+    );
   });
 });
 
@@ -124,6 +151,7 @@ describe('Звернення конфігуратора методологій',
       expression: '@Flow * CST.k1',
       resultType: 'Number',
       outputUnitId: 3,
+      argumentsCsv: 'Flow',
       isNew: false,
     });
 
@@ -139,6 +167,7 @@ describe('Звернення конфігуратора методологій',
       expression: '@Flow * CST.k1',
       resultType: 'Number',
       outputUnitId: 3,
+      argumentsCsv: 'Flow',
     });
   });
 

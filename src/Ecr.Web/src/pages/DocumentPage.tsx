@@ -11,6 +11,7 @@ import type {
   ValidationResultResponse,
 } from '@/api/types';
 import { ExportButton } from '@/features/export/ExportButton';
+import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
 import { ImportPanel } from '@/features/import/ImportPanel';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
@@ -231,6 +232,11 @@ export function DocumentPage(): JSX.Element {
           </Stack>
         ))}
       </Suspense>
+
+      {/* ⛔ Числа методологій — окремо від сітки, і це `D-69`: у комірку
+          вони не потрапляють ніколи, а приходять у документ посиланням через
+          прив'язку. Доти це число не показував жоден екран. */}
+      <CalculationResultsPanel documentId={documentId} periodKey={periodKey} />
     </Stack>
       )}
     </AsyncBoundary>
