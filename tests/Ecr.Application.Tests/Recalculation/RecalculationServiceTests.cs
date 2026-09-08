@@ -20,6 +20,7 @@ public sealed class RecalculationServiceTests
 
         return new(Substitute.For<ICellStore>(),
                Substitute.For<IRowStore>(),
+               Substitute.For<IPeriodStore>(),
                Substitute.For<IMetadataCache>(),
                Substitute.For<ITemplateVersionStore>(),
                Substitute.For<IFormulaEngine>(),

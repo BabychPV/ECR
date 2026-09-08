@@ -402,6 +402,13 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             "жодне повідомлення валідації не містить адреси рядка.");
     }
 
+    /// <remarks>
+    /// ⛔ Сценарій довго не міг дійти до головного: без реальної таблиці
+    /// (`S-04`…`S-09`) не було що змінювати. Тепер він змінює комірку ДВІЧІ —
+    /// і саме друга правка доводить те, заради чого журнал ведуть: «було 7,
+    /// стало 9». Перша правка старого значення не має чесно (комірки не
+    /// існувало, `ФВ-3.8`), і саме тому одного запису тут замало.
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-20")]
@@ -409,53 +416,92 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S20", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Security.ViewAudit"]);
+            app, "S20",
+            [
+                "Project.Manage", "Document.View", "Document.Create", "Template.Edit",
+                "Template.Publish", "Security.ViewAudit",
+            ]);
 
-        (admin, _, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S20");
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S20");
+        admin = doc.Admin;
 
         var tables = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
         var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(tableArray.GetArrayLength() > 0, $"документ {documentId} не має жодної таблиці — нема що змінювати для аудиту.");
+        Assert.True(tableArray.GetArrayLength() > 0, $"документ {doc.DocumentId} не має жодної таблиці: {app.ErrorsText}");
         var tableInstanceId = tableArray[0].GetProperty("tableInstanceId").GetInt64();
 
-        var slice = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables/{tableInstanceId}", UriKind.Relative));
-        var sliceBody = await slice.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(sliceBody.GetProperty("rows").GetArrayLength() > 0, $"таблиця {tableInstanceId} не має жодного рядка.");
-        var row = sliceBody.GetProperty("rows")[0];
-        var rowKey = row.GetProperty("rowKey").GetString()!;
-        var columnCode = sliceBody.GetProperty("columns")[0].GetProperty("code").GetString()!;
-
         var from = DateTime.UtcNow.AddMinutes(-1);
-        var patch = await admin.Client.PatchAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/cells", UriKind.Relative),
-            new
-            {
-                tableInstanceId,
-                periodKey,
-                origin = "UserEdit",
-                rows = new[]
-                {
-                    new { rowKey, baseVersion = row.GetProperty("rowVersion").GetString(), cells = new object[] { new { columnCode, value = 7m } } },
-                },
-            });
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+
+        // Перша правка: комірки ще не існувало — «було» лишається порожнім.
+        await PatchAsync(app, admin, doc, tableInstanceId, 7m);
+
+        // Друга: саме вона має лягти в журнал як «було 7, стало 9».
+        await PatchAsync(app, admin, doc, tableInstanceId, 9m);
 
         var to = DateTime.UtcNow.AddMinutes(1);
         var audit = await admin.Client.GetAsync(new Uri(
-            $"/api/v1/audit/cells?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}&documentId={documentId}&limit=50",
+            $"/api/v1/audit/cells?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}&documentId={doc.DocumentId}&limit=50",
             UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
 
-        var auditBody = await audit.Content.ReadFromJsonAsync<JsonElement>();
-        var items = auditBody.GetProperty("items");
-        Assert.True(items.GetArrayLength() > 0, $"журнал аудиту порожній для щойно зміненої комірки документа {documentId}.");
+        var items = (await audit.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("items").EnumerateArray().ToList();
+        Assert.True(items.Count >= 2, $"журнал аудиту не має двох записів для документа {doc.DocumentId}: {app.ErrorsText}");
 
-        var entry = items[0];
-        Assert.Equal(rowKey, entry.GetProperty("rowKey").GetString());
-        Assert.True(entry.TryGetProperty("newValue", out _), "запис аудиту не несе нового значення.");
+        // ⛔ Доказ сценарію: запис із НОВИМ значенням 9 несе і адресу рядка, і
+        // старе значення. Обидва поля писалися константами (`RowKey`
+        // порожнім рядком, `OldValue` — `null`), тож журнал відповідав «стало
+        // 9» і не міг сказати ні де, ні що було до того.
+        var second = items.Find(i => i.GetProperty("newValue").GetString() == "9");
+        Assert.True(second.ValueKind != JsonValueKind.Undefined, "у журналі немає запису про другу правку.");
+        Assert.Equal(doc.RowKeys[0], second.GetProperty("rowKey").GetString());
+
+        // ⚠ Порівняння ЧИСЛОМ, а не рядком: «нове» приходить із запиту
+        // (`9`), а «старе» — з бази, де воно лежить із масштабом колонки
+        // (`7.0000000000`). Це реальна поведінка, і підганяти під неї
+        // очікування рядком означало б зафіксувати спосіб форматування
+        // замість факту.
+        Assert.Equal(
+            7m,
+            decimal.Parse(
+                second.GetProperty("oldValue").GetString()!,
+                System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Пише число в першу комірку першого рядка, звіряючи версію.</summary>
+    private static async Task PatchAsync(
+        EcrApiFactory app, Provisioning.Administrator admin, RealDocument doc,
+        long tableInstanceId, decimal value)
+    {
+        var slice = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables/{tableInstanceId}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, slice.StatusCode);
+
+        var row = (await slice.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("rows").EnumerateArray()
+            .First(r => r.GetProperty("rowKey").GetString() == doc.RowKeys[0]);
+
+        var patch = await admin.Client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId,
+                periodKey = doc.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = doc.RowKeys[0],
+                        baseVersion = row.GetProperty("rowVersion").GetString(),
+                        cells = new object[] { new { columnCode = doc.ColumnCode, value } },
+                    },
+                },
+            });
+
+        Assert.True(patch.StatusCode == HttpStatusCode.OK, $"{patch.StatusCode}: {app.ErrorsText}");
     }
 
     /// <summary>
