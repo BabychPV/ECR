@@ -1,23 +1,28 @@
-using System.Reflection;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Expressions;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
-using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Binding;
+using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
+using Ecr.Infrastructure.Caching;
+using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using NSubstitute;
 using Xunit;
 
 namespace Ecr.Application.Tests.Expressions;
 
 /// <summary>
-/// Перевірка виразу при введенні (<c>ФВ-9.15a</c>).
+/// Перевірка виразу при введенні (<c>ФВ-9.15a</c>). На <b>реальному</b> SQL Server.
 /// </summary>
 /// <remarks>
 /// ⛔ Головне твердження цих тестів одне: **редактор каже те саме, що скаже
@@ -25,77 +30,30 @@ namespace Ecr.Application.Tests.Expressions;
 /// публікація відхилить, гірший за відсутній: він навчає довіряти собі, і
 /// відмова приходить тоді, коли її вже нікуди подіти — за годину до подання
 /// форми.
+///
+/// ⛔ Переведено з моків на живу базу (директива №09 §8.2). Обидві половини
+/// порівняння брали структуру з ОДНОГО мока <c>ITemplateVersionStore</c>, який
+/// віддавав граф, зібраний рефлексією в пам'яті. Тотожність двох відповідей на
+/// вигаданій структурі не є доказом тотожності на справжній: розійтися вони
+/// можуть саме там, де структура приходить із бази (порожні навігації, м'яко
+/// видалені колонки, чужа версія) — тобто рівно в тому, чого мок не відтворює.
+///
+/// ⛔ Публікація тут — СПРАВЖНІЙ <c>PublishTemplateVersionHandler</c> з усіма
+/// реальними складниками: сховище, репозиторій, рушій, кеш метаданих, довідник
+/// одиниць, аудит, транзакція. Це важливо саме для цього тесту: він мусить
+/// упасти й тоді, коли перевірку додали в ОБРОБНИК повз спільний
+/// <c>PublishChecks.CheckExpression</c>, а не лише всередині <c>Run</c>.
+///
+/// ⚠ <c>IAccessDecisionService</c> лишається підробкою: переписування 34 таких
+/// місць директива §8.2 виносить за межі цього проходу.
 /// </remarks>
-public sealed class ValidateExpressionTests
+[Collection("SqlServer")]
+public sealed class ValidateExpressionTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 2, 1, 12, 0, 0, DateTimeKind.Utc);
 
-    // ⚠ Мок ПОРТА СХОВИЩА, а не узагальненого репозиторію. Раніше тут стояв
-    // `IRepository<TemplateVersion, int>`, і саме він приховував дефект:
-    // справжня реалізація віддає версію без навігацій, а мок — граф, зібраний
-    // у пам'яті. Мок відрізнявся від реалізації рівно тим, у чому полягав
-    // дефект (`A7 §4.3`); те, що структура справді доїжджає, доводить
-    // інтеграційний `TemplateVersionStructureTests` на живій базі.
-    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
-
-    // ⚠ Репозиторій потрібен публікації лише для `DeprecateAsync`; структуру
-    // вона бере зі сховища (`_versions`).
-    private readonly IRepository<TemplateVersion, int> _repository =
-        Substitute.For<IRepository<TemplateVersion, int>>();
-    private readonly IUnitCatalog _catalogue = Substitute.For<IUnitCatalog>();
-    private readonly IMetadataCache _cache = Substitute.For<IMetadataCache>();
-    private readonly IFormulaEngine _formulas = Substitute.For<IFormulaEngine>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
-    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
-    private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
-    private readonly IClock _clock = Substitute.For<IClock>();
-    private readonly TemplateVersion _draft;
-
-    public ValidateExpressionTests()
-    {
-        _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
-        _clock.UtcNow.Returns(Now);
-        _versions.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
-        _catalogue.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
-
-        _user.UserId.Returns(9);
-        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
-        {
-            CacheKey = "p",
-            UserId = 9,
-            SecurityStamp = "s",
-            Permissions = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "Calculation.View", "Template.View", "Template.Publish",
-            },
-            Grants = new Dictionary<string, GrantLevel>(),
-            Denies = new HashSet<string>(),
-            RoleIds = new HashSet<int>(),
-        });
-
-        var parser = new Parser();
-        _formulas.Parse(Arg.Any<string>(), Arg.Any<ExpressionDialect>())
-                 .Returns(call => parser.Parse(call.ArgAt<string>(0), call.ArgAt<ExpressionDialect>(1)));
-
-        // ⛔ Обхід AST теж справжній. Заглушка тут зробила б головний тест
-        // порожнім: резолвінг посилань живе саме в ньому, і без нього ні
-        // редактор, ні публікація не сказали б нічого про `[Apr]` — а тест
-        // порівнював би дві однакові порожнечі й лишався зеленим завжди.
-        var engine = new RealFormulaEngine();
-        _formulas.ExtractDependencies(
-                     Arg.Any<ParsedExpression>(),
-                     Arg.Any<TemplateVersionSnapshot?>(),
-                     Arg.Any<DependencyContext>())
-                 .Returns(call => engine.ExtractDependencies(
-                     call.ArgAt<ParsedExpression>(0),
-                     call.ArgAt<TemplateVersionSnapshot?>(1),
-                     call.ArgAt<DependencyContext>(2)));
-
-        _formulas.BuildEvaluationOrder(Arg.Any<IReadOnlyList<FormulaNode>>())
-                 .Returns(call => new OrderingResult(
-                     true, call.Arg<IReadOnlyList<FormulaNode>>().Select(n => n.FormulaDefId).ToList(), null));
-    }
 
     [Theory]
     [InlineData("SUM([Jan]")]
@@ -104,6 +62,7 @@ public sealed class ValidateExpressionTests
     [InlineData("SUM(@Fuel)")]
     [InlineData("ROUND([Jan])")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task Редактор_каже_те_саме_що_публікація_і_на_тих_самих_позиціях(string expression)
     {
@@ -115,10 +74,10 @@ public sealed class ValidateExpressionTests
         // ⚠ Тест упаде, щойно хтось додасть перевірку в публікацію повз
         // спільний `CheckExpression` — тобто рівно тоді, коли редактор почне
         // брехати. Без нього розбіжність виявляли б користувачі.
-        var table = Structure(expression);
+        var version = await ArrangeAsync(expression);
 
-        var fromPublish = await PublishDiagnosticsAsync().ConfigureAwait(true);
-        var fromEditor = await EditorDiagnosticsAsync(expression, table).ConfigureAwait(true);
+        var fromPublish = await PublishDiagnosticsAsync(version);
+        var fromEditor = await EditorDiagnosticsAsync(version, expression);
 
         Assert.NotEmpty(fromPublish);
         Assert.Equal(Render(fromPublish), Render(fromEditor));
@@ -126,14 +85,15 @@ public sealed class ValidateExpressionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task Правильний_вираз_не_дає_жодного_зауваження()
     {
-        var table = Structure("SUM([Jan])");
+        var version = await ArrangeAsync("SUM([Jan])");
 
-        var result = await Handler()
-            .HandleAsync(Request("SUM([Jan])", table), CancellationToken.None)
-            .ConfigureAwait(true);
+        await using var db = Context();
+        var result = await Handler(db)
+            .HandleAsync(Request(version, "SUM([Jan])"), CancellationToken.None);
 
         Assert.Empty(result.Diagnostics);
 
@@ -145,6 +105,7 @@ public sealed class ValidateExpressionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task Без_версії_шаблону_названо_чого_НЕ_перевіряли()
     {
@@ -152,13 +113,12 @@ public sealed class ValidateExpressionTests
         // цілий», а не «вираз правильний». Мовчазна різниця між цими двома
         // твердженнями і є способом пообіцяти публікацію, якої не буде: вираз
         // із посиланням на неіснуючу колонку тут виглядав би бездоганним.
-        var result = await Handler()
-            .HandleAsync(
-                new ExpressionValidationRequest(
-                    "SUM([НемаТакої])", ExpressionDialect.Template,
-                    TemplateVersionId: null, TableDefId: null, RowKey: null, ColumnDefId: null),
-                CancellationToken.None)
-            .ConfigureAwait(true);
+        await using var db = Context();
+        var result = await Handler(db).HandleAsync(
+            new ExpressionValidationRequest(
+                "SUM([НемаТакої])", ExpressionDialect.Template,
+                TemplateVersionId: null, TableDefId: null, RowKey: null, ColumnDefId: null),
+            CancellationToken.None);
 
         Assert.Empty(result.Diagnostics);
 
@@ -169,6 +129,7 @@ public sealed class ValidateExpressionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task Цикл_названо_непереверненим_завжди()
     {
@@ -176,43 +137,36 @@ public sealed class ValidateExpressionTests
         // собі відповіді, чи утворює він коло з рештою формул. Промовчати тут
         // означало б сказати «циклу немає» — і публікація відмовляла б після
         // зеленого редактора, не пояснивши, що змінилося.
-        var table = Structure("SUM([Jan])");
+        var version = await ArrangeAsync("SUM([Jan])");
 
-        var result = await Handler()
-            .HandleAsync(Request("SUM([Jan])", table), CancellationToken.None)
-            .ConfigureAwait(true);
+        await using var db = Context();
+        var result = await Handler(db)
+            .HandleAsync(Request(version, "SUM([Jan])"), CancellationToken.None);
 
         Assert.Contains(ValidateExpressionHandler.SkippedCycle, result.SkippedChecks, StringComparer.Ordinal);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task Без_права_на_структуру_перевірка_із_версією_відмовляє()
     {
         // ⛔ Діагностика називає коди колонок і рядків, тобто ВІДДАЄ структуру.
         // Без цієї перевірки ендпоінт був би обхідним шляхом до неї для того,
         // хто права на структуру не має.
-        var table = Structure("SUM([Jan])");
+        var version = await ArrangeAsync("SUM([Jan])");
 
-        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
-        {
-            CacheKey = "p",
-            UserId = 9,
-            SecurityStamp = "s",
-            Permissions = new HashSet<string>(StringComparer.Ordinal) { "Calculation.View" },
-            Grants = new Dictionary<string, GrantLevel>(),
-            Denies = new HashSet<string>(),
-            RoleIds = new HashSet<int>(),
-        });
+        await using var db = Context();
+        var handler = Handler(db, "Calculation.View");
 
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Handler().HandleAsync(Request("SUM([Jan])", table), CancellationToken.None))
-            .ConfigureAwait(true);
+            () => handler.HandleAsync(Request(version, "SUM([Jan])"), CancellationToken.None));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task І_редактор_і_публікація_витягують_залежності_через_ПОРТ_зі_знімком_чернетки()
     {
@@ -224,68 +178,93 @@ public sealed class ValidateExpressionTests
         // формула» розходяться на першій правці, і розбіжність видно не як
         // помилку, а як довіру до зеленого редактора, після якого публікація
         // відмовляє (`H-3`, директива №06 §1).
-        var table = Structure("SUM([Jan], [Apr])");
+        //
+        // ⚠ Рушій тут — СПРАВЖНІЙ, лише обгорнутий записувачем. Підміна
+        // рушія заглушкою зробила б головне порівняння вище звірянням двох
+        // порожнеч; записувач же нічого не змінює у відповідях.
+        var version = await ArrangeAsync("SUM([Jan], [Apr])");
+        var engine = new RecordingFormulaEngine();
 
-        await PublishDiagnosticsAsync().ConfigureAwait(true);
-        var afterPublish = Extractions();
+        await PublishDiagnosticsAsync(version, engine);
+        var afterPublish = engine.Snapshots.Count;
 
-        await EditorDiagnosticsAsync("SUM([Jan], [Apr])", table).ConfigureAwait(true);
-        var afterEditor = Extractions();
+        await EditorDiagnosticsAsync(version, "SUM([Jan], [Apr])", engine);
+        var afterEditor = engine.Snapshots.Count;
 
-        Assert.NotEmpty(afterPublish);
+        Assert.True(afterPublish > 0, "публікація має ходити за залежностями через порт");
         Assert.True(
-            afterEditor.Count > afterPublish.Count,
+            afterEditor > afterPublish,
             "редактор теж має ходити через порт, а не обходити його власним розкривачем");
 
         // ⛔ Знімок — саме ЧЕРНЕТКИ, і приходить він параметром. Це і є та
         // обставина, через яку метод порту раніше був недосяжним: із кешу
         // чернетка не прийшла б узагалі, і перевірка мовчки працювала б над
         // попередньою редакцією структури.
-        Assert.All(afterEditor, snapshot =>
+        Assert.All(engine.Snapshots, snapshot =>
         {
             Assert.NotNull(snapshot);
-            Assert.Equal(_draft.Id, snapshot.TemplateVersionId);
+            Assert.Equal(version.VersionId, snapshot!.TemplateVersionId);
         });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>Знімки, з якими рушій просили витягти залежності.</summary>
-    private List<TemplateVersionSnapshot?> Extractions()
-        => [.. _formulas.ReceivedCalls()
-            .Where(c => string.Equals(
-                c.GetMethodInfo().Name,
-                nameof(IFormulaEngine.ExtractDependencies),
-                StringComparison.Ordinal))
-            .Select(c => (TemplateVersionSnapshot?)c.GetArguments()[1])];
+    private static ExpressionValidationRequest Request(DraftVersion version, string expression)
+        => new(expression, ExpressionDialect.Template, version.VersionId, version.TableDefId, null, version.TotalColumnDefId);
 
-    private ValidateExpressionHandler Handler()
-        => new(_versions, _catalogue, _formulas, _access, _user);
+    private ValidateExpressionHandler Handler(
+        EcrDbContext db, string? onlyPermission = null, IFormulaEngine? engine = null)
+    {
+        Profile(onlyPermission);
 
-    private static ExpressionValidationRequest Request(string expression, TableDef table)
-        => new(expression, ExpressionDialect.Template, 1, table.Id, null, table.Columns[1].Id);
+        return new ValidateExpressionHandler(
+            new TemplateVersionStore(db),
+            new UnitCatalog(db),
+            engine ?? new RealFormulaEngine(),
+            _access,
+            _user);
+    }
 
     /// <summary>Зауваження, які видала б публікація цієї версії.</summary>
-    private async Task<IReadOnlyList<DiagnosticInfo>> PublishDiagnosticsAsync()
+    /// <remarks>
+    /// ⛔ Обробник СПРАВЖНІЙ і зібраний із реальних складників. Попередник
+    /// будував його з десяти моків, тож перевірка, додана в сам обробник повз
+    /// <c>PublishChecks</c>, лишалася непоміченою — а це рівно та розбіжність
+    /// між редактором і публікацією, від якої тест і стереже.
+    /// </remarks>
+    private async Task<IReadOnlyList<DiagnosticInfo>> PublishDiagnosticsAsync(
+        DraftVersion version, IFormulaEngine? engine = null)
     {
+        Profile(null);
+
+        await using var db = Context();
+        using var memory = new MemoryCache(new MemoryCacheOptions());
+
         var handler = new PublishTemplateVersionHandler(
-            _repository, _versions, _formulas, _cache, _catalogue,
-            _access, _user, _audit, _uow, _clock);
+            new Repository<TemplateVersion, int>(db),
+            new TemplateVersionStore(db),
+            engine ?? new RealFormulaEngine(),
+            new MetadataCache(memory, db),
+            new UnitCatalog(db),
+            _access,
+            _user,
+            new AuditWriter(db),
+            new UnitOfWork(db),
+            new TestClock(Now));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.PublishAsync(1, userId: 9, CancellationToken.None)).ConfigureAwait(true);
+            () => handler.PublishAsync(version.VersionId, userId: 9, CancellationToken.None));
 
-        return (IReadOnlyList<DiagnosticInfo>)((IEnumerable<DiagnosticInfo>)error.Details!["diagnostics"]!)
-            .ToList();
+        return [.. (IEnumerable<DiagnosticInfo>)error.Details!["diagnostics"]!];
     }
 
     /// <summary>Зауваження, які видає перевірка при введенні.</summary>
     private async Task<IReadOnlyList<DiagnosticInfo>> EditorDiagnosticsAsync(
-        string expression, TableDef table)
+        DraftVersion version, string expression, IFormulaEngine? engine = null)
     {
-        var result = await Handler()
-            .HandleAsync(Request(expression, table), CancellationToken.None)
-            .ConfigureAwait(true);
+        await using var db = Context();
+        var result = await Handler(db, null, engine)
+            .HandleAsync(Request(version, expression), CancellationToken.None);
 
         return result.Diagnostics;
     }
@@ -294,29 +273,123 @@ public sealed class ValidateExpressionTests
     private static string Render(IEnumerable<DiagnosticInfo> diagnostics)
         => string.Join("\n", diagnostics.Select(d => $"{d.Code}@{d.Position}+{d.Length}: {d.Message}"));
 
-    /// <summary>Версія з однією таблицею і однією формулою колонки.</summary>
-    private TableDef Structure(string expression)
+    private void Profile(string? onlyPermission)
     {
-        var builder = new TemplateBuilder { TemplateVersionId = 1 };
-        var sheet = builder.Sheet("Water");
-        var table = builder.Table(sheet, "Main");
-        builder.Column(table, "Jan", isMonthColumn: true);
-        builder.Column(table, "Total");
-        builder.Row(table, "7001001", 1);
+        var builder = new AccessBuilder { UserId = 9 };
 
-        var formula = new FormulaDef(
-            table.Id, FormulaScope.Column, expression, ExpressionDialect.Template);
+        if (onlyPermission is null)
+        {
+            builder.Permission("Calculation.View").Permission("Template.View").Permission("Template.Publish");
+        }
+        else
+        {
+            builder.Permission(onlyPermission);
+        }
 
-        typeof(Entity<int>).GetProperty("Id")!.SetValue(formula, 100);
-        typeof(FormulaDef).GetProperty(nameof(FormulaDef.ColumnDefId))!
-            .SetValue(formula, table.Columns[1].Id);
+        _user.UserId.Returns(9);
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(builder.Build());
+    }
 
+    private EcrDbContext Context()
+        => new(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+            .Options);
+
+    /// <summary>
+    /// Версія-чернетка з таблицею, двома колонками, рядком і однією формулою
+    /// колонки — <b>у базі</b>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Вираз кладеться сирим текстом: <c>SaveFormulaDefHandler</c> синтаксис
+    /// на запис не перевіряє, і саме тому зламане взагалі може опинитися в
+    /// структурі (`S-08`). Без цієї обставини половину тестів файла не було б
+    /// на чому поставити.
+    /// </remarks>
+    private async Task<DraftVersion> ArrangeAsync(string expression)
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        await using var db = Context();
+
+        var template = new Template(EcrCode.Create($"VE{tag}"), Name($"Template {tag}"), 1, Now);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync();
+
+        var version = new TemplateVersion(template.Id, "1.0.0.0", 1, Now);
+        db.TemplateVersions.Add(version);
+        await db.SaveChangesAsync();
+
+        var sheet = new SheetDef(version.Id, EcrCode.Create($"S{tag}"), Name("Water"), 1);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync();
+
+        var table = new TableDef(
+            sheet.Id, EcrCode.Create($"Main{tag}"), Name("Main"), 1,
+            TableLayoutKind.MonthsInColumns, TableRowMode.Fixed);
+        db.TableDefs.Add(table);
+        await db.SaveChangesAsync();
+
+        var jan = new ColumnDef(table.Id, EcrCode.Create("Jan"), Name("Jan"), 1, CellDataType.Decimal);
+        var total = new ColumnDef(table.Id, EcrCode.Create("Total"), Name("Total"), 2, CellDataType.Decimal);
+        db.ColumnDefs.Add(jan);
+        db.ColumnDefs.Add(total);
+        db.RowDefs.Add(new RowDef(table.Id, RowKey.Create("7001001"), 1, Name("Row"), RowKind.Item));
+        await db.SaveChangesAsync();
+
+        // ⛔ Формула чіпляється НАВІГАЦІЄЮ `table.AddFormula`, а не
+        // `db.FormulaDefs.Add`. Це не стиль: у `cfg.FormulaDef` ДВА зовнішні
+        // ключі на `cfg.TableDef` — оголошений `TableDefId` і тіньовий
+        // `TableDefId1`, який EF завів під навігацію `TableDef.Formulas`
+        // (`HasOne<TableDef>().WithMany()` — без навігації). `GetWithStructureAsync`
+        // вантажить формули саме через навігацію, тож рядок, вставлений лише з
+        // `TableDefId`, для публікації НЕ ІСНУЄ. Бойовий шлях
+        // (`FormulaDefHandlers`) кличе `AddFormula`, і тест мусить іти ним же.
+        //
+        // ⚠ Мок цього побачити не міг за побудовою — див. `Q-163`.
+        var formula = new FormulaDef(table.Id, FormulaScope.Column, expression, ExpressionDialect.Template);
+        formula.AssignColumn(total.Id);
         table.AddFormula(formula);
+        await db.SaveChangesAsync();
 
-        typeof(TemplateVersion).GetProperty(nameof(TemplateVersion.Id))!.SetValue(_draft, 1);
-        _draft.GetType().GetField("_sheets", BindingFlags.Instance | BindingFlags.NonPublic)!
-              .SetValue(_draft, new List<SheetDef> { sheet });
+        return new DraftVersion(version.Id, table.Id, total.Id);
+    }
 
-        return table;
+    private static LocalizedText Name(string value)
+        => new(new Dictionary<string, string> { ["en"] = value });
+
+    private sealed record DraftVersion(int VersionId, int TableDefId, int TotalColumnDefId);
+
+    /// <summary>
+    /// Справжній рушій, який ЗАПАМ'ЯТОВУЄ знімки, з якими його просили витягти
+    /// залежності.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Це спостерігач, а не підробка: усі відповіді — від
+    /// <see cref="RealFormulaEngine"/>. Замінити рушій заглушкою тут означало б
+    /// перевіряти заглушку; не бачити викликів — не мати чим довести, що обидва
+    /// шляхи ходять через ПОРТ, а не тримають по власному обходу AST.
+    /// </remarks>
+    private sealed class RecordingFormulaEngine : IFormulaEngine
+    {
+        private readonly RealFormulaEngine _inner = new();
+
+        /// <summary>Знімки, передані в <c>ExtractDependencies</c>, у порядку викликів.</summary>
+        public List<TemplateVersionSnapshot?> Snapshots { get; } = [];
+
+        public ParseResult Parse(string expression, ExpressionDialect dialect)
+            => _inner.Parse(expression, dialect);
+
+        public DependencyExtraction ExtractDependencies(
+            ParsedExpression expression, TemplateVersionSnapshot? snapshot, DependencyContext context)
+        {
+            Snapshots.Add(snapshot);
+            return _inner.ExtractDependencies(expression, snapshot, context);
+        }
+
+        public EvaluationResult Evaluate(
+            ParsedExpression expression, IEvaluationContext context, NumericMode mode = NumericMode.Strict)
+            => _inner.Evaluate(expression, context, mode);
+
+        public OrderingResult BuildEvaluationOrder(IReadOnlyList<FormulaNode> nodes)
+            => _inner.BuildEvaluationOrder(nodes);
     }
 }
