@@ -366,7 +366,11 @@ if ($Node -eq 'PK1') {
         'Edit(tools/**)',
         'Write(src/**)',
         'Write(tests/**)',
-        'Write(tools/**)'
+        'Write(tools/**)',
+        # docs/build/** — журнали ВИКОНАВЦЯ (права видано людиною 2026-09-08).
+        # Керуючий читає, але не пише: потрібна зміна — це настанова, не коміт.
+        'Edit(docs/build/**)',
+        'Write(docs/build/**)'
     )
     $allowList = @()
 } else {
@@ -389,10 +393,15 @@ if ($Node -eq 'PK1') {
         'Bash(gh pr review:*)',
         'Edit(scripts/**)'
     )
-    # ЄДИНИЙ виняток із заборони docs/**: журнал відхилень. PK2 мусить
-    # мати змогу дописати запис у свій лог PK2-LOG.md (гілка sync) — інакше відхилення просто зникне.
+    # Винятки із заборони docs/**: власні журнали виконавця. `docs/build/**`
+    # (questions.md, decisions.md, roadmap.md, progress.md, problems.md) —
+    # права видано людиною 2026-09-08; доти PK2 не міг закрити ВЛАСНИЙ запис.
+    # Плюс PK2-LOG.md на гілці sync. PK2 мусить
+    # мати змогу писати в них — інакше журнал бреше про стан.
     # allow має вищий приоритет за deny, тому виняток працює.
     $allowList = @(
+        'Edit(docs/build/**)',
+        'Write(docs/build/**)',
         'Edit(PK2-LOG.md)',
         'Write(PK2-LOG.md)'
     )
