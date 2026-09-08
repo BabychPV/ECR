@@ -58,6 +58,7 @@ public sealed class RecalculationJobProjectIdTests(SqlServerFixture sql)
             db,
             new StubRunner(),
             RunHandler(),
+            Formulas(),
             new TestClock(DateTime.UtcNow));
 
         // ⛔ ГОЛОВНЕ ТВЕРДЖЕННЯ: виконання не кидає. На невиправленому коді
@@ -80,6 +81,28 @@ public sealed class RecalculationJobProjectIdTests(SqlServerFixture sql)
             .SingleAsync(r => r.ProjectId == document.ProjectId);
 
         Assert.Equal(document.ProjectId, run.ProjectId);
+    }
+
+    /// <summary>Служба перерахунку формул шаблону над підставними портами.</summary>
+    /// <remarks>
+    /// ⚠ Цей тест — про <c>ProjectId</c>, а не про формули: порти підставні,
+    /// і фаза формул чесно завершується нулем комірок. Порядок і зміст фаз
+    /// доводить <c>RecalculationJobTests</c>.
+    /// </remarks>
+    private static Ecr.Application.Recalculation.RecalculationService Formulas()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
+        return new(
+            Substitute.For<ICellStore>(),
+            Substitute.For<IRowStore>(),
+            Substitute.For<Ecr.Application.Ports.IPeriodStore>(),
+            Substitute.For<IMetadataCache>(),
+            Substitute.For<ITemplateVersionStore>(),
+            Substitute.For<IFormulaEngine>(),
+            units,
+            Substitute.For<Ecr.Application.Ports.IUnitOfWork>());
     }
 
     private static RunCalculationHandler RunHandler()

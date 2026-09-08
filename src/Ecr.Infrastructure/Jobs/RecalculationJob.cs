@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
+using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -23,15 +24,36 @@ namespace Ecr.Infrastructure.Jobs;
 /// не знаючи її реалізації; без нього <c>EnqueueAsync&lt;IRecalculationJob&gt;</c>
 /// не мав би що запустити — черга приймала б завдання, і не робилося б нічого.
 /// </para>
+/// <para>
+/// ⛔ Прогін складається з ДВОХ конвеєрів, і порядок між ними гарантує КОД, а
+/// не порядок викликів клієнта: спершу формули шаблону (<c>doc.CellValue</c>),
+/// потім методології (<c>calc.CalculationResult</c>). Причина — у тому, звідки
+/// методологія бере входи: <c>CalculationInputBuilder</c> читає
+/// <c>ICellStore.ReadSliceAsync</c>, тобто рівно ту таблицю, у яку пишуть
+/// формули шаблону. Порахувати методології першими означало б узяти входи
+/// ДО того, як вони стали правильними, — і видати новий прогін із новою
+/// контрольною сумою від застарілих чисел. Неправильне число без жодної
+/// ознаки неправильності (директива №10 `W10.1`).
+/// </para>
 /// </remarks>
 public sealed class RecalculationJob(
     EcrDbContext db,
     ICalculationRunner orchestrator,
     RunCalculationHandler runs,
+    RecalculationService formulas,
     Domain.Abstractions.IClock clock) : IRecalculationJob
 {
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
+
+    /// <summary>Скільки шкали прогресу віддано формулам шаблону.</summary>
+    /// <remarks>
+    /// ⚠ Оркестратор методологій рахує власні відсотки від нуля
+    /// (<c>CalculationOrchestrator</c>). Без масштабування шкала стрибала б
+    /// назад — 40 %, потім знову 5 %, — і «скільки лишилося» перестало б
+    /// щось означати саме тоді, коли прогін довгий і на нього дивляться.
+    /// </remarks>
+    private const int FormulaPhaseShare = 40;
 
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     /// <remarks>
@@ -78,7 +100,28 @@ public sealed class RecalculationJob(
             db.CalculationRuns.Add(run);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+            // ⛔ КРОК 1 — формули шаблону, і саме ВСЕРЕДИНІ `try`. Відмова тут
+            // мусить позначити прогін `Failed` із причиною, а не лишити його
+            // `Running` назавжди: рівно цей клас дефекту в цьому файлі вже
+            // коштував розбору двічі (`D2-285`, `D2-286`).
+            await progress
+                .ReportAsync(0, "Перерахунок формул шаблону.", ct)
+                .ConfigureAwait(false);
+
+            var cells = await FormulasAsync(request, ct).ConfigureAwait(false);
+
+            await progress
+                .ReportAsync(
+                    FormulaPhaseShare, $"Формули шаблону: перераховано комірок — {cells}.", ct)
+                .ConfigureAwait(false);
+
             var bindings = await BindingsAsync(request, ct).ConfigureAwait(false);
+
+            // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно стали
+            // актуальними.
+            await progress
+                .ReportAsync(FormulaPhaseShare, "Перерахунок методологій.", ct)
+                .ConfigureAwait(false);
 
             var profile = await orchestrator
                 .RunAsync(
@@ -86,7 +129,7 @@ public sealed class RecalculationJob(
                     request.DocumentId,
                     new PeriodKey(request.PeriodKey ?? 0),
                     bindings,
-                    progress,
+                    new PhaseProgress(progress, FormulaPhaseShare, "Методології"),
                     ct)
                 .ConfigureAwait(false);
 
@@ -120,6 +163,48 @@ public sealed class RecalculationJob(
 
             throw;
         }
+    }
+
+    /// <summary>Повний перерахунок формул шаблону для документа й періодів завдання.</summary>
+    /// <returns>Скільки комірок перераховано.</returns>
+    /// <remarks>
+    /// ⛔ Повний, а не інкрементний. Інкрементний шлях
+    /// (<c>PatchCellsHandler</c> → <c>IFormulaRecalculationJob</c>) бере
+    /// формули з набору змінених комірок, тож формула, ДОДАНА в шаблон після
+    /// введення даних, не потрапляє в нього ніколи — і залишалася б
+    /// непорахованою нескінченно.
+    ///
+    /// ⚠ Періоди перебираються ЗА ЗРОСТАННЯМ. Формула шаблону має право
+    /// читати попередній період (<c>[Period:-1]</c>), і зворотний порядок
+    /// порахував би лютий зі старого січня, а потім січень — правильно, але
+    /// вже нікому.
+    /// </remarks>
+    private async Task<int> FormulasAsync(RecalculationRequest request, CancellationToken ct)
+    {
+        // ⚠ Періоди беруться з ЕКЗЕМПЛЯРІВ таблиць, а не з `request.PeriodKey`:
+        // той може бути `null` — «повний рік», — і `new PeriodKey(0)` тоді
+        // виглядав би як звичайний період, у якому просто нічого немає
+        // (`A7-28`, `PeriodKey.IsValid`).
+        var scopes = await db.TableInstances
+            .AsNoTracking()
+            .Where(i => i.DocumentId == request.DocumentId
+                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey))
+            .Select(i => new ScopeRow(i.DocumentId, i.PeriodKeyValue))
+            .Distinct()
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var written = 0;
+
+        foreach (var scope in scopes.OrderBy(s => s.PeriodKeyValue))
+        {
+            written += await formulas
+                .RecalculateAllAsync(scope.DocumentId, new PeriodKey(scope.PeriodKeyValue), ct)
+                .ConfigureAwait(false);
+        }
+
+        return written;
     }
 
     /// <summary>Прив'язки методологій до таблиць документа.</summary>
@@ -188,6 +273,29 @@ public sealed class RecalculationJob(
 
     /// <summary>Прив'язка методології до опису таблиці.</summary>
     private sealed record BindingRow(int TableDefId, int MethodologyId);
+
+    /// <summary>Документ і період, для яких рахуються формули шаблону.</summary>
+    private sealed record ScopeRow(long DocumentId, int PeriodKeyValue);
+
+    /// <summary>Прогрес однієї фази: шкала зсунута, повідомлення назване.</summary>
+    /// <param name="inner">Канал прогресу задачі.</param>
+    /// <param name="floor">Скільки відсотків уже пройдено до цієї фази.</param>
+    /// <param name="phase">Ім'я фази — префікс кожного повідомлення.</param>
+    /// <remarks>
+    /// ⛔ Голе «40 %» не означає нічого: у прогоні дві фази, і перше, на що
+    /// дивиться той, хто розбирає повільний прогін, — у якій він саме зараз.
+    /// Оркестратор методологій свого місця в загальній шкалі не знає і знати
+    /// не має — переклад його 0…100 у 40…100 живе тут.
+    /// </remarks>
+    private sealed class PhaseProgress(IJobProgress inner, int floor, string phase) : IJobProgress
+    {
+        /// <inheritdoc />
+        public Task ReportAsync(int percent, string? message, CancellationToken ct)
+            => inner.ReportAsync(
+                floor + (Math.Clamp(percent, 0, 100) * (100 - floor) / 100),
+                string.IsNullOrWhiteSpace(message) ? phase : $"{phase}: {message}",
+                ct);
+    }
 }
 
 /// <summary>Завдання на перерахунок.</summary>
