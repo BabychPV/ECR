@@ -66,6 +66,13 @@ public static class DependencyInjection
         services.AddScoped<SaveTableDefHandler>();
         services.AddScoped<DeleteTableDefHandler>();
 
+        // Третій і четвертий зрізи — колонка й рядок таблиці (ФВ-2.1..ФВ-2.5,
+        // W5.2), за зразком аркуша й таблиці вище.
+        services.AddScoped<SaveColumnDefHandler>();
+        services.AddScoped<DeleteColumnDefHandler>();
+        services.AddScoped<SaveRowDefHandler>();
+        services.AddScoped<DeleteRowDefHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();

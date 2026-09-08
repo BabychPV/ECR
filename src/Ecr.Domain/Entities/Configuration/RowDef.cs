@@ -45,4 +45,49 @@ public sealed class RowDef : Entity<int>
 
     /// <summary>Змінює порядок — презентаційна операція.</summary>
     public void Reorder(int ordinal) => Ordinal = ordinal;
+
+    /// <summary>
+    /// Змінює підпис рядка.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До появи <c>PUT …/tables/{tableId}/rows/{code}</c> (<c>W5.2</c>)
+    /// сеттера не існувало: рядок фіксованої таблиці заводили лише тести й
+    /// офлайновий генератор. Той самий випадок, що й
+    /// <see cref="SheetDef.Rename"/> у <c>W5.0</c>.
+    ///
+    /// ⚠ <c>LabelL10n</c> — поле презентаційного шару (<see
+    /// cref="Services.ChangeClassifier.PresentationFields"/>).
+    /// </remarks>
+    public void Rename(LocalizedText label)
+    {
+        ArgumentNullException.ThrowIfNull(label);
+        LabelL10n = label;
+    }
+
+    /// <summary>
+    /// Заборона ручного вводу в рядок (наприклад, підсумковий рядок балансу).
+    /// </summary>
+    public void SetReadOnly(bool readOnly) => IsReadOnly = readOnly;
+
+    /// <summary>
+    /// Прив'язує рядок до батьківського в ієрархії; <c>null</c> — корінь.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Належність батька тій самій таблиці й відсутність циклу перевіряє
+    /// ВИКЛИК (обробник): сеттер сутності не бачить графа версії, а без нього
+    /// таку перевірку не зробити.
+    /// </remarks>
+    public void SetParent(int? parentRowDefId) => ParentRowDefId = parentRowDefId;
+
+    /// <summary>
+    /// Логічне видалення: фізично запис лишається, бо на нього посилаються
+    /// комірки документів навіть у чернетці (ФВ-7.6) — той самий підхід, що
+    /// й <see cref="SheetDef.SoftDelete"/>.
+    /// </summary>
+    public void SoftDelete(int userId, DateTime utcNow)
+    {
+        IsDeleted = true;
+        DeletedAt = utcNow;
+        DeletedByUserId = userId;
+    }
 }

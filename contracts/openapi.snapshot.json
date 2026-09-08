@@ -469,6 +469,20 @@
         ],
         "type": "object"
       },
+      "CellDataType": {
+        "description": "Тип даних колонки. Розширюваний: нові значення додаються без міграції схеми\n(ФВ-2.4). Зберігається як `tinyint`.",
+        "enum": [
+          "String",
+          "Int",
+          "Decimal",
+          "Bool",
+          "Date",
+          "Lookup",
+          "Formula",
+          "Unit",
+          "Calculated"
+        ]
+      },
       "ChangeClass": {
         "description": "Клас структурної зміни (документ 10 «Еволюція схеми»).",
         "enum": [
@@ -567,6 +581,109 @@
           "finishedAt",
           "status",
           "pointsRetrieved"
+        ],
+        "type": "object"
+      },
+      "ColumnDefDto": {
+        "description": "Колонка у відповіді на запис/читання через цей обробник.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType"
+          },
+          "defaultValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayFormat": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "headerL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isReadOnly": {
+            "type": "boolean"
+          },
+          "isRequired": {
+            "type": "boolean"
+          },
+          "lookupFilter": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lookupRegistryDefId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "precision": {
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "scale": {
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "styleId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unitId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "headerL10n",
+          "ordinal",
+          "dataType",
+          "isRequired",
+          "isReadOnly",
+          "isHidden",
+          "precision",
+          "scale",
+          "defaultValue",
+          "displayFormat",
+          "styleId",
+          "lookupRegistryDefId",
+          "lookupFilter",
+          "unitId"
         ],
         "type": "object"
       },
@@ -3996,6 +4113,47 @@
         ],
         "type": "object"
       },
+      "RowDefDto": {
+        "description": "Рядок у відповіді на запис/читання через цей обробник.",
+        "properties": {
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "isReadOnly": {
+            "type": "boolean"
+          },
+          "labelL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "parentRowKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "type": "string"
+          },
+          "rowKind": {
+            "$ref": "#/components/schemas/RowKind"
+          }
+        },
+        "required": [
+          "id",
+          "rowKey",
+          "labelL10n",
+          "ordinal",
+          "rowKind",
+          "parentRowKey",
+          "isReadOnly"
+        ],
+        "type": "object"
+      },
       "RowDto": {
         "description": "Рядок зі значеннями. Ключ у Cells — код колонки.",
         "properties": {
@@ -4057,6 +4215,130 @@
         ],
         "type": "object"
       },
+      "RowKind": {
+        "description": "Роль рядка у звіті.",
+        "enum": [
+          "Group",
+          "Item",
+          "Balance",
+          "Note",
+          "Header"
+        ]
+      },
+      "SaveColumnDefRequest": {
+        "description": "Налаштування колонки таблиці чернетки (`W5.2`).",
+        "properties": {
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType",
+            "description": "Тип даних; незмінний після створення."
+          },
+          "defaultValue": {
+            "description": "Значення за замовчуванням порожньої комірки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayFormat": {
+            "description": "Формат відображення; презентаційне поле.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "headerL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Заголовок колонки мовами каталогу.",
+            "type": "object"
+          },
+          "isHidden": {
+            "description": "Видимість колонки; презентаційне поле.",
+            "type": "boolean"
+          },
+          "isReadOnly": {
+            "description": "Заборона ручного вводу.",
+            "type": "boolean"
+          },
+          "isRequired": {
+            "description": "Обов'язковість заповнення.",
+            "type": "boolean"
+          },
+          "lookupFilter": {
+            "description": "Звуження списку довідника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lookupRegistryDefId": {
+            "description": "Довідник; лише для колонки типу `Lookup`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ordinal": {
+            "description": "`null` — нова колонка стає останньою за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "precision": {
+            "description": "Точність для `Decimal`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "scale": {
+            "description": "Масштаб для `Decimal`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "styleId": {
+            "description": "Стиль показу; презентаційне поле.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unitId": {
+            "description": "Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "headerL10n",
+          "ordinal",
+          "dataType",
+          "isRequired",
+          "isReadOnly",
+          "isHidden",
+          "precision",
+          "scale",
+          "defaultValue",
+          "displayFormat",
+          "styleId",
+          "lookupRegistryDefId",
+          "lookupFilter",
+          "unitId"
+        ],
+        "type": "object"
+      },
       "SaveMethodologyFormulaRequest": {
         "description": "Запит на запис формули версії-чернетки.",
         "properties": {
@@ -4110,6 +4392,49 @@
           "fields",
           "rules",
           "reason"
+        ],
+        "type": "object"
+      },
+      "SaveRowDefRequest": {
+        "description": "Налаштування рядка фіксованої таблиці чернетки (`W5.2`).",
+        "properties": {
+          "isReadOnly": {
+            "description": "Заборона ручного вводу.",
+            "type": "boolean"
+          },
+          "labelL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підпис рядка мовами каталогу.",
+            "type": "object"
+          },
+          "ordinal": {
+            "description": "`null` — новий рядок стає останнім за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "parentRowKey": {
+            "description": "Ключ батьківського рядка в тій самій таблиці; `null` — корінь.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKind": {
+            "$ref": "#/components/schemas/RowKind",
+            "description": "Роль рядка; незмінна після створення."
+          }
+        },
+        "required": [
+          "labelL10n",
+          "ordinal",
+          "rowKind",
+          "parentRowKey",
+          "isReadOnly"
         ],
         "type": "object"
       },
@@ -10789,6 +11114,464 @@
           }
         },
         "summary": "Структура версії для клієнта. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить колонка.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код колонки.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає колонку з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⛔ Другий вертикальний зріз авторства структури шаблону через API\n(`W5.2`, за зразком `sheets/{code}` вище, `W5.0`).\n\n⚠ Таблиця адресується числовим `tableId`, а не парою кодів\nаркуша й таблиці — та сама форма, що й `SaveTableRelationRequest`\nвище (`SourceTableDefId`/`TargetTableDefId`): клієнт уже має\n`TableDto.Id` з попереднього `GET …/structure`.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить колонка.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код колонки.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує колонку таблиці чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить рядок.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ключ рядка.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає рядок із чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⛔ Третій вертикальний зріз авторства структури шаблону через API\n(`W5.2`). Рядок і колонка — сиблінги під тією самою таблицею, тому\nадресуються однаково: `tables/{tableId}`, а не кодом таблиці.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить рядок.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ключ рядка.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRowDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRowDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRowDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RowDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує рядок фіксованої таблиці чернетки. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

@@ -22,6 +22,12 @@ import {
   emptyDraft as emptyTableDraft,
   type TableDraft,
 } from '@/features/templates/table';
+import { ColumnEditor } from '@/features/templates/ColumnEditor';
+import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
+import { columnDraftOf, emptyColumnDraft, type ColumnDefDto, type ColumnDraft } from '@/features/templates/column';
+import { RowEditor } from '@/features/templates/RowEditor';
+import { deleteRow, saveRow } from '@/features/templates/rowApi';
+import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -64,6 +70,19 @@ export function TemplateVersionPage(): JSX.Element {
   const [tableDraft, setTableDraft] = useState<{ sheetCode: string; draft: TableDraft } | null>(
     null,
   );
+
+  // ⚠ Чернетки колонки й рядка несуть `tableId`: на відміну від аркуша, вони
+  // адресуються не лише кодом, а й таблицею-власником (`W5.2`).
+  const [columnEdit, setColumnEdit] = useState<{ tableId: number; draft: ColumnDraft } | null>(null);
+  const [rowEdit, setRowEdit] = useState<{ tableId: number; draft: RowDraft } | null>(null);
+
+  // ⛔ Кеш повних відповідей ЦЬОГО сеансу, ключ — `tableId:код`. Структура
+  // версії (`GET …/structure`) віддає колонку й рядок бідніше, ніж їх приймає
+  // й повертає `PUT` (`Q-012`, докладніше в `column.ts`/`row.ts`): без цього
+  // кешу повторне відкриття форми правки губило б розширені поля колонки чи
+  // переклади підпису рядка, яких структура не носить.
+  const [savedColumns, setSavedColumns] = useState<Record<string, ColumnDefDto>>({});
+  const [savedRows, setSavedRows] = useState<Record<string, RowDefDto>>({});
 
   const structure = useQuery({
     queryKey: ['template-version', id],
@@ -183,6 +202,60 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
       showDone(t('tableDef.deleted'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Запис колонки (`W5.2`) — третій вертикальний зріз авторства структури
+   * шаблону через API, за зразком запису аркуша й таблиці вище.
+   */
+  const saveColumnMutation = useMutation({
+    mutationFn: ({ tableId, draft }: { tableId: number; draft: ColumnDraft }) =>
+      saveColumn(id, tableId, draft),
+    onSuccess: async (result, variables) => {
+      // ⛔ Кладемо ПОВНУ відповідь у кеш сеансу до інвалідації запиту: інакше
+      // наступне відкриття форми правки цієї-таки колонки знову побачило б
+      // лише бідний `TemplateColumnDto` зі структури.
+      setSavedColumns((prev) => ({ ...prev, [`${String(variables.tableId)}:${result.code}`]: result }));
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setColumnEdit(null);
+      showDone(t('columns.saved'));
+    },
+    onError: showApiError,
+  });
+
+  /** Видалення колонки — м'яко, `ФВ-7.6`. */
+  const deleteColumnMutation = useMutation({
+    mutationFn: ({ tableId, code }: { tableId: number; code: string }) => deleteColumn(id, tableId, code),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      showDone(t('columns.deleted'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Запис рядка (`W5.2`) — четвертий вертикальний зріз авторства структури
+   * шаблону через API.
+   */
+  const saveRowMutation = useMutation({
+    mutationFn: ({ tableId, draft }: { tableId: number; draft: RowDraft }) => saveRow(id, tableId, draft),
+    onSuccess: async (result, variables) => {
+      setSavedRows((prev) => ({ ...prev, [`${String(variables.tableId)}:${result.rowKey}`]: result }));
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setRowEdit(null);
+      showDone(t('rows.saved'));
+    },
+    onError: showApiError,
+  });
+
+  /** Видалення рядка — м'яко, `ФВ-7.6`. */
+  const deleteRowMutation = useMutation({
+    mutationFn: ({ tableId, rowKey }: { tableId: number; rowKey: string }) => deleteRow(id, tableId, rowKey),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      showDone(t('rows.deleted'));
     },
     onError: showApiError,
   });
@@ -370,102 +443,244 @@ export function TemplateVersionPage(): JSX.Element {
                         </Group>
                       )}
 
-                      {sheet.tables.map((table) => (
-                        <div key={table.id}>
-                          <Group gap="xs" mt="sm">
-                            <Text fw={600}>
-                              {localized(table.nameL10n) || table.code}{' '}
-                              <Text span c="dimmed">
-                                ({table.code}) · {table.rowMode}
+                      {sheet.tables.map((table) => {
+                        const nextColumnOrdinal =
+                          table.columns.length === 0
+                            ? 0
+                            : Math.max(...table.columns.map((c) => c.ordinal)) + 1;
+                        const nextRowOrdinal =
+                          table.rows.length === 0 ? 0 : Math.max(...table.rows.map((r) => r.ordinal)) + 1;
+
+                        return (
+                          <div key={table.id}>
+                            <Group justify="space-between" mt="sm">
+                              <Text fw={600}>
+                                {localized(table.nameL10n) || table.code}{' '}
+                                <Text span c="dimmed">
+                                  ({table.code}) · {table.rowMode}
+                                </Text>
                               </Text>
-                            </Text>
-                            {canEditSheets && (
+                              {canEditSheets && (
+                                <Group gap="xs">
+                                  <Button
+                                    size="compact-xs"
+                                    variant="subtle"
+                                    onClick={() =>
+                                      setTableDraft({
+                                        sheetCode: sheet.code,
+                                        draft: tableDraftOf(table),
+                                      })
+                                    }
+                                  >
+                                    {t('tableDef.edit')}
+                                  </Button>
+                                  <Button
+                                    size="compact-xs"
+                                    variant="subtle"
+                                    color="red"
+                                    loading={
+                                      deleteTableMutation.isPending &&
+                                      deleteTableMutation.variables?.code === table.code
+                                    }
+                                    onClick={() =>
+                                      deleteTableMutation.mutate({
+                                        sheetCode: sheet.code,
+                                        code: table.code,
+                                      })
+                                    }
+                                  >
+                                    {t('tableDef.delete')}
+                                  </Button>
+                                  <Button
+                                    size="compact-xs"
+                                    variant="default"
+                                    onClick={() =>
+                                      setColumnEdit({ tableId: table.id, draft: emptyColumnDraft(nextColumnOrdinal) })
+                                    }
+                                  >
+                                    {t('columns.add')}
+                                  </Button>
+                                </Group>
+                              )}
+                            </Group>
+                            <Table striped withTableBorder mt="xs">
+                              <Table.Thead>
+                                <Table.Tr>
+                                  <Table.Th>{t('version.column')}</Table.Th>
+                                  <Table.Th>{t('version.type')}</Table.Th>
+                                  <Table.Th>{t('version.unit')}</Table.Th>
+                                  <Table.Th />
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {table.columns.map((column) => (
+                                  <Table.Tr key={column.id}>
+                                    <Table.Td>
+                                      {localized(column.headerL10n) || column.code}{' '}
+                                      <Text span c="dimmed">
+                                        ({column.code})
+                                      </Text>
+                                      {column.isHidden && (
+                                        <Badge ml="xs" size="xs" variant="outline">
+                                          {t('version.hidden')}
+                                        </Badge>
+                                      )}
+                                    </Table.Td>
+                                    <Table.Td>
+                                      {column.dataType}
+                                      {column.isReadOnly && (
+                                        <Badge ml="xs" size="xs" variant="light">
+                                          {t('version.readOnly')}
+                                        </Badge>
+                                      )}
+                                    </Table.Td>
+                                    <Table.Td>{column.unitSymbol ?? '—'}</Table.Td>
+                                    <Table.Td>
+                                      <Group gap="xs" wrap="nowrap" justify="flex-end">
+                                        {/* ⚠ Правка тут не потребує нової версії: підпис,
+                                            порядок, формат і видимість — презентаційний
+                                            шар, і його дозволено міняти в опублікованій
+                                            версії (`ФВ-7.2`). */}
+                                        {can(session.data, 'Template.Edit') && (
+                                          <Button
+                                            size="compact-xs"
+                                            variant="subtle"
+                                            onClick={() => setEditing(column)}
+                                          >
+                                            {t('version.presentation')}
+                                          </Button>
+                                        )}
+                                        {canEditSheets && (
+                                          <>
+                                            <Button
+                                              size="compact-xs"
+                                              variant="subtle"
+                                              onClick={() =>
+                                                setColumnEdit({
+                                                  tableId: table.id,
+                                                  draft: columnDraftOf(
+                                                    column,
+                                                    savedColumns[`${String(table.id)}:${column.code}`],
+                                                  ),
+                                                })
+                                              }
+                                            >
+                                              {t('columns.edit')}
+                                            </Button>
+                                            <Button
+                                              size="compact-xs"
+                                              variant="subtle"
+                                              color="red"
+                                              loading={
+                                                deleteColumnMutation.isPending
+                                                && deleteColumnMutation.variables?.code === column.code
+                                              }
+                                              onClick={() =>
+                                                deleteColumnMutation.mutate({ tableId: table.id, code: column.code })
+                                              }
+                                            >
+                                              {t('columns.delete')}
+                                            </Button>
+                                          </>
+                                        )}
+                                      </Group>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                ))}
+                              </Table.Tbody>
+                            </Table>
+
+                            {/* ⚠ Рядки фіксованої таблиці. Динамічна (`RowMode.Dynamic`)
+                                не показує тут нічого й додати рядок не дає:
+                                домен (`TableDef.AddRow`) відхиляє їх шаблоном,
+                                вони з'являються під час роботи, а не тут. */}
+                            {table.rowMode !== 'Dynamic' && (
                               <>
-                                <Button
-                                  size="compact-xs"
-                                  variant="subtle"
-                                  onClick={() =>
-                                    setTableDraft({
-                                      sheetCode: sheet.code,
-                                      draft: tableDraftOf(table),
-                                    })
-                                  }
-                                >
-                                  {t('tableDef.edit')}
-                                </Button>
-                                <Button
-                                  size="compact-xs"
-                                  variant="subtle"
-                                  color="red"
-                                  loading={
-                                    deleteTableMutation.isPending &&
-                                    deleteTableMutation.variables?.code === table.code
-                                  }
-                                  onClick={() =>
-                                    deleteTableMutation.mutate({
-                                      sheetCode: sheet.code,
-                                      code: table.code,
-                                    })
-                                  }
-                                >
-                                  {t('tableDef.delete')}
-                                </Button>
+                                <Group justify="space-between" mt="sm">
+                                  <Text fw={600} size="sm" c="dimmed">
+                                    {t('rows.title')}
+                                  </Text>
+                                  {canEditSheets && (
+                                    <Button
+                                      size="compact-xs"
+                                      variant="default"
+                                      onClick={() =>
+                                        setRowEdit({ tableId: table.id, draft: emptyRowDraft(nextRowOrdinal) })
+                                      }
+                                    >
+                                      {t('rows.add')}
+                                    </Button>
+                                  )}
+                                </Group>
+
+                                {table.rows.length === 0 ? (
+                                  <Text size="sm" c="dimmed">
+                                    {t('rows.empty')}
+                                  </Text>
+                                ) : (
+                                  <Table striped withTableBorder mt="xs">
+                                    <Table.Thead>
+                                      <Table.Tr>
+                                        <Table.Th>{t('rows.label')}</Table.Th>
+                                        <Table.Th>{t('rows.rowKind')}</Table.Th>
+                                        <Table.Th />
+                                      </Table.Tr>
+                                    </Table.Thead>
+                                    <Table.Tbody>
+                                      {table.rows.map((row) => (
+                                        <Table.Tr key={row.rowKey}>
+                                          <Table.Td>
+                                            {row.label ?? row.rowKey}{' '}
+                                            <Text span c="dimmed">
+                                              ({row.rowKey})
+                                            </Text>
+                                          </Table.Td>
+                                          <Table.Td>{row.rowKind}</Table.Td>
+                                          <Table.Td>
+                                            {canEditSheets && (
+                                              <Group gap="xs" wrap="nowrap" justify="flex-end">
+                                                <Button
+                                                  size="compact-xs"
+                                                  variant="subtle"
+                                                  onClick={() =>
+                                                    setRowEdit({
+                                                      tableId: table.id,
+                                                      draft: rowDraftOf(
+                                                        row,
+                                                        savedRows[`${String(table.id)}:${row.rowKey}`],
+                                                      ),
+                                                    })
+                                                  }
+                                                >
+                                                  {t('rows.edit')}
+                                                </Button>
+                                                <Button
+                                                  size="compact-xs"
+                                                  variant="subtle"
+                                                  color="red"
+                                                  loading={
+                                                    deleteRowMutation.isPending
+                                                    && deleteRowMutation.variables?.rowKey === row.rowKey
+                                                  }
+                                                  onClick={() =>
+                                                    deleteRowMutation.mutate({ tableId: table.id, rowKey: row.rowKey })
+                                                  }
+                                                >
+                                                  {t('rows.delete')}
+                                                </Button>
+                                              </Group>
+                                            )}
+                                          </Table.Td>
+                                        </Table.Tr>
+                                      ))}
+                                    </Table.Tbody>
+                                  </Table>
+                                )}
                               </>
                             )}
-                          </Group>
-                          <Table striped withTableBorder mt="xs">
-                            <Table.Thead>
-                              <Table.Tr>
-                                <Table.Th>{t('version.column')}</Table.Th>
-                                <Table.Th>{t('version.type')}</Table.Th>
-                                <Table.Th>{t('version.unit')}</Table.Th>
-                                <Table.Th />
-                              </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                              {table.columns.map((column) => (
-                                <Table.Tr key={column.id}>
-                                  <Table.Td>
-                                    {localized(column.headerL10n) || column.code}{' '}
-                                    <Text span c="dimmed">
-                                      ({column.code})
-                                    </Text>
-                                    {column.isHidden && (
-                                      <Badge ml="xs" size="xs" variant="outline">
-                                        {t('version.hidden')}
-                                      </Badge>
-                                    )}
-                                  </Table.Td>
-                                  <Table.Td>
-                                    {column.dataType}
-                                    {column.isReadOnly && (
-                                      <Badge ml="xs" size="xs" variant="light">
-                                        {t('version.readOnly')}
-                                      </Badge>
-                                    )}
-                                  </Table.Td>
-                                  <Table.Td>{column.unitSymbol ?? '—'}</Table.Td>
-                                  <Table.Td>
-                                    {/* ⚠ Правка тут не потребує нової версії: підпис,
-                                        порядок, формат і видимість — презентаційний
-                                        шар, і його дозволено міняти в опублікованій
-                                        версії (`ФВ-7.2`). */}
-                                    {can(session.data, 'Template.Edit') && (
-                                      <Button
-                                        size="compact-xs"
-                                        variant="subtle"
-                                        onClick={() => setEditing(column)}
-                                      >
-                                        {t('version.presentation')}
-                                      </Button>
-                                    )}
-                                  </Table.Td>
-                                </Table.Tr>
-                              ))}
-                            </Table.Tbody>
-                          </Table>
-                        </div>
-                      ))}
+                          </div>
+                        );
+                      })}
                     </Accordion.Panel>
                   </Accordion.Item>
                 ))}
@@ -544,6 +759,40 @@ export function TemplateVersionPage(): JSX.Element {
             onChange={(draft) => setTableDraft({ sheetCode: tableDraft.sheetCode, draft })}
             onSubmit={() => saveTableMutation.mutate(tableDraft)}
             onCancel={() => setTableDraft(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        opened={columnEdit !== null}
+        onClose={() => setColumnEdit(null)}
+        title={columnEdit?.draft.isNew === true ? t('columns.add') : t('columns.edit')}
+      >
+        {columnEdit !== null && (
+          <ColumnEditor
+            draft={columnEdit.draft}
+            disabled={!canEditSheets}
+            saving={saveColumnMutation.isPending}
+            onChange={(draft) => setColumnEdit({ tableId: columnEdit.tableId, draft })}
+            onSubmit={() => saveColumnMutation.mutate(columnEdit)}
+            onCancel={() => setColumnEdit(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        opened={rowEdit !== null}
+        onClose={() => setRowEdit(null)}
+        title={rowEdit?.draft.isNew === true ? t('rows.add') : t('rows.edit')}
+      >
+        {rowEdit !== null && (
+          <RowEditor
+            draft={rowEdit.draft}
+            disabled={!canEditSheets}
+            saving={saveRowMutation.isPending}
+            onChange={(draft) => setRowEdit({ tableId: rowEdit.tableId, draft })}
+            onSubmit={() => saveRowMutation.mutate(rowEdit)}
+            onCancel={() => setRowEdit(null)}
           />
         )}
       </Modal>
