@@ -1118,7 +1118,15 @@ USING (VALUES
     (N'rows.readOnlyHint',               N'en', N'For example, a balance row filled in by the system, not by a person.', 1),
     (N'rows.partialLabelWarning',        N'en', N'The label is shown here in one language only. Saving will clear the other languages unless you already edited this row in this session.', 1),
     (N'rows.errRowKey',                  N'en', N'Give the row a key: it is how the row is addressed.', 1),
-    (N'rows.errLabel',                   N'en', N'Give the row a label in at least one language.', 1)
+    (N'rows.errLabel',                   N'en', N'Give the row a label in at least one language.', 1),
+    -- Редактор формул колонки чи рядка (W5.3) — наступний зріз авторства структури.
+    (N'formulas.edit',                   N'en', N'Formula', 1),
+    (N'formulas.save',                   N'en', N'Save formula', 1),
+    (N'formulas.saved',                  N'en', N'The formula has been saved.', 1),
+    (N'formulas.expression',             N'en', N'Formula expression', 1),
+    (N'formulas.targetColumn',           N'en', N'Formula for this column.', 1),
+    (N'formulas.targetRow',              N'en', N'Formula for this row.', 1),
+    (N'formulas.errExpression',          N'en', N'Write the expression the formula should compute.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

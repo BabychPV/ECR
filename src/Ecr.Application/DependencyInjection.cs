@@ -73,6 +73,10 @@ public static class DependencyInjection
         services.AddScoped<SaveRowDefHandler>();
         services.AddScoped<DeleteRowDefHandler>();
 
+        // П'ятий зріз — формула колонки чи рядка (W5.3), за зразком вище.
+        services.AddScoped<SaveFormulaDefHandler>();
+        services.AddScoped<DeleteFormulaDefHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();

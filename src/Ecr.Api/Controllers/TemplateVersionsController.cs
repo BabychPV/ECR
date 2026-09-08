@@ -31,6 +31,8 @@ public sealed class TemplateVersionsController(
     DeleteColumnDefHandler deleteColumn,
     SaveRowDefHandler saveRow,
     DeleteRowDefHandler deleteRow,
+    SaveFormulaDefHandler saveFormula,
+    DeleteFormulaDefHandler deleteFormula,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -346,6 +348,57 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>
+    /// Записує формулу колонки чи рядка чернетки (<c>W5.3</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableDefId">Таблиця, якій належить ціль.</param>
+    /// <param name="scope"><c>column</c> чи <c>row</c> — обмежено маршрутом нижче.</param>
+    /// <param name="target"><c>ColumnDefId</c> числом при <c>column</c>; <c>RowKey</c> текстом при <c>row</c>.</param>
+    /// <param name="request">Вираз і діалект.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Адреса — <c>(tableDefId, scope, target)</c>, а не код: <c>FormulaDef</c>
+    /// не має власної ідентичності окремо від колонки чи рядка, який обчислює
+    /// (див. <c>FormulaDefHandlers.cs</c>).
+    ///
+    /// ⛔ <c>target</c> означає РІЗНЕ залежно від <c>scope</c>, і це навмисно:
+    /// при <c>column</c> це вже присвоєний сервером числовий
+    /// <c>ColumnDefId</c> (той самий, що й <c>TemplateColumnDto.Id</c>), а при
+    /// <c>row</c> — <c>RowKey</c> ТЕКСТОМ. <c>RowDef.Id</c> не годиться за
+    /// адресу: структура версії (<c>TemplateRowDto</c>) взагалі не показує
+    /// клієнту числового ідентифікатора рядка, лише <c>RowKey</c> — адресація
+    /// через <c>Id</c> зробила б цю гілку викликаною лише з Swagger. Оскільки
+    /// <c>RowKey</c> унікальний лише В МЕЖАХ ТАБЛИЦІ (бізнес-ключ, не
+    /// сурогатний), таблицю названо в адресі явно — той самий сегмент
+    /// <c>tableDefId</c>, що й для колонки, заради однієї форми адреси на обидві
+    /// області.
+    ///
+    /// ⚠ <c>PUT</c> — та сама форма, що й <c>sheets/{code}</c>: створення й
+    /// зміна є однією дією, бо адресу задає викликач, а не сервер (<c>D2-147</c>).
+    /// </remarks>
+    [HttpPut("tables/{tableDefId:int}/formulas/{scope:regex(^(column|row)$)}/{target}")]
+    [ProducesResponseType<FormulaDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<FormulaDto>> SaveFormula(
+        int id, int tableDefId, string scope, string target,
+        [FromBody] SaveFormulaDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveFormula
+            .HandleAsync(
+                id,
+                tableDefId,
+                ParseFormulaScope(scope),
+                target,
+                new SaveFormulaDefCommand(request.Dialect, request.Expression),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
     /// Записує колонку таблиці чернетки. Право <c>Template.Edit</c>.
     /// </summary>
     /// <param name="id">Версія-чернетка.</param>
@@ -475,6 +528,41 @@ public sealed class TemplateVersionsController(
 
         return NoContent();
     }
+    /// <summary>
+    /// Прибирає формулу з чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableDefId">Таблиця, якій належить ціль.</param>
+    /// <param name="scope"><c>column</c> чи <c>row</c>.</param>
+    /// <param name="target"><c>ColumnDefId</c> числом при <c>column</c>; <c>RowKey</c> текстом при <c>row</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("tables/{tableDefId:int}/formulas/{scope:regex(^(column|row)$)}/{target}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteFormula(
+        int id, int tableDefId, string scope, string target, CancellationToken ct)
+    {
+        await deleteFormula
+            .HandleAsync(id, tableDefId, ParseFormulaScope(scope), target, ct)
+            .ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>Розбирає сегмент маршруту в область формули.</summary>
+    /// <remarks>
+    /// ⚠ Захист на випадок, якщо обмеження маршруту (<c>regex</c>) колись
+    /// послаблять: без нього невідоме значення провалилося б у switch мовчки.
+    /// </remarks>
+    private static Ecr.Domain.Enums.FormulaScope ParseFormulaScope(string scope) => scope switch
+    {
+        "column" => Ecr.Domain.Enums.FormulaScope.Column,
+        "row" => Ecr.Domain.Enums.FormulaScope.Row,
+        _ => throw new Application.Errors.BusinessRuleException(
+            ErrorCodes.TemplateInvalid,
+            $"Невідома область формули «{scope}»: очікується column або row."),
+    };
 
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
@@ -584,3 +672,10 @@ public sealed record SaveRowDefRequest(
     Ecr.Domain.Enums.RowKind RowKind,
     string? ParentRowKey,
     bool IsReadOnly);
+
+/// <summary>Налаштування формули чернетки (<c>W5.3</c>).</summary>
+/// <param name="Dialect">Діалект, за яким читається вираз.</param>
+/// <param name="Expression">Текст виразу.</param>
+public sealed record SaveFormulaDefRequest(
+    Ecr.Domain.Enums.ExpressionDialect Dialect,
+    string Expression);

@@ -1605,11 +1605,72 @@
         },
         "type": "object"
       },
+      "FormulaDto": {
+        "description": "Формула для відповіді клієнту.",
+        "properties": {
+          "columnDefId": {
+            "description": "Колонка, якщо `Scope == Column`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "dialect": {
+            "$ref": "#/components/schemas/ExpressionDialect",
+            "description": "Діалект виразу."
+          },
+          "expression": {
+            "description": "Текст виразу.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowDefId": {
+            "description": "Рядок, якщо `Scope == Row` (сурогатний ключ; адреса запиту — `RowKey`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/FormulaScope",
+            "description": "Область: `Column` чи `Row`."
+          },
+          "tableDefId": {
+            "description": "Таблиця, якій належить формула.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tableDefId",
+          "scope",
+          "columnDefId",
+          "rowDefId",
+          "dialect",
+          "expression"
+        ],
+        "type": "object"
+      },
       "FormulaResultType": {
         "description": "Тип результату формули методології (директива ПК-1 №05, поправка 2-біс).",
         "enum": [
           "Number",
           "Text"
+        ]
+      },
+      "FormulaScope": {
+        "description": "Область дії формули.",
+        "enum": [
+          "Column",
+          "Row",
+          "Cell"
         ]
       },
       "GrantLevel": {
@@ -4336,6 +4397,24 @@
           "lookupRegistryDefId",
           "lookupFilter",
           "unitId"
+        ],
+        "type": "object"
+      },
+      "SaveFormulaDefRequest": {
+        "description": "Налаштування формули чернетки (`W5.3`).",
+        "properties": {
+          "dialect": {
+            "$ref": "#/components/schemas/ExpressionDialect",
+            "description": "Діалект, за яким читається вираз."
+          },
+          "expression": {
+            "description": "Текст виразу.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dialect",
+          "expression"
         ],
         "type": "object"
       },
@@ -11114,6 +11193,255 @@
           }
         },
         "summary": "Структура версії для клієнта. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить ціль.",
+            "in": "path",
+            "name": "tableDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`column` чи `row`.",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "pattern": "^(column|row)$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`ColumnDefId` числом при `column`; `RowKey` текстом при `row`.",
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає формулу з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⚠ Адреса — `(tableDefId, scope, target)`, а не код: `FormulaDef`\nне має власної ідентичності окремо від колонки чи рядка, який обчислює\n(див. `FormulaDefHandlers.cs`).\n\n⛔ `target` означає РІЗНЕ залежно від `scope`, і це навмисно:\nпри `column` це вже присвоєний сервером числовий\n`ColumnDefId` (той самий, що й `TemplateColumnDto.Id`), а при\n`row` — `RowKey` ТЕКСТОМ. `RowDef.Id` не годиться за\nадресу: структура версії (`TemplateRowDto`) взагалі не показує\nклієнту числового ідентифікатора рядка, лише `RowKey` — адресація\nчерез `Id` зробила б цю гілку викликаною лише з Swagger. Оскільки\n`RowKey` унікальний лише В МЕЖАХ ТАБЛИЦІ (бізнес-ключ, не\nсурогатний), таблицю названо в адресі явно — той самий сегмент\n`tableDefId`, що й для колонки, заради однієї форми адреси на обидві\nобласті.\n\n⚠ `PUT` — та сама форма, що й `sheets/{code}`: створення й\nзміна є однією дією, бо адресу задає викликач, а не сервер (`D2-147`).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить ціль.",
+            "in": "path",
+            "name": "tableDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`column` чи `row` — обмежено маршрутом нижче.",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "pattern": "^(column|row)$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`ColumnDefId` числом при `column`; `RowKey` текстом при `row`.",
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує формулу колонки чи рядка чернетки (`W5.3`). Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]
