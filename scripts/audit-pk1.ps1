@@ -269,6 +269,36 @@ foreach ($i in $review) {
     }
 }
 
+# ── Ж. Закритий issue з активними мітками ────────────────────────────────────
+# ⛔ Знайдено справжнім використанням: директиву закрили вручну, а мітки
+# `status:open` і `needs:pk2` на ній лишилися. Перевірка А цього не бачила, бо
+# питає `--state open`. Наслідок безсимптомний: виконавець не побачить задачу
+# у черзі, а керуючий вважатиме, що видав її. Це втрата роботи, не неохайність
+# обліку.
+#
+# ⚠ Урок ширший за сам випадок: сторож, який дивиться в одне місце, гарантує
+# тільки це місце. Інваріант «рівно одна мітка needs:*» перевірявся правильно —
+# і все одно пропускав, бо перевірявся не всюди.
+
+if (-not $Quiet) { Write-Host '--- Ж. Закриті issues з активними мітками' }
+
+$closed = @(Invoke-GhJson @('issue', 'list', '--state', 'closed', '--limit', '50',
+                            '--json', 'number,title,labels'))
+
+$activeStatus = @('status:open', 'status:in-progress', 'status:review', 'status:blocked')
+
+foreach ($i in $closed) {
+    $names = @($i.labels | ForEach-Object { $_.name })
+    $stuckStatus = @($names | Where-Object { $activeStatus -contains $_ })
+    $stuckRouting = @($names | Where-Object { $_ -like 'needs:*' })
+
+    if ($stuckStatus.Count -gt 0 -or $stuckRouting.Count -gt 0) {
+        $tags = @($stuckStatus + $stuckRouting) -join ', '
+        Add-Finding 'КРИТИЧНО' 'втрата роботи' "issue #$($i.number)" `
+            "issue ЗАКРИТИЙ, але носить активні мітки: $tags — задачу не побачить жоден вузол" `
+            'відкрити назад (gh issue reopen) або привести мітки до кінцевого стану (status:done / status:cancelled)'
+    }
+}
 # ── Звіт ─────────────────────────────────────────────────────────────────────
 
 Write-Host ''

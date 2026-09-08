@@ -6,8 +6,9 @@
 
 ⚠ `gh` може не бути в `PATH`. Якщо `gh` не знайдено — уживай
 `& "C:\Program Files\GitHub CLI\gh.exe"`.
-⚠ `git` тут **2.19.1**: `git switch` і `git restore` **не існують**.
-Уживай `git checkout` і `git reset HEAD -- <файл>`.
+⚠ Уживай `git checkout` і `git reset HEAD -- <файл>`: вони працюють у будь-якій
+версії git. У Windows буває два різні `git` одночасно, і версія відповідає
+різне з різних оболонок — тут це вже дало хибний замір (`CLAUDE.md`).
 
 ---
 
