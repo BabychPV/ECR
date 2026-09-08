@@ -205,13 +205,21 @@ internal static class Provisioning
         return new Administrator(userClient, userId, roleId, userName);
     }
 
-    /// <summary>Видає ресурсний грант ролі (`PUT /roles/{id}/grants`) через bootstrap.</summary>
+    /// <summary>Видає ОДИН ресурсний грант ролі (`PUT /roles/{id}/grants`) через bootstrap.</summary>
     /// <remarks>
     /// ⛔ Заміна набору грантів ролі змінює `SecurityStamp` кожного, хто цю
     /// роль має (ФВ-6.7: «зміна... ролей... діє негайно»), тож будь-яка ЖИВА
     /// сесія користувача цієї ролі одразу застаріває — наступний виклик під
     /// нею отримає `401`, а не оновлений профіль прав. Викликач зобов'язаний
     /// увійти заново через <see cref="ReauthenticateAsync"/>.
+    ///
+    /// ⛔ `DIR-010`: другий виклик на ту саму роль МОВЧКИ стер би перший —
+    /// `PUT` замінює набір грантів ЦІЛКОМ (<c>ReplaceResourceGrantsHandler</c>).
+    /// Це вже раз дало тест, що доводив не свою причину (`Q-161`, PR #64:
+    /// `IsDeny_грант_блокує_новий_рядок` потребував ОБОХ грантів разом). Тому
+    /// метод СПЕРШУ читає наявні гранти ролі (`GET`) і падає, якщо роль уже
+    /// щось має — мовчазне стирання неможливе фізично, а не за домовленістю.
+    /// Кілька грантів на одну роль — <see cref="GrantManyAsync"/>.
     /// </remarks>
     public static async Task GrantAsync(
         EcrApiFactory app, int roleId, string resourceKind, int resourceId, string level, bool isDeny = false)
@@ -219,6 +227,24 @@ internal static class Provisioning
         ArgumentNullException.ThrowIfNull(app);
 
         var bootstrap = await BootstrapAdministratorAsync(app).ConfigureAwait(false);
+
+        var existing = await bootstrap
+            .GetAsync(new Uri($"/api/v1/roles/{roleId}/grants", UriKind.Relative))
+            .ConfigureAwait(false);
+        Assert.True(
+            existing.IsSuccessStatusCode,
+            $"перелік грантів ролі {roleId}: {existing.StatusCode}: {app.ErrorsText}");
+        var existingCount = (await existing.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(false))
+            .GetArrayLength();
+
+        if (existingCount > 0)
+        {
+            throw new InvalidOperationException(
+                $"Роль {roleId} уже має {existingCount} грант(и/ів): PUT /roles/{{id}}/grants замінює " +
+                "набір ЦІЛКОМ, і цей виклик стер би наявні. Для кількох грантів на одну роль " +
+                $"викликайте {nameof(GrantManyAsync)} одним запитом.");
+        }
+
         var response = await bootstrap
             .PutAsJsonAsync(
                 new Uri($"/api/v1/roles/{roleId}/grants", UriKind.Relative),
