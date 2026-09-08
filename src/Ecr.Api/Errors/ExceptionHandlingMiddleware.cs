@@ -259,8 +259,22 @@ public sealed partial class ExceptionHandlingMiddleware(
         SourceAuthenticationException e =>
             (StatusCodes.Status502BadGateway, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Той самий клас розбіжності, що й `ECR-ROW-0409` вище (`D2-294`),
+        // і та сама причина: цифри коду — це НАШ статус відповіді
+        // (`ECR-<ДОМЕН>-<HTTP>`). `ECR-RPT-0409` каже 409 і доїжджав як 422
+        // обома шляхами: зайнятий код опису звіту (`BusinessRuleException`) і
+        // спроба опублікувати вже опубліковану версію (`DomainException` із
+        // самої сутності). Клієнт, що читає статус раніше за код, показував
+        // «дані невірні» там, де правильна відповідь — «цей звіт уже є» і
+        // «цю версію вже опубліковано».
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.ReportDefDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
+
+        DomainException e when e.ErrorCode == ErrorCodes.ReportImmutable =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, null),
 
         DomainException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, null),

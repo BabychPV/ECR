@@ -288,6 +288,28 @@ export type SourceEntityStatus = Schemas['SourceEntityStatus'];
 /** Зріз звітності. */
 export type ReportSnapshotSummary = Schemas['ReportSnapshotSummary'];
 
+/**
+ * Опис звіту разом із версіями (`ФВ-10.4`).
+ *
+ * ⛔ Це не звіт і не його вигляд: рендеринг лишається в SSRS (`D-52`), а
+ * веб-конструктор звітів ТЗ виносить за обсяг (`ФВ-10.6`). Тип потрібен, щоб
+ * побудову зрізу можна було замовити ВИБОРОМ зі списку, а не набором коду
+ * руками — до `W7` єдиним способом вказати звіт було вгадати його код.
+ */
+export type ReportDefinition = Schemas['ReportDefinitionDto'];
+
+/** Версія опису звіту; зріз будується лише за `Published`. */
+export type ReportVersionDto = Schemas['ReportVersionDto'];
+
+/** Колонка зрізу в описі версії: код і тип значення. */
+export type ReportColumnCommand = Schemas['ReportColumnCommand'];
+
+/** Запит на створення опису звіту разом із першою версією. */
+export type CreateReportDefRequest = Schemas['CreateReportDefRequest'];
+
+/** Запит на створення версії-чернетки опису звіту. */
+export type CreateReportVersionRequest = Schemas['CreateReportVersionRequest'];
+
 /** Стан фонової задачі. */
 export type JobStatus = Schemas['JobStatus'];
 

@@ -930,6 +930,90 @@
         ],
         "type": "object"
       },
+      "CreateReportDefRequest": {
+        "description": "Запит на створення опису звіту разом із першою версією.",
+        "properties": {
+          "code": {
+            "description": "Код звіту; ним адресується побудова зрізу.",
+            "type": "string"
+          },
+          "columns": {
+            "description": "Колонки зрізу: код і тип значення.",
+            "items": {
+              "$ref": "#/components/schemas/ReportColumnCommand"
+            },
+            "type": "array"
+          },
+          "isRegulatory": {
+            "description": "Чи звіт іде регулятору: від цього залежить фільтр статусів у вʼюсі\n`rpt.v_*` (`D-65`), а не «важливість».",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          },
+          "rules": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportRulesCommand",
+                "description": "Правила відбору рядків; `null` — джерело за замовчуванням."
+              }
+            ]
+          },
+          "version": {
+            "description": "Номер першої версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "isRegulatory",
+          "version",
+          "columns",
+          "rules"
+        ],
+        "type": "object"
+      },
+      "CreateReportVersionRequest": {
+        "description": "Запит на створення версії-чернетки опису звіту.",
+        "properties": {
+          "columns": {
+            "description": "Колонки зрізу.",
+            "items": {
+              "$ref": "#/components/schemas/ReportColumnCommand"
+            },
+            "type": "array"
+          },
+          "rules": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportRulesCommand",
+                "description": "Правила відбору рядків; `null` — джерело за замовчуванням."
+              }
+            ]
+          },
+          "version": {
+            "description": "Номер версії; унікальний у межах опису.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "columns",
+          "rules"
+        ],
+        "type": "object"
+      },
       "CreateRoleRequest": {
         "description": "Запит на створення ролі.",
         "properties": {
@@ -4145,6 +4229,79 @@
         ],
         "type": "object"
       },
+      "ReportColumnCommand": {
+        "description": "Колонка зрізу в описі версії звіту.",
+        "properties": {
+          "code": {
+            "description": "Код колонки; він же ключ у рядку зрізу.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Тип значення: `text`, `number` або `date`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ReportDefinitionDto": {
+        "description": "Опис звіту разом із його версіями.",
+        "properties": {
+          "code": {
+            "description": "Код звіту — саме ним будується зріз.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор опису.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи звіт в обігу.",
+            "type": "boolean"
+          },
+          "isRegulatory": {
+            "description": "Чи звіт іде регулятору. Не позначка «важливий»: від неї залежить, який\nфільтр статусів піде у вʼюху `rpt.v_*` (`D-65`).",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          },
+          "versions": {
+            "description": "Версії, найновіша першою.",
+            "items": {
+              "$ref": "#/components/schemas/ReportVersionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "isRegulatory",
+          "isActive",
+          "versions"
+        ],
+        "type": "object"
+      },
+      "ReportRulesCommand": {
+        "description": "Правила відбору рядків зрізу.",
+        "properties": {
+          "rowSource": {
+            "description": "Звідки беруться рядки. Єдине відоме будівнику значення —\nstring ReportDefinitionSpec.CalculationResults.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowSource"
+        ],
+        "type": "object"
+      },
       "ReportSnapshotSummary": {
         "description": "Зріз у переліку.",
         "properties": {
@@ -4207,6 +4364,46 @@
           "rowCount",
           "contentHash",
           "builtAt"
+        ],
+        "type": "object"
+      },
+      "ReportVersionDto": {
+        "description": "Версія опису звіту.",
+        "properties": {
+          "columnsJson": {
+            "description": "Опис колонок зрізу.",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Коли створено.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор версії.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rulesJson": {
+            "description": "Правила відбору рядків.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою\n        (Task&lt;int?&gt; IReportDefinitionStore.FindCurrentVersionIdAsync(string code, CancellationToken ct)).",
+            "type": "string"
+          },
+          "version": {
+            "description": "Номер версії; унікальний у межах опису.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "columnsJson",
+          "rulesJson",
+          "createdAt"
         ],
         "type": "object"
       },
@@ -9859,6 +10056,136 @@
         ]
       }
     },
+    "/api/v1/reports": {
+      "get": {
+        "description": "⚠ Версії приходять разом з описом, а не окремим запитом: побудувати\nзріз можна лише за ОПУБЛІКОВАНОЮ версією, і перелік, у якому цього не\nвидно, показував би звіти, кожен другий з яких відмовляє на побудову\nбез пояснення.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportDefinitionDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportDefinitionDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReportDefinitionDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Перелік описів звітів. Право `Report.ViewRegulatory`.",
+        "tags": [
+          "Reports"
+        ]
+      },
+      "post": {
+        "description": "⚠ Колонки й правила приходять СТРУКТУРОЮ, а не рядком JSON: у базі це\nсправді JSON (`ФВ-10.4` — опис звіту є даними), але клієнт, який\nскладає його сам, рано чи пізно складе такий, якого побудова не\nпрочитає, і дізнається про це порожнім зрізом.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportDefinitionDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportDefinitionDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportDefinitionDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить опис звіту разом із першою версією-чернеткою.\nПраво `Report.EditDefinition`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
     "/api/v1/reports/snapshots": {
       "get": {
         "description": "У переліку є час побудови й контрольна сума: споживач має бачити, на\nяких даних побудовано зріз. Два зрізи однієї версії за один період\nвідрізняються лише цим.",
@@ -9973,6 +10300,206 @@
           }
         },
         "summary": "Будує зріз. Право `Report.BuildSnapshot`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
+    "/api/v1/reports/{id}/versions": {
+      "post": {
+        "description": "⛔ Єдиний спосіб змінити опублікований опис: опублікована версія\nнезмінна, бо на її колонки посилаються вже побудовані зрізи, які читає\nSSRS. Дії «правити версію» немає навмисно.",
+        "parameters": [
+          {
+            "description": "Опис звіту.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportVersionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportVersionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportVersionDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportVersionDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportVersionDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить нову версію-чернетку наявного опису. Право `Report.EditDefinition`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
+    "/api/v1/reports/{id}/versions/{vid}/publish": {
+      "post": {
+        "description": "⛔ Побудова бере ЛИШЕ опубліковану версію — чернетка зрізу не дає\nвзагалі. Опис звіту правлять саме тоді, коли ще не впевнені в ньому, і\nзріз за чернеткою потрапив би в регуляторну вʼюху нарівні зі справжнім.",
+        "parameters": [
+          {
+            "description": "Опис звіту.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportVersionDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportVersionDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportVersionDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Публікує версію опису звіту. Право `Report.EditDefinition`.",
         "tags": [
           "Reports"
         ]

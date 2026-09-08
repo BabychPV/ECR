@@ -342,6 +342,23 @@ public static class ErrorCodes
     /// <summary>Версія звіту або зріз уже не чернетка: потрібен новий (ФВ-9.17).</summary>
     public const string ReportImmutable = "ECR-RPT-0409";
 
+    /// <summary>
+    /// Опис звіту з таким кодом уже є (<c>UQ_ReportDef</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>4091</c>, а не <c>0409</c>: статус той самий (<c>409</c>), але
+    /// код мусить бути УНІКАЛЬНИМ — клієнт розрізняє причини саме ним, і два
+    /// стани під одним кодом означали б, що «цей звіт уже є» неможливо
+    /// відрізнити від «цю версію вже опубліковано». Форма з додатковою
+    /// цифрою — та сама, що в <see cref="CellOutOfRange"/>
+    /// (<c>ECR-CELL-4222</c>) і <see cref="UnitContextualCoefficient"/>
+    /// (<c>ECR-UOM-4221</c>).
+    /// </remarks>
+    public const string ReportDefDuplicate = "ECR-RPT-4091";
+
+    /// <summary>Опис звіту не складається: порожня назва, колонки чи невідоме правило.</summary>
+    public const string ReportInvalid = "ECR-RPT-0422";
+
     // Система
     public const string Internal = "ECR-SYS-0500";
     public const string Archiving = "ECR-SYS-0503";
