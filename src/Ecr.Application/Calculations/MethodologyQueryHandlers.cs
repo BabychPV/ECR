@@ -14,7 +14,7 @@ namespace Ecr.Application.Calculations;
 /// даних. Останньої тут немає взагалі — вона живе в довідниках.
 /// </remarks>
 public sealed class ListMethodologiesHandler(
-    IMethodologyStore methodologies,
+    Ports.IMethodologyDraftStore methodologies,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -22,8 +22,21 @@ public sealed class ListMethodologiesHandler(
     public const string Permission = "Calculation.View";
 
     /// <summary>Читає перелік.</summary>
-    /// <param name="methodologyIds">Методології, які цікавлять.</param>
+    /// <param name="methodologyIds">
+    /// Методології, які цікавлять; порожній перелік — УСІ активні (перелік
+    /// адміністрування, а не побудова конкретного розрахунку).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Знайдено живим прогоном (не сценарієм — жоден не проходив без
+    /// заданих `ids`): порожній `methodologyIds` віддавав ПОРОЖНІЙ перелік
+    /// назавжди, а не «всі». Сторінка конфігуратора кличе цей маршрут БЕЗ
+    /// параметра, тож щойно заведена через `POST /methodologies` методологія
+    /// була недосяжна з переліку — єдиного місця, звідки на неї можна
+    /// перейти. Другий шар тієї самої тиші: методологія без ЖОДНОЇ
+    /// ОПУБЛІКОВАНОЇ версії відкидалася цілком — тобто щойно заведена, без
+    /// версій, зникала так само.
+    /// </remarks>
     public async Task<IReadOnlyList<MethodologyDto>> HandleAsync(
         IReadOnlyList<int> methodologyIds, CancellationToken ct)
     {
@@ -33,27 +46,31 @@ public sealed class ListMethodologiesHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var result = new List<MethodologyDto>(methodologyIds.Count);
+        var ids = methodologyIds.Count > 0
+            ? methodologyIds
+            : await methodologies.ListActiveIdsAsync(ct).ConfigureAwait(false);
 
-        foreach (var id in methodologyIds)
+        var result = new List<MethodologyDto>(ids.Count);
+
+        foreach (var id in ids)
         {
-            var versions = await methodologies.GetPublishedVersionsAsync(id, ct).ConfigureAwait(false);
-            if (versions.Count == 0)
+            var methodology = await methodologies.FindAsync(id, ct).ConfigureAwait(false);
+            if (methodology is null)
             {
                 continue;
             }
 
-            result.Add(Map(id, versions));
+            result.Add(Map(methodology));
         }
 
         return result;
     }
 
-    /// <summary>Складає DTO методології з її версій.</summary>
-    private static MethodologyDto Map(int methodologyId, IReadOnlyList<MethodologyVersion> versions)
+    /// <summary>Складає DTO методології — код, назва й група з САМОЇ методології, не з версії.</summary>
+    private static MethodologyDto Map(Methodology methodology)
     {
-        var ordered = versions
-            .Where(v => v.EffectiveFrom is not null)
+        var ordered = methodology.Versions
+            .Where(v => v.Status == Domain.Enums.TemplateVersionStatus.Published && v.EffectiveFrom is not null)
             .OrderBy(v => v.EffectiveFrom)
             .ToList();
 
@@ -80,12 +97,11 @@ public sealed class ListMethodologiesHandler(
                 ordered[i].TraceLevel));
         }
 
-        return new MethodologyDto(
-            methodologyId,
-            versions[0].Version,
-            new Domain.ValueObjects.LocalizedText(new Dictionary<string, string>()),
-            Group: null,
-            mapped);
+        // ⛔ Порожній `mapped` — ЛЕГІТИМНИЙ стан (щойно заведена методологія
+        // або та, у якої лише чернетка), а не привід прибрати рядок цілком:
+        // без нього нема як перейти з переліку до єдиного місця, де версію
+        // можна завести.
+        return new MethodologyDto(methodology.Id, methodology.Code, methodology.NameL10n, methodology.Group, mapped);
     }
 }
 

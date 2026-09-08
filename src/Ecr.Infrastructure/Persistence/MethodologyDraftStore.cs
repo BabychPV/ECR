@@ -20,6 +20,17 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     private const int MaxChildren = 10_000;
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> ListActiveIdsAsync(CancellationToken ct)
+        => await db.Methodologies
+            .AsNoTracking()
+            .Where(m => m.IsActive)
+            .OrderBy(m => m.Code)
+            .Select(m => m.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<Methodology?> FindByCodeAsync(string code, CancellationToken ct)
         => await db.Methodologies
             .AsNoTracking()
