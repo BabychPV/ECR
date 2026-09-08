@@ -62,11 +62,19 @@ git show origin/sync:PK1-LOG.md    # PK2 читає PK1
 Цикл: `/cycle`.
 
 ## PK2 (виконавець, Sonnet)
-Пишеш: `PK2-LOG.md` на гілці `sync`; `src/**`, `tests/**`, `tools/**` у `main`.
+Пишеш: `PK2-LOG.md` на гілці `sync`; `src/**`, `tests/**`, `tools/**` і
+**`docs/build/**`** у `main`.
 ⛔ У `main` комітиш **тільки ти** — керуючий там не пише. Отже кожна зміна
 проходить твій PR, і рев'ю справді щось означає.
 Береш настанови з `PK1-LOG.md`, звітуєш у `PK2-LOG.md`.
-НЕ чіпаєш `docs/`, `CLAUDE.md`, `.githooks/`, `.github/`, `.claude/`, `scripts/`.
+НЕ чіпаєш `docs/sync/`, `docs/tz/`, `CLAUDE.md`, `.githooks/`, `.github/`,
+`.claude/`, `scripts/`, `contracts/`.
+
+⚠ `docs/build/**` — **твоя** зона з 2026-09-08 (права видано людиною):
+`questions.md`, `decisions.md`, `roadmap.md`, `progress.md`, `problems.md` і
+решта пакета. Ти написав там кожен запис за весь проєкт, тому й закриваєш їх
+сам. Доти межа проходила по `docs/**` цілком — і три записи `Q-` стояли
+`OPEN`, хоч виправлення були в `main`.
 НЕ мержиш власний PR.
 Цикл: `/cycle`.
 

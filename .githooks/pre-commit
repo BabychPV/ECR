@@ -135,6 +135,9 @@ while IFS= read -r FILE; do
             [Pp][Kk]2-[Ll][Oo][Gg].[Mm][Dd])
                 add_violation "$FILE" "PK2-LOG.md — лог ВИКОНАВЦЯ на гілці sync. Вузол PK1 його ЧИТАЄ (git show origin/sync:PK2-LOG.md), але не пише в нього НІКОЛИ. Свої записи — у PK1-LOG.md."
                 ;;
+            [Dd][Oo][Cc][Ss]/[Bb][Uu][Ii][Ll][Dd]/*)
+                add_violation "$FILE" "docs/build/** — інженерні журнали ВИКОНАВЦЯ (questions.md, decisions.md, roadmap.md, progress.md, problems.md і решта пакета). PK2 написав там кожен запис за весь проєкт і закриває їх сам. Вузол PK1 читає, але не пише: потрібна зміна — це настанова, не коміт."
+                ;;
             *.[Cc][Ss][Pp][Rr][Oo][Jj])
                 add_violation "$FILE" "шлях належить зоні PK2: *.csproj (файли проєктів). Вузол PK1 не має права його змінювати."
                 ;;
@@ -164,6 +167,17 @@ while IFS= read -r FILE; do
             [Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*.[Pp][Rr][Oo][Pp][Ss]) : ;;
             */[Dd][Ii][Rr][Ee][Cc][Tt][Oo][Rr][Yy].*.[Pp][Rr][Oo][Pp][Ss]) : ;;
             [Pp][Kk]2-[Ll][Oo][Gg].[Mm][Dd]) : ;;
+            # ⛔ ПОРЯДОК ЗНАЧУЩИЙ: `docs/build/*` мусить стояти ВИЩЕ за
+            # загальну заборону `docs/*` нижче — у `case` перемагає перший
+            # збіг. Якщо поміняти місцями, дозвіл не діятиме зовсім.
+            #
+            # Права видані людиною 2026-09-08: `docs/build/**` — інженерні
+            # журнали виконавця (`questions.md`, `decisions.md`, `roadmap.md`,
+            # `progress.md`, `problems.md`), у яких він написав кожен запис за
+            # весь проєкт. Доти межа проходила по `docs/**` цілком, і він не
+            # міг закрити власний запис: три `Q-` стояли `OPEN`, хоч
+            # виправлення були в `main`.
+            [Dd][Oo][Cc][Ss]/[Bb][Uu][Ii][Ll][Dd]/*) : ;;
             [Pp][Kk]1-[Ll][Oo][Gg].[Mm][Dd])
                 add_violation "$FILE" "PK1-LOG.md — лог КЕРУЮЧОГО на гілці sync. Вузол PK2 його ЧИТАЄ (git show origin/sync:PK1-LOG.md), але не пише в нього НІКОЛИ. Свої записи — у PK2-LOG.md."
                 ;;
@@ -171,7 +185,7 @@ while IFS= read -r FILE; do
                 add_violation "$FILE" "шлях належить зоні contracts/** — вона заборонена для ОБОХ вузлів і змінюється лише окремою узгодженою процедурою."
                 ;;
             [Dd][Oo][Cc][Ss]/*)
-                add_violation "$FILE" "шлях належить зоні PK1: docs/** (документація). Вузол PK2 у docs/ не пише зовсім: його лог — PK2-LOG.md на гілці sync."
+                add_violation "$FILE" "шлях належить зоні PK1: docs/ поза docs/build/. Вузлу PK2 дозволені docs/build/** (його журнали) і PK2-LOG.md на гілці sync; docs/sync/** і docs/tz/** — ні."
                 ;;
             [Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd])
                 add_violation "$FILE" "шлях належить зоні PK1: CLAUDE.md (інструкції для агента). Вузол PK2 не має права його змінювати."
@@ -189,7 +203,7 @@ while IFS= read -r FILE; do
                 add_violation "$FILE" "шлях належить зоні PK1: scripts/** (сервісні скрипти). Вузол PK2 не має права його змінювати."
                 ;;
             *)
-                add_violation "$FILE" "шлях поза дозволеною зоною PK2. Вузол PK2 може писати лише у: src/**, tests/**, tools/**, *.csproj, *.sln, Directory.*.props (у main) і PK2-LOG.md (на гілці sync)."
+                add_violation "$FILE" "шлях поза дозволеною зоною PK2. Вузол PK2 може писати лише у: src/**, tests/**, tools/**, docs/build/**, *.csproj, *.sln, Directory.*.props (у main) і PK2-LOG.md (на гілці sync)."
                 ;;
         esac
     fi
