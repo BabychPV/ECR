@@ -73,19 +73,20 @@ public interface IMethodologyDraftStore
     public Task<MethodologyFormula?> FindFormulaAsync(
         int methodologyVersionId, string code, CancellationToken ct);
 
-    /// <summary>Константа версії за кодом — відстежувана; <c>null</c>, якщо її немає.</summary>
+    /// <summary>Константи версії з цим кодом — відстежувані; порожньо, якщо їх немає.</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="code">Код константи.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Константа або <c>null</c>.</returns>
+    /// <returns>Усі варіанти константи з цим кодом.</returns>
     /// <remarks>
-    /// ⚠ Кандидатів на один код у версії буває кілька (звуження за категорією і
-    /// речовиною, вікна чинності — див. <see cref="IConstantStore"/>). Тут
-    /// шукається саме **незвужена** константа: редактор заводить базове
-    /// значення, а звуження — окремий крок, якого ще немає. Повертати «першу з
-    /// кількох» означало б, що повторний запис мовчки править чужий варіант.
+    /// ⛔ Повертається ПЕРЕЛІК, а не «перша». Кандидатів на один код у версії
+    /// буває кілька — звуження за категорією і речовиною (ФВ-16.5), — і «перша
+    /// з кількох» означала б, що запис базового значення мовчки править варіант,
+    /// заведений для однієї установки. Вибір із кількох робить викликач, і
+    /// сьогодні він єдино чесний: відмовляє, бо адреса запиту (код) на кілька
+    /// варіантів не вказує.
     /// </remarks>
-    public Task<MethodologyConstant?> FindConstantAsync(
+    public Task<IReadOnlyList<MethodologyConstant>> GetConstantsByCodeAsync(
         int methodologyVersionId, string code, CancellationToken ct);
 
     /// <summary>Правило версії за кодом — відстежуване; <c>null</c>, якщо його немає.</summary>

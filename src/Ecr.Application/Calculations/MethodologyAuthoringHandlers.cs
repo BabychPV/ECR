@@ -189,9 +189,26 @@ public sealed class SaveMethodologyConstantHandler(
             ?? throw new NotFoundException(
                 "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
 
-        var existing = await drafts
-            .FindConstantAsync(methodologyVersionId, constantCode.Value, ct)
+        var candidates = await drafts
+            .GetConstantsByCodeAsync(methodologyVersionId, constantCode.Value, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Кілька варіантів одного коду — ВІДМОВА, а не «беремо перший».
+        // Константа звужується за категорією і речовиною (ФВ-16.5), і адреса
+        // цього запиту — самий КОД: на кілька варіантів вона не вказує. «Перший
+        // ліпший» означав би, що запис базового значення мовчки переписує
+        // коефіцієнт, заведений для однієї установки, і побачити це можна було б
+        // лише за числом у звіті. Такий стан приходить із імпорту корпусу;
+        // редактора варіантів ще немає.
+        if (candidates.Count > 1)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0409",
+                $"Константа «{constantCode.Value}» має {candidates.Count} варіантів звуження у версії "
+                + $"{methodologyVersionId}: за самим кодом неоднозначно, який із них правити.");
+        }
+
+        var existing = candidates.Count == 1 ? candidates[0] : null;
 
         MethodologyConstant constant;
 

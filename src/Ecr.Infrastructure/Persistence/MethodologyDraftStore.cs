@@ -74,21 +74,13 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    /// <remarks>
-    /// ⛔ Шукається константа БЕЗ звуження — без категорії й речовини. Кандидатів
-    /// на один код у версії буває кілька (ФВ-16.5), і «перша з кількох» означала
-    /// б, що повторний запис базового значення мовчки переписує варіант,
-    /// заведений для однієї установки.
-    /// </remarks>
-    public async Task<MethodologyConstant?> FindConstantAsync(
+    public async Task<IReadOnlyList<MethodologyConstant>> GetConstantsByCodeAsync(
         int methodologyVersionId, string code, CancellationToken ct)
         => await db.MethodologyConstants
-            .FirstOrDefaultAsync(
-                c => c.MethodologyVersionId == methodologyVersionId
-                     && c.Code == code
-                     && c.Category == null
-                     && c.SubstanceEntryId == null,
-                ct)
+            .Where(c => c.MethodologyVersionId == methodologyVersionId && c.Code == code)
+            .OrderBy(c => c.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
 
     /// <inheritdoc />
