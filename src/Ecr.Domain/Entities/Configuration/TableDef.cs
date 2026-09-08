@@ -55,6 +55,62 @@ public sealed class TableDef : Entity<int>
     public void SwitchStorage(CellStorageMode mode) => StorageMode = mode;
 
     /// <summary>
+    /// Змінює назву таблиці.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>NameL10n</c> — поле презентаційного шару
+    /// (<see cref="Services.ChangeClassifier.PresentationFields"/> уже містить
+    /// <c>TableDef.NameL10n</c> — саме на це посилання цей сеттер і чекав).
+    /// Той самий метод, а не дві копії, покликаний обслуговувати і
+    /// <c>PUT …/tables/{code}</c> (структурна правка чернетки), і майбутній
+    /// <c>PATCH …/presentation</c> (опублікована версія) — за зразком
+    /// <see cref="SheetDef.Rename"/>.
+    /// </remarks>
+    public void Rename(LocalizedText name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        NameL10n = name;
+    }
+
+    /// <summary>Змінює порядок — та сама презентаційна операція, що й <see cref="SheetDef.Reorder"/>.</summary>
+    public void Reorder(int ordinal) => Ordinal = ordinal;
+
+    /// <summary>
+    /// Змінює розкладку таблиці.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дозволена в чернетці без окремого узгодження з <see cref="RowMode"/>:
+    /// обидва поля структурні, але жодне не є ідентичністю
+    /// (<see cref="Services.ChangeClassifier.IdentityFields"/> їх не містить) —
+    /// тобто зміна сама собою не Breaking за ФВ-7.4. Чи руйнівна вона з
+    /// документами на версії, вирішує загальна класифікація зміни в
+    /// обробнику (<c>ChangeClassifier.Classify</c>), а не ця сутність.
+    /// </remarks>
+    public void SetLayout(TableLayoutKind layoutKind) => LayoutKind = layoutKind;
+
+    /// <summary>
+    /// Змінює спосіб формування рядків.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не звіряє сумісність із наявними <see cref="Rows"/>: колонки й рядки
+    /// заводить наступний зріз (<c>ColumnDef</c>/<c>RowDef</c>), тож на момент,
+    /// коли цей сеттер узагалі можна викликати повторно, рядків ще немає.
+    /// <c>MaxDynamicRows</c> перевіряється окремо в
+    /// <see cref="SetMaxDynamicRows"/> — обробник викликає її одразу після
+    /// цього сеттера з фінальним <see cref="RowMode"/>, а не покладається на
+    /// побічну перевірку тут.
+    /// </remarks>
+    public void SetRowMode(TableRowMode rowMode) => RowMode = rowMode;
+
+    /// <summary>Логічне видалення: фізично запис лишається, бо на нього посилаються дані (ФВ-7.6).</summary>
+    public void SoftDelete(int userId, DateTime utcNow)
+    {
+        IsDeleted = true;
+        DeletedAt = utcNow;
+        DeletedByUserId = userId;
+    }
+
+    /// <summary>
     /// Стеля кількості динамічних рядків.
     /// </summary>
     /// <remarks>

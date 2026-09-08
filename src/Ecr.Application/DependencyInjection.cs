@@ -62,6 +62,10 @@ public static class DependencyInjection
         services.AddScoped<SaveSheetDefHandler>();
         services.AddScoped<DeleteSheetDefHandler>();
 
+        // Другий вертикальний зріз — таблиця на аркуші (W5.1), той самий патерн.
+        services.AddScoped<SaveTableDefHandler>();
+        services.AddScoped<DeleteTableDefHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();

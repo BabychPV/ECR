@@ -25,6 +25,8 @@ public sealed class TemplateVersionsController(
     DeleteTableRelationHandler deleteRelation,
     SaveSheetDefHandler saveSheet,
     DeleteSheetDefHandler deleteSheet,
+    SaveTableDefHandler saveTable,
+    DeleteTableDefHandler deleteTable,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -291,6 +293,72 @@ public sealed class TemplateVersionsController(
         return NoContent();
     }
 
+    /// <summary>
+    /// Записує таблицю на аркуші чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="sheetCode">Код аркуша, якому належить таблиця.</param>
+    /// <param name="code">Код таблиці.</param>
+    /// <param name="request">Налаштування таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Другий вертикальний зріз авторства структури шаблону через API
+    /// (<c>W5.1</c>), той самий патерн, що й <c>sheets/{code}</c> вище
+    /// (<c>W5.0</c>).
+    ///
+    /// ⚠ Таблиця адресується ДВОМА кодами — <c>{sheetCode}/tables/{code}</c>,
+    /// а не голим кодом версії, як аркуш: код таблиці унікальний лише в межах
+    /// свого аркуша (<see cref="Ecr.Domain.Entities.Configuration.SheetDef.AddTable"/>),
+    /// тож без коду аркуша в адресі дві таблиці з однаковим кодом на різних
+    /// аркушах були б нерозрізнимі маршрутом. Батько — аркуш — адресується
+    /// саме своїм кодом, а не ідентифікатором, з тієї самої причини, що й сам
+    /// аркуш у `sheets/{code}`: адресу задає викликач (<c>D2-147</c>), а
+    /// ідентифікатор аркуша до першого читання структури клієнту невідомий.
+    ///
+    /// ⚠ <c>PUT</c> за кодом: створення й зміна — одна ідемпотентна дія. Стан
+    /// версії перевіряє домен: опублікована відхиляє правку сама
+    /// (<c>ECR-TMPL-0409</c>, <c>ФВ-7.1</c>).
+    /// </remarks>
+    [HttpPut("sheets/{sheetCode}/tables/{code}")]
+    [ProducesResponseType<TableDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TableDto>> SaveTable(
+        int id, string sheetCode, string code, [FromBody] SaveTableDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveTable
+            .HandleAsync(
+                id,
+                sheetCode,
+                code,
+                new SaveTableDefCommand(
+                    request.NameL10n, request.Ordinal, request.LayoutKind, request.RowMode,
+                    request.MaxDynamicRows),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає таблицю з аркуша чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="sheetCode">Код аркуша, якому належить таблиця.</param>
+    /// <param name="code">Код таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("sheets/{sheetCode}/tables/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteTable(int id, string sheetCode, string code, CancellationToken ct)
+    {
+        await deleteTable.HandleAsync(id, sheetCode, code, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
@@ -342,3 +410,16 @@ public sealed record SaveSheetDefRequest(
     string? SheetGroup,
     bool IsMandatory,
     bool IsVisible);
+
+/// <summary>Налаштування таблиці на аркуші чернетки (<c>W5.1</c>).</summary>
+/// <param name="NameL10n">Назва таблиці мовами каталогу.</param>
+/// <param name="Ordinal"><c>null</c> — нова таблиця стає останньою на аркуші за порядком.</param>
+/// <param name="LayoutKind">Розкладка: як періоди лягають на структуру.</param>
+/// <param name="RowMode">Спосіб формування рядків.</param>
+/// <param name="MaxDynamicRows">Стеля кількості рядків, якщо таблиця приймає додані користувачем; <c>null</c> — без стелі.</param>
+public sealed record SaveTableDefRequest(
+    IReadOnlyDictionary<string, string> NameL10n,
+    int? Ordinal,
+    Ecr.Domain.Enums.TableLayoutKind LayoutKind,
+    Ecr.Domain.Enums.TableRowMode RowMode,
+    int? MaxDynamicRows);
