@@ -467,6 +467,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/calculation-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Числа, які дав розрахунок методологій. Право `Calculation.View`.
+         * @description ⛔ Окремий маршрут, а не поле зрізу таблиці, і це `D-69`: результат
+         *     методології НЕ потрапляє в `doc.CellValue` — інакше нічний
+         *     перерахунок писав би десятки мільйонів рядків у партиції документів. У
+         *     документ він приходить посиланням через `cfg.CalculationBinding`.
+         *
+         *     ⛔ Доти побачити це число було НІДЕ: перерахунок завершувався успіхом,
+         *     значення лягало в `calc.CalculationResult`, і жоден маршрут його не
+         *     віддавав. Тобто питання «чи порахувала методологія правильно» мало рівно
+         *     одну відповідь — `SELECT` у базі.
+         *
+         *     ⚠ Віддаються числа АКТУАЛЬНОГО прогону, не останнього за часом: прогін,
+         *     який упав, лишає по собі частину рядків, і суміш двох версій методології
+         *     на екрані виглядала б цілком правдоподібно.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період; результати партиційовані за ним. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationResultDto"][];
+                        "text/json": components["schemas"]["CalculationResultDto"][];
+                        "text/plain": components["schemas"]["CalculationResultDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/export": {
         parameters: {
             query?: never;
@@ -1388,6 +1447,202 @@ export interface paths {
             };
         };
         put?: never;
+        /**
+         * Заводить методологію-контейнер. Право `Calculation.EditFormula`.
+         * @description ⛔ Дії не існувало, і це був корінь, а не незручність: `POST
+         *     …/{id}/versions` вимагає ідентифікатора методології, брати який не
+         *     було звідки. Увесь конфігуратор версій працював лише над тим, що завіз
+         *     офлайновий генератор тестових даних.
+         *
+         *     ⚠ Створюється саме КОНТЕЙНЕР, без жодної версії. Перша версія — окрема
+         *     дія (`POST …/{id}/versions` з `copyFromVersionId = null`): у
+         *     неї свій рівень драбини виразності і свої режими, і склеїти обидві дії
+         *     означало б ухвалити ці рішення за методолога в момент, коли він ще навіть
+         *     не назвав методологію.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateMethodologyRequest"];
+                    "application/json": components["schemas"]["CreateMethodologyRequest"];
+                    "text/json": components["schemas"]["CreateMethodologyRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologySummaryDto"];
+                        "text/json": components["schemas"]["MethodologySummaryDto"];
+                        "text/plain": components["schemas"]["MethodologySummaryDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Прив'язки методології до колонок. Право `Calculation.View`.
+         * @description ⚠ Прив'язка живе на МЕТОДОЛОГІЇ, а не на версії: вона переживає всі її
+         *     версії одразу і клонуванням не копіюється. Тому маршрут без `vid`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationBindingDto"][];
+                        "text/json": components["schemas"]["CalculationBindingDto"][];
+                        "text/plain": components["schemas"]["CalculationBindingDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Прив'язує вихід методології до колонки документа. Право `Calculation.EditRule`.
+         * @description ⛔ <b>Головний блокер розрахунку.</b> `cfg.CalculationBinding` не
+         *     створювало НІЩО — ні обробник, ні тест, — і наслідок був повністю
+         *     мовчазний: `RecalculationJob` віддавав порожній перелік прив'язок,
+         *     оркестратор одразу повертав порожній профіль, задача завершувалася
+         *     `Succeeded` і не рахувала нічого. Порожній набір прив'язок помилкою
+         *     не є, тож ані стан задачі, ані журнал про це не казали.
+         *
+         *     ⛔ Адреса — трійка `(колонка, методологія, код виходу)`
+         *     (`UQ_CalculationBinding`), тому дія одна: `PUT` створює і
+         *     змінює. `TableDefId` у запиті НЕМАЄ — він виводиться з колонки: два
+         *     поля про те саме розходяться мовчки, а прив'язка з чужою таблицею просто
+         *     не спрацьовує.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія-джерело. */
+                    id: number;
+                    /** @description Колонка-приймач. */
+                    columnDefId: number;
+                    /** @description Який вихід методології лягає в колонку. */
+                    outputCode: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveCalculationBindingRequest"];
+                    "application/json": components["schemas"]["SaveCalculationBindingRequest"];
+                    "text/json": components["schemas"]["SaveCalculationBindingRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationBindingDto"];
+                        "text/json": components["schemas"]["CalculationBindingDto"];
+                        "text/plain": components["schemas"]["CalculationBindingDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -1558,6 +1813,142 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/constants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Константи версії. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyConstantDto"][];
+                        "text/json": components["schemas"]["MethodologyConstantDto"][];
+                        "text/plain": components["schemas"]["MethodologyConstantDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/constants/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує константу версії-чернетки. Право `Calculation.EditConstant`.
+         * @description ⛔ Доти константа потрапляла у версію рівно одним шляхом — копіюванням при
+         *     клонуванні. Первісну завести не було чим, тобто методологія, створена з
+         *     нуля, рахувала правильними виразами по порожніх коефіцієнтах.
+         *
+         *     ⚠ `ValidTo` — перший НЕчинний день (виключна межа): коефіцієнт,
+         *     чинний увесь 2024 рік, має тут `2025-01-01`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код константи — те, що стоїть після `CST.`. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyConstantRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyConstantRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyConstantRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyConstantDto"];
+                        "text/json": components["schemas"]["MethodologyConstantDto"];
+                        "text/plain": components["schemas"]["MethodologyConstantDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1747,6 +2138,223 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/modes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Задає режими обчислення версії-чернетки. Право `Calculation.EditFormula`.
+         * @description ⛔ Доти `SetModes` кликав лише `CloneAsDraft`, який ПЕРЕНОСИТЬ
+         *     режими джерела: конструктор ставить `Legacy`/`Actual`, клон
+         *     переносить, третього шляху не було. Тобто `NumericMode.Strict`
+         *     увімкнути було неможливо в принципі — при тому, що саме він відрізняє
+         *     `null` від тихого нуля при діленні на нуль (ФВ-9.14).
+         *
+         *     ⚠ Обидва перші режими тихо змінюють УСІ числа версії, не змінивши жодної
+         *     формули. Тому вони обов'язкові в diff публікації (`D-78`), а сама
+         *     зміна — окрема дія, а не поле у створенні версії.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetMethodologyModesRequest"];
+                    "application/json": components["schemas"]["SetMethodologyModesRequest"];
+                    "text/json": components["schemas"]["SetMethodologyModesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyDraftVersionDto"];
+                        "text/json": components["schemas"]["MethodologyDraftVersionDto"];
+                        "text/plain": components["schemas"]["MethodologyDraftVersionDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Оголошені виходи версії. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyOutputDto"][];
+                        "text/json": components["schemas"]["MethodologyOutputDto"][];
+                        "text/plain": components["schemas"]["MethodologyOutputDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/outputs/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Оголошує вихід версії. Право `Calculation.EditFormula`.
+         * @description ⛔ Без жодного виходу модуль рахує всі формули і не записує НІЧОГО: цикл
+         *     запису йде по оголошених виходах, а не по формулах. Методологія з
+         *     правильними виразами дає при цьому порожній результат, і жодна перевірка
+         *     публікації цього не називає.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код виходу — адреса, на яку посилається прив'язка. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyOutputRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyOutputRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyOutputRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyOutputDto"];
+                        "text/json": components["schemas"]["MethodologyOutputDto"];
+                        "text/plain": components["schemas"]["MethodologyOutputDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/publish": {
         parameters: {
             query?: never;
@@ -1820,6 +2428,284 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Правила відбору рядків версії. Право `Calculation.View`.
+         * @description ⚠ Віддаються і ВИМКНЕНІ правила, на відміну від того, що бачить прогін:
+         *     вимкнене правило, невидиме в редакторі, неможливо ні ввімкнути назад, ні
+         *     назвати причиною порожнього розрахунку.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyRuleDto"][];
+                        "text/json": components["schemas"]["MethodologyRuleDto"][];
+                        "text/plain": components["schemas"]["MethodologyRuleDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/rules/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує правило відбору рядків. Право `Calculation.EditRule`.
+         * @description ⛔ Правило і прив'язка — РІЗНІ речі й обидві обов'язкові. Прив'язка
+         *     (`PUT …/bindings/…`) каже, ЯКА таблиця і в яку колонку лягає число;
+         *     правило — ЯКІ рядки цієї таблиці рахувати. Без правил
+         *     `MethodologyResolver` не зіставляє жодного рядка, і перерахунок
+         *     завершується успіхом, не порахувавши нічого.
+         *
+         *     ⚠ Предикат СТРУКТУРОВАНИЙ, а не вираз (`Q-026`): діалект методологій
+         *     посилань на комірки документів не має за побудовою, а третій діалект не
+         *     створюється (`D-92`). «Уся таблиця» пишеться як `{}`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код правила. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyRuleRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyRuleRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyRuleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyRuleDto"];
+                        "text/json": components["schemas"]["MethodologyRuleDto"];
+                        "text/plain": components["schemas"]["MethodologyRuleDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Золотий набір версії. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyTestCaseDto"][];
+                        "text/json": components["schemas"]["MethodologyTestCaseDto"][];
+                        "text/plain": components["schemas"]["MethodologyTestCaseDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/tests/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує тест золотого набору. Право `Calculation.EditFormula`.
+         * @description ⛔ Не «тести заради тестів», а умова публікації (ФВ-9.12): порожній набір
+         *     НЕ зелений, і версія без нього не публікується взагалі. Доки набір не було
+         *     чим заповнити, опублікувати заведену з нуля методологію було неможливо в
+         *     принципі — правило працювало, користі з нього не було.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Код тесту. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyTestCaseRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyTestCaseRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyTestCaseRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyTestCaseDto"];
+                        "text/json": components["schemas"]["MethodologyTestCaseDto"];
+                        "text/plain": components["schemas"]["MethodologyTestCaseDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5945,11 +6831,67 @@ export interface components {
              */
             projectId: number;
         };
+        /** @description Прив'язка виходу методології до колонки документа (`D-69`). */
+        CalculationBindingDto: {
+            /**
+             * Format: int32
+             * @description Колонка-приймач.
+             */
+            columnDefId: number;
+            /**
+             * Format: int32
+             * @description Ідентифікатор прив'язки.
+             */
+            id: number;
+            /** @description Вимкнена прив'язка не бере участі в прогоні. */
+            isActive: boolean;
+            /** @description Як звузити рядки таблиці; `{}` — усі. */
+            matchJson: string;
+            /**
+             * Format: int32
+             * @description Методологія-джерело.
+             */
+            methodologyId: number;
+            /** @description Який вихід методології лягає в колонку. */
+            outputCode: string;
+            /**
+             * Format: int32
+             * @description Таблиця колонки-приймача.
+             */
+            tableDefId: number;
+        };
         /**
          * @description Рівень драбини виразності для методології (ФВ-9.2).
          * @enum {unknown}
          */
         CalculationLevel: "Configuration" | "Script" | "Module";
+        /** @description Число, яке дав актуальний прогін розрахунку на документі. */
+        CalculationResultDto: {
+            /**
+             * Format: int32
+             * @description Версія, що дала число.
+             */
+            methodologyVersionId: number;
+            /** @description Код виходу методології. */
+            outputCode: string;
+            /** @description Рядок документа; `null` — рівень таблиці. */
+            sourceRowKey: null | string;
+            /**
+             * Format: int64
+             * @description Речовина; `null` — вихід без речовини.
+             */
+            substanceEntryId: null | number;
+            /**
+             * Format: int32
+             * @description Одиниця результату.
+             */
+            unitId: number;
+            /**
+             * Format: double
+             * @description Значення.
+             */
+            value: number;
+        };
         /**
          * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
          *     числа при перерахунку в г/с і т/рік.
@@ -6112,6 +7054,11 @@ export interface components {
             unitId: null | number;
             unitSymbol: null | string;
         };
+        /**
+         * @description Природа значення константи методології (директива ПК-1 №05, поправка 2-біс).
+         * @enum {unknown}
+         */
+        ConstantKind: "Numeric" | "Text" | "CategoryLabel";
         /** @description Запит на конверсію. */
         ConvertUnitRequest: {
             /** @description Код вихідної одиниці. */
@@ -6148,6 +7095,22 @@ export interface components {
              * @description Опублікована версія шаблону.
              */
             templateVersionId: number;
+        };
+        /** @description Запит на заведення методології-контейнера. */
+        CreateMethodologyRequest: {
+            /** @description Код, унікальний у системі: те, чим на методологію посилаються імпорти
+             *     (`!Name` через `calc.MethodologyImport`) і прив'язки. */
+            code: string;
+            /** @description Група в переліку; `null` — поза групами. */
+            group: null | string;
+            /** @description Природа методології. ⛔ Не описове поле: `Bespoke`-модулі правила
+             *     прив'язки не мають у принципі, а `Library` не рахує ні для кого — і саме
+             *     на цьому тримається перевірка публікації, яка доти була недосяжна. */
+            kind: components["schemas"]["MethodologyKind"];
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
         };
         /** @description Запит на створення версії-чернетки. */
         CreateMethodologyVersionRequest: {
@@ -6781,6 +7744,46 @@ export interface components {
             /** @description Чи змінилася конвенція. */
             isChanged?: boolean;
         };
+        /** @description Константа версії методології (ФВ-16.1, ФВ-16.5). */
+        MethodologyConstantDto: {
+            /** @description Категорія звуження; `null` — спільна. */
+            category: null | string;
+            /** @description Код — те, що стоїть після `CST.`. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор константи.
+             */
+            id: number;
+            /** @description Чи придатна константа до підстановки у вираз. */
+            isResolved: boolean;
+            /** @description Число, текст або мітка категорії. */
+            kind: components["schemas"]["ConstantKind"];
+            /** @description Звідки взято значення. */
+            source: null | string;
+            /** @description Текст або сирий рядок джерела. */
+            textValue: null | string;
+            /**
+             * Format: int32
+             * @description Одиниця; `null` — нечислова.
+             */
+            unitId: null | number;
+            /**
+             * Format: date
+             * @description Перший чинний день; `null` — від початку.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день (виключно); `null` — без межі.
+             */
+            validTo: null | string;
+            /**
+             * Format: double
+             * @description Число; `null` — нечислова або нерозібрана.
+             */
+            value: null | number;
+        };
         /** @description Версія методології в **конфігураторі** — на відміну від
          *     MethodologyVersionDto, тут є і чернетки. */
         MethodologyDraftVersionDto: {
@@ -6834,6 +7837,11 @@ export interface components {
         };
         /** @description Формула версії методології, як її бачить конфігуратор. */
         MethodologyFormulaDto: {
+            /** @description Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;
+             *     `null` — списку немає. ⛔ Не те саме, що порожній рядок: `null`
+             *     глушить звірку пастки 2 (`ECR-CALC-0432`), а порожній оголошує «нуль
+             *     аргументів», і тоді будь-який токен у виразі є порушенням. */
+            argumentsCsv: null | string;
             /** @description Код — те, на що посилається `!Name`. */
             code: string;
             /**
@@ -6856,6 +7864,11 @@ export interface components {
             /** @description Число чи текст. */
             resultType: components["schemas"]["FormulaResultType"];
         };
+        /**
+         * @description Природа методології (директива ПК-1 №05, поправка 6).
+         * @enum {unknown}
+         */
+        MethodologyKind: "DataDriven" | "Bespoke" | "Library";
         /** @description Зміна арифметичного режиму (ФВ-9.9). */
         MethodologyModeChange: {
             /** @description Режим нової. */
@@ -6864,6 +7877,26 @@ export interface components {
             before: components["schemas"]["NumericMode"];
             /** @description Чи змінився режим. */
             isChanged?: boolean;
+        };
+        /** @description Оголошений вихід версії — те, що методологія повертає (ФВ-16.6). */
+        MethodologyOutputDto: {
+            /** @description Код виходу — адреса, на яку посилається прив'язка. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор виходу.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Порядок у переліку.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Одиниця результату; обов'язкова.
+             */
+            unitId: number;
         };
         /** @description Diff публікації: що саме зміниться в числах. */
         MethodologyPublicationDiff: {
@@ -6915,6 +7948,64 @@ export interface components {
             substanceEntryId: null | number;
             /** @description Випадок золотого набору. */
             testCode: string;
+        };
+        /** @description Правило відбору рядків документа (ФВ-13.3, ФВ-13.4). */
+        MethodologyRuleDto: {
+            /** @description Код, унікальний у межах версії. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор правила.
+             */
+            id: number;
+            /** @description Вимкнене правило не бере участі в зіставленні. */
+            isActive: boolean;
+            /** @description Структурований предикат; `{}` — уся таблиця. */
+            matchJson: string;
+            /**
+             * Format: int32
+             * @description Менше значення — вищий пріоритет; перший збіг виграє.
+             */
+            priority: number;
+        };
+        /** @description Методологія-контейнер, як її бачить конфігуратор — <b>без</b> версій. */
+        MethodologySummaryDto: {
+            /** @description Код — те, чим на неї посилаються імпорти й прив'язки. */
+            code: string;
+            /** @description Група в переліку; `null` — поза групами. */
+            group: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор методології.
+             */
+            id: number;
+            /** @description Чи бере методологія участь у розрахунку. */
+            isActive: boolean;
+            /** @description Природа: обирається правилом, зашита в модуль або бібліотека. */
+            kind: components["schemas"]["MethodologyKind"];
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
+        /** @description Тест золотого набору версії (ФВ-13.7, ФВ-9.12). */
+        MethodologyTestCaseDto: {
+            /** @description Код тесту — те, що потрапляє в повідомлення про провал. */
+            code: string;
+            /** @description Очікувані виходи: код виходу → число. */
+            expectedJson: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор тесту.
+             */
+            id: number;
+            /** @description Вхід прогону у формі `CalculationInput`. */
+            inputJson: string;
+            /**
+             * Format: double
+             * @description Допуск порівняння; нуль — точна рівність.
+             */
+            tolerance: number;
         };
         /** @description Версія методології. */
         MethodologyVersionDto: {
@@ -7791,6 +8882,15 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Запит на прив'язку виходу методології до колонки документа. */
+        SaveCalculationBindingRequest: {
+            /** @description Вимкнена прив'язка не бере участі в прогоні. Законна одразу: її заводять
+             *     наперед, поки методологію ще правлять. */
+            isActive: boolean;
+            /** @description Як звузити рядки таблиці; `{}` — усі. ⚠ Порожній рядок відхиляється: він
+             *     не збігається з жодним рядком, і прив'язка мовчки не спрацьовувала б. */
+            matchJson: string;
+        };
         /** @description Налаштування колонки таблиці чернетки (`W5.2`). */
         SaveColumnDefRequest: {
             /** @description Тип даних; незмінний після створення. */
@@ -7849,8 +8949,55 @@ export interface components {
             /** @description Текст виразу. */
             expression: string;
         };
+        /** @description Запит на запис константи версії-чернетки. */
+        SaveMethodologyConstantRequest: {
+            /** @description Категорія звуження; `null` — константа спільна. */
+            category: null | string;
+            /** @description Число, текст або мітка категорії. ⛔ Константа не завжди число: з 6507
+             *     констант корпусу 108 нечислові, і ~90 із них ужиті у виразах операндом
+             *     порівняння (поправка 2-біс директиви ПК-1 №05). */
+            kind: components["schemas"]["ConstantKind"];
+            /** @description Звідки взято значення: наказ, паспорт установки, вимірювання. */
+            source: null | string;
+            /**
+             * Format: int64
+             * @description Речовина звуження; `null` — спільна.
+             */
+            substanceEntryId: null | number;
+            /** @description Текст; обов'язковий для нечислових видів. */
+            textValue: null | string;
+            /**
+             * Format: int32
+             * @description Одиниця; для числа обов'язкова, для тексту знімається (ФВ-16.1).
+             */
+            unitId: null | number;
+            /**
+             * Format: date
+             * @description Перший чинний день; `null` — від початку.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Перший НЕчинний день, **виключно**: коефіцієнт, чинний увесь 2024 рік, має
+             *     тут `2025-01-01`.
+             */
+            validTo: null | string;
+            /**
+             * Format: double
+             * @description Число; обов'язкове для `Numeric`.
+             */
+            value: null | number;
+        };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {
+            /** @description Оголошені аргументи — `;`-список, як у `FInfo_Arguments`;
+             *     `null` — списку немає. ⛔ Це **джерело істини про аргументи**, а не
+             *     текст виразу (директива ПК-1 №05 §7, пастка 2): збірка підставляє рівно
+             *     перелічене, і токен поза списком у вираз не потрапляє — формула рахується з
+             *     невизначеним параметром і повертає правдоподібне число, а не помилку.
+             *     ⚠ `null` і порожній рядок — різні стани: перший глушить звірку
+             *     (`ECR-CALC-0432`), другий оголошує «нуль аргументів». */
+            argumentsCsv: null | string;
             /** @description Вираз діалекту методологій. */
             expression: string;
             /**
@@ -7863,6 +9010,47 @@ export interface components {
              *     повертає `'Сверхнорматив'` як ЗНАЧЕННЯ, і без типу воно пішло б у
              *     числову колонку результату. */
             resultType: components["schemas"]["FormulaResultType"];
+        };
+        /** @description Запит на оголошення виходу версії. */
+        SaveMethodologyOutputRequest: {
+            /**
+             * Format: int32
+             * @description Порядок у переліку виходів.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Одиниця результату; обов'язкова — на ній тримається перевірка розмірностей.
+             */
+            unitId: number;
+        };
+        /** @description Запит на запис правила відбору рядків. */
+        SaveMethodologyRuleRequest: {
+            /** @description Вимкнене правило не бере участі ні в зіставленні, ні в матриці покриття. */
+            isActive: boolean;
+            /** @description Структурований предикат «колонка → очікуване значення»; `{}` — уся
+             *     таблиця. ⚠ Не вираз: діалект методологій посилань на комірки не має
+             *     (`Q-026`). */
+            matchJson: string;
+            /**
+             * Format: int32
+             * @description Менше значення — вищий пріоритет; перший збіг виграє (ФВ-13.4).
+             */
+            priority: number;
+        };
+        /** @description Запит на запис тесту золотого набору. */
+        SaveMethodologyTestCaseRequest: {
+            /** @description Очікувані виходи: `{"tons":12.5}`. */
+            expectedJson: string;
+            /** @description Вхід прогону у формі `CalculationInput`. */
+            inputJson: string;
+            /**
+             * Format: double
+             * @description Допуск порівняння; нуль — точна рівність. ⚠ Потрібен саме тому, що числа
+             *     рахуються з округленням: очікувати побітової рівності означало б червоний
+             *     тест від зміни порядку доданків.
+             */
+            tolerance: number;
         };
         /** @description Вид і налаштування нового правила доступу до періоду (`ФВ-2.15`). */
         SavePeriodAccessRuleRequest: {
@@ -8039,6 +9227,16 @@ export interface components {
             pinnedPeriodId: null | number;
             /** @description Причина закріплення; потрапляє в аудит. */
             reason: null | string;
+        };
+        /** @description Запит на зміну режимів обчислення версії-чернетки. */
+        SetMethodologyModesRequest: {
+            /** @description Джерело тривалості періоду (ФВ-16.11). */
+            calendarMode: components["schemas"]["CalendarMode"];
+            /** @description Арифметика: `Legacy` відтворює числа чинної системи, `Strict`
+             *     віддає `null` там, де та мовчки давала нуль (ФВ-9.9, ФВ-9.14). */
+            numericMode: components["schemas"]["NumericMode"];
+            /** @description Обсяг журналу обчислення (ФВ-9.13). */
+            traceLevel: components["schemas"]["TraceLevel"];
         };
         /** @description Запит на зміну рядка каталогу. */
         SetUiStringRequest: {
