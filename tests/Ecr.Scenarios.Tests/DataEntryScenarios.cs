@@ -88,27 +88,29 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S14", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S14",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (admin, var projectId, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S14");
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S14", rowMode: "Dynamic");
+        admin = doc.Admin;
 
         var tables = await admin.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
         var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(
             tableArray.EnumerateArray().Any(t => t.GetProperty("allowsDynamicRows").GetBoolean()),
-            $"документ {documentId} проєкту {projectId} не має жодної динамічної таблиці: без S-04 нема звідки їй узятися.");
+            $"документ {doc.DocumentId} проєкту {doc.ProjectId} не має жодної динамічної таблиці.");
 
         var tableInstanceId = tableArray.EnumerateArray()
             .First(t => t.GetProperty("allowsDynamicRows").GetBoolean())
             .GetProperty("tableInstanceId").GetInt64();
 
         var createRow = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/rows", UriKind.Relative),
+            new Uri($"/api/v1/documents/{doc.DocumentId}/rows", UriKind.Relative),
             new { tableInstanceId, rowKey = (string?)null });
 
-        Assert.Equal(HttpStatusCode.Created, createRow.StatusCode);
+        Assert.True(createRow.StatusCode == HttpStatusCode.Created, $"{createRow.StatusCode}: {app.ErrorsText}");
     }
 
     [Fact]
@@ -118,9 +120,13 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S15", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S15",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (admin, _, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S15");
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S15");
+        admin = doc.Admin;
+        var documentId = doc.DocumentId;
+        var periodKey = doc.PeriodKey;
 
         var tables = await admin.Client.GetAsync(
             new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
@@ -183,12 +189,21 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S16", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S16",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        // ⛔ Реальна структура ЗАВОДИТЬСЯ до проєкту: адреса таблиці має
+        // існувати, інакше «закритий період блокує запис» невідрізниме від
+        // «адреси не існує» (`NotFound` замість `Forbidden`). Таблиця —
+        // `Dynamic`: `POST …/rows` на `Fixed` відмовляє `ECR-ROW-0409` ЩЕ ДО
+        // перевірки прав (`CreateRowHandler`, крок 1) — і замаскувала б
+        // справжній доказ сценарію, підмінивши його перевіркою режиму.
+        var structure = await BuildTemplateStructureAsync(admin.Client, "S16", "Dynamic", null, app);
 
         // Рік у далекому минулому — усі 12 місячних періодів давно за межею
         // HardClose (45 днів), тому PeriodStateJob неминуче переведе їх у
         // Closed, і не треба чекати на реальний годинник.
-        var projectId = await CreateOldProjectAsync(admin.Client, "S16");
+        var projectId = await CreateOldProjectAsync(admin.Client, "S16", structure.VersionId);
         await ProjectAndPeriodScenarios.ActivateProjectAsync(admin.Client, projectId);
         await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
         admin = await Provisioning.ReauthenticateAsync(app, admin);
@@ -196,12 +211,20 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         var closedPeriodKey = await AwaitPeriodStateAsync(admin.Client, projectId, "Closed", TimeSpan.FromSeconds(20));
         Assert.True(closedPeriodKey.HasValue, $"жоден період проєкту {projectId} (рік 2019) не перейшов у Closed за 20 с.");
 
-        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, "S16");
         var createDoc = await admin.Client.PostAsJsonAsync(
             new Uri("/api/v1/documents", UriKind.Relative),
-            new { projectId, templateVersionId = versionId, sheetDefIds = Array.Empty<int>() });
+            new { projectId, templateVersionId = structure.VersionId, sheetDefIds = new[] { structure.SheetDefId } });
         Assert.Equal(HttpStatusCode.Created, createDoc.StatusCode);
         var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
+
+        // Читання не залежить від стану періоду (`CanReadDocumentAsync`) —
+        // адресу таблиці можна взяти й у закритому періоді.
+        var tables = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId}/tables?periodKey={closedPeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(tableArray.GetArrayLength() > 0, $"документ {documentId} не має жодної таблиці.");
+        var tableInstanceId = tableArray[0].GetProperty("tableInstanceId").GetInt64();
 
         // ⛔ Доказ сценарію: запис у ЗАКРИТИЙ період відхиляється — і на
         // PATCH, і на створенні рядка, — навіть під роллю з рівнем Manage.
@@ -209,20 +232,20 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new Uri($"/api/v1/documents/{documentId}/cells", UriKind.Relative),
             new
             {
-                tableInstanceId = 1L,
+                tableInstanceId,
                 periodKey = closedPeriodKey!.Value,
                 origin = "UserEdit",
                 rows = new[]
                 {
-                    new { rowKey = "R1", baseVersion = (string?)null, cells = new object[] { new { columnCode = "C1", value = 1m } } },
+                    new { rowKey = "R1", baseVersion = (string?)null, cells = new object[] { new { columnCode = "A", value = 1m } } },
                 },
             });
-        Assert.Equal(HttpStatusCode.Forbidden, patch.StatusCode);
+        Assert.True(patch.StatusCode == HttpStatusCode.Forbidden, $"{patch.StatusCode}: {app.ErrorsText}");
 
         var createRow = await admin.Client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{documentId}/rows", UriKind.Relative),
-            new { tableInstanceId = 1L, rowKey = (string?)null });
-        Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+            new { tableInstanceId, rowKey = (string?)null });
+        Assert.True(createRow.StatusCode == HttpStatusCode.Forbidden, $"{createRow.StatusCode}: {app.ErrorsText}");
     }
 
     [Fact]
@@ -281,6 +304,18 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     public async Task Симуляція_блокує_новий_рядок()
     {
         using var app = new EcrApiFactory(sql);
+
+        // ⛔ Реальна адреса, а не `documentId=1`/`tableInstanceId=1`: числові
+        // ідентифікатори не гарантовано вільні — інший сценарій, що виконався
+        // раніше в тій самій спільній базі (`SqlServerFixture`), міг уже
+        // зайняти їх. Тоді відповідь означала б «такого документа не існує»
+        // (`404`), а не «симуляція блокує запис» — і саме це сталося, щойно
+        // порядок сценаріїв змінився.
+        var builder = await Provisioning.AdministratorAsync(
+            app, "S17cBuild",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+        var doc = await ArrangeRealDocumentAsync(app, builder, "S17c", rowMode: "Dynamic");
+
         var admin = await Provisioning.AdministratorAsync(
             app, "S17c", ["Security.Simulate", "Document.View", "Document.Create"]);
         var subject = await Provisioning.AdministratorAsync(app, "S17cSubject", ["Document.View", "Document.Create"]);
@@ -290,20 +325,27 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new { subjectUserId = subject.UserId, reason = "S-17: перевірка read-only симуляції" });
         Assert.Equal(HttpStatusCode.Created, start.StatusCode);
 
-        var createRow = await admin.Client.PostAsJsonAsync(
-            new Uri("/api/v1/documents/1/rows", UriKind.Relative),
-            new { tableInstanceId = 1L, rowKey = (string?)null });
+        var tables = await doc.Admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
 
-        Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+        // ⛔ Доказ сценарію: симуляція блокує запис ПЕРШОЮ (`EditRules.CanEdit`),
+        // незалежно від грантів адміністратора на цей конкретний проєкт —
+        // саме тому `admin` тут не потребує жодного гранта на `doc.ProjectId`.
+        var createRow = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/rows", UriKind.Relative),
+            new { tableInstanceId, rowKey = (string?)null });
+
+        Assert.True(createRow.StatusCode == HttpStatusCode.Forbidden, $"{createRow.StatusCode}: {app.ErrorsText}");
     }
 
     /// <remarks>
-    /// ⛔ ЗАМІР: <c>POST …/submit</c> на <c>sheetDefId</c>, якого в документі
-    /// немає (S-04 не дав жодного реального аркуша), повертає <c>204</c>, а не
-    /// відмову — реальний прогін підтвердив, що обробник не звіряє
-    /// <c>sheetDefId</c> зі складом документа перед поданням. Це самостійна,
-    /// варта уваги знахідка, а не привід підганяти очікування — тому асерція
-    /// нижче лишається `>= 400` і має падати саме так.
+    /// ⛔ Сценарій переписаний із «замiру відсутньої структури» (`S-04`,
+    /// давно закритий `W5`) на доказ РЕАЛЬНОЇ поведінки: подання аркуша
+    /// заморожує його на подальші правки (`D-67`) — новий рядок у ВЖЕ
+    /// ПОДАНІЙ таблиці має відхилятися, а не мовчки прийматися.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -312,27 +354,30 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
-            app, "S17d", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S17d",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (admin, _, var documentId, var periodKey) = await ArrangeDocumentAsync(app, admin, "S17d");
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S17d", rowMode: "Dynamic");
+        admin = doc.Admin;
 
-        // Подати можна лише РЕАЛЬНИЙ аркуш документа — а їх немає (S-04).
-        // Викликаємо submit найпершим правдоподібним SheetDefId, щоб дійти до
-        // самої перевірки; природний результат тут — відмова про НЕІСНУЮЧИЙ
-        // аркуш, а не про подання, і саме це фіксує асерція.
         var submit = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/submit", UriKind.Relative),
-            new { sheetDefId = 1, periodKey });
+            new Uri($"/api/v1/documents/{doc.DocumentId}/submit", UriKind.Relative),
+            new { sheetDefId = doc.SheetDefId, periodKey = doc.PeriodKey });
+        Assert.True(submit.StatusCode == HttpStatusCode.NoContent, $"{submit.StatusCode}: {app.ErrorsText}");
 
-        Assert.True(
-            (int)submit.StatusCode >= 400,
-            $"подання неіснуючого аркуша мало відмовити, а повернуло {submit.StatusCode}");
+        var tables = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
 
+        // ⛔ Доказ сценарію: аркуш ПОДАНО, і новий рядок у його таблиці —
+        // заборонений, хоч таблиця й динамічна і до подання приймала б рядок
+        // без питань (`EditRules.CanEdit`: `DocumentStatus.Submitted`).
         var createRow = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/rows", UriKind.Relative),
-            new { tableInstanceId = 1L, rowKey = (string?)null });
-
-        Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+            new Uri($"/api/v1/documents/{doc.DocumentId}/rows", UriKind.Relative),
+            new { tableInstanceId, rowKey = (string?)null });
+        Assert.True(createRow.StatusCode == HttpStatusCode.Forbidden, $"{createRow.StatusCode}: {app.ErrorsText}");
     }
 
     [Fact]
@@ -342,36 +387,40 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var first = await Provisioning.AdministratorAsync(
-            app, "S18a", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S18a",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
         var second = await Provisioning.AdministratorAsync(
-            app, "S18b", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+            app, "S18b",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
 
-        (first, _, var firstDocumentId, var periodKey) = await ArrangeDocumentAsync(app, first, "S18a");
-        (second, _, var secondDocumentId, _) = await ArrangeDocumentAsync(app, second, "S18b");
+        var firstDoc = await ArrangeRealDocumentAsync(app, first, "S18a");
+        first = firstDoc.Admin;
+        var secondDoc = await ArrangeRealDocumentAsync(app, second, "S18b");
+        second = secondDoc.Admin;
 
         var secondTables = await second.Client.GetAsync(
-            new Uri($"/api/v1/documents/{secondDocumentId}/tables?periodKey={periodKey}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{secondDoc.DocumentId}/tables?periodKey={secondDoc.PeriodKey}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, secondTables.StatusCode);
         var secondTableArray = await secondTables.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(secondTableArray.GetArrayLength() > 0, $"документ {secondDocumentId} не має жодної таблиці — нема чужого TableInstanceId для проби.");
+        Assert.True(secondTableArray.GetArrayLength() > 0, $"документ {secondDoc.DocumentId} не має жодної таблиці — нема чужого TableInstanceId для проби.");
         var foreignTableInstanceId = secondTableArray[0].GetProperty("tableInstanceId").GetInt64();
 
         // Чужий TableInstanceId у маршруті СВОГО документа — має бути 4xx,
         // а не запис у чужу таблицю.
         var patch = await first.Client.PatchAsJsonAsync(
-            new Uri($"/api/v1/documents/{firstDocumentId}/cells", UriKind.Relative),
+            new Uri($"/api/v1/documents/{firstDoc.DocumentId}/cells", UriKind.Relative),
             new
             {
                 tableInstanceId = foreignTableInstanceId,
-                periodKey,
+                periodKey = firstDoc.PeriodKey,
                 origin = "UserEdit",
                 rows = new[]
                 {
-                    new { rowKey = "R1", baseVersion = (string?)null, cells = new object[] { new { columnCode = "C1", value = 1m } } },
+                    new { rowKey = firstDoc.RowKeys[0], baseVersion = (string?)null, cells = new object[] { new { columnCode = "A", value = 1m } } },
                 },
             });
 
-        Assert.True((int)patch.StatusCode is >= 400 and < 500, $"чужий TableInstanceId мав дати 4xx, а дав {patch.StatusCode}");
+        Assert.True((int)patch.StatusCode is >= 400 and < 500, $"чужий TableInstanceId мав дати 4xx, а дав {patch.StatusCode}: {app.ErrorsText}");
     }
 
     /// <remarks>
@@ -616,35 +665,39 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         string ColumnCode,
         IReadOnlyList<string> RowKeys);
 
+    /// <summary>Структура шаблону — версія, аркуш, таблиця, (рядки).</summary>
+    private sealed record TemplateStructure(int VersionId, int SheetDefId, int TableDefId, IReadOnlyList<string> RowKeys);
+
     /// <summary>
-    /// Будує документ із РЕАЛЬНОЮ структурою через ті самі маршрути, якими це
-    /// робить адміністратор.
+    /// Заводить опубліковану версію шаблону з реальною структурою через ті
+    /// самі маршрути, якими це робить адміністратор.
     /// </summary>
-    /// <param name="app">Піднятий застосунок.</param>
-    /// <param name="admin">Адміністратор; повертається НОВИЙ, з чинною сесією.</param>
+    /// <param name="client">HTTP-клієнт адміністратора з чинною сесією.</param>
     /// <param name="prefix">Префікс кодів — свій у кожного сценарію.</param>
+    /// <param name="rowMode">
+    /// <c>"Fixed"</c> — таблиця з двома рядками з `RowDef` (`R1`/`R2`);
+    /// <c>"Dynamic"</c> — таблиця без жодного рядка з шаблону, рядки заводить
+    /// оператор.
+    /// </param>
     /// <param name="validationExpression">
     /// Вираз правила валідації рівня РЯДКА (<c>Scope = 1</c>); <c>null</c> —
     /// правил не заводити.
     /// </param>
+    /// <param name="app">Піднятий застосунок — лише для тексту помилки з асерцій.</param>
     /// <remarks>
     /// ⛔ Це не «фікстура зручності». До `W5` такого шляху не існувало в API
     /// взагалі, і саме тому `S-13`…`S-21`, `S-25`, `S-28` доводили
     /// відсутність маршруту замість поведінки. Тепер ланцюжок реальний і
-    /// повний: шаблон → версія → аркуш → таблиця → колонка → рядки →
-    /// (правило) → публікація → проєкт → активація → документ. Жодного
-    /// <c>SELECT</c> і жодного обходу HTTP (Правило 1, §3.2).
-    ///
-    /// ⚠ Версія ПУБЛІКУЄТЬСЯ: проєкт у проді працює на опублікованій, і саме
-    /// на ній перевіряються кеш метаданих, план перерахунку і зріз.
+    /// повний: шаблон → версія → аркуш → таблиця → колонка → (рядки) →
+    /// (правило) → публікація. Жодного <c>SELECT</c> і жодного обходу HTTP
+    /// (Правило 1, §3.2).
     /// </remarks>
-    internal static async Task<RealDocument> ArrangeRealDocumentAsync(
-        EcrApiFactory app, Provisioning.Administrator admin, string prefix,
-        string? validationExpression = null)
+    private static async Task<TemplateStructure> BuildTemplateStructureAsync(
+        HttpClient client, string prefix, string rowMode, string? validationExpression, EcrApiFactory app)
     {
-        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, prefix);
+        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(client, prefix);
 
-        var addSheet = await admin.Client.PutAsJsonAsync(
+        var addSheet = await client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1", UriKind.Relative),
             new
             {
@@ -657,23 +710,20 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True(addSheet.StatusCode == HttpStatusCode.OK, $"{addSheet.StatusCode}: {app.ErrorsText}");
         var sheetDefId = (await addSheet.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
-        var addTable = await admin.Client.PutAsJsonAsync(
+        var addTable = await client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1/tables/TABLE1", UriKind.Relative),
             new
             {
                 nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} table" },
                 ordinal = 1,
                 layoutKind = "PerPeriodInstance",
-
-                // ⛔ Саме `Fixed`: склад рядків задає шаблон, а не оператор —
-                // це і є таблиця, яку `S-13` вимагає бачити з рядками.
-                rowMode = "Fixed",
+                rowMode,
                 maxDynamicRows = (int?)null,
             });
         Assert.True(addTable.StatusCode == HttpStatusCode.OK, $"{addTable.StatusCode}: {app.ErrorsText}");
         var tableDefId = (await addTable.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
-        var addColumn = await admin.Client.PutAsJsonAsync(
+        var addColumn = await client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/columns/A", UriKind.Relative),
             new
             {
@@ -694,10 +744,12 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             });
         Assert.True(addColumn.StatusCode == HttpStatusCode.OK, $"{addColumn.StatusCode}: {app.ErrorsText}");
 
-        string[] rowKeys = ["R1", "R2"];
+        // ⛔ Рядки з `RowDef` — лише для `Fixed`: динамічна таблиця їх не
+        // приймає за побудовою (`TableDef.AddRow` відмовляє `ECR-TMPL-0422`).
+        string[] rowKeys = rowMode == "Fixed" ? ["R1", "R2"] : [];
         for (var i = 0; i < rowKeys.Length; i++)
         {
-            var addRow = await admin.Client.PutAsJsonAsync(
+            var addRow = await client.PutAsJsonAsync(
                 new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/rows/{rowKeys[i]}", UriKind.Relative),
                 new
                 {
@@ -712,7 +764,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
 
         if (validationExpression is not null)
         {
-            var addRule = await admin.Client.PutAsJsonAsync(
+            var addRule = await client.PutAsJsonAsync(
                 new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/validation-rules/{prefix}RULE", UriKind.Relative),
                 new
                 {
@@ -730,9 +782,38 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             Assert.True(addRule.StatusCode == HttpStatusCode.OK, $"{addRule.StatusCode}: {app.ErrorsText}");
         }
 
-        var publish = await admin.Client.PostAsync(
+        var publish = await client.PostAsync(
             new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative), content: null);
         Assert.True(publish.StatusCode == HttpStatusCode.NoContent, $"{publish.StatusCode}: {app.ErrorsText}");
+
+        return new TemplateStructure(versionId, sheetDefId, tableDefId, rowKeys);
+    }
+
+    /// <summary>
+    /// Будує документ із РЕАЛЬНОЮ структурою: шаблон → версія → аркуш →
+    /// таблиця → колонка → (рядки) → (правило) → публікація → проєкт →
+    /// активація → документ.
+    /// </summary>
+    /// <param name="app">Піднятий застосунок.</param>
+    /// <param name="admin">Адміністратор; повертається НОВИЙ, з чинною сесією.</param>
+    /// <param name="prefix">Префікс кодів — свій у кожного сценарію.</param>
+    /// <param name="validationExpression">
+    /// Вираз правила валідації рівня РЯДКА (<c>Scope = 1</c>); <c>null</c> —
+    /// правил не заводити.
+    /// </param>
+    /// <param name="rowMode">
+    /// <c>"Fixed"</c> (типово) — таблиця з двома рядками з `RowDef`;
+    /// <c>"Dynamic"</c> — рядки заводить оператор через `POST …/rows`.
+    /// </param>
+    /// <remarks>
+    /// ⚠ Версія ПУБЛІКУЄТЬСЯ: проєкт у проді працює на опублікованій, і саме
+    /// на ній перевіряються кеш метаданих, план перерахунку і зріз.
+    /// </remarks>
+    internal static async Task<RealDocument> ArrangeRealDocumentAsync(
+        EcrApiFactory app, Provisioning.Administrator admin, string prefix,
+        string? validationExpression = null, string rowMode = "Fixed")
+    {
+        var structure = await BuildTemplateStructureAsync(admin.Client, prefix, rowMode, validationExpression, app);
 
         var policiesResponse = await admin.Client.GetAsync(
             new Uri("/api/v1/projects/period-policies", UriKind.Relative));
@@ -750,7 +831,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                 timeZoneId = "Asia/Almaty",
                 periodKind = "Monthly",
                 year = DateTime.UtcNow.Year,
-                templateVersionId = versionId,
+                templateVersionId = structure.VersionId,
                 periodPolicyId = policyId,
             });
         Assert.True(createProject.StatusCode == HttpStatusCode.Created, $"{createProject.StatusCode}: {app.ErrorsText}");
@@ -778,16 +859,22 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
 
         var createDoc = await admin.Client.PostAsJsonAsync(
             new Uri("/api/v1/documents", UriKind.Relative),
-            new { projectId, templateVersionId = versionId, sheetDefIds = new[] { sheetDefId } });
+            new { projectId, templateVersionId = structure.VersionId, sheetDefIds = new[] { structure.SheetDefId } });
         Assert.True(createDoc.StatusCode == HttpStatusCode.Created, $"{createDoc.StatusCode}: {app.ErrorsText}");
         var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
 
         return new RealDocument(
-            admin, projectId, documentId, periodKey, sheetDefId, tableDefId, "A", rowKeys);
+            admin, projectId, documentId, periodKey, structure.SheetDefId, structure.TableDefId, "A", structure.RowKeys);
     }
 
     /// <summary>Проєкт зі звітним роком 2019 — усі періоди давно поза HardClose.</summary>
-    private static async Task<int> CreateOldProjectAsync(HttpClient client, string prefix)
+    /// <param name="client">HTTP-клієнт адміністратора.</param>
+    /// <param name="prefix">Префікс кодів.</param>
+    /// <param name="versionId">
+    /// Наперед заведена версія шаблону; <c>null</c> — завести порожню (як
+    /// раніше, для сценаріїв, яким реальна структура не потрібна).
+    /// </param>
+    private static async Task<int> CreateOldProjectAsync(HttpClient client, string prefix, int? versionId = null)
     {
         var policiesResponse = await client.GetAsync(new Uri("/api/v1/projects/period-policies", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, policiesResponse.StatusCode);
@@ -796,7 +883,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
 
         // ⚠ Без версії шаблону обробник відмовляє з ECR-TMPL-0404 попри
         // номінально опційний тип поля (докладніше — ProjectAndPeriodScenarios.CreateProjectAsync).
-        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(client, prefix);
+        var effectiveVersionId = versionId ?? await StructureScenarios.CreateEmptyDraftVersionAsync(client, prefix);
 
         var code = $"{prefix}_{Guid.NewGuid():N}"[..20];
         var create = await client.PostAsJsonAsync(
@@ -808,7 +895,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                 timeZoneId = "Asia/Almaty",
                 periodKind = "Monthly",
                 year = 2019,
-                templateVersionId = versionId,
+                templateVersionId = effectiveVersionId,
                 periodPolicyId = policyId,
             });
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
