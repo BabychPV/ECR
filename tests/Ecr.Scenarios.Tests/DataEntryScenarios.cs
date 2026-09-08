@@ -653,8 +653,12 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// <param name="PeriodKey">Період, у якому працює сценарій.</param>
     /// <param name="SheetDefId">Аркуш — ним подають і затверджують.</param>
     /// <param name="TableDefId">Опис таблиці.</param>
-    /// <param name="ColumnCode">Код єдиної числової колонки.</param>
+    /// <param name="ColumnCode">Код першої (і, типово, єдиної) числової колонки.</param>
     /// <param name="RowKeys">Ключі рядків, які шаблон задає фіксованій таблиці.</param>
+    /// <param name="VersionId">Опублікована версія шаблону, на якій живе документ.</param>
+    /// <param name="FormulaColumnDefId">
+    /// Колонка-формула, якщо її замовили (<c>formulaColumn</c>); інакше <c>0</c>.
+    /// </param>
     internal sealed record RealDocument(
         Provisioning.Administrator Admin,
         int ProjectId,
@@ -663,10 +667,13 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         int SheetDefId,
         int TableDefId,
         string ColumnCode,
-        IReadOnlyList<string> RowKeys);
+        IReadOnlyList<string> RowKeys,
+        int VersionId = 0,
+        int FormulaColumnDefId = 0);
 
-    /// <summary>Структура шаблону — версія, аркуш, таблиця, (рядки).</summary>
-    private sealed record TemplateStructure(int VersionId, int SheetDefId, int TableDefId, IReadOnlyList<string> RowKeys);
+    /// <summary>Структура шаблону — версія, аркуш, таблиця, (рядки), (колонка-формула).</summary>
+    private sealed record TemplateStructure(
+        int VersionId, int SheetDefId, int TableDefId, IReadOnlyList<string> RowKeys, int FormulaColumnDefId = 0);
 
     /// <summary>
     /// Заводить опубліковану версію шаблону з реальною структурою через ті
@@ -684,6 +691,8 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// правил не заводити.
     /// </param>
     /// <param name="app">Піднятий застосунок — лише для тексту помилки з асерцій.</param>
+    /// <param name="extraNumericColumns">Додаткові числові колонки понад <c>A</c>.</param>
+    /// <param name="formulaColumn">Колонка типу <c>Formula</c> і вираз на ній.</param>
     /// <remarks>
     /// ⛔ Це не «фікстура зручності». До `W5` такого шляху не існувало в API
     /// взагалі, і саме тому `S-13`…`S-21`, `S-25`, `S-28` доводили
@@ -693,7 +702,9 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// (Правило 1, §3.2).
     /// </remarks>
     private static async Task<TemplateStructure> BuildTemplateStructureAsync(
-        HttpClient client, string prefix, string rowMode, string? validationExpression, EcrApiFactory app)
+        HttpClient client, string prefix, string rowMode, string? validationExpression, EcrApiFactory app,
+        IReadOnlyList<string>? extraNumericColumns = null,
+        (string Code, string Expression)? formulaColumn = null)
     {
         var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(client, prefix);
 
@@ -744,6 +755,85 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             });
         Assert.True(addColumn.StatusCode == HttpStatusCode.OK, $"{addColumn.StatusCode}: {app.ErrorsText}");
 
+        // Додаткові числові колонки — рівно того самого виду, що й `A`.
+        var ordinal = 1;
+        foreach (var code in extraNumericColumns ?? [])
+        {
+            ordinal++;
+            var addExtra = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/columns/{code}", UriKind.Relative),
+                new
+                {
+                    headerL10n = new Dictionary<string, string> { ["en"] = code },
+                    ordinal,
+                    dataType = "Decimal",
+                    isRequired = false,
+                    isReadOnly = false,
+                    isHidden = false,
+                    precision = (byte?)null,
+                    scale = (byte?)null,
+                    defaultValue = (string?)null,
+                    displayFormat = (string?)null,
+                    styleId = (int?)null,
+                    lookupRegistryDefId = (int?)null,
+                    lookupFilter = (string?)null,
+                    unitId = (int?)null,
+                });
+            Assert.True(addExtra.StatusCode == HttpStatusCode.OK, $"колонка {code}: {addExtra.StatusCode}: {app.ErrorsText}");
+        }
+
+        // ⛔ Колонка-формула і сама формула — ДО публікації, і це не порядок
+        // зручності. Розкриті залежності (`cfg.FormulaDependency`) складає
+        // саме публікація (`PublishChecks.Dependencies`), а без них
+        // `RecalculationPlanBuilder` будує порожній план: формула існує,
+        // граф про неї не знає, число не рахується ніколи.
+        var formulaColumnDefId = 0;
+        if (formulaColumn is { } target)
+        {
+            ordinal++;
+            var addFormulaColumn = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/columns/{target.Code}", UriKind.Relative),
+                new
+                {
+                    headerL10n = new Dictionary<string, string> { ["en"] = target.Code },
+                    ordinal,
+
+                    // ⛔ `Formula` (`CellDataType = 6`), а не `Decimal`: саме
+                    // тип робить колонку обчислюваною (`ColumnDef.IsComputed`),
+                    // і саме він забороняє писати в неї руками
+                    // (`ECR-CELL-4221`). На `Decimal` число в колонці нічим не
+                    // відрізнялося б від уведеного оператором.
+                    dataType = "Formula",
+                    isRequired = false,
+                    isReadOnly = false,
+                    isHidden = false,
+                    precision = (byte?)null,
+                    scale = (byte?)null,
+                    defaultValue = (string?)null,
+                    displayFormat = (string?)null,
+                    styleId = (int?)null,
+                    lookupRegistryDefId = (int?)null,
+                    lookupFilter = (string?)null,
+                    unitId = (int?)null,
+                });
+            Assert.True(
+                addFormulaColumn.StatusCode == HttpStatusCode.OK,
+                $"колонка-формула {target.Code}: {addFormulaColumn.StatusCode}: {app.ErrorsText}");
+            formulaColumnDefId = (await addFormulaColumn.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("id").GetInt32();
+
+            // Маршрут `W5.3` (`D2-301`): адреса формули — це САМА колонка,
+            // власного коду `FormulaDef` не має.
+            var saveFormula = await client.PutAsJsonAsync(
+                new Uri(
+                    $"/api/v1/template-versions/{versionId}/tables/{tableDefId}/formulas/column/{formulaColumnDefId}",
+                    UriKind.Relative),
+                new { dialect = "Template", expression = target.Expression });
+            Assert.True(
+                saveFormula.StatusCode == HttpStatusCode.OK,
+                $"формула колонки {target.Code}: {saveFormula.StatusCode}: {app.ErrorsText}");
+        }
+
         // ⛔ Рядки з `RowDef` — лише для `Fixed`: динамічна таблиця їх не
         // приймає за побудовою (`TableDef.AddRow` відмовляє `ECR-TMPL-0422`).
         string[] rowKeys = rowMode == "Fixed" ? ["R1", "R2"] : [];
@@ -786,7 +876,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative), content: null);
         Assert.True(publish.StatusCode == HttpStatusCode.NoContent, $"{publish.StatusCode}: {app.ErrorsText}");
 
-        return new TemplateStructure(versionId, sheetDefId, tableDefId, rowKeys);
+        return new TemplateStructure(versionId, sheetDefId, tableDefId, rowKeys, formulaColumnDefId);
     }
 
     /// <summary>
@@ -805,15 +895,26 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// <c>"Fixed"</c> (типово) — таблиця з двома рядками з `RowDef`;
     /// <c>"Dynamic"</c> — рядки заводить оператор через `POST …/rows`.
     /// </param>
+    /// <param name="extraNumericColumns">
+    /// Додаткові числові колонки понад <c>A</c>; <c>null</c> — жодної.
+    /// </param>
+    /// <param name="formulaColumn">
+    /// Колонка типу <c>Formula</c> разом із виразом, збереженим на ній через
+    /// <c>PUT …/formulas/column/{columnDefId}</c> (`W5.3`); <c>null</c> —
+    /// формул не заводити.
+    /// </param>
     /// <remarks>
     /// ⚠ Версія ПУБЛІКУЄТЬСЯ: проєкт у проді працює на опублікованій, і саме
     /// на ній перевіряються кеш метаданих, план перерахунку і зріз.
     /// </remarks>
     internal static async Task<RealDocument> ArrangeRealDocumentAsync(
         EcrApiFactory app, Provisioning.Administrator admin, string prefix,
-        string? validationExpression = null, string rowMode = "Fixed")
+        string? validationExpression = null, string rowMode = "Fixed",
+        IReadOnlyList<string>? extraNumericColumns = null,
+        (string Code, string Expression)? formulaColumn = null)
     {
-        var structure = await BuildTemplateStructureAsync(admin.Client, prefix, rowMode, validationExpression, app);
+        var structure = await BuildTemplateStructureAsync(
+            admin.Client, prefix, rowMode, validationExpression, app, extraNumericColumns, formulaColumn);
 
         var policiesResponse = await admin.Client.GetAsync(
             new Uri("/api/v1/projects/period-policies", UriKind.Relative));
@@ -864,7 +965,8 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
 
         return new RealDocument(
-            admin, projectId, documentId, periodKey, structure.SheetDefId, structure.TableDefId, "A", structure.RowKeys);
+            admin, projectId, documentId, periodKey, structure.SheetDefId, structure.TableDefId, "A", structure.RowKeys,
+            structure.VersionId, structure.FormulaColumnDefId);
     }
 
     /// <summary>Проєкт зі звітним роком 2019 — усі періоди давно поза HardClose.</summary>

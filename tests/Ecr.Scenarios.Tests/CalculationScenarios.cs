@@ -25,25 +25,50 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     /// <c>C</c> стає сумою сама.
     /// </summary>
     /// <remarks>
-    /// ⛔ <b>Сценарій лишається недоведеним, і причина вже інша, ніж була.</b>
-    /// Стара («формулу колонки нема як зберегти, S-05») застаріла: `W5.3` дав
-    /// <c>PUT …/tables/{id}/formulas/column/{columnId}</c>. Тепер блокує інше й
-    /// глибше: спільне приготування <c>DataEntryScenarios.ArrangeDocumentAsync</c>
-    /// будує документ на ПОРОЖНІЙ версії шаблону, тож у ньому немає жодної
-    /// таблиці — а `S-24` показує, що з реальною структурою той самий шлях
-    /// проходиться цілком. Друга половина, глибша: формули ШАБЛОНУ рахує
-    /// <c>FormulaRecalculationJob</c> (результат у <c>doc.CellValue</c>), а
-    /// <c>POST …/recalculate</c> ставить у чергу перерахунок МЕТОДОЛОГІЙ
-    /// (<c>calc.CalculationResult</c>, <c>D-69</c>). Це два різні конвеєри, і
-    /// зробити цей сценарій зеленим означає довести другий — обсяг окремого
-    /// пакета, не `W6`.
+    /// ⛔ <b>Сценарій переписано (`W10.2`, директива №10), бо він доводив не те,
+    /// про що він.</b> Дефектів було три, і найгірший — не той, який називали.
+    /// <list type="number">
+    /// <item>Документ будувався спільним <c>ArrangeDocumentAsync</c> — на
+    /// ПОРОЖНІЙ версії шаблону, без жодної таблиці. Найменший із трьох:
+    /// приготування, а не твердження.</item>
+    /// <item>У <c>A</c> і <c>B</c> не писалося НІЧОГО — жодного <c>PATCH</c> у
+    /// тілі тесту, хоч ім'я тесту саме про запис <c>A</c> і <c>B</c>.</item>
+    /// <item>Головний: єдина асерція перевіряла, що в таблиці ІСНУЄ колонка з
+    /// <c>dataType == "Formula"</c>. Про число в <c>C</c> вона не питала
+    /// взагалі — тобто полагодити пункт 1 означало б отримати зелений
+    /// сценарій, який не доводить нічого. Той самий «порожній зелений», який
+    /// `W5.9` прибрав із `S-05`…`S-09`, а `W6` — із `S-23`/`S-24`/`S-26`.</item>
+    /// </list>
     ///
-    /// ⚠ Два дефекти самого сценарію тут ВИПРАВЛЕНО, бо вони приховували
-    /// справжню причину: не було права <c>System.ViewHealth</c> (стан задачі
-    /// віддає <c>GET /jobs/{jobId}</c> саме під ним, і опитування отримувало
-    /// `403`), а <c>jobId</c> не екранувався (див. <c>ScenarioHelpers</c>).
-    /// Через них сценарій падав із «перерахунок не завершився», не почавши
-    /// перевіряти те, про що він.
+    /// ⛔ Тепер доводиться ЧИСЛО: <c>4 + 2.5 = 6.5</c>, потім <c>10 + 2.5 =
+    /// 12.5</c> після зміни входу. Обидва підібрані так, що збіг випадковим
+    /// бути не може: результат не дорівнює жодному з доданків, ані їх добутку
+    /// чи різниці. Асерція «в <c>C</c> щось є» пройшла б і на нулі, і на
+    /// скопійованому <c>A</c>.
+    ///
+    /// ⛔ Число саме СИСТЕМНЕ, і це доводиться окремо, бо інакше воно
+    /// невідрізниме від уведеного людиною: колонка має тип <c>Formula</c>,
+    /// зріз віддає заборону <c>CalculatedCell</c> на цю комірку, а спроба
+    /// записати в неї руками відхиляється (<c>ECR-CELL-4221</c>). Комірковий
+    /// прапорець <c>IsCalculated</c> у контракті зрізу не публікується взагалі
+    /// (<c>RowDto.Cells</c> — це <c>значення</c>, а не запис), тож саме ці три
+    /// ознаки і є те, чим «обчислено системою» видно клієнтові.
+    ///
+    /// ⚠ <b>Вимір, який спростовує попередній діагноз</b> (`Q-160`, `D2-335`,
+    /// `D2-336`): інтерактивний конвеєр рахує <c>C</c> САМ. <c>PatchCellsHandler</c>
+    /// ставить у чергу <c>IFormulaRecalculationJob</c>, той кличе
+    /// <c>RecalculationService</c>, і після `W6`/`W8` (`D2-334`: знімок нарешті
+    /// вантажить <c>cfg.FormulaDef</c>) ланцюг замкнений. Тому асерція на
+    /// <c>6.5</c> тут — не очікування майбутнього пакета, а чинна поведінка.
+    ///
+    /// ⛔ Чого цей сценарій НЕ доводить і доводити не може, доки не зіллється
+    /// `W10.0`/`W10.1`: що <c>POST …/recalculate</c> сам уміє рахувати формули
+    /// шаблону. Він і досі ставить у чергу лише перерахунок МЕТОДОЛОГІЙ
+    /// (<c>RecalculationJob</c> не має <c>RecalculationService</c> серед
+    /// залежностей узагалі), а «перерахувати все» для формул не існує як
+    /// операції. Тут він викликається і перевіряється на тому, за що
+    /// відповідає вже зараз: не втратити й не зіпсувати обчислених значень,
+    /// які після `W10.1` стануть його власними.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -55,44 +80,229 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         // ⛔ `System.ViewHealth` у переліку не для повноти: стан задачі віддає
         // `GET /jobs/{jobId}` саме під цим правом, і без нього опитування
         // отримувало `403`, а `AwaitJobAsync` мовчки віддавав «немає стану».
-        // Сценарій падав із «перерахунок не завершився успіхом», хоча про
-        // перерахунок нічого й не питав.
         var admin = await Provisioning.AdministratorAsync(
             app,
             "S21",
             [
-                "Project.Manage", "Document.View", "Document.Create", "Template.Edit",
-                "Calculation.Recalculate", "System.ViewHealth",
+                "Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish",
+                "Calculation.View", "Calculation.EditFormula", "Calculation.Recalculate", "System.ViewHealth",
             ]);
 
-        (admin, _, var documentId, var periodKey) = await DataEntryScenarios.ArrangeDocumentAsync(app, admin, "S21");
+        // 1. Реальна структура: дві числові колонки і третя — типу `Formula`,
+        //    з виразом, збереженим маршрутом `W5.3`, ДО публікації версії.
+        //    Без публікації немає `cfg.FormulaDependency`, а без них — плану
+        //    перерахунку: формула лежала б у базі й не рахувалася ніколи.
+        var doc = await DataEntryScenarios.ArrangeRealDocumentAsync(
+            app, admin, "S21",
+            extraNumericColumns: ["B"],
+            formulaColumn: ("C", "[A] + [B]"));
+        admin = doc.Admin;
 
-        var recalc = await admin.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/recalculate", UriKind.Relative), new { periodKey });
-        Assert.Equal(HttpStatusCode.Accepted, recalc.StatusCode);
+        var tableInstanceId = await TableInstanceAsync(app, admin.Client, doc.DocumentId, doc.PeriodKey);
+        var rowKey = doc.RowKeys[0];
 
-        var jobId = (await recalc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetString()!;
-        var final = await ScenarioHelpers.AwaitJobAsync(admin.Client, jobId, TimeSpan.FromSeconds(30));
+        // 2. Колонка `C` — саме обчислювана, а не просто третя числова.
+        var columns = (await ReadSliceAsync(admin.Client, doc.DocumentId, tableInstanceId)).GetProperty("columns");
+        var formulaColumn = columns.EnumerateArray().FirstOrDefault(
+            c => string.Equals(c.GetProperty("code").GetString(), "C", StringComparison.Ordinal));
+        Assert.True(formulaColumn.ValueKind == JsonValueKind.Object, $"у зрізі немає колонки C: {columns.GetRawText()}");
+        Assert.Equal("Formula", formulaColumn.GetProperty("dataType").GetString());
+
+        // 3. Запис `A` і `B` — те, чого в цьому сценарії не було зовсім.
+        await WriteInputsAsync(app, admin.Client, doc.DocumentId, tableInstanceId, doc.PeriodKey, rowKey, 4m, 2.5m);
+
+        // 4. ⛔ ЧИСЛО. Перерахунок після правки комірки асинхронний
+        //    (`FormulaRecalculationJob`), тому зріз опитується, а не читається
+        //    один раз: миттєве читання перевіряло б чергу, а не результат.
+        var sum = await AwaitCellAsync(
+            admin.Client, doc.DocumentId, tableInstanceId, rowKey, "C", TimeSpan.FromSeconds(30));
         Assert.True(
-            final.ValueKind != JsonValueKind.Undefined,
-            $"стан задачі {jobId} не прочитався взагалі: {app.ErrorsText}");
-        Assert.True(
-            !string.Equals(final.GetProperty("state").GetString(), "Running", StringComparison.Ordinal),
-            $"перерахунок документа {documentId} не завершився за 30 с: {final.GetRawText()}");
+            sum is not null,
+            $"комірка C рядка {rowKey} лишилася порожньою за 30 с після запису A=4, B=2.5: "
+            + $"{(await ReadSliceAsync(admin.Client, doc.DocumentId, tableInstanceId)).GetRawText()}; {app.ErrorsText}");
+        Assert.Equal(6.5m, sum!.Value);
 
-        var tables = await admin.Client.GetAsync(
+        // 5. Число НЕ людське: зріз віддає заборону на цю комірку саме як
+        //    `CalculatedCell`, а спроба записати в неї відхиляється. Без цих
+        //    двох перевірок 6.5 могло б бути чим завгодно, що туди поклали.
+        var permissions = (await ReadSliceAsync(admin.Client, doc.DocumentId, tableInstanceId))
+            .GetProperty("cellPermissions");
+        Assert.True(
+            permissions.TryGetProperty($"{rowKey}:C", out var reason)
+            && string.Equals(reason.GetString(), "CalculatedCell", StringComparison.Ordinal),
+            $"зріз не позначив C як обчислену системою: {permissions.GetRawText()}");
+
+        var manualWrite = await TryWriteCalculatedAsync(
+            admin.Client, doc.DocumentId, tableInstanceId, doc.PeriodKey, rowKey);
+        Assert.False(
+            manualWrite.IsSuccess,
+            $"запис руками в обчислювану колонку C прийнято ({manualWrite.Status}) — тоді число в ній нічого не доводить.");
+
+        // 6. Перерахунок, а не разовий запис: змінюємо `A` і вимагаємо НОВОЇ
+        //    суми. Формула, порахована один раз і застигла, пройшла б крок 4.
+        await WriteInputsAsync(app, admin.Client, doc.DocumentId, tableInstanceId, doc.PeriodKey, rowKey, 10m, 2.5m);
+        var recomputed = await AwaitCellAsync(
+            admin.Client, doc.DocumentId, tableInstanceId, rowKey, "C", TimeSpan.FromSeconds(30), expected: 12.5m);
+        Assert.Equal(12.5m, recomputed);
+
+        // 7. Явний перерахунок документа — той самий виклик, який `W10.1` має
+        //    навчити рахувати ще й формули шаблону. Сьогодні він відповідає за
+        //    методології; перевіряється те, за що він відповідає ВЖЕ: дійти до
+        //    кінцевого стану і не зіпсувати обчислених чисел.
+        await RecalculateAsync(app, admin, doc.DocumentId, doc.PeriodKey);
+
+        var afterRecalculate = await ReadCellAsync(admin.Client, doc.DocumentId, tableInstanceId, rowKey, "C");
+        Assert.Equal(12.5m, afterRecalculate);
+    }
+
+    /// <summary>Єдиний екземпляр таблиці документа за період.</summary>
+    private static async Task<long> TableInstanceAsync(
+        EcrApiFactory app, HttpClient client, long documentId, int periodKey)
+    {
+        var tables = await client.GetAsync(
             new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
+        Assert.True(tables.StatusCode == HttpStatusCode.OK, $"таблиці: {tables.StatusCode}: {app.ErrorsText}");
         var tableArray = await tables.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(tableArray.GetArrayLength() > 0, $"документ {documentId} не має жодної таблиці — нема де шукати обчислену колонку C.");
-        var tableInstanceId = tableArray[0].GetProperty("tableInstanceId").GetInt64();
+        Assert.True(tableArray.GetArrayLength() > 0, $"документ {documentId} не має жодної таблиці: {app.ErrorsText}");
 
-        var slice = await admin.Client.GetAsync(
+        return tableArray[0].GetProperty("tableInstanceId").GetInt64();
+    }
+
+    /// <summary>Пише <c>A</c> і <c>B</c> в один рядок одним <c>PATCH</c>.</summary>
+    /// <remarks>
+    /// ⚠ <c>baseVersion</c> береться зі ЗРІЗУ, а не подається як <c>null</c>:
+    /// рядок фіксованої таблиці вже існує (`S-13`), і <c>null</c> означав би
+    /// намір СТВОРИТИ його — тобто дублікат (<c>ECR-ROW-0409</c>, `409`).
+    /// </remarks>
+    private static async Task WriteInputsAsync(
+        EcrApiFactory app, HttpClient client, long documentId, long tableInstanceId, int periodKey,
+        string rowKey, decimal a, decimal b)
+    {
+        var slice = await ReadSliceAsync(client, documentId, tableInstanceId);
+        var row = slice.GetProperty("rows").EnumerateArray()
+            .FirstOrDefault(r => string.Equals(r.GetProperty("rowKey").GetString(), rowKey, StringComparison.Ordinal));
+        Assert.True(row.ValueKind == JsonValueKind.Object, $"рядка {rowKey} у зрізі {tableInstanceId} немає.");
+        var baseVersion = row.GetProperty("rowVersion").GetString();
+
+        var patch = await client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{documentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId,
+                periodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey,
+                        baseVersion,
+                        cells = new object[]
+                        {
+                            new { columnCode = "A", value = a },
+                            new { columnCode = "B", value = b },
+                        },
+                    },
+                },
+            });
+
+        Assert.True(patch.StatusCode == HttpStatusCode.OK, $"запис A/B у {rowKey}: {patch.StatusCode}: {app.ErrorsText}");
+    }
+
+    /// <summary>Зріз таблиці — те саме читання, яким малює grid.</summary>
+    private static async Task<JsonElement> ReadSliceAsync(
+        HttpClient client, long documentId, long tableInstanceId)
+    {
+        var slice = await client.GetAsync(
             new Uri($"/api/v1/documents/{documentId}/tables/{tableInstanceId}", UriKind.Relative));
-        var sliceBody = await slice.Content.ReadFromJsonAsync<JsonElement>();
-        var columns = sliceBody.GetProperty("columns");
-        var calculated = columns.EnumerateArray()
-            .FirstOrDefault(c => string.Equals(c.GetProperty("dataType").GetString(), "Formula", StringComparison.Ordinal));
-        Assert.True(calculated.ValueKind != JsonValueKind.Undefined, $"таблиця {tableInstanceId} не має жодної колонки-формули (dataType=Formula) — S-05 не дав змоги її зберегти.");
+        Assert.Equal(HttpStatusCode.OK, slice.StatusCode);
+
+        return await slice.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    /// <summary>Значення однієї комірки зі зрізу; <c>null</c> — комірки немає.</summary>
+    private static async Task<decimal?> ReadCellAsync(
+        HttpClient client, long documentId, long tableInstanceId, string rowKey, string columnCode)
+    {
+        var slice = await ReadSliceAsync(client, documentId, tableInstanceId);
+        var row = slice.GetProperty("rows").EnumerateArray()
+            .FirstOrDefault(r => string.Equals(r.GetProperty("rowKey").GetString(), rowKey, StringComparison.Ordinal));
+
+        if (row.ValueKind != JsonValueKind.Object
+            || !row.GetProperty("cells").TryGetProperty(columnCode, out var cell)
+            || cell.ValueKind != JsonValueKind.Number)
+        {
+            return null;
+        }
+
+        return cell.GetDecimal();
+    }
+
+    /// <summary>
+    /// Чекає, поки комірка з'явиться у зрізі (і, якщо задано, набуде
+    /// <paramref name="expected"/>); повертає останнє прочитане.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <paramref name="expected"/> потрібне саме для ПЕРЕрахунку: після
+    /// зміни входу в комірці вже лежить старе число, тож «дочекатися, поки
+    /// значення з'явиться» повернуло б його ж і сценарій пройшов би на
+    /// застарілому результаті.
+    /// </remarks>
+    private static async Task<decimal?> AwaitCellAsync(
+        HttpClient client, long documentId, long tableInstanceId, string rowKey, string columnCode,
+        TimeSpan timeout, decimal? expected = null)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        decimal? last = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            last = await ReadCellAsync(client, documentId, tableInstanceId, rowKey, columnCode);
+            if (last is not null && (expected is null || last == expected))
+            {
+                return last;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+        }
+
+        return last;
+    }
+
+    /// <summary>
+    /// Пробує записати число руками в обчислювану колонку <c>C</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Код відповіді не фіксується жорстко: сценарій доводить, що запис НЕ
+    /// приймається (<c>ColumnDef.ValidateValue</c> → <c>ECR-CELL-4221</c>), а
+    /// не те, якою саме цифрою про це сказано.
+    /// </remarks>
+    private static async Task<(bool IsSuccess, HttpStatusCode Status)> TryWriteCalculatedAsync(
+        HttpClient client, long documentId, long tableInstanceId, int periodKey, string rowKey)
+    {
+        var slice = await ReadSliceAsync(client, documentId, tableInstanceId);
+        var baseVersion = slice.GetProperty("rows").EnumerateArray()
+            .First(r => string.Equals(r.GetProperty("rowKey").GetString(), rowKey, StringComparison.Ordinal))
+            .GetProperty("rowVersion").GetString();
+
+        var patch = await client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{documentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId,
+                periodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey,
+                        baseVersion,
+                        cells = new object[] { new { columnCode = "C", value = 999m } },
+                    },
+                },
+            });
+
+        return (patch.IsSuccessStatusCode, patch.StatusCode);
     }
 
     /// <summary>S-22. <c>CONVERT</c> між одиницями в формулі шаблону.</summary>
