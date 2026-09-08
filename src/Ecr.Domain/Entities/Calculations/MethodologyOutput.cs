@@ -35,4 +35,22 @@ public sealed class MethodologyOutput : Entity<int>
     /// саме — і місце, де вони розійдуться.
     /// </remarks>
     public int Ordinal { get; private set; }
+
+    /// <summary>Переписує одиницю й порядок наявного виходу.</summary>
+    /// <param name="unitId">Нова одиниця результату.</param>
+    /// <param name="ordinal">Новий порядок у переліку.</param>
+    /// <remarks>
+    /// ⛔ Метод <c>internal</c>: єдиний вхід — <see cref="MethodologyVersion.EditOutput"/>,
+    /// бо вихід не знає, опублікована його версія чи ні. Зміна одиниці в
+    /// опублікованій версії не змінює жодного числа в базі і змінює ЗНАЧЕННЯ
+    /// кожного з них: ті самі 12.5 стають тоннами замість кілограмів.
+    ///
+    /// ⚠ <see cref="Code"/> не змінюється: він і є адресою виходу — на нього
+    /// посилаються <c>cfg.CalculationBinding.OutputCode</c> і очікування тестів.
+    /// </remarks>
+    internal void Update(int unitId, int ordinal)
+    {
+        UnitId = unitId;
+        Ordinal = ordinal;
+    }
 }

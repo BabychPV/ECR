@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
+        services.AddScoped<ICalculationBindingStore, CalculationBindingStore>();
         services.AddScoped<IOrphanScanner, OrphanScanner>();
         services.AddScoped(typeof(IRepository<,>), typeof(Repository<,>));
 

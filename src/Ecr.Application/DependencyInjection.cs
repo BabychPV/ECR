@@ -176,6 +176,23 @@ public static class DependencyInjection
         services.AddScoped<Calculations.ListMethodologyFormulasHandler>();
         services.AddScoped<Calculations.SaveMethodologyFormulaHandler>();
         services.AddScoped<Calculations.DeleteMethodologyFormulaHandler>();
+
+        // Авторство методології з нуля (директива №09, `W6`): сама методологія,
+        // константи, правила відбору, виходи, золотий набір, режими і прив'язка
+        // до колонки документа.
+        services.AddScoped<Calculations.CreateMethodologyHandler>();
+        services.AddScoped<Calculations.ListMethodologyConstantsHandler>();
+        services.AddScoped<Calculations.SaveMethodologyConstantHandler>();
+        services.AddScoped<Calculations.ListMethodologyRulesHandler>();
+        services.AddScoped<Calculations.SaveMethodologyRuleHandler>();
+        services.AddScoped<Calculations.ListMethodologyOutputsHandler>();
+        services.AddScoped<Calculations.SaveMethodologyOutputHandler>();
+        services.AddScoped<Calculations.ListMethodologyTestCasesHandler>();
+        services.AddScoped<Calculations.SaveMethodologyTestCaseHandler>();
+        services.AddScoped<Calculations.SetMethodologyModesHandler>();
+        services.AddScoped<Calculations.ListCalculationBindingsHandler>();
+        services.AddScoped<Calculations.SaveCalculationBindingHandler>();
+        services.AddScoped<Documents.GetCalculationResultsHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
 

@@ -207,7 +207,8 @@ public sealed class ListMethodologyFormulasHandler(
             .ConfigureAwait(false);
 
         return [.. formulas.Select(f => new MethodologyFormulaDto(
-            f.Id, f.Code, f.Expression, f.ResultType, f.OutputUnitId, f.EvaluationOrder))];
+            f.Id, f.Code, f.Expression, f.ResultType, f.OutputUnitId, f.EvaluationOrder,
+            f.ArgumentsCsv))];
     }
 }
 
@@ -241,18 +242,34 @@ public sealed class SaveMethodologyFormulaHandler(
     /// <param name="expression">Вираз діалекту методологій.</param>
     /// <param name="resultType">Число чи текст.</param>
     /// <param name="outputUnitId">Одиниця результату; <c>null</c> — зняти.</param>
+    /// <param name="argumentsCsv">
+    /// Оголошений список аргументів (<c>;</c>-розділений); <c>null</c> — списку
+    /// немає.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Записану формулу.</returns>
     /// <exception cref="NotFoundException">Версії немає.</exception>
     /// <exception cref="BusinessRuleException">
     /// Версія опублікована, вираз порожній або одиниця стоїть на тексті.
     /// </exception>
+    /// <remarks>
+    /// ⛔ <paramref name="argumentsCsv"/> зберігається **як написано**, без
+    /// нормалізації, і <c>null</c> тут не те саме, що порожній рядок. Джерело
+    /// істини про аргументи — саме цей список, а не текст виразу (директива
+    /// ПК-1 №05 §7, пастка 2): збірка підставляє рівно перелічене, і токен поза
+    /// списком у вираз не потрапляє — формула рахується з невизначеним
+    /// параметром, повертаючи правдоподібне число. Доки списку не було чим
+    /// заповнити, звірка <c>ECR-CALC-0432</c> була написана, покрита тестами й
+    /// недосяжна: вона отримувала <c>null</c> на кожній формулі корпусу і
+    /// мовчала.
+    /// </remarks>
     public async Task<MethodologyFormulaDto> HandleAsync(
         int methodologyVersionId,
         string code,
         string expression,
         FormulaResultType resultType,
         int? outputUnitId,
+        string? argumentsCsv,
         CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
@@ -280,6 +297,12 @@ public sealed class SaveMethodologyFormulaHandler(
             formula = existing;
         }
 
+        // ⚠ Список аргументів ставиться ПІСЛЯ виразу і поза `EditFormula`: він
+        // не бере участі в жодній перевірці домену (порожній вираз, одиниця на
+        // тексті), і затягнути його туди означало б розширити метод, який
+        // тримає інваріанти, полем, що інваріантів не має.
+        formula.SetArguments(argumentsCsv);
+
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new MethodologyFormulaDto(
@@ -288,7 +311,8 @@ public sealed class SaveMethodologyFormulaHandler(
             formula.Expression,
             formula.ResultType,
             formula.OutputUnitId,
-            formula.EvaluationOrder);
+            formula.EvaluationOrder,
+            formula.ArgumentsCsv);
     }
 }
 

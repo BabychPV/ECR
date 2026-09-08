@@ -190,6 +190,47 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
     /// </remarks>
     private const int MaxSupersededRuns = 100;
 
+    /// <summary>Стеля вибірки результатів на один документ і період.</summary>
+    /// <remarks>
+    /// Рядків стільки, скільки виходів × речовин × рядків таблиці; десятки
+    /// тисяч — уже ознака того, що прив'язку поставили на не ту таблицю.
+    /// </remarks>
+    private const int MaxResults = 50_000;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Прогін добирається за <c>Status = Current</c>, а не за максимальним
+    /// <c>Id</c>. Прогін, який упав, лишає по собі частину рядків, і «останній
+    /// за часом» показав би суміш: половина чисел від нової версії методології,
+    /// половина від старої, і жодної ознаки на екрані.
+    ///
+    /// ⚠ Приєднання до <c>calc.CalculationRun</c>, а не окремий запит за
+    /// актуальним прогоном: прогонів на період може бути кілька (кожен документ
+    /// перераховується окремо), і «актуальний прогін періоду» — не одне число.
+    /// </remarks>
+    public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
+        long documentId, int periodKey, CancellationToken ct)
+        => await db.CalculationResults
+            .AsNoTracking()
+            .Where(r => r.DocumentId == documentId && r.PeriodKey == periodKey)
+            .Join(
+                db.CalculationRuns.AsNoTracking()
+                    .Where(run => run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus),
+                r => r.CalculationRunId,
+                run => run.Id,
+                (r, _) => new CalculationResultRow(
+                    r.MethodologyVersionId,
+                    r.SourceRowKey,
+                    r.OutputCode,
+                    r.Value,
+                    r.UnitId,
+                    r.SubstanceEntryId))
+            .OrderBy(r => r.SourceRowKey)
+            .ThenBy(r => r.OutputCode)
+            .Take(MaxResults)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
     /// <summary>Наступний ідентифікатор кроку трейсу.</summary>
     private async Task<long> NextStepIdAsync(CancellationToken ct)
     {

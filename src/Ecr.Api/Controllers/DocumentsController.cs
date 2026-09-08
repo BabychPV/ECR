@@ -25,6 +25,7 @@ public sealed class DocumentsController(
     ReopenDocumentHandler reopen,
     RecalculateDocumentHandler recalculate,
     GetDocumentTablesHandler tables,
+    GetCalculationResultsHandler calculationResults,
     ExportDocumentHandler export,
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
@@ -204,6 +205,34 @@ public sealed class DocumentsController(
     [ProducesResponseType<IReadOnlyList<DocumentTableDto>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Tables(long id, [FromQuery] int periodKey, CancellationToken ct)
         => Ok(await tables.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Числа, які дав розрахунок методологій. Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="periodKey">Період; результати партиційовані за ним.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Окремий маршрут, а не поле зрізу таблиці, і це <c>D-69</c>: результат
+    /// методології НЕ потрапляє в <c>doc.CellValue</c> — інакше нічний
+    /// перерахунок писав би десятки мільйонів рядків у партиції документів. У
+    /// документ він приходить посиланням через <c>cfg.CalculationBinding</c>.
+    ///
+    /// ⛔ Доти побачити це число було НІДЕ: перерахунок завершувався успіхом,
+    /// значення лягало в <c>calc.CalculationResult</c>, і жоден маршрут його не
+    /// віддавав. Тобто питання «чи порахувала методологія правильно» мало рівно
+    /// одну відповідь — <c>SELECT</c> у базі.
+    ///
+    /// ⚠ Віддаються числа АКТУАЛЬНОГО прогону, не останнього за часом: прогін,
+    /// який упав, лишає по собі частину рядків, і суміш двох версій методології
+    /// на екрані виглядала б цілком правдоподібно.
+    /// </remarks>
+    [HttpGet("{id:long}/calculation-results")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Calculations.Dto.CalculationResultDto>>(
+        StatusCodes.Status200OK)]
+    public async Task<IActionResult> CalculationResults(
+        long id, [FromQuery] int periodKey, CancellationToken ct)
+        => Ok(await calculationResults.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
