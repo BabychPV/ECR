@@ -23,6 +23,8 @@ public sealed class TemplateVersionsController(
     ListTableRelationsHandler listRelations,
     SaveTableRelationHandler saveRelation,
     DeleteTableRelationHandler deleteRelation,
+    SaveSheetDefHandler saveSheet,
+    DeleteSheetDefHandler deleteSheet,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
     /// <summary>Клонує версію. Право <c>Template.Edit</c>.</summary>
@@ -234,6 +236,61 @@ public sealed class TemplateVersionsController(
         return NoContent();
     }
 
+    /// <summary>
+    /// Записує аркуш чернетки. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="code">Код аркуша.</param>
+    /// <param name="request">Налаштування аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Перший вертикальний зріз авторства структури шаблону через API
+    /// (`ФВ-2.1`..`ФВ-2.5`): до цього аркуш, таблицю, колонку чи рядок
+    /// створював лише офлайновий генератор тестових даних.
+    ///
+    /// ⚠ <c>PUT</c> за кодом — та сама форма, що й <c>relations/{code}</c>
+    /// вище: створення й зміна є однією дією, бо адресу задає викликач
+    /// (<c>D2-147</c>). Стан версії перевіряє домен: опублікована відхиляє
+    /// правку сама (<c>ECR-TMPL-0409</c>, <c>ФВ-7.1</c>).
+    /// </remarks>
+    [HttpPut("sheets/{code}")]
+    [ProducesResponseType<SheetDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SheetDto>> SaveSheet(
+        int id, string code, [FromBody] SaveSheetDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveSheet
+            .HandleAsync(
+                id,
+                code,
+                new SaveSheetDefCommand(
+                    request.NameL10n, request.Ordinal, request.SheetGroup,
+                    request.IsMandatory, request.IsVisible),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає аркуш із чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="code">Код аркуша.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("sheets/{code}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteSheet(int id, string code, CancellationToken ct)
+    {
+        await deleteSheet.HandleAsync(id, code, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
@@ -272,3 +329,16 @@ public sealed record SaveTableRelationRequest(
 /// <summary>Нова ревізія презентаційного шару.</summary>
 /// <param name="PresentationRevision">Ревізія; входить у ключ кешу метаданих (D-16).</param>
 public sealed record PresentationRevisionResponse(int PresentationRevision);
+
+/// <summary>Налаштування аркуша чернетки (<c>ФВ-2.1</c>).</summary>
+/// <param name="NameL10n">Назва аркуша мовами каталогу.</param>
+/// <param name="Ordinal"><c>null</c> — новий аркуш стає останнім за порядком.</param>
+/// <param name="SheetGroup">Група для правил складу документа; <c>null</c> — поза групами.</param>
+/// <param name="IsMandatory">Чи обов'язковий аркуш для складу документа.</param>
+/// <param name="IsVisible">Видимість аркуша.</param>
+public sealed record SaveSheetDefRequest(
+    IReadOnlyDictionary<string, string> NameL10n,
+    int? Ordinal,
+    string? SheetGroup,
+    bool IsMandatory,
+    bool IsVisible);

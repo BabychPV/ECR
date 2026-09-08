@@ -153,4 +153,27 @@ public sealed class TemplateVersion : Entity<int>
                 "без клону вже подані документи мовчки змінили б свою структуру.");
         }
     }
+
+    /// <summary>Додає аркуш до версії.</summary>
+    /// <remarks>
+    /// ⚠ Перевірка коду — за зразком <see cref="SheetDef.AddTable"/>: код
+    /// аркуша — це його ідентичність і адреса в <c>PUT …/sheets/{code}</c>, а
+    /// не лише етикетка, тому дублікат тут — помилка виклику, а не деталь
+    /// подання.
+    /// </remarks>
+    /// <exception cref="DomainException">Аркуш із таким кодом уже є у версії.</exception>
+    public void AddSheet(SheetDef sheet)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+
+        if (_sheets.Any(s => string.Equals(s.Code, sheet.Code, StringComparison.Ordinal)))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Аркуш з кодом {sheet.Code} у версії {Version} уже існує: код — це ідентичність, " +
+                "на нього посилається адреса PUT-запиту.");
+        }
+
+        _sheets.Add(sheet);
+    }
 }

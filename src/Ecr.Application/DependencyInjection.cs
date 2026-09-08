@@ -57,6 +57,11 @@ public static class DependencyInjection
         services.AddScoped<SaveTableRelationHandler>();
         services.AddScoped<DeleteTableRelationHandler>();
 
+        // Авторство структури шаблону: перший вертикальний зріз — аркуш
+        // (ФВ-2.1..ФВ-2.5). Читання складу лишається на GetTemplateStructureHandler.
+        services.AddScoped<SaveSheetDefHandler>();
+        services.AddScoped<DeleteSheetDefHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();

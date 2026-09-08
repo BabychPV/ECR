@@ -148,6 +148,15 @@ export type TableRelationKind = Schemas['TableRelationKind'];
 /** Запис зв'язку між таблицями чернетки. */
 export type SaveTableRelationRequest = Schemas['SaveTableRelationRequest'];
 
+/**
+ * Запис аркуша чернетки (`ФВ-2.1`) — тіло `PUT …/sheets/{code}`.
+ *
+ * ⛔ Перший вертикальний зріз авторства структури шаблону через API: до
+ * цього аркуш, таблицю, колонку чи рядок міг завести лише офлайновий
+ * генератор тестових даних.
+ */
+export type SaveSheetDefRequest = Schemas['SaveSheetDefRequest'];
+
 /** Довідник. */
 export type RegistryDefDto = Schemas['RegistryDefDto'];
 export type RegistrySourceKind = Schemas['RegistrySourceKind'];

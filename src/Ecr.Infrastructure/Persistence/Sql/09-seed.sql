@@ -1015,7 +1015,28 @@ USING (VALUES
     (N'tables.errSource',                N'en', N'Pick the source table.', 1),
     (N'tables.errTarget',                N'en', N'Pick the target table.', 1),
     (N'tables.errSelf',                  N'en', N'Source and target must differ: a table cannot be related to itself.', 1),
-    (N'tables.errMatch',                 N'en', N'Describe how rows are matched, otherwise the relation joins nothing.', 1)
+    (N'tables.errMatch',                 N'en', N'Describe how rows are matched, otherwise the relation joins nothing.', 1),
+    -- Редактор аркушів (ФВ-2.1) — перший вертикальний зріз авторства структури.
+    (N'sheets.add',                      N'en', N'Add sheet', 1),
+    (N'sheets.edit',                     N'en', N'Edit', 1),
+    (N'sheets.delete',                   N'en', N'Remove', 1),
+    (N'sheets.save',                     N'en', N'Save sheet', 1),
+    (N'sheets.saved',                    N'en', N'The sheet has been saved.', 1),
+    (N'sheets.deleted',                  N'en', N'The sheet has been removed.', 1),
+    (N'sheets.code',                     N'en', N'Code', 1),
+    (N'sheets.codeHint',                 N'en', N'The address of the sheet in the API. It cannot be renamed later.', 1),
+    (N'sheets.name',                     N'en', N'Name', 1),
+    (N'sheets.nameHint',                 N'en', N'Shown to the person filling in the form.', 1),
+    (N'sheets.group',                    N'en', N'Group', 1),
+    (N'sheets.groupHint',                N'en', N'Used by document composition rules; leave empty when the sheet belongs to no group.', 1),
+    (N'sheets.ordinal',                  N'en', N'Order', 1),
+    (N'sheets.ordinalHint',              N'en', N'Display order only — not an identity; nothing refers to it.', 1),
+    (N'sheets.mandatory',                N'en', N'Mandatory', 1),
+    (N'sheets.mandatoryHint',            N'en', N'Required for the document to be considered complete.', 1),
+    (N'sheets.visible',                  N'en', N'Visible', 1),
+    (N'sheets.visibleHint',              N'en', N'Hidden sheets stay in the structure but do not show on the form.', 1),
+    (N'sheets.errCode',                  N'en', N'Give the sheet a code: it is how the sheet is addressed.', 1),
+    (N'sheets.errName',                  N'en', N'Give the sheet a name in at least one language.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
