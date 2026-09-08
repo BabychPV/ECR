@@ -187,36 +187,73 @@ public sealed class PeriodAccessRuleDef : Entity<int>
         return rule;
     }
 
-    /// <summary>Обмежує правило аркушем.</summary>
-    public PeriodAccessRuleDef ForSheet(int sheetDefId)
+    /// <summary>Обмежує правило аркушем; <c>null</c> — знімає обмеження аркушем.</summary>
+    /// <remarks>
+    /// ⚠ Параметр став <c>int?</c> у W5.4 заради <c>PUT
+    /// …/period-access-rules/{id}</c>: редагування наявного правила мусить
+    /// уміти повернути «діє на всіх аркушах», а не лише перемкнути на інший
+    /// аркуш. Наявні виклики з <c>int</c> компілюються без змін —
+    /// неявне приведення до <c>int?</c>.
+    /// </remarks>
+    public PeriodAccessRuleDef ForSheet(int? sheetDefId)
     {
         SheetDefId = sheetDefId;
 
         return this;
     }
 
-    /// <summary>Обмежує правило таблицею.</summary>
-    public PeriodAccessRuleDef ForTable(int tableDefId)
+    /// <summary>Обмежує правило таблицею; <c>null</c> — знімає обмеження таблицею.</summary>
+    /// <remarks>⚠ Той самий привід, що й у <see cref="ForSheet"/>.</remarks>
+    public PeriodAccessRuleDef ForTable(int? tableDefId)
     {
         TableDefId = tableDefId;
 
         return this;
     }
 
-    /// <summary>Обмежує правило видом рядків.</summary>
-    public PeriodAccessRuleDef ForRows(RowKind rowKind)
+    /// <summary>Обмежує правило видом рядків; <c>null</c> — діє на всі види.</summary>
+    /// <remarks>⚠ Той самий привід, що й у <see cref="ForSheet"/>.</remarks>
+    public PeriodAccessRuleDef ForRows(RowKind? rowKind)
     {
         RowKind = rowKind;
 
         return this;
     }
 
-    /// <summary>Обмежує правило роллю.</summary>
-    public PeriodAccessRuleDef ForRole(int roleId)
+    /// <summary>Обмежує правило роллю; <c>null</c> — діє для всіх ролей.</summary>
+    /// <remarks>⚠ Той самий привід, що й у <see cref="ForSheet"/>.</remarks>
+    public PeriodAccessRuleDef ForRole(int? roleId)
     {
         RoleId = roleId;
 
         return this;
+    }
+
+    /// <summary>Змінює поведінку поза вікном наявного правила.</summary>
+    /// <remarks>
+    /// ⛔ Сеттер потрібен для <c>PUT …/period-access-rules/{id}</c> (W5.4):
+    /// досі <see cref="OnOutOfWindow"/> задавав лише конструктор — авторства
+    /// правил доступу через API не існувало, і відредагувати наявне правило
+    /// можна було тільки видаленням і створенням заново.
+    ///
+    /// ⚠ Та сама заборона, що в конструкторі: <c>Hide</c> — приховане
+    /// значення (<c>H-1</c>), і новий виклик через API не має шляху його
+    /// поставити, так само як не мав його конструктор.
+    /// </remarks>
+    /// <exception cref="DomainException">Поведінка — застаріле значення <c>Hide</c>.</exception>
+    public void SetOutOfWindowBehavior(OutOfWindowBehavior value)
+    {
+#pragma warning disable CS0618
+        if (value == OutOfWindowBehavior.Hide)
+        {
+            throw new DomainException(
+                "ECR-CFG-0422",
+                "Поведінка «Hide» більше не заводиться: ФВ-2.16 приховування "
+                + "не передбачає. Візьміть «ReadOnly» — це те саме «заборонити».");
+        }
+#pragma warning restore CS0618
+
+        OnOutOfWindow = value;
     }
 
     /// <summary>Чи діє правило для періоду з таким порядковим номером.</summary>

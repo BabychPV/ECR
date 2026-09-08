@@ -2648,6 +2648,15 @@
           "Strict"
         ]
       },
+      "OutOfWindowBehavior": {
+        "description": "Поведінка поза вікном доступу до періоду (ФВ-2.16).",
+        "enum": [
+          "Hide",
+          "ReadOnly",
+          "Warn",
+          "AllowWithConfirmation"
+        ]
+      },
       "PagedResultOfCellChangeView": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -2926,6 +2935,130 @@
           "cells"
         ],
         "type": "object"
+      },
+      "PeriodAccessRuleDto": {
+        "description": "Правило доступу до періоду для відповіді API.",
+        "properties": {
+          "conditionExpr": {
+            "description": "Умова (`Expression`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fromSequence": {
+            "description": "Від якого номера періоду; `null` — без обмеження.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор правила; адреса `PUT`/`DELETE …/{id}`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "onOutOfWindow": {
+            "$ref": "#/components/schemas/OutOfWindowBehavior",
+            "description": "Поведінка поза вікном."
+          },
+          "relativeOffset": {
+            "description": "Зсув ±N періодів (`RelativeWindow`).",
+            "format": "int16",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "roleId": {
+            "description": "`null` — для всіх ролей.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowKind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RowKind",
+                "description": "`null` — на всі види рядків."
+              }
+            ]
+          },
+          "ruleKind": {
+            "$ref": "#/components/schemas/PeriodAccessRuleKind",
+            "description": "Вид правила."
+          },
+          "sheetDefId": {
+            "description": "Аркуш; `null` — не обмежено аркушем.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourceColumnDefId": {
+            "description": "Колонка-джерело вікна (`SourceWindow`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableDefId": {
+            "description": "Таблиця; `null` — не обмежено таблицею.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toSequence": {
+            "description": "До якого номера періоду; `null` — без обмеження.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "templateVersionId",
+          "ruleKind",
+          "sheetDefId",
+          "tableDefId",
+          "roleId",
+          "rowKind",
+          "fromSequence",
+          "toSequence",
+          "sourceColumnDefId",
+          "relativeOffset",
+          "conditionExpr",
+          "onOutOfWindow"
+        ],
+        "type": "object"
+      },
+      "PeriodAccessRuleKind": {
+        "description": "Вид правила доступу до періоду (`ФВ-2.15`).",
+        "enum": [
+          "AlwaysReadOnly",
+          "HeaderRows",
+          "EditablePeriodOnly",
+          "RelativeWindow",
+          "SourceWindow",
+          "Expression"
+        ]
       },
       "PeriodCalendarDto": {
         "description": "Календар проєкту.",
@@ -4445,6 +4578,107 @@
         ],
         "type": "object"
       },
+      "SavePeriodAccessRuleRequest": {
+        "description": "Вид і налаштування нового правила доступу до періоду (`ФВ-2.15`).",
+        "properties": {
+          "conditionExpr": {
+            "description": "Для `Expression`: булевий вираз; обов'язковий.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fromSequence": {
+            "description": "Для `EditablePeriodOnly`: від якого номера періоду.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "onOutOfWindow": {
+            "$ref": "#/components/schemas/OutOfWindowBehavior",
+            "description": "Поведінка поза вікном; не `Hide`."
+          },
+          "relativeOffset": {
+            "description": "Для `RelativeWindow`: зсув ±N періодів; обов'язковий, додатний.",
+            "format": "int16",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "roleId": {
+            "description": "`null` — правило діє для всіх ролей.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowKind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RowKind",
+                "description": "`null` — на всі види рядків."
+              }
+            ]
+          },
+          "ruleKind": {
+            "$ref": "#/components/schemas/PeriodAccessRuleKind",
+            "description": "Вид правила; визначає обов'язковий параметр нижче."
+          },
+          "sheetDefId": {
+            "description": "Аркуш, якого стосується правило.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourceColumnDefId": {
+            "description": "Для `SourceWindow`: колонка-джерело вікна; обов'язкова.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableDefId": {
+            "description": "Таблиця, якої стосується правило.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "toSequence": {
+            "description": "Для `EditablePeriodOnly`: до якого номера періоду.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "ruleKind",
+          "onOutOfWindow",
+          "sheetDefId",
+          "tableDefId",
+          "roleId",
+          "rowKind",
+          "fromSequence",
+          "toSequence",
+          "sourceColumnDefId",
+          "relativeOffset",
+          "conditionExpr"
+        ],
+        "type": "object"
+      },
       "SaveRegistryDefinitionDto": {
         "description": "Запит на збереження опису довідника.",
         "properties": {
@@ -4649,6 +4883,52 @@
           "matchJson",
           "mapJson",
           "onSourceChange",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "SaveValidationRuleRequest": {
+        "description": "Налаштування правила валідації (`ФВ-2.1`, продовжено на `ValidationRule`).",
+        "properties": {
+          "columnDefId": {
+            "description": "Колонка, до якої прив'язане правило; `null` — до всіх колонок таблиці.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "expression": {
+            "description": "Предикат нашою мовою.",
+            "type": "string"
+          },
+          "isActive": {
+            "description": "Чи діє правило.",
+            "type": "boolean"
+          },
+          "messageL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Текст порушення мовами каталогу.",
+            "type": "object"
+          },
+          "scope": {
+            "description": "0 Cell, 1 Row, 2 Table, 3 Document.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ValidationSeverity",
+            "description": "Рівень: `Info`, `Warning`, `Error`."
+          }
+        },
+        "required": [
+          "severity",
+          "scope",
+          "expression",
+          "messageL10n",
+          "columnDefId",
           "isActive"
         ],
         "type": "object"
@@ -5798,6 +6078,58 @@
         ],
         "type": "object"
       },
+      "UpdatePeriodAccessRuleRequest": {
+        "description": "Прив'язка й поведінка наявного правила доступу до періоду (`ФВ-2.15`).",
+        "properties": {
+          "onOutOfWindow": {
+            "$ref": "#/components/schemas/OutOfWindowBehavior",
+            "description": "Поведінка поза вікном; не `Hide`."
+          },
+          "roleId": {
+            "description": "`null` — правило діє для всіх ролей.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowKind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RowKind",
+                "description": "`null` — на всі види рядків."
+              }
+            ]
+          },
+          "sheetDefId": {
+            "description": "Аркуш, якого стосується правило.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableDefId": {
+            "description": "Таблиця, якої стосується правило.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "onOutOfWindow",
+          "sheetDefId",
+          "tableDefId",
+          "roleId",
+          "rowKind"
+        ],
+        "type": "object"
+      },
       "UserIdResponse": {
         "description": "Створений користувач.",
         "properties": {
@@ -5993,6 +6325,74 @@
           "messages"
         ],
         "type": "object"
+      },
+      "ValidationRuleDto": {
+        "description": "Правило валідації для відповіді API.",
+        "properties": {
+          "code": {
+            "description": "Код правила; він же в повідомленні порушення.",
+            "type": "string"
+          },
+          "columnDefId": {
+            "description": "Колонка; `null` — до всіх колонок таблиці.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "expression": {
+            "description": "Предикат нашою мовою.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор правила.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи діє правило.",
+            "type": "boolean"
+          },
+          "messageL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Текст порушення мовами каталогу."
+          },
+          "scope": {
+            "description": "0 Cell, 1 Row, 2 Table, 3 Document.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ValidationSeverity",
+            "description": "Рівень."
+          },
+          "tableDefId": {
+            "description": "Таблиця, якій належить правило.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tableDefId",
+          "code",
+          "severity",
+          "scope",
+          "columnDefId",
+          "expression",
+          "messageL10n",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "ValidationSeverity": {
+        "description": "Рівень результату валідації.",
+        "enum": [
+          "Info",
+          "Warning",
+          "Error"
+        ]
       },
       "VersionIdResponse": {
         "description": "Створена версія шаблону.",
@@ -10340,6 +10740,322 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/period-access-rules": {
+      "post": {
+        "description": "⛔ `POST`, а НЕ `PUT` за кодом, на відміну від\n`sheets/{code}` і `validation-rules/{code}` вище:\n`PeriodAccessRuleDef` не має поля `Code` і жодного\nунікального індексу (лише `CK_PAR_Target`/`CK_PAR_Range`/\n`CK_PAR_Kind`) — єдина адреса, яку сутність має, це `Id`,\nпризначений базою вже ПІСЛЯ створення. Детальніше —\n`PeriodAccessRuleHandlers.cs`.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePeriodAccessRuleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePeriodAccessRuleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePeriodAccessRuleRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodAccessRuleDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodAccessRuleDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodAccessRuleDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить нове правило доступу до періоду чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/period-access-rules/{ruleId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Правило.",
+            "in": "path",
+            "name": "ruleId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає правило доступу до періоду (фізично). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⚠ `PUT` за `id`, а не за кодом: `id` — єдина адреса, яку\nправило має ПІСЛЯ створення. Вид правила (PeriodAccessRuleKind)\nі його специфічний параметр тут не редагуються — див.\n`PeriodAccessRuleHandlers.cs`.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Правило.",
+            "in": "path",
+            "name": "ruleId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodAccessRuleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodAccessRuleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodAccessRuleRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodAccessRuleDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodAccessRuleDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodAccessRuleDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює наявне правило доступу до періоду. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/presentation": {
       "patch": {
         "description": "Єдина зміна, дозволена після публікації. Інкрементує\n`PresentationRevision` одним statement із `OUTPUT` (R-B7) —\nсаме тому ключ кешу `v{id}:r{rev}` не потребує інвалідації.",
@@ -11900,6 +12616,235 @@
           }
         },
         "summary": "Записує рядок фіксованої таблиці чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить правило.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код правила.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає правило валідації з таблиці чернетки (фізично). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⚠ Вкладено в ТАБЛИЦЮ (`tables/{tableId}`), а не в аркуш чи версію:\nсама сутність адресується таблицею\n(`UQ_ValidationRule` на `(TableDefId, Code)`), і той самий код\nу різних таблицях версії — різні правила. `PUT` за кодом — та сама\nформа, що й `sheets/{code}` вище (`D2-147`).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить правило.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код правила; унікальний у межах таблиці.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveValidationRuleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveValidationRuleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveValidationRuleRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRuleDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRuleDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationRuleDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує правило валідації таблиці чернетки. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

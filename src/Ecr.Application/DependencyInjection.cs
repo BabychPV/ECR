@@ -77,6 +77,17 @@ public static class DependencyInjection
         services.AddScoped<SaveFormulaDefHandler>();
         services.AddScoped<DeleteFormulaDefHandler>();
 
+        // Шостий і сьомий зрізи (W5.4): правила валідації таблиці
+        // (ФВ-2.1..ФВ-2.5, продовжено на ValidationRule) і правила доступу до
+        // періоду (ФВ-2.15). PeriodAccessRuleDef без природного коду — звідси
+        // окремий Create (POST) на додачу до Save/Delete за id (докладніше в
+        // PeriodAccessRuleHandlers.cs).
+        services.AddScoped<SaveValidationRuleHandler>();
+        services.AddScoped<DeleteValidationRuleHandler>();
+        services.AddScoped<CreatePeriodAccessRuleHandler>();
+        services.AddScoped<SavePeriodAccessRuleHandler>();
+        services.AddScoped<DeletePeriodAccessRuleHandler>();
+
         // Шаблони і проєкти: переліки і створення (модуль 1.7)
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();

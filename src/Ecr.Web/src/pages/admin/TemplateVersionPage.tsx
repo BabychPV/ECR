@@ -1,5 +1,16 @@
 import { useState, type JSX } from 'react';
-import { Accordion, Badge, Button, Group, Modal, Table, Text, TextInput } from '@mantine/core';
+import {
+  Accordion,
+  Badge,
+  Button,
+  Divider,
+  Group,
+  Modal,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -11,6 +22,18 @@ import type {
   VersionIdResponse,
 } from '@/api/types';
 import { AccessMatrix } from '@/features/templates/AccessMatrix';
+import { PeriodAccessRuleEditor, PeriodAccessRuleManager } from '@/features/templates/PeriodAccessRuleEditor';
+import {
+  createPeriodAccessRule,
+  deletePeriodAccessRule,
+  savePeriodAccessRule,
+} from '@/features/templates/periodAccessRuleApi';
+import {
+  emptyPeriodAccessRuleDraft,
+  updatePeriodAccessRuleDraftOf,
+  type CreatePeriodAccessRuleDraft,
+  type UpdatePeriodAccessRuleDraft,
+} from '@/features/templates/periodAccessRule';
 import { PresentationEditor } from '@/features/templates/PresentationEditor';
 import { SheetEditor } from '@/features/templates/SheetEditor';
 import { deleteSheet, saveSheet } from '@/features/templates/sheetApi';
@@ -31,6 +54,9 @@ import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/feat
 import { FormulaEditor } from '@/features/templates/FormulaEditor';
 import { saveFormula } from '@/features/templates/formulaApi';
 import { emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
+import { ValidationRuleEditor } from '@/features/templates/ValidationRuleEditor';
+import { deleteValidationRule, saveValidationRule } from '@/features/templates/validationRuleApi';
+import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -87,6 +113,42 @@ export function TemplateVersionPage(): JSX.Element {
   // переклади підпису рядка, яких структура не носить.
   const [savedColumns, setSavedColumns] = useState<Record<string, ColumnDefDto>>({});
   const [savedRows, setSavedRows] = useState<Record<string, RowDefDto>>({});
+
+  // ⚠ Правило валідації (W5.4) адресується ТАБЛИЦЕЮ: чернетка тримається
+  // разом із таблицею, для якої відкрили форму — той самий tableId їде і в
+  // PUT, і в DELETE.
+  const [validationRuleTable, setValidationRuleTable] = useState<number | null>(null);
+  const [validationDraft, setValidationDraft] = useState<ValidationRuleDraft>(
+    emptyValidationRuleDraft(),
+  );
+  const [deleteRuleCode, setDeleteRuleCode] = useState('');
+
+  // ⛔ Правила доступу до періоду (`ФВ-2.15`) не мають коду — форма
+  // створення (`createPeriodDraft`) і форма правки наявного за `id`
+  // (`manageRuleId`/`manageDraft`) навмисно окремі, за тією самою причиною,
+  // що описана в `PeriodAccessRuleEditor.tsx`.
+  const [periodRulesOpen, setPeriodRulesOpen] = useState(false);
+  const [createPeriodDraft, setCreatePeriodDraft] = useState<CreatePeriodAccessRuleDraft>(
+    emptyPeriodAccessRuleDraft(),
+  );
+  const [manageRuleId, setManageRuleId] = useState<number | null>(null);
+  const [manageDraft, setManageDraft] = useState<UpdatePeriodAccessRuleDraft>(
+    updatePeriodAccessRuleDraftOf({
+      id: 0,
+      templateVersionId: id,
+      ruleKind: 'AlwaysReadOnly',
+      sheetDefId: null,
+      tableDefId: null,
+      roleId: null,
+      rowKind: null,
+      fromSequence: null,
+      toSequence: null,
+      sourceColumnDefId: null,
+      relativeOffset: null,
+      conditionExpr: null,
+      onOutOfWindow: 'ReadOnly',
+    }),
+  );
 
   const structure = useQuery({
     queryKey: ['template-version', id],
@@ -286,6 +348,75 @@ export function TemplateVersionPage(): JSX.Element {
     onError: showApiError,
   });
 
+
+  /**
+   * Запис правила валідації таблиці (W5.4, продовження `ФВ-2.1` на
+   * `ValidationRule`).
+   */
+  const saveValidationRuleMutation = useMutation({
+    mutationFn: ({ tableId, draft }: { tableId: number; draft: ValidationRuleDraft }) =>
+      saveValidationRule(id, tableId, draft),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setValidationRuleTable(null);
+      showDone(t('validationRules.saved'));
+    },
+    onError: showApiError,
+  });
+
+  /** Видалення правила валідації — фізичне (на відміну від аркуша). */
+  const deleteValidationRuleMutation = useMutation({
+    mutationFn: ({ tableId, code }: { tableId: number; code: string }) =>
+      deleteValidationRule(id, tableId, code),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setDeleteRuleCode('');
+      showDone(t('validationRules.deleted'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Заводить нове правило доступу до періоду (`ФВ-2.15`).
+   *
+   * ⛔ `POST`, а не `PUT` за кодом: `PeriodAccessRuleDef` не має природного
+   * коду (`periodAccessRule.ts`).
+   */
+  const createPeriodRuleMutation = useMutation({
+    mutationFn: (draft: CreatePeriodAccessRuleDraft) => createPeriodAccessRule(id, draft),
+    onSuccess: async (created) => {
+      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setCreatePeriodDraft(emptyPeriodAccessRuleDraft());
+
+      // ⚠ Щойно створене правило одразу підставляється у форму «правка за
+      // id» нижче: інакше побачений на екрані id довелося б передруковувати
+      // руками, щоб одразу ж його відредагувати чи прибрати.
+      setManageRuleId(created.id);
+      setManageDraft(updatePeriodAccessRuleDraftOf(created));
+      showDone(t('periodRules.added'));
+    },
+    onError: showApiError,
+  });
+
+  /** Змінює прив'язку й поведінку наявного правила доступу до періоду. */
+  const savePeriodRuleMutation = useMutation({
+    mutationFn: ({ ruleId, draft }: { ruleId: number; draft: UpdatePeriodAccessRuleDraft }) =>
+      savePeriodAccessRule(id, ruleId, draft),
+    onSuccess: async () => {
+      showDone(t('periodRules.saved'));
+    },
+    onError: showApiError,
+  });
+
+  /** Прибирає правило доступу до періоду (фізично). */
+  const deletePeriodRuleMutation = useMutation({
+    mutationFn: (ruleId: number) => deletePeriodAccessRule(id, ruleId),
+    onSuccess: async () => {
+      setManageRuleId(null);
+      showDone(t('periodRules.deleted'));
+    },
+    onError: showApiError,
+  });
   // ⚠ Структура не несе статусу версії: його віддає перелік версій шаблону.
   // Тому кнопка публікації тут показується за правом, а сервер лишається
   // єдиним, хто вирішує, чи можна публікувати саме цю версію.
@@ -324,6 +455,16 @@ export function TemplateVersionPage(): JSX.Element {
                 саме воно найчастіше й з'ясовується постфактум, коли форму
                 вже не заповнити. */}
             {can(session.data, 'Template.View') && <AccessMatrix templateVersionId={id} />}
+
+            {/* ⛔ Правила доступу до періоду (`ФВ-2.15`, W5.4) — кнопка тут
+                же, поруч із матрицею: саме матриця показує НАСЛІДОК цих
+                правил, і питання «чому тут замок» найчастіше веде до «а що
+                за ним налаштовано». */}
+            {canEditSheets && (
+              <Button size="xs" variant="default" onClick={() => setPeriodRulesOpen(true)}>
+                {t('periodRules.title')}
+              </Button>
+            )}
 
             {/* ⛔ Зв'язки таблиць (`ФВ-2.12`, `ФВ-2.13`) — окрема сторінка, і
                 вхід у неї стоїть саме тут: питання «звідки в цій таблиці
@@ -525,6 +666,21 @@ export function TemplateVersionPage(): JSX.Element {
                                     }
                                   >
                                     {t('columns.add')}
+                                  </Button>
+                                  {/* ⛔ Правило валідації (W5.4, продовження
+                                      `ФВ-2.1` на `ValidationRule`) адресується
+                                      ТАБЛИЦЕЮ — кнопка тому стоїть тут, а не
+                                      на рівні аркуша чи версії. */}
+                                  <Button
+                                    size="compact-xs"
+                                    variant="subtle"
+                                    onClick={() => {
+                                      setValidationRuleTable(table.id);
+                                      setValidationDraft(emptyValidationRuleDraft());
+                                      setDeleteRuleCode('');
+                                    }}
+                                  >
+                                    {t('validationRules.title')}
                                   </Button>
                                 </Group>
                               )}
@@ -860,6 +1016,106 @@ export function TemplateVersionPage(): JSX.Element {
             onCancel={() => setFormulaDraft(null)}
           />
         )}
+      </Modal>
+
+      {/*
+       * ⛔ Правило валідації (W5.4). Форма PUT-за-кодом стоїть поруч із
+       * компактним видаленням за тим самим кодом: список наявних правил
+       * структура версії не несе (він живе лише в кешованому знімку, який
+       * читає рушій валідації, а не GET-відповідь), тому редагування — це
+       * ввести код і перезаписати, а не обрати рядок зі списку.
+       */}
+      <Modal
+        opened={validationRuleTable !== null}
+        onClose={() => setValidationRuleTable(null)}
+        title={t('validationRules.title')}
+      >
+        {validationRuleTable !== null && (
+          <Stack gap="md">
+            <ValidationRuleEditor
+              draft={validationDraft}
+              disabled={!canEditSheets}
+              saving={saveValidationRuleMutation.isPending}
+              onChange={setValidationDraft}
+              onSubmit={() =>
+                saveValidationRuleMutation.mutate({
+                  tableId: validationRuleTable,
+                  draft: validationDraft,
+                })
+              }
+              onCancel={() => setValidationRuleTable(null)}
+            />
+
+            <Divider label={t('validationRules.delete')} />
+
+            <Group align="flex-end">
+              <TextInput
+                label={t('validationRules.code')}
+                value={deleteRuleCode}
+                onChange={(event) => setDeleteRuleCode(event.currentTarget.value)}
+              />
+              <Button
+                color="red"
+                variant="default"
+                disabled={!canEditSheets || deleteRuleCode.trim().length === 0}
+                loading={deleteValidationRuleMutation.isPending}
+                onClick={() =>
+                  deleteValidationRuleMutation.mutate({
+                    tableId: validationRuleTable,
+                    code: deleteRuleCode.trim(),
+                  })
+                }
+              >
+                {t('validationRules.delete')}
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+
+      {/*
+       * ⛔ Правила доступу до періоду (`ФВ-2.15`, W5.4). Дві форми в одному
+       * вікні — заведення нового (`POST`) і правка/видалення наявного за
+       * `id` (`PUT`/`DELETE`) — з тієї самої причини, що описана в
+       * `PeriodAccessRuleEditor.tsx`: сутність не має коду, і адресувати
+       * наявний рядок можна лише тим, що вже показав сервер.
+       */}
+      <Modal
+        opened={periodRulesOpen}
+        onClose={() => setPeriodRulesOpen(false)}
+        title={t('periodRules.title')}
+        size="lg"
+      >
+        <Stack gap="lg">
+          <PeriodAccessRuleEditor
+            draft={createPeriodDraft}
+            disabled={!canEditSheets}
+            saving={createPeriodRuleMutation.isPending}
+            onChange={setCreatePeriodDraft}
+            onSubmit={() => createPeriodRuleMutation.mutate(createPeriodDraft)}
+          />
+
+          <Divider label={t('periodRules.manage')} />
+
+          <PeriodAccessRuleManager
+            ruleId={manageRuleId}
+            draft={manageDraft}
+            disabled={!canEditSheets}
+            saving={savePeriodRuleMutation.isPending || deletePeriodRuleMutation.isPending}
+            onRuleIdChange={setManageRuleId}
+            onChange={setManageDraft}
+            onSave={() => {
+              if (manageRuleId !== null) {
+                savePeriodRuleMutation.mutate({ ruleId: manageRuleId, draft: manageDraft });
+              }
+            }}
+            onDelete={() => {
+              if (manageRuleId !== null) {
+                deletePeriodRuleMutation.mutate(manageRuleId);
+              }
+            }}
+          />
+        </Stack>
       </Modal>
     </>
   );
