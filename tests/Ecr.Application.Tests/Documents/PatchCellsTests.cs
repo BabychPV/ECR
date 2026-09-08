@@ -28,6 +28,7 @@ public sealed class PatchCellsTests
     /// <summary>Сховище документів — через нього йде «дотик» документа (`H-23d`).</summary>
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
 
+    private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
@@ -85,7 +86,7 @@ public sealed class PatchCellsTests
     };
 
     private PatchCellsHandler Handler()
-        => new(_cells, _rows, _documents, _metadata, _access,
+        => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _audit, _jobs, _uow, _user, _clock);
 
@@ -505,6 +506,88 @@ public sealed class PatchCellsTests
 
         // Комірка адресується колонкою СВОЄЇ таблиці (TableDefId = 3).
         Assert.Equal(VolumeColumnId, Assert.Single(changes.Upserts).Address.ColumnDefId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "R-A2")]
+    public async Task Аудит_несе_RowKey_і_старе_значення()
+    {
+        // Комірка вже має значення: саме воно і є половиною запису аудиту.
+        _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<CellAddress, CellValueData>
+              {
+                  [new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId)] =
+                      new CellValueData { ValueNumeric = 5m },
+              });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        var record = Assert.Single(Audited());
+
+        // ⛔ Обидва поля писалися константами: `RowKey` — порожнім рядком,
+        // `OldValue` — `null`. Журнал відповідав «стало 7» і не міг сказати
+        // ні де, ні що було до того (директива №09 `W8` п.4).
+        Assert.Equal("7001001", record.RowKey);
+        Assert.Equal("5", record.OldValue);
+        Assert.Equal("7", record.NewValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "R-A2")]
+    public async Task Аудит_несе_RowKey_щойно_створеного_рядка()
+    {
+        _rows.CreateRowAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(2002L);
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7009999", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        // ⚠ Рядка, який щойно створили, немає в мапі, прочитаній ДО вставки —
+        // тобто найпростіший спосіб дістати ключ тут не працює. Саме тому
+        // мапа збирається по ходу, а не «з того, що вже було».
+        Assert.Equal("7009999", Assert.Single(Audited()).RowKey);
+
+        // Комірки не існувало — «було» лишається порожнім чесно: незаповнена
+        // комірка не матеріалізується взагалі (`ФВ-3.8`).
+        Assert.Null(Assert.Single(Audited()).OldValue);
+    }
+
+    [Theory]
+    [InlineData(PeriodState.Open, false)]
+    [InlineData(PeriodState.Grace, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "D-70")]
+    public async Task IsLateEdit_обчислюється_за_станом_періоду(PeriodState state, bool expected)
+    {
+        _periods.FindPeriodStateAsync(700L, Period, Arg.Any<CancellationToken>())
+                .Returns((PeriodState?)state);
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 7m)])),
+            CancellationToken.None);
+
+        // ⛔ Тут стояв літерал `false`, при тому що `Period.IsLateEditWindow`
+        // існував і не мав жодного читача: пізніх правок у журналі не бувало
+        // ніколи (директива №09 `W8` п.6). `Reopen` теж сюди входить — він
+        // переводить період саме в `Grace`.
+        Assert.Equal(expected, Assert.Single(Audited()).IsLateEdit);
+
+        await _cells.Received(1).ApplyAsync(
+            Arg.Is<CellChangeSet>(c => c.IsLateEdit == expected), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Записи, які обробник віддав у журнал аудиту.</summary>
+    private IReadOnlyList<CellChangeRecord> Audited()
+    {
+        var call = _audit.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteCellChangesAsync));
+
+        return (IReadOnlyList<CellChangeRecord>)call.GetArguments()[0]!;
     }
 
     /// <summary>Додає таблицю з одним правилом валідації у знімок метаданих.</summary>

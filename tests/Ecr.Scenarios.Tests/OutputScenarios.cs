@@ -156,13 +156,13 @@ public sealed class OutputScenarios(SqlServerFixture sql)
     /// помилок; погодження рецензентом.
     /// </summary>
     /// <remarks>
-    /// ⚠ Механізм експорту (<c>202</c> + <c>jobId</c>, <c>GET …/export/{exportId}</c>)
-    /// перевіряється на РЕАЛЬНОМУ, хай і порожньому, документі — це не
-    /// вимагає структурних маршрутів (S-04), лише документ узагалі (S-13
-    /// показує ту саму межу). «Книга непорожня» довести не можна: без
-    /// реальних колонок і рядків книзі нема що містити. Подання на аркуш,
-    /// якого не існує, відмовляє з іншої причини, ніж «є блокуючий Error»
-    /// (ФВ-5.19), але відмовляє — і це очікувана, задокументована межа.
+    /// ⛔ Друга половина сценарію переписана з «доказу межі» на доказ реальної
+    /// поведінки (директива №09 `W8` п.5). Раніше вона подавала НЕІСНУЮЧИЙ
+    /// аркуш і задовольнялася будь-якою відмовою: справжнього блокувального
+    /// <c>Error</c> узяти не було звідки, а якби й було — подання його не
+    /// побачило б, бо <c>SubmitSheetHandler</c> тримав <c>ValidationEngine</c>
+    /// упорснутим і не читаним. Тепер сценарій кладе в комірку число, яке
+    /// порушує РЕАЛЬНЕ правило версії, і подання відмовляє саме тому.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -171,48 +171,110 @@ public sealed class OutputScenarios(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         var author = await Provisioning.AdministratorAsync(
-            app, "S28a", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Document.Export"]);
+            app, "S28a",
+            [
+                "Project.Manage", "Document.View", "Document.Create", "Template.Edit",
+                "Template.Publish", "Document.Export",
 
-        (author, var projectId, var documentId, var periodKey) = await DataEntryScenarios.ArrangeDocumentAsync(app, author, "S28");
+                // ⚠ ЗАМІР: щоб ДОЧЕКАТИСЯ власної задачі експорту, авторові
+                // потрібне `System.ViewHealth` — `GET /api/v1/jobs/{id}`
+                // вимагає саме його (`GetJobStatusHandler.Permission`). Тобто
+                // «експортувати» і «забрати книгу» — різні права, і без
+                // другого автор отримує `202` з `jobId`, за яким йому нічого
+                // не видно. Це видима межа моделі прав, а не сценарію
+                // (`Q-156`); сценарій її називає й іде далі.
+                "System.ViewHealth",
+            ]);
 
-        // Крок 1: експорт у книгу — механізм є, доступний, повертає jobId.
+        // Правило рівня рядка: значення колонки `A` не більше за 100.
+        var doc = await DataEntryScenarios.ArrangeRealDocumentAsync(app, author, "S28", "[A] <= 100");
+        author = doc.Admin;
+
+        // ⛔ Крок 1 — ЗАПИС, і він стоїть першим навмисно. Експорт
+        // порожнього документа відмовляє (`ExcelExporter`: «документа за
+        // період не існує або він порожній»), тож «книга непорожня» можна
+        // довести лише книгою, у якій щось є. Заразом число `101` порушує
+        // правило версії (`[A] <= 100`) — його ж перевіряє крок 3.
+        var tables = await author.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
+
+        var slice = await author.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables/{tableInstanceId}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, slice.StatusCode);
+        var row = (await slice.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("rows").EnumerateArray()
+            .First(r => r.GetProperty("rowKey").GetString() == doc.RowKeys[0]);
+
+        var patch = await author.Client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId,
+                periodKey = doc.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = doc.RowKeys[0],
+                        baseVersion = row.GetProperty("rowVersion").GetString(),
+                        cells = new object[] { new { columnCode = doc.ColumnCode, value = 101m } },
+                    },
+                },
+            });
+
+        // ⚠ ЗАПИС при цьому проходить: блокує лише комірковий Error (R-B3,
+        // `D-90`), а це правило рівня рядка. Заборона зберегти проміжний стан
+        // зробила б роботу з великою таблицею неможливою.
+        Assert.True(patch.StatusCode == HttpStatusCode.OK, $"{patch.StatusCode}: {app.ErrorsText}");
+
+        // Крок 2: експорт у книгу — механізм є, доступний, повертає jobId.
         var export = await author.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/export", UriKind.Relative),
-            new { includeFormulas = false, includeStyles = true, language = "en", periodKey });
+            new Uri($"/api/v1/documents/{doc.DocumentId}/export", UriKind.Relative),
+            new { includeFormulas = false, includeStyles = true, language = "en", periodKey = doc.PeriodKey });
         Assert.Equal(HttpStatusCode.Accepted, export.StatusCode);
         var exportJobId = (await export.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetString()!;
 
-        var exportJob = await ScenarioHelpers.AwaitJobAsync(author.Client, exportJobId, TimeSpan.FromSeconds(15));
-        Assert.True(exportJob.ValueKind != JsonValueKind.Undefined, $"задача експорту {exportJobId} не набула кінцевого стану за 15 с.");
-        Assert.Equal("Succeeded", exportJob.GetProperty("state").GetString());
+        // ⚠ Тридцять секунд, а не п'ятнадцять: книга тепер має РЕАЛЬНИЙ вміст
+        // (аркуш, таблиця, колонка, рядки), і на холодному старті хоста
+        // побудова перший раз іде відчутно довше за порожню.
+        var exportJob = await ScenarioHelpers.AwaitJobAsync(author.Client, exportJobId, TimeSpan.FromSeconds(30));
+        Assert.True(
+            exportJob.ValueKind != JsonValueKind.Undefined,
+            $"задача експорту {exportJobId} не набула кінцевого стану за 30 с: {app.ErrorsText}");
+        Assert.True(
+            exportJob.GetProperty("state").GetString() == "Succeeded",
+            $"задача експорту завершилася станом {exportJob.GetProperty("state").GetString()}: {app.ErrorsText}");
 
         var exportId = exportJob.TryGetProperty("message", out var m) ? m.GetString() : null;
         Assert.False(string.IsNullOrWhiteSpace(exportId), "повідомлення прогресу задачі експорту не несе exportId, за яким забрати файл.");
 
         var download = await author.Client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/export/{exportId}", UriKind.Relative));
+            new Uri($"/api/v1/documents/{doc.DocumentId}/export/{exportId}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, download.StatusCode);
         var bytes = await download.Content.ReadAsByteArrayAsync();
-
-        // Доказ «книга непорожня» — документ без жодної реальної таблиці
-        // (S-04..S-09 недосяжні) не може мати вмісту, який вартий цієї назви.
         Assert.True(bytes.Length > 0, "експортована книга порожня.");
 
-        // Крок 2: подання аркуша з блокуючим Error відхиляється. Реального
-        // Error узяти нема звідки (S-06/S-19), тому подаємо неіснуючий
-        // аркуш — відмова однаково очікувана, лише з іншим кодом.
+        // ⛔ Крок 3 і доказ сценарію: подання ВІДМОВЛЯЄ, і саме через валідацію
+        // (`ECR-SUB-4221`, `ФВ-5.4`/`ФВ-5.19`), а не «якимось 4xx».
         var submit = await author.Client.PostAsJsonAsync(
-            new Uri($"/api/v1/documents/{documentId}/submit", UriKind.Relative),
-            new { sheetDefId = 1, periodKey });
-        Assert.True((int)submit.StatusCode >= 400, $"подання мало відмовити, а повернуло {submit.StatusCode}");
+            new Uri($"/api/v1/documents/{doc.DocumentId}/submit", UriKind.Relative),
+            new { sheetDefId = doc.SheetDefId, periodKey = doc.PeriodKey });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, submit.StatusCode);
+        var submitBody = await submit.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-SUB-4221", submitBody.GetProperty("errorCode").GetString());
 
         // Крок 3: рецензент (окремий обліковий запис із власним грантом)
         // бачить документ автора.
         var reviewer = await Provisioning.AdministratorAsync(app, "S28b", ["Document.View"]);
-        await Provisioning.GrantAsync(app, reviewer.RoleId, "Project", projectId, "Approve");
+        await Provisioning.GrantAsync(app, reviewer.RoleId, "Project", doc.ProjectId, "Approve");
         reviewer = await Provisioning.ReauthenticateAsync(app, reviewer);
 
-        var reviewerSees = await reviewer.Client.GetAsync(new Uri($"/api/v1/documents/{documentId}", UriKind.Relative));
+        var reviewerSees = await reviewer.Client.GetAsync(new Uri($"/api/v1/documents/{doc.DocumentId}", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, reviewerSees.StatusCode);
     }
 }

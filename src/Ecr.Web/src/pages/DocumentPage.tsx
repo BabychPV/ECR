@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, type JSX } from 'react';
+﻿import { Suspense, lazy, useState, type JSX } from 'react';
 import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -10,12 +10,14 @@ import type {
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
+import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { ExportButton } from '@/features/export/ExportButton';
 import { ImportPanel } from '@/features/import/ImportPanel';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -75,6 +77,32 @@ export function DocumentPage(): JSX.Element {
       ),
   });
 
+  /*
+   * ⛔ Останній результат перевірки ЧИТАЄТЬСЯ (директива №09 `W8` п.3,
+   * `S-19`). Підсумок зберігається на сервері (`ФВ-5.19`), і доти його не
+   * читав ніхто: перелік зауважень жив рівно до перезавантаження сторінки, а
+   * щоб побачити його знову, оператор мусив ЗАПУСТИТИ перевірку заново — на
+   * великому документі це три секунди й повний прогін правил заради списку,
+   * який уже пораховано.
+   *
+   * ⚠ `404` — це «ще не перевіряли», а не помилка: `retry: false` і `null` у
+   * стані. «Зауважень немає» показувати замість цього не можна — зелений
+   * напис під документом, якого ніхто не перевіряв, повідомляє неправду про
+   * готовність.
+   */
+  const lastValidation = useQuery({
+    queryKey: ['validation', documentId, periodKey],
+    queryFn: () =>
+      apiFetch<ValidationResultResponse>(
+        `/api/v1/documents/${documentId}/validation?periodKey=${periodKey}`,
+      ),
+    retry: false,
+  });
+
+  // Свіжий прогін перекриває прочитаний: після натискання «Перевірити» на
+  // екрані має бути те, що щойно порахували, а не те, що лежало в базі.
+  const [fresh, setFresh] = useState<ValidationResultResponse | null>(null);
+
   const validate = useMutation({
     mutationFn: () =>
       apiFetch<ValidationResultResponse>(
@@ -87,8 +115,13 @@ export function DocumentPage(): JSX.Element {
         },
       ),
     onSuccess: (result) => {
+      setFresh(result);
+
       const errors = result.messages.filter((message) => message.severity === 'Error');
 
+      // ⚠ Тост ЛИШАЄТЬСЯ, але тепер він лише повідомляє, що перевірка
+      // завершилася: сам перелік — на екрані, під заголовком. Число без
+      // переліку не веде до жодної дії (`ФВ-14.24`).
       notifications.show({
         color: errors.length === 0 ? 'green' : 'red',
         message:
@@ -97,7 +130,11 @@ export function DocumentPage(): JSX.Element {
             : t('document.validationErrors', { count: errors.length }),
       });
     },
+    onError: showApiError,
   });
+
+  /** Що показувати в панелі: свіже, інакше прочитане, інакше нічого. */
+  const shownValidation = fresh ?? lastValidation.data ?? null;
 
   const sheets = groupBySheet(tables.data ?? []);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
@@ -186,6 +223,12 @@ export function DocumentPage(): JSX.Element {
           </Group>
         }
       />
+
+      {/* ⚠ Панель — ПІД заголовком і НАД вкладками: зауваження стосуються
+          документа за період цілком, а не активного аркуша, і сховати їх під
+          вкладку означало б показувати їх лише тому, хто вгадав, куди
+          дивитися. */}
+      <ValidationPanel messages={shownValidation?.messages ?? null} />
 
       <Tabs value={active?.code ?? null} onChange={setSheet}>
         <Tabs.List>

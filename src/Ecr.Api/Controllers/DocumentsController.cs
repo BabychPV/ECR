@@ -20,6 +20,7 @@ public sealed class DocumentsController(
     GetDocumentHandler getDocument,
     CreateDocumentHandler create,
     ValidateDocumentHandler validate,
+    GetValidationResultHandler validationResult,
     SubmitSheetHandler submit,
     ApproveSheetHandler approve,
     ReopenDocumentHandler reopen,
@@ -121,6 +122,43 @@ public sealed class DocumentsController(
             periodKey,
             [.. messages.Select(m => new ValidationMessageDto(
                 m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
+    }
+
+    /// <summary>
+    /// Останній результат перевірки. Право <c>Document.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).
+    /// Підсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:
+    /// <c>IValidationResultStore.GetLatestAsync</c> не мав жодного виклику.
+    /// Ціна видна на екрані — перелік зауважень жив рівно до перезавантаження
+    /// сторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ
+    /// перевірку заново.
+    ///
+    /// ⚠ <c>404</c>, а не порожній перелік, коли перевірку ще не запускали:
+    /// «зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
+    /// першу замість другої означає повідомити неправду про готовність.
+    /// </remarks>
+    /// <param name="id">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:long}/validation")]
+    [ProducesResponseType<ValidationResultResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> LastValidation(
+        long id, [FromQuery] int periodKey, CancellationToken ct)
+    {
+        var messages = await validationResult
+            .HandleAsync(id, PeriodKey.Parse(periodKey), ct)
+            .ConfigureAwait(false);
+
+        return messages is null
+            ? NotFound(new { errorCode = "ECR-DOC-0404" })
+            : Ok(new ValidationResultResponse(
+                id,
+                periodKey,
+                [.. messages.Select(m => new ValidationMessageDto(
+                    m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
     /// <summary>Перерахунок документа. Право <c>Calculation.Recalculate</c>.</summary>

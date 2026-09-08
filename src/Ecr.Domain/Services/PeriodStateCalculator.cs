@@ -51,6 +51,54 @@ public sealed class PeriodStateCalculator
     }
 
     /// <summary>
+    /// Обчислює переходи набору періодів, нічого не змінюючи.
+    /// </summary>
+    /// <param name="periods">Періоди одного проєкту з уже обчисленими межами.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="siteTimeZone">Пояс майданчика (<c>D-68</c>).</param>
+    /// <remarks>
+    /// ⛔ Правило жило в <c>PeriodStateJob.Plan</c> — тобто в
+    /// <c>Ecr.Infrastructure</c>, куди прикладний шар не має шляху. Через це
+    /// активація проєкту не могла відкрити період САМА і чекала наступного
+    /// годинного прогону задачі: щойно активований проєкт годину показував
+    /// «період ще не відкрито», хоч за датами він давно відкритий (директива
+    /// №09 §7 `W8`, `S-11`). Тепер рішення живе в домені, а задача і обробник
+    /// активації беруть його з одного місця.
+    /// </remarks>
+    public IReadOnlyList<PeriodTransition> Plan(
+        IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(periods);
+
+        var transitions = new List<PeriodTransition>();
+
+        foreach (var period in periods)
+        {
+            var target = Calculate(period, utcNow, siteTimeZone);
+
+            // Уже в цільовому стані — не чіпаємо. Повторний прогін має бути
+            // безслідним: інакше StateChangedAt оновлювався б щоразу і журнал
+            // перестав би відповідати, коли період справді змінився.
+            if (target == period.State)
+            {
+                continue;
+            }
+
+            // ⚠ Назад не переводимо НІКОЛИ. `Closed → Grace` — виключно
+            // рішення адміністратора через Reopen; збій розрахунку не має
+            // тихо відкривати закритий період.
+            if (period.State == PeriodState.Closed)
+            {
+                continue;
+            }
+
+            transitions.Add(new PeriodTransition(period, target));
+        }
+
+        return transitions;
+    }
+
+    /// <summary>
     /// Обирає поточний період проєкту в режимі <c>Auto</c>: найраніший
     /// <c>Open</c>, інакше найпізніший <c>Grace</c>, інакше нічого (D-77).
     /// </summary>
@@ -79,3 +127,8 @@ public sealed class PeriodStateCalculator
             .FirstOrDefault();
     }
 }
+
+/// <summary>Перехід, який треба застосувати до періоду.</summary>
+/// <param name="Period">Період.</param>
+/// <param name="Target">Цільовий стан.</param>
+public readonly record struct PeriodTransition(Period Period, PeriodState Target);

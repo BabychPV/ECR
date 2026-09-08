@@ -7794,6 +7794,79 @@
         ]
       }
     },
+    "/api/v1/documents/{id}/validation": {
+      "get": {
+        "description": "⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).\nПідсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:\n`IValidationResultStore.GetLatestAsync` не мав жодного виклику.\nЦіна видна на екрані — перелік зауважень жив рівно до перезавантаження\nсторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ\nперевірку заново.\n\n⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:\n«зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати\nпершу замість другої означає повідомити неправду про готовність.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResultResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResultResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResultResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Останній результат перевірки. Право `Document.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
     "/api/v1/expressions/metadata": {
       "get": {
         "parameters": [

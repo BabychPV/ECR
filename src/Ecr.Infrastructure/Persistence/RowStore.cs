@@ -194,14 +194,82 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
 
         var utcNow = clock.UtcNow;
 
+        var created = new Dictionary<int, long>(missing.Count);
+
         for (var i = 0; i < missing.Count; i++)
         {
+            created[missing[i]] = first + i;
             db.TableInstances.Add(new TableInstance(periodKey, first + i, documentId, missing[i], utcNow));
         }
+
+        await MaterializeFixedRowsAsync(created, periodKey, utcNow, ct).ConfigureAwait(false);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return missing.Count;
+    }
+
+    /// <summary>
+    /// Заводить рядки щойно створених екземплярів за описами
+    /// <c>cfg.RowDef</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Фіксована таблиця не мала жодного рядка НІКОЛИ (директива №09 `W8`
+    /// п.2, `S-13`). Екземпляр створювався, колонки приходили, а рядків не
+    /// будував ніхто: `doc.TableRow` заповнював лише `CreateRowAsync` — шлях
+    /// «оператор додав рядок», який для `RowMode = Fixed` заборонений за
+    /// побудовою. Тобто в таблицю, склад рядків якої заданий шаблоном,
+    /// неможливо було ввести перше число.
+    ///
+    /// ⚠ Разом зі створенням екземпляра і ТІЄЮ Ж транзакцією: екземпляр без
+    /// своїх рядків — саме той стан, який щойно описано, і залишати його
+    /// досяжним хоч на мить означало б лишити дефект живим на шляху збою.
+    ///
+    /// ⚠ Ідемпотентність тримає та сама умова, що й для екземплярів: рядки
+    /// заводяться лише для тих, кого щойно створили. Повторний виклик
+    /// створює нуль екземплярів і, отже, нуль рядків.
+    /// </remarks>
+    private async Task MaterializeFixedRowsAsync(
+        IReadOnlyDictionary<int, long> instancesByTableDef,
+        PeriodKey periodKey,
+        DateTime utcNow,
+        CancellationToken ct)
+    {
+        var tableDefIds = instancesByTableDef.Keys.ToList();
+
+        var rowDefs = await db.RowDefs
+            .AsNoTracking()
+            .Where(r => tableDefIds.Contains(r.TableDefId) && !r.IsDeleted)
+            .OrderBy(r => r.TableDefId)
+            .ThenBy(r => r.Ordinal)
+            .Select(r => new { r.Id, r.TableDefId, r.RowKeyValue, r.Ordinal })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (rowDefs.Count == 0)
+        {
+            // Динамічна таблиця описів рядків не має — і це не порожнеча, а
+            // її природа: рядки в ній заводить оператор.
+            return;
+        }
+
+        var firstRowId = await bulk
+            .ReserveIdsAsync("doc.TableRowSeq", rowDefs.Count, ct)
+            .ConfigureAwait(false);
+
+        for (var i = 0; i < rowDefs.Count; i++)
+        {
+            var def = rowDefs[i];
+
+            db.TableRows.Add(new TableRow(
+                periodKey,
+                firstRowId + i,
+                instancesByTableDef[def.TableDefId],
+                RowKey.Create(def.RowKeyValue),
+                def.Ordinal,
+                utcNow,
+                def.Id));
+        }
     }
 
     /// <inheritdoc />

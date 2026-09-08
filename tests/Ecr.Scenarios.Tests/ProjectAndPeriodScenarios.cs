@@ -39,20 +39,17 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     /// віддає <c>Open</c> одразу після активації.
     /// </summary>
     /// <remarks>
-    /// ⚠ Переходи станів веде фонова задача <c>PeriodStateJob</c>, а не запит
-    /// (ФВ-1.12); явного ендпоінта «перевести період» у контракті немає.
-    /// Сценарій тому ОПИТУЄ (той самий прийом, що <see cref="ScenarioHelpers.AwaitJobAsync"/>,
-    /// але без jobId — тут немає задачі, за якою можна стежити напряму) і
-    /// падає з чіткою причиною, якщо задача не встигла чи не існує в
-    /// тестовому хості.
+    /// ⛔ Сценарій БІЛЬШЕ НЕ ОПИТУЄ і не чекає жодної секунди — і це сама суть
+    /// його назви. Раніше він крутив цикл на 20 с у надії, що
+    /// <c>PeriodStateJob</c> устигне; ЗАМІР показував, що не встигає й за 90 с,
+    /// бо задача йде на ГОДИННОМУ розкладі, а `Period.AdvanceTo` кликала лише
+    /// вона. `W8` (директива №09 п.1) зробив перехід частиною самої активації:
+    /// відповідь на <c>POST …/activate</c> уже означає, що періоди в належному
+    /// стані.
     ///
-    /// ⛔ ЗАМІР: навіть 90 секунд очікування (перевірено окремим прогоном
-    /// цього тесту з подовженим тайм-аутом) не переводять жоден період у
-    /// <c>Open</c> у хості <c>WebApplicationFactory</c> — календар будується
-    /// (`GET` віддає періоди зі станом <c>Scheduled</c>), але Quartz-задача,
-    /// схоже, або не запланована з достатньою частотою, або не запускається
-    /// в тестовому хості взагалі. Це видима межа продукту в цьому середовищі,
-    /// а не недбалий тайм-аут сценарію.
+    /// ⚠ Тому перевірка тепер СИЛЬНІША, а не просто «зелена»: очікування
+    /// прибране, і будь-яке повернення до фонового переходу знову зробить її
+    /// червоною негайно, а не «іноді».
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -68,25 +65,23 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
         admin = await Provisioning.ReauthenticateAsync(app, admin);
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
-        var sawOpen = false;
-        while (DateTime.UtcNow < deadline && !sawOpen)
-        {
-            var response = await admin.Client.GetAsync(
-                new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var response = await admin.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var calendar = await response.Content.ReadFromJsonAsync<JsonElement>();
-            sawOpen = calendar.GetProperty("periods").EnumerateArray()
-                .Any(p => string.Equals(p.GetProperty("state").GetString(), "Open", StringComparison.Ordinal));
+        var calendar = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var periods = calendar.GetProperty("periods").EnumerateArray().ToList();
 
-            if (!sawOpen)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(500));
-            }
-        }
+        Assert.True(
+            periods.Exists(p => string.Equals(p.GetProperty("state").GetString(), "Open", StringComparison.Ordinal)),
+            $"одразу після активації проєкту {projectId} жоден період не в стані Open: {app.ErrorsText}");
 
-        Assert.True(sawOpen, $"жоден період не перейшов у Open за 20 с після активації проєкту {projectId}: {app.ErrorsText}");
+        // ⚠ І поточний період призначений: на нього спирається кожен екран,
+        // який відкриває документ «за поточний період». Доти прапорець
+        // `isCurrent` не стояв на жодному періоді до першого прогону задачі.
+        Assert.True(
+            periods.Exists(p => p.GetProperty("isCurrent").GetBoolean()),
+            $"жоден період проєкту {projectId} не позначений поточним одразу після активації.");
     }
 
     /// <summary>

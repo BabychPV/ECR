@@ -144,6 +144,23 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ П'ятий запит — ПРАВИЛА ВАЛІДАЦІЇ, і без нього валідації не було
+        // взагалі (директива №09 `W8`, `S-19`/`S-28`). `ValidateDocumentHandler`
+        // читає рівно `table.ValidationRules` цього знімка; знімок їх не
+        // вантажив, колекція завжди була порожня — і `POST …/validate`
+        // відповідав «зауважень немає» на будь-яких даних, при будь-яких
+        // заведених правилах. Відповідь при цьому виглядала як робота: `200`,
+        // порожній список, зелений тост. Правила існували в базі, проходили
+        // перевірку публікації (`PublishChecks` бере структуру іншим шляхом —
+        // `ITemplateVersionStore.GetWithStructureAsync` з `Include`) і не
+        // виконувалися ЖОДНОГО разу.
+        var validationRules = await db.ValidationRules
+            .AsNoTracking()
+            .Where(r => tableIds.Contains(r.TableDefId))
+            .OrderBy(r => r.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         // Граф збирається в пам'яті: так кожна сутність приїжджає рівно один
         // раз. Складається він доменними AddColumn/AddRow/AddTable, а не
         // окремим «швидким» шляхом: перевірки на дублікати кодів мають бути
@@ -151,6 +168,7 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
         // місцем, де неконсистентна структура проходить мовчки.
         var columnsByTable = columns.ToLookup(c => c.TableDefId);
         var rowsByTable = rows.ToLookup(r => r.TableDefId);
+        var rulesByTable = validationRules.ToLookup(r => r.TableDefId);
 
         foreach (var table in tables)
         {
@@ -162,6 +180,11 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
             foreach (var row in rowsByTable[table.Id])
             {
                 table.AddRow(row);
+            }
+
+            foreach (var rule in rulesByTable[table.Id])
+            {
+                table.AddValidationRule(rule);
             }
         }
 

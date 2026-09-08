@@ -2620,6 +2620,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
 | `POST` | `/api/v1/documents/{id}/validate` | `Document.View` | 2 |
+| `GET` | `/api/v1/documents/{id}/validation` | `Document.View` | 2 |
 | `POST` | `/api/v1/documents/{id}/recalculate` | `Calculation.Recalculate` | 2 |
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
