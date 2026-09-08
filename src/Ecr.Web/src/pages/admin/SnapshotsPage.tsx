@@ -1,14 +1,21 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, NumberInput, Select, Table, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Group, Modal, NumberInput, Select, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
-import type { BuildSnapshotRequest, PagedProjects, ReportSnapshotSummary } from '@/api/types';
+import type {
+  BuildSnapshotRequest,
+  PagedProjects,
+  ReportDefinition,
+  ReportSnapshotSummary,
+} from '@/api/types';
+import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 
 /**
  * Зрізи регламентної звітності.
@@ -34,13 +41,32 @@ export function SnapshotsPage(): JSX.Element {
   const [periodKey, setPeriodKey] = useUrlNumber('periodKey');
 
   const [building, setBuilding] = useState(false);
-  const [code, setCode] = useState('');
+  const [managing, setManaging] = useState(false);
+  const [code, setCode] = useState<string | null>(null);
   const [buildPeriod, setBuildPeriod] = useState(currentPeriodKey());
 
   const projects = useQuery({
     queryKey: ['projects'],
     queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
   });
+
+  // ⛔ Перелік описів звітів, а не поле для набору коду руками (`W7`). До
+  // цього єдиним способом вказати звіт було ВГАДАТИ його код: описів у базі
+  // не створювало ніщо, тож будь-який набраний код відмовляв `ECR-RPT-0404`, і
+  // відрізнити «помилився в коді» від «звіту не існує взагалі» було нічим.
+  const reportDefs = useQuery({
+    queryKey: ['report-defs'],
+    queryFn: () => apiFetch<ReportDefinition[]>('/api/v1/reports'),
+  });
+
+  // ⚠ У виборі — лише те, за чим зріз СПРАВДІ побудується: чинний опис із
+  // опублікованою версією. Показати решту означало б пропонувати варіанти,
+  // кожен другий з яких відмовляє без пояснення (побудова бере лише
+  // `Published`).
+  const buildable = (reportDefs.data ?? []).filter(
+    (definition) =>
+      definition.isActive && definition.versions.some((v) => v.status === 'Published'),
+  );
 
   const snapshots = useQuery({
     queryKey: ['snapshots', projectId, periodKey],
@@ -54,7 +80,7 @@ export function SnapshotsPage(): JSX.Element {
 
   const build = useMutation({
     mutationFn: () =>
-      apiEnqueue(`/api/v1/reports/${encodeURIComponent(code.trim())}/build`, {
+      apiEnqueue(`/api/v1/reports/${encodeURIComponent(code ?? '')}/build`, {
         projectId: projectId ?? 0,
         periodKey: buildPeriod,
       } satisfies BuildSnapshotRequest),
@@ -92,6 +118,12 @@ export function SnapshotsPage(): JSX.Element {
               value={periodKey ?? ''}
               onChange={(value) => setPeriodKey(typeof value === 'number' ? value : null)}
             />
+
+            {can(session.data, 'Report.EditDefinition') && (
+              <Button size="xs" variant="default" onClick={() => setManaging(true)}>
+                {t('reportDefs.manage')}
+              </Button>
+            )}
 
             {can(session.data, 'Report.BuildSnapshot') && (
               <Button size="xs" disabled={projectId === null} onClick={() => setBuilding(true)}>
@@ -162,13 +194,25 @@ export function SnapshotsPage(): JSX.Element {
       </AsyncBoundary>
 
       <Modal opened={building} onClose={() => setBuilding(false)} title={t('snapshots.build')}>
-        <TextInput
+        <Select
           label={t('snapshots.code')}
           description={t('snapshots.codeHint')}
+          placeholder={t('snapshots.pickReport')}
+          nothingFoundMessage={t('snapshots.noPublished')}
+          data={buildable.map((definition) => ({
+            value: definition.code,
+            label: `${localized(definition.nameL10n) || definition.code} (${definition.code})`,
+          }))}
           value={code}
-          onChange={(event) => setCode(event.currentTarget.value)}
+          onChange={setCode}
           data-autofocus
         />
+
+        {buildable.length === 0 && (
+          <Text size="xs" c="dimmed" mt="xs">
+            {t('snapshots.noPublished')}
+          </Text>
+        )}
 
         <NumberInput
           mt="sm"
@@ -186,7 +230,7 @@ export function SnapshotsPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={code.trim().length === 0}
+            disabled={code === null}
             loading={build.isPending}
             onClick={() => build.mutate()}
           >
@@ -194,6 +238,12 @@ export function SnapshotsPage(): JSX.Element {
           </Button>
         </Group>
       </Modal>
+
+      <ReportDefinitionsModal
+        opened={managing}
+        onClose={() => setManaging(false)}
+        definitions={reportDefs.data ?? []}
+      />
     </>
   );
 }

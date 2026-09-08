@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { PollMs, outcomeOf, pollInterval } from '../jobFollow';
 
 /**
@@ -34,7 +34,7 @@ describe('стеження за фоновою задачею', () => {
 
   it('«стан прочитати не вдалося» — це не «ще виконується»', () => {
     // ⛔ `GET /jobs/{id}` вимагає окремого права (`System.ViewHealth`,
-    // `Q-154`). Без нього кнопка крутилася б вічно: оператор бачив би
+    // `Q-156`). Без нього кнопка крутилася б вічно: оператор бачив би
     // «перераховується» на задачі, стан якої йому просто не показують.
     expect(outcomeOf(undefined, true)).toBe('unknown');
     expect(outcomeOf('Running', true)).toBe('unknown');

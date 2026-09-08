@@ -36,7 +36,7 @@ export function pollInterval(state: string | undefined): number | false {
  *
  * @remarks
  * ⛔ «Стан прочитати не вдалося» — це НЕ «ще виконується».
- * `GET /jobs/{id}` вимагає окремого права (`System.ViewHealth`, `Q-154`), і
+ * `GET /jobs/{id}` вимагає окремого права (`System.ViewHealth`, `Q-156`), і
  * без нього кнопка крутилася б вічно: оператор бачив би «перераховується» на
  * задачі, стан якої йому просто не показують.
  */
