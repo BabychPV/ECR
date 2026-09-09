@@ -435,6 +435,7 @@ USING (VALUES
     (N'templates.versions',              N'en', N'Versions', 1),
     (N'version.title',                   N'en', N'Template version', 1),
     (N'version.publish',                 N'en', N'Publish', 1),
+    (N'version.publishHint',             N'en', N'After this the structure is frozen: fix a wrong rule now, not after publishing.', 1),
     (N'version.published',               N'en', N'The version has been published.', 1),
     (N'version.column',                  N'en', N'Column', 1),
     (N'version.type',                    N'en', N'Type', 1),

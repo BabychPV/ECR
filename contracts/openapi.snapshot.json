@@ -3930,6 +3930,19 @@
         ],
         "type": "object"
       },
+      "PublishVersionRequest": {
+        "description": "Запит на публікацію версії.",
+        "properties": {
+          "reason": {
+            "description": "Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —\nтой самий патерн, що й `PublishMethodologyRequest.ChangeReason`\n(ФВ-14.7): «чому цю версію ввели в обіг» — питання, на яке через рік\nмає бути відповідь, а не літерал `\"Publish\"`, однаковий для кожної\nпублікації.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "RecalculationAcceptedResponse": {
         "description": "Прийнятий у чергу перерахунок.",
         "properties": {
@@ -13852,9 +13865,10 @@
     },
     "/api/v1/template-versions/{id}/publish": {
       "post": {
-        "description": "Після публікації структура незмінна: тригер БД відхиляє структурний\n`UPDATE`, презентаційний пропускає. Цикл у графі формул — помилка\n**публікації** (`ECR-TMPL-4221`), а не рантайму (ФВ-9.4).",
+        "description": "Після публікації структура незмінна: тригер БД відхиляє структурний\n`UPDATE`, презентаційний пропускає. Цикл у графі формул — помилка\n**публікації** (`ECR-TMPL-4221`), а не рантайму (ФВ-9.4).\n\n⛔ Причина обов'язкова — той самий патерн, що й `PublishMethodologyRequest.ChangeReason`\n(`ФВ-14.7`, `MethodologiesController`) і сусідній DeprecateVersionRequest\nнижче: до цього поле не існувало взагалі, і журнал публікацій ніс\nлітерал `\"Publish\"` — рядок, що ВИГЛЯДАЄ як причина, але нею не є,\nі однаковий для кожної публікації без винятку. За рік «Publish» у\nжурналі не відповідає на питання «чому саме цю версію ввели в обіг».",
         "parameters": [
           {
+            "description": "Версія-чернетка.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -13865,6 +13879,27 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "No Content"

@@ -253,7 +253,7 @@ public sealed class ValidateExpressionTests(SqlServerFixture sql)
             new TestClock(Now));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.PublishAsync(version.VersionId, userId: 9, CancellationToken.None));
+            () => handler.PublishAsync(version.VersionId, userId: 9, reason: "Тест", CancellationToken.None));
 
         return [.. (IEnumerable<DiagnosticInfo>)error.Details!["diagnostics"]!];
     }

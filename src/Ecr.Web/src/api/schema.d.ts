@@ -5168,17 +5168,32 @@ export interface paths {
          * @description Після публікації структура незмінна: тригер БД відхиляє структурний
          *     `UPDATE`, презентаційний пропускає. Цикл у графі формул — помилка
          *     **публікації** (`ECR-TMPL-4221`), а не рантайму (ФВ-9.4).
+         *
+         *     ⛔ Причина обов'язкова — той самий патерн, що й `PublishMethodologyRequest.ChangeReason`
+         *     (`ФВ-14.7`, `MethodologiesController`) і сусідній DeprecateVersionRequest
+         *     нижче: до цього поле не існувало взагалі, і журнал публікацій ніс
+         *     літерал `"Publish"` — рядок, що ВИГЛЯДАЄ як причина, але нею не є,
+         *     і однаковий для кожної публікації без винятку. За рік «Publish» у
+         *     журналі не відповідає на питання «чому саме цю версію ввели в обіг».
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
+                    /** @description Версія-чернетка. */
                     id: number;
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishVersionRequest"];
+                    "application/json": components["schemas"]["PublishVersionRequest"];
+                    "text/json": components["schemas"]["PublishVersionRequest"];
+                };
+            };
             responses: {
                 /** @description No Content */
                 204: {
@@ -8891,6 +8906,15 @@ export interface components {
              *     цією версією, а які — попередньою.
              */
             effectiveFrom: null | string;
+        };
+        /** @description Запит на публікацію версії. */
+        PublishVersionRequest: {
+            /** @description Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —
+             *     той самий патерн, що й `PublishMethodologyRequest.ChangeReason`
+             *     (ФВ-14.7): «чому цю версію ввели в обіг» — питання, на яке через рік
+             *     має бути відповідь, а не літерал `"Publish"`, однаковий для кожної
+             *     публікації. */
+            reason: string;
         };
         /** @description Прийнятий у чергу перерахунок. */
         RecalculationAcceptedResponse: {
