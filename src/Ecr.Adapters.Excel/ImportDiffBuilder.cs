@@ -17,7 +17,7 @@ namespace Ecr.Adapters.Excel;
 /// застосування, змішані в одному методі, дають код, у якому неможливо
 /// перевірити, що саме буде відхилено, не застосувавши це.
 /// </remarks>
-public sealed class ImportDiffBuilder(ICellStore cellStore, IRowStore rowStore)
+public sealed class ImportDiffBuilder
 {
     /// <summary>
     /// Скільки змін має сенс показати в одному перегляді.
@@ -36,15 +36,27 @@ public sealed class ImportDiffBuilder(ICellStore cellStore, IRowStore rowStore)
     /// <param name="table">Опис таблиці зі знімка.</param>
     /// <param name="decisions">Рішення про доступ на комірки зрізу.</param>
     /// <param name="lookups">Коди записів довідників: <c>RegistryDefId</c> → код → <c>Id</c>.</param>
-    /// <param name="ct">Скасування.</param>
-    public async Task<TableDiff> BuildAsync(
+    /// <param name="rowIds">Ідентифікатори рядків цієї таблиці: <c>RowKey</c> → <c>TableRow.Id</c>.</param>
+    /// <param name="versions">Версії рядків цієї таблиці: <c>RowKey</c> → hex <c>rowversion</c>.</param>
+    /// <param name="current">Поточний зріз комірок цієї таблиці.</param>
+    /// <remarks>
+    /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
+    /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
+    /// <paramref name="current"/> викликач читає ОДНИМ пакетним запитом на
+    /// ВСІ таблиці книги (<c>ExcelImporter.PreviewAsync</c>), а не по одному
+    /// на кожну з ~90. Це узгоджує клас із власним призначенням, названим у
+    /// коментарі типу: порівняння перевірне БЕЗ бази.
+    /// </remarks>
+    public TableDiff Build(
         IXLWorksheet worksheet,
         ExcelTableBlock block,
         int periodKey,
         TableDef table,
         IReadOnlyDictionary<CellAddress, EditDecision> decisions,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> lookups,
-        CancellationToken ct)
+        IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlyDictionary<string, string> versions,
+        IReadOnlyList<CellRecord> current)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
         ArgumentNullException.ThrowIfNull(block);
@@ -52,18 +64,6 @@ public sealed class ImportDiffBuilder(ICellStore cellStore, IRowStore rowStore)
         ArgumentNullException.ThrowIfNull(decisions);
 
         var period = new PeriodKey(periodKey);
-
-        var rowIds = await rowStore
-            .GetRowIdsAsync(block.TableInstanceId, period, ct)
-            .ConfigureAwait(false);
-
-        var versions = await rowStore
-            .GetRowVersionsAsync(block.TableInstanceId, period, ct)
-            .ConfigureAwait(false);
-
-        var current = await cellStore
-            .ReadSliceAsync(block.TableInstanceId, ct)
-            .ConfigureAwait(false);
 
         var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
 

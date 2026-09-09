@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
@@ -14,23 +15,24 @@ using Xunit;
 namespace Ecr.Adapters.Tests.Excel;
 
 /// <summary>
-/// Q-168 (аудит фази 2, продуктивність): <c>ImportDiffBuilder.BuildAsync</c>
-/// коштує кількох походів у базу НА КОЖНУ таблицю книги — синхронно, поки
-/// користувач стоїть над результатом попереднього перегляду імпорту.
+/// Q-168 (аудит фази 2, продуктивність): попередній перегляд імпорту читає
+/// рядки й комірки ОДНИМ пакетом на всю книгу, а не походом у базу на кожну
+/// таблицю.
 /// </summary>
 /// <remarks>
-/// ⚠ «Тести спершу» (рішення людини): цей файл ставить бюджет запитів на
-/// сьогоднішню поведінку — три походи в базу (<c>GetRowIdsAsync</c>,
-/// <c>GetRowVersionsAsync</c>, <c>ReadSliceAsync</c>) НА КОЖНУ таблицю, лінійно
-/// від їхньої кількості. Фікс (Q-168, PR B) пакетує ці три виклики через
-/// <c>IRowStore.GetRowIdsBatchAsync</c>, аналогічний пакетний метод версій
-/// рядків і <c>ICellStore.ReadSlicesAsync</c> — після нього той самий тест
-/// затягується до сталого числа запитів, незалежного від кількості таблиць.
+/// ⛔ До фікса (PR A цього ж номера) <c>ImportDiffBuilder.BuildAsync</c> сам
+/// ходив у базу тричі НА КОЖНУ таблицю (<c>GetRowIdsAsync</c>,
+/// <c>GetRowVersionsAsync</c>, <c>ReadSliceAsync</c>) — 3×N запитів на книгу
+/// з N таблицями, доведено попередньою версією цього тесту (9 запитів на
+/// три таблиці). Тепер <c>ImportDiffBuilder</c> — чиста функція без бази
+/// (<c>Build</c>, синхронний), а <c>ExcelImporter.PreviewAsync</c> читає
+/// рядки й комірки ВСІХ таблиць трьома пакетними запитами ОДИН раз:
+/// <c>IRowStore.GetRowIdsBatchAsync</c>, <c>IRowStore.GetRowVersionsBatchAsync</c>,
+/// <c>ICellStore.ReadSlicesAsync</c>.
 /// <para>
 /// ⚠ Блоки книги тут навмисно БЕЗ рядків (<c>Rows: []</c>): подвійний цикл
-/// по рядках/колонках усередині <c>BuildAsync</c> для виміру не потрібен —
-/// три походи в базу трапляються ДО нього, незалежно від того, скільки в
-/// таблиці рядків.
+/// по рядках/колонках усередині <c>Build</c> для виміру не потрібен — усі
+/// походи в базу трапляються в пакетних запитах ДО нього.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -41,13 +43,14 @@ public sealed class ImportDiffBuilderPerformanceTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Перегляд_кількох_таблиць_масштабується_лінійно_від_їх_кількості()
+    public async Task Перегляд_кількох_таблиць_коштує_сталих_трьох_запитів_незалежно_від_їх_кількості()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         using var workbook = new XLWorkbook();
         using var warmCache = new MemoryCache(new MemoryCacheOptions());
 
         var blocks = new List<(TableDef Table, ExcelTableBlock Block)>();
+        var periodKey = new PeriodKey(202601);
 
         for (var i = 0; i < TableCount; i++)
         {
@@ -74,24 +77,38 @@ public sealed class ImportDiffBuilderPerformanceTests(SqlServerFixture sql)
         await using var countingDb = CreateCountingContext(executed);
         var cellStore = new NormalizedCellStore(countingDb, bulk);
         var rowStore = new RowStore(countingDb, bulk, new TestClock(DateTime.UtcNow));
-        var diffBuilder = new ImportDiffBuilder(cellStore, rowStore);
+        var diffBuilder = new ImportDiffBuilder();
+
+        var tableInstanceIds = blocks.ConvertAll(b => b.Block.TableInstanceId);
+
+        // ⛔ Рівно ТРИ пакетні запити на ВСЮ книгу — не на таблицю.
+        var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(tableInstanceIds, periodKey, CancellationToken.None);
+        var versionsBatch = await rowStore.GetRowVersionsBatchAsync(tableInstanceIds, periodKey, CancellationToken.None);
+        var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, CancellationToken.None);
 
         var emptyDecisions = new Dictionary<CellAddress, EditDecision>();
         var emptyLookups = new Dictionary<int, IReadOnlyDictionary<string, long>>();
+        var emptyRowIds = new Dictionary<string, long>();
+        var emptyVersions = new Dictionary<string, string>();
+        var emptySlice = Array.Empty<CellRecord>();
 
         foreach (var (table, block) in blocks)
         {
-            await diffBuilder.BuildAsync(
-                workbook.Worksheet(block.SheetName), block, periodKey: 202601,
-                table, emptyDecisions, emptyLookups, CancellationToken.None);
+            // ⚠ Build — синхронний і без бази (Q-168): решта вимірюваних
+            // запитів була б ЗАЙВОЮ, якби він досі ходив у базу сам.
+            diffBuilder.Build(
+                workbook.Worksheet(block.SheetName), block, periodKey.Value, table,
+                emptyDecisions, emptyLookups,
+                rowIdsBatch.GetValueOrDefault(block.TableInstanceId, emptyRowIds),
+                versionsBatch.GetValueOrDefault(block.TableInstanceId, emptyVersions),
+                slicesBatch.GetValueOrDefault(block.TableInstanceId, emptySlice));
         }
 
-        // ⛔ Сьогоднішній бюджет: рівно три походи в базу НА ТАБЛИЦЮ
-        // (GetRowIdsAsync, GetRowVersionsAsync, ReadSliceAsync) — прямий доказ
-        // знахідки Q-168. Після пакетного фікса (PR B) це число перестає
-        // рости з кількістю таблиць; тест тоді звузити до сталої стелі.
+        // ⛔ Прямий доказ фікса: рівно три запити на ВСЮ книгу, незалежно від
+        // TableCount. Мутаційний доказ — у PR: тимчасове повернення виклику
+        // на таблицю замість пакетного валило цю саму перевірку.
         var queries = executed.Count(cmd => cmd.Contains("SELECT", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(3 * TableCount, queries);
+        Assert.Equal(3, queries);
     }
 
     /// <summary>Контекст, який складає кожну виконану команду в список.</summary>

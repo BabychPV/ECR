@@ -99,6 +99,31 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> GetRowVersionsBatchAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+    {
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyDictionary<string, string>>();
+        }
+
+        var rows = await db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value
+                        && tableInstanceIds.Contains(r.TableInstanceId)
+                        && !r.IsDeleted)
+            .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.RowVersion })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.TableInstanceId)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyDictionary<string, string> (g) =>
+                    g.ToDictionary(
+                        r => r.RowKeyValue, r => Convert.ToBase64String(r.RowVersion), StringComparer.Ordinal));
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// <c>Id</c> береться з <c>SEQUENCE</c> ДО вставки (B02 §2.3): так рядок і
     /// його комірки можна завантажити одним проходом, без другого кроку з
