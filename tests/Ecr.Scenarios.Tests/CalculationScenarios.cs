@@ -530,6 +530,66 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             j => string.Equals(JobId(j), jobId, StringComparison.Ordinal));
     }
 
+    /// <remarks>
+    /// ⛔ Q-174 (аудит фази 2, авторизація). `RecalculateDocumentHandler`
+    /// перевіряв лише загальне право `Calculation.Recalculate`, без гранта на
+    /// проєкт документа. Наслідок: користувач із цим правом (виданим під
+    /// власний проєкт) міг поставити в чергу перезапис обчислених значень
+    /// чужого документа.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-25")]
+    public async Task Чужий_документ_не_перераховується()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S25bOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Calculation.Recalculate"]);
+        var stranger = await Provisioning.AdministratorAsync(
+            app, "S25bStranger", ["Calculation.Recalculate"]);
+
+        (owner, _, var documentId, var periodKey) = await DataEntryScenarios.ArrangeDocumentAsync(app, owner, "S25bOwner");
+
+        // ⛔ Доказ сценарію: `stranger` має право запускати перерахунок
+        // узагалі, але жодного гранта на проєкт `owner` — постановка в чергу
+        // чужого документа має дати 4xx, а не 202.
+        var recalc = await stranger.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{documentId}/recalculate", UriKind.Relative), new { periodKey });
+
+        Assert.True(
+            (int)recalc.StatusCode is >= 400 and < 500,
+            $"перерахунок чужого документа мав дати 4xx, а дав {recalc.StatusCode}: {await recalc.Content.ReadAsStringAsync()}");
+    }
+
+    /// <remarks>
+    /// ⛔ Q-175 (аудит фази 2, авторизація). `GetCalculationResultsHandler`
+    /// перевіряв лише загальне право `Calculation.View`, без гранта на проєкт
+    /// документа. Наслідок: будь-хто з цим правом бачив показники методологій
+    /// (речовини, обсяги викидів) чужого документа.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-25")]
+    public async Task Чужі_результати_розрахунку_не_читаються()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S25cOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Calculation.View"]);
+        var stranger = await Provisioning.AdministratorAsync(
+            app, "S25cStranger", ["Calculation.View"]);
+
+        (owner, _, var documentId, var periodKey) = await DataEntryScenarios.ArrangeDocumentAsync(app, owner, "S25cOwner");
+
+        var results = await stranger.Client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId}/calculation-results?periodKey={periodKey}", UriKind.Relative));
+
+        Assert.True(
+            (int)results.StatusCode is >= 400 and < 500,
+            $"результати чужого документа мали дати 4xx, а дав {results.StatusCode}: {await results.Content.ReadAsStringAsync()}");
+    }
+
     /// <summary>
     /// S-26. <c>MaskedZero</c>: ділення на нуль у <c>Legacy</c> → <c>0</c> із
     /// причиною в трейсі; у <c>Strict</c> → <c>null</c>.

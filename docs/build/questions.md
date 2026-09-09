@@ -217,11 +217,11 @@
 | Q-169 | CONFLICT | `ConsistencyCheckJob` пише кожну знахідку окремим `EXISTS`+`INSERT` замість пакетного upsert — нічний job, обмежений `MaxIssues`, низький пріоритет | OPEN |
 | Q-170 | CONFLICT | `MaterializeCollectedDataJob` викликає `CoverageJournal.RecordAsync` (власний `SaveChangesAsync`) на кожен конфлікт замість пакетного запису — малий обсяг за побудовою, низький пріоритет | OPEN |
 | Q-171 | CONFLICT | `GetTableSliceHandler` (`GET …/tables/{tableInstanceId}`) не перевіряє належність `tableInstanceId` документу з маршруту — читає чужі дані. Перевірено особисто | RESOLVED · `GetTableSliceHandler.cs`, PR нижче |
-| Q-172 | CONFLICT | `GetDocumentTablesHandler` (`GET …/documents/{id}/tables`) не має жодної перевірки гранта на проєкт — лише RBAC; ланцюжком із Q-171 дає повний перелік чужих `tableInstanceId` | OPEN |
+| Q-172 | CONFLICT | `GetDocumentTablesHandler` (`GET …/documents/{id}/tables`) не має жодної перевірки гранта на проєкт — лише RBAC; ланцюжком із Q-171 дає повний перелік чужих `tableInstanceId` | RESOLVED · `GetDocumentTablesHandler.cs`, PR #75 |
 | Q-173 | CONFLICT | `ReopenDocumentHandler` (`POST …/reopen`) свідомо пропускає перевірку гранта (коментар у коді), хоча `Submit`/`Approve` того самого документа — ні; повертає подане/затверджене подання назад у Draft у чужому проєкті | OPEN |
-| Q-174 | CONFLICT | `RecalculateDocumentHandler` не перевіряє грант на проєкт — фонова задача перераховує чужі дані; окремо `Q-151` — та сама задача без gate закритого періоду | OPEN |
-| Q-175 | CONFLICT | `GetCalculationResultsHandler` (`GET …/calculation-results`) не перевіряє грант на проєкт — віддає результати методологій (речовини, обсяги) по будь-якому `documentId` | OPEN |
-| Q-176 | CONFLICT | `CreateDocumentHandler` не перевіряє грант на `projectId` із тіла запиту — можна завести документ у чужому проєкті | OPEN |
+| Q-174 | CONFLICT | `RecalculateDocumentHandler` не перевіряє грант на проєкт — фонова задача перераховує чужі дані; окремо `Q-151` — та сама задача без gate закритого періоду | RESOLVED · `RecalculateDocumentHandler.cs`, PR #75 |
+| Q-175 | CONFLICT | `GetCalculationResultsHandler` (`GET …/calculation-results`) не перевіряє грант на проєкт — віддає результати методологій (речовини, обсяги) по будь-якому `documentId` | RESOLVED · `GetCalculationResultsHandler.cs`, PR #75 |
+| Q-176 | CONFLICT | `CreateDocumentHandler` не перевіряє грант на `projectId` із тіла запиту — можна завести документ у чужому проєкті | RESOLVED · `CreateDocumentHandler.cs`, PR #75 |
 | Q-177 | CONFLICT | `GetCellChangesHandler` (`GET /audit/cells`) не фільтрує за грантом на проєкт; без `documentId` — необмежений запит по всіх проєктах, включно зі старими/новими значеннями комірок | OPEN |
 | Q-178 | QUESTION | `ExcelExchangeHandlers` (import preview/apply) перевіряють лише RBAC на контролері, без гранта на проєкт — фактичний захист є глибше (`ExcelImporter`→`CanEditSliceAsync`), але це розбіжність із патерном `ExportDocumentHandler` (`A7-55`), не доведена вразливість | OPEN |
 | Q-179 | QUESTION | `ProjectsController`: Activate/Archive/Clone/ApprovalRoute перевіряють лише глобальний `Project.Manage`, без гранта на конкретний `projectId` — може бути навмисним (адмінське право), потребує підтвердження заміру | OPEN |
@@ -7270,7 +7270,17 @@ INSERT` на кожну знахідку замість пакетного upser
 документа цим маршрутом, а тоді прочитати самі значення через `GetSlice`
 (до фіксу `Q-171`) — повний ланцюжок розкриття.
 
-**Статус:** OPEN
+#### Закрито
+
+Додано `access.CanReadDocumentAsync(profile, documentId, ct)` тим самим
+прийомом, що й `Q-171`. Доведено сценарієм на реальному HTTP:
+`stranger` із загальним `Document.View` (без гранта на проєкт `owner`)
+отримує `403` на `GET .../documents/{чужий}/tables`, а не список
+`tableInstanceId` (`DataEntryScenarios.Чужий_документ_у_переліку_таблиць_не_читається`).
+Мутація (D-134): відкат перевірки → тест падає з `200` і реальним
+переліком таблиць; відновлено → зелений.
+
+**Статус:** RESOLVED · `GetDocumentTablesHandler.cs`, PR #75
 
 ---
 
@@ -7315,7 +7325,17 @@ INSERT` на кожну знахідку замість пакетного upser
 виконується і перезаписує обчислені значення чужого проєкту, включно з
 можливо закритим періодом.
 
-**Статус:** OPEN
+#### Закрито
+
+Додано `access.CanReadDocumentAsync(profile, documentId, ct)` після
+`PermissionCheck.RequireAsync`. Доведено сценарієм: `stranger` із
+загальним `Calculation.Recalculate` отримує `403` на
+`POST .../documents/{чужий}/recalculate` (`CalculationScenarios.Чужий_документ_не_перераховується`).
+Мутація (D-134): відкат → тест падає з `202 Accepted`; відновлено —
+зелений. `Q-151` (недосяжний `RunCalculationHandler` з gate закритого
+періоду) лишається окремим, не закритим цим PR.
+
+**Статус:** RESOLVED · `RecalculateDocumentHandler.cs`, PR #75
 
 ---
 
@@ -7330,7 +7350,17 @@ INSERT` на кожну знахідку замість пакетного upser
 **Атака:** будь-який користувач із `Calculation.View` читає показники
 викидів документа проєкту, на який не має гранта.
 
-**Статус:** OPEN
+#### Закрито
+
+Додано `access.CanReadDocumentAsync(profile, documentId, ct)` — `Calculation.View`
+лишається функціональним правом (навіщо це право взагалі є), грант на
+проєкт додатково звужує «яких САМЕ документів». Доведено сценарієм:
+`stranger` із `Calculation.View` отримує `403` на
+`GET .../documents/{чужий}/calculation-results`
+(`CalculationScenarios.Чужі_результати_розрахунку_не_читаються`).
+Мутація (D-134): відкат → тест падає з `200`; відновлено — зелений.
+
+**Статус:** RESOLVED · `GetCalculationResultsHandler.cs`, PR #75
 
 ---
 
@@ -7346,7 +7376,18 @@ INSERT` на кожну знахідку замість пакетного upser
 документ-привид у чужому проєкті, на який не має гранта — засмічує його
 перелік документів і послідовність бізнес-ключа.
 
-**Статус:** OPEN
+#### Закрито
+
+Додано перевірку `profile.LevelFor(ResourceKind.Project, projectId) >=
+GrantLevel.Write` — тут ресурс ще НЕ документ (документа поки не існує),
+тож перевіряється грант на сам `projectId`, а не `CanReadDocumentAsync`.
+Доведено сценарієм: `stranger` із загальним `Document.Create` отримує
+`403` на `POST /documents` із чужим `projectId`
+(`DataEntryScenarios.Документ_не_заводиться_у_чужому_проєкті`). Мутація
+(D-134): відкат → тест падає зі `201 Created` і реальним `documentId`;
+відновлено — зелений.
+
+**Статус:** RESOLVED · `CreateDocumentHandler.cs`, PR #75
 
 ---
 

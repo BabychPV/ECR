@@ -532,6 +532,71 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// ⛔ Q-172 (аудит фази 2, авторизація). `GetDocumentTablesHandler`
+    /// перевіряв лише загальне право `Document.View`, без гранта на
+    /// конкретний `documentId` — а сам ще й МАТЕРІАЛІЗУЄ екземпляри таблиць
+    /// (запис на шляху читання). Разом із `Q-171` це давало повний
+    /// ланцюжок: перелічити чужі `tableInstanceId` цим маршрутом, тоді
+    /// прочитати їх через `GetSlice`.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-18")]
+    public async Task Чужий_документ_у_переліку_таблиць_не_читається()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S18dOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+        var stranger = await Provisioning.AdministratorAsync(
+            app, "S18dStranger", ["Document.View"]);
+
+        var ownerDoc = await ArrangeRealDocumentAsync(app, owner, "S18dOwner");
+        owner = ownerDoc.Admin;
+
+        // ⛔ Доказ сценарію: `stranger` має загальне `Document.View`, але
+        // жодного гранта на проєкт `owner` — перелік таблиць чужого
+        // документа має дати 4xx, а не список tableInstanceId.
+        var tables = await stranger.Client.GetAsync(
+            new Uri($"/api/v1/documents/{ownerDoc.DocumentId}/tables?periodKey={ownerDoc.PeriodKey}", UriKind.Relative));
+
+        Assert.True(
+            (int)tables.StatusCode is >= 400 and < 500,
+            $"перелік таблиць чужого документа мав дати 4xx, а дав {tables.StatusCode}: {await tables.Content.ReadAsStringAsync()}");
+    }
+
+    /// <remarks>
+    /// ⛔ Q-176 (аудит фази 2, авторизація). `CreateDocumentHandler`
+    /// перевіряв лише загальне право `Document.Create`, без гранта на
+    /// `projectId` із тіла запиту. Наслідок: будь-хто з цим правом (виданим
+    /// під власний проєкт) міг завести документ-привид у чужому проєкті.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-18")]
+    public async Task Документ_не_заводиться_у_чужому_проєкті()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S18eOwner", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit"]);
+        var stranger = await Provisioning.AdministratorAsync(app, "S18eStranger", ["Document.Create"]);
+
+        (owner, var ownerProjectId, _, _) = await ArrangeDocumentAsync(app, owner, "S18eOwner");
+        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(owner.Client, "S18eOwnerV2");
+
+        // ⛔ Доказ сценарію: `stranger` має право заводити документи взагалі,
+        // але жодного гранта на проєкт `owner` — створення документа в
+        // чужому проєкті має дати 4xx, а не новий documentId.
+        var createDoc = await stranger.Client.PostAsJsonAsync(
+            new Uri("/api/v1/documents", UriKind.Relative),
+            new { projectId = ownerProjectId, templateVersionId = versionId, sheetDefIds = Array.Empty<int>() });
+
+        Assert.True(
+            (int)createDoc.StatusCode is >= 400 and < 500,
+            $"створення документа в чужому проєкті мало дати 4xx, а дав {createDoc.StatusCode}: {await createDoc.Content.ReadAsStringAsync()}");
+    }
+
+    /// <remarks>
     /// ⛔ Сценарій довів дефект, глибший за той, який називала директива.
     /// Повідомлень не було не тому, що правил не було звідки взяти, — правило
     /// заводилося ще з `W5.4`. <c>MetadataCache</c> не вантажив

@@ -51,7 +51,20 @@ public sealed class GetCalculationResultsHandler(
     public async Task<IReadOnlyList<CalculationResultDto>> HandleAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ І ГРАНТ на проєкт документа (Q-175, аудит фази 2). `Calculation.View`
+        // (а не `Document.View`) відповідає на питання «чи бачить ця людина
+        // результати методологій узагалі» — але «яких САМЕ документів» і далі
+        // визначає грант на проєкт, так само як для читання самого документа.
+        // Без цієї перевірки будь-хто з `Calculation.View` бачив показники
+        // викидів чужого проєкту.
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
 
         var rows = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
 

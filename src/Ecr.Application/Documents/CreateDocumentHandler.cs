@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Documents;
 
@@ -34,9 +35,21 @@ public sealed class CreateDocumentHandler(
     {
         ArgumentNullException.ThrowIfNull(sheetDefIds);
 
-        await Templates.ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ І ГРАНТ на проєкт (Q-176, аудит фази 2). `Document.Create` каже
+        // «ця людина взагалі заводить документи», а не «у ЦЬОМУ проєкті» —
+        // `projectId` приходить із тіла запиту й досі ніде не звірявся з
+        // грантами користувача. Без цієї перевірки хтось із правом
+        // `Document.Create` (виданим під власний проєкт) міг завести
+        // документ-привид у чужому.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Write)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта на запис у проєкт {projectId}.");
+        }
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
