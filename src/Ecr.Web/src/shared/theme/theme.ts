@@ -22,6 +22,51 @@ export const brand: MantineColorsTuple = [
 ];
 
 /**
+ * Статусні кольори — `error` і `warning` (`W4.2`).
+ *
+ * ⛔ Це не перефарбовування. `primaryShade: { light: 6, dark: 5 }` (нижче)
+ * діє на КОЖЕН колір теми, не лише на `brand` — підтверджено читанням
+ * `getPrimaryShade` у `@mantine/core`: варіанти `filled`/`light`/`outline`
+ * будь-якого кольору беруть відтінок за ЦИМ індексом. Стандартна Mantine-
+ * шкала `red`/`orange` підібрана під typical `primaryShade.dark` (8), не
+ * під 5, тому голе `color="red"` у темній темі досі рендерилось як білий
+ * текст на світлому червоному — контраст ~2.2–2.8:1, глибоко нижче AA. Цей
+ * дефект був у застосунку ДО цієї зміни, просто жоден тест його не бачив:
+ * `contrast.test.ts` перевіряв лише `cellState` і кільце фокуса.
+ *
+ * ⚠ Значення підібрані обчисленням (не на око), за тим самим методом, що
+ * `cellState`: перевірені пари — `filled` (біла мітка на заливці, обидві
+ * схеми), `light` (текст на 10%/15%-заливці, обидві схеми) і `outline`
+ * (текст/межа на тлі сторінки, обидві схеми). Розрахунок — не в репозиторії
+ * (одноразовий скрипт), результат — у `contrast.test.ts`, який і є гейтом.
+ */
+export const statusError: MantineColorsTuple = [
+  '#fff5f5',
+  '#ffe3e3',
+  '#ffc9c9',
+  '#ffa8a8',
+  '#ff8787',
+  '#c92a2a',
+  '#c92a2a',
+  '#a61e1e',
+  '#a61e1e',
+  '#a61e1e',
+];
+
+export const statusWarning: MantineColorsTuple = [
+  '#fff4e6',
+  '#ffe8cc',
+  '#ffd8a8',
+  '#ffc078',
+  '#ffa94d',
+  '#a83c0b',
+  '#a83c0b',
+  '#8a3008',
+  '#8a3008',
+  '#8a3008',
+];
+
+/**
  * Стани комірки: колір і ФОРМА (`ФВ-14.18`, `D-128`, `D-144`).
  *
  * ⛔ Колір тут — **другий** носій, не перший, і це не риторика, а виміряний
@@ -115,7 +160,7 @@ export type CellStateName = keyof typeof cellState;
  * а привести їх назад буде дорожче, ніж написати заново.
  */
 export const theme = createTheme({
-  colors: { brand },
+  colors: { brand, statusError, statusWarning },
   primaryColor: 'brand',
   primaryShade: { light: 6, dark: 5 },
 

@@ -81,7 +81,7 @@ export function AccessMatrix({ templateVersionId }: { templateVersionId: number 
                             як дванадцять різних застережень. */}
                         {sheet.dependsOnData && (
                           <Tooltip label={t('version.accessMatrixDataHint')} multiline w={280}>
-                            <Badge ml="xs" size="xs" variant="outline" color="orange">
+                            <Badge ml="xs" size="xs" variant="outline" color="statusWarning">
                               {t('version.accessMatrixData')}
                             </Badge>
                           </Tooltip>
@@ -132,7 +132,9 @@ function Cell({ cell }: { cell: AccessMatrixCellDto }): JSX.Element {
       <Text
         span
         aria-label={label}
-        c={cell.state === 'Editable' ? 'dimmed' : cell.state === 'Partial' ? 'orange' : 'red'}
+        c={
+          cell.state === 'Editable' ? 'dimmed' : cell.state === 'Partial' ? 'statusWarning' : 'statusError'
+        }
         fw={cell.state === 'Editable' ? 400 : 700}
       >
         {sign}

@@ -114,12 +114,12 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
             <Group gap="xs">
               <Badge variant="light">{t('import.changes', { count: preview.changes.length })}</Badge>
               {preview.conflicts.length > 0 && (
-                <Badge color="orange">
+                <Badge color="statusWarning">
                   {t('import.conflicts', { count: preview.conflicts.length })}
                 </Badge>
               )}
               {preview.rejected.length > 0 && (
-                <Badge color="red">
+                <Badge color="statusError">
                   {t('import.rejected', { count: preview.rejected.length })}
                 </Badge>
               )}
@@ -129,7 +129,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               // ⛔ Застосування заблоковане цілком, а не «застосуємо решту».
               // Часткове застосування заборонене на рівні API, і імітувати
               // його тут означало б показати успіх там, де сервер відмовить.
-              <Alert color="orange" title={t('import.blockedTitle')}>
+              <Alert color="statusWarning" title={t('import.blockedTitle')}>
                 {t('import.blockedHint')}
               </Alert>
             )}

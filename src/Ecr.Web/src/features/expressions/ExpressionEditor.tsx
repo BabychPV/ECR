@@ -186,7 +186,7 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
 
   if (failed) {
     return (
-      <Alert color="red" title={t('expressions.editorFailed')}>
+      <Alert color="statusError" title={t('expressions.editorFailed')}>
         {t('expressions.editorFailedHint')}
       </Alert>
     );

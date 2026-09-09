@@ -47,13 +47,13 @@ export function AccessDiagnosticsPanel({
       )}
 
       {view.groupsFromTicket && view.groups.length === 0 && (
-        <Alert color="orange" title={t('myGroups.noSidsTitle')}>
+        <Alert color="statusWarning" title={t('myGroups.noSidsTitle')}>
           {t('myGroups.noSidsHint')}
         </Alert>
       )}
 
       {view.groupsFromTicket && view.groups.length > 0 && view.unmatchedSids.length > 0 && (
-        <Alert color="orange" title={t('myGroups.unmatchedTitle')}>
+        <Alert color="statusWarning" title={t('myGroups.unmatchedTitle')}>
           {t('myGroups.unmatchedHint', { count: view.unmatchedSids.length })}
         </Alert>
       )}
@@ -113,7 +113,7 @@ export function AccessDiagnosticsPanel({
             відповіді: перша лікується продовженням призначення, друга —
             заведенням нового. */}
         {view.expiredRoleCodes.length > 0 && (
-          <Text size="sm" c="orange">
+          <Text size="sm" c="statusWarning">
             {t('myGroups.expired', { roles: view.expiredRoleCodes.join(', ') })}
           </Text>
         )}

@@ -332,7 +332,7 @@ function ColumnsEditor({
           />
           <ActionIcon
             variant="subtle"
-            color="red"
+            color="statusError"
             aria-label={t('reportDefs.removeColumn')}
             disabled={columns.length === 1}
             onClick={() => onChange(columns.filter((_, i) => i !== index))}

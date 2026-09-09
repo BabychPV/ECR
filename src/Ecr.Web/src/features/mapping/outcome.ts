@@ -40,6 +40,6 @@ export function outcomeColor(outcome: MappingOutcome): string {
     case 'RawOnly':
       return 'gray';
     default:
-      return 'red';
+      return 'statusError';
   }
 }

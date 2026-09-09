@@ -202,7 +202,7 @@ export function SheetActions({
     }
 
     notifications.show({
-      color: 'red',
+      color: 'statusError',
       message: recalcJob.data?.message ?? t('workflow.recalcFailed'),
     });
   }, [recalcJobId, outcome, recalcJob.data?.message, queryClient, documentId, periodKey]);
@@ -245,7 +245,7 @@ export function SheetActions({
         )}
 
         {isAllowed('reject', state) && (
-          <Button size="xs" color="red" variant="light" onClick={() => setAsking('reject')}>
+          <Button size="xs" color="statusError" variant="light" onClick={() => setAsking('reject')}>
             {t('workflow.reject')}
           </Button>
         )}

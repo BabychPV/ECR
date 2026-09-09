@@ -89,7 +89,7 @@ export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.E
               <Button
                 size="compact-xs"
                 variant="subtle"
-                color="red"
+                color="statusError"
                 onClick={() => setSteps(steps.filter((_, i) => i !== index))}
               >
                 {t('common.delete')}
