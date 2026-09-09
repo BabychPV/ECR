@@ -637,3 +637,68 @@ public sealed class ArchiveProjectHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
+
+/// <summary>
+/// Змінює пояс майданчика проєкту. Право <c>Project.Manage</c> (T6/#52).
+/// </summary>
+/// <remarks>
+/// ⚠ Ре-верифіковано проти твердження аудиту (`[звірка]`, слабша впевненість):
+/// домен УЖЕ мав повний, протестований <see cref="Project.ChangeTimeZone"/>
+/// (перевірено — <c>TimeZoneImmutabilityTests</c> покриває і дозволений, і
+/// заборонений випадок), просто без застосункового обробника й ендпоінта над
+/// ним. Тобто прогалина була рівно там, де аудит і назвав: не в правилі, а в
+/// доступі до нього через API. Само правило («не після відкриття першого
+/// періоду», <c>ECR-CFG-4221</c>/<c>ECR-PRD-0409</c>) не чіпається: обробник
+/// лише виносить наявний метод сутності на HTTP.
+///
+/// ⛔ «Шість сутностей для деактивації», згадані в тому ж пункті аудиту, — не
+/// реалізовано. Жодного тексту, який їх називає (структура, коментарі, історія
+/// git), у цьому репозиторії не знайдено: сам аудит зізнається, що цей
+/// підпункт «частково незрозумілий». Вигадувати шість сутностей означало б
+/// закривати рядок аудиту, а не проблему; правильна дія тут — назвати
+/// прогалину, а не заповнити її здогадкою (правило винятку «факти, яких я не
+/// знаю» цього ж проєкту).
+/// </remarks>
+public sealed class ChangeProjectTimeZoneHandler(
+    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+{
+    /// <summary>Право на зміну поясу.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Змінює пояс майданчика.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="timeZoneId">Новий пояс — ідентифікатор IANA.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Проєкту немає (<c>ECR-PRJ-0404</c>).</exception>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CFG-4221</c> — значення не є відомим ідентифікатором IANA;
+    /// <c>ECR-PRD-0409</c> — перший період уже відкривався (ФВ-1.1a).
+    /// </exception>
+    public async Task HandleAsync(int projectId, string timeZoneId, CancellationToken ct)
+    {
+        var profile = await PermissionCheck
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
+        // грант на неіснуючий `projectId` не буває виданий нікому.
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+
+        // ⛔ Той самий патерн гранта на КОНКРЕТНИЙ проєкт, що й
+        // Activate/Archive/Clone (Q-179): глобальне `Project.Manage` каже «ця
+        // людина взагалі керує проєктами», грант — «саме цим».
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
+
+        // Уся перевірка — в сутності: невідомий IANA-ідентифікатор і спроба
+        // зміни після відкриття першого періоду обидва йдуть звідти
+        // (`Project.ChangeTimeZone`), обробник нічого не дублює.
+        project.ChangeTimeZone(timeZoneId);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}

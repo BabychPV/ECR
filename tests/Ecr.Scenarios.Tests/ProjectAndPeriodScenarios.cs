@@ -270,6 +270,36 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         Assert.Equal("ECR-PRD-4225", invalidBody.GetProperty("errorCode").GetString());
     }
 
+    /// <summary>
+    /// T6/#52. Пояс майданчика змінюється, поки жоден період не відкрився, і
+    /// відмовляється, щойно перший період вийшов зі <c>Scheduled</c>.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "T6-52")]
+    public async Task D_134_Зміна_поясу_дозволена_в_чернетці_і_заборонена_після_активації()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(app, "T652", ["Project.Manage", "Document.View", "Template.Edit"]);
+
+        var projectId = await CreateProjectAsync(admin.Client, "T652", "Asia/Almaty");
+
+        var changeInDraft = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/projects/{projectId}/timezone", UriKind.Relative),
+            new { timeZoneId = "Asia/Aqtau" });
+        Assert.Equal(HttpStatusCode.NoContent, changeInDraft.StatusCode);
+
+        admin = await ActivateProjectAsync(admin, projectId);
+
+        var changeAfterActivation = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/projects/{projectId}/timezone", UriKind.Relative),
+            new { timeZoneId = "UTC" });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, changeAfterActivation.StatusCode);
+        var body = await changeAfterActivation.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-PRD-0409", body.GetProperty("errorCode").GetString());
+    }
+
     /// <summary>Перша політика періодів, доступна для вибору (seed завжди має ECR-Standard).</summary>
     private static async Task<int> FirstPeriodPolicyIdAsync(HttpClient client)
     {

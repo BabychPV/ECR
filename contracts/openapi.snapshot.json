@@ -605,6 +605,19 @@
         ],
         "type": "object"
       },
+      "ChangeProjectTimeZoneRequest": {
+        "description": "Запит на зміну поясу майданчика проєкту (T6/#52).",
+        "properties": {
+          "timeZoneId": {
+            "description": "Новий пояс — ідентифікатор IANA (`Asia/Aqtau`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timeZoneId"
+        ],
+        "type": "object"
+      },
       "CloneProjectRequest": {
         "description": "Запит на клонування проєкту.",
         "properties": {
@@ -11860,6 +11873,72 @@
           }
         },
         "summary": "Перерахунок УСЬОГО проєкту. Право `Calculation.Recalculate`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/timezone": {
+      "put": {
+        "description": "⚠ Дозволено лише поки жоден період проєкту не виходив зі стану\n`Scheduled` (ФВ-1.1a, `ECR-PRD-0409`) — те саме правило, що й\nпри створенні (`ECR-CFG-4221` на невідомий IANA-ідентифікатор).\nПеревіряє сутність (void Project.ChangeTimeZone(string timeZoneId)),\nне цей ендпоінт.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeProjectTimeZoneRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeProjectTimeZoneRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeProjectTimeZoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює пояс майданчика проєкту. Право `Project.Manage` (T6/#52).",
         "tags": [
           "Projects"
         ]

@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
+  ChangeProjectTimeZoneRequest,
   CloneProjectRequest,
   JobStatus,
   PagedProjects,
@@ -14,7 +15,7 @@ import type {
   SetCurrentPeriodRequest,
 } from '@/api/types';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
-import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
+import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { can, useSession } from '@/shared/session/useSession';
@@ -50,6 +51,13 @@ export function PeriodsPage(): JSX.Element {
 
   const [cloning, setCloning] = useState(false);
   const [cloneCode, setCloneCode] = useState('');
+
+  // T6/#52: діалог зміни поясу майданчика; `null` — закрито. Значення поля
+  // ПОРОЖНЄ на відкритті — з тієї ж причини, що й пояс у формі створення
+  // (директива ПК-1 №06 §3): наявний пояс не має підказувати новий, бо це
+  // одна незворотна дія.
+  const [changingTimeZone, setChangingTimeZone] = useState(false);
+  const [newTimeZoneId, setNewTimeZoneId] = useState<string | null>(null);
 
   // Який період відкриваємо; `null` — діалог закритий.
   const [reopening, setReopening] = useState<number | null>(null);
@@ -126,6 +134,32 @@ export function PeriodsPage(): JSX.Element {
     onSuccess: async () => {
       await refresh();
       showDone(t('periods.archived'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Зміна поясу майданчика (T6/#52).
+   *
+   * ⛔ Домен уже мав повний, протестований `Project.ChangeTimeZone` —
+   * прогалина була рівно тут, у відсутньому ендпоінті над ним, не в
+   * правилі. Дозволено лише поки жоден період не вийшов зі стану
+   * `Scheduled` (ФВ-1.1a); кнопка нижче показується лише чернетці як
+   * найближчий видимий проксі цього правила — сервер перевіряє його
+   * насправді і відмовляє `ECR-PRD-0409`, якщо проксі колись розійдеться
+   * з фактом.
+   */
+  const changeTimeZone = useMutation({
+    mutationFn: (target: { id: number; timeZoneId: string }) =>
+      apiFetch(`/api/v1/projects/${target.id}/timezone`, {
+        method: 'PUT',
+        body: JSON.stringify({ timeZoneId: target.timeZoneId } satisfies ChangeProjectTimeZoneRequest),
+      }),
+    onSuccess: async () => {
+      await refresh();
+      setChangingTimeZone(false);
+      setNewTimeZoneId(null);
+      showDone(t('periods.timezoneChanged'));
     },
     onError: showApiError,
   });
@@ -312,6 +346,16 @@ export function PeriodsPage(): JSX.Element {
                 onClick={() => activate.mutate(selected.id)}
               >
                 {t('periods.activate')}
+              </Button>
+            )}
+
+            {/* T6/#52: показана лише чернетці — поки жоден період не вийшов
+                зі `Scheduled`, зміна безпечна (ФВ-1.1a); сервер перевіряє це
+                насправді через `Project.ChangeTimeZone`, кнопка — лише
+                видимий проксі. */}
+            {selected?.status === 'Draft' && manages && (
+              <Button size="xs" variant="default" onClick={() => setChangingTimeZone(true)}>
+                {t('periods.timezoneChange')}
               </Button>
             )}
 
@@ -508,6 +552,47 @@ export function PeriodsPage(): JSX.Element {
             }}
           >
             {t('periods.clone')}
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* T6/#52: значення поля ПОРОЖНЄ на відкритті — той самий вибір, що й
+          у формі створення (директива ПК-1 №06 §3): наявний пояс не має
+          підказувати новий для незворотної дії. */}
+      <Modal
+        opened={changingTimeZone}
+        onClose={() => setChangingTimeZone(false)}
+        title={t('periods.timezoneChange')}
+      >
+        <Text size="sm" mb="sm">
+          {t('periods.timezoneChangeHint')}
+        </Text>
+
+        <Select
+          required
+          searchable
+          limit={50}
+          label={t('periods.timeZone')}
+          data={timeZones()}
+          value={newTimeZoneId}
+          onChange={setNewTimeZoneId}
+          data-autofocus
+        />
+
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setChangingTimeZone(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={newTimeZoneId === null || selected === undefined}
+            loading={changeTimeZone.isPending}
+            onClick={() => {
+              if (selected !== undefined && newTimeZoneId !== null) {
+                changeTimeZone.mutate({ id: selected.id, timeZoneId: newTimeZoneId });
+              }
+            }}
+          >
+            {t('periods.timezoneChange')}
           </Button>
         </Group>
       </Modal>

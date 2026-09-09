@@ -98,6 +98,7 @@ public static class DependencyInjection
         services.AddScoped<Projects.CreateProjectHandler>();
         services.AddScoped<Projects.ActivateProjectHandler>();
         services.AddScoped<Projects.ArchiveProjectHandler>();
+        services.AddScoped<Projects.ChangeProjectTimeZoneHandler>();
 
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();

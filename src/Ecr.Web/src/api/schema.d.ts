@@ -3499,6 +3499,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/timezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює пояс майданчика проєкту. Право `Project.Manage` (T6/#52).
+         * @description ⚠ Дозволено лише поки жоден період проєкту не виходив зі стану
+         *     `Scheduled` (ФВ-1.1a, `ECR-PRD-0409`) — те саме правило, що й
+         *     при створенні (`ECR-CFG-4221` на невідомий IANA-ідентифікатор).
+         *     Перевіряє сутність (void Project.ChangeTimeZone(string timeZoneId)),
+         *     не цей ендпоінт.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ChangeProjectTimeZoneRequest"];
+                    "application/json": components["schemas"]["ChangeProjectTimeZoneRequest"];
+                    "text/json": components["schemas"]["ChangeProjectTimeZoneRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries": {
         parameters: {
             query?: never;
@@ -7477,6 +7537,11 @@ export interface components {
             currentPassword: string;
             /** @description Новий пароль. */
             newPassword: string;
+        };
+        /** @description Запит на зміну поясу майданчика проєкту (T6/#52). */
+        ChangeProjectTimeZoneRequest: {
+            /** @description Новий пояс — ідентифікатор IANA (`Asia/Aqtau`). */
+            timeZoneId: string;
         };
         /** @description Запит на клонування проєкту. */
         CloneProjectRequest: {

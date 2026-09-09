@@ -966,6 +966,12 @@ USING (VALUES
     (N'periods.policyCreate',            N'en', N'Add policy', 1),
     (N'periods.policyCreated',           N'en', N'The policy is created.', 1),
     (N'periods.policyUpdated',           N'en', N'The policy is updated. Projects pick up the new offsets on their next calendar rebuild.', 1),
+    -- T6/#52: зміна поясу майданчика — дозволена лише поки жоден період не
+    -- відкривався (ФВ-1.1a); кнопка доступна лише чернетці з тієї ж причини,
+    -- що й активація вище.
+    (N'periods.timezoneChange',          N'en', N'Change time zone', 1),
+    (N'periods.timezoneChangeHint',      N'en', N'Allowed only while every period of the project is still Scheduled: once one opens, the boundaries become someone''s obligation.', 1),
+    (N'periods.timezoneChanged',         N'en', N'The site time zone is changed.', 1),
     (N'workflow.route',                  N'en', N'Approval route', 1),
     (N'workflow.routeHint',              N'en', N'Who approves, and in what order', 1),
     (N'workflow.routeEmptyHint',         N'en', N'No route means single-stage approval: one holder of the Approve level is enough. Removing every step returns the project to that.', 1),

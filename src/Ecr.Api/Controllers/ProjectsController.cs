@@ -23,6 +23,7 @@ public sealed class ProjectsController(
     ListPeriodPoliciesHandler policies,
     CreatePeriodPolicyHandler createPolicy,
     UpdatePeriodPolicyHandler updatePolicy,
+    ChangeProjectTimeZoneHandler changeTimeZone,
     RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
     Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
@@ -254,6 +255,29 @@ public sealed class ProjectsController(
     }
 
     /// <summary>
+    /// Змінює пояс майданчика проєкту. Право <c>Project.Manage</c> (T6/#52).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Дозволено лише поки жоден період проєкту не виходив зі стану
+    /// <c>Scheduled</c> (ФВ-1.1a, <c>ECR-PRD-0409</c>) — те саме правило, що й
+    /// при створенні (<c>ECR-CFG-4221</c> на невідомий IANA-ідентифікатор).
+    /// Перевіряє сутність (<see cref="Ecr.Domain.Entities.Documents.Project.ChangeTimeZone"/>),
+    /// не цей ендпоінт.
+    /// </remarks>
+    [HttpPut("{id:int}/timezone")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ChangeTimeZone(
+        int id, [FromBody] ChangeProjectTimeZoneRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await changeTimeZone.HandleAsync(id, request.TimeZoneId, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
     /// Перерахунок УСЬОГО проєкту. Право <c>Calculation.Recalculate</c>.
     /// </summary>
     /// <remarks>
@@ -390,3 +414,7 @@ public sealed record UpdatePeriodPolicyRequest(
     int GraceOffsetDays,
     int HardCloseOffsetDays,
     int YearGraceOffsetDays);
+
+/// <summary>Запит на зміну поясу майданчика проєкту (T6/#52).</summary>
+/// <param name="TimeZoneId">Новий пояс — ідентифікатор IANA (<c>Asia/Aqtau</c>).</param>
+public sealed record ChangeProjectTimeZoneRequest(string TimeZoneId);
