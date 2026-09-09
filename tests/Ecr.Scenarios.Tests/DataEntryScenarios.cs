@@ -748,6 +748,45 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                 System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    /// <remarks>
+    /// ⛔ Q-177 (аудит фази 2, авторизація). `GetCellChangesHandler`
+    /// перевіряв лише загальне право `Security.ViewAudit`, без гранта на
+    /// проєкт документа, коли `documentId` заданий явно. Наслідок: будь-хто
+    /// з цим правом читав старі/нові значення комірок чужого документа.
+    /// Загальний випадок (без `documentId`, по всіх проєктах) лишається
+    /// окремим відкритим питанням — чи `Security.ViewAudit` навмисно
+    /// комплаєнс-право поза межами проєктів.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-20")]
+    public async Task Чужий_журнал_аудиту_за_documentId_не_читається()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S20bOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+        var stranger = await Provisioning.AdministratorAsync(app, "S20bStranger", ["Security.ViewAudit"]);
+
+        var doc = await ArrangeRealDocumentAsync(app, owner, "S20bOwner");
+        owner = doc.Admin;
+
+        var from = DateTime.UtcNow.AddMinutes(-1);
+        var to = DateTime.UtcNow.AddMinutes(1);
+
+        // ⛔ Доказ сценарію: `stranger` має `Security.ViewAudit`, але жодного
+        // гранта на проєкт `owner` — запит із конкретним `documentId` чужого
+        // проєкту має дати 4xx, а не журнал (навіть порожній 200 приховав би
+        // різницю між «немає доступу» і «немає записів»).
+        var audit = await stranger.Client.GetAsync(new Uri(
+            $"/api/v1/audit/cells?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}&documentId={doc.DocumentId}&limit=50",
+            UriKind.Relative));
+
+        Assert.True(
+            (int)audit.StatusCode is >= 400 and < 500,
+            $"журнал аудиту чужого документа мав дати 4xx, а дав {audit.StatusCode}: {await audit.Content.ReadAsStringAsync()}");
+    }
+
     /// <summary>Пише число в першу комірку першого рядка, звіряючи версію.</summary>
     private static async Task PatchAsync(
         EcrApiFactory app, Provisioning.Administrator admin, RealDocument doc,
