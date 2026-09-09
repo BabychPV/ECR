@@ -23,17 +23,28 @@ public sealed class AccessProfileCache(IMemoryCache memory)
     /// <summary>Повертає профіль із кешу або будує його.</summary>
     /// <param name="userId">Користувач.</param>
     /// <param name="securityStamp">Штамп безпеки — частина ключа.</param>
+    /// <param name="groupsFingerprint">
+    /// Відбиток груп, з якими буде побудований профіль при промаху
+    /// (<see cref="Key"/>) — ОБОВ'ЯЗКОВИЙ параметр, а не з дефолтом
+    /// (`Q-187`): саме забутий тут третій аргумент дав змогу профілю
+    /// власної сесії (з групами) і профілю перегляду адміністратором /
+    /// симуляції (без груп) того самого користувача лягати в ОДИН запис
+    /// `IMemoryCache`, хоча значення `AccessProfile.CacheKey` вже рахувало
+    /// цей відбиток — просто не як реальний ключ пошуку.
+    /// </param>
     /// <param name="factory">Побудова профілю при промаху.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<AccessProfile> GetOrCreateAsync(
-        int userId, string securityStamp, Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
+        int userId, string securityStamp, string groupsFingerprint,
+        Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(securityStamp);
+        ArgumentNullException.ThrowIfNull(groupsFingerprint);
         ArgumentNullException.ThrowIfNull(factory);
 
         // Зміна ролей або пароля змінює SecurityStamp, тому старий запис просто
         // перестає використовуватися — явна інвалідація не потрібна.
-        var key = Key(userId, securityStamp);
+        var key = Key(userId, securityStamp, groupsFingerprint);
         if (memory.TryGetValue(key, out AccessProfile? cached) && cached is not null)
         {
             return cached;
@@ -66,9 +77,14 @@ public sealed class AccessProfileCache(IMemoryCache memory)
     /// без зміни першого не зачіпає сесію взагалі.
     /// </remarks>
     /// <param name="userId">Користувач, чий профіль застарів.</param>
-    /// <param name="securityStamp">Поточний штамп користувача (без фінгерпринта груп).</param>
-    public void Evict(int userId, string securityStamp)
-        => memory.Remove(Key(userId, securityStamp));
+    /// <param name="securityStamp">Поточний штамп користувача.</param>
+    /// <param name="groupsFingerprint">
+    /// Відбиток груп ТОГО САМОГО запису, що клав <see cref="GetOrCreateAsync"/>
+    /// (`Q-187`) — без нього скидання цілило б у порожній варіант ключа,
+    /// а реальний запис (із групами) лишався б неторканим до сплину TTL.
+    /// </param>
+    public void Evict(int userId, string securityStamp, string groupsFingerprint)
+        => memory.Remove(Key(userId, securityStamp, groupsFingerprint));
 
     /// <summary>Ключ запису; виділений, щоб форма ключа була в одному місці.</summary>
     /// <summary>
