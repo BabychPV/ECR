@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { PatchCell, PatchCellsRequest, PatchCellsResponse } from '@/api/types';
@@ -69,11 +69,22 @@ export function buildRequest(
 }
 
 /**
+ * Видимий стан збереження (`B-35`, `#38`).
+ *
+ * ⛔ Оператор має бачити, чи дійшла його правка до сервера, а не здогадуватися
+ * з відсутності помилки. Мовчазне автозбереження — небезпека, а не зручність:
+ * саме так сформульований ризик у розборі `B-35`.
+ */
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+/**
  * Хук пакетного збереження комірок.
  *
- * ⚠ Дебаунс ~500 мс або `Ctrl+S`: зберігати на кожен натиск клавіші означало
- * б сотні запитів на один рядок, а не зберігати зовсім — втратити роботу при
- * закритті вкладки.
+ * ⚠ Дебаунс ~500 мс і збереження перед закриттям вкладки — це `autosave.ts`
+ * (`createDebouncer`, `registerUnloadFlush`), не цей хук: обидва механізми
+ * потребують ще й `pending`-мапу, яку тримає `DocumentGrid`, тож самотужки
+ * тут їх не зібрати. Хук натомість відповідає за ВИДИМИЙ підсумок: чи
+ * зберігається зараз, чи збереглося, чи впало.
  */
 export function useCellPatch(documentId: number): {
   patch: (request: PatchCellsRequest) => Promise<PatchCellsResponse>;
@@ -81,16 +92,22 @@ export function useCellPatch(documentId: number): {
   rowVersions: Record<string, string>;
   isPending: boolean;
   conflicts: unknown[];
+  /** Видимий індикатор для оператора — не лише лічильник незбереженого. */
+  status: SaveStatus;
 } {
   const queryClient = useQueryClient();
   const [isPending, setPending] = useState(false);
   const [conflicts, setConflicts] = useState<unknown[]>([]);
+  const [status, setStatus] = useState<SaveStatus>('idle');
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versions = useRef<Record<string, string>>({});
 
   const patch = useCallback(
     async (request: PatchCellsRequest): Promise<PatchCellsResponse> => {
       setPending(true);
       setConflicts([]);
+      setStatus('saving');
+      if (savedTimer.current !== null) clearTimeout(savedTimer.current);
 
       try {
         // ⚠ Адреса несе ДОКУМЕНТ, а не лише екземпляр таблиці: маршрут
@@ -111,6 +128,13 @@ export function useCellPatch(documentId: number): {
           queryKey: ['table-slice', request.tableInstanceId, request.periodKey],
         });
 
+        // ⚠ «Збережено» показується ТИМЧАСОВО, а не назавжди: індикатор, який
+        // ніколи не гасне, оператор перестає читати за перший же день, і він
+        // перестає відповідати на питання «чи зберігся мій щойновведений
+        // рядок». Дві секунди — досить, щоб побачити, і мало, щоб набриднути.
+        setStatus('saved');
+        savedTimer.current = setTimeout(() => setStatus('idle'), 2000);
+
         return response;
       } catch (error) {
         // ⛔ Конфлікт не «вирішується» мовчазним перезаписом: перелік
@@ -119,6 +143,7 @@ export function useCellPatch(documentId: number): {
           setConflicts(error.conflicts);
         }
 
+        setStatus('error');
         void documentId;
         throw error;
       } finally {
@@ -128,7 +153,44 @@ export function useCellPatch(documentId: number): {
     [documentId, queryClient],
   );
 
-  return { patch, rowVersions: versions.current, isPending, conflicts };
+  // ⚠ Таймер живе в `ref`, а не лише всередині `patch`: компонент може
+  // розмонтуватися між «збережено» і спливанням двох секунд (перехід на іншу
+  // таблицю), і виклик `setStatus` на розмонтованому хуку — попередження
+  // React, яке нічого корисного не робить, лише шумить у консолі.
+  useEffect(() => () => {
+    if (savedTimer.current !== null) clearTimeout(savedTimer.current);
+  }, []);
+
+  return { patch, rowVersions: versions.current, isPending, conflicts, status };
+}
+
+/**
+ * Надсилає останній пакет правок при закритті вкладки (`B-35`, `#38`).
+ *
+ * ⛔ Звичайний `apiFetch` тут не підходить: `beforeunload` не чекає на
+ * `await`, сторінка вивантажується незалежно від того, дійшла відповідь чи
+ * ні. `keepalive: true` — єдиний прапорець `fetch`, який браузер шанує саме
+ * в цей момент: запит триває й після того, як документ зник, за умови, що
+ * тіло вкладається в ліміт (≈64 КБ) — а пакет правок одного зрізу в нього
+ * вкладається з великим запасом.
+ *
+ * ⚠ Відповідь навмисно ІГНОРУЄТЬСЯ: обробляти конфлікт чи оновлювати версії
+ * рядків тут нема кому — вкладка вже зачиняється, а екран, який показав би
+ * результат, зникає раніше за нього.
+ */
+export function sendPatchBeacon(documentId: number, request: PatchCellsRequest): void {
+  try {
+    void fetch(`/api/v1/documents/${documentId}/cells`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      keepalive: true,
+      body: JSON.stringify(request),
+    });
+  } catch {
+    // ⚠ Найкраще, що можна зробити на вивантаженні сторінки, — спробувати:
+    // показати помилку вже нема на чому, екран зникає в цю саму мить.
+  }
 }
 
 /** Ключ комірки — експортується, щоб накопичувач і grid не розходилися. */

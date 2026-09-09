@@ -1,5 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Alert, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -13,7 +13,14 @@ import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './c
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
-import { buildRequest, cellEditKey, useCellPatch, type PendingEdit } from './useCellPatch';
+import {
+  buildRequest,
+  cellEditKey,
+  sendPatchBeacon,
+  useCellPatch,
+  type PendingEdit,
+} from './useCellPatch';
+import { createDebouncer, registerUnloadFlush } from './autosave';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -89,7 +96,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
 
-  const { patch, isPending, conflicts } = useCellPatch(documentId);
+  const { patch, isPending, conflicts, status: saveStatus } = useCellPatch(documentId);
 
   /**
    * Додавання рядка динамічної таблиці (`ФВ-3.2`).
@@ -118,6 +125,56 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const history = useRef(new UndoStack(`${tableInstanceId}:${periodKey}`));
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
   const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
+
+  // ⚠ `pending` читається з таймера дебаунсу й обробника `beforeunload` —
+  // обидва живуть поза React-рендером, і замикання на `pending` там бачило б
+  // застиглий знімок з моменту створення. `ref` завжди дає ОСТАННЮ мапу.
+  const pendingRef = useRef(pending);
+  useEffect(() => {
+    pendingRef.current = pending;
+  }, [pending]);
+
+  const save = useCallback(
+    async (edits: PendingEdit[]) => {
+      if (edits.length === 0) return;
+
+      await patch(buildRequest(tableInstanceId, periodKey, edits));
+      setPending(new Map());
+    },
+    [patch, periodKey, tableInstanceId],
+  );
+
+  // ⚠ Дебаунс тримає ОДИН стабільний колбек (`autosave.ts`, `#38`): він читає
+  // найсвіжіші `pending`/`save` через `ref` (`pendingRef` вище), а не через
+  // замикання, — інакше кожен рендер створював би новий дебаунсер і
+  // скасовував заплановане збереження попереднього, тобто автозбереження
+  // ніколи не спрацьовувало б.
+  const saveRef = useRef(save);
+  useEffect(() => {
+    saveRef.current = save;
+  }, [save]);
+
+  const autosaveDebouncer = useRef(
+    createDebouncer(() => {
+      void saveRef.current([...pendingRef.current.values()]);
+    }),
+  );
+
+  // ⚠ Останній шанс зберегти перед закриттям вкладки (`B-35`, `#38`):
+  // `patch()` не встигне — `beforeunload` не чекає на `fetch` — тому тут іде
+  // окремий, «доручи й забудь» запит із `keepalive`.
+  useEffect(
+    () =>
+      registerUnloadFlush(
+        () => pendingRef.current.size > 0,
+        () =>
+          sendPatchBeacon(
+            documentId,
+            buildRequest(tableInstanceId, periodKey, [...pendingRef.current.values()]),
+          ),
+      ),
+    [documentId, tableInstanceId, periodKey],
+  );
 
   // ⛔ Округлені комірки (D-116, ФВ-9.16c) — перелік із «було → стало», а не
   // прапорець на весь зріз. Позначка ставиться лише на ЗМІНЕНІ комірки: інакше
@@ -148,6 +205,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     setPending(new Map());
     setWidths(readWidths(tableInstanceId));
     touchHistory();
+
+    // ⚠ Дебаунс іншої таблиці не має права зберегти правку в цю: без
+    // скасування таймер, запланований до переходу, спрацював би вже після
+    // нього — з `tableInstanceId`/`periodKey`, зафіксованими в замиканні
+    // `autosaveDebouncer`, тобто в чужий зріз.
+    autosaveDebouncer.current.cancel();
   }, [tableInstanceId, periodKey, touchHistory]);
 
   /**
@@ -184,16 +247,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data, readOnly, flags, widths],
   );
   const rows = useMemo(() => (data === undefined ? [] : gridRows(data)), [data]);
-
-  const save = useCallback(
-    async (edits: PendingEdit[]) => {
-      if (edits.length === 0) return;
-
-      await patch(buildRequest(tableInstanceId, periodKey, edits));
-      setPending(new Map());
-    },
-    [patch, periodKey, tableInstanceId],
-  );
 
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
   const onPaste = useCallback(
@@ -320,6 +373,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
         return next;
       });
+
+      // ⚠ Кожна правка ПЕРЕЗАПУСКАЄ дебаунс (`B-35`, `#38`): збереження йде
+      // через 500 мс тиші ПІСЛЯ ОСТАННЬОЇ правки, а не після першої — інакше
+      // швидкий ряд натисків Tab відсилав би окремий запит на кожну клітину.
+      autosaveDebouncer.current.trigger();
     },
     [data, readOnly, touchHistory],
   );
@@ -432,6 +490,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         >
           {t('grid.save', { count: pending.size })}
         </Button>
+
+        {/*
+         * ⚠ Видимий індикатор (`B-35`, `#38`): оператор має бачити, чи
+         * дійшла правка до сервера, а не здогадуватися з мовчання. `idle` не
+         * показується: порожнє місце в панелі інструментів не привертає
+         * уваги там, де нічого не відбувається.
+         *
+         * ⛔ «Збережено» і «зберігається» — НЕЙТРАЛЬНИЙ текст, не новий
+         * колірний токен: обидва статусні кольори теми (`statusError`,
+         * `statusWarning`) пройшли перебір контрасту під `primaryShade`
+         * цього застосунку (`theme.ts`), а невіряний третій колір саме тут
+         * дав би контраст ~2.2–2.8:1 — те, що вже раз ламало а11y-гейт
+         * (`W4.2`) для нечіпаних кольорів Mantine.
+         */}
+        {(saveStatus === 'saving' || saveStatus === 'saved') && (
+          <Text size="xs" c="dimmed" data-save-status={saveStatus}>
+            {t(saveStatus === 'saving' ? 'grid.saving' : 'grid.saved')}
+          </Text>
+        )}
+        {saveStatus === 'error' && (
+          <Badge color="statusError" variant="light" data-save-status="error">
+            {t('grid.saveError')}
+          </Badge>
+        )}
 
         {/* ⛔ Кнопка є лише там, де рядки додає користувач, і зникає при
             досягненні стелі. Показана в `Fixed` таблиці, вона обіцяла б те,
