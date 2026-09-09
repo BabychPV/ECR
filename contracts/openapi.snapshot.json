@@ -6405,29 +6405,41 @@
       "TableSliceDto": {
         "description": "Зріз таблиці для grid. Порожні комірки не передаються — клієнт бере\n`DefaultValue` з опису колонки (ФВ-3.8).\nБюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2).",
         "properties": {
+          "cellConfirmations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Комірки, дозволені лише після ЯВНОГО підтвердження оператора\n(`ФВ-2.16`, `AllowWithConfirmation`, `#43`). Ключ — той\nсамий формат, що й у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions\n(`\"{rowKey}:{columnCode}\"`); значення — пояснення для діалогу\nпідтвердження. Комірка, якої тут немає, підтвердження не потребує.",
+            "type": "object"
+          },
           "cellPermissions": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Компактна мапа заборон: ключ — `\"{rowKey}:{columnCode}\"`, значення —\nназва EditDenyReason. Комірка, якої тут\nнемає, дозволена.",
             "type": "object"
           },
           "columns": {
+            "description": "Опис колонок таблиці.",
             "items": {
               "$ref": "#/components/schemas/ColumnDto"
             },
             "type": "array"
           },
           "periodKey": {
+            "description": "Період екземпляра.",
             "format": "int32",
             "type": "integer"
           },
           "rows": {
+            "description": "Рядки зі значеннями.",
             "items": {
               "$ref": "#/components/schemas/RowDto"
             },
             "type": "array"
           },
           "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
             "format": "int64",
             "type": "integer"
           }
@@ -6437,7 +6449,8 @@
           "periodKey",
           "columns",
           "rows",
-          "cellPermissions"
+          "cellPermissions",
+          "cellConfirmations"
         ],
         "type": "object"
       },

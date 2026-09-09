@@ -6,12 +6,29 @@ namespace Ecr.Application.Documents.Dto;
 /// <c>DefaultValue</c> з опису колонки (ФВ-3.8).
 /// Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2).
 /// </summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="PeriodKey">Період екземпляра.</param>
+/// <param name="Columns">Опис колонок таблиці.</param>
+/// <param name="Rows">Рядки зі значеннями.</param>
+/// <param name="CellPermissions">
+/// Компактна мапа заборон: ключ — <c>"{rowKey}:{columnCode}"</c>, значення —
+/// назва <see cref="Ecr.Domain.Enums.EditDenyReason"/>. Комірка, якої тут
+/// немає, дозволена.
+/// </param>
+/// <param name="CellConfirmations">
+/// Комірки, дозволені лише після ЯВНОГО підтвердження оператора
+/// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>, <c>#43</c>). Ключ — той
+/// самий формат, що й у <see cref="CellPermissions"/>
+/// (<c>"{rowKey}:{columnCode}"</c>); значення — пояснення для діалогу
+/// підтвердження. Комірка, якої тут немає, підтвердження не потребує.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ColumnDto> Columns,
     IReadOnlyList<RowDto> Rows,
-    IReadOnlyDictionary<string, string> CellPermissions);
+    IReadOnlyDictionary<string, string> CellPermissions,
+    IReadOnlyDictionary<string, string> CellConfirmations);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>

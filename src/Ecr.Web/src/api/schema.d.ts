@@ -10070,14 +10070,33 @@ export interface components {
          *     `DefaultValue` з опису колонки (ФВ-3.8).
          *     Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2). */
         TableSliceDto: {
+            /** @description Комірки, дозволені лише після ЯВНОГО підтвердження оператора
+             *     (`ФВ-2.16`, `AllowWithConfirmation`, `#43`). Ключ — той
+             *     самий формат, що й у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions
+             *     (`"{rowKey}:{columnCode}"`); значення — пояснення для діалогу
+             *     підтвердження. Комірка, якої тут немає, підтвердження не потребує. */
+            cellConfirmations: {
+                [key: string]: string;
+            };
+            /** @description Компактна мапа заборон: ключ — `"{rowKey}:{columnCode}"`, значення —
+             *     назва EditDenyReason. Комірка, якої тут
+             *     немає, дозволена. */
             cellPermissions: {
                 [key: string]: string;
             };
+            /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Період екземпляра.
+             */
             periodKey: number;
+            /** @description Рядки зі значеннями. */
             rows: components["schemas"]["RowDto"][];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці.
+             */
             tableInstanceId: number;
         };
         TemplateChangeDto: {
