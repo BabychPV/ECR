@@ -112,6 +112,7 @@ public sealed class RecalculationJobProjectIdTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Ports.ICalculationResultStore>(),
             Substitute.For<IBackgroundJobScheduler>(),
             Substitute.For<Ecr.Application.Ports.IUnitOfWork>(),
+            Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow));
 

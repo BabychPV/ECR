@@ -3766,6 +3766,68 @@
         ],
         "type": "object"
       },
+      "ProjectRecalculationAcceptedResponse": {
+        "description": "Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151).",
+        "properties": {
+          "jobId": {
+            "description": "Задача.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період; `null` — повний рік, усі документи проєкту.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "periodKey"
+        ],
+        "type": "object"
+      },
+      "ProjectRecalculationRequest": {
+        "description": "Запит на перерахунок усього проєкту (Q-151).",
+        "properties": {
+          "approvalReason": {
+            "description": "Причина погодження; обов'язкова разом із `ApprovedByUserId`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "approvedByUserId": {
+            "description": "Хто погодив перерахунок закритого періоду (ФВ-9.7); `null` — без погодження.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periodKey": {
+            "description": "Період; `null` — повний рік, усі документи проєкту.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "periodKey",
+          "approvedByUserId",
+          "approvalReason"
+        ],
+        "type": "object"
+      },
       "ProjectStatus": {
         "description": "Стан проєкту: `Draft → Active → Archived`.",
         "enum": [
@@ -11446,6 +11508,89 @@
           }
         },
         "summary": "Календар періодів проєкту. Право `Document.View`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/recalculate": {
+      "post": {
+        "description": "    ⛔ Q-151/Q-162 (аудит фази 1). `RunCalculationHandler` існував,\n    був протестований і не мав звідки його викликати: жоден контролер\n    на нього не посилався. Задача, яку він ставить у чергу\n    (`IRecalculationJob`), тепер справді перераховує всі документи\n    проєкту, коли `periodKey` — `null` (повний рік) чи період\n    охоплює кілька документів (Q-162: раніше `DocumentId = 0` мовчки\n    повертав нуль перерахованих прив'язок).\n    Довга операція — у фон, як і перерахунок документа: повертає\njobId, а не результат.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRecalculationRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRecalculationRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRecalculationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecalculationAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecalculationAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecalculationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перерахунок УСЬОГО проєкту. Право `Calculation.Recalculate`.",
         "tags": [
           "Projects"
         ]

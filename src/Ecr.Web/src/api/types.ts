@@ -452,6 +452,12 @@ export type ResourceGrantDto = Schemas['ResourceGrantDto'];
 /** Публікація версії методології. */
 export type PublishMethodologyRequest = Schemas['PublishMethodologyRequest'];
 
+/** Перерахунок усього проєкту (Q-151): null-період — повний рік. */
+export type ProjectRecalculationRequest = Schemas['ProjectRecalculationRequest'];
+
+/** Прийнятий у чергу перерахунок проєкту. */
+export type ProjectRecalculationAcceptedResponse = Schemas['ProjectRecalculationAcceptedResponse'];
+
 /** Запуск збору з джерела. */
 export type CollectRequest = Schemas['CollectRequest'];
 

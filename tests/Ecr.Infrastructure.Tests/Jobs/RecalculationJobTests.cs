@@ -3,6 +3,7 @@ using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
@@ -141,6 +142,101 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
         Assert.Equal(progress.Reports.Select(r => r.Percent).Order(), progress.Reports.Select(r => r.Percent));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task DocumentId_нуль_перераховує_УСІ_документи_проєкту()
+    {
+        // ⛔ Q-151/Q-162: `RunCalculationHandler` кладе в чергу payload БЕЗ
+        // `DocumentId` узагалі (проєкт-рівневий перерахунок) — при розборі в
+        // non-nullable `long` це мовчки стає 0. До цього пакета `0` не
+        // трактувався як «усі документи проєкту»: фільтр `DocumentId == 0`
+        // просто не знаходив жодного екземпляра таблиці, і прогін чесно
+        // звітував `Succeeded` над нулем документів.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        long secondDocumentId;
+        await using (var seed = builder.CreateContext())
+        {
+            var second = new Document(
+                document.ProjectId, "DOC-EXTRA", 1,
+                new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc));
+            seed.Documents.Add(second);
+            await seed.SaveChangesAsync();
+            secondDocumentId = second.Id;
+        }
+
+        var order = new List<string>();
+        var runner = new RecordingRunner(order);
+
+        await using var db = builder.CreateContext();
+
+        var request = new RecalculationRequest(
+            ProjectId: document.ProjectId,
+            DocumentId: 0,
+            PeriodKey: document.PeriodKey.Value,
+            TriggeredByUserId: null);
+
+        var job = new RecalculationJob(
+            db, runner, RunHandler(), FormulaService(Rows(order)), new TestClock(DateTime.UtcNow));
+
+        await job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None);
+
+        // ⛔ ГОЛОВНЕ ТВЕРДЖЕННЯ: обидва документи проєкту дійсно перерахувалися
+        // — не лише перший, і не жоден.
+        //
+        // ⚠ `run.Status` тут НЕ перевіряється (той самий застережний коментар,
+        // що й у `RecalculationJobProjectIdTests`): `ICalculationResultStore`,
+        // який перемикає актуальність прогону на `Succeeded`, замоканий —
+        // цей тест про те, ЯКІ документи дійшли до оркестратора, а не про
+        // повний життєвий цикл прогону.
+        Assert.Equal(
+            new[] { document.DocumentId, secondDocumentId }.OrderBy(id => id),
+            runner.DocumentIds.OrderBy(id => id));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task DocumentId_нуль_іменує_документ_у_повідомленнях_прогресу()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        await using (var seed = builder.CreateContext())
+        {
+            seed.Documents.Add(new Document(
+                document.ProjectId, "DOC-EXTRA-2", 1,
+                new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc)));
+            await seed.SaveChangesAsync();
+        }
+
+        var order = new List<string>();
+        var progress = new RecordingProgress();
+
+        await using var db = builder.CreateContext();
+
+        var job = new RecalculationJob(
+            db, new RecordingRunner(order), RunHandler(), FormulaService(Rows(order)),
+            new TestClock(DateTime.UtcNow));
+
+        var request = new RecalculationRequest(
+            ProjectId: document.ProjectId,
+            DocumentId: 0,
+            PeriodKey: document.PeriodKey.Value,
+            TriggeredByUserId: null);
+
+        await job.ExecuteAsync(request, progress, CancellationToken.None);
+
+        // ⚠ Одного документа замало для розбору: коли їх кілька, повідомлення
+        // мусить називати, ПРО ЯКИЙ документ саме йдеться.
+        Assert.Contains(progress.Reports, r => r.Message!.Contains("Документ ", StringComparison.Ordinal));
+
+        // ⚠ Жоден звіт не йде назад навіть коли документів кілька.
+        Assert.Equal(progress.Reports.Select(r => r.Percent).Order(), progress.Reports.Select(r => r.Percent));
+    }
+
     /// <summary>Завдання на перерахунок цього документа за його період.</summary>
     private static RecalculationRequest Request(TestDocument document)
         => new(
@@ -190,6 +286,7 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Ports.ICalculationResultStore>(),
             Substitute.For<IBackgroundJobScheduler>(),
             Substitute.For<Ecr.Application.Ports.IUnitOfWork>(),
+            Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
             new TestClock(DateTime.UtcNow));
 
@@ -199,11 +296,15 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
         /// <summary>Відсоток, який оркестратор повідомляє про себе.</summary>
         public int? ReportPercent { get; init; }
 
+        /// <summary>Документи, для яких оркестратор справді був викликаний.</summary>
+        public List<long> DocumentIds { get; } = [];
+
         public async Task<ModuleProfile> RunAsync(
             long calculationRunId, long documentId, PeriodKey periodKey,
             IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
         {
             order.Add(Methodologies);
+            DocumentIds.Add(documentId);
 
             if (ReportPercent is { } percent)
             {

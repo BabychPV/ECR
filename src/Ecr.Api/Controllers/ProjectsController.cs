@@ -1,3 +1,4 @@
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Periods;
 using Ecr.Application.Projects;
@@ -20,6 +21,7 @@ public sealed class ProjectsController(
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
     ListPeriodPoliciesHandler policies,
+    RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
     Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
 {
@@ -195,6 +197,45 @@ public sealed class ProjectsController(
         return NoContent();
     }
 
+    /// <summary>
+    /// Перерахунок УСЬОГО проєкту. Право <c>Calculation.Recalculate</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Q-151/Q-162 (аудит фази 1). <c>RunCalculationHandler</c> існував,
+    /// був протестований і не мав звідки його викликати: жоден контролер
+    /// на нього не посилався. Задача, яку він ставить у чергу
+    /// (<c>IRecalculationJob</c>), тепер справді перераховує всі документи
+    /// проєкту, коли <c>periodKey</c> — <c>null</c> (повний рік) чи період
+    /// охоплює кілька документів (Q-162: раніше `DocumentId = 0` мовчки
+    /// повертав нуль перерахованих прив'язок).
+    /// <para>
+    /// Довга операція — у фон, як і перерахунок документа: повертає
+    /// <c>jobId</c>, а не результат.
+    /// </para>
+    /// </remarks>
+    [HttpPost("{id:int}/recalculate")]
+    [ProducesResponseType<Contracts.ProjectRecalculationAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Recalculate(
+        int id, [FromBody] ProjectRecalculationRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // ⚠ Погодження передається лише коли обидва поля заповнені: часткове
+        // (сама причина без того, хто погодив, чи навпаки) для
+        // `RunCalculationHandler` означає «погодження немає» — і саме так
+        // правило ФВ-9.7 і мало відмовити.
+        var approval = request is { ApprovedByUserId: { } approvedBy, ApprovalReason: { } reason }
+            ? new ClosedPeriodApproval(approvedBy, reason)
+            : null;
+
+        var jobId = await recalculate
+            .HandleAsync(id, request.PeriodKey, approval, ct)
+            .ConfigureAwait(false);
+
+        return Accepted(new Contracts.ProjectRecalculationAcceptedResponse(jobId, id, request.PeriodKey));
+    }
+
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:int}/periods")]
     [ProducesResponseType<Ecr.Application.Periods.Dto.PeriodCalendarDto>(StatusCodes.Status200OK)]
@@ -253,3 +294,12 @@ public sealed record CloneProjectRequest(string Code);
 /// <param name="PinnedPeriodId">Закріплений період; <c>null</c> — режим <c>Auto</c>.</param>
 /// <param name="Reason">Причина закріплення; потрапляє в аудит.</param>
 public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason);
+
+/// <summary>Запит на перерахунок усього проєкту (Q-151).</summary>
+/// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
+/// <param name="ApprovedByUserId">
+/// Хто погодив перерахунок закритого періоду (ФВ-9.7); <c>null</c> — без погодження.
+/// </param>
+/// <param name="ApprovalReason">Причина погодження; обов'язкова разом із <c>ApprovedByUserId</c>.</param>
+public sealed record ProjectRecalculationRequest(
+    int? PeriodKey, int? ApprovedByUserId, string? ApprovalReason);

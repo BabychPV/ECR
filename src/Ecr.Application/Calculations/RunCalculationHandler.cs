@@ -22,6 +22,7 @@ public sealed class RunCalculationHandler(
     ICalculationResultStore results,
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
+    Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
 {
@@ -30,6 +31,18 @@ public sealed class RunCalculationHandler(
     // каталозі `sec.Permission` і не було в контракті: видати його не міг
     // ніхто, а перевіряти його ніде й не пробували. Правило ФВ-9.7 тримається
     // не правом, а ПОГОДЖЕННЯМ (`approval` нижче) — і саме тому працює.
+
+    /// <summary>Право на запуск перерахунку проєкту (`02-contracts.md` §9).</summary>
+    /// <remarks>
+    /// ⛔ Q-151 (аудит фази 1). До цього пакета обробник не мав жодної
+    /// перевірки права взагалі — лише те, що запит автентифікований. Той самий
+    /// клас дефекту, що й `A7-53`: право оголошене в контракті документного
+    /// маршруту (<c>RecalculateDocumentHandler.Permission</c>), а маршрут
+    /// проєкту не був підключений НІ до чого — тож перевіряти права не було де.
+    /// Тепер обидва маршрути перевіряють те саме право: перерахунок є
+    /// перерахунок, незалежно від того, одного документа він стосується чи всіх.
+    /// </remarks>
+    public const string Permission = "Calculation.Recalculate";
 
     /// <summary>Ставить прогін у чергу і повертає ідентифікатор задачі.</summary>
     /// <param name="projectId">Проєкт.</param>
@@ -42,6 +55,8 @@ public sealed class RunCalculationHandler(
     public async Task<string> HandleAsync(
         int projectId, int? periodKey, ClosedPeriodApproval? approval, CancellationToken ct)
     {
+        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не запускає розрахунок.");
 

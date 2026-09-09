@@ -100,42 +100,81 @@ public sealed class RecalculationJob(
             db.CalculationRuns.Add(run);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-            // ⛔ КРОК 1 — формули шаблону, і саме ВСЕРЕДИНІ `try`. Відмова тут
-            // мусить позначити прогін `Failed` із причиною, а не лишити його
-            // `Running` назавжди: рівно цей клас дефекту в цьому файлі вже
-            // коштував розбору двічі (`D2-285`, `D2-286`).
-            await progress
-                .ReportAsync(0, "Перерахунок формул шаблону.", ct)
-                .ConfigureAwait(false);
+            // ⛔ Q-151/Q-162 (аудит фази 1). `RunCalculationHandler` УЖЕ ставив
+            // у чергу payload без `DocumentId` (нуль після розбору JSON) —
+            // документація поля прямо казала «нуль — усі документи проєкту»,
+            // але сюди ніхто не дійшов: фільтр нижче на `DocumentId == 0`
+            // завжди повертав ПОРОЖНІЙ перелік прив'язок, а прогін завершувався
+            // `Succeeded` над нулем документів. Тепер `DocumentId <= 0` справді
+            // означає «усі документи проєкту» — рішення людини: «так, потрібен
+            // явний маршрут».
+            var documentIds = request.DocumentId > 0
+                ? (IReadOnlyList<long>)[request.DocumentId]
+                : await ProjectDocumentIdsAsync(projectId, ct).ConfigureAwait(false);
 
-            var cells = await FormulasAsync(request, ct).ConfigureAwait(false);
+            var totalProfile = new ModuleProfile();
 
-            await progress
-                .ReportAsync(
-                    FormulaPhaseShare, $"Формули шаблону: перераховано комірок — {cells}.", ct)
-                .ConfigureAwait(false);
+            for (var i = 0; i < documentIds.Count; i++)
+            {
+                var documentId = documentIds[i];
+                var prefix = documentIds.Count > 1
+                    ? $"Документ {documentId} ({i + 1} із {documentIds.Count}): "
+                    : string.Empty;
 
-            var bindings = await BindingsAsync(request, ct).ConfigureAwait(false);
+                // ⚠ Один документ — той самий діапазон 0…100, що й завжди
+                // (i=0, Count=1 дає floor=0, ceiling=100): жодна наявна
+                // поведінка не змінюється. Кілька документів ділять шкалу
+                // порівну між собою.
+                var floor = i * 100 / documentIds.Count;
+                var ceiling = (i + 1) * 100 / documentIds.Count;
+                var formulaCeiling = floor + ((ceiling - floor) * FormulaPhaseShare / 100);
 
-            // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно стали
-            // актуальними.
-            await progress
-                .ReportAsync(FormulaPhaseShare, "Перерахунок методологій.", ct)
-                .ConfigureAwait(false);
+                // ⛔ КРОК 1 — формули шаблону, і саме ВСЕРЕДИНІ `try`. Відмова
+                // тут мусить позначити прогін `Failed` із причиною, а не
+                // лишити його `Running` назавжди: рівно цей клас дефекту в
+                // цьому файлі вже коштував розбору двічі (`D2-285`, `D2-286`).
+                await progress
+                    .ReportAsync(floor, $"{prefix}Перерахунок формул шаблону.", ct)
+                    .ConfigureAwait(false);
 
-            var profile = await orchestrator
-                .RunAsync(
-                    run.Id,
-                    request.DocumentId,
-                    new PeriodKey(request.PeriodKey ?? 0),
-                    bindings,
-                    new PhaseProgress(progress, FormulaPhaseShare, "Методології"),
-                    ct)
-                .ConfigureAwait(false);
+                var docRequest = request with { DocumentId = documentId };
+                var cells = await FormulasAsync(docRequest, ct).ConfigureAwait(false);
+
+                await progress
+                    .ReportAsync(
+                        formulaCeiling, $"{prefix}Формули шаблону: перераховано комірок — {cells}.", ct)
+                    .ConfigureAwait(false);
+
+                var bindings = await BindingsAsync(docRequest, ct).ConfigureAwait(false);
+
+                // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно
+                // стали актуальними.
+                await progress
+                    .ReportAsync(formulaCeiling, $"{prefix}Перерахунок методологій.", ct)
+                    .ConfigureAwait(false);
+
+                // ⛔ ОДИН прогін (`run.Id`) на всі документи — `CalculationRun`
+                // прив'язаний до проєкту й періоду (`FK_CalculationRun_Project`),
+                // не до документа. Профілі модулів зводяться в один сумарний
+                // запис нижче — `ModuleProfile.Record` акумулює за кодом
+                // модуля, тож повторний виклик на кожен документ саме те, для
+                // чого метод і існує.
+                var profile = await orchestrator
+                    .RunAsync(
+                        run.Id,
+                        documentId,
+                        new PeriodKey(request.PeriodKey ?? 0),
+                        bindings,
+                        new PhaseProgress(progress, formulaCeiling, ceiling, "Методології"),
+                        ct)
+                    .ConfigureAwait(false);
+
+                totalProfile.Merge(profile);
+            }
 
             // Завершення — прикладний сценарій: профіль і перемикання
             // актуальності однією транзакцією (ФВ-9.11).
-            await runs.CompleteAsync(run.Id, profile, ct).ConfigureAwait(false);
+            await runs.CompleteAsync(run.Id, totalProfile, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -248,6 +287,19 @@ public sealed class RecalculationJob(
             .ToList();
     }
 
+    /// <summary>Усі документи проєкту — для перерахунку «на весь проєкт».</summary>
+    /// <remarks>
+    /// Q-151/Q-162: саме цей перелік замінює «нуль документів» на «усі
+    /// документи проєкту», коли <c>DocumentId</c> у завданні — 0 або менше.
+    /// </remarks>
+    private async Task<IReadOnlyList<long>> ProjectDocumentIdsAsync(int projectId, CancellationToken ct)
+        => await db.Documents
+            .AsNoTracking()
+            .Where(d => d.ProjectId == projectId)
+            .Select(d => d.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
     /// <summary>Розбирає завдання черги.</summary>
     /// <remarks>
     /// Payload приходить як анонімний об'єкт від use-case і як JSON із черги —
@@ -277,22 +329,30 @@ public sealed class RecalculationJob(
     /// <summary>Документ і період, для яких рахуються формули шаблону.</summary>
     private sealed record ScopeRow(long DocumentId, int PeriodKeyValue);
 
-    /// <summary>Прогрес однієї фази: шкала зсунута, повідомлення назване.</summary>
+    /// <summary>Прогрес однієї фази: шкала зсунута й стиснута, повідомлення назване.</summary>
     /// <param name="inner">Канал прогресу задачі.</param>
     /// <param name="floor">Скільки відсотків уже пройдено до цієї фази.</param>
+    /// <param name="ceiling">Скільки відсотків відведено на кінець цієї фази.</param>
     /// <param name="phase">Ім'я фази — префікс кожного повідомлення.</param>
     /// <remarks>
     /// ⛔ Голе «40 %» не означає нічого: у прогоні дві фази, і перше, на що
     /// дивиться той, хто розбирає повільний прогін, — у якій він саме зараз.
     /// Оркестратор методологій свого місця в загальній шкалі не знає і знати
-    /// не має — переклад його 0…100 у 40…100 живе тут.
+    /// не має — переклад його 0…100 у <c>floor…ceiling</c> живе тут.
+    /// <para>
+    /// ⚠ Q-151/Q-162: один документ (<c>floor=0, ceiling=100</c>) дає той
+    /// самий результат, що й раніше жорстко зашите <c>100</c>, — навмисно, щоб
+    /// не зламати наявний тест точних відсотків. Кілька документів ділять
+    /// шкалу на рівні відрізки <c>floor…ceiling</c> між собою.
+    /// </para>
     /// </remarks>
-    private sealed class PhaseProgress(IJobProgress inner, int floor, string phase) : IJobProgress
+    private sealed class PhaseProgress(IJobProgress inner, int floor, int ceiling, string phase)
+        : IJobProgress
     {
         /// <inheritdoc />
         public Task ReportAsync(int percent, string? message, CancellationToken ct)
             => inner.ReportAsync(
-                floor + (Math.Clamp(percent, 0, 100) * (100 - floor) / 100),
+                floor + (Math.Clamp(percent, 0, 100) * (ceiling - floor) / 100),
                 string.IsNullOrWhiteSpace(message) ? phase : $"{phase}: {message}",
                 ct);
     }

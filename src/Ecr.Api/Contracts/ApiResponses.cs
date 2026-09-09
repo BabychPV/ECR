@@ -81,3 +81,11 @@ public sealed record SimulationSessionResponse(long SessionId, int SimulatedForU
 /// <param name="DocumentId">Документ.</param>
 /// <param name="PeriodKey">Період; перерахунок завжди адресує пару документ × період.</param>
 public sealed record RecalculationAcceptedResponse(string JobId, long DocumentId, int PeriodKey);
+
+/// <summary>
+/// Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151).
+/// </summary>
+/// <param name="JobId">Задача.</param>
+/// <param name="ProjectId">Проєкт.</param>
+/// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
+public sealed record ProjectRecalculationAcceptedResponse(string JobId, int ProjectId, int? PeriodKey);
