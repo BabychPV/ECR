@@ -24,7 +24,6 @@
 | `Q-154` | `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql` (`rpt.ReportDef`) | SCOPE — склад колонок 6 державних форм |
 | `Q-155` | `src/Ecr.Application/Workflow/SubmitSheetHandler.cs` | SCOPE — версії методологій у зрізі подання |
 | `Q-156` | `src/Ecr.Application/Integration/IntegrationHandlers.cs` (`GetJobStatusHandler`) | SCOPE — право бачити свою фонову задачу |
-| `Q-157` | `src/Ecr.Api/Controllers/DocumentsController.cs`, `src/Ecr.Application/Documents/Dto/PatchCellsResponse.cs`, `contracts/openapi.snapshot.json`, `src/Ecr.Web/src/api/schema.d.ts` | Фіксується фазою 1 — див. нижче |
 | `Q-160` | `src/Ecr.Application/Recalculation/RecalculationService.cs`, `src/Ecr.Infrastructure/Jobs/FormulaRecalculationJob.cs`, `src/Ecr.Infrastructure/Jobs/RecalculationJob.cs` | SCOPE — явний маршрут «перерахувати формули шаблону» |
 | `Q-162` | `src/Ecr.Infrastructure/Jobs/RecalculationJob.cs` (`RecalculationRequest.DocumentId`) | SCOPE — сенс `DocumentId = 0` |
 
@@ -39,9 +38,9 @@
 
 ## Зони фази 1 (у роботі)
 
-| Задача | Файли | Стан |
-|---|---|---|
-| `Q-157` | `src/Ecr.Api/Controllers/DocumentsController.cs`, `contracts/openapi.snapshot.json`, `src/Ecr.Web/src/api/schema.d.ts` | у роботі — зона `contracts/**` більше не заборонена (`PR #69`) |
+`Q-157` закрито (`PR #71`) — фаза 1 наразі без активних задач; решта
+відкритих `Q-` вище — задокументована прогалина (`SCOPE`), не робота в
+процесі.
 
 ## Як користуватись (фаза 2.5, маршрутизація)
 
