@@ -40,6 +40,20 @@ public interface IJobProgressStore
     public Task FinishAsync(
         string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct);
 
+    /// <summary>
+    /// Повертає раніше провалену задачу в стан «у черзі» (D-134, №11 T10 #40).
+    /// </summary>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="utcNow">Момент ручного перезапуску в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>false</c> — запису прогресу немає (задачі ніколи не існувало).</returns>
+    /// <remarks>
+    /// ⚠ Без <c>jobCode</c>: запис уже існує (це саме РЕ-старт), і повторний
+    /// <see cref="QueueAsync"/> тут означав би тягнути код задачі окремим
+    /// запитом заради значення, яке вже лежить у тому самому рядку.
+    /// </remarks>
+    public Task<bool> RestartAsync(string jobId, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Стан задачі; <c>null</c> — такої немає.</summary>
     public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
 

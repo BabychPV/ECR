@@ -62,6 +62,23 @@ public interface IBackgroundJobScheduler
     /// <summary>Скасовує задачу.</summary>
     public Task CancelAsync(string jobId, CancellationToken ct);
 
+    /// <summary>
+    /// Вручну перезапускає провалену задачу (директива №11, T10 #40).
+    /// </summary>
+    /// <param name="jobId">Ідентифікатор задачі, яку ставили раніше.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>
+    /// <c>false</c> — деталей задачі більше немає в планувальнику (наприклад,
+    /// після перезапуску процесу: чергу тримає сховище В ПАМ'ЯТІ, D-66).
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Задача лишається в черзі Quartz дурабельною (<c>StoreDurably</c>) саме
+    /// доти, доки не вичерпає ретраї (<see cref="IBackgroundJob"/>) — інакше
+    /// відновлювати після провалу не було б чого: без триґера і без durable
+    /// Quartz сам прибирає деталі задачі одразу після останнього прогону.
+    /// </remarks>
+    public Task<bool> RestartAsync(string jobId, CancellationToken ct);
+
     /// <summary>Стан виконання для UI прогресу.</summary>
     public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
 
@@ -147,6 +164,19 @@ public interface IFormulaRecalculationJob : IBackgroundJob;
 /// спирається на адаптер Excel.
 /// </remarks>
 public interface IExcelExportJob : IBackgroundJob;
+
+/// <summary>
+/// Маркер задачі застосування ВЕЛИКОГО імпорту з <c>.xlsx</c> (директива №11,
+/// T10 #45).
+/// </summary>
+/// <remarks>
+/// ⚠ Окремий від <see cref="IExcelExportJob"/>, хоч обидва — Excel: застосування
+/// імпорту читає РАНІШЕ побудований diff (<c>previewToken</c>) і пише через
+/// звичайний шлях <c>PatchCellsHandler</c>, тоді як експорт лише читає й
+/// будує книгу. Спільний маркер змусив би задачу розбирати payload двох
+/// різних форм.
+/// </remarks>
+public interface IExcelImportJob : IBackgroundJob;
 
 /// <summary>
 /// Маркер задачі перенесення зібраних точок у комірки (<c>D-118</c>).

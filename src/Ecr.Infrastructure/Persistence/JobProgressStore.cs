@@ -82,6 +82,24 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     }
 
     /// <inheritdoc />
+    public async Task<bool> RestartAsync(string jobId, DateTime utcNow, CancellationToken ct)
+    {
+        var entry = await db.JobProgresses
+            .FirstOrDefaultAsync(p => p.JobId == jobId, ct)
+            .ConfigureAwait(false);
+
+        if (entry is null)
+        {
+            return false;
+        }
+
+        entry.Queue(utcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return true;
+    }
+
+    /// <inheritdoc />
     public async Task<JobStatus?> FindAsync(string jobId, CancellationToken ct)
         => await db.JobProgresses
             .AsNoTracking()

@@ -46,6 +46,20 @@ public sealed class QuartzJobScheduler(
     /// <summary>Ключ коду задачі — за ним прогрес зіставляється з типом.</summary>
     public const string JobCodeKey = "ecr.jobCode";
 
+    /// <summary>
+    /// Ключ лічильника спроб — у <c>JobDataMap</c> ТРИҐЕРА, не задачі (D-134,
+    /// №11 T10 #40).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме триґера. <see cref="QuartzJobAdapter"/> не позначений
+    /// <c>[PersistJobDataAfterExecution]</c> — зміна <c>JobDetail.JobDataMap</c>
+    /// усередині <c>Execute</c> ніде не зберігається, і наступний прогін читав
+    /// би той самий «0» знову й знову. Дані триґера, навпаки, задаються ПРИ
+    /// ЙОГО СТВОРЕННІ — новий триґер на ретрай несе вже інкрементоване
+    /// значення.
+    /// </remarks>
+    public const string RetryAttemptKey = "ecr.retryAttempt";
+
     /// <summary>Чи піднято планувальник.</summary>
     public bool IsConfigured => schedulerFactory is not null;
 
@@ -86,6 +100,12 @@ public sealed class QuartzJobScheduler(
             .WithIdentity(jobId)
             .UsingJobData(PayloadKey, JsonSerializer.Serialize(payload, PayloadOptions))
             .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
+            // ⚠ Дурабельна навмисно (D-134, №11 T10 #40/#50): задача, що
+            // вичерпала ретраї, мусить пережити свій єдиний триґер, інакше
+            // ручний перезапуск не мав би чого перезапускати. Успіх і
+            // скасування прибирають деталь самі (QuartzJobAdapter.Execute) —
+            // держати НАЗАВЖДИ лишається тільки те, що впало остаточно.
+            .StoreDurably()
             .Build();
 
         var trigger = TriggerBuilder.Create()
@@ -218,6 +238,48 @@ public sealed class QuartzJobScheduler(
         }
 
         await instance.DeleteJob(new JobKey(jobId), ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Планується НОВИЙ одноразовий триґер на ТОЙ САМИЙ <c>JobKey</c>, а не
+    /// новий запис черги: клієнт, що вже показує <c>jobId</c> провальної
+    /// задачі, має побачити той самий ідентифікатор знову «у черзі», а не
+    /// отримати другий, про який нічого не знає.
+    /// <para>
+    /// Лічильник ретраїв скидається в нуль явно (<see cref="RetryAttemptKey"/>
+    /// у даних нового триґера): ручний перезапуск — це нова спроба людини, а
+    /// не продовження вичерпаної автоматичної серії.
+    /// </para>
+    /// </remarks>
+    public async Task<bool> RestartAsync(string jobId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        var scheduler = Scheduler(jobId);
+        var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
+
+        var jobKey = new JobKey(jobId);
+        if (!await instance.CheckExists(jobKey, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        var trigger = TriggerBuilder.Create()
+            .ForJob(jobKey)
+            .WithIdentity($"{jobId}-restart-{Guid.NewGuid():N}-trigger")
+            .UsingJobData(RetryAttemptKey, "0")
+            .StartNow()
+            .Build();
+
+        await instance.ScheduleJob(trigger, ct).ConfigureAwait(false);
+
+        if (progress is not null && clock is not null)
+        {
+            await progress.RestartAsync(jobId, clock.UtcNow, ct).ConfigureAwait(false);
+        }
+
+        return true;
     }
 
     /// <inheritdoc />

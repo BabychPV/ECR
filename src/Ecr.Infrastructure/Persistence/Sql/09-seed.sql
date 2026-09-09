@@ -704,6 +704,8 @@ USING (VALUES
     (N'sources.emptyHint',               N'en', N'Without sources the system works fine: data is entered by hand.', 1),
     (N'jobs.pick',                       N'en', N'Enter a job id', 1),
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
+    (N'jobs.restart',                    N'en', N'Restart', 1),
+    (N'jobs.restarting',                 N'en', N'Restarting…', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
 
