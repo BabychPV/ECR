@@ -38,10 +38,15 @@ public sealed class PiSqlClientDataSource(
     /// ⚠ Імена об'єктів звірені з експортом чинного рішення
     /// (<c>ECR_01_Air_PISqlClientExportedObjects.sql</c>): саме
     /// <c>[Master].[Element].[Element]</c> і <c>[Master].[Element].[Attribute]</c>,
-    /// а не вигадані за аналогією.
+    /// а не вигадані за аналогією. Колонки <c>UnitOfMeasure</c> і
+    /// <c>ValueType</c> звірені додатково з офіційною AVEVA PI SQL DAS
+    /// (RTQP Engine) Reference, Element schema
+    /// (<c>docs.aveva.com/bundle/pi-sql-data-access-server-rtqp-engine/page/1016070.html</c>,
+    /// станом на 2026-03-12): раніше тут стояли неіснуючі <c>UOM</c> і
+    /// <c>Type</c> (`Q-197`).
     /// </remarks>
     public const string DefaultCatalogQuery = """
-        SELECT e.Name AS ElementName, a.Name AS AttributeName, a.UOM AS Uom, a.Type AS DataType
+        SELECT e.Name AS ElementName, a.Name AS AttributeName, a.UnitOfMeasure AS Uom, a.ValueType AS DataType
         FROM [Master].[Element].[Attribute] a
         INNER JOIN [Master].[Element].[Element] e ON e.ID = a.ElementID
         ORDER BY e.Name, a.Name
@@ -49,12 +54,12 @@ public sealed class PiSqlClientDataSource(
 
     /// <summary>Ключ конфігурації, яким запит каталогу можна перевизначити.</summary>
     /// <remarks>
-    /// ⚠ Запити винесені в **налаштування** (`P-11`). Імена об'єктів звірені з
-    /// експортом чинного рішення, але точні колонки
-    /// <c>[Master].[Element].[Attribute]</c> перевірити ніде: живого PI SQL
-    /// Client у контурі розробки немає. Помилка в назві колонки — це не
-    /// архітектурна проблема, а один рядок; вимагати заради нього перезбирання
-    /// і релізу означало б, що зупинений збір чекає доби замість хвилини.
+    /// ⚠ Запити винесені в **налаштування** (`P-11`). Імена об'єктів
+    /// <c>[Master].[Element].[Attribute]</c> звірені як з експортом чинного
+    /// рішення, так і з офіційною схемою (`Q-197`) — живого PI SQL Client у
+    /// контурі розробки все ще немає, але саму назву колонки перевіряти вже
+    /// не потрібно. Ключ конфігурації лишається на випадок, якщо в NCOC
+    /// встановлена версія RTQP Engine, де база все ж розходиться.
     /// </remarks>
     public const string CatalogQueryKey = "PiSqlClient:CatalogQuery";
 
