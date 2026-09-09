@@ -487,6 +487,51 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// ⛔ Q-171 (аудит фази 2, авторизація). `GetSlice` перевіряв право на
+    /// СВІЙ `documentId` з маршруту і читав `tableInstanceId` без звірки з
+    /// ним — на відміну від `Patch`/`CreateRow`, які цю звірку роблять.
+    /// Реальний наслідок: чужий `tableInstanceId` у своєму документі
+    /// віддавав СПРАВЖНІ значення чужих комірок, а не лише дозволяв запис
+    /// (як у сценарії вище).
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-18")]
+    public async Task Чужий_TableInstanceId_у_маршруті_документа_на_читанні()
+    {
+        using var app = new EcrApiFactory(sql);
+        var first = await Provisioning.AdministratorAsync(
+            app, "S18cFirst",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+        var second = await Provisioning.AdministratorAsync(
+            app, "S18cSecond",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        var firstDoc = await ArrangeRealDocumentAsync(app, first, "S18cFirst");
+        first = firstDoc.Admin;
+        var secondDoc = await ArrangeRealDocumentAsync(app, second, "S18cSecond");
+        second = secondDoc.Admin;
+
+        // Пишемо справжнє число у чужий документ, щоб мати що витягти.
+        var secondTables = await second.Client.GetAsync(
+            new Uri($"/api/v1/documents/{secondDoc.DocumentId}/tables?periodKey={secondDoc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, secondTables.StatusCode);
+        var secondTableArray = await secondTables.Content.ReadFromJsonAsync<JsonElement>();
+        var foreignTableInstanceId = secondTableArray[0].GetProperty("tableInstanceId").GetInt64();
+
+        await PatchAsync(app, second, secondDoc, foreignTableInstanceId, 777m);
+
+        // ⛔ Доказ сценарію: чужий tableInstanceId у СВОЄМУ документі має
+        // дати 4xx, а не тіло з реальним числом 777.
+        var slice = await first.Client.GetAsync(
+            new Uri($"/api/v1/documents/{firstDoc.DocumentId}/tables/{foreignTableInstanceId}", UriKind.Relative));
+
+        Assert.True(
+            (int)slice.StatusCode is >= 400 and < 500,
+            $"чужий TableInstanceId на читанні мав дати 4xx, а дав {slice.StatusCode}: {await slice.Content.ReadAsStringAsync()}");
+    }
+
+    /// <remarks>
     /// ⛔ Сценарій довів дефект, глибший за той, який називала директива.
     /// Повідомлень не було не тому, що правил не було звідки взяти, — правило
     /// заводилося ще з `W5.4`. <c>MetadataCache</c> не вантажив

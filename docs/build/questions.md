@@ -209,6 +209,23 @@
 | Q-161 | CONFLICT | два сценарії (`IsDeny_грант_блокує_новий_рядок`, `Заархівований_проєкт_блокує_новий_рядок`) досі адресують `documentId=1`/`tableInstanceId=1` — числа, чия відсутність у спільній базі не гарантована, а лише випадкова на сьогодні | RESOLVED · `DataEntryScenarios.cs` (обидва сценарії — реальна адреса + перевірка `reason`), PR #64 |
 | Q-162 | QUESTION | `RecalculationRequest.DocumentId = 0` документовано як «усі документи проєкту», але жоден крок прогону так його не читає — ні прив'язки методологій, ні (тепер) формули шаблону | OPEN |
 | Q-163 | CONFLICT | `cfg.FormulaDef` має ДВА зовнішні ключі на `cfg.TableDef` — оголошений `TableDefId` і тіньовий `TableDefId1`; публікація і кеш метаданих читають РІЗНІ, тож формула, вставлена лише з `TableDefId`, для публікації не існує | RESOLVED · `ConfigurationRestConfiguration.cs` (`FormulaDefConfiguration`), PR #60 |
+| Q-164 | CONFLICT | `PatchCellsHandler` створює новий рядок ОКРЕМИМ `SaveChangesAsync`+`ReserveIdsAsync` на кожен рядок батчу замість однієї партії — той самий файл поруч уже має пакетний прийом | OPEN |
+| Q-165 | CONFLICT | `ValidateDocumentHandler` робить похід у базу НА КОЖНУ таблицю документа — усупереч власному коментарю в тому ж методі про бюджет 3с p95 на весь документ | OPEN |
+| Q-166 | CONFLICT | `RecalculationService` читає `rowIds`/комірки окремим запитом НА КОЖНУ таблицю документа, і робить це на КОЖНЕ редагування комірки (через `FormulaRecalculationJob`), не лише на повний перерахунок | OPEN |
+| Q-167 | CONFLICT | `DocumentStore.ListAsync` — окремий запит стану погодження на КОЖЕН документ сторінки замість одного `WHERE DocumentId IN (...)` | OPEN |
+| Q-168 | CONFLICT | Попередній перегляд імпорту Excel (`ExcelImporter`) — кілька походів у базу НА КОЖНУ таблицю книги, синхронно, поки користувач чекає на екрані | OPEN |
+| Q-169 | CONFLICT | `ConsistencyCheckJob` пише кожну знахідку окремим `EXISTS`+`INSERT` замість пакетного upsert — нічний job, обмежений `MaxIssues`, низький пріоритет | OPEN |
+| Q-170 | CONFLICT | `MaterializeCollectedDataJob` викликає `CoverageJournal.RecordAsync` (власний `SaveChangesAsync`) на кожен конфлікт замість пакетного запису — малий обсяг за побудовою, низький пріоритет | OPEN |
+| Q-171 | CONFLICT | `GetTableSliceHandler` (`GET …/tables/{tableInstanceId}`) не перевіряє належність `tableInstanceId` документу з маршруту — читає чужі дані. Перевірено особисто | RESOLVED · `GetTableSliceHandler.cs`, PR нижче |
+| Q-172 | CONFLICT | `GetDocumentTablesHandler` (`GET …/documents/{id}/tables`) не має жодної перевірки гранта на проєкт — лише RBAC; ланцюжком із Q-171 дає повний перелік чужих `tableInstanceId` | OPEN |
+| Q-173 | CONFLICT | `ReopenDocumentHandler` (`POST …/reopen`) свідомо пропускає перевірку гранта (коментар у коді), хоча `Submit`/`Approve` того самого документа — ні; повертає подане/затверджене подання назад у Draft у чужому проєкті | OPEN |
+| Q-174 | CONFLICT | `RecalculateDocumentHandler` не перевіряє грант на проєкт — фонова задача перераховує чужі дані; окремо `Q-151` — та сама задача без gate закритого періоду | OPEN |
+| Q-175 | CONFLICT | `GetCalculationResultsHandler` (`GET …/calculation-results`) не перевіряє грант на проєкт — віддає результати методологій (речовини, обсяги) по будь-якому `documentId` | OPEN |
+| Q-176 | CONFLICT | `CreateDocumentHandler` не перевіряє грант на `projectId` із тіла запиту — можна завести документ у чужому проєкті | OPEN |
+| Q-177 | CONFLICT | `GetCellChangesHandler` (`GET /audit/cells`) не фільтрує за грантом на проєкт; без `documentId` — необмежений запит по всіх проєктах, включно зі старими/новими значеннями комірок | OPEN |
+| Q-178 | QUESTION | `ExcelExchangeHandlers` (import preview/apply) перевіряють лише RBAC на контролері, без гранта на проєкт — фактичний захист є глибше (`ExcelImporter`→`CanEditSliceAsync`), але це розбіжність із патерном `ExportDocumentHandler` (`A7-55`), не доведена вразливість | OPEN |
+| Q-179 | QUESTION | `ProjectsController`: Activate/Archive/Clone/ApprovalRoute перевіряють лише глобальний `Project.Manage`, без гранта на конкретний `projectId` — може бути навмисним (адмінське право), потребує підтвердження заміру | OPEN |
+| Q-180 | QUESTION | `DownloadExportHandler` не перевіряє грант на проєкт — захищений лише непередбачуваністю `exportId` (128-бітний GUID); задокументована, практично нездобувна прогалина | OPEN |
 
 ---
 
@@ -7078,3 +7095,334 @@ EF заповнює обидві колонки.
 змержено).
 
 **Статус:** RESOLVED · `ConfigurationRestConfiguration.cs` (`FormulaDefConfiguration`), PR #60
+
+---
+
+### Q-164 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — створення рядка не пакетне
+
+**Де:** `src/Ecr.Application/Documents/PatchCellsHandler.cs:244-251`,
+`src/Ecr.Infrastructure/Persistence/RowStore.cs:83-95`.
+
+**Що знайшлося:** `PatchCellsHandler` створює кожен новий рядок батчу
+окремим викликом `RowStore.CreateRowAsync`, а той сам по собі — це
+`ReserveIdsAsync("doc.TableRowSeq", 1, ct)` + `db.SaveChangesAsync(ct)` НА
+КОЖЕН рядок. Перевірено особисто (не лише зі слів аудиту): рядки коду
+процитовані точно. Той самий файл `RowStore.cs` уже має пакетний прийом
+для того самого лічильника — `MaterializeFixedRowsAsync` (:232+) резервує
+ОДИН діапазон `ReserveIdsAsync("doc.TableRowSeq", rowDefs.Count, ct)` на
+всю партію.
+
+**Чого це коштує:** батч на 100 нових рядків (масове додавання динамічних
+рядків) — це ~200 послідовних походів у базу проти бюджету «p95 300мс на
+100 комірок» (`ФВ-6.10`).
+
+**Статус:** OPEN
+
+---
+
+### Q-165 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — валідація документа суперечить власному бюджету
+
+**Де:** `src/Ecr.Application/Documents/ValidateDocumentHandler.cs:52-75`.
+
+**Що знайшлося:** коментар методу (:44-46) прямо каже: похід у базу на
+кожну з ~90 таблиць документа не вкладається в бюджет 3с p95 на весь
+документ. Але цикл двома рядками нижче робить рівно це —
+`cellStore.ReadSliceAsync` і `rowStore.GetRowIdsAsync` окремим запитом на
+кожну таблицю.
+
+**Чого це коштує:** повна валідація документа (виконується перед КОЖНИМ
+`Submit`) — це ~180 послідовних походів у базу на документ із ~90
+таблицями замість ≤2 пакетних.
+
+**Статус:** OPEN
+
+---
+
+### Q-166 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — перерахунок формул читає базу таблицею, а не документом
+
+**Де:** `src/Ecr.Application/Recalculation/RecalculationService.cs:226-232,
+501-521` (`LoadPeriodAsync`).
+
+**Що знайшлося:** цикл будує `rowIdsByTable` і читає комірки окремим
+запитом на КОЖНУ таблицю, і робить це через `FormulaRecalculationJob` після
+КОЖНОГО виклику `PatchCellsHandler.HandleAsync` — тобто на кожне
+редагування комірки, не лише на повний перерахунок.
+
+**Чого це коштує:** документ на ~90 таблиць — це ~90 запитів на побудову
+`rowIdsByTable`, плюс до ~360 усередині `LoadPeriodAsync` (2 запити × 90
+таблиць × 2 періоди, коли місяць не січень) НА КОЖНЕ редагування комірки.
+Найбільший сукупний ризик серед знахідок цього виміру саме через частоту
+виклику.
+
+**Статус:** OPEN
+
+---
+
+### Q-167 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — перелік документів: N+1 на стан погодження
+
+**Де:** `src/Ecr.Infrastructure/Persistence/DocumentStore.cs:76-81`
+(`ListAsync`), `:231-245` (`StatesAsync`).
+
+**Що знайшлося:** сторінка документів пагінована коректно (курсор,
+`Take(page.Limit + 1)`), але для КОЖНОГО документа сторінки `StatesAsync`
+робить окремий запит `ApprovalStates.Where(DocumentId == …)` замість
+одного `WHERE DocumentId IN (...)` на всю сторінку.
+
+**Чого це коштує:** найчастіше відвідуваний екран («перелік документів»)
+платить зайвий похід у базу на кожен рядок кожної сторінки.
+
+**Статус:** OPEN
+
+---
+
+### Q-168 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — попередній перегляд імпорту Excel синхронний і не пакетний
+
+**Де:** `src/Ecr.Adapters.Excel/ExcelImporter.cs:81-108`.
+
+**Що знайшлося:** на кожен табличний блок книги — `CanEditSliceAsync`
+(кілька запитів усередині) і `ImportDiffBuilder.BuildAsync` (`GetRowIdsAsync`
++ `GetRowVersionsAsync` + `ReadSliceAsync`), разом ~4-6 походів у базу на
+таблицю. На відміну від рядків 164-166 (фонові задачі), цей шлях
+СИНХРОННИЙ — коментар обробника прямо каже, що користувач стоїть над
+результатом (`ExcelExchangeHandlers.cs:97-99`).
+
+**Чого це коштує:** книга на більшість із ~90 таблиць шаблону — 350+
+послідовних походів у базу, перш ніж попередній перегляд взагалі
+повернеться, безпосередньо в інтерактивну затримку, не у фоновий бюджет.
+
+**Статус:** OPEN
+
+---
+
+### Q-169 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — нічна перевірка узгодженості пише знахідки по одній
+
+**Де:** `src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs:199-220`.
+
+**Що знайшлося:** `WriteIssuesAsync` виконує окремий `IF NOT EXISTS (...)
+INSERT` на кожну знахідку замість пакетного upsert.
+
+**Чому низький пріоритет:** обмежено `MaxIssues = 1000`, нічний
+обслуговуючий job, не інтерактивний шлях.
+
+**Статус:** OPEN
+
+---
+
+### Q-170 · CONFLICT · Аудит фази 2 (продуктивність), 2026-09-09 · `audit/baseline` — запис покриття інтеграції по одному конфлікту
+
+**Де:** `src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs:119-125`.
+
+**Що знайшлося:** `CoverageJournal.RecordAsync` (власний
+`SaveChangesAsync`) викликається на кожен конфлікт замість пакетного
+запису.
+
+**Чому низький пріоритет:** обсяг обмежений кількістю мапованих колонок на
+джерело інтеграції (мале число за побудовою, не масштабується з кількістю
+документів/рядків).
+
+**Статус:** OPEN
+
+---
+
+### Q-171 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — зріз таблиці не перевіряє належність `tableInstanceId` документу
+
+**Де:** `src/Ecr.Application/Documents/GetTableSliceHandler.cs` (весь метод
+`HandleAsync`), контролер `src/Ecr.Api/Controllers/CellsController.cs:26-39`
+(`GetSlice`).
+
+**Що знайшлося:** обробник перевіряє `Document.View` і
+`CanReadDocumentAsync(profile, documentId)` — обидва проти `documentId` з
+маршруту. Потім читає `instance = rowStore.ResolveTableInstanceAsync(tableInstanceId)`
+і повертає РЕАЛЬНІ значення комірок **без жодної звірки
+`instance.DocumentId == documentId`**. Перевірено особисто:
+`grep -n "DocumentId" GetTableSliceHandler.cs` — нуль збігів; контролер
+теж нічого не звіряє. `CellsController.Patch` і `CreateRowHandler.cs`
+мають рівно цю звірку з поясненням у коментарі — на читанні її не було
+ніколи.
+
+**Атака:** користувач A, авторизований лише на власний документ `docA`,
+викликає `GET /documents/docA/tables/{tableInstanceId документа docB}` —
+проходить перевірку на `docA`, отримує реальні дані `docB`.
+
+**Що зробив:** додав звірку `instance.DocumentId != documentId` →
+`NotFoundException("ECR-DOC-0404", …)`, за тим самим прийомом і тим самим
+кодом помилки, що вже є в `CreateRowHandler`. Доведено тестом, що падає на
+незміненому коді й проходить після фіксу (D-134).
+
+**Статус:** RESOLVED · `GetTableSliceHandler.cs`, PR нижче
+
+---
+
+### Q-172 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — перелік таблиць документа без гранта на проєкт
+
+**Де:** `src/Ecr.Application/Documents/GetDocumentTablesHandler.cs:39-57`
+(`DocumentsController.Tables`).
+
+**Що знайшлося:** метод викликає лише
+`ListTemplatesHandler.RequireAsync(access, currentUser, "Document.View", ct)`
+— жодного `CanReadDocumentAsync` для конкретного `documentId`. Далі кличе
+`rowStore.EnsureTableInstancesAsync(documentId, key, ct)` (це ЗАПИС —
+матеріалізує рядки, якщо їх нема) і повертає `TableInstanceId` й назви
+таблиць/аркушів для БУДЬ-ЯКОГО `documentId`.
+
+**Чому це серйозніше в парі з `Q-171`:** будь-який користувач із
+загальним `Document.View` може перелічити `tableInstanceId` чужого
+документа цим маршрутом, а тоді прочитати самі значення через `GetSlice`
+(до фіксу `Q-171`) — повний ланцюжок розкриття.
+
+**Статус:** OPEN
+
+---
+
+### Q-173 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — Reopen свідомо пропускає грант, хоча Submit/Approve — ні
+
+**Де:** `src/Ecr.Application/Workflow/ReopenDocumentHandler.cs:36-69`.
+
+**Що знайшлося:** перевіряється лише `profile.Has("Document.Reopen")`
+(:47-51), і коментар прямо каже, що перевірка гранта пропущена НАВМИСНО
+("право небезпечне і тому перевіряється окремо від грантів", :45-46). Але
+`SubmitSheetHandler.CanSubmitAsync` і `ApproveSheetHandler.CanApproveAsync`
+над ТИМ САМИМ ресурсом поєднують RBAC із грантом, прив'язаним до проєкту
+(`BuildContextAsync(documentId, ...)`). Reopen — дія з важчими наслідками
+(повертає ПОДАНЕ чи ЗАТВЕРДЖЕНЕ подання назад у Draft), а перевірка в неї
+слабша.
+
+**Атака:** користувач A має `Document.Reopen` (виданий для власного
+проєкту), але нуль гранта на проєкт B; `POST /documents/{документ_у_B}/reopen`
+проходить і відкочує подане звітування чужого проєкту.
+
+**Чому не виправив сам:** коментар у коді показує, що це свідомий виняток
+із загального патерну, а не недогляд — можлива причина: `Document.Reopen`
+задумувався як загальне адміністративне право. Потрібне підтвердження
+наміру, перш ніж міняти поведінку, яку хтось свідомо запрограмував інакше.
+
+**Статус:** OPEN
+
+---
+
+### Q-174 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — перерахунок документа без гранта на проєкт
+
+**Де:** `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs:35-66`.
+
+**Що знайшлося:** перевіряється лише `Calculation.Recalculate` (:37-39) —
+жодного `CanReadDocumentAsync`/гранта на проєкт. `RecalculationJob.FormulasAsync`
+далі перезаписує `doc.CellValue` і `calc.CalculationResult` без gate
+закритого періоду взагалі (див. `Q-151` — та сама задача, недосяжний
+правильний вхід `RunCalculationHandler`, який цей gate має).
+
+**Атака:** користувач A з `Calculation.Recalculate` на власний проєкт
+викликає перерахунок `documentId` у проєкті B (нуль гранта) — задача
+виконується і перезаписує обчислені значення чужого проєкту, включно з
+можливо закритим періодом.
+
+**Статус:** OPEN
+
+---
+
+### Q-175 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — результати методологій без гранта на проєкт
+
+**Де:** `src/Ecr.Application/Documents/GetCalculationResultsHandler.cs:51-65`.
+
+**Що знайшлося:** перевіряється лише загальний `Calculation.View` (:54);
+жодного `CanReadDocumentAsync`. Віддає результати методологій (речовини,
+обсяги викидів, коди виходу, одиниці) для будь-якого `documentId`.
+
+**Атака:** будь-який користувач із `Calculation.View` читає показники
+викидів документа проєкту, на який не має гранта.
+
+**Статус:** OPEN
+
+---
+
+### Q-176 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — створення документа у довільному проєкті
+
+**Де:** `src/Ecr.Application/Documents/CreateDocumentHandler.cs:32-97`.
+
+**Що знайшлося:** перевіряється лише загальний `Document.Create` (:37-39);
+`projectId` береться прямо з тіла запиту й іде у створення документа
+(:79) без `profile.LevelFor(ResourceKind.Project, projectId)`.
+
+**Атака:** користувач із `Document.Create` (для власного проєкту) заводить
+документ-привид у чужому проєкті, на який не має гранта — засмічує його
+перелік документів і послідовність бізнес-ключа.
+
+**Статус:** OPEN
+
+---
+
+### Q-177 · CONFLICT · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — журнал аудиту комірок без фільтра гранта
+
+**Де:** `src/Ecr.Application/Audit/GetCellChangesHandler.cs:33-73`.
+
+**Що знайшлося:** перевіряється лише загальний `Security.ViewAudit`
+(:41-45); необов'язковий фільтр `documentId` іде прямо в
+`audit.ReadCellChangesAsync` без фільтрації за грантом на проєкт, а без
+`documentId` запит НЕОБМЕЖЕНИЙ по всіх документах/проєктах.
+`CellChangeView` несе старі й нові значення комірок і адресу рядка/колонки
+— це вміст документа, не метадані. `ListDocumentsHandler` (той самий шар)
+явно фільтрує перелік за грантом із коментарем «перелік документів чужого
+проєкту — це вже відомості»; журнал аудиту чутливіший за цей перелік і
+такого фільтра не має.
+
+**Чому не виправив сам:** може бути навмисним, якщо `Security.ViewAudit` —
+задумане як централізоване/комплаєнс-право поза межами проєктів. Потребує
+підтвердження, перш ніж звужувати.
+
+**Статус:** OPEN
+
+---
+
+### Q-178 · QUESTION · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — імпорт Excel: перевірка гранта лише на контролері відсутня (захист є глибше)
+
+**Де:** `src/Ecr.Application/Documents/ExcelExchangeHandlers.cs:91-95`
+(Preview), `:117-122` (Apply).
+
+**Що знайшлося:** обидва перевіряють лише загальний `Document.Import`, на
+відміну від `ExportDocumentHandler` (той самий файл), який явно додає
+`CanReadDocumentAsync` з посиланням на `A7-55`. На практиці
+`ExcelImporter.PreviewAsync`/`ApplyAsync` кличе `access.CanEditSliceAsync`
+на кожен табличний блок, що резолвить СПРАВЖНІЙ проєкт-власник
+`tableInstanceId` і відмовляє чужим коміркам ДО того, як вони дійдуть до
+`PatchCellsHandler` — тобто фактичний захист від запису/зчитування значень
+є в глибині виклику.
+
+**Що вирішити:** узгодити з патерном `ExportDocumentHandler` заради
+послідовності дизайну (додати перевірку на вході, а не покладатися лише на
+захист у глибині), чи залишити як є, довірившись глибинному захисту.
+
+**Статус:** OPEN
+
+---
+
+### Q-179 · QUESTION · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — керування проєктом лише за глобальним правом
+
+**Де:** `src/Ecr.Application/Projects/ProjectQueryHandlers.cs:256-260`
+(Activate), `:345-349` (Archive); `src/Ecr.Application/Projects/CloneProjectHandler.cs:42-44`;
+`src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs:35` (Get), `:77`
+(Replace).
+
+**Що знайшлося:** усі перевіряють лише глобальний RBAC `Project.Manage`
+проти `id`/`projectId` з маршруту, без `profile.LevelFor(ResourceKind.Project, id)`,
+тоді як `ListProjectsHandler` (той самий файл) явно фільтрує видимі
+проєкти за тим самим грантом.
+
+**Що вирішити:** чи `Project.Manage` — навмисно платформенне
+адміністративне право (тоді поведінка правильна), чи мало б, як і решта,
+вимагати гранта на конкретний проєкт. З коду намір не читається.
+
+**Статус:** OPEN
+
+---
+
+### Q-180 · QUESTION · Аудит фази 2 (авторизація), 2026-09-09 · `audit/baseline` — завантаження експорту захищене лише непередбачуваністю токена
+
+**Де:** `src/Ecr.Application/Documents/DownloadExportHandler.cs:37-49`.
+
+**Що знайшлося:** перевіряється лише загальний `Document.Export`, без
+`CanReadDocumentAsync`; фактичний захист — лише те, що `exportId`
+(128-бітний `Guid`) віддається лише тому, хто замовив експорт.
+
+**Чому не критично:** GUID криптографічно випадковий і практично
+недобірний повним перебором — задокументована, а не доведена прогалина.
+
+**Статус:** OPEN
