@@ -189,6 +189,19 @@ public interface IUserStore
     public Task<IReadOnlyList<string>> FilterDangerousAsync(
         IReadOnlyList<string> permissionCodes, CancellationToken ct);
 
+    /// <summary>
+    /// ПОВНИЙ каталог системних прав — усі, незалежно від того, чи видано
+    /// комусь.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На відміну від <see cref="FilterUnknownAsync"/> і
+    /// <see cref="FilterDangerousAsync"/>, які звіряють ЧУЖИЙ перелік кодів із
+    /// каталогом, цей метод повертає каталог ЦІЛКОМ: він відповідає на питання
+    /// «що взагалі можна видати», а не «що з переданого існує».
+    /// </remarks>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Security.PermissionCatalogItem>> ListPermissionsAsync(CancellationToken ct);
+
     /// <summary>Політика паролів запису або типова.</summary>
     /// <remarks>
     /// Повертає завжди щось: відсутня політика не має означати «без обмежень» —

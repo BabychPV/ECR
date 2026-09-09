@@ -516,6 +516,24 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<PermissionCatalogItem>> ListPermissionsAsync(CancellationToken ct)
+    {
+        // ⚠ Межа стоїть навіть тут, де каталог свідомо малий (38 прав
+        // сьогодні): «свідомо малий» — властивість поточних даних, а не
+        // запиту (правило 6, той самий принцип, що й `MaxRoles` вище).
+        var permissions = await db.Permissions
+            .AsNoTracking()
+            .OrderBy(p => p.Group)
+            .ThenBy(p => p.Id)
+            .Take(MaxPermissions)
+            .Select(p => new { Code = p.Id, p.Group, p.IsDangerous })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. permissions.Select(p => new PermissionCatalogItem(p.Code, p.Group, p.IsDangerous))];
+    }
+
+    /// <inheritdoc />
     public async Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
