@@ -12,6 +12,7 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class SecurityController(
     ListRolesHandler listRoles,
+    ListPermissionsHandler listPermissions,
     CreateRoleHandler createRole,
     ListUsersHandler listUsers,
     CreateUserHandler createUser,
@@ -77,6 +78,21 @@ public sealed class SecurityController(
         // Небезпечні права віддаються ОКРЕМИМ списком: у складені ролі вони не
         // входять навмисно, і адміністратор має бачити різницю (ФВ-6.12, D-40).
         => Ok(await listRoles.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Повний каталог системних прав, включно з тими, яких не має жодна роль.
+    /// Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До появи цього маршруту клієнт складав перелік прав перетином того,
+    /// що вже оголошено в наявних ролях: право без жодного носія не можна було
+    /// призначити НІКОМУ — форма створення ролі його просто не показувала
+    /// (директива №11, трек T2, `#19`).
+    /// </remarks>
+    [HttpGet("permissions")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.PermissionCatalogItem>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPermissions(CancellationToken ct)
+        => Ok(await listPermissions.HandleAsync(ct).ConfigureAwait(false));
 
     /// <summary>Створює роль. Право <c>Security.ManageRoles</c>.</summary>
     [HttpPost("roles")]

@@ -2723,6 +2723,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/expressions/metadata` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
+| `GET` | `/api/v1/permissions` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
