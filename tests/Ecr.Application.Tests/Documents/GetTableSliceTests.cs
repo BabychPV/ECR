@@ -173,6 +173,21 @@ public sealed class GetTableSliceTests
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Чужий_TableInstanceId_у_маршруті_документа_не_читається()
+    {
+        // ⛔ Q-171 (аудит фази 2, авторизація). `CanReadDocumentAsync` вище
+        // перевіряє право на `documentId` із МАРШРУТУ; сам `tableInstanceId`
+        // читався без звірки з ним — клієнт зі своїм документом і чужим
+        // `tableInstanceId` отримував РЕАЛЬНІ дані чужого документа.
+        Cells(Cell(Row1, new CellValueData { ValueNumeric = 1m }));
+
+        var notFound = await Assert.ThrowsAsync<Ecr.Application.Errors.NotFoundException>(
+            () => Handler().HandleAsync(999, TableInstance, Profile(), "en", CancellationToken.None));
+
+        Assert.Equal("ECR-DOC-0404", notFound.ErrorCode);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.10")]
     public async Task Права_перевіряються_одним_викликом_на_зріз()

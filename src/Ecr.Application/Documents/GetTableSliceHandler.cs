@@ -44,6 +44,20 @@ public sealed class GetTableSliceHandler(
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
+        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ (Q-171,
+        // аудит фази 2). Без цієї перевірки шлях у URL декоративний:
+        // `CanReadDocumentAsync` вище перевіряє право на СВІЙ `documentId`,
+        // а `tableInstanceId` читається БЕЗ звірки з ним — клієнт міг би
+        // вказати чужий екземпляр і прочитати чужі дані, маючи право лише
+        // на свій документ. `CreateRowHandler` і `CellsController.Patch`
+        // цю звірку роблять; на читанні її не було ніколи.
+        if (instance.DocumentId != documentId)
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.");
+        }
+
         // 1. Метадані — зі знімка, без звернення до БД (D-16).
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         var table = snapshot.Sheets.SelectMany(sh => sh.Tables)
