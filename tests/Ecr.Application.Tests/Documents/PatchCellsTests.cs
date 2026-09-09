@@ -129,8 +129,8 @@ public sealed class PatchCellsTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Рядок_без_базової_версії_трактується_як_створення()
     {
-        _rows.CreateRowAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-             .Returns(2002L);
+        _rows.CreateRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns([2002L]);
 
         await Handler().HandleAsync(
             Request(new PatchRow("7009999", BaseVersion: null, [new PatchCell("Volume", 1m)])),
@@ -138,8 +138,9 @@ public sealed class PatchCellsTests
 
         // null у BaseVersion — це намір СТВОРИТИ рядок (R-B2), а не
         // «мені байдуже до версії».
-        await _rows.Received(1).CreateRowAsync(
-            TableInstance, Arg.Any<PeriodKey>(), Arg.Is<RowKey>(k => k.Value == "7009999"),
+        await _rows.Received(1).CreateRowsAsync(
+            TableInstance, Arg.Any<PeriodKey>(),
+            Arg.Is<IReadOnlyList<RowKey>>(keys => keys.Count == 1 && keys[0].Value == "7009999"),
             Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
@@ -152,8 +153,8 @@ public sealed class PatchCellsTests
 
         Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
 
-        await _rows.DidNotReceive().CreateRowAsync(
-            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
@@ -237,8 +238,8 @@ public sealed class PatchCellsTests
         Assert.Equal(nameof(EditDenyReason.PeriodClosed), ex.Details!["reason"]);
 
         // Ані рядка, ані комірок: відмова має спинити батч ПОВНІСТЮ.
-        await _rows.DidNotReceive().CreateRowAsync(
-            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
     }
 
@@ -286,8 +287,8 @@ public sealed class PatchCellsTests
             CancellationToken.None));
 
         Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
-        await _rows.DidNotReceive().CreateRowAsync(
-            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -540,8 +541,8 @@ public sealed class PatchCellsTests
     [Trait("Requirement", "R-A2")]
     public async Task Аудит_несе_RowKey_щойно_створеного_рядка()
     {
-        _rows.CreateRowAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-             .Returns(2002L);
+        _rows.CreateRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns([2002L]);
 
         await Handler().HandleAsync(
             Request(new PatchRow("7009999", BaseVersion: null, [new PatchCell("Volume", 1m)])),

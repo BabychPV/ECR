@@ -95,6 +95,30 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<long>> CreateRowsAsync(
+        long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct)
+    {
+        if (rowKeys.Count == 0)
+        {
+            return [];
+        }
+
+        var firstId = await bulk.ReserveIdsAsync("doc.TableRowSeq", rowKeys.Count, ct).ConfigureAwait(false);
+        var utcNow = clock.UtcNow;
+        var ids = new List<long>(rowKeys.Count);
+
+        for (var i = 0; i < rowKeys.Count; i++)
+        {
+            var id = firstId + i;
+            ids.Add(id);
+            db.TableRows.Add(new TableRow(periodKey, id, tableInstanceId, rowKeys[i], ordinal, utcNow));
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return ids;
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Без цього «дотику» <c>RowVersion</c> не піднімається, і оптимістичне
     /// блокування тихо не працює: двоє правлять ті самі комірки, обидва бачать
