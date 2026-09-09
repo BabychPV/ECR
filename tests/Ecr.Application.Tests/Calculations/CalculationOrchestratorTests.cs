@@ -3,6 +3,7 @@ using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -30,6 +31,7 @@ public sealed class CalculationOrchestratorTests
     private readonly ICalculationResultStore _results = Substitute.For<ICalculationResultStore>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
+    private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
@@ -43,6 +45,13 @@ public sealed class CalculationOrchestratorTests
                  .Returns(false);
         _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
              .Returns("job-1");
+
+        // ⛔ Q-151 (аудит фази 1): `RunCalculationHandler` не перевіряв ЖОДНОГО
+        // права до цього пакета — лише те, що запит автентифікований. Профіль
+        // за замовчуванням несе право, якого потребує кожен наявний тест тут;
+        // тест на ВІДСУТНІСТЬ права — окремий, нижче.
+        _access.BuildProfileAsync(Runner, Arg.Any<CancellationToken>()).Returns(Profile(
+            [RunCalculationHandler.Permission]));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -177,10 +186,41 @@ public sealed class CalculationOrchestratorTests
         await _results.Received(1).InvalidateReportSnapshotsAsync(77, Arg.Any<CancellationToken>());
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Без_права_Calculation_Recalculate_перерахунок_не_ставиться_в_чергу()
+    {
+        // ⛔ Q-151 (аудит фази 1). До цього пакета обробник не перевіряв
+        // ЖОДНОГО права — лише автентифікацію (`ICurrentUser.UserId`). Той
+        // самий клас дефекту, що й `A7-53`: право оголошене в контракті
+        // (`02-contracts.md` §9), а обробник, якому маршрут делегує рішення,
+        // його не питав.
+        _access.BuildProfileAsync(Runner, Arg.Any<CancellationToken>())
+               .Returns(Profile([]));
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync(Project, Period, approval: null, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
+        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
+            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+    }
+
     private RunCalculationHandler Handler()
-        => new(_periods, _workflow, _results, _jobs, _uow, _user, _clock);
+        => new(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
 
     private void States(PeriodState state)
         => _periods.GetPeriodStatesAsync(Project, Period, Arg.Any<CancellationToken>())
                    .Returns(new List<PeriodStateRef> { new(Period, state) });
+
+    /// <summary>Профіль доступу з переліком прав.</summary>
+    private static AccessProfile Profile(IReadOnlyCollection<string> permissions) => new()
+    {
+        CacheKey = "p",
+        UserId = Runner,
+        SecurityStamp = "s",
+        Permissions = new HashSet<string>(permissions, StringComparer.Ordinal),
+        Grants = new Dictionary<string, GrantLevel>(),
+        Denies = new HashSet<string>(),
+        RoleIds = new HashSet<int>(),
+    };
 }

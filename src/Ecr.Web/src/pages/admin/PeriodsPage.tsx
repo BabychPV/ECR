@@ -1,17 +1,21 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Group, Modal, Select, Table, Text, TextInput } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
   CloneProjectRequest,
+  JobStatus,
   PagedProjects,
   PeriodCalendarDto,
   ProjectIdResponse,
+  ProjectRecalculationRequest,
   ReopenPeriodRequest,
   SetCurrentPeriodRequest,
 } from '@/api/types';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
+import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -183,9 +187,82 @@ export function PeriodsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  /**
+   * Перерахунок УСЬОГО проєкту (Q-151/Q-162): постановка в чергу і стеження
+   * за нею — той самий прийом, що й у `SheetActions.tsx` для одного
+   * документа (директива №09 `W8` п.7): GUID у тості й забуття про задачу —
+   * дефект, який тут не повторюємо.
+   *
+   * ⚠ `periodKey: null` — повний рік, тобто саме та семантика, заради якої
+   * `RunCalculationHandler` існував (`RecalculationJob`, Q-162): без цього
+   * маршруту оператор не мав звідки поставити перерахунок УСІХ документів
+   * проєкту одразу, лише по одному документу за раз.
+   */
+  const [recalcJobId, setRecalcJobId] = useState<string | null>(null);
+
+  const recalculate = useMutation({
+    mutationFn: (id: number) =>
+      apiEnqueue(`/api/v1/projects/${id}/recalculate`, {
+        periodKey: null,
+        approvedByUserId: null,
+        approvalReason: null,
+      } satisfies ProjectRecalculationRequest),
+    onSuccess: (job) => {
+      setRecalcJobId(job.jobId);
+      showDone(t('workflow.recalcQueued', { job: job.jobId }));
+    },
+    onError: showApiError,
+  });
+
+  const recalcJob = useQuery({
+    queryKey: ['job', recalcJobId],
+    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(recalcJobId ?? '')}`),
+    enabled: recalcJobId !== null,
+    refetchInterval: (query) => pollInterval(query.state.data?.state),
+
+    // ⚠ `GET /jobs/{id}` вимагає `System.ViewHealth` (Q-156) — без нього
+    // оператор лишається з поставленою задачею, а не з червоним сповіщенням
+    // про право, якого він не просив.
+    retry: false,
+  });
+
+  const recalcOutcome = recalcJobId === null
+    ? null
+    : outcomeOf(recalcJob.data?.state, recalcJob.isError);
+
+  const recalcRunning = recalcOutcome === 'running';
+
+  const recalcReported = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (recalcJobId === null || recalcOutcome === null || recalcOutcome === 'running') return;
+    if (recalcOutcome === 'unknown') return;
+    if (recalcReported.current === recalcJobId) return;
+
+    recalcReported.current = recalcJobId;
+
+    if (recalcOutcome === 'succeeded') {
+      showDone(t('workflow.recalcDone'));
+
+      // ⚠ Сітки документів проєкту перечитуються САМЕ тут, а не на постановці
+      // в чергу: раніше означало б показати старі числа під написом
+      // «перераховано».
+      void queryClient.invalidateQueries({ queryKey: ['table-slice'] });
+      void queryClient.invalidateQueries({ queryKey: ['document'] });
+
+      return;
+    }
+
+    notifications.show({
+      color: 'statusError',
+      message: recalcJob.data?.message ?? t('workflow.recalcFailed'),
+    });
+  }, [recalcJobId, recalcOutcome, recalcJob.data?.message, queryClient]);
+
   const manages = can(session.data, 'Project.Manage');
   const configures = can(session.data, 'Period.Configure');
   const reopens = can(session.data, 'Period.Reopen');
+  const recalculates = can(session.data, 'Calculation.Recalculate');
 
   return (
     <>
@@ -236,6 +313,20 @@ export function PeriodsPage(): JSX.Element {
             {selected !== undefined && manages && (
               <Button size="xs" variant="default" onClick={() => setCloning(true)}>
                 {t('periods.clone')}
+              </Button>
+            )}
+
+            {/* ⛔ Q-151/Q-162: перерахунок усього проєкту, а не по документу за
+                раз. Кнопка доступна лише активному проєкту — чернетка не має
+                жодного документа, який можна було б перерахувати. */}
+            {selected?.status === 'Active' && recalculates && (
+              <Button
+                size="xs"
+                variant="default"
+                loading={recalculate.isPending || recalcRunning}
+                onClick={() => recalculate.mutate(selected.id)}
+              >
+                {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
               </Button>
             )}
 

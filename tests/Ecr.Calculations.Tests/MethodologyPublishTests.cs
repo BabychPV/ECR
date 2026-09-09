@@ -237,7 +237,22 @@ public sealed class MethodologyPublishTests
         _workflow.HasSubmittedSheetsAsync(1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(false);
 
-        var handler = new RunCalculationHandler(_periods, _workflow, _results, _jobs, _uow, _user, _clock);
+        // ⚠ Тест перевіряє правило ФВ-9.4 (закритий період без погодження), а
+        // не право на запуск: профіль тут — окремий, із правом
+        // `Calculation.Recalculate`, яке спільний `Profile()` класу не несе
+        // (той служить `PublishMethodologyHandler`, де це право не потрібне).
+        _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(new AccessProfile
+        {
+            CacheKey = "p",
+            UserId = Reviewer,
+            SecurityStamp = "s",
+            Permissions = new HashSet<string>(StringComparer.Ordinal) { "Calculation.Recalculate" },
+            Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(),
+            RoleIds = new HashSet<int>(),
+        });
+
+        var handler = new RunCalculationHandler(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(1, 202601, approval: null, CancellationToken.None));

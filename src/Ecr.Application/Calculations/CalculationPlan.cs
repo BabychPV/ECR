@@ -123,6 +123,33 @@ public sealed class ModuleProfile
         };
     }
 
+    /// <summary>Домішує статистику іншого профілю (напр. іншого документа) у цей.</summary>
+    /// <remarks>
+    /// ⚠ Не через <see cref="Record"/> у циклі: той рахує кожен виклик як
+    /// один (<c>Calls + 1</c>), тож так узятий чужий <c>Calls</c> загубився б,
+    /// якщо модуль у джерелі викликався більш ніж раз. Тут складаються
+    /// сирі лічильники обох профілів (Q-151/Q-162: перерахунок кількох
+    /// документів в одному прогоні зводить їхні профілі в один).
+    /// </remarks>
+    public void Merge(ModuleProfile other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        foreach (var stat in other._stats.Values)
+        {
+            var existing = _stats.TryGetValue(stat.Code, out var found)
+                ? found
+                : new ModuleStat(stat.Code, TimeSpan.Zero, 0, 0);
+
+            _stats[stat.Code] = existing with
+            {
+                Elapsed = existing.Elapsed + stat.Elapsed,
+                Rows = existing.Rows + stat.Rows,
+                Calls = existing.Calls + stat.Calls,
+            };
+        }
+    }
+
     /// <summary>Статистика по модулях, від найповільнішого.</summary>
     public IReadOnlyList<ModuleStat> Stats
         => _stats.Values.OrderByDescending(s => s.Elapsed).ToList();

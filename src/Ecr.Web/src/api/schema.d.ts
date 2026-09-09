@@ -3302,6 +3302,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/recalculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перерахунок УСЬОГО проєкту. Право `Calculation.Recalculate`.
+         * @description     ⛔ Q-151/Q-162 (аудит фази 1). `RunCalculationHandler` існував,
+         *         був протестований і не мав звідки його викликати: жоден контролер
+         *         на нього не посилався. Задача, яку він ставить у чергу
+         *         (`IRecalculationJob`), тепер справді перераховує всі документи
+         *         проєкту, коли `periodKey` — `null` (повний рік) чи період
+         *         охоплює кілька документів (Q-162: раніше `DocumentId = 0` мовчки
+         *         повертав нуль перерахованих прив'язок).
+         *         Довга операція — у фон, як і перерахунок документа: повертає
+         *     jobId, а не результат.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ProjectRecalculationRequest"];
+                    "application/json": components["schemas"]["ProjectRecalculationRequest"];
+                    "text/json": components["schemas"]["ProjectRecalculationRequest"];
+                };
+            };
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectRecalculationAcceptedResponse"];
+                        "text/json": components["schemas"]["ProjectRecalculationAcceptedResponse"];
+                        "text/plain": components["schemas"]["ProjectRecalculationAcceptedResponse"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries": {
         parameters: {
             query?: never;
@@ -8696,6 +8764,36 @@ export interface components {
              * @description Ідентифікатор.
              */
             projectId: number;
+        };
+        /** @description Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151). */
+        ProjectRecalculationAcceptedResponse: {
+            /** @description Задача. */
+            jobId: string;
+            /**
+             * Format: int32
+             * @description Період; `null` — повний рік, усі документи проєкту.
+             */
+            periodKey: null | number;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+        };
+        /** @description Запит на перерахунок усього проєкту (Q-151). */
+        ProjectRecalculationRequest: {
+            /** @description Причина погодження; обов'язкова разом із `ApprovedByUserId`. */
+            approvalReason: null | string;
+            /**
+             * Format: int32
+             * @description Хто погодив перерахунок закритого періоду (ФВ-9.7); `null` — без погодження.
+             */
+            approvedByUserId: null | number;
+            /**
+             * Format: int32
+             * @description Період; `null` — повний рік, усі документи проєкту.
+             */
+            periodKey: null | number;
         };
         /**
          * @description Стан проєкту: `Draft → Active → Archived`.

@@ -61,14 +61,20 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     /// вантажить <c>cfg.FormulaDef</c>) ланцюг замкнений. Тому асерція на
     /// <c>6.5</c> тут — не очікування майбутнього пакета, а чинна поведінка.
     ///
-    /// ⛔ Чого цей сценарій НЕ доводить і доводити не може, доки не зіллється
-    /// `W10.0`/`W10.1`: що <c>POST …/recalculate</c> сам уміє рахувати формули
-    /// шаблону. Він і досі ставить у чергу лише перерахунок МЕТОДОЛОГІЙ
-    /// (<c>RecalculationJob</c> не має <c>RecalculationService</c> серед
-    /// залежностей узагалі), а «перерахувати все» для формул не існує як
-    /// операції. Тут він викликається і перевіряється на тому, за що
-    /// відповідає вже зараз: не втратити й не зіпсувати обчислених значень,
-    /// які після `W10.1` стануть його власними.
+    /// ⛔ <b>Виправлення застарілого запису</b> (`Q-160`, аудит фази 1).
+    /// Абзац вище стверджував, що <c>POST …/recalculate</c> «і досі ставить у
+    /// чергу лише перерахунок методологій», бо ніби <c>RecalculationJob</c>
+    /// «не має <c>RecalculationService</c> серед залежностей узагалі». Це вже
+    /// НЕПРАВДА станом на поточний код: `W10.1` домержився, і
+    /// <c>RecalculationJob</c> веде ДВА конвеєри в строгому порядку — спершу
+    /// формули шаблону (<c>RecalculationService.RecalculateAllAsync</c>),
+    /// потім методології, — рівно так, як довідково доводить
+    /// <c>RecalculationJobTests.Формули_шаблону_рахуються_ПЕРЕД_методологіями</c>
+    /// (юніт, підставні порти) і крок 7 цього сценарію (наскрізно, реальний
+    /// HTTP): перерахунок документа не губить і не псує щойно порахованого
+    /// <c>C</c>. Застарілий коментар не описував нову поведінку неправильно —
+    /// він описував уже ЗНИКЛУ прогалину, яку сам факт заплутав би читача,
+    /// що йде за посиланням `Q-160` у пошуках чинного стану.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -468,6 +474,131 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Перерахунок УСЬОГО проєкту рахує методологію в УСІХ його документах, а
+    /// не лише в одному (Q-151/Q-162, аудит фази 1).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього пакета `RunCalculationHandler` існував, був протестований
+    /// юніт-тестами і не мав звідки його викликати: жоден контролер на нього
+    /// не посилався (Q-151). І навіть викликаний напряму, `RecalculationJob`
+    /// фільтрував прив'язки методологій за `DocumentId == 0` — тобто «нуль
+    /// перерахованих документів завжди», а не «усі документи проєкту», яке
+    /// малося на увазі (Q-162): `RunCalculationHandler` кладе payload БЕЗ
+    /// `DocumentId` узагалі, і non-nullable `long` мовчки перетворює
+    /// відсутнє поле на 0 при розборі JSON.
+    ///
+    /// ⚠ ДРУГИЙ документ — ядро доказу. Методологія не рахується автоматично
+    /// (на відміну від формул шаблону, які перераховує кожен `PATCH`), тож
+    /// результат <c>EMISSION</c> у другому документі з'являється ЛИШЕ якщо
+    /// проєктний маршрут справді дійшов до НЬОГО, а не тільки до першого
+    /// документа стенда. Числа підібрані різними (10 і 25): збіг випадковим
+    /// бути не може.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-24b")]
+    public async Task Перерахунок_проєкту_рахує_методологію_в_УСІХ_документах()
+    {
+        var stand = await ArrangeStandAsync(sql, "S24b", argument: 4m, divisor: 2m);
+        using var app = stand.App;
+
+        var methodologyId = await CreateMethodologyAsync(app, stand.Admin.Client, "S24b");
+        var versionId = await CreateDraftVersionAsync(app, stand.Admin.Client, methodologyId, "1.0.0");
+
+        await SaveConstantAsync(app, stand.Admin.Client, methodologyId, versionId, "EF", 2.5m, stand.UnitId);
+        await SaveFormulaAsync(app, stand.Admin.Client, methodologyId, versionId, "EMISSION", "@A * CST.EF", "A", stand.UnitId);
+        await SaveOutputAsync(app, stand.Admin.Client, methodologyId, versionId, "EMISSION", stand.UnitId);
+        await SaveRuleAsync(app, stand.Admin.Client, methodologyId, versionId, "ALL_ROWS", "{}", priority: 1);
+        await SaveTestCaseAsync(
+            app, stand.Admin.Client, methodologyId, versionId, "GOLDEN",
+            Input(stand, argument: 4m, divisor: 2m), """{"EMISSION":10}""");
+
+        await SaveBindingAsync(app, stand.Admin.Client, methodologyId, stand.ResultColumnId, "EMISSION");
+
+        await PublishAsync(app, stand.Publisher.Client, methodologyId, versionId, EffectiveFrom(stand.PeriodKey, yearsBack: 1));
+
+        // Другий документ у ТОМУ САМОМУ проєкті й періоді, на тій самій
+        // версії шаблону — тобто та сама прив'язка `TableDefId` застосовна.
+        var createDoc2 = await stand.Admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/documents", UriKind.Relative),
+            new
+            {
+                projectId = stand.ProjectId,
+                templateVersionId = stand.TemplateVersionId,
+                sheetDefIds = new[] { stand.SheetDefId },
+            });
+        Assert.True(
+            createDoc2.StatusCode == HttpStatusCode.Created,
+            $"другий документ: {createDoc2.StatusCode}: {app.ErrorsText}");
+        var documentId2 = (await createDoc2.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
+
+        var tables2 = await stand.Admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId2}/tables?periodKey={stand.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables2.StatusCode);
+        var tableInstanceId2 = (await tables2.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
+
+        // Вхідне число ІНШЕ (10, не 4): 10 × 2.5 = 25 — інший результат, ніж
+        // у першого документа стенда (10), тож переплутати їх неможливо.
+        var patch2 = await stand.Admin.Client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{documentId2}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId = tableInstanceId2,
+                periodKey = stand.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = stand.RowKey,
+                        baseVersion = (string?)null,
+                        cells = new object[]
+                        {
+                            new { columnCode = "A", value = 10m },
+                            new { columnCode = "B", value = 0m },
+                        },
+                    },
+                },
+            });
+        Assert.True(patch2.StatusCode == HttpStatusCode.OK, $"запис у другий документ: {patch2.StatusCode}: {app.ErrorsText}");
+
+        // ГОЛОВНЕ ТВЕРДЖЕННЯ: ОДИН виклик ПРОЄКТНОГО маршруту — не по
+        // документу за раз (Q-151).
+        var recalc = await stand.Admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/projects/{stand.ProjectId}/recalculate", UriKind.Relative),
+            new { periodKey = stand.PeriodKey, approvedByUserId = (int?)null, approvalReason = (string?)null });
+        Assert.Equal(HttpStatusCode.Accepted, recalc.StatusCode);
+
+        var jobId = (await recalc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetString()!;
+        var final = await ScenarioHelpers.AwaitJobAsync(stand.Admin.Client, jobId, TimeSpan.FromSeconds(60));
+        Assert.True(final.ValueKind != JsonValueKind.Undefined, $"стан задачі {jobId} не прочитався: {app.ErrorsText}");
+        Assert.True(
+            string.Equals(final.GetProperty("state").GetString(), "Succeeded", StringComparison.Ordinal),
+            $"перерахунок проєкту {stand.ProjectId} завершився станом "
+            + $"{final.GetProperty("state").GetString()}: {final.GetRawText()}; {app.ErrorsText}");
+
+        var results1 = await ReadResultsAsync(app, stand.Admin.Client, stand.DocumentId, stand.PeriodKey);
+        var emission1 = results1.EnumerateArray().FirstOrDefault(
+            r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
+        Assert.True(
+            emission1.ValueKind != JsonValueKind.Undefined,
+            $"документ {stand.DocumentId}: немає EMISSION після проєктного перерахунку: {results1.GetRawText()}");
+        Assert.Equal(10m, emission1.GetProperty("value").GetDecimal());
+
+        // ⛔ ДРУГИЙ документ — те, чого до Q-151/Q-162 не могло статися:
+        // фільтр `DocumentId == 0` не знаходив НІ ОДНОГО документа проєкту, і
+        // `calc.CalculationResult` лишався порожнім для ОБОХ документів.
+        var results2 = await ReadResultsAsync(app, stand.Admin.Client, documentId2, stand.PeriodKey);
+        var emission2 = results2.EnumerateArray().FirstOrDefault(
+            r => string.Equals(r.GetProperty("outputCode").GetString(), "EMISSION", StringComparison.Ordinal));
+        Assert.True(
+            emission2.ValueKind != JsonValueKind.Undefined,
+            $"документ {documentId2}: немає EMISSION після проєктного перерахунку: {results2.GetRawText()}");
+        Assert.Equal(25m, emission2.GetProperty("value").GetDecimal());
+    }
+
+    /// <summary>
     /// S-25. Збій розрахунку видимий: задача переходить у кінцевий стан із
     /// причиною, і перелік черги (<c>GET /jobs</c>) її показує.
     /// </summary>
@@ -717,6 +848,9 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     /// <param name="PeriodKey">Період.</param>
     /// <param name="RowKey">Рядок, у який записано вхідні числа.</param>
     /// <param name="UnitId">Одиниця <c>t</c> із seed — для константи й виходу.</param>
+    /// <param name="ProjectId">Проєкт стенда — потрібен, щоб завести ДРУГИЙ документ у ньому (Q-151/Q-162).</param>
+    /// <param name="TemplateVersionId">Версія шаблону, на якій живе документ стенда.</param>
+    /// <param name="SheetDefId">Аркуш, яким подано документ стенда.</param>
     private sealed record Stand(
         EcrApiFactory App,
         Provisioning.Administrator Admin,
@@ -726,7 +860,10 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         long TableInstanceId,
         int PeriodKey,
         string RowKey,
-        int UnitId);
+        int UnitId,
+        int ProjectId,
+        int TemplateVersionId,
+        int SheetDefId);
 
     /// <summary>Заводить аркуш, таблицю з фіксованим рядком і три колонки.</summary>
     private static async Task<Structure> ArrangeStructureAsync(
@@ -939,7 +1076,8 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             .GetProperty("id").GetInt32();
 
         return new Stand(
-            app, admin, publisher, structure.ResultColumnId, documentId, tableInstanceId, periodKey, rowKey, unitId);
+            app, admin, publisher, structure.ResultColumnId, documentId, tableInstanceId, periodKey, rowKey, unitId,
+            projectId, structure.TemplateVersionId, structure.SheetDefId);
     }
 
     /// <summary>Створює проєкт на заданій версії шаблону.</summary>
