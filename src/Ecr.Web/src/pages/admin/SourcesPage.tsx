@@ -45,7 +45,7 @@ export function SourcesPage(): JSX.Element {
     },
     onError: (error) => {
       notifications.show({
-        color: 'red',
+        color: 'statusError',
         message: error instanceof EcrApiError ? error.message : String(error),
       });
     },
@@ -94,7 +94,7 @@ export function SourcesPage(): JSX.Element {
                     <Group gap="xs">
                       <Badge
                         variant="light"
-                        color={source.lastRun.status === 'Succeeded' ? 'green' : 'orange'}
+                        color={source.lastRun.status === 'Succeeded' ? 'green' : 'statusWarning'}
                       >
                         {source.lastRun.status}
                       </Badge>
@@ -106,7 +106,7 @@ export function SourcesPage(): JSX.Element {
                   {source.oldestGap === null ? (
                     <Text c="dimmed">—</Text>
                   ) : (
-                    <Badge color="red" variant="light">
+                    <Badge color="statusError" variant="light">
                       {source.oldestGap}
                     </Badge>
                   )}

@@ -178,7 +178,7 @@ export function UiStringsPage(): JSX.Element {
                         <Group gap="xs">
                           <Text>{value}</Text>
                           {untranslated && (
-                            <Badge size="xs" color="orange" variant="light">
+                            <Badge size="xs" color="statusWarning" variant="light">
                               {t('uiStrings.untranslated')}
                             </Badge>
                           )}

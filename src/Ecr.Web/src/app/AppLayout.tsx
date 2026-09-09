@@ -139,7 +139,7 @@ export function AppLayout(): JSX.Element {
                 доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
             {me.isSimulation && (
               <>
-                <Badge color="orange" variant="filled">
+                <Badge color="statusWarning" variant="filled">
                   {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
                 </Badge>
 

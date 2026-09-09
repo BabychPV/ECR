@@ -31,7 +31,7 @@ export function ErrorAlert({
   const apiError = error instanceof EcrApiError ? error : null;
 
   return (
-    <Alert color="red" title={apiError?.problem.title ?? t('state.errorTitle')} role="alert">
+    <Alert color="statusError" title={apiError?.problem.title ?? t('state.errorTitle')} role="alert">
       <Stack gap="xs">
         {/* ⚠ Текст СЕРВЕРА, а не власний узагальнений: «не вдалося
             завантажити» не каже нічого, а «період закрито» каже все. */}

@@ -86,7 +86,7 @@ export function JobsPage(): JSX.Element {
             {/* ⛔ Текст помилки — без стека (ФВ-6.11): стек виносить назовні
                 шляхи, імена і подекуди значення. */}
             {status.error !== null && (
-              <Text size="sm" c="red">
+              <Text size="sm" c="statusError">
                 {status.error}
               </Text>
             )}
@@ -164,7 +164,7 @@ function stateColor(state: string): string {
     case 'Succeeded':
       return 'green';
     case 'Failed':
-      return 'red';
+      return 'statusError';
     case 'Cancelled':
       return 'gray';
     default:

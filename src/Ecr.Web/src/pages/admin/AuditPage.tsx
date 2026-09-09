@@ -118,7 +118,7 @@ export function AuditPage(): JSX.Element {
                           після кінця періоду (`D-70`). В аудиті вона виглядає
                           інакше саме тому, що пояснювати доводиться саме її. */}
                       {change.isLateEdit && (
-                        <Badge ml="xs" size="xs" color="orange" variant="light">
+                        <Badge ml="xs" size="xs" color="statusWarning" variant="light">
                           {t('audit.late')}
                         </Badge>
                       )}

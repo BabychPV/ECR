@@ -206,7 +206,7 @@ function Findings({ result }: { readonly result: ExpressionValidationDto | null 
             {value.diagnostics.length === 0 ? (
               <Badge color="green">{t('expressions.noFindings')}</Badge>
             ) : (
-              <Badge color="red">
+              <Badge color="statusError">
                 {t('expressions.findings', { count: value.diagnostics.length })}
               </Badge>
             )}

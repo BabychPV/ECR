@@ -262,7 +262,7 @@ export function SecurityPage(): JSX.Element {
                         вони не входять навмисно, і адміністратор має бачити
                         різницю (ФВ-6.12, D-40). */}
                     {role.dangerousPermissions.length > 0 && (
-                      <Badge ml="xs" size="xs" color="red" variant="light">
+                      <Badge ml="xs" size="xs" color="statusError" variant="light">
                         {t('security.dangerous', { count: role.dangerousPermissions.length })}
                       </Badge>
                     )}
@@ -358,12 +358,12 @@ export function SecurityPage(): JSX.Element {
                           «користувач не може увійти» найчастіше пояснюється
                           саме ними, а не правами. */}
                       {user.mustChangePassword && (
-                        <Badge size="sm" color="orange" variant="light">
+                        <Badge size="sm" color="statusWarning" variant="light">
                           {t('security.mustChangePassword')}
                         </Badge>
                       )}
                       {user.isLockedOut && (
-                        <Badge size="sm" color="red" variant="light">
+                        <Badge size="sm" color="statusError" variant="light">
                           {t('security.lockedOut')}
                         </Badge>
                       )}

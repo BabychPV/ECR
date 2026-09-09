@@ -245,7 +245,7 @@ export function PeriodsPage(): JSX.Element {
               <Button
                 size="xs"
                 variant="default"
-                color="red"
+                color="statusError"
                 loading={archive.isPending}
                 onClick={() => archive.mutate(selected.id)}
               >
@@ -271,7 +271,7 @@ export function PeriodsPage(): JSX.Element {
       </AsyncBoundary>
 
       {selected?.status === 'Draft' && (
-        <Text c="orange" size="sm" mb="xs">
+        <Text c="statusWarning" size="sm" mb="xs">
           {t('periods.draftHint')}
         </Text>
       )}
@@ -336,7 +336,7 @@ export function PeriodsPage(): JSX.Element {
                       `Open` після кінця місяця виглядає як несправність
                       календаря, а не як свідоме рішення людини. */}
                   {period.reopenedUntil !== null && (
-                    <Badge ml="xs" size="xs" color="orange" variant="outline">
+                    <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
                       {t('periods.reopenedUntil', { until: period.reopenedUntil })}
                     </Badge>
                   )}

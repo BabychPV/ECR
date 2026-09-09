@@ -269,7 +269,7 @@ export function KitchenSinkPage(): JSX.Element {
           <Button>Основна</Button>
           <Button variant="default">Звичайна</Button>
           <Button variant="subtle">Тиха</Button>
-          <Button color="red">Небезпечна</Button>
+          <Button color="statusError">Небезпечна</Button>
           <Button loading>Триває</Button>
           <Button disabled>Недоступна</Button>
         </Group>
@@ -283,10 +283,10 @@ export function KitchenSinkPage(): JSX.Element {
 
         <Group>
           <Badge>Звичайний</Badge>
-          <Badge color="orange" variant="filled">
+          <Badge color="statusWarning" variant="filled">
             Симуляція
           </Badge>
-          <Badge color="red">Помилка</Badge>
+          <Badge color="statusError">Помилка</Badge>
         </Group>
       </Section>
 
