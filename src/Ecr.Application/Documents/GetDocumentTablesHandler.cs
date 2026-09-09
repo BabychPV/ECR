@@ -2,7 +2,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
-using Ecr.Application.Templates;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -39,9 +38,22 @@ public sealed class GetDocumentTablesHandler(
     public async Task<IReadOnlyList<DocumentTableDto>> HandleAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
-        await ListTemplatesHandler
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ І ГРАНТ на проєкт (Q-172, аудит фази 2). Право саме по собі каже
+        // «цей користувач узагалі працює з документами», а не «з ЦИМ».
+        // Метод іще й МАТЕРІАЛІЗУЄ екземпляри таблиць нижче — без цієї
+        // перевірки будь-хто із загальним `Document.View` міг перелічити
+        // `tableInstanceId` чужого документа (і зробити це для документа, що
+        // ще не відкривали, — власним записом).
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
 
         var key = PeriodKey.Parse(periodKey);
 

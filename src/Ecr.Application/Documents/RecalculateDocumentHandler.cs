@@ -34,9 +34,21 @@ public sealed class RecalculateDocumentHandler(
     /// </remarks>
     public async Task<string> HandleAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ І ГРАНТ на проєкт документа (Q-174, аудит фази 2). Право саме по
+        // собі каже «цей користувач узагалі запускає перерахунки», а не «для
+        // ЦЬОГО документа». Без цієї перевірки користувач із
+        // `Calculation.Recalculate` на власний проєкт міг поставити в чергу
+        // перезапис обчислених значень чужого документа.
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
 
         // ⛔ Новий перерахунок ВИТІСНЯЄ попередній над тим самим документом і
         // періодом (`H-23c`). Дві причини, і жодна не про зручність.
