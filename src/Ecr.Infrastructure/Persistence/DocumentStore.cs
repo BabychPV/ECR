@@ -72,12 +72,21 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var hasMore = rows.Count > page.Limit;
         var page1 = rows.Take(page.Limit).ToList();
 
+        // ⛔ Q-167 (аудит фази 2, продуктивність): ОДИН пакетний запит станів
+        // на ВСЮ сторінку замість запиту на кожен документ — «перелік
+        // документів» найчастіше відвідуваний екран системи, і зайвий похід
+        // у базу на кожен рядок сторінки платить кожен, хто його відкриває.
+        var statesByDocument = await StatesBatchAsync(
+            [.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
-            items.Add(new DocumentSummary(
-                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount,
-                await StatesAsync(d.Id, period, ct).ConfigureAwait(false)));
+            var states = statesByDocument.TryGetValue(d.Id, out var found)
+                ? found
+                : new Dictionary<string, string>(StringComparer.Ordinal);
+
+            items.Add(new DocumentSummary(d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -248,6 +257,39 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             s => s.SheetDefId.ToString(CultureInfo.InvariantCulture),
             s => s.Status.ToString(),
             StringComparer.Ordinal);
+    }
+
+    /// <summary>Стан аркушів кількох документів ОДНИМ запитом; порожньо, якщо період не вказано.</summary>
+    /// <remarks>
+    /// ⛔ Q-167 (аудит фази 2, продуктивність). Той самий стан, що й
+    /// <see cref="StatesAsync"/>, але для сторінки документів разом:
+    /// `WHERE DocumentId IN (...)`, згруповано на клієнті, а не запит на
+    /// кожен документ сторінки.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> StatesBatchAsync(
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+    {
+        if (period.Value is not { } periodKey || documentIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyDictionary<string, string>>();
+        }
+
+        var states = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(a => documentIds.Contains(a.DocumentId) && a.PeriodKey == periodKey)
+            .Select(a => new { a.DocumentId, a.SheetDefId, a.Status })
+            .Take(documentIds.Count * MaxSheets)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return states
+            .GroupBy(s => s.DocumentId)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyDictionary<string, string> (g) => g.ToDictionary(
+                    s => s.SheetDefId.ToString(CultureInfo.InvariantCulture),
+                    s => s.Status.ToString(),
+                    StringComparer.Ordinal));
     }
 
     /// <summary>
