@@ -54,7 +54,7 @@ public sealed class ExcelExportJob(IExcelExporter exporter, IExportStore exports
         await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
 
         await exports
-            .SaveAsync(task.ExportId, buffer.ToArray(), Lifetime, ct)
+            .SaveAsync(task.ExportId, task.DocumentId, buffer.ToArray(), Lifetime, ct)
             .ConfigureAwait(false);
 
         // ⚠ Ключ повідомляється в прогресі: саме за ним клієнт, побачивши

@@ -19,24 +19,49 @@ public sealed class ExportStore(IDistributedCache cache) : IExportStore
     /// <summary>Префікс ключа — щоб книги не змішалися з рештою кешу.</summary>
     public const string KeyPrefix = "ecr:export:";
 
+    /// <summary>
+    /// Довжина заголовка запису: <c>documentId</c> як <c>long</c> (Q-180)
+    /// попереду вмісту книги.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>IDistributedCache</c> зберігає лише опаковані байти — жодної
+    /// схеми БД тут немає (кеш на <c>AddDistributedSqlServerCache</c> — це
+    /// одна таблиця «ключ → блоб», її форма не міняється), тож `documentId`
+    /// пакується просто ПОПЕРЕДУ вмісту, а не окремою колонкою.
+    /// </remarks>
+    private const int HeaderLength = sizeof(long);
+
     /// <inheritdoc />
-    public Task SaveAsync(string exportId, byte[] content, TimeSpan lifetime, CancellationToken ct)
+    public Task SaveAsync(string exportId, long documentId, byte[] content, TimeSpan lifetime, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exportId);
         ArgumentNullException.ThrowIfNull(content);
+
+        var envelope = new byte[HeaderLength + content.Length];
+        BitConverter.TryWriteBytes(envelope, documentId);
+        content.CopyTo(envelope, HeaderLength);
 
         // ⛔ Абсолютний строк, а не ковзний: книга не має «продовжувати життя»
         // від того, що її кілька разів завантажили.
         var options = new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = lifetime };
 
-        return cache.SetAsync(KeyPrefix + exportId, content, options, ct);
+        return cache.SetAsync(KeyPrefix + exportId, envelope, options, ct);
     }
 
     /// <inheritdoc />
-    public Task<byte[]?> FindAsync(string exportId, CancellationToken ct)
+    public async Task<ExportedBook?> FindAsync(string exportId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exportId);
 
-        return cache.GetAsync(KeyPrefix + exportId, ct);
+        var envelope = await cache.GetAsync(KeyPrefix + exportId, ct).ConfigureAwait(false);
+        if (envelope is null || envelope.Length < HeaderLength)
+        {
+            return null;
+        }
+
+        var documentId = BitConverter.ToInt64(envelope, 0);
+        var content = envelope[HeaderLength..];
+
+        return new ExportedBook(documentId, content);
     }
 }

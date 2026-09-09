@@ -225,7 +225,7 @@
 | Q-177 | CONFLICT | `GetCellChangesHandler` (`GET /audit/cells`) не фільтрує за грантом на проєкт; без `documentId` — необмежений запит по всіх проєктах, включно зі старими/новими значеннями комірок | RESOLVED |
 | Q-178 | QUESTION | `ExcelExchangeHandlers` (import preview/apply) перевіряють лише RBAC на контролері, без гранта на проєкт — фактичний захист є глибше (`ExcelImporter`→`CanEditSliceAsync`), але це розбіжність із патерном `ExportDocumentHandler` (`A7-55`), не доведена вразливість | RESOLVED |
 | Q-179 | QUESTION | `ProjectsController`: Activate/Archive/Clone/ApprovalRoute перевіряють лише глобальний `Project.Manage`, без гранта на конкретний `projectId` — може бути навмисним (адмінське право), потребує підтвердження заміру | RESOLVED |
-| Q-180 | QUESTION | `DownloadExportHandler` не перевіряє грант на проєкт — захищений лише непередбачуваністю `exportId` (128-бітний GUID); задокументована, практично нездобувна прогалина | OPEN |
+| Q-180 | QUESTION | `DownloadExportHandler` не перевіряє грант на проєкт — захищений лише непередбачуваністю `exportId` (128-бітний GUID); задокументована, практично нездобувна прогалина | RESOLVED |
 | Q-181 | CONFLICT | `ConcurrencyTests.Запис_зі_застарілою_версією_рядка_відхиляється` не відхиляв жодного запису — дублював сусідній тест, справжнє відхилення доводить `PatchCellsTests` | RESOLVED · видалено дублікат, PR #74 |
 | Q-182 | CONFLICT | `ReopenRaceTests.Програвший_бачить_актуальний_стан_і_відмовляє_з_причиною` імітував відмову (`throw` за вже перевіреною умовою) замість виклику `ReopenDocumentHandler` | RESOLVED · перейменовано й прибрано фіктивний блок, PR #74 |
 | Q-183 | CONFLICT | `ReportSnapshotBuilderTests.Вʼюха_для_регулятора_віддає_лише_Approved_і_Submitted` шукала підрядок у тексті SQL-файлу, не виконувала запит — мутація фільтра (`1=1`, реальний витік чернеток регулятору) лишала підрядок у коментарі | RESOLVED · `ReportSnapshotBuilderTests.cs` (реальний запит до розгорнутої вʼюхи), PR #76 |
@@ -7834,7 +7834,45 @@ received no matching calls»; відновлення — знову зелено
 **Чому не критично:** GUID криптографічно випадковий і практично
 недобірний повним перебором — задокументована, а не доведена прогалина.
 
-**Статус:** OPEN
+#### Закрито (рішення людини)
+
+Інструкція: «додати перевірку, але спершу прогреп легітимні шляхи без
+гранта — зупинитись, якщо знайдеться». Перегреп: `Document.Export`
+тримають лише робочі ролі (`DataEntry`, `Approver` — `09-seed.sql`), не
+наскрізна роль на кшталт `Security.ViewAudit` із Q-177; фронтенд
+(`DocumentPage.tsx`) не має жодного механізму «поділитися посиланням на
+експорт» — кнопка тягне `exportId` лише з ЩОЙНО поставленої власної
+задачі. Сам коментар обробника («ідентифікатор — переслати іншій
+людині») описує ЗАГРОЗУ (навіщо перевіряти право знову), а не підтриману
+можливість. Легітимного шляху без гранта не знайдено — додано перевірку.
+
+**Технічна перешкода, яку довелося зняти:** `IExportStore` зберігав
+ЛИШЕ байти книги під `exportId` — жодного зв'язку з `documentId`, тому
+`DownloadExportHandler` не мав за чим перевірити грант. Розширено
+`IExportStore.SaveAsync` третім параметром `documentId`, `FindAsync`
+тепер повертає `ExportedBook(DocumentId, Content)` замість голого
+`byte[]`. Реалізація (`ExportStore`, поверх `AddDistributedSqlServerCache`)
+пакує `documentId` (8 байт, `BitConverter`) ПЕРЕД вмістом в одному
+опакованому блобі — це НЕ зміна схеми БД: таблиця `dbo.Cache` лишається
+тією самою парою «ключ → блоб», змінився лише формат усередині блоба,
+тому зупинка на зміну схеми (`schema-migration-always-stops`) тут не
+застосовна. `ExcelExportJob` (`src/Ecr.Infrastructure/Jobs/ExcelExportJob.cs`)
+передає `task.DocumentId` при збереженні. `DownloadExportHandler` тепер:
+право → існування книги (перше, як і в Q-179 — інакше прострочений
+`exportId` завжди впав би на «немає гранта», ховаючи `ECR-DOC-0404` за
+`403`) → `CanReadDocumentAsync(profile, book.DocumentId, ct)`.
+
+Тестів на `DownloadExportHandler`/`ExportStore` раніше не існувало
+взагалі. Додано `DownloadExportAccessTests.cs` (3 тести: 404 без
+дотику до перевірки гранта, 403 без гранта, успіх із грантом) і
+`ExportStoreTests.cs` (2 тести, за зразком `ImportPreviewStoreTests.cs`,
+проти реального SQLEXPRESS). Доказ мутацією (×2): вимкнув перевірку
+гранта в обробнику — тест падав; прибрав запис `documentId` у конверт
+`ExportStore` — тест на округлення `DocumentId`/`Content` падав.
+Відновлення обох — знову зелено. Повний `dotnet test` (усі проєкти,
+проти SQLEXPRESS): зелено.
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR #98
 
 ---
 

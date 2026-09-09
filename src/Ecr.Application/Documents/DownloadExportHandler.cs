@@ -3,7 +3,6 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
-using Ecr.Application.Templates;
 
 namespace Ecr.Application.Documents;
 
@@ -18,6 +17,17 @@ namespace Ecr.Application.Documents;
 /// ⛔ Право перевіряється **знову**, а не «вже перевірили при постановці».
 /// Між постановкою і завантаженням минає час: ролі могли змінити, а
 /// ідентифікатор експорту — переслати іншій людині.
+/// </para>
+/// <para>
+/// ⛔ Q-180 (аудит фази 2, авторизація). До цього перевірявся лише
+/// глобальний <see cref="Permission"/> — захистом від чужого документа
+/// була практично нездобувна, але єдина лінія оборони: непередбачуваність
+/// 128-бітного <c>exportId</c>. Людина визнала прогалину не доведеною
+/// вразливістю, але вирішила закрити її так само, як і решту фази 2
+/// (`Q-178`, <see cref="ExportDocumentHandler"/>): грант на КОНКРЕТНИЙ
+/// документ, а не лише функціональне право. Це вимагало розширити
+/// <see cref="IExportStore"/>, щоб він узагалі пам'ятав, з якого документа
+/// побудована книга — раніше він зберігав лише байти.
 /// </para>
 /// </remarks>
 public sealed class DownloadExportHandler(
@@ -34,17 +44,33 @@ public sealed class DownloadExportHandler(
     /// <exception cref="NotFoundException">
     /// Книги немає або строк її життя вийшов — <c>ECR-DOC-0404</c>.
     /// </exception>
+    /// <exception cref="AccessDeniedException">
+    /// Немає гранта на документ, з якого побудована книга — <c>ECR-AUTH-0403</c>.
+    /// </exception>
     public async Task<byte[]> HandleAsync(string exportId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exportId);
 
-        await ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        return await exports.FindAsync(exportId, ct).ConfigureAwait(false)
-               ?? throw new NotFoundException(
-                   "ECR-DOC-0404",
-                   "Книги немає або строк її життя вийшов: побудуйте експорт заново.");
+        // ⚠ Існування ПЕРЕД грантом — той самий порядок, що й у Q-179: без
+        // нього застарілий/невідомий exportId завжди впав би на «немає
+        // гранта», ховаючи справжню причину (файл прострочився чи його
+        // взагалі не було) за помилковим 403.
+        var book = await exports.FindAsync(exportId, ct).ConfigureAwait(false)
+                   ?? throw new NotFoundException(
+                       "ECR-DOC-0404",
+                       "Книги немає або строк її життя вийшов: побудуйте експорт заново.");
+
+        var read = await access.CanReadDocumentAsync(profile, book.DocumentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {book.DocumentId}: {read.Reason}.");
+        }
+
+        return book.Content;
     }
 }
