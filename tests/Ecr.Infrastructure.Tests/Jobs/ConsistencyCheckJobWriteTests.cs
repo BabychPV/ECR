@@ -49,7 +49,11 @@ public sealed class ConsistencyCheckJobWriteTests(SqlServerFixture sql)
         var writes = executed.Count(cmd => cmd.Contains("ConsistencyIssue", StringComparison.Ordinal));
         Assert.Equal(1, writes);
 
-        var count = await CountIssuesAsync("ORPHANED_CELL", CancellationToken.None);
+        // ⚠ Рахуємо ЛИШЕ рядки, які вставив цей тест: `aud.ConsistencyIssue`
+        // спільний для всієї колекції SqlServer, і глобальний COUNT за
+        // RuleCode збігався б із будь-якою іншою знахідкою ORPHANED_CELL з
+        // паралельного тесту (`ConsistencyCheckJobDetectionTests`, Q-184).
+        var count = await CountIssuesAsync("ORPHANED_CELL", doc.RowIds, CancellationToken.None);
         Assert.Equal(2, count);
     }
 
@@ -71,12 +75,14 @@ public sealed class ConsistencyCheckJobWriteTests(SqlServerFixture sql)
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 
-    private async Task<int> CountIssuesAsync(string ruleCode, CancellationToken ct)
+    private async Task<int> CountIssuesAsync(string ruleCode, IReadOnlyList<long> entityIds, CancellationToken ct)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync(ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM aud.ConsistencyIssue WHERE RuleCode = @rule";
+        command.CommandText =
+            "SELECT COUNT(*) FROM aud.ConsistencyIssue WHERE RuleCode = @rule AND EntityId IN ("
+            + string.Join(',', entityIds) + ")";
         command.Parameters.AddWithValue("@rule", ruleCode);
         return (int)(await command.ExecuteScalarAsync(ct))!;
     }
