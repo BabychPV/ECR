@@ -81,6 +81,57 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             "рядок фіксованої таблиці прийшов без підпису з RowDef."));
     }
 
+    /// <summary>
+    /// Q-148: <c>PATCH /cells</c> і <c>POST /rows</c> дають ОДНАКОВУ відповідь
+    /// на той самий намір — «додати рядок у Fixed».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Виміряно живим прогоном до фікса: `PATCH` із вигаданим ключем
+    /// (`baseVersion: null`) на цій самій таблиці віддавав `200`, а
+    /// `POST …/rows` на ту саму таблицю законно відхиляв `409`. Два шляхи
+    /// запису відповідали протилежне на те саме питання.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-13")]
+    public async Task Fixed_таблиця_відхиляє_вигаданий_ключ_рядка_через_PATCH()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(
+            app, "S13b",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        var doc = await ArrangeRealDocumentAsync(app, admin, "S13b");
+        admin = doc.Admin;
+
+        var tables = await admin.Client.GetAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/tables?periodKey={doc.PeriodKey}", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, tables.StatusCode);
+        var tableInstanceId = (await tables.Content.ReadFromJsonAsync<JsonElement>())[0]
+            .GetProperty("tableInstanceId").GetInt64();
+
+        var patch = await admin.Client.PatchAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/cells", UriKind.Relative),
+            new
+            {
+                tableInstanceId,
+                periodKey = doc.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey = "DYN-vigadanyi", baseVersion = (string?)null,
+                        cells = new object[] { new { columnCode = doc.ColumnCode, value = 1m } },
+                    },
+                },
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, patch.StatusCode);
+        var body = await patch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-ROW-0409", body.GetProperty("errorCode").GetString());
+    }
+
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-14")]
