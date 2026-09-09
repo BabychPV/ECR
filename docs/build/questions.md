@@ -242,7 +242,8 @@
 | Q-194 | CONFLICT | `DeleteRegistryEntryHandler` (перевірка `ECR-REG-0409`, покритий тестом) без жодного `[HttpDelete]` — помилково заведений запис довідника не можна прибрати через API взагалі | OPEN |
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
-| Q-205 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
+| Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
+| Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
 
 ---
 
@@ -8778,7 +8779,42 @@ doc-коментарем немає ні в `src/`, ні в тестах — з�
 
 ---
 
-### Q-205 · SCOPE · T9 директиви №11, 2026-09-09 · `02a-db-schema.md` §17 роками розійшовся з чинним `09-seed.sql`
+### Q-205 · SCOPE · T9 директиви №11, 2026-09-09 · перемикач мови інтерфейсу (en/ru/kz)
+
+**Де:** `src/Ecr.Web/src/shared/ui/LanguageSwitcher.tsx` (новий),
+`src/Ecr.Web/src/shared/ui/UserMenu.tsx`, `shared/i18n/index.ts`
+(`setLanguage`), `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql`.
+
+**Що знайшлося:** `shared/i18n/index.ts` мав функцію `setLanguage` без
+жодного викликача в `src/` — код, що зберігає вибір мови
+(`localStorage`) і синхронно оновлює `current`, існував, але нічого його
+не кликало. Перевірено окремо: англійський fallback при відсутньому
+перекладі вже працював і був покритий — сервер (`UiStringResolver.Compose`
+підміняє відсутній переклад до відправки) і клієнт (`t()` пробує
+`lookup(current) ?? lookup(DefaultLanguage)`) — новий код для самого
+fallback-у не був потрібен, тільки перемикач, що дає користувачу вибір.
+
+**Що зроблено:** `LanguageSwitcher.tsx` (Mantine `NativeSelect`, реєстр
+мов через наявний `useLanguages`/`GET /api/v1/languages`), розміщений у
+`UserMenu.tsx` поруч із перемикачами теми й щільності. Вибір викликає і
+`setLanguage()` (зберігає вибір, оновлює `current` синхронно), і
+`loadCatalog(value, 'private')` (фактично підвантажує каталог обраної
+мови — без цього перемикач лише запам'ятовував би код мови, не змінюючи
+видимий текст). У `09-seed.sql` додано один рядок реєстру каталогу —
+підпис перемикача (`profile.language`); самі мови (`sys_ecr.Language`,
+en/ru/kz) уже існували в реєстрі до цієї роботи.
+
+**Перевірка мутацією (D-134):** директива вимагала доказу мутацією, що
+`setLanguage` — не no-op. Емпірично: прибрати виклик `loadCatalog` —
+3 з 4 тестів червоніють з правильної причини (видимий текст лишається
+старим назавжди); окремий тест ловить саме no-op `setLanguage` через
+`localStorage` (`uiLanguage`), що залежить лише від нього.
+
+**Статус:** RESOLVED · PR #116
+
+---
+
+### Q-208 · SCOPE · T9 директиви №11, 2026-09-09 · `02a-db-schema.md` §17 роками розійшовся з чинним `09-seed.sql`
 
 **Де:** `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`, рядки
 2941-2962), `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql` (той
