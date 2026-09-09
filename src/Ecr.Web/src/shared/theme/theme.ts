@@ -8,7 +8,7 @@
  * буде — міняється ЦЕЙ кортеж і більше нічого в усьому застосунку. Саме заради
  * цього діє `ФВ-14.11`.
  */
-const brand: MantineColorsTuple = [
+export const brand: MantineColorsTuple = [
   '#eef3ff',
   '#dce4f5',
   '#b9c7e2',
