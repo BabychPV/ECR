@@ -222,7 +222,7 @@
 | Q-174 | CONFLICT | `RecalculateDocumentHandler` не перевіряє грант на проєкт — фонова задача перераховує чужі дані; окремо `Q-151` — та сама задача без gate закритого періоду | RESOLVED · `RecalculateDocumentHandler.cs`, PR #75 |
 | Q-175 | CONFLICT | `GetCalculationResultsHandler` (`GET …/calculation-results`) не перевіряє грант на проєкт — віддає результати методологій (речовини, обсяги) по будь-якому `documentId` | RESOLVED · `GetCalculationResultsHandler.cs`, PR #75 |
 | Q-176 | CONFLICT | `CreateDocumentHandler` не перевіряє грант на `projectId` із тіла запиту — можна завести документ у чужому проєкті | RESOLVED · `CreateDocumentHandler.cs`, PR #75 |
-| Q-177 | CONFLICT | `GetCellChangesHandler` (`GET /audit/cells`) не фільтрує за грантом на проєкт; без `documentId` — необмежений запит по всіх проєктах, включно зі старими/новими значеннями комірок | OPEN — випадок із заданим `documentId` закрито (`GetCellChangesHandler.cs`, PR #76); без `documentId` лишається відкритим питанням |
+| Q-177 | CONFLICT | `GetCellChangesHandler` (`GET /audit/cells`) не фільтрує за грантом на проєкт; без `documentId` — необмежений запит по всіх проєктах, включно зі старими/новими значеннями комірок | RESOLVED |
 | Q-178 | QUESTION | `ExcelExchangeHandlers` (import preview/apply) перевіряють лише RBAC на контролері, без гранта на проєкт — фактичний захист є глибше (`ExcelImporter`→`CanEditSliceAsync`), але це розбіжність із патерном `ExportDocumentHandler` (`A7-55`), не доведена вразливість | OPEN |
 | Q-179 | QUESTION | `ProjectsController`: Activate/Archive/Clone/ApprovalRoute перевіряють лише глобальний `Project.Manage`, без гранта на конкретний `projectId` — може бути навмисним (адмінське право), потребує підтвердження заміру | OPEN |
 | Q-180 | QUESTION | `DownloadExportHandler` не перевіряє грант на проєкт — захищений лише непередбачуваністю `exportId` (128-бітний GUID); задокументована, практично нездобувна прогалина | OPEN |
@@ -7639,11 +7639,24 @@ Application-порту й самої реалізації в Infrastructure од
 (`DataEntryScenarios.Чужий_журнал_аудиту_за_documentId_не_читається`).
 Мутація (D-134): відкат → тест падає з `200`; відновлено — зелений.
 
-Випадок без `documentId` (необмежений запит по всіх проєктах) лишається
+Випадок без `documentId` (необмежений запит по всіх проєктах) лишався
 відкритим питанням вище.
 
-**Статус:** OPEN — випадок із заданим `documentId` закрито
-(`GetCellChangesHandler.cs`, PR #76); без `documentId` лишається відкритим
+#### Закрито (рішення людини)
+
+Підтверджено: `Security.ViewAudit` — централізоване/комплаєнс-право
+поза межами проєктів, навмисно, а не прогалина. Оновлено коментар у
+`GetCellChangesHandler.cs`, додано сценарій
+`DataEntryScenarios.Журнал_аудиту_без_documentId_наскрізний_за_призначенням`:
+`stranger` без ЖОДНОГО гранта, лише з `Security.ViewAudit`, отримує
+`200` на запит без `documentId` — так, як задумано.
+
+Доказ мутацією: тимчасово додав відмову за відсутністю грантів у гілку
+без `documentId` — новий тест упав (`Expected: OK, Actual: Forbidden`);
+прибрав мутацію — знову `200`.
+
+**Статус:** RESOLVED · обидва випадки закрито (`documentId` — PR #76,
+наскрізний намір задокументовано й доведено тестом — PR #92)
 
 ---
 

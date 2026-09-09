@@ -787,6 +787,44 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             $"журнал аудиту чужого документа мав дати 4xx, а дав {audit.StatusCode}: {await audit.Content.ReadAsStringAsync()}");
     }
 
+    /// <summary>
+    /// Без <c>documentId</c> — <c>Security.ViewAudit</c> навмисно наскрізне.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Q-177 (залишок) — рішення людини: `Security.ViewAudit` — це
+    /// централізоване/комплаєнс-право поза межами проєктів, а не «бачить
+    /// лише свої проєкти». Той самий `stranger`, що вище отримує `4xx` на
+    /// КОНКРЕТНИЙ чужий документ, тут — без `documentId`, тобто по всій
+    /// системі — має отримати `200`: це не діра, а призначення права.
+    /// Якби колись хтось «полагодив» це фільтром за грантом, цей тест
+    /// упав би першим і назвав би причину зміни.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-20")]
+    public async Task Журнал_аудиту_без_documentId_наскрізний_за_призначенням()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S20cOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+        var stranger = await Provisioning.AdministratorAsync(app, "S20cStranger", ["Security.ViewAudit"]);
+
+        var doc = await ArrangeRealDocumentAsync(app, owner, "S20cOwner");
+        owner = doc.Admin;
+
+        var from = DateTime.UtcNow.AddMinutes(-1);
+        var to = DateTime.UtcNow.AddMinutes(1);
+
+        // `stranger` не має ЖОДНОГО гранта на жоден проєкт — лише
+        // `Security.ViewAudit`. Запит БЕЗ `documentId` мусить пройти.
+        var audit = await stranger.Client.GetAsync(new Uri(
+            $"/api/v1/audit/cells?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}&limit=50",
+            UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
+    }
+
     /// <summary>Пише число в першу комірку першого рядка, звіряючи версію.</summary>
     private static async Task PatchAsync(
         EcrApiFactory app, Provisioning.Administrator admin, RealDocument doc,
