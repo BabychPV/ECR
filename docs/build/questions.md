@@ -233,10 +233,10 @@
 | Q-185 | CONFLICT | `PartitionCheckJobTests.Достатній_запас_не_породжує_шуму` перевіряє лише текст тернарного виразу в `PartitionCheckJob.cs` — інверсія умови (`enough`) лишає перевірений підрядок незмінним | RESOLVED |
 | Q-186 | CONFLICT | `CollectionCoverage.Skipped(...)` пише `CollectionRunId = 0` — рядка `itg.CollectionRun` з таким `Id` не існує ніде, `FK_CCov_Run` відхиляє КОЖЕН запис journal покриття на пропуск/конфлікт; знайдено емпірично (реальний `DbUpdateException` на SQL Server), не аудитом | RESOLVED |
 | Q-187 | CONFLICT | `AccessProfileCache.GetOrCreateAsync` кешує профіль за ключем `(userId, securityStamp)` БЕЗ `groupsFingerprint`, хоча `LoadAsync` рахує права по-різному залежно від наявності групових SID — власна сесія користувача й перегляд/симуляція чужого профілю можуть ділити один кеш-запис і 30 хв повертати права ІНШОГО контексту | OPEN |
-| Q-188 | SCOPE | `GetCurrentUserHandler.LevelForProject` дублює логіку `AccessProfile.LevelFor` (deny виграє, потім grant) — друга реалізація того самого правила на іншій формі даних (string-серіалізований DTO замість домену) | OPEN |
+| Q-188 | SCOPE | `GetCurrentUserHandler.LevelForProject` дублює логіку `AccessProfile.LevelFor` (deny виграє, потім grant) — друга реалізація того самого правила на іншій формі даних (string-серіалізований DTO замість домену) | RESOLVED · спільний `AccessProfile.Resolve`, PR #109 |
 | Q-189 | SCOPE | `PatchCellsHandler.HandleAsync` — ~340 рядків одним методом (права, побудова рядків, валідація, застосування, аудит, підсумок) в одній функції | RESOLVED · розкладено на приватні методи за фазами, PR #110 |
 | Q-190 | SCOPE | `TableDef.SwitchStorage`/`CellStorageMode.Hybrid` — мертвий код: `StorageMode` вставляється як `Normalized` у конструкторі й ніде не читається умовно; `SwitchStorage` не має жодного викликача | OPEN |
-| Q-191 | CONFLICT | `permissions.ts.decide()` вирішує `CalculatedCell`/`ColumnReadOnly` ЛОКАЛЬНО, не питаючи сервер, тоді як `EditRules.CanEdit` перевіряє симуляцію, стан проєкту/періоду/аркуша РАНІШЕ за ці дві причини — клієнт може показати «комірка обчислюється» на комірці, яку сервер відхилив би через «документ подано» чи «період закрито» | OPEN |
+| Q-191 | CONFLICT | `permissions.ts.decide()` вирішує `CalculatedCell`/`ColumnReadOnly` ЛОКАЛЬНО, не питаючи сервер, тоді як `EditRules.CanEdit` перевіряє симуляцію, стан проєкту/періоду/аркуша РАНІШЕ за ці дві причини — клієнт може показати «комірка обчислюється» на комірці, яку сервер відхилив би через «документ подано» чи «період закрито» | RESOLVED · `permissions.ts` (`decide`), PR #108 |
 
 ---
 
@@ -8435,7 +8435,29 @@ Ecr.sln` проти локального SQLEXPRESS (Docker недоступни
 вже стався з `DenyReason` на клієнті до `A7-02` (три назви розійшлися з
 сервером, коментар у `permissions.ts` це прямо називає).
 
-**Статус:** OPEN
+#### Закрито
+
+Винесено спільний `internal static AccessProfile.Resolve(bool isDenied,
+GrantLevel? grant)` — єдине місце, де живе правило «deny → grant → None».
+`AccessProfile.LevelFor` і `GetCurrentUserHandler.LevelForProject` тепер
+лише будують ключ і дістають значення зі своєї форми даних (домен vs
+рядковий `CurrentUserView`), а саме рішення делегують туди. Поведінка й
+публічні сигнатури обох методів не змінились.
+
+`LevelForProject` навмисно лишився над `CurrentUserView`, а не над
+`AccessProfile`, хоч домену профіль на момент побудови `CurrentUserView` в
+`GetCurrentUserHandler.HandleAsync` доступний: сигнатура публічна, і
+розпарсити рядок назад у `GrantLevel` перед викликом спільного `Resolve`
+дешевше, ніж міняти форму виклику для можливих інших споживачів DTO.
+
+Новий `tests/Ecr.Application.Tests/Security/GetCurrentUserHandlerTests.cs`
+звіряє `LevelFor` і `LevelForProject` між собою (не проти захардкоджених
+чисел) на кількох комбінаціях грант/заборона, пропущених через справжню
+`HandleAsync`. Перевірено вручну (D-134): тимчасове вимкнення
+deny-перевірки в `LevelForProject` валило саме ці тести
+(`Expected: None, Actual: Manage`); після повернення — зелено.
+
+**Статус:** RESOLVED · спільний `AccessProfile.Resolve`, PR #109
 
 ---
 
@@ -8454,7 +8476,7 @@ upsert/delete, застосування через `ICellStore`, запис ау
 щоб зрозуміти один крок, потрібно тримати в голові контекст усіх
 попередніх 300+ рядків.
 
-**Статус:** RESOLVED
+**Статус:** RESOLVED · розкладено на приватні методи за фазами, PR #110
 
 #### Закрито
 
@@ -8533,4 +8555,26 @@ upsert/delete, застосування через `ICellStore`, запис ау
 якої немає (`ФВ-6.11` вимагає підказку саме тому, що мовчазна відмова
 дорожча за помилку розробника) — тут вона не мовчазна, а НЕПРАВДИВА.
 
-**Статус:** OPEN
+#### Закрито
+
+`decide()` у `permissions.ts` переставлено: серверний
+`slice.cellPermissions[cellKey]` тепер перевіряється ПЕРШИМ (він уже несе
+причину, обчислену `EditRules.CanEdit` за повною чергою), а локальна
+евристика `CalculatedCell`/`ColumnReadOnly` лишилась лише запасним
+варіантом — вона спрацьовує тільки коли для комірки немає запису в
+серверному словнику (сервер віддає лише відхилення, відсутність запису
+чи `'None'` — це дозвіл). Жодна інша поведінка `decide()` не змінена:
+переклад причин через `Hints`, невідома причина сервера, `guardOf` —
+усе те саме.
+
+Додано два тести в `permissions.test.ts`, що доводять пріоритет: колонка
+одночасно обчислювана (чи read-only) І сервер уже дав причину вищого
+пріоритету (`DocumentSubmitted`, `ProjectArchived`) — `decide()` повертає
+СЕРВЕРНУ причину, не локальну здогадку. D-134: тимчасово повернутий
+старий порядок (локальна перевірка першою) — обидва нові тести падали,
+показуючи `CalculatedCell`/`ColumnReadOnly` замість очікуваних
+`DocumentSubmitted`/`ProjectArchived`; після відновлення порядку — знову
+зелені. `Кожна_причина_заборони_має_підказку_на_клієнті` і решта 297
+клієнтських тестів лишились зеленими.
+
+**Статус:** RESOLVED · `permissions.ts` (`decide`), PR #108

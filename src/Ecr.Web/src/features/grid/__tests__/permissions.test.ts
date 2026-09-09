@@ -122,6 +122,37 @@ describe('Права по комірках', () => {
     expect(new Set(hints).size).toBe(reasons.length);
   });
 
+  it('Q-191: серверна причина переважає локальну евристику "обчислена колонка"', () => {
+    // Колонка обчислювана (локально дало б `CalculatedCell`), але сервер уже
+    // виніс причину вищого пріоритету за повною чергою `EditRules.CanEdit`
+    // (документ поданий — перевіряється РАНІШЕ за `CalculatedCell`). Клієнт
+    // мусить показати СЕРВЕРНУ причину, а не свою локальну здогадку.
+    const data = slice(
+      { [cellKey('R1', 'C1')]: 'DocumentSubmitted' },
+      [column({ dataType: 'Formula' })],
+    );
+
+    const decision = decide(data, 'R1', column({ dataType: 'Formula' }));
+
+    expect(decision.reason).toBe('DocumentSubmitted');
+    expect(decision.reason).not.toBe('CalculatedCell');
+  });
+
+  it('Q-191: серверна причина переважає локальну евристику "read-only колонка"', () => {
+    // Той самий випадок для другої локальної евристики: колонка read-only
+    // (локально дало б `ColumnReadOnly`), а проєкт архівований — причина, що
+    // стоїть значно вище в черзі сервера.
+    const data = slice(
+      { [cellKey('R1', 'C1')]: 'ProjectArchived' },
+      [column({ isReadOnly: true })],
+    );
+
+    const decision = decide(data, 'R1', column({ isReadOnly: true }));
+
+    expect(decision.reason).toBe('ProjectArchived');
+    expect(decision.reason).not.toBe('ColumnReadOnly');
+  });
+
   it('сторож вставки і сіра комірка ніколи не розходяться', () => {
     // Один предикат на обидві поведінки: інакше «комірка сіра» і «сюди не
     // вставиться» відповідали б різними правилами.
