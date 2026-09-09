@@ -229,8 +229,8 @@
 | Q-181 | CONFLICT | `ConcurrencyTests.Запис_зі_застарілою_версією_рядка_відхиляється` не відхиляв жодного запису — дублював сусідній тест, справжнє відхилення доводить `PatchCellsTests` | RESOLVED · видалено дублікат, PR #74 |
 | Q-182 | CONFLICT | `ReopenRaceTests.Програвший_бачить_актуальний_стан_і_відмовляє_з_причиною` імітував відмову (`throw` за вже перевіреною умовою) замість виклику `ReopenDocumentHandler` | RESOLVED · перейменовано й прибрано фіктивний блок, PR #74 |
 | Q-183 | CONFLICT | `ReportSnapshotBuilderTests.Вʼюха_для_регулятора_віддає_лише_Approved_і_Submitted` шукала підрядок у тексті SQL-файлу, не виконувала запит — мутація фільтра (`1=1`, реальний витік чернеток регулятору) лишала підрядок у коментарі | RESOLVED · `ReportSnapshotBuilderTests.cs` (реальний запит до розгорнутої вʼюхи), PR #76 |
-| Q-184 | CONFLICT | `ConsistencyCheckJobTests` (3 тести) перевіряють лише текст `ConsistencyCheckJob.cs` (`File.ReadAllText` + `Assert.Contains`) — жодного запуску job, жодної реальної осиротілої комірки чи розбіжності | OPEN |
-| Q-185 | CONFLICT | `PartitionCheckJobTests.Достатній_запас_не_породжує_шуму` перевіряє лише текст тернарного виразу в `PartitionCheckJob.cs` — інверсія умови (`enough`) лишає перевірений підрядок незмінним | OPEN |
+| Q-184 | CONFLICT | `ConsistencyCheckJobTests` (3 тести) перевіряють лише текст `ConsistencyCheckJob.cs` (`File.ReadAllText` + `Assert.Contains`) — жодного запуску job, жодної реальної осиротілої комірки чи розбіжності | RESOLVED |
+| Q-185 | CONFLICT | `PartitionCheckJobTests.Достатній_запас_не_породжує_шуму` перевіряє лише текст тернарного виразу в `PartitionCheckJob.cs` — інверсія умови (`enough`) лишає перевірений підрядок незмінним | RESOLVED |
 | Q-186 | CONFLICT | `CollectionCoverage.Skipped(...)` пише `CollectionRunId = 0` — рядка `itg.CollectionRun` з таким `Id` не існує ніде, `FK_CCov_Run` відхиляє КОЖЕН запис journal покриття на пропуск/конфлікт; знайдено емпірично (реальний `DbUpdateException` на SQL Server), не аудитом | RESOLVED |
 | Q-187 | CONFLICT | `AccessProfileCache.GetOrCreateAsync` кешує профіль за ключем `(userId, securityStamp)` БЕЗ `groupsFingerprint`, хоча `LoadAsync` рахує права по-різному залежно від наявності групових SID — власна сесія користувача й перегляд/симуляція чужого профілю можуть ділити один кеш-запис і 30 хв повертати права ІНШОГО контексту | OPEN |
 | Q-188 | SCOPE | `GetCurrentUserHandler.LevelForProject` дублює логіку `AccessProfile.LevelFor` (deny виграє, потім grant) — друга реалізація того самого правила на іншій формі даних (string-серіалізований DTO замість домену) | OPEN |
@@ -7966,7 +7966,37 @@ received no matching calls»; відновлення — знову зелено
 різних таблицях — більший обсяг роботи, ніж точковий фікс; черга на
 окремий PR.
 
-**Статус:** OPEN
+#### Закрито (рішення людини)
+
+«Test-honesty rewrites, tooling already exists» — інструмент справді
+вже був: `ConsistencyCheckJobWriteTests` (Q-169) уже показав, як
+запустити `ConsistencyCheckJob.ExecuteAsync` проти реального
+SQLEXPRESS через `TestDocumentBuilder` і пряме читання
+`aud.ConsistencyIssue`. Новий `ConsistencyCheckJobDetectionTests.cs`
+(3 тести, той самий патерн) для кожного з трьох правил:
+
+- `ORPHANED_CELL` — пряма вставка `doc.CellValue` з посиланням на
+  неіснуючий запис довідника (як і `ConsistencyCheckJobWriteTests`).
+- `BROKEN_FK` — довелося тимчасово вимкнути `FK_TableRow_Instance`
+  (`ALTER TABLE ... NOCHECK CONSTRAINT`), вставити рядок із неіснуючим
+  `TableInstanceId`, і ввімкнути назад через `WITH NOCHECK CHECK
+  CONSTRAINT` (без ревалідації — інакше впало б на щойно вставленому
+  навмисно зламаному рядку). Нормалізована модель САМА забороняє цей
+  стан (коментар job-и це прямо каже) — тому довести, що перевірка
+  справді щось шукає, а не мовчить на порожній множині за конструкцією,
+  можна лише обійшовши FK. Рядок прибирається в `finally`.
+- `ARCHIVE_CHECKSUM` — `ArchiveRun` через доменний конструктор і
+  `RecordChecksums` із навмисно різними JSON джерела/цілі.
+
+Три старі тексто-читальні тести видалено з `ConsistencyCheckJobTests.cs`
+(лишилися лише два легітимні тести на `OrphanScanPlan.Plan` — чиста
+функція, не читання файлу). Доказ мутацією (×3, по одному на правило):
+тимчасово знешкодив кожну умову виявлення в `ConsistencyCheckJob.cs`
+(анти-джойн осиротілих комірок, анти-джойн порушених FK, порівняння сум
+архіву) — відповідний новий тест падав на «issue не знайдено»;
+відновлення кожної — знову зелено.
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR #99
 
 ---
 
@@ -7986,7 +8016,28 @@ received no matching calls»; відновлення — знову зелено
 станом партицій (достатній і недостатній запас) — більший обсяг, ніж
 точковий фікс; черга на окремий PR.
 
-**Статус:** OPEN
+#### Закрито (рішення людини)
+
+«Test-honesty rewrites, tooling already exists». Ключ — межі
+партиціонування (`02-partitions.sql`) зашиті наперед аж до `202712`, а
+`PartitionCheckJob` бере «зараз» через injected `IClock` (уже
+тестований шлях в інших job-ах). Тому обидві гілки доводяться БЕЗ жодного
+DDL: рання симульована дата (`2026-01`) лишає 23 межі попереду →
+`Succeeded`; дата за місяць до останньої зашитої межі (`2027-11`) лишає
+рівно одну → `Degraded`. Мутувати сам `pf_ByPeriodKey` було б ризиковано
+— на ньому сидять реальні партиційовані таблиці, спільні з рештою
+тестів колекції; підміна годинника цього не потребує.
+
+Новий `PartitionCheckJobDetectionTests.cs` (2 тести) замінив
+дишонест-тест; `Задача_не_виконує_DDL` і
+`Нестача_запасу_партицій_дає_попередження` лишилися — вони вже були
+чесні (перший доводить ВІДСУТНІСТЬ DDL у коді, що можна довести лише
+читанням джерела; другий — чиста константа). Доказ мутацією: інверсія
+`ahead >= MinimumBoundariesAhead` → `ahead < MinimumBoundariesAhead`
+валила ОБИДВА нові тести (кожен очікує протилежний статус); відновлення
+— знову зелено.
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR #99
 
 ---
 

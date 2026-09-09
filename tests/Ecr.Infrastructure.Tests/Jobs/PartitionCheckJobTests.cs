@@ -53,23 +53,12 @@ public sealed partial class PartitionCheckJobTests
         Assert.Contains("SPLIT RANGE", script, StringComparison.Ordinal);
     }
 
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public void Достатній_запас_не_породжує_шуму()
-    {
-        var source = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Jobs", "PartitionCheckJob.cs"));
-
-        // ⚠ При достатньому запасі прогін завершується Succeeded, а не
-        // попередженням. Задача, що пише попередження щоночі, привчає його не
-        // читати — і справжнє попередження губиться серед звичних.
-        Assert.Contains("enough ? \"Succeeded\" : \"Degraded\"", source, StringComparison.Ordinal);
-
-        // Але прогін пишеться ЗАВЖДИ, зокрема успішний: задача, яка мовчить,
-        // коли все гаразд, і мовчить, коли не запустилася, — це задача, про
-        // зупинку якої дізнаються з наслідків.
-        Assert.Contains("db.MaintenanceRuns.Add(run)", source, StringComparison.Ordinal);
-        Assert.Contains("boundariesAhead", source, StringComparison.Ordinal);
-    }
+    // ⛔ Q-185: `Достатній_запас_не_породжує_шуму` робив лише
+    // `Assert.Contains` на текст файлу — доведено мутацією (інверсія умови
+    // лишала перевірений підрядок незмінним). Перенесено в
+    // `PartitionCheckJobDetectionTests` — реальний запуск job-и проти
+    // справжніх меж `pf_ByPeriodKey` на SQLEXPRESS, з обома гілками
+    // (Succeeded/Degraded) через симульований годинник.
 
     /// <summary>Коментарі коду — те, що не виконується.</summary>
     [GeneratedRegex(@"//[^\n]*|/\*.*?\*/", RegexOptions.Singleline)]

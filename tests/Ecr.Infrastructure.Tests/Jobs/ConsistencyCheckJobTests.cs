@@ -14,62 +14,12 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </summary>
 public sealed partial class ConsistencyCheckJobTests
 {
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-7.7")]
-    public void Виявляє_осиротілі_комірки()
-    {
-        var source = Source();
-
-        // Комірка з посиланням на запис довідника, якого немає. У
-        // нормалізованій моделі це тримає FK, але дані можуть прийти й
-        // міграцією, де FK ще не було.
-        Assert.Contains("ORPHANED_CELL", source, StringComparison.Ordinal);
-        Assert.Contains("cell.ValueRegistryEntryId != null", source, StringComparison.Ordinal);
-
-        // ⛔ І нічого не виправляє. Автоматичне «полагодження» приховало б
-        // причину, а причина тут завжди важливіша за наслідок: осиротіла
-        // комірка означає, що десь видалили запис довідника, на який
-        // посилаються ПОДАНІ документи.
-        var executable = Comments().Replace(source, string.Empty);
-        Assert.DoesNotContain("Remove(", executable, StringComparison.Ordinal);
-        Assert.DoesNotContain("ExecuteDeleteAsync", executable, StringComparison.Ordinal);
-    }
-
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-8.7")]
-    public void Виявляє_порушені_FK_у_гібридному_режимі()
-    {
-        var source = Source();
-
-        // ⚠ У гібридній моделі (D-21) частина значень лежить у JSON, і
-        // зовнішній ключ їх не тримає: перевірити посилання може лише ця
-        // задача. У нормалізованій моделі те саме тримає FK, і знахідок не
-        // буває — саме тому ненульовий результат означає або гібрид, або
-        // зламане обмеження.
-        Assert.Contains("BROKEN_FK", source, StringComparison.Ordinal);
-        Assert.Contains("db.TableInstances.Any", source, StringComparison.Ordinal);
-
-        // Вага 3 — помилка, не попередження: рядок без свого екземпляра
-        // таблиці не читається взагалі.
-        Assert.Contains("Severity: 3", source, StringComparison.Ordinal);
-    }
-
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-8.14")]
-    public void Звіряє_архів_із_джерелом_за_контрольними_сумами()
-    {
-        var source = Source();
-
-        // ⚠ Звіряються СУМИ ПРОГОНУ, а не рядки: перечитати десятки мільйонів
-        // рядків архіву щоночі неможливо. Три суми записав сам прогін
-        // архівації — тут перевіряється, що вони збіглися.
-        Assert.Contains("ARCHIVE_CHECKSUM", source, StringComparison.Ordinal);
-        Assert.Contains("run.SourceJson, run.TargetJson", source, StringComparison.Ordinal);
-
-        // Розбіжність — найважча знахідка: архів і джерело кажуть різне про ті
-        // самі дані, і жодне з двох чисел не можна вважати правильним.
-        Assert.Contains("не збіглися", source, StringComparison.Ordinal);
-    }
+    // ⛔ Q-184: три тести, що були тут (осиротілі комірки, порушений FK,
+    // звірка архіву), робили лише `File.ReadAllText` + `Assert.Contains` —
+    // доведено мутацією, що заміна анти-джойну виявлення на завжди-хибний
+    // лишала перевірений підрядок незмінним. Перенесено в
+    // `ConsistencyCheckJobDetectionTests` — реальний запуск
+    // `ConsistencyCheckJob.ExecuteAsync` проти живих рядків на SQLEXPRESS.
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-13.16")]
