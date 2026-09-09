@@ -255,15 +255,31 @@ public sealed class ActivateProjectHandler(
     /// </exception>
     public async Task HandleAsync(int projectId, CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ Родина PRJ, а не ROW (`P-25`, рядок 2). `ROW` — це рядок ТАБЛИЦІ
         // ДОКУМЕНТА, і «проєкту немає» доїжджало до обробника помилок сітки,
         // якої на екрані переліку проєктів немає взагалі.
+        //
+        // ⚠ Існування перевіряється ДО гранта: грант на неіснуючий `projectId`
+        // не буває виданий нікому за визначенням, і зворотний порядок
+        // перетворив би КОЖЕН запит на неіснуючий проєкт на `403`, приховуючи
+        // справжню причину (`ECR-PRJ-0404`) за помилковим кодом гранта.
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+
+        // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
+        // не лише глобальне `Project.Manage` — рішення людини. Глобальне
+        // право каже «ця людина взагалі керує проєктами», грант — «саме
+        // цим». Той самий патерн, що вже застосований до `CreateDocumentHandler`
+        // (`Q-176`) і сусідів.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
 
         if (project.Status != Domain.Enums.ProjectStatus.Draft)
         {
@@ -344,12 +360,22 @@ public sealed class ArchiveProjectHandler(
     /// </exception>
     public async Task HandleAsync(int projectId, CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
+        // грант на неіснуючий `projectId` не буває виданий нікому.
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+
+        // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
+        // не лише глобальне `Project.Manage` — рішення людини.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
 
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
         // текстом: людині треба знати, які саме періоди закрити, а не що

@@ -38,8 +38,13 @@ public sealed class ActivateProjectTests
     {
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
+        // ⚠ Грант на 10 — це `ProjectBuilder.Project()`'s дефолтний Id
+        // (`Q-179`, аудит фази 2, авторизація).
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, 10, GrantLevel.Manage)
+                .Build());
     }
 
     [Fact]
@@ -74,6 +79,24 @@ public sealed class ActivateProjectTests
         Assert.Equal(
             project.Periods.Single(p => p.State == PeriodState.Open).Id,
             project.CurrentPeriodId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Без_гранта_на_проєкт_активація_відхиляється()
+    {
+        // ⛔ Q-179 (аудит фази 2, авторизація). Глобальне `Project.Manage`
+        // саме по собі не давало права активувати БУДЬ-ЯКИЙ проєкт —
+        // потрібен грант на КОНКРЕТНИЙ.
+        var project = Arrange();
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+
+        var denied = await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
+            () => Handler().HandleAsync(project.Id, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal(ProjectStatus.Draft, project.Status);
     }
 
     /// <summary>Проєкт-чернетка з побудованим календарем 2026 року.</summary>

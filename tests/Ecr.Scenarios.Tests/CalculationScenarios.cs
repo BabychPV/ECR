@@ -849,8 +849,11 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             // власний виклик.
             projectId = await CreateProjectOnVersionAsync(
                 setup, admin.Client, prefix, structure.TemplateVersionId);
-            await ProjectAndPeriodScenarios.ActivateProjectAsync(admin.Client, projectId);
-            await Provisioning.GrantAsync(setup, admin.RoleId, "Project", projectId, "Manage");
+            // ⚠ Грант Manage тепер видає сам ActivateProjectAsync (Q-179):
+            // Activate вимагає його ще ДО активації, тож окремий виклик
+            // GrantAsync після неї дублював би той самий грант ролі й упав би
+            // («роль уже має грант(и)» — PUT замінює набір цілком).
+            admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(setup, admin, projectId);
         }
 
         var app = new EcrApiFactory(sql);

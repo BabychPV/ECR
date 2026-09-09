@@ -39,7 +39,7 @@ public sealed class CloneProjectHandler(
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, "Project.Manage", ct)
             .ConfigureAwait(false);
 
@@ -50,9 +50,24 @@ public sealed class CloneProjectHandler(
         // ⛔ `ECR-PRJ-0404`: клонується ПРОЄКТ, і його відсутність не має нічого
         // спільного з «період поза межами проєкту». Старий код до того ж казав
         // цифрами 422 при статусі 404 (`P-25`, рядок 4).
+        //
+        // ⚠ Існування — ДО гранта: грант на неіснуючий `sourceProjectId` не
+        // буває виданий нікому, і зворотний порядок ховав би `ECR-PRJ-0404`
+        // за помилковим `403`.
         var source = await periods.FindProjectAsync(sourceProjectId, ct).ConfigureAwait(false)
                      ?? throw new NotFoundException(
                          ErrorCodes.ProjectNotFound, $"Проєкт {sourceProjectId} не знайдено.");
+
+        // ⛔ Q-179 (аудит фази 2, авторизація): грант на проєкт-ДЖЕРЕЛО, не
+        // лише глобальне `Project.Manage` — рішення людини. Клонування читає
+        // повний склад налаштувань джерела; без цього користувач із гранта
+        // Manage на ОДИН проєкт міг клонувати БУДЬ-ЯКИЙ чужий.
+        if (profile.LevelFor(Ecr.Domain.Enums.ResourceKind.Project, sourceProjectId)
+            < Ecr.Domain.Enums.GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {sourceProjectId}.");
+        }
 
         // Рік зсувається на один: клон робиться заради наступного звітного
         // періоду, і залишити ті самі дати означало б два проєкти з однаковими
