@@ -242,7 +242,7 @@
 | Q-194 | CONFLICT | `DeleteRegistryEntryHandler` (перевірка `ECR-REG-0409`, покритий тестом) без жодного `[HttpDelete]` — помилково заведений запис довідника не можна прибрати через API взагалі | OPEN |
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
-| Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #TBD |
+| Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
 
 ---
 
@@ -8805,4 +8805,4 @@ Engine достатньо близька до 2024 R2, щоб ця схема б
 звужено до версії RTQP Engine і двох дрібних пунктів;
 `docs/build/roadmap.md` — знято те саме формулювання.
 
-**Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #TBD
+**Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #114
