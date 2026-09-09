@@ -36,13 +36,30 @@ dotnet restore Ecr.sln
 dotnet build Ecr.sln -c Debug
 ```
 
-Тести за замовчуванням — **без інтеграційних** (не потребують Docker і SQL Server):
+⚠ **Виправлено (Q-207).** `Category!=Integration` нижче — це **явний вибір
+розробника**, не поведінка «за замовчуванням». Канонічний прогін
+(`tools/verify-all.ps1`, крок «Тести .NET» — той самий, що й CI) кличе
+`dotnet test Ecr.sln` **без фільтра `Category`** і виконує інтеграційні тести
+разом з рештою; фільтром він виключає лише `Ecr.Scenarios.Tests` (окремий
+крок, директива №09). Тому `Category!=Integration` — команда саме для машини
+**без** Docker і SQL Server, не типовий прогін проєкту; без Docker/SQL Server
+і без цього фільтра `dotnet test Ecr.sln` **падає** на інтеграційних тестах
+(`SqlServerFixture` не піднімає контейнер), а не тихо їх пропускає.
+
+Без інтеграційних (машина без Docker і SQL Server):
 
 ```bash
 dotnet test Ecr.sln --filter "Category!=Integration"
 ```
 
-Інтеграційні тести окремо (потрібен Docker або локальний SQL Server):
+Разом з інтеграційними, тобто повний канонічний прогін (потрібен Docker або
+`ECR_TEST_SQL` — локальний SQL Server або рядок з'єднання, `04-environment.md` §5.1):
+
+```bash
+dotnet test Ecr.sln
+```
+
+Лише інтеграційні, окремо:
 
 ```bash
 dotnet test Ecr.sln --filter "Category=Integration"

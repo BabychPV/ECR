@@ -13,8 +13,16 @@ namespace Ecr.TestKit;
 /// SQLite тут не підходить: перевіряти треба саме те, чого в ньому немає —
 /// партиціонування, складені FK, <c>TRUNCATE … WITH (PARTITIONS)</c>, RCSI,
 /// тригери. Тести, що використовують цю фікстуру, позначені
-/// <c>[Trait("Category","Integration")]</c> і не входять у прогін за
-/// замовчуванням (`04-environment.md` §5).
+/// <c>[Trait("Category","Integration")]</c>.
+///
+/// ⚠ Виправлено (Q-207): раніше тут стояло, що ці тести «не входять у прогін
+/// за замовчуванням». Це не так — <c>tools/verify-all.ps1</c> (крок «Тести
+/// .NET», той самий, що й CI) кличе <c>dotnet test</c> без фільтра
+/// <c>Category</c>, тож вони виконуються за замовчуванням і саме тому CI
+/// піднімає реальний SQL Server у контейнері. Без <c>ECR_TEST_SQL</c> і без
+/// Docker ця фікстура впаде на <see cref="InitializeAsync"/> — виключити такі
+/// тести можна лише явним <c>--filter "Category!=Integration"</c>
+/// (`04-environment.md` §5, `09-commands.md` §2).
 /// </remarks>
 public sealed class SqlServerFixture : IAsyncLifetime
 {
