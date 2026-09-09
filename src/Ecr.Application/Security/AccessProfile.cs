@@ -63,10 +63,25 @@ public sealed class AccessProfile
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)
     {
         var key = $"{kind}:{resourceId}";
-        if (Denies.Contains(key))
-        {
-            return GrantLevel.None;
-        }
-        return Grants.TryGetValue(key, out var level) ? level : GrantLevel.None;
+        return Resolve(Denies.Contains(key), Grants.TryGetValue(key, out var level) ? level : null);
     }
+
+    /// <summary>
+    /// Єдине місце, де живе правило «заборона виграє на будь-якому рівні
+    /// (ФВ-6.6), інакше — грант, інакше — <see cref="GrantLevel.None"/>».
+    /// </summary>
+    /// <remarks>
+    /// І <see cref="LevelFor"/> над доменною формою (<see cref="Grants"/>/
+    /// <see cref="Denies"/>), і клієнтська проєкція
+    /// <see cref="GetCurrentUserHandler.LevelForProject"/> над
+    /// серіалізованим у рядки <c>CurrentUserView</c> викликають саме цей
+    /// метод. До <c>Q-188</c> це були дві незалежні реалізації одного
+    /// правила над різними формами тих самих даних — правка порядку
+    /// перевірки чи формату ключа в одній не гарантовано потрапляла б у
+    /// другу (той самий клас дефекту, що вже стався з <c>DenyReason</c> на
+    /// клієнті до <c>A7-02</c>). Кожен виклик відповідає лише за побудову
+    /// ключа й пошук у своїй формі даних; саме рішення — тут і тільки тут.
+    /// </remarks>
+    internal static GrantLevel Resolve(bool isDenied, GrantLevel? grant)
+        => isDenied ? GrantLevel.None : grant ?? GrantLevel.None;
 }
