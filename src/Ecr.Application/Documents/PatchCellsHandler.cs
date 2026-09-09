@@ -241,13 +241,27 @@ public sealed class PatchCellsHandler(
         // змінили (директива №09 `W8` п.4).
         var rowKeyById = rowIds.ToDictionary(pair => pair.Value, pair => pair.Key);
 
-        foreach (var row in creations)
+        // ⛔ Q-164 (аудит фази 2, продуктивність): ОДИН пакетний виклик на
+        // весь батч, а не `CreateRowAsync` у циклі — той коштував двох
+        // походів у базу НА КОЖЕН новий рядок (`ReserveIdsAsync` +
+        // `SaveChangesAsync`), той самий прийом, що вже застосований для
+        // екземплярів таблиць (`MaterializeFixedRowsAsync`).
+        if (creations.Count > 0)
         {
-            var id = await rowStore.CreateRowAsync(
-                request.TableInstanceId, periodKey, RowKey.Create(row.RowKey), ordinal: 0, ct).ConfigureAwait(false);
-            touched.Add(id);
-            rowKeyById[id] = row.RowKey;
-            Distribute(row, id, periodKey, columnDefs, instance.TableDefId, upserts, deletes);
+            var newIds = await rowStore
+                .CreateRowsAsync(
+                    request.TableInstanceId, periodKey,
+                    [.. creations.Select(row => RowKey.Create(row.RowKey))], ordinal: 0, ct)
+                .ConfigureAwait(false);
+
+            for (var i = 0; i < creations.Count; i++)
+            {
+                var row = creations[i];
+                var id = newIds[i];
+                touched.Add(id);
+                rowKeyById[id] = row.RowKey;
+                Distribute(row, id, periodKey, columnDefs, instance.TableDefId, upserts, deletes);
+            }
         }
 
         foreach (var row in updates)

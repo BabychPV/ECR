@@ -62,6 +62,22 @@ public interface IRowStore
         long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct);
 
     /// <summary>
+    /// Створює кілька рядків ОДНИМ пакетом; <c>Id</c> повертаються в тому
+    /// самому порядку, що й <paramref name="rowKeys"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Q-164 (аудит фази 2, продуктивність). Той самий прийом, що вже
+    /// застосований для екземплярів таблиць
+    /// (<c>EnsureTableInstancesAsync</c>/<c>MaterializeFixedRowsAsync</c>):
+    /// ОДИН діапазон <c>SEQUENCE</c> на весь набір, ОДИН
+    /// <c>SaveChangesAsync</c>. Виклик <see cref="CreateRowAsync"/> у циклі
+    /// коштує двох походів у базу НА КОЖЕН рядок — на батчі в 100 рядків це
+    /// вихід за бюджет запису (300 мс на 100 комірок) ще до першої комірки.
+    /// </remarks>
+    public Task<IReadOnlyList<long>> CreateRowsAsync(
+        long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct);
+
+    /// <summary>
     /// Піднімає <c>ModifiedAt</c> зачеплених рядків.
     /// </summary>
     /// <remarks>
