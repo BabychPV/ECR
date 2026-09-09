@@ -122,6 +122,7 @@ public static class DependencyInjection
 
         // Безпека: ролі, користувачі, аудит (модулі 3.2, 3.9)
         services.AddScoped<Security.ListRolesHandler>();
+        services.AddScoped<Security.ListPermissionsHandler>();
         services.AddScoped<Security.ListResourceGrantsHandler>();
         services.AddScoped<Security.ReplaceResourceGrantsHandler>();
         services.AddScoped<Security.SetReceivesAlertsHandler>();
