@@ -243,6 +243,7 @@
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
 | Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
+| Q-201 | CONFLICT | Директива №11, трек T5: `PublishTemplateVersionHandler.PublishAsync` писав у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на кожен виклик — рядок, що виглядає як причина публікації версії шаблону, але нею не є | RESOLVED · `PublishVersionRequest`, PR #121 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
 | Q-207 | CONFLICT | Директива №11, трек T11 (чотири самосуперечності пакета документації): `decisions.md` цитує «директива №04 §3» для двох різних тез; `07-checkpoints.md` каже «сім етапів `0`…`6`», хоча в самому документі є `ЕТАП 7` і згадка `ЕТАП 8`; шапка `02-requirements.md` підсумовує 215, фактичних листових вимог — 253; `04-environment.md`/`09-commands.md` стверджували, що інтеграційні тести виключені з `dotnet test` за замовчуванням, а `verify-all.ps1` жодного фільтра `Category` не застосовує | RESOLVED |
 | Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
@@ -8825,6 +8826,63 @@ Engine достатньо близька до 2024 R2, щоб ця схема б
 `docs/build/roadmap.md` — знято те саме формулювання.
 
 **Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #114
+
+---
+
+### Q-201 · CONFLICT · Директива №11, трек T5, 2026-09-10 · `PublishTemplateVersionHandler` писав хардкод `"Publish"` замість причини публікації
+
+**Де:** `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs`
+(`PublishAsync`); `src/Ecr.Api/Controllers/TemplateVersionsController.cs`
+(`Publish`, `PublishVersionRequest`); `src/Ecr.Web/src/pages/admin/TemplateVersionPage.tsx`.
+
+**Що знайшлося:** ендпоінт `POST /api/v1/template-versions/{id}/publish` не
+мав тіла запиту взагалі; `PublishTemplateVersionHandler.PublishAsync` писав
+у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на
+кожен виклик — рядок, що ВИГЛЯДАЄ як причина, але не є нею й однаковий
+незалежно від того, хто й навіщо публікує версію. За рік журнал публікацій
+не відповідає на питання «чому саме цю версію ввели в обіг».
+
+**Рішення (директива лишала вибір на розсуд виконавця): `reason`
+обов'язковий, не optional; маркера «не вказано» немає.** Зміряно вже
+наявний і щойно змержений патерн методології
+(`PublishMethodologyRequest.ChangeReason`, `MethodologiesController`,
+ФВ-14.7, `#29`) — там причина теж обов'язкова й валідується як непорожня.
+Сусідній `Deprecate` у ТОМУ Ж контролері вже вимагає непорожню причину
+(`DeprecateVersionRequest`) — інша форма для `Publish` дала б два різні
+контракти на дві однаково важливі операції в одному файлі. Маркер «не
+вказано» (варіант «optional») підійшов би, якби причина була другорядним
+полем звітності — тут вона ні: `#29` для методології зробив причину
+обов'язковою з тієї ж причини (найважливіша дія над версією — після
+публікації структура заморожена), і публікація шаблону несе ту саму вагу
+рішення.
+
+**Що зроблено:**
+
+- **Контракт**: `PublishVersionRequest(string Reason)` — синтаксис
+  ідентичний сусідньому `DeprecateVersionRequest`; OpenAPI-знімок і
+  клієнтські типи (`schema.d.ts`/`types.ts`) регенеровано.
+- **Обробник**: `PublishTemplateVersionHandler.PublishAsync(int, int,
+  string reason, CancellationToken)` валідує `reason` ПЕРШИМ — до
+  діагностик структури графа формул — за зразком перевірки `effectiveFrom`
+  у `PublishMethodologyHandler`; порожній/пробільний рядок відхиляється
+  `ECR-TMPL-0422`. Валідне значення йде в `ChangeReason` аудиту замість
+  хардкоду `"Publish"`.
+- **Клієнт**: кнопка «Опублікувати» в `TemplateVersionPage.tsx` відкриває
+  вже наявний `ReasonModal` — той самий компонент, що вже стоїть на кнопці
+  «Вивести з обігу» в цьому ж файлі, — замість миттєвого виклику без
+  причини.
+
+**Тест (D-134):** новий сценарій у `StructureScenarios.cs` на живій БД —
+публікація справної структури без причини відхиляється `ECR-TMPL-0422`, а
+прийнята причина дослівно доходить до `aud.PublicationEvent.ChangeReason`
+(не `"Publish"`). Мутація 1: заміна `reason` на хардкод `"Publish"` у
+виклику `WritePublicationEventAsync` — тест падає (`Expected: "T5 звірка:
+перша публікація версії S09rea"… Actual: "Publish"`). Мутація 2: вимкнення
+guard-перевірки (`if (string.IsNullOrWhiteSpace(reason))` → `if (false)`)
+— тест падає (`Expected: UnprocessableEntity Actual: NoContent`). Після
+кожної мутації відновлено вихідний код; `StructureScenarios`: 8/8 passed.
+
+**Статус:** RESOLVED · PR #121
 
 ---
 
