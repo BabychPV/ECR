@@ -9,6 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe as report, findViolations } from '@/test/a11y';
 import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
+import { theme } from '@/shared/theme/theme';
 import { DocumentsPage } from '@/pages/DocumentsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
@@ -36,18 +37,57 @@ import { MyGroupsPage } from '@/pages/MyGroupsPage';
  * ⚠ Сторінки рендеряться **в порожньому стані**: сервер замокано порожньою
  * відповіддю. Це навмисно: порожній стан — той, у якому найлегше забути
  * підпис, роль або зв'язок поля з помилкою, бо на ньому нічого не видно.
+ *
+ * ⛔ W4.3: `theme` — та сама тема застосунку (`shared/theme/theme.ts`), і
+ * `forceColorScheme` — а не стоковий Mantine-дефолт без жодної теми і без
+ * жодної схеми. До цієї зміни `<MantineProvider>` не мав ні `theme`, ні
+ * `colorScheme`/`defaultColorScheme` узагалі: axe щоразу бачив стандартну
+ * палітру Mantine, а не оцю (`brand`, `statusError`/`statusWarning`,
+ * `cellState`), і НІКОЛИ — темну схему. Гейт `a11y` існував понад рік,
+ * блокуючи CI, і жодного разу не торкнувся коду, який реально працює в
+ * темній темі (`App.tsx`, `defaultColorScheme="auto"`).
+ *
+ * ⚠ `forceColorScheme`, а не `defaultColorScheme`: перший ІГНОРУЄ
+ * `colorSchemeManager` (тобто `localStorage`) і дає детерміновану схему
+ * незалежно від того, що інший тест лишив у сховищі jsdom — `defaultColorScheme`
+ * цього не гарантує.
  */
-function Shell({ children }: { children: ReactNode }): JSX.Element {
+function Shell({
+  children,
+  colorScheme,
+}: {
+  children: ReactNode;
+  colorScheme: 'light' | 'dark';
+}): JSX.Element {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return (
-    <MantineProvider>
+    <MantineProvider theme={theme} forceColorScheme={colorScheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>
   );
 }
+
+/**
+ * Яку(і) схему(и) проганяти (`W4.3`).
+ *
+ * ⛔ `ECR_A11Y_THEME` — ЄДИНЕ джерело: без нього (локальний прогін)
+ * проганяються ОБИДВІ схеми в одному виклику Vitest, з ним (CI-матриця,
+ * `.github/workflows/ci.yml`, джоба `a11y`) — рівно ОДНА. Друге число тут
+ * не заводиться навмисно: два джерела «яку тему проганяти» розійшлися б,
+ * і один з них почав би мовчки перемагати (та сама вада, що й скрізь у
+ * цьому корпусі — `ФВ-14.15`, коментар нижче в цьому ж файлі).
+ *
+ * ⚠ Обидві ноги матриці йдуть ПАРАЛЕЛЬНО, а не послідовно: кожна
+ * перевіряє той самий обсяг маршрутів, що й до W4.3 (не подвоєний), тож
+ * заміряний час ноги (975–1372 с) не змінюється, а лише подвоюється
+ * ЗАЙНЯТІСТЬ, не ЧАС очікування на PR.
+ */
+const RequestedTheme = process.env['ECR_A11Y_THEME'];
+const Themes: readonly ('light' | 'dark')[] =
+  RequestedTheme === 'light' || RequestedTheme === 'dark' ? [RequestedTheme] : ['light', 'dark'];
 
 /**
  * ⚠ Редактор виразів потрапляє сюди СВОЄЮ сторінкою, а не Monaco: у jsdom той
@@ -211,10 +251,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-suite('Доступність маршрутів', () => {
+suite.each(Themes)('Доступність маршрутів (%s)', (colorScheme) => {
   it.each(Pages)('ФВ-14.16: %s не має порушень critical і serious', async (_path, Page) => {
     const { container } = render(
-      <Shell>
+      <Shell colorScheme={colorScheme}>
         <Page />
       </Shell>,
     );
@@ -253,8 +293,11 @@ suite('Технічні ключі на екрані', () => {
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
 
+    // ⚠ Схема тут фіксована, не з `Themes`: текст написів не залежить від
+    // світлої/темної схеми, тож дублювати цю перевірку на дві теми означало
+    // б подвоїти час без жодної нової гарантії (`W4.3`).
     const { container } = render(
-      <Shell>
+      <Shell colorScheme="light">
         <Page />
       </Shell>,
     );
