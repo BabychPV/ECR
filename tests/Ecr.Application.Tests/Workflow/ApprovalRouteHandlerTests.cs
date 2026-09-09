@@ -46,7 +46,10 @@ public sealed class ApprovalRouteHandlerTests
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(Ecr.Domain.Enums.ResourceKind.Project, ProjectId, Ecr.Domain.Enums.GrantLevel.Manage)
+                .Build());
 
         _workflow.RoleExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
     }
@@ -205,6 +208,36 @@ public sealed class ApprovalRouteHandlerTests
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Без_гранта_на_проєкт_маршрут_не_змінюється()
+    {
+        // ⛔ Q-179 (аудит фази 2, авторизація). Глобальне `Project.Manage`
+        // саме по собі не давало права міняти маршрут БУДЬ-ЯКОГО проєкту —
+        // потрібен грант на КОНКРЕТНИЙ.
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => Replace([11]));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Без_гранта_на_проєкт_читання_маршруту_відхиляється()
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => new GetApprovalRouteHandler(_workflow, _access, _user)
+                .HandleAsync(ProjectId, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
     }
 
     private Task<int> Replace(int[] roleIds)

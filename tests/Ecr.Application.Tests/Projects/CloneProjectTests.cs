@@ -47,10 +47,13 @@ public sealed class CloneProjectTests
         _user.UserId.Returns(9);
         _periods.FindProjectAsync(1, Arg.Any<CancellationToken>()).Returns(_source);
 
-        // Право видане: предмет цих тестів — правила клонування, а не доступ.
-        // Саме право стереже `EndpointCoverageTests`.
+        // Право й грант видані: предмет цих тестів — правила клонування, а
+        // не доступ. Саме право/грант стереже `EndpointCoverageTests`/`Q-179`.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, 1, GrantLevel.Manage)
+                .Build());
     }
 
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
@@ -145,6 +148,23 @@ public sealed class CloneProjectTests
         await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
             () => Handler().HandleAsync(1, "KASH_2027", CancellationToken.None));
 
+        await _periods.DidNotReceive().AddProjectAsync(Arg.Any<Project>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Без_гранта_на_проєкт_джерело_клонування_відхиляється()
+    {
+        // ⛔ Q-179 (аудит фази 2, авторизація). Глобальне `Project.Manage`
+        // саме по собі не давало права клонувати БУДЬ-ЯКИЙ проєкт — потрібен
+        // грант на КОНКРЕТНЕ джерело.
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+
+        var denied = await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
+            () => Handler().HandleAsync(1, "KASH_2027", CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
         await _periods.DidNotReceive().AddProjectAsync(Arg.Any<Project>(), Arg.Any<CancellationToken>());
     }
 }

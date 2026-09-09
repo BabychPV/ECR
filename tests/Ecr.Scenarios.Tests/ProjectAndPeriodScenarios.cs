@@ -22,11 +22,11 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var admin = await Provisioning.AdministratorAsync(app, "S10", ["Project.Manage", "Document.View", "Template.Edit"]);
 
         var projectId = await CreateProjectAsync(admin.Client, "S10", "Asia/Almaty");
-        await ActivateProjectAsync(admin.Client, projectId);
+        admin = await ActivateProjectAsync(app, admin, projectId);
 
-        // Проєкт активний і має календар періодів.
-        await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
-        admin = await Provisioning.ReauthenticateAsync(app, admin);
+        // Проєкт активний і має календар періодів. Грант Manage вже видано
+        // самою активацією (Q-179) — другий виклик замінив би набір ролі й
+        // упав би на «роль уже має грант(и)».
         var periods = await admin.Client.GetAsync(new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, periods.StatusCode);
 
@@ -60,11 +60,9 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var admin = await Provisioning.AdministratorAsync(app, "S11", ["Project.Manage", "Document.View", "Template.Edit"]);
 
         var projectId = await CreateProjectAsync(admin.Client, "S11", "Asia/Almaty");
-        await ActivateProjectAsync(admin.Client, projectId);
+        admin = await ActivateProjectAsync(app, admin, projectId);
 
-        await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
-        admin = await Provisioning.ReauthenticateAsync(app, admin);
-
+        // Грант Manage вже видано самою активацією (Q-179).
         var response = await admin.Client.GetAsync(
             new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -172,14 +170,28 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     /// (`ProjectsController.Periods`: «Календар добудовується перед
     /// читанням... Виклик ідемпотентний»), тому цей крок явно виконується
     /// ПЕРЕД активацією, а не покладається на активацію саму собою.
+    ///
+    /// ⛔ Q-179 (аудит фази 2, авторизація). `Activate` тепер вимагає грант
+    /// `Manage` на КОНКРЕТНИЙ проєкт, не лише глобальне `Project.Manage` —
+    /// щойно створений проєкт такого гранта не має НІ В КОГО, тож видаємо
+    /// його ролі виконавця тут і перечитуємо профіль (`ReauthenticateAsync`,
+    /// бо грант не крутить `SecurityStamp` — кешований профіль інакше не
+    /// побачив би новий грант).
     /// </remarks>
-    internal static async Task ActivateProjectAsync(HttpClient client, int projectId)
+    internal static async Task<Provisioning.Administrator> ActivateProjectAsync(
+        EcrApiFactory app, Provisioning.Administrator admin, int projectId)
     {
-        var buildCalendar = await client.GetAsync(new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
+        admin = await Provisioning.ReauthenticateAsync(app, admin);
+
+        var buildCalendar = await admin.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, buildCalendar.StatusCode);
 
-        var activate = await client.PostAsync(
+        var activate = await admin.Client.PostAsync(
             new Uri($"/api/v1/projects/{projectId}/activate", UriKind.Relative), content: null);
         Assert.Equal(HttpStatusCode.NoContent, activate.StatusCode);
+
+        return admin;
     }
 }

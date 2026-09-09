@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Workflow;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -32,7 +33,16 @@ public sealed class GetApprovalRouteHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<ApprovalRouteDto> HandleAsync(int projectId, CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)
+                                            .ConfigureAwait(false);
+
+        // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
+        // не лише глобальне `Project.Manage` — рішення людини.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
 
         var route = await workflow.FindProjectRouteAsync(projectId, ct).ConfigureAwait(false);
 
@@ -74,7 +84,16 @@ public sealed class ReplaceApprovalRouteHandler(
     {
         ArgumentNullException.ThrowIfNull(roleIds);
 
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)
+                                            .ConfigureAwait(false);
+
+        // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
+        // не лише глобальне `Project.Manage` — рішення людини.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
 
         // ⛔ Ролі перевіряються ДО будь-якої зміни. Крок на неіснуючу роль дав
         // би маршрут, який неможливо пройти: документ подали б і не
