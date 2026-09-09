@@ -335,9 +335,18 @@ public sealed class DocumentsController(
         return Ok(await previewImport.HandleAsync(id, stream, ct).ConfigureAwait(false));
     }
 
-    /// <summary>Застосування раніше переглянутого імпорту. Право <c>Document.Import</c>.</summary>
+    /// <summary>
+    /// Застосування раніше переглянутого імпорту. Право <c>Document.Import</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 202 з jobId — лише для diff, що перевищує поріг
+    /// <see cref="Ecr.Application.Documents.ApplyImportHandler.LargeImportThreshold"/>
+    /// (директива №11, T10 #45); звичайний, невеликий імпорт лишається 200 із
+    /// результатом одразу, як і раніше.
+    /// </remarks>
     [HttpPost("{id:long}/import/apply")]
     [ProducesResponseType<Ecr.Application.Documents.Dto.PatchCellsResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ImportApply(
         long id, [FromBody] ImportApplyRequest request, CancellationToken ct)
@@ -347,9 +356,13 @@ public sealed class DocumentsController(
         // Конфлікт версій рядків підіймається зі звичайного шляху запису як
         // ECR-CELL-0409 і перетворюється на 409 середовищем обробки помилок:
         // окрема перевірка тут була б другою, яка вміє розійтися з першою.
-        return Ok(await applyImport
+        var result = await applyImport
             .HandleAsync(id, request.PreviewToken, ct)
-            .ConfigureAwait(false));
+            .ConfigureAwait(false);
+
+        return result.JobId is not null
+            ? Accepted(new Contracts.JobAcceptedResponse(result.JobId))
+            : Ok(result.Response);
     }
 }
 
