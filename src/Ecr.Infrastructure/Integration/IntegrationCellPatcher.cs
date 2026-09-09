@@ -186,4 +186,23 @@ public sealed class CoverageJournal(EcrDbContext db, IClock clock) : ICoverageJo
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task RecordManyAsync(IReadOnlyList<CoverageEvent> events, CancellationToken ct)
+    {
+        if (events.Count == 0)
+        {
+            return;
+        }
+
+        var now = clock.UtcNow;
+
+        foreach (var e in events)
+        {
+            db.CollectionCoverages.Add(
+                CollectionCoverage.Skipped(e.SourceEntityId, e.PeriodKey.Value, e.Status, e.Details, now));
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
 }

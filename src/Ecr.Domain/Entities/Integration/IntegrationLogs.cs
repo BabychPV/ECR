@@ -95,6 +95,15 @@ public sealed class CollectionCoverage : Entity<long>
         CollectionRunId = collectionRunId;
     }
 
+    /// <summary>Той самий конструктор, але без прогону (для <see cref="Skipped"/>).</summary>
+    private CollectionCoverage(int sourceEntityId, DateTime coveredFrom, DateTime coveredTo)
+    {
+        SourceEntityId = sourceEntityId;
+        CoveredFrom = coveredFrom;
+        CoveredTo = coveredTo;
+        CollectionRunId = null;
+    }
+
     /// <summary>
     /// Причина, чому інтервал НЕ перенесено в комірки (<c>D-118</c>).
     /// </summary>
@@ -111,13 +120,20 @@ public sealed class CollectionCoverage : Entity<long>
     ///
     /// ⚠ Записується в ТУ САМУ таблицю покриття, а не в окрему: питання «що з
     /// цим інтервалом» має одну відповідь в одному місці.
+    ///
+    /// ⛔ Q-186. Раніше тут стояв `collectionRunId: 0` — значення-«заглушка»
+    /// проти РЕАЛЬНОГО `FK_CCov_Run` на `itg.CollectionRun.Id`, якого з таким
+    /// `Id` не існує НІКОЛИ (`IDENTITY` не видає `0`). Кожен виклик падав на
+    /// цьому ключі: подія «пропуск»/«конфлікт» НЕ прив'язана до жодного
+    /// прогону збору за визначенням, і мала лишатися `NULL`, а не мати
+    /// вигаданий ідентифікатор.
     /// </remarks>
     public static CollectionCoverage Skipped(
         int sourceEntityId, int periodKey, string status, string details, DateTime utcNow)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(status);
 
-        return new CollectionCoverage(sourceEntityId, utcNow, utcNow, collectionRunId: 0)
+        return new CollectionCoverage(sourceEntityId, utcNow, utcNow)
         {
             PeriodKey = periodKey,
             Status = status,
@@ -128,7 +144,9 @@ public sealed class CollectionCoverage : Entity<long>
     public int SourceEntityId { get; private set; }
     public DateTime CoveredFrom { get; private set; }
     public DateTime CoveredTo { get; private set; }
-    public long CollectionRunId { get; private set; }
+
+    /// <summary>Прогін, що дав це покриття; <c>null</c> — подія «пропуск»/«конфлікт» (<see cref="Skipped"/>).</summary>
+    public long? CollectionRunId { get; private set; }
 
     /// <summary>Період, якого стосується статус; <c>null</c> — звичайне покриття.</summary>
     public int? PeriodKey { get; private set; }
