@@ -59,7 +59,7 @@ export function TestCaseRunner(props: TestCaseRunnerProps): JSX.Element {
         // ⛔ «Тестів немає» — це НЕ «все гаразд». Публікація без зеленого
         // набору заборонена (`ФВ-9.12`), і мовчазна порожнеча тут читалася б
         // як успіх — рівно до відмови публікації.
-        <Alert color="yellow" title={t('expressions.noTestCases')}>
+        <Alert color="statusWarning" title={t('expressions.noTestCases')}>
           {t('expressions.noTestCasesHint')}
         </Alert>
       )}
@@ -71,7 +71,7 @@ export function TestCaseRunner(props: TestCaseRunnerProps): JSX.Element {
 
 function Verdict({ result }: { readonly result: SimulationResultDto }): JSX.Element {
   return (
-    <Badge color={result.isGreen ? 'green' : 'red'}>
+    <Badge color={result.isGreen ? 'green' : 'statusError'}>
       {result.isGreen ? t('expressions.testsGreen') : t('expressions.testsRed')}
     </Badge>
   );
@@ -114,7 +114,7 @@ function Verdicts({ result }: { readonly result: SimulationResultDto }): JSX.Ele
                       відсутність: методологія, яка перестала рахувати
                       оголошений вихід, інакше виглядала б як «майже зійшлося». */}
                   {mismatch.actual === null ? (
-                    <Text span c="red">
+                    <Text span c="statusError">
                       {t('expressions.testMissing')}
                     </Text>
                   ) : (

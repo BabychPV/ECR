@@ -466,7 +466,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       )}
 
       {conflicts.length > 0 && (
-        <Alert color="orange" title={t('grid.conflictTitle')}>
+        <Alert color="statusWarning" title={t('grid.conflictTitle')}>
           {/* ⛔ «Перезаписати мовчки» не є опцією: користувач бачить, чия
               правка і яка саме, і вирішує сам. */}
           <Text size="sm">{t('grid.conflictHint', { count: conflicts.length })}</Text>

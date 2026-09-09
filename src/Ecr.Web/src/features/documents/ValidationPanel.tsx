@@ -49,12 +49,12 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
 
   return (
     <Alert
-      color={errors === 0 ? 'yellow' : 'red'}
+      color={errors === 0 ? 'statusWarning' : 'statusError'}
       variant="light"
       title={
         <Group gap="xs">
           <Text fw={600}>{t('document.validationTitle')}</Text>
-          <Badge size="sm" color={errors === 0 ? 'yellow' : 'red'}>
+          <Badge size="sm" color={errors === 0 ? 'statusWarning' : 'statusError'}>
             {t('document.validationErrors', { count: errors })}
           </Badge>
         </Group>
@@ -99,8 +99,8 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
 
 /** Колір рівня; невідомий рівень лишається нейтральним, а не червоним. */
 function colorOf(severity: string): string {
-  if (severity === 'Error') return 'red';
-  if (severity === 'Warning') return 'yellow';
+  if (severity === 'Error') return 'statusError';
+  if (severity === 'Warning') return 'statusWarning';
 
   return 'blue';
 }

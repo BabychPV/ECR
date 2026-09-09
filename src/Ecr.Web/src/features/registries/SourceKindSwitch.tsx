@@ -58,7 +58,7 @@ export function SourceKindSwitch({ registries }: { registries: RegistryDefDto[] 
         title={t('registries.sourceSwitch')}
         size="lg"
       >
-        <Alert color="orange" title={t('registries.sourceSwitchHint')}>
+        <Alert color="statusWarning" title={t('registries.sourceSwitchHint')}>
           {t('registries.sourceSwitchWarning')}
         </Alert>
 

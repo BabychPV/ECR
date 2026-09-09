@@ -86,7 +86,7 @@ export function UserAccessEditor({
           Сказати про це треба тут, а не залишити людину гадати, чому в неї
           порожні екрани. */}
       {selected.length === 0 && (
-        <Alert color="orange" title={t('security.noRolesTitle')}>
+        <Alert color="statusWarning" title={t('security.noRolesTitle')}>
           {t('security.noRolesWarning')}
         </Alert>
       )}

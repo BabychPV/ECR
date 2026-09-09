@@ -68,7 +68,7 @@ export function VersionDiff({ templateVersionId }: { templateVersionId: number }
                   дізнатися про це з відмови публікації означає витратити на
                   правку час, який можна було не витрачати. */}
               {result.affectedDocumentCount > 0 && (
-                <Alert mt="md" color="orange" title={t('version.diffAffected')}>
+                <Alert mt="md" color="statusWarning" title={t('version.diffAffected')}>
                   {t('version.diffAffectedHint', { count: result.affectedDocumentCount })}
                 </Alert>
               )}
@@ -126,9 +126,9 @@ export function VersionDiff({ templateVersionId }: { templateVersionId: number }
 function classColor(changeClass: string): string {
   switch (changeClass) {
     case 'Breaking':
-      return 'red';
+      return 'statusError';
     case 'Guarded':
-      return 'orange';
+      return 'statusWarning';
     case 'Presentation':
       return 'blue';
     default:

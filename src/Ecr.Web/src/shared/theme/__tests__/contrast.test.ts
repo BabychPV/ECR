@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { AA, contrast } from '../contrast';
-import { brand, cellState, themeSurface } from '../theme';
+import { brand, cellState, statusError, statusWarning, themeSurface } from '../theme';
 
 // ⚠ Шлях від кореня проєкту, а не від import.meta.url: під jsdom
 // він не має схеми file:, і fileURLToPath кидає виняток.
@@ -60,6 +60,42 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     // би контраст кольору, якого вже немає в застосунку.
     expect(contrast(brand[6], themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
     expect(contrast(brand[4], themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
+  });
+
+  /**
+   * W4.2: статусні кольори (`error`/`warning`) замінили голі `color="red"` /
+   * `color="orange"` у фічах — і ось чому голе ім'я було дефектом, а не
+   * стилем. `primaryShade: { light: 6, dark: 5 }` застосовується до
+   * КОЖНОГО кольору Mantine, не лише до `brand` (перевірено читанням
+   * `getPrimaryShade` у `@mantine/core`): відтінок `filled`-варіанта в
+   * темній темі береться за індексом 5. Стандартна Mantine-шкала `red`/
+   * `orange` на цьому індексі світла, і білий текст на ній давав ~2.2–2.8:1
+   * — під AA. Жоден із двох контрольних кольорів не був наведений на око:
+   * значення підібрані перебором під REAL-варіанти Mantine (`filled` —
+   * біла мітка на заливці; `outline` — текст/межа на тлі сторінки), в обох
+   * схемах.
+   */
+  describe.each([
+    ['error', statusError],
+    ['warning', statusWarning],
+  ] as const)('статусний колір «%s» контрастний у варіантах Mantine', (name, tuple) => {
+    it(`«filled» (біла мітка на заливці) — обидві схеми (${name})`, () => {
+      // Індекс 6 — заливка `filled` у СВІТЛІЙ схемі (`primaryShade.light`),
+      // індекс 5 — та сама заливка в ТЕМНІЙ (`primaryShade.dark`). Саме
+      // індекс 5, а не 8 (Mantine-дефолт для типової теми), і саме тут
+      // стандартна `red`/`orange` провалювались.
+      expect(contrast('#ffffff', tuple[6])).toBeGreaterThanOrEqual(AA.text);
+      expect(contrast('#ffffff', tuple[5])).toBeGreaterThanOrEqual(AA.text);
+    });
+
+    it(`«outline»/«light» (текст на тлі сторінки) — обидві схеми (${name})`, () => {
+      // Світла схема: текст/межа `outline` і текст `light` — той самий
+      // індекс 6. Темна схема: `outline` бере індекс 1
+      // (`Math.max(primaryShade.dark - 4, 0)` = 1) — БЛІДИЙ відтінок навмисно:
+      // на темному тлі яскравий/темний відтінок або зникає, або ріже очі.
+      expect(contrast(tuple[6], themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
+      expect(contrast(tuple[1], themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
+    });
   });
 
   it('обчислення контрасту дає відомі значення', () => {

@@ -64,7 +64,7 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
                   <Table.Td>{field.sourceField}</Table.Td>
                   <Table.Td>{target(field.targetRowKey, field.targetColumnCode)}</Table.Td>
                   <Table.Td>
-                    <Badge color="red" variant="light">
+                    <Badge color="statusError" variant="light">
                       {outcomeLabel(field.outcome)}
                     </Badge>
                   </Table.Td>
@@ -136,7 +136,7 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    <Badge color={column.isUnfillable ? 'red' : 'gray'} variant="light">
+                    <Badge color={column.isUnfillable ? 'statusError' : 'gray'} variant="light">
                       {/* ⚠ Два виклики `t`, а не один із тернарним ключем:
                           зібраний ключ невидимий для сторожа каталогу
                           (`D2-172`). */}

@@ -234,7 +234,7 @@ export function PeriodAccessRuleManager({
       <Group justify="flex-end">
         <Button
           variant="default"
-          color="red"
+          color="statusError"
           disabled={disabled || ruleId === null}
           loading={saving}
           onClick={onDelete}
