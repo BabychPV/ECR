@@ -50,6 +50,21 @@ public sealed class ReopenDocumentHandler(
                 "ECR-ACCS-0403", $"Потрібне право {Permission}.");
         }
 
+        // ⛔ Q-173 (аудит фази 2, авторизація). Глобальне право вище каже «ця
+        // людина взагалі може повертати аркуші в роботу»; рішення тут каже
+        // «саме на ЦЕЙ документ». Submit і Approve того самого документа
+        // перевіряють обидва рівні (CanSubmitAsync/CanApproveAsync) — Reopen,
+        // що скасовує будь-яке з них, не мав перевіряти менше.
+        var reopenDecision = await access.CanReopenAsync(profile, documentId, sheetDefId, key, ct)
+                                          .ConfigureAwait(false);
+        if (!reopenDecision.IsAllowed)
+        {
+            throw new AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Повернення аркуша {sheetDefId} у роботу відхилено: {reopenDecision.Reason}.",
+                new Dictionary<string, object?> { ["reason"] = reopenDecision.Reason.ToString() });
+        }
+
         // ⚠ Період береться з UPDLOCK ДО будь-яких змін: інакше Reopen і
         // PeriodStateJob перегоняють одне одного, і повернення застосувалося б
         // до вже закритого періоду (ФВ-1.10a).

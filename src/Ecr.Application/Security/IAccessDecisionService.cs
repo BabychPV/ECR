@@ -87,6 +87,17 @@ public interface IAccessDecisionService
     public Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
+    /// <summary>Чи може користувач повернути поданий/затверджений аркуш у <c>Draft</c>.</summary>
+    /// <remarks>
+    /// ⛔ Q-173 (аудит фази 2, авторизація). Раніше <c>ReopenDocumentHandler</c>
+    /// перевіряв лише глобальне <c>Document.Reopen</c> — жодного рішення,
+    /// прив'язаного до документа, на відміну від <see cref="CanSubmitAsync"/>
+    /// і <see cref="CanApproveAsync"/>. Операція, що скасовує подання, вимагала
+    /// МЕНШЕ перевірок за саме подання.
+    /// </remarks>
+    public Task<EditDecision> CanReopenAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
     /// <summary>
     /// Крок маршруту погодження, якого чекає аркуш (<c>ФВ-5.17</c>).
     /// </summary>

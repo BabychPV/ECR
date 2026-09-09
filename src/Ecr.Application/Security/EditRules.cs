@@ -218,6 +218,35 @@ public static class EditRules
             : EditDecision.Deny(EditDenyReason.NoGrant);
     }
 
+    /// <summary>Чи можна повернути поданий/затверджений аркуш у <c>Draft</c>.</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="context">Умови аркуша.</param>
+    /// <remarks>
+    /// ⛔ Q-173 (аудит фази 2, авторизація). Поріг — <see cref="GrantLevel.Approve"/>,
+    /// не <see cref="GrantLevel.Write"/>: <c>ApprovalState.Reopen</c> скасовує і
+    /// <c>Submitted</c>, і <c>Approved</c> — скасувати затвердження має право
+    /// той, хто має право його дати, не менше.
+    /// </remarks>
+    public static EditDecision CanReopen(AccessProfile profile, CellAccessContext context)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (profile.IsSimulation)
+        {
+            return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (context.SheetStatus is not (DocumentStatus.Submitted or DocumentStatus.Approved))
+        {
+            return EditDecision.Deny(
+                EditDenyReason.BusinessRule, $"Аркуш у стані {context.SheetStatus}, а не Submitted/Approved.");
+        }
+
+        return Effective(profile, context) >= GrantLevel.Approve
+            ? EditDecision.Allow()
+            : EditDecision.Deny(EditDenyReason.NoGrant);
+    }
+
     /// <summary>
     /// Ефективний рівень: найдрібніший оголошений рівень перемагає, заборона —
     /// завжди.

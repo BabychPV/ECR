@@ -70,6 +70,8 @@ public sealed class SubmitApproveTests
                .Returns(EditDecision.Allow());
         _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());
+        _access.CanReopenAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Allow());
 
         _rows.GetOrphanFlagsAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
@@ -401,6 +403,29 @@ public sealed class SubmitApproveTests
         // Спершу Reopen ПЕРІОДУ, потім аркуша (ФВ-5.20a): інакше правка пішла б
         // у період, який уже віддали назовні.
         Assert.Equal("ECR-PRD-4223", error.ErrorCode);
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Reopen_без_рішення_прив_язаного_до_документа_відхиляється()
+    {
+        // ⛔ Q-173 (аудит фази 2, авторизація). Глобального права
+        // `Document.Reopen` НЕДОСТАТНЬО: обробник мусить питати
+        // `CanReopenAsync` так само, як `Submit`/`Approve` питають
+        // `CanSubmitAsync`/`CanApproveAsync` — операція, що скасовує подання,
+        // не має вимагати менше за саме подання.
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        _access.CanReopenAsync(Arg.Any<AccessProfile>(), Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Reopen().HandleAsync(Document, Water, Period, "причина", CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
+
+        // ⚠ Аркуш лишається Submitted — відмова стається ДО будь-якої зміни
+        // стану, не після.
         Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
     }
 

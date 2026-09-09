@@ -218,7 +218,7 @@
 | Q-170 | CONFLICT | `MaterializeCollectedDataJob` викликає `CoverageJournal.RecordAsync` (власний `SaveChangesAsync`) на кожен конфлікт замість пакетного запису — малий обсяг за побудовою, низький пріоритет | RESOLVED |
 | Q-171 | CONFLICT | `GetTableSliceHandler` (`GET …/tables/{tableInstanceId}`) не перевіряє належність `tableInstanceId` документу з маршруту — читає чужі дані. Перевірено особисто | RESOLVED · `GetTableSliceHandler.cs`, PR нижче |
 | Q-172 | CONFLICT | `GetDocumentTablesHandler` (`GET …/documents/{id}/tables`) не має жодної перевірки гранта на проєкт — лише RBAC; ланцюжком із Q-171 дає повний перелік чужих `tableInstanceId` | RESOLVED · `GetDocumentTablesHandler.cs`, PR #75 |
-| Q-173 | CONFLICT | `ReopenDocumentHandler` (`POST …/reopen`) свідомо пропускає перевірку гранта (коментар у коді), хоча `Submit`/`Approve` того самого документа — ні; повертає подане/затверджене подання назад у Draft у чужому проєкті | OPEN |
+| Q-173 | CONFLICT | `ReopenDocumentHandler` (`POST …/reopen`) свідомо пропускає перевірку гранта (коментар у коді), хоча `Submit`/`Approve` того самого документа — ні; повертає подане/затверджене подання назад у Draft у чужому проєкті | RESOLVED |
 | Q-174 | CONFLICT | `RecalculateDocumentHandler` не перевіряє грант на проєкт — фонова задача перераховує чужі дані; окремо `Q-151` — та сама задача без gate закритого періоду | RESOLVED · `RecalculateDocumentHandler.cs`, PR #75 |
 | Q-175 | CONFLICT | `GetCalculationResultsHandler` (`GET …/calculation-results`) не перевіряє грант на проєкт — віддає результати методологій (речовини, обсяги) по будь-якому `documentId` | RESOLVED · `GetCalculationResultsHandler.cs`, PR #75 |
 | Q-176 | CONFLICT | `CreateDocumentHandler` не перевіряє грант на `projectId` із тіла запиту — можна завести документ у чужому проєкті | RESOLVED · `CreateDocumentHandler.cs`, PR #75 |
@@ -7475,12 +7475,34 @@ value-tuple-параметра обрізав би її розпізнаванн
 проєкту), але нуль гранта на проєкт B; `POST /documents/{документ_у_B}/reopen`
 проходить і відкочує подане звітування чужого проєкту.
 
-**Чому не виправив сам:** коментар у коді показує, що це свідомий виняток
-із загального патерну, а не недогляд — можлива причина: `Document.Reopen`
-задумувався як загальне адміністративне право. Потрібне підтвердження
-наміру, перш ніж міняти поведінку, яку хтось свідомо запрограмував інакше.
+**Первинне рішення:** коментар у коді показує, що це свідомий виняток із
+загального патерну — просив підтвердження наміру перед зміною поведінки.
 
-**Статус:** OPEN
+#### Закрито (рішення людини)
+
+Настанова: «Reopen мусить вимагати і глобальне право, і рішення, прив'язане
+до документа». Коментар «право небезпечне і тому перевіряється окремо від
+грантів» — міркування навиворіт: небезпечна операція вимагає ОБОХ
+перевірок, а не однієї замість іншої. Не рішення продукту — відновлення
+інваріанта, який тримають `Submit`/`Approve`.
+
+Додано `IAccessDecisionService.CanReopenAsync(profile, documentId,
+sheetDefId, periodKey, ct)` — той самий патерн, що й
+`CanSubmitAsync`/`CanApproveAsync`, реалізовано через
+`EditRules.CanReopen`: поріг `GrantLevel.Approve`, не `Write`
+(`ApprovalState.Reopen` скасовує і `Submitted`, і `Approved` — скасувати
+затвердження має право той, хто має право його дати, не менше).
+`ReopenDocumentHandler` тепер перевіряє ОБИДВА рівні — глобальне право
+(як і раніше) і документний грант (новий виклик).
+
+Доказ мутацією: тимчасово прибрав виклик `CanReopenAsync` —
+`SubmitApproveTests.Reopen_без_рішення_прив_язаного_до_документа_відхиляється`
+впав («No exception was thrown» замість очікуваного
+`AccessDeniedException`); відновив виклик — тест і решта 13 у класі знову
+зелені. Повний `dotnet test Ecr.sln` (з інтеграційними, проти локального
+SQLEXPRESS): 1463/1463.
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR #87
 
 ---
 
