@@ -83,6 +83,63 @@ public sealed class NormalizedCellStore(EcrDbContext db, BulkCellLoader bulk) : 
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<CellRecord>>();
+        }
+
+        var rows = await (
+            from instance in db.TableInstances.AsNoTracking()
+            where tableInstanceIds.Contains(instance.Id)
+            join row in db.TableRows.AsNoTracking()
+                on new { P = instance.PeriodKeyValue, I = instance.Id }
+                equals new { P = row.PeriodKeyValue, I = row.TableInstanceId }
+            join cell in db.CellValues.AsNoTracking()
+                on new { P = row.PeriodKeyValue, R = row.Id }
+                equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
+            where !row.IsDeleted
+            select new
+            {
+                instance.Id,
+                cell.PeriodKeyValue,
+                cell.TableRowId,
+                cell.ColumnDefId,
+                cell.TableDefId,
+                cell.ValueString,
+                cell.ValueNumeric,
+                cell.ValueDate,
+                cell.ValueBool,
+                cell.ValueRegistryEntryId,
+                cell.ValueUnitId,
+                cell.IsCalculated,
+                cell.IsEmpty,
+            }).ToListAsync(ct).ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.Id)
+            .ToDictionary(
+                g => g.Key,
+                IReadOnlyList<CellRecord> (g) => [.. g.Select(r => new CellRecord(
+                    new CellAddress(new PeriodKey(r.PeriodKeyValue), r.TableRowId, r.ColumnDefId),
+                    r.TableDefId,
+                    new CellValueData
+                    {
+                        ValueString = r.ValueString,
+                        ValueNumeric = r.ValueNumeric,
+                        ValueDate = r.ValueDate,
+                        ValueBool = r.ValueBool,
+                        ValueRegistryEntryId = r.ValueRegistryEntryId,
+                        ValueUnitId = r.ValueUnitId,
+                        IsCalculated = r.IsCalculated,
+                        IsEmpty = r.IsEmpty,
+                    }))]);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
     {
