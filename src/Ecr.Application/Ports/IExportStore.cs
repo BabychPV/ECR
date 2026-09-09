@@ -20,13 +20,24 @@ public interface IExportStore
 {
     /// <summary>Кладе готову книгу.</summary>
     /// <param name="exportId">Ключ, названий у завданні на експорт.</param>
+    /// <param name="documentId">
+    /// Документ, з якого книга побудована — Q-180: без нього
+    /// <c>DownloadExportHandler</c> не має за чим перевірити грант на проєкт
+    /// при завантаженні, і захист лишається лише непередбачуваністю
+    /// <paramref name="exportId"/>.
+    /// </param>
     /// <param name="content">Вміст книги.</param>
     /// <param name="lifetime">Скільки живе.</param>
     /// <param name="ct">Скасування.</param>
-    public Task SaveAsync(string exportId, byte[] content, TimeSpan lifetime, CancellationToken ct);
+    public Task SaveAsync(string exportId, long documentId, byte[] content, TimeSpan lifetime, CancellationToken ct);
 
     /// <summary>Читає книгу; <c>null</c> — її немає або строк вийшов.</summary>
     /// <param name="exportId">Ключ експорту.</param>
     /// <param name="ct">Скасування.</param>
-    public Task<byte[]?> FindAsync(string exportId, CancellationToken ct);
+    public Task<ExportedBook?> FindAsync(string exportId, CancellationToken ct);
 }
+
+/// <summary>Готова книга разом із документом, з якого вона побудована.</summary>
+/// <param name="DocumentId">Документ — потрібен для перевірки гранта при завантаженні (Q-180).</param>
+/// <param name="Content">Вміст книги.</param>
+public sealed record ExportedBook(long DocumentId, byte[] Content);
