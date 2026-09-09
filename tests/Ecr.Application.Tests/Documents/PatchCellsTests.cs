@@ -44,8 +44,23 @@ public sealed class PatchCellsTests
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
         SetId(column, VolumeColumnId);
 
+        // ⚠ Q-148: PatchCellsHandler тепер шукає TableDef у Sheets, щоб
+        // перевірити RowMode/MaxDynamicRows на створення рядка. Dynamic —
+        // щоб тести, які не про Q-148, і далі вільно створювали рядки.
+        var sheet = new SheetDef(
+            templateVersionId: 2, EcrCode.Create("Water"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("Main"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.MonthsInColumns, TableRowMode.Dynamic);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
+        table.AddColumn(column);
+        sheet.AddTable(table);
+
         var snapshot = new TemplateVersionSnapshot(
-            TemplateVersionId: 2, PresentationRevision: 0, Sheets: [],
+            TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
             ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = column },
             RowsByKey: new Dictionary<(int, string), RowDef>());
 
@@ -156,6 +171,101 @@ public sealed class PatchCellsTests
         await _rows.DidNotReceive().CreateRowsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Fixed_таблиця_відхиляє_вигаданий_ключ_рядка_ECR_ROW_0409()
+    {
+        // ⛔ Q-148: PATCH /cells і POST /rows мають давати ОДНАКОВУ відповідь
+        // на той самий намір — «додати рядок у Fixed». `CreateRowHandler` уже
+        // відхиляв це за RowMode; тут той самий шлях був відкритий.
+        WithTable(TableRowMode.Fixed);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(new PatchRow("DYN-vigadanyi", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Fixed_таблиця_дозволяє_матеріалізацію_ключа_з_RowsByKey()
+    {
+        // ⚠ «Вужче формулювання» (рішення людини): не заборона створення в
+        // Fixed цілком, а дозвіл ЛИШЕ на ключ, який справді описаний у
+        // шаблоні (`snapshot.RowsByKey`) — вигаданий ключ і далі відхиляється.
+        var rowDef = new RowDef(
+            tableDefId: 3, RowKey.Create("R1"), 1,
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Row 1" }), RowKind.Item);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(rowDef, 1);
+
+        WithTable(TableRowMode.Fixed, rowsByKey: new Dictionary<(int, string), RowDef> { [(3, "R1")] = rowDef });
+
+        _rows.CreateRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns([3001L]);
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("R1", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        await _rows.Received(1).CreateRowsAsync(
+            TableInstance, Arg.Any<PeriodKey>(),
+            Arg.Is<IReadOnlyList<RowKey>>(keys => keys.Count == 1 && keys[0].Value == "R1"),
+            Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task MaxDynamicRows_блокує_створення_що_перевищило_б_межу()
+    {
+        // ⛔ Q-148: та сама стеля, яку вже стереже CreateRowHandler, можна
+        // було обійти пакетним записом через PATCH.
+        WithTable(TableRowMode.Dynamic, maxDynamicRows: 1);
+
+        // У таблиці вже є один рядок (7001001, з дефолтного фікстурного
+        // GetRowIdsAsync) — другий створюваний перевищив би межу в 1.
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Підміняє знімок метаданих таблицею з обраним RowMode.</summary>
+    private void WithTable(
+        TableRowMode rowMode, int? maxDynamicRows = null,
+        IReadOnlyDictionary<(int, string), RowDef>? rowsByKey = null)
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("Volume"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
+        SetId(column, VolumeColumnId);
+
+        var sheet = new SheetDef(
+            templateVersionId: 2, EcrCode.Create("Water"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("Main"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.MonthsInColumns, rowMode);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
+        table.AddColumn(column);
+
+        if (maxDynamicRows is not null)
+        {
+            table.SetMaxDynamicRows(maxDynamicRows);
+        }
+
+        sheet.AddTable(table);
+
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(
+                TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
+                ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = column },
+                RowsByKey: rowsByKey ?? new Dictionary<(int, string), RowDef>()));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -483,9 +593,20 @@ public sealed class PatchCellsTests
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
         SetId(alien, OtherTableColumnId);
 
+        var sheet = new SheetDef(
+            templateVersionId: 2, EcrCode.Create("Water"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("Main"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.MonthsInColumns, TableRowMode.Dynamic);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
+        table.AddColumn(mine);
+        sheet.AddTable(table);
+
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
             new TemplateVersionSnapshot(
-                TemplateVersionId: 2, PresentationRevision: 0, Sheets: [],
+                TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
 
                 // ⚠ Чужа колонка йде ПЕРШОЮ: саме її брав `First()`.
                 ColumnsById: new Dictionary<int, ColumnDef>

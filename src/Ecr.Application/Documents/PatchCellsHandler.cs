@@ -56,6 +56,12 @@ public sealed class PatchCellsHandler(
         //    їх не можна, це частина первинного ключа комірки.
         var instance = await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+
+        var table = snapshot.Sheets
+            .SelectMany(sh => sh.Tables)
+            .FirstOrDefault(t => t.Id == instance.TableDefId)
+            ?? throw new NotFoundException(
+                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
         // ⚠ У мапі — сам ColumnDef, а не лише Id. Значення розбирається за
         // ОГОЛОШЕНИМ типом колонки: через HTTP усе приходить JsonElement-ом, і
         // здогадка за виглядом значення клала число в текст, а ідентифікатор
@@ -90,6 +96,50 @@ public sealed class PatchCellsHandler(
         //    null означає намір СТВОРИТИ рядок, а не «мені байдуже до версії».
         var creations = request.Rows.Where(r => r.BaseVersion is null).ToList();
         var updates = request.Rows.Where(r => r.BaseVersion is not null).ToList();
+
+        // ⛔ Q-148 (аудит, узгодження шляхів запису). До цього PATCH /cells
+        // створював рядок БУДЬ-ЯКИМ ключем у БУДЬ-ЯКОМУ режимі — той самий
+        // намір, що POST /rows законно відхиляв (`CreateRowHandler`:
+        // `ECR-ROW-0409`, RowMode). Два шляхи запису в ту саму таблицю давали
+        // протилежні відповіді на те саме питання.
+        //
+        // ⚠ Рішення людини — «вужче формулювання»: не заборонити створення в
+        // Fixed цілком (це зробило б таблицю незаповнюваною до `W8`), а
+        // дозволити ЛИШЕ матеріалізацію шаблонного рядка (ключ є в
+        // `snapshot.RowsByKey`) і заборонити вигаданий ключ. Після `W8`
+        // (`MaterializeFixedRowsAsync`) фіксовані рядки й так заводяться при
+        // відкритті періоду — тож на практиці цей шлях або відхиляє вигаданий
+        // ключ, або впаде нижче на «рядок уже існує»; про запас лишається
+        // безпечним, якщо матеріалізація колись відстане від відкриття.
+        if (creations.Count > 0 && !table.AllowsDynamicRows)
+        {
+            var invalidKeys = creations
+                .Where(r => !snapshot.RowsByKey.ContainsKey((instance.TableDefId, r.RowKey)))
+                .Select(r => r.RowKey)
+                .ToList();
+
+            if (invalidKeys.Count > 0)
+            {
+                throw new BusinessRuleException(
+                    "ECR-ROW-0409",
+                    $"Таблиця {table.Code} має RowMode = {table.RowMode}: рядки задані шаблоном, "
+                    + $"довільний ключ не приймається. Неприпустимі ключі: {string.Join(", ", invalidKeys)}.",
+                    new Dictionary<string, object?> { ["rowKeys"] = invalidKeys });
+            }
+        }
+
+        // ⛔ Та сама знахідка Q-148: `MaxDynamicRows` перевіряв лише
+        // `CreateRowHandler`, і той самий стелю можна було обійти пакетним
+        // записом через PATCH.
+        if (creations.Count > 0 && table.AllowsDynamicRows && table.MaxDynamicRows is { } maxRows
+            && rowIds.Count + creations.Count > maxRows)
+        {
+            throw new BusinessRuleException(
+                "ECR-ROW-0409",
+                $"Створення {creations.Count} рядків перевищило б межу динамічних рядків таблиці "
+                + $"{table.Code}: {rowIds.Count} наявних + {creations.Count} нових > {maxRows}.",
+                new Dictionary<string, object?> { ["existing"] = rowIds.Count, ["adding"] = creations.Count, ["max"] = maxRows });
+        }
 
         var duplicates = creations.Where(r => versions.ContainsKey(r.RowKey)).Select(r => r.RowKey).ToList();
         if (duplicates.Count > 0)
