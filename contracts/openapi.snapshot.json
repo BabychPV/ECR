@@ -8094,6 +8094,7 @@
     },
     "/api/v1/documents/{id}/import/apply": {
       "post": {
+        "description": "⚠ 202 з jobId — лише для diff, що перевищує поріг\nint ApplyImportHandler.LargeImportThreshold\n(директива №11, T10 #45); звичайний, невеликий імпорт лишається 200 із\nрезультатом одразу, як і раніше.",
         "parameters": [
           {
             "in": "path",
@@ -8146,6 +8147,26 @@
               }
             },
             "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "409": {
             "content": {
@@ -8868,6 +8889,87 @@
           }
         },
         "summary": "Стан задачі за її ідентифікатором. Право `System.ViewHealth`.",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/{jobId}/restart": {
+      "post": {
+        "description": "⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:\nклієнт, що вже показує цю задачу, продовжує опитувати той самий\n`GET /jobs/{jobId}`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "jobId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth`\n(директива №11, T10 #40).",
         "tags": [
           "Jobs"
         ]

@@ -242,6 +242,7 @@
 | Q-194 | CONFLICT | `DeleteRegistryEntryHandler` (перевірка `ECR-REG-0409`, покритий тестом) без жодного `[HttpDelete]` — помилково заведений запис довідника не можна прибрати через API взагалі | OPEN |
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
+| Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED частково · #40/#41/#45/#50 закрито, #44 STOPPED (схемна міграція, рішення людини) |
 
 ---
 
@@ -8758,3 +8759,115 @@ doc-коментарем немає ні в `src/`, ні в тестах — з�
 не судження про реалізацію.
 
 **Статус:** OPEN
+
+---
+
+### Q-206 · SCOPE · Директива №11, T10, 2026-09-09 · п'ять незалежних знахідок аудиту (`#40`, `#41`, `#44`, `#45`, `#50`)
+
+**Де:** `src/Ecr.Infrastructure/Jobs/QuartzJobAdapter.cs`,
+`src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs`,
+`src/Ecr.Application/Integration/IntegrationHandlers.cs` (`RestartJobHandler`),
+`src/Ecr.Api/Controllers/JobsController.cs` (`#40`); `src/Ecr.Api/Observability/EcrMetrics.cs:114`,
+`src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs`,
+`src/Ecr.Application/Ports/IConsistencyMetrics.cs`,
+`src/Ecr.Api/Observability/ConsistencyMetricsAdapter.cs` (`#41`);
+`src/Ecr.Domain/Entities/Calculations/ScriptVersion.cs` (`#44`, НЕ ЧІПАВ);
+`src/Ecr.Application/Documents/ExcelExchangeHandlers.cs` (`ApplyImportHandler`),
+`src/Ecr.Infrastructure/Jobs/ExcelImportJob.cs` (`#45`);
+`src/Ecr.Application/Ports/ICellStore.cs`, `src/Ecr.Application/Ports/ICalculationResultStore.cs`,
+`src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs`,
+`src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`#50`).
+
+**Що знайшлося й що зроблено:**
+
+**#40 — нема `RetryPolicy`.** Підтверджено: `QuartzJobAdapter.Execute` ловив
+провал, писав `Failed` і кидав `JobExecutionException(refireImmediately: false)`
+— жодного ретраю, жодного способу перезапустити задачу, крім постановки
+НОВОЇ (з новим `jobId`, втратою зв'язку з попереднім прогресом). Додано
+експоненційний відступ — до трьох ретраїв (`QuartzJobAdapter.MaxRetryAttempts`,
+30 с / 60 с / 120 с; судження, задокументоване в коді) — і ендпоінт
+`POST /api/v1/jobs/{jobId}/restart` (право `System.ViewHealth`, лише для
+задачі в стані `Failed`). Обидва спираються на `.StoreDurably()` у
+`QuartzJobScheduler.EnqueueCoreAsync`: задача, яка вичерпала ретраї, лишається
+в планувальнику (успіх/скасування прибирають деталь самі), тож перезапуск
+має що перезапускати. D-134: тимчасово прибрано перевірку
+`attempt < MaxRetryAttempts` (замінено на `false`) — тест
+`Провал_після_вичерпання_ліміту_...` у
+`QuartzJobAdapterRetryTests.cs` (той, що очікує РІВНО одну зупинку на межі)
+почервонів, бо ретрай планувався б і на межі; повернуто, зелено.
+
+**#41 — мертва метрика.** Підтверджено: `EcrMetrics.RecordConsistencyIssues`
+(рядок 114) не мав жодного викликача — `ConsistencyCheckJob` пише знахідки
+лише в `aud.ConsistencyIssue`. Проблема шару: `ConsistencyCheckJob` живе в
+`Ecr.Infrastructure`, яка на `Ecr.Api` (де `EcrMetrics`) не посилається.
+Додано порт `IConsistencyMetrics` (`Ecr.Application.Ports`) з адаптером
+`ConsistencyMetricsAdapter` у `Ecr.Api`, зареєстрованим у `Program.cs`
+поруч із самим `EcrMetrics`. `ConsistencyCheckJob.ExecuteAsync` тепер кличе
+`metrics.RecordIssues(count, ruleCode)` за КОЖНИМ різновидом знахідки
+(`GroupBy(RuleCode)`) після побудови списку `issues`. D-134: тимчасово
+прибрано виклик `metrics.RecordIssues` — новий тест
+`Знахідка_видима_в_метриках` у `ConsistencyCheckJobDetectionTests.cs`
+почервонів (`metrics.Received(1).RecordIssues(...)` не справдився); повернуто,
+зелено.
+
+**#44 — `ScriptVersion` без творця. ЗУПИНЕНО, код не змінено.** Підтверджено:
+нуль `new ScriptVersion(` поза тестами (перевіряє й окремий сторож
+`MethodologyCloneCompletenessTests.Скрипт_рівня_2_не_створює_ніщо_...`),
+`MarkCompiled`/`MarkTested`/`HasGreenTest` теж без викликачів поза тестами
+власної сутності. Директива каже прибрати `ScriptVersion` і прапорець
+`HasGreenTest` — але `calc.ScriptVersion` це РЕАЛЬНА таблиця з РЕАЛЬНОЮ
+колонкою `HasGreenTest`, заведена міграцією `20260904232328_Stage4Calculations`
+і присутня в моделі БЕЗПЕРЕРВНО аж до найновішої міграції
+(`20260909161652_Q155NullableSnapshotModes`) — тобто застосована в кожному
+середовищі, що прогнало міграції за останні кілька днів. Прибрати сутність
+означає `DROP TABLE calc.ScriptVersion` (нова міграція), а не редагування
+коду. Це рівно сценарій, який сама директива називає підставою зупинитися:
+«якщо прибрати ризикованіше, ніж очікувалось — STOP і звітуй, а не форсуй
+схемну зміну». Судження про безпечність міграції — не моє.
+
+**Чому не вирішив сам (лише #44):** схемна міграція — завжди стоп у цьому
+проєкті, без винятку «але ця безпечна». Потрібне пряме підтвердження людини:
+чи можна `DROP TABLE calc.ScriptVersion` (і колонку `HasGreenTest`) новою
+міграцією зараз, чи рівень 2 залишиться в схемі до конкретнішого рішення про
+реліз, у якому він з'явиться.
+
+**#45 — синхронний імпорт без порогу.** Підтверджено: `ApplyImportHandler`
+завжди викликав `IExcelImporter.ApplyAsync` синхронно, на відміну від
+`ExportDocumentHandler`, який давно й безумовно йде в чергу. Додано
+`IExcelImporter.CountPendingChangesAsync` (рахує зміни РАНІШЕ побудованого
+`ImportPlan`, не розбираючи вдруге) і поріг
+`ApplyImportHandler.LargeImportThreshold = 2000` комірок — судження від уже
+задокументованого бюджету `ICellStore.ApplyAsync` (p95 &lt; 150 мс на 100
+комірок). Вище порогу — `IExcelImportJob` у черзі (той самий шлях запису,
+`IExcelImporter.ApplyAsync`, лише з боку задачі), контролер повертає `202` з
+`jobId`, як і в експорту; нижче — як і раніше, `200` синхронно. D-134:
+тимчасово замінено умову порогу на `false` (завжди синхронно) — новий тест
+`Великий_diff_не_блокує_запит_довше_за_поріг_часу` у
+`ApplyImportThresholdTests.cs` (штучно повільний `ApplyAsync`, бюджет 500 мс
+на виклик обробника) почервонів, бо обробник чекав на 5-секундну затримку
+синхронно; повернуто, зелено.
+
+**#50 — два мертві члени порту.** `ICellStore.BulkInsertAsync`: перевірено
+свіжим пошуком (не з довіри до `unreachable-mechanisms.md`, чий запис
+стверджував «використовує `ExcelImporter`» — неправда, `ExcelImporter`
+кличе лише `ReadSlicesAsync`) — нуль викликів поза власною реалізацією й
+тестами реалізації; `git log -S` показує єдиний комівт, що торкався методу
+(скелет). Прибрано з порту й реалізації; `BulkCellLoader.LoadAsync`
+(нижчий шар, на якому будувався метод) лишився — його напряму кличе
+`Ecr.DataGen` (реальний споживач: генератор обсягу). Два тести, що раніше
+викликали `store.BulkInsertAsync` заради перевірки `SqlBulkCopy`
+(перевірка ключів), переписано на прямий виклик `BulkCellLoader.LoadAsync`
+— та сама перевірка, без мертвого порту між нею й реалізацією.
+`ICalculationResultStore.ReserveResultIdRangeAsync`: підтверджено нуль
+ЗОВНІШНІХ викликів через порт (єдиний виклик — внутрішній, з
+`CalculationResultStore.WriteResultsAsync`, той самий об'єкт). Перевірено
+`RunCalculationHandler`: не викликає напряму, ідентифікатори видаються
+винятково всередині `WriteResultsAsync`. Прибрано з інтерфейсу
+`ICalculationResultStore`, зроблено `private` у `CalculationResultStore` —
+той самий шаблон, що вже мав сусідній `NextStepIdAsync` (private, ніколи не
+був на порту). Логіка жива й потрібна, просто не мала бути публічним
+контрактом.
+
+**Статус:** RESOLVED частково · `#40`/`#41`/`#45`/`#50` закрито кодом і
+тестами; `#44` — STOPPED, чекає підтвердження людини на схемну міграцію,
+PR #TBD

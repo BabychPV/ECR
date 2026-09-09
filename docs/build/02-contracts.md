@@ -2175,6 +2175,20 @@ public interface IJobProgressStore
 }
 ```
 
+#### `IConsistencyMetrics`
+
+Видимість знахідок `ConsistencyCheckJob` у метриках (директива №11, T10 #41).
+Порт, а не прямий виклик `EcrMetrics`: та живе в `Ecr.Api`, а
+`ConsistencyCheckJob` — в `Ecr.Infrastructure`, яка на `Ecr.Api` не
+посилається.
+
+```csharp
+public interface IConsistencyMetrics
+{
+    public void RecordIssues(int count, string kind);
+}
+```
+
 #### `IMethodologyDraftStore`
 
 Сховище **редагованої** частини методології (`ФВ-9.15`): усі версії, включно з чернетками, і формули, які в чернетці правлять. Порт окремий від `IMethodologyStore` навмисно — той обслуговує розрахунок і показує лише опубліковане, бо рахувати чернеткою не можна ніколи. Клон версії переносить **весь** вміст джерела; за повнотою переліку стежить архітектурний сторож.
@@ -2562,6 +2576,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
+| `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
+| `ECR-JOB-0409` | 409 | ручний перезапуск задачі, яка не в стані `Failed` (директива №11, T10 #40) |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
 | `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`) |
 
@@ -2716,6 +2732,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
