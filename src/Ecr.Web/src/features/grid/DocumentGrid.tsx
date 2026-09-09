@@ -11,7 +11,7 @@ import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
 import { roundToScale, type RoundedCell } from './rounding';
-import { cellKey, decide, guardOf } from './permissions';
+import { cellKey, confirmationOf, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
@@ -126,6 +126,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
   const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
 
+  // ⚠ Значення, підтверджені оператором (`ФВ-2.16`, `#43`), яких сервер ще
+  // не бачив: доки не прийде свіжий зріз, grid показує ЇХ, а не збережене
+  // значення з `data`, — інакше підтверджений ввід зникав би з екрана до
+  // першого успішного збереження.
+  const [overrides, setOverrides] = useState<Map<string, unknown>>(new Map());
+
+  // ⚠ Запит на підтвердження — окремий стан, а не частина `pending`: до кліку
+  // «Продовжити» значення НЕ застосоване взагалі (`onBeforeEdit` блокує його
+  // синхронно), і показувати його як незбережену правку означало б брехати
+  // про те, що вже сталося.
+  const [confirmRequest, setConfirmRequest] = useState<{
+    rowKey: string;
+    columnCode: string;
+    value: unknown;
+    hint: string;
+  } | null>(null);
+
   // ⚠ `pending` читається з таймера дебаунсу й обробника `beforeunload` —
   // обидва живуть поза React-рендером, і замикання на `pending` там бачило б
   // застиглий знімок з моменту створення. `ref` завжди дає ОСТАННЮ мапу.
@@ -140,6 +157,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       await patch(buildRequest(tableInstanceId, periodKey, edits));
       setPending(new Map());
+
+      // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
+      // значення, і локальна підстава більше не потрібна нікому.
+      setOverrides(new Map());
     },
     [patch, periodKey, tableInstanceId],
   );
@@ -203,6 +224,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   useEffect(() => {
     history.current.rescope(`${tableInstanceId}:${periodKey}`);
     setPending(new Map());
+    setOverrides(new Map());
+    setConfirmRequest(null);
     setWidths(readWidths(tableInstanceId));
     touchHistory();
 
@@ -246,7 +269,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     () => (data === undefined ? [] : gridColumns(data, readOnly, flags, widths)),
     [data, readOnly, flags, widths],
   );
-  const rows = useMemo(() => (data === undefined ? [] : gridRows(data)), [data]);
+
+  // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
+  // ЩОЙНО (`ФВ-2.16`, `#43`): сервер про них ще не знає, і без цього шару
+  // підтверджений ввід зникав би з екрана до першого успішного збереження.
+  const rows = useMemo(
+    () => (data === undefined ? [] : gridRows(data, overrides)),
+    [data, overrides],
+  );
 
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
   const onPaste = useCallback(
@@ -337,28 +367,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   /**
-   * Правка з клавіатури.
+   * Захоплює правку в `pending`/історію і планує автозбереження.
    *
-   * ⛔ Без цього обробника grid показував би введене значення і **не зберігав
-   * його**: RevoGrid тримає правку у власній моделі й не знає ні про наш
-   * batch-PATCH, ні про історію. Дефект без жодної ознаки збою — таблиця
-   * виглядає заповненою, доки її не перевідкриють.
+   * ⛔ Спільна для двох джерел правки: клавіатура (`onAfterEdit`, нижче) і
+   * підтверджена комірка `AllowWithConfirmation` (`onConfirmEdit`, `#43`).
+   * Друга копія цієї логіки розійшлася б із першою на першій же зміні
+   * правила історії чи дебаунсу.
    */
-  const onAfterEdit = useCallback(
-    (event: { detail: unknown }) => {
-      if (data === undefined || readOnly) return;
+  const applyEditedValue = useCallback(
+    (signal: { columnCode: string; rowKey: string; raw: string }) => {
+      if (data === undefined) return null;
 
-      const detail = event.detail as
-        | { prop?: string | number; model?: unknown; val?: unknown }
-        | undefined;
-
-      const captured = captureEdit(data, {
-        columnCode: detail?.prop === undefined ? '' : String(detail.prop),
-        rowKey: rowKeyOf(detail?.model),
-        raw: String(detail?.val ?? ''),
-      });
-
-      if (captured === null) return;
+      const captured = captureEdit(data, signal);
+      if (captured === null) return null;
 
       history.current.push({
         label: t('grid.edit', { column: captured.columnHeader }),
@@ -378,9 +399,97 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // через 500 мс тиші ПІСЛЯ ОСТАННЬОЇ правки, а не після першої — інакше
       // швидкий ряд натисків Tab відсилав би окремий запит на кожну клітину.
       autosaveDebouncer.current.trigger();
+
+      return captured;
     },
-    [data, readOnly, touchHistory],
+    [data, touchHistory],
   );
+
+  /**
+   * Правка з клавіатури.
+   *
+   * ⛔ Без цього обробника grid показував би введене значення і **не зберігав
+   * його**: RevoGrid тримає правку у власній моделі й не знає ні про наш
+   * batch-PATCH, ні про історію. Дефект без жодної ознаки збою — таблиця
+   * виглядає заповненою, доки її не перевідкриють.
+   */
+  const onAfterEdit = useCallback(
+    (event: { detail: unknown }) => {
+      if (data === undefined || readOnly) return;
+
+      const detail = event.detail as
+        | { prop?: string | number; model?: unknown; val?: unknown }
+        | undefined;
+
+      applyEditedValue({
+        columnCode: detail?.prop === undefined ? '' : String(detail.prop),
+        rowKey: rowKeyOf(detail?.model),
+        raw: String(detail?.val ?? ''),
+      });
+    },
+    [data, readOnly, applyEditedValue],
+  );
+
+  /**
+   * `beforeedit`: гейт підтвердження для `AllowWithConfirmation` (`ФВ-2.16`,
+   * `#43`).
+   *
+   * ⛔ Значення блокується СИНХРОННО — `event.preventDefault()` до того, як
+   * RevoGrid встигне застосувати його до комірки (`onCellEdit` бібліотеки
+   * читає `defaultPrevented` одразу після `emit`). Показ модалки й клік
+   * оператора — АСИНХРОННІ, а `beforeedit` ні: єдиний спосіб встигнути
+   * запитати підтвердження — не дати grid застосувати значення самому, а
+   * застосувати його самим, ПІСЛЯ відповіді, через `applyEditedValue`.
+   *
+   * ⚠ Комірку без вимоги підтвердження обробник не чіпає взагалі: звичайна
+   * правка йде далі своїм шляхом, `afteredit` спрацьовує як завжди.
+   */
+  const onBeforeEdit = useCallback(
+    (event: { detail: unknown; preventDefault: () => void }) => {
+      if (data === undefined || readOnly) return;
+
+      const detail = event.detail as
+        | { prop?: string | number; model?: unknown; val?: unknown }
+        | undefined;
+
+      const columnCode = detail?.prop === undefined ? '' : String(detail.prop);
+      const column = data.columns.find((candidate) => candidate.code === columnCode);
+      if (column === undefined) return;
+
+      const rowKey = rowKeyOf(detail?.model);
+      const hint = confirmationOf(data, rowKey, column);
+      if (hint === null) return;
+
+      event.preventDefault();
+      setConfirmRequest({ rowKey, columnCode, value: detail?.val, hint });
+    },
+    [data, readOnly],
+  );
+
+  /** Оператор підтвердив правку поза вікном доступу (`ФВ-2.16`, `#43`). */
+  const onConfirmEdit = useCallback(() => {
+    if (confirmRequest === null) return;
+
+    const captured = applyEditedValue({
+      rowKey: confirmRequest.rowKey,
+      columnCode: confirmRequest.columnCode,
+      raw: String(confirmRequest.value ?? ''),
+    });
+
+    // ⚠ Підстава ставиться ЛИШЕ якщо правка справді захоплена: відмова
+    // `applyEditedValue` (право забрали між показом діалогу й кліком) не
+    // повинна намалювати значення, якого сервер не отримає ніколи.
+    if (captured !== null) {
+      setOverrides((current) => {
+        const next = new Map(current);
+        next.set(cellKey(confirmRequest.rowKey, confirmRequest.columnCode), captured.pending.value);
+
+        return next;
+      });
+    }
+
+    setConfirmRequest(null);
+  }, [confirmRequest, applyEditedValue]);
 
   /** Ctrl+C: віддає виділене у форматі, який приймає Excel. */
   const onCopy = useCallback(
@@ -562,6 +671,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         columns={columns}
         source={rows}
         readonly={readOnly}
+        onBeforeedit={onBeforeEdit}
         onAfteredit={onAfterEdit}
         onAftercolumnresize={onColumnResize}
         style={{ height: '70vh' }}
@@ -592,6 +702,33 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             </List.Item>
           ))}
         </List>
+      </Modal>
+
+      {/*
+       * ⛔ `AllowWithConfirmation` (`ФВ-2.16`, `#43`). До цієї модалки правка
+       * поза вікном доступу проходила МОВЧКИ — так само, як звичайна: третя
+       * поведінка з трьох, названих вимогою, не відрізнялася від першої.
+       * Закриття без кнопки (хрестик, `Esc`, клік поза) трактується як
+       * СКАСУВАННЯ: `applyEditedValue` тут не викликаний узагалі, тож
+       * скасовувати нічого не треба — значення й так ніколи не потрапляло
+       * в комірку (`onBeforeEdit` заблокував його синхронно).
+       */}
+      <Modal
+        opened={confirmRequest !== null}
+        onClose={() => setConfirmRequest(null)}
+        title={t('grid.confirmTitle')}
+      >
+        <Text size="sm" mb="md">
+          {confirmRequest?.hint}
+        </Text>
+        <Group justify="flex-end" gap="xs">
+          <Button size="xs" variant="default" onClick={() => setConfirmRequest(null)}>
+            {t('grid.confirmCancel')}
+          </Button>
+          <Button size="xs" onClick={onConfirmEdit}>
+            {t('grid.confirmProceed')}
+          </Button>
+        </Group>
       </Modal>
     </Stack>
       )}
@@ -653,13 +790,23 @@ function gridColumns(
   }));
 }
 
-/** Рядки grid; порожні комірки беруться з `defaultValue` колонки (ФВ-3.8). */
-function gridRows(slice: TableSliceDto): GridRow[] {
+/**
+ * Рядки grid; порожні комірки беруться з `defaultValue` колонки (ФВ-3.8).
+ *
+ * @param overrides Значення, підтверджені оператором (`ФВ-2.16`, `#43`), яких
+ * сервер ще не бачив — перекривають і збережене значення, і `defaultValue`,
+ * бо мають ознаку «оператор це щойно ввів», а не «так було до нього».
+ */
+function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>): GridRow[] {
   return slice.rows.map((row) => {
     const model: GridRow = { __rowKey: row.rowKey };
 
     for (const column of slice.columns) {
-      model[column.code] = row.cells[column.code] ?? column.defaultValue ?? '';
+      const key = cellKey(row.rowKey, column.code);
+
+      model[column.code] = overrides?.has(key)
+        ? overrides.get(key)
+        : (row.cells[column.code] ?? column.defaultValue ?? '');
     }
 
     return model;

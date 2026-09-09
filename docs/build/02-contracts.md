@@ -3105,12 +3105,19 @@ namespace Ecr.Application.Documents.Dto;
 /// <c>DefaultValue</c> з опису колонки (ФВ-3.8).
 /// Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2).
 /// </summary>
+/// <param name="CellConfirmations">
+/// Комірки, дозволені лише після ЯВНОГО підтвердження оператора
+/// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>, <c>#43</c>). Ключ — той
+/// самий формат, що й у <c>CellPermissions</c>; значення — пояснення для
+/// діалогу підтвердження.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ColumnDto> Columns,
     IReadOnlyList<RowDto> Rows,
-    IReadOnlyDictionary<string, string> CellPermissions);
+    IReadOnlyDictionary<string, string> CellPermissions,
+    IReadOnlyDictionary<string, string> CellConfirmations);
 
 /// <summary>Опис колонки для клієнта.</summary>
 public sealed record ColumnDto(
