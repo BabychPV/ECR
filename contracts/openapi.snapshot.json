@@ -3702,6 +3702,29 @@
           "Closed"
         ]
       },
+      "PermissionCatalogItem": {
+        "description": "Право з ПОВНОГО каталогу системи (`sec.Permission`).",
+        "properties": {
+          "code": {
+            "description": "Код права; саме він перевіряється в обробниках.",
+            "type": "string"
+          },
+          "group": {
+            "description": "Група для угруповання в UI: `Template`, `Document`, `Calculation` тощо.",
+            "type": "string"
+          },
+          "isDangerous": {
+            "description": "Небезпечне право (`ФВ-6.12`, `D-40`): у складені ролі не входить\nза seed і видається поіменно, а не через матрицю.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "group",
+          "isDangerous"
+        ],
+        "type": "object"
+      },
       "PresentationRevisionResponse": {
         "description": "Нова ревізія презентаційного шару.",
         "properties": {
@@ -10988,6 +11011,46 @@
         "summary": "Відкриває закритий період. Право `Period.Reopen`.",
         "tags": [
           "Periods"
+        ]
+      }
+    },
+    "/api/v1/permissions": {
+      "get": {
+        "description": "⛔ До появи цього маршруту клієнт складав перелік прав перетином того,\nщо вже оголошено в наявних ролях: право без жодного носія не можна було\nпризначити НІКОМУ — форма створення ролі його просто не показувала\n(директива №11, трек T2, `#19`).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogItem"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogItem"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogItem"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Повний каталог системних прав, включно з тими, яких не має жодна роль.\nПраво `Security.ManageRoles`.",
+        "tags": [
+          "Security"
         ]
       }
     },
