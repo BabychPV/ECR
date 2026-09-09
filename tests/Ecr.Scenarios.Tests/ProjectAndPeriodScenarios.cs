@@ -22,11 +22,11 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var admin = await Provisioning.AdministratorAsync(app, "S10", ["Project.Manage", "Document.View", "Template.Edit"]);
 
         var projectId = await CreateProjectAsync(admin.Client, "S10", "Asia/Almaty");
-        admin = await ActivateProjectAsync(app, admin, projectId);
+        admin = await ActivateProjectAsync(admin, projectId);
 
         // Проєкт активний і має календар періодів. Грант Manage вже видано
-        // самою активацією (Q-179) — другий виклик замінив би набір ролі й
-        // упав би на «роль уже має грант(и)».
+        // самим створенням проєкту — повторний GrantAsync тут упав би на
+        // «роль уже має грант(и)».
         var periods = await admin.Client.GetAsync(new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, periods.StatusCode);
 
@@ -60,9 +60,9 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var admin = await Provisioning.AdministratorAsync(app, "S11", ["Project.Manage", "Document.View", "Template.Edit"]);
 
         var projectId = await CreateProjectAsync(admin.Client, "S11", "Asia/Almaty");
-        admin = await ActivateProjectAsync(app, admin, projectId);
+        admin = await ActivateProjectAsync(admin, projectId);
 
-        // Грант Manage вже видано самою активацією (Q-179).
+        // Грант Manage вже видано самим створенням проєкту.
         var response = await admin.Client.GetAsync(
             new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -126,6 +126,41 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
             p => p.GetProperty("id").GetInt32() == projectId);
     }
 
+    /// <summary>
+    /// Творець одразу активує ВЛАСНИЙ щойно створений проєкт, без стороннього
+    /// гранта.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Побічна знахідка при Q-179: до цього фіксу `CreateProjectHandler`
+    /// не видавав творцю ЖОДНОГО гранта на щойно створений проєкт —
+    /// `Activate` (вимагає `GrantLevel.Manage` на конкретний `projectId`
+    /// після Q-179) відмовляв би творцю власного проєкту, доки хтось не
+    /// видав би грант окремим кроком. «Якщо є право створити проєкт — є
+    /// право ним володіти» (рішення людини).
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-10")]
+    public async Task Творець_одразу_активує_власний_проєкт_без_стороннього_гранта()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(app, "S10own", ["Project.Manage", "Document.View", "Template.Edit"]);
+
+        var projectId = await CreateProjectAsync(admin.Client, "S10own", "Asia/Almaty");
+
+        // ⛔ ТІЄЮ САМОЮ сесією, без GrantAsync і без ReauthenticateAsync:
+        // грант на власність видає сам CreateProjectHandler.
+        var buildCalendar = await admin.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, buildCalendar.StatusCode);
+
+        var activate = await admin.Client.PostAsync(
+            new Uri($"/api/v1/projects/{projectId}/activate", UriKind.Relative), content: null);
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            activate.StatusCode);
+    }
+
     /// <summary>Створює проєкт із IANA-поясом і повертає його ідентифікатор.</summary>
     internal static async Task<int> CreateProjectAsync(HttpClient client, string prefix, string timeZoneId)
     {
@@ -171,19 +206,20 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     /// читанням... Виклик ідемпотентний»), тому цей крок явно виконується
     /// ПЕРЕД активацією, а не покладається на активацію саму собою.
     ///
-    /// ⛔ Q-179 (аудит фази 2, авторизація). `Activate` тепер вимагає грант
-    /// `Manage` на КОНКРЕТНИЙ проєкт, не лише глобальне `Project.Manage` —
-    /// щойно створений проєкт такого гранта не має НІ В КОГО, тож видаємо
-    /// його ролі виконавця тут і перечитуємо профіль (`ReauthenticateAsync`,
-    /// бо грант не крутить `SecurityStamp` — кешований профіль інакше не
-    /// побачив би новий грант).
+    /// ⛔ Q-179 (аудит фази 2, авторизація). `Activate` вимагає грант
+    /// `Manage` на КОНКРЕТНИЙ проєкт, не лише глобальне `Project.Manage`.
+    /// До побічної знахідки при Q-179 щойно створений проєкт такого гранта
+    /// не мав НІ В КОГО, і цей метод видавав його ролі виконавця тут явно.
+    /// Після фікса `CreateProjectHandler` сам видає грант творцю тією ж
+    /// транзакцією, що й створення (і скидає лише його кешований профіль,
+    /// не крутячи `SecurityStamp` — сесія лишається дійсною), тож `admin`
+    /// (він же завжди творець у кожному виклику цього методу) уже має
+    /// грант і дійсну сесію одразу після `CreateProjectAsync`. Явний
+    /// `GrantAsync` тут падав би на власній «роль уже має грант(и)».
     /// </remarks>
     internal static async Task<Provisioning.Administrator> ActivateProjectAsync(
-        EcrApiFactory app, Provisioning.Administrator admin, int projectId)
+        Provisioning.Administrator admin, int projectId)
     {
-        await Provisioning.GrantAsync(app, admin.RoleId, "Project", projectId, "Manage");
-        admin = await Provisioning.ReauthenticateAsync(app, admin);
-
         var buildCalendar = await admin.Client.GetAsync(
             new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, buildCalendar.StatusCode);

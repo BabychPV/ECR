@@ -43,16 +43,30 @@ public sealed class CreateProjectTests
     private readonly IProjectStore _projects = Substitute.For<IProjectStore>();
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IUserStore _users = Substitute.For<IUserStore>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+
+    private const int ManagerRoleId = 1;
 
     public CreateProjectTests()
     {
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Role(ManagerRoleId).Build());
+
+        // ⛔ Q-179 (побічна знахідка): CreateProjectHandler тепер видає
+        // творцю грант Manage на щойно створений проєкт — через КОЖНУ роль
+        // творця, яка сама несе Project.Manage. Фікстура задає рівно одну
+        // таку роль.
+        _users.ListRolesAsync(Arg.Any<CancellationToken>()).Returns(
+            [new RoleView(ManagerRoleId, "Manager", IsBuiltIn: false, IsActive: true,
+                Permissions: ["Project.Manage"], DangerousPermissions: [])]);
+        _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
+            .Returns(new List<ResourceGrantDto>());
     }
 
     [Theory]
@@ -122,7 +136,7 @@ public sealed class CreateProjectTests
         // чужі партиції й у чужий архів.
         _clock.UtcNow.Returns(new DateTime(2025, 12, 31, 21, 0, 0, DateTimeKind.Utc));
 
-        await new CreateProjectHandler(_periods, _access, _uow, _user, _clock)
+        await new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
             .HandleAsync(
                 "KASH_2026",
                 new Dictionary<string, string> { ["en"] = "Kashagan" },
@@ -178,6 +192,61 @@ public sealed class CreateProjectTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Створення_видає_творцю_грант_Manage_на_новий_проєкт()
+    {
+        // ⛔ Побічна знахідка при Q-179: Activate/Archive/Clone/маршрут
+        // погодження вимагають GrantLevel.Manage на КОНКРЕТНИЙ projectId
+        // після Q-179 — а створення проєкту не видавало жодного гранта
+        // нікому. Творець власного щойно створеного проєкту не міг би
+        // активувати ЙОГО Ж, доки хтось не видасть грант окремим кроком.
+        var projectId = await Create("Asia/Almaty");
+
+        await _users.Received(1).ReplaceGrantsAsync(
+            ManagerRoleId,
+            Arg.Is<IReadOnlyList<ResourceGrantDto>>(grants =>
+                grants.Any(g => g.ResourceKind == ResourceKind.Project
+                                 && g.ResourceId == projectId
+                                 && g.Level == GrantLevel.Manage
+                                 && !g.IsDeny)),
+            Arg.Any<CancellationToken>());
+
+        // ⚠ НЕ RotateStampsForRoleAsync: перша версія фікса його викликала й
+        // розлоговувала творця його ж власною дією (Unauthorized на
+        // наступному запиті тією самою сесією — підтверджено сценарієм
+        // Творець_одразу_активує_власний_проєкт_без_стороннього_гранта).
+        // Замість цього — точкове скидання кешованого профілю ЛИШЕ творця,
+        // без зміни штампа: сесія лишається дійсною, а профіль перебудується
+        // на наступному запиті.
+        await _users.DidNotReceive().RotateStampsForRoleAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _access.Received(1).InvalidateProfileAsync(9, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task Наявні_гранти_ролі_на_інші_проєкти_не_губляться()
+    {
+        // ⛔ ReplaceGrantsAsync ЗАМІНЮЄ набір цілком (не додає по одному) —
+        // тому обробник мусить прочитати наявні гранти ролі ПЕРЕД заміною,
+        // а не просто написати список з одного нового елемента.
+        _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
+            .Returns(new List<ResourceGrantDto>
+            {
+                new(ResourceKind.Project, 999, GrantLevel.Write, IsDeny: false),
+            });
+
+        var projectId = await Create("Asia/Almaty");
+
+        await _users.Received(1).ReplaceGrantsAsync(
+            ManagerRoleId,
+            Arg.Is<IReadOnlyList<ResourceGrantDto>>(grants =>
+                grants.Count == 2
+                && grants.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == 999)
+                && grants.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == projectId)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Без_права_Project_Manage_перелік_політик_недоступний()
     {
@@ -192,7 +261,7 @@ public sealed class CreateProjectTests
     }
 
     private Task<int> Create(string timeZoneId)
-        => new CreateProjectHandler(_periods, _access, _uow, _user, _clock)
+        => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
             .HandleAsync(
                 "KASH_2026",
                 new Dictionary<string, string> { ["en"] = "Kashagan" },

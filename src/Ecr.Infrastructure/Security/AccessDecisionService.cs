@@ -52,6 +52,22 @@ public sealed class AccessDecisionService(
             .ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task InvalidateProfileAsync(int userId, CancellationToken ct)
+    {
+        var stamp = await db.Users
+            .AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => u.SecurityStamp)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (stamp is not null)
+        {
+            profileCache.Evict(userId, stamp);
+        }
+    }
+
     /// <summary>
     /// Сталий відбиток набору груп.
     /// </summary>
