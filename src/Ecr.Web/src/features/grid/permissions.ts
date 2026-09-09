@@ -86,28 +86,47 @@ export function cellKey(rowKey: string, columnCode: string): string {
 /**
  * Рішення про комірку.
  *
- * Порядок перевірок значущий: спершу те, що не залежить від користувача
- * (обчислена колонка), потім те, що залежить. Інакше власник усіх прав бачив
- * би «немає права» на комірці, яку не може редагувати ніхто.
+ * ⛔ Q-191 (аудит фази 2). Порядок перевірок значущий, і до цього виправлення
+ * він був ПЕРЕВЕРНУТИЙ відносно сервера: клієнт питав «обчислена колонка?»/
+ * «read-only колонка?» ЛОКАЛЬНО й ПЕРШИМ, а серверний `slice.cellPermissions`
+ * (де `EditRules.CanEdit` уже виніс причину за повною чергою — симуляція →
+ * архів проєкту → архівація → період → вікно доступу → стан аркуша → лише
+ * ПОТІМ обчислена колонка → read-only колонка → read-only рядок) дивився
+ * ОСТАННІМ. Наслідок: поданий документ або архівований проєкт на обчислюваній
+ * комірці показував «комірка обчислюється системою» — правда локально, але
+ * не та причина, що насправді стоїть вище в черзі сервера. Не діра в доступі
+ * (`PatchCellsHandler` однаково перевіряє `CanEdit` на сервері незалежно від
+ * підказки), але користувачу показували не ту загадку.
+ *
+ * Правильний порядок: СЕРВЕРНИЙ словник — джерело істини і перевіряється
+ * ПЕРШИМ, бо він уже враховує повну чергу `CanEdit`. Локальна евристика
+ * (`CalculatedCell`/`ColumnReadOnly`) лишається лише як ЗАПАСНИЙ варіант для
+ * комірки, якої немає в словнику (сервер віддає лише відхилення — див. нижче)
+ * — інакше власник усіх прав на щойно завантаженому зрізі бачив би «немає
+ * права» на комірці, яку не може редагувати ніхто.
  */
 export function decide(slice: TableSliceDto, rowKey: string, column: ColumnDto): CellDecision {
+  const permission = slice.cellPermissions[cellKey(rowKey, column.code)];
+
+  // ⚠ Відсутність запису — це ДОЗВІЛ. Сервер віддає лише відхилення: словник
+  // на 500×60 із дозволами на кожну комірку важив би більше за самі дані.
+  // `'None'` трактується так само: це явний дозвіл від сервера, а не «немає
+  // даних» — і те, і те означає «дивись локальну евристику нижче».
+  if (permission !== undefined && permission !== 'None') {
+    const reason = reasonOf(permission);
+
+    return reason === null
+      ? { editable: false, reason: null, hint: t('deny.Unknown', { reason: permission }) }
+      : deny(reason);
+  }
+
   if (column.dataType === 'Formula' || column.dataType === 'Calculated') {
     return deny('CalculatedCell');
   }
 
   if (column.isReadOnly) return deny('ColumnReadOnly');
 
-  const permission = slice.cellPermissions[cellKey(rowKey, column.code)];
-
-  // ⚠ Відсутність запису — це ДОЗВІЛ. Сервер віддає лише відхилення: словник
-  // на 500×60 із дозволами на кожну комірку важив би більше за самі дані.
-  if (permission === undefined || permission === 'None') return Editable;
-
-  const reason = reasonOf(permission);
-
-  return reason === null
-    ? { editable: false, reason: null, hint: t('deny.Unknown', { reason: permission }) }
-    : deny(reason);
+  return Editable;
 }
 
 /**
