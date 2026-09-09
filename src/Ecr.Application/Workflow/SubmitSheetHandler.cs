@@ -164,18 +164,23 @@ public sealed class SubmitSheetHandler(
         // значення.
         //
         // ⚠ `MethodologyVersionsJson`, `NumericMode` і `CalendarMode`
-        // лишаються незаповненими СВІДОМО і винесені в `Q-155`: чинні версії
-        // методологій цього документа сюди не проведені, а вигадати їх тут
-        // означало б записати в зріз неправду замість порожнечі. Різниця
-        // принципова: порожнє поле видно, а `Legacy`/`Actual` за
-        // замовчуванням виглядають як зафіксований вибір.
+        // лишаються незаповненими СВІДОМО (`Q-155`, RESOLVED): чинні версії
+        // методологій і чинні режими цього документа сюди не проведені —
+        // `SubmitSheetHandler` не має порту, який би це дав. Раніше тут
+        // писалися підставні `NumericMode.Legacy`/`CalendarMode.Actual`
+        // «щоб не порожньо» — саме та помилка, яку зробив `TemplateVersionId:
+        // 0` у `W8` до того, як її помітили: підставне значення виглядає як
+        // зафіксований вибір, а не як «невідомо». `null` тут видно й
+        // перевіряється, тому обидва поля тепер `byte?` аж до домену й
+        // стовпця (`SubmissionSnapshot.NumericMode`/`CalendarMode`,
+        // `calc.SubmissionSnapshot`).
         await workflow.SaveSnapshotAsync(
             new SubmissionSnapshotRecord(
                 documentId, sheetDefId, periodKey,
                 templateVersionId,
                 MethodologyVersionsJson: null,
-                NumericMode: (byte)NumericMode.Legacy,
-                CalendarMode: (byte)Domain.Enums.CalendarMode.Actual,
+                NumericMode: null,
+                CalendarMode: null,
                 PayloadJson: payload,
                 ContentHash: Hash(payload),
                 SubmittedAt: now,
