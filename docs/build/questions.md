@@ -214,7 +214,7 @@
 | Q-166 | CONFLICT | `RecalculationService` читає `rowIds`/комірки окремим запитом НА КОЖНУ таблицю документа, і робить це на КОЖНЕ редагування комірки (через `FormulaRecalculationJob`), не лише на повний перерахунок | RESOLVED |
 | Q-167 | CONFLICT | `DocumentStore.ListAsync` — окремий запит стану погодження на КОЖЕН документ сторінки замість одного `WHERE DocumentId IN (...)` | RESOLVED |
 | Q-168 | CONFLICT | Попередній перегляд імпорту Excel (`ExcelImporter`) — кілька походів у базу НА КОЖНУ таблицю книги, синхронно, поки користувач чекає на екрані | OPEN |
-| Q-169 | CONFLICT | `ConsistencyCheckJob` пише кожну знахідку окремим `EXISTS`+`INSERT` замість пакетного upsert — нічний job, обмежений `MaxIssues`, низький пріоритет | OPEN |
+| Q-169 | CONFLICT | `ConsistencyCheckJob` пише кожну знахідку окремим `EXISTS`+`INSERT` замість пакетного upsert — нічний job, обмежений `MaxIssues`, низький пріоритет | RESOLVED |
 | Q-170 | CONFLICT | `MaterializeCollectedDataJob` викликає `CoverageJournal.RecordAsync` (власний `SaveChangesAsync`) на кожен конфлікт замість пакетного запису — малий обсяг за побудовою, низький пріоритет | OPEN |
 | Q-171 | CONFLICT | `GetTableSliceHandler` (`GET …/tables/{tableInstanceId}`) не перевіряє належність `tableInstanceId` документу з маршруту — читає чужі дані. Перевірено особисто | RESOLVED · `GetTableSliceHandler.cs`, PR нижче |
 | Q-172 | CONFLICT | `GetDocumentTablesHandler` (`GET …/documents/{id}/tables`) не має жодної перевірки гранта на проєкт — лише RBAC; ланцюжком із Q-171 дає повний перелік чужих `tableInstanceId` | RESOLVED · `GetDocumentTablesHandler.cs`, PR #75 |
@@ -7280,7 +7280,28 @@ INSERT` на кожну знахідку замість пакетного upser
 **Чому низький пріоритет:** обмежено `MaxIssues = 1000`, нічний
 обслуговуючий job, не інтерактивний шлях.
 
-**Статус:** OPEN
+#### Закрито
+
+`WriteIssuesAsync` перемкнуто на `MERGE ... WHEN NOT MATCHED THEN INSERT`
+на чанк (300 знахідок — 6 параметрів на рядок, у межах ліміту SQL Server
+у 2100), з тією самою умовою ідемпотентності
+(`RuleCode`+`EntityType`+`EntityId`, лише незакриті). До 1000 знахідок
+(`MaxIssues`) тепер щонайбільше 4 запити замість до 1000.
+
+Для запису знахідок не існувало жодного тесту (наявний
+`ConsistencyCheckJobTests` перевіряє лише ТЕКСТ джерела виявлення правил,
+не поведінку запису — тому N+1 тут і не був пійманий раніше) — додано
+`ConsistencyCheckJobWriteTests.cs` на реальному SQL Server, окремим
+файлом, тим самим прийомом підрахунку команд, що й `DocumentStoreTests`
+(`Q-167`).
+
+Доказ мутацією на реальній базі: дві знахідки → 1 команда на
+`aud.ConsistencyIssue` після фіксу; тимчасове повернення старого циклу —
+2 команди, тест впав (`Expected: 1, Actual: 2`); відновлення фіксу —
+знову 1 і зелено. Повний `dotnet test Ecr.sln` (з інтеграційними, проти
+локального SQLEXPRESS — Docker на цій машині недоступний): 1461/1461.
+
+**Статус:** RESOLVED · мутаційний доказ вище (на реальній БД), PR #82
 
 ---
 
