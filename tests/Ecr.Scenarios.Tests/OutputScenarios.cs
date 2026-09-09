@@ -88,7 +88,7 @@ public sealed class OutputScenarios(SqlServerFixture sql)
         Assert.Equal("Draft", versions[0].GetProperty("status").GetString());
 
         var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(admin.Client, "S27", "Asia/Almaty");
-        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(app, admin, projectId);
+        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(admin, projectId);
         var periodKey = (DateTime.UtcNow.Year * 100) + 1;
 
         // Крок 2: доки версія чернеткова, побудови немає — і це той самий

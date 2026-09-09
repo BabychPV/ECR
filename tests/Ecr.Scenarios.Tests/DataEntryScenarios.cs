@@ -204,9 +204,10 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         // HardClose (45 днів), тому PeriodStateJob неминуче переведе їх у
         // Closed, і не треба чекати на реальний годинник.
         var projectId = await CreateOldProjectAsync(admin.Client, "S16", structure.VersionId);
-        // ⚠ Грант Manage тепер видає сам ActivateProjectAsync (Q-179): Activate
-        // вимагає його ще ДО активації, а не лише глобальне Project.Manage.
-        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(app, admin, projectId);
+        // ⚠ Грант Manage вже видано самим створенням проєкту: Activate
+        // вимагає його на конкретний projectId, а не лише глобальне
+        // Project.Manage.
+        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(admin, projectId);
 
         var closedPeriodKey = await AwaitPeriodStateAsync(admin.Client, projectId, "Closed", TimeSpan.FromSeconds(20));
         Assert.True(closedPeriodKey.HasValue, $"жоден період проєкту {projectId} (рік 2019) не перейшов у Closed за 20 с.");
@@ -269,9 +270,10 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
 
         var structure = await BuildTemplateStructureAsync(admin.Client, "S17a", "Dynamic", null, app);
         var projectId = await CreateOldProjectAsync(admin.Client, "S17a", structure.VersionId);
-        // ⚠ Грант Manage тепер видає сам ActivateProjectAsync (Q-179): Activate
-        // вимагає його ще ДО активації, а не лише глобальне Project.Manage.
-        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(app, admin, projectId);
+        // ⚠ Грант Manage вже видано самим створенням проєкту: Activate
+        // вимагає його на конкретний projectId, а не лише глобальне
+        // Project.Manage.
+        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(admin, projectId);
 
         var closedPeriodKey = await AwaitPeriodStateAsync(admin.Client, projectId, "Closed", TimeSpan.FromSeconds(20));
         Assert.True(closedPeriodKey.HasValue, $"жоден період проєкту {projectId} не закрився — архівацію (яка вимагає всіх закритих) перевірити нема на чому.");
@@ -873,9 +875,10 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         EcrApiFactory app, Provisioning.Administrator admin, string prefix)
     {
         var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(admin.Client, prefix, "Asia/Almaty");
-        // ⚠ Грант Manage тепер видає сам ActivateProjectAsync (Q-179): Activate
-        // вимагає його ще ДО активації, а не лише глобальне Project.Manage.
-        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(app, admin, projectId);
+        // ⚠ Грант Manage вже видано самим створенням проєкту: Activate
+        // вимагає його на конкретний projectId, а не лише глобальне
+        // Project.Manage.
+        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(admin, projectId);
 
         var periodsResponse = await admin.Client.GetAsync(
             new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
@@ -1188,9 +1191,10 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True(createProject.StatusCode == HttpStatusCode.Created, $"{createProject.StatusCode}: {app.ErrorsText}");
         var projectId = (await createProject.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("projectId").GetInt32();
 
-        // ⚠ Грант Manage тепер видає сам ActivateProjectAsync (Q-179): Activate
-        // вимагає його ще ДО активації, а не лише глобальне Project.Manage.
-        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(app, admin, projectId);
+        // ⚠ Грант Manage вже видано самим створенням проєкту: Activate
+        // вимагає його на конкретний projectId, а не лише глобальне
+        // Project.Manage.
+        admin = await ProjectAndPeriodScenarios.ActivateProjectAsync(admin, projectId);
 
         // ⛔ Період береться ВІДКРИТИЙ, а не «перший у календарі». Записувати
         // можна лише у відкритий (`ФВ-1.12`), і саме `W8` зробив його

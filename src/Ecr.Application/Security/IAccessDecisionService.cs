@@ -35,6 +35,22 @@ public interface IAccessDecisionService
     /// <summary>Будує профіль прав користувача. Викликається раз на сесію.</summary>
     public Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct);
 
+    /// <summary>
+    /// Точково скидає кешований профіль користувача, не чіпаючи його штамп
+    /// безпеки — отже, і не розлоговуючи його активну сесію.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не заміна <c>RotateStampsForRoleAsync</c>: та навмисно розлоговує
+    /// ВСІХ носіїв ролі негайно (ФВ-6.7) — правильна поведінка, коли
+    /// адміністратор відкликає чужий доступ. Цей метод — для протилежного
+    /// випадку: користувач щойно сам собі (побічно) розширив доступ власною
+    /// дією (наприклад, створенням проєкту) і має побачити це в ТІЙ САМІЙ
+    /// сесії, без примусового виходу.
+    /// </remarks>
+    /// <param name="userId">Користувач, чий кешований профіль застарів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task InvalidateProfileAsync(int userId, CancellationToken ct);
+
     /// <summary>Чи може користувач читати документ.</summary>
     public Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct);
 

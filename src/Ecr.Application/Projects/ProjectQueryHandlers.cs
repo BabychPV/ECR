@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -122,6 +123,8 @@ public sealed record PeriodPolicyDto(
 public sealed class CreateProjectHandler(
     IPeriodStore periods,
     IAccessDecisionService access,
+    IUserStore users,
+    IAuditWriter audit,
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock)
@@ -153,7 +156,9 @@ public sealed class CreateProjectHandler(
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        await ListTemplatesHandler.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Пояс перевіряється ПЕРШИМ із усього, і саме тут. Він вічний
         // (ФВ-1.1a), тож невідомий ідентифікатор став би вічною властивістю
@@ -210,7 +215,102 @@ public sealed class CreateProjectHandler(
         await periods.AddProjectAsync(project, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Виявлено ПІСЛЯ `Q-179`: якщо є право створити проєкт — є право
+        // ним володіти. До цього творець не отримував ЖОДНОГО гранта на
+        // щойно створений проєкт — `Activate`/`Archive`/`Clone`/маршрут
+        // погодження (усі перевіряють `GrantLevel.Manage` на конкретний
+        // `projectId` після `Q-179`) відмовляли б власному творцю доти,
+        // доки хтось не видасть грант окремим кроком.
+        await GrantOwnershipAsync(profile, project.Id, ct).ConfigureAwait(false);
+
         return project.Id;
+    }
+
+    /// <summary>
+    /// Видає щойно створений проєкт у володіння творцю.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Грант прив'язаний до РОЛІ (`sec.ResourceGrant.RoleId`), не до
+    /// користувача — окремої таблиці особистих грантів немає. Рішення
+    /// людини: видати грант КОЖНІЙ ролі творця, яка сама несе
+    /// <see cref="Permission"/> — тій самій «сумі ролей», яку вже застосовує
+    /// <c>AccessDecisionService.LoadAsync</c> для читання грантів (найширший
+    /// рівень серед ролей перемагає). Побічний наслідок — свідомо прийнятий:
+    /// усі, хто поділяє цю роль із творцем, теж отримують доступ до нового
+    /// проєкту, так само як вони вже поділяють саме право його створювати.
+    ///
+    /// ⚠ НЕ `RotateStampsForRoleAsync`. Перша версія цього фікса викликала
+    /// його — і розлоговувала ТВОРЦЯ його ж власною дією: наступний запит
+    /// тією самою сесією отримував `401`, бо ротація штампа інвалідує живу
+    /// сесію негайно й навмисно (ФВ-6.7) — саме так і мало бути, коли
+    /// адміністратор відкликає ЧУЖИЙ доступ, але не тоді, коли користувач
+    /// побічно розширює ВЛАСНИЙ. Підтверджено сценарієм
+    /// `Творець_одразу_активує_власний_проєкт_без_стороннього_гранта`:
+    /// з ротацією — `Unauthorized` на першому ж запиті після створення.
+    ///
+    /// Замість цього — точкове скидання кешованого профілю ЛИШЕ творця
+    /// (`InvalidateProfileAsync`, без зміни штампа): наступний запит цією ж
+    /// сесією просто перебудує профіль і побачить новий грант, а сесія
+    /// лишається дійсною. Побічний наслідок, прийнятий свідомо: інші носії
+    /// тієї самої ролі побачать грант лише при природному сплині кешу (до 30
+    /// хв) або новому вході — так само, як будь-яка інша зміна грантів, що
+    /// не супроводжується ротацією штампа.
+    /// </remarks>
+    private async Task GrantOwnershipAsync(AccessProfile profile, int projectId, CancellationToken ct)
+    {
+        var allRoles = await users.ListRolesAsync(ct).ConfigureAwait(false);
+        var qualifyingRoles = allRoles
+            .Where(r => profile.RoleIds.Contains(r.Id) && r.Permissions.Contains(Permission))
+            .ToList();
+
+        var grantedAny = false;
+
+        foreach (var role in qualifyingRoles)
+        {
+            var existing = await users.ListGrantsAsync(role.Id, ct).ConfigureAwait(false);
+
+            // ⚠ Проєкт щойно створений — дубліката бути не може за
+            // побудовою (`projectId` ще не існував ні для кого), але
+            // перевірка тут коштує дешевше за мовчазний `UQ_ResourceGrant`
+            // виняток, якби це припущення колись перестало виконуватися.
+            if (existing.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == projectId))
+            {
+                continue;
+            }
+
+            var updated = existing
+                .Append(new ResourceGrantDto(ResourceKind.Project, projectId, GrantLevel.Manage, IsDeny: false))
+                .ToList();
+
+            await users.ReplaceGrantsAsync(role.Id, updated, ct).ConfigureAwait(false);
+            grantedAny = true;
+
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow,
+                    "ResourceGrantsReplaced",
+                    TargetUserId: null,
+                    TargetRoleId: role.Id,
+                    DetailsJson: JsonSerializer.Serialize(new
+                    {
+                        role = role.Code,
+                        reason = "CreateProjectOwnership",
+                        projectId,
+                    }),
+                    // ⚠ `!.Value`, не повторна перевірка: `PermissionCheck.RequireAsync`
+                    // вище вже вимагав автентифікованого користувача, інакше
+                    // сюди взагалі не дійшли б.
+                    ChangedByUserId: currentUser.UserId!.Value,
+                    CorrelationId: currentUser.CorrelationId),
+                ct).ConfigureAwait(false);
+        }
+
+        if (grantedAny)
+        {
+            await access.InvalidateProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+        }
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
 
