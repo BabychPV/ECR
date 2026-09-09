@@ -12,8 +12,27 @@ namespace Ecr.Application.Security;
 /// <param name="IsAllowed">Чи дозволена дія.</param>
 /// <param name="Reason">Причина відмови; <see cref="EditDenyReason.None"/> при дозволі.</param>
 /// <param name="Detail">Уточнення для UI (напр. дата закриття періоду). Не для логіки.</param>
-public readonly record struct EditDecision(bool IsAllowed, EditDenyReason Reason, string? Detail = null)
+/// <param name="RequiresConfirmation">
+/// Дозволено, але лише після ЯВНОГО підтвердження оператора
+/// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>, <c>#43</c>). Завжди
+/// <c>false</c> при відмові: підтверджувати нема чого, коли дія й так
+/// заборонена.
+/// </param>
+public readonly record struct EditDecision(
+    bool IsAllowed, EditDenyReason Reason, string? Detail = null, bool RequiresConfirmation = false)
 {
     public static EditDecision Allow() => new(true, EditDenyReason.None);
     public static EditDecision Deny(EditDenyReason reason, string? detail = null) => new(false, reason, detail);
+
+    /// <summary>
+    /// Дозволено за умови підтвердження (<c>ФВ-2.16</c>, <c>#43</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="Deny"/>: комірка лишається редаговною і без цього
+    /// підтвердження — заборона тут перетворила б <c>AllowWithConfirmation</c>
+    /// на <c>ReadOnly</c>, і дві з трьох поведінок <c>ФВ-2.16</c> знову
+    /// злилися б в одну.
+    /// </remarks>
+    public static EditDecision AllowWithConfirmation(string? detail)
+        => new(true, EditDenyReason.None, detail, RequiresConfirmation: true);
 }

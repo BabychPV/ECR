@@ -49,6 +49,7 @@ function slice(
       },
     ],
     cellPermissions: permissions,
+    cellConfirmations: {},
   };
 }
 
