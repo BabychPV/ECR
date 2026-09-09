@@ -121,7 +121,7 @@ public sealed class DocumentsController(
         return Ok(new ValidationResultResponse(
             id,
             periodKey,
-            [.. messages.Select(m => new ValidationMessageDto(
+            [.. messages.Select(m => new ValidationFindingDto(
                 m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
@@ -158,7 +158,7 @@ public sealed class DocumentsController(
             : Ok(new ValidationResultResponse(
                 id,
                 periodKey,
-                [.. messages.Select(m => new ValidationMessageDto(
+                [.. messages.Select(m => new ValidationFindingDto(
                     m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
@@ -407,7 +407,7 @@ public sealed record ImportApplyRequest(string PreviewToken);
 /// чи можна подавати, ухвалює клієнт за наявністю рівня <c>Error</c>.
 /// </remarks>
 public sealed record ValidationResultResponse(
-    long DocumentId, int PeriodKey, IReadOnlyList<ValidationMessageDto> Messages);
+    long DocumentId, int PeriodKey, IReadOnlyList<ValidationFindingDto> Messages);
 
 /// <summary>Одне зауваження перевірки.</summary>
 /// <param name="Severity">Рівень: <c>Error</c>, <c>Warning</c>, <c>Info</c>.</param>
@@ -416,5 +416,5 @@ public sealed record ValidationResultResponse(
 /// <param name="RowKey">Рядок; <c>null</c> — зауваження до таблиці.</param>
 /// <param name="ColumnCode">Колонка; <c>null</c> — зауваження до рядка.</param>
 /// <param name="BlocksSave">Чи блокує збереження.</param>
-public sealed record ValidationMessageDto(
+public sealed record ValidationFindingDto(
     string Severity, string RuleCode, string Message, string? RowKey, string? ColumnCode, bool BlocksSave);

@@ -10253,6 +10253,21 @@ export interface components {
              */
             templateVersionId: null | number;
         };
+        /** @description Одне зауваження перевірки. */
+        ValidationFindingDto: {
+            /** @description Чи блокує збереження. */
+            blocksSave: boolean;
+            /** @description Колонка; `null` — зауваження до рядка. */
+            columnCode: null | string;
+            /** @description Текст, уже локалізований. */
+            message: string;
+            /** @description Рядок; `null` — зауваження до таблиці. */
+            rowKey: null | string;
+            /** @description Код правила. */
+            ruleCode: string;
+            /** @description Рівень: `Error`, `Warning`, `Info`. */
+            severity: string;
+        };
         /** @description Повідомлення валідації. */
         ValidationMessageDto: {
             /** @description Колонка; `null` — рівень рядка. */
@@ -10274,7 +10289,7 @@ export interface components {
              */
             documentId: number;
             /** @description Зауваження ВСІХ рівнів. */
-            messages: components["schemas"]["ValidationMessageDto"][];
+            messages: components["schemas"]["ValidationFindingDto"][];
             /**
              * Format: int32
              * @description Період, за який виконано перевірку.

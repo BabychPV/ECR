@@ -61,8 +61,11 @@ export type PatchRow = Schemas['PatchRow'];
  */
 export type PatchCellsRequest = Schemas['PatchCellsRequest'];
 
-/** Повідомлення валідації. */
+/** Повідомлення валідації (рівні, що НЕ блокують запис — `PatchCellsResponse.validation`). */
 export type ValidationMessageDto = Schemas['ValidationMessageDto'];
+
+/** Одне зауваження перевірки (`POST/GET …/validate…`) — несе `blocksSave`. */
+export type ValidationFindingDto = Schemas['ValidationFindingDto'];
 
 /** Результат пакетної зміни; несе нові `RowVersion` кожного зачепленого рядка. */
 export type PatchCellsResponse = Schemas['PatchCellsResponse'];
