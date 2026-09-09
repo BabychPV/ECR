@@ -156,6 +156,43 @@ public sealed class CascadeRecalculationTests
         await _metadata.DidNotReceiveWithAnyArgs().GetAsync(default, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Кілька_таблиць_документа_читаються_одним_пакетним_запитом()
+    {
+        // ⛔ Q-166 (аудит фази 2, продуктивність): цей прогін виконується на
+        // КОЖНЕ редагування комірки (через `FormulaRecalculationJob`), а не
+        // лише на повний перерахунок — запит на кожну таблицю окремо тут
+        // коштує найдорожче серед усіх знахідок цього виміру. Друга таблиця
+        // навмисно НЕ з `_table.Id`: інакше вона перезаписала б перший запис
+        // у `rowIdsByTable` (індекс за `TableDefId`, не за екземпляром) і
+        // зробила б це тим самим тестом, що й для однієї таблиці.
+        Arrange(jan: 10m, feb: 5m);
+
+        const long secondInstance = 501;
+        const int secondTableDefId = 999;
+        _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new TableInstanceRef(TableInstance, DocumentId, _table.Id, Version, Period.Value),
+                new TableInstanceRef(secondInstance, DocumentId, secondTableDefId, Version, Period.Value),
+            ]);
+
+        await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        // Два незалежні проходи існували вже ДО фіксу (побудова плану в
+        // RunAsync і завантаження значень у LoadValuesAsync) — Q-166 не про
+        // їх злиття, а про те, що кожен із них ходив у базу окремо НА КОЖНУ
+        // таблицю. Тепер кожен прохід — рівно один пакетний виклик.
+        await _rows.Received(2).GetRowIdsBatchAsync(
+            Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
+
+        await _rows.DidNotReceive().GetRowIdsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _cells.DidNotReceive().ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
     /// <summary>Змінена комірка першого рядка в заданій колонці.</summary>
     private static DirtySet Dirty(int columnDefId)
     {
@@ -224,6 +261,18 @@ public sealed class CascadeRecalculationTests
         _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns([new TableInstanceRef(TableInstance, DocumentId, _table.Id, Version, Period.Value)]);
 
+        // ⛔ Q-166: службу перемкнуто на пакетні методи (`GetRowIdsBatchAsync`,
+        // `ReadSlicesAsync`) — фікстура задає ті самі дані, що й одиничні
+        // виклики вище, лише в пакетній формі. Одиничні мокуються теж:
+        // `ResolveTableInstanceAsync`-шлях (не всі тести проходять через
+        // `LoadPeriodAsync`) досі може їх торкатися.
+        _rows.GetRowIdsBatchAsync(
+                Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [TableInstance] = new Dictionary<string, long> { ["7001001"] = 1001 },
+            });
+
         _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(
         [
             new CellRecord(
@@ -233,6 +282,20 @@ public sealed class CascadeRecalculationTests
                 new CellAddress(Period, 1001, _febId), _table.Id,
                 new CellValueData { ValueNumeric = feb }),
         ]);
+
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [TableInstance] =
+                [
+                    new CellRecord(
+                        new CellAddress(Period, 1001, _janId), _table.Id,
+                        new CellValueData { ValueNumeric = jan }),
+                    new CellRecord(
+                        new CellAddress(Period, 1001, _febId), _table.Id,
+                        new CellValueData { ValueNumeric = feb }),
+                ],
+            });
 
         // ⚠ Граф — саме той, який зберігає публікація: формула підсумку
         // залежить від двох місячних колонок того самого рядка.
