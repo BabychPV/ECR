@@ -360,8 +360,8 @@ public sealed class DocumentsController(
             .HandleAsync(id, request.PreviewToken, ct)
             .ConfigureAwait(false);
 
-        return result.JobId is not null
-            ? Accepted(new Contracts.JobAcceptedResponse(result.JobId))
+        return result.JobId is { } jobId
+            ? Accepted(new Contracts.JobAcceptedResponse(jobId))
             : Ok(result.Response);
     }
 }
