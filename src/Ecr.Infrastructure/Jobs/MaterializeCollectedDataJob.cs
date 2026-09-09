@@ -116,11 +116,18 @@ public sealed class MaterializeCollectedDataJob(
 
         // ⛔ Конфлікт із правкою людини НЕ мовчазний: людина виправила навмисно,
         // і інтеграція не має права це стерти — але й приховати факт теж.
-        foreach (var kept in written.KeptManual)
+        //
+        // ⛔ Q-170 (аудит фази 2, продуктивність): ОДИН пакетний запис на всі
+        // конфлікти замість `RecordAsync` (власний `SaveChangesAsync`) у
+        // циклі на кожен.
+        if (written.KeptManual.Count > 0)
         {
             await coverage
-                .RecordAsync(task.SourceEntityId, periodKey, "ConflictKeptManual",
-                    $"Комірка {kept} має правку людини: значення збору не застосовано.", ct)
+                .RecordManyAsync(
+                    [.. written.KeptManual.Select(kept => new CoverageEvent(
+                        task.SourceEntityId, periodKey, "ConflictKeptManual",
+                        $"Комірка {kept} має правку людини: значення збору не застосовано."))],
+                    ct)
                 .ConfigureAwait(false);
         }
 

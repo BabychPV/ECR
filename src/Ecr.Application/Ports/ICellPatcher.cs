@@ -67,4 +67,19 @@ public interface ICoverageJournal
     /// <param name="ct">Токен скасування.</param>
     public Task RecordAsync(
         int sourceEntityId, PeriodKey periodKey, string status, string details, CancellationToken ct);
+
+    /// <summary>Записує кілька подій покриття ОДНИМ <c>SaveChangesAsync</c>.</summary>
+    /// <remarks>
+    /// ⛔ Q-170 (аудит фази 2, продуктивність). Виклик <see cref="RecordAsync"/>
+    /// у циклі на кожен конфлікт «залишено за людиною» коштує окремого
+    /// <c>SaveChangesAsync</c> на кожен запис; тут — один похід на весь набір.
+    /// </remarks>
+    public Task RecordManyAsync(IReadOnlyList<CoverageEvent> events, CancellationToken ct);
 }
+
+/// <summary>Одна подія покриття для пакетного запису.</summary>
+/// <param name="SourceEntityId">Сутність джерела.</param>
+/// <param name="PeriodKey">Період.</param>
+/// <param name="Status">Статус: <c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>.</param>
+/// <param name="Details">Пояснення для людини; без стеків (ФВ-6.11).</param>
+public sealed record CoverageEvent(int SourceEntityId, PeriodKey PeriodKey, string Status, string Details);

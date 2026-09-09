@@ -215,7 +215,7 @@
 | Q-167 | CONFLICT | `DocumentStore.ListAsync` — окремий запит стану погодження на КОЖЕН документ сторінки замість одного `WHERE DocumentId IN (...)` | RESOLVED |
 | Q-168 | CONFLICT | Попередній перегляд імпорту Excel (`ExcelImporter`) — кілька походів у базу НА КОЖНУ таблицю книги, синхронно, поки користувач чекає на екрані | OPEN |
 | Q-169 | CONFLICT | `ConsistencyCheckJob` пише кожну знахідку окремим `EXISTS`+`INSERT` замість пакетного upsert — нічний job, обмежений `MaxIssues`, низький пріоритет | RESOLVED |
-| Q-170 | CONFLICT | `MaterializeCollectedDataJob` викликає `CoverageJournal.RecordAsync` (власний `SaveChangesAsync`) на кожен конфлікт замість пакетного запису — малий обсяг за побудовою, низький пріоритет | OPEN |
+| Q-170 | CONFLICT | `MaterializeCollectedDataJob` викликає `CoverageJournal.RecordAsync` (власний `SaveChangesAsync`) на кожен конфлікт замість пакетного запису — малий обсяг за побудовою, низький пріоритет | RESOLVED |
 | Q-171 | CONFLICT | `GetTableSliceHandler` (`GET …/tables/{tableInstanceId}`) не перевіряє належність `tableInstanceId` документу з маршруту — читає чужі дані. Перевірено особисто | RESOLVED · `GetTableSliceHandler.cs`, PR нижче |
 | Q-172 | CONFLICT | `GetDocumentTablesHandler` (`GET …/documents/{id}/tables`) не має жодної перевірки гранта на проєкт — лише RBAC; ланцюжком із Q-171 дає повний перелік чужих `tableInstanceId` | RESOLVED · `GetDocumentTablesHandler.cs`, PR #75 |
 | Q-173 | CONFLICT | `ReopenDocumentHandler` (`POST …/reopen`) свідомо пропускає перевірку гранта (коментар у коді), хоча `Submit`/`Approve` того самого документа — ні; повертає подане/затверджене подання назад у Draft у чужому проєкті | OPEN |
@@ -231,7 +231,7 @@
 | Q-183 | CONFLICT | `ReportSnapshotBuilderTests.Вʼюха_для_регулятора_віддає_лише_Approved_і_Submitted` шукала підрядок у тексті SQL-файлу, не виконувала запит — мутація фільтра (`1=1`, реальний витік чернеток регулятору) лишала підрядок у коментарі | RESOLVED · `ReportSnapshotBuilderTests.cs` (реальний запит до розгорнутої вʼюхи), PR #76 |
 | Q-184 | CONFLICT | `ConsistencyCheckJobTests` (3 тести) перевіряють лише текст `ConsistencyCheckJob.cs` (`File.ReadAllText` + `Assert.Contains`) — жодного запуску job, жодної реальної осиротілої комірки чи розбіжності | OPEN |
 | Q-185 | CONFLICT | `PartitionCheckJobTests.Достатній_запас_не_породжує_шуму` перевіряє лише текст тернарного виразу в `PartitionCheckJob.cs` — інверсія умови (`enough`) лишає перевірений підрядок незмінним | OPEN |
-| Q-186 | CONFLICT | `CollectionCoverage.Skipped(...)` пише `CollectionRunId = 0` — рядка `itg.CollectionRun` з таким `Id` не існує ніде, `FK_CCov_Run` відхиляє КОЖЕН запис journal покриття на пропуск/конфлікт; знайдено емпірично (реальний `DbUpdateException` на SQL Server), не аудитом | OPEN |
+| Q-186 | CONFLICT | `CollectionCoverage.Skipped(...)` пише `CollectionRunId = 0` — рядка `itg.CollectionRun` з таким `Id` не існує ніде, `FK_CCov_Run` відхиляє КОЖЕН запис journal покриття на пропуск/конфлікт; знайдено емпірично (реальний `DbUpdateException` на SQL Server), не аудитом | RESOLVED |
 
 ---
 
@@ -7318,18 +7318,37 @@ INSERT` на кожну знахідку замість пакетного upser
 джерело інтеграції (мале число за побудовою, не масштабується з кількістю
 документів/рядків).
 
-**Спроба фіксу:** написав пакетний `ICoverageJournal.RecordManyAsync` (той
-самий прийом, що й `Q-169`) і переключив цикл на нього — код збирався
-чисто. Але інтеграційний тест проти реального SQL Server упав ще ДО
-перевірки пакетності: сам виклик `CoverageJournal.RecordAsync`/`Skipped`
-відхиляється `FK_CCov_Run` незалежно від того, батчований запис чи ні
-(`CollectionRunId: 0` без відповідного рядка `CollectionRun`) — див.
-**`Q-186`**. Оскільки довести пакетний фікс без обходу цього окремого
-бага неможливо, а обхід (підсіяти фіктивний `CollectionRun` лише в тесті)
-приховав би реальну помилку, — відкотив зміни `Q-170` до з'ясування
-`Q-186`.
+**Спроба фіксу (перша):** написав пакетний `ICoverageJournal.RecordManyAsync`
+(той самий прийом, що й `Q-169`) і переключив цикл на нього — код
+збирався чисто. Але інтеграційний тест проти реального SQL Server упав
+ще ДО перевірки пакетності: сам виклик `CoverageJournal.RecordAsync`/
+`Skipped` відхиляється `FK_CCov_Run` незалежно від того, батчований
+запис чи ні (`CollectionRunId: 0` без відповідного рядка
+`CollectionRun`) — заведено як окрема знахідка **`Q-186`**. Обхід
+(підсіяти фіктивний `CollectionRun` лише в тесті) приховав би реальну
+помилку, тому спершу відкотив зміни `Q-170`.
 
-**Статус:** OPEN — заблоковано `Q-186`
+#### Закрито
+
+Після виправлення `Q-186` (`CollectionRunId` → `long?`, міграція
+`20260909090641_Q186NullableCollectionRunId`) повернув пакетний фікс:
+`ICoverageJournal.RecordManyAsync(IReadOnlyList<CoverageEvent>, ct)` —
+один `SaveChangesAsync` на весь набір конфліктів замість `RecordAsync` у
+циклі. `CoverageEvent` — іменований record, а не value-tuple: тестова
+регексна перевірка `ForbiddenApiTests.Публічні_асинхронні_методи_приймають_CancellationToken`
+рахує дужки без урахування вкладеного типу, і `)` усередині
+value-tuple-параметра обрізав би її розпізнавання сигнатури методу
+раніше, ніж вона побачить `CancellationToken`.
+
+Доказ мутацією на реальній базі (двічі): (1) тимчасово повернув цикл
+`RecordAsync` у циклі — `CoverageJournalTests.Кілька_подій_записуються_одним_запитом`
+впав (`Expected: 1, Actual: 2` команд на `CollectionCoverage`); відновив
+пакетний виклик — знову зелено. (2) Той самий тест і довів `Q-186`:
+тимчасово повернув `collectionRunId: 0` — тест впав з тим самим
+`DbUpdateException`/`FK_CCov_Run`, що й у проді; відновив `null` —
+знову зелено.
+
+**Статус:** RESOLVED · мутаційний доказ вище (на реальній БД), PR #84
 
 ---
 
@@ -7748,10 +7767,27 @@ Application-порту й самої реалізації в Infrastructure од
 не викликається), і задача обривається без жодного видимого сліду
 причини, окрім логів помилки самого хоста черги.
 
-**Чому не виправив сам:** правильний фікс (`CollectionRunId` → `long?`,
-`FK_CCov_Run` — необов'язковий) потребує **міграції схеми** (реальна
-таблиця вже створена попередньою міграцією), а не лише зміни C#-коду;
-міграція БД зачіпає розгорнуту базу і належить на власний, окремо
-переглянутий PR, а не побічний ефект виправлення `Q-170`.
+**Первинне рішення:** правильний фікс потребує міграції схеми — більший
+обсяг, ніж побічний ефект `Q-170`; спершу відклав окремим PR.
 
-**Статус:** OPEN
+#### Закрито
+
+`CollectionRunId` → `long?` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`),
+`Skipped(...)` більше не вигадує `collectionRunId: 0`, а лишає його
+`null` — подія «пропуск»/«конфлікт» не прив'язана до жодного прогону
+збору за визначенням. `FK_CCov_Run` лишився без змін: `NULL` у
+зовнішньому ключі SQL Server пропускає перевірку сам по собі, окремої
+зміни на констрейнті не треба.
+
+Міграція: `dotnet ef migrations add Q186NullableCollectionRunId`
+(`20260909090641_Q186NullableCollectionRunId.cs`) —
+`ALTER COLUMN CollectionRunId bigint NULL`, той самий формат іменування,
+що й прецедент `20260908131556_Q163RemoveFormulaDefShadowFk.cs`.
+
+Доказ мутацією на реальній базі: тимчасово повернув
+`collectionRunId: 0` — `CoverageJournalTests.Кілька_подій_записуються_одним_запитом`
+впав з тим самим `DbUpdateException`/`FK_CCov_Run`, що спричинив цю
+знахідку; відновив `null` — тест знову зелений. Повний `dotnet test
+Ecr.sln` проти локального SQLEXPRESS (Docker недоступний): 1462/1462.
+
+**Статус:** RESOLVED · мутаційний доказ вище (на реальній БД), PR #84
