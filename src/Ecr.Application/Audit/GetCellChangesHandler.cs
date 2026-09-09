@@ -68,6 +68,28 @@ public sealed class GetCellChangesHandler(
                 ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
+        // ⛔ Грант на проєкт (Q-177, аудит фази 2) — лише коли `documentId`
+        // ЗАДАНО. Без нього запит іде по ВСІХ документах/проєктах, і звузити
+        // це до гранта означало б завести множинний фільтр у
+        // `IAuditReader.ReadCellChangesAsync` — зміна публічної сигнатури й
+        // Application, і Infrastructure водночас, тобто рішення поза межами
+        // одного фіксу. `Security.ViewAudit` як централізоване/комплаєнс
+        // право поза проєктами — можливо, свідомий вибір; лишається
+        // окремим відкритим питанням (`Q-177`), не вирішеним тут.
+        //
+        // Тут — вужчий і однозначний випадок: КОНКРЕТНИЙ `documentId` мусить
+        // належати проєкту, на який запитувач має грант, так само як для
+        // читання самого документа.
+        if (documentId is { } id)
+        {
+            var read = await access.CanReadDocumentAsync(profile, id, ct).ConfigureAwait(false);
+            if (!read.IsAllowed)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Немає доступу до документа {id}: {read.Reason}.");
+            }
+        }
+
         return await audit.ReadCellChangesAsync(from, to, documentId, page, ct).ConfigureAwait(false);
     }
 }
