@@ -402,6 +402,12 @@ USING (VALUES
     (N'grid.roundedTitle',               N'en', N'Rounded {count} value(s)', 1),
     (N'grid.roundedHint',                N'en', N'Extra decimals from the pasted sheet were rounded to the column scale. Nothing was rounded silently.', 1),
     (N'grid.roundedShow',                N'en', N'Show the list', 1),
+    (N'grid.saving',                     N'en', N'Saving...', 1),
+    (N'grid.saved',                      N'en', N'Saved', 1),
+    (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    (N'grid.confirmTitle',               N'en', N'Confirm this change', 1),
+    (N'grid.confirmCancel',              N'en', N'Cancel', 1),
+    (N'grid.confirmProceed',             N'en', N'Proceed', 1),
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
     (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),
@@ -723,6 +729,13 @@ USING (VALUES
     (N'profile.density',                 N'en', N'Row height', 1),
     (N'profile.densityCompact',          N'en', N'Compact', 1),
     (N'profile.densityComfortable',      N'en', N'Comfortable', 1),
+
+    -- ⚠ Лише підпис перемикача — англійський, як і решта каталогу. Самі
+    -- переклади ru/kz — робота термінолога (`C-7`, T9 директиви №11):
+    -- реєстр мов (`sys_ecr.Language`, вище) уже мав ru/kz, каталог рядків —
+    -- ще ні, і перемикач без цього підпису показував би позначений ключ
+    -- (`D-138`) у списку, що вже дає вибір трьох мов.
+    (N'profile.language',                N'en', N'Language', 1),
     (N'profile.logout',                  N'en', N'Sign out', 1),
 
     -- Робочий процес аркуша: подання, погодження, повернення в роботу.

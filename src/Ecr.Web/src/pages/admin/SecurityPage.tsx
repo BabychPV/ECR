@@ -23,6 +23,7 @@ import { createUserBody } from '@/features/security/createUserBody';
 import { UserAccessEditor } from '@/features/security/UserAccessEditor';
 import type {
   CreateRoleRequest,
+  PermissionCatalogItem,
   RoleIdResponse,
   RoleView,
   SetAlertsRequest,
@@ -187,7 +188,23 @@ export function SecurityPage(): JSX.Element {
     enabled: tab === 'users',
   });
 
-  const permissions = [...new Set((roles.data ?? []).flatMap((role) => role.permissions))].sort();
+  /**
+   * ПОВНИЙ каталог прав (директива №11, T2) — а не перетин того, що вже
+   * оголошено в наявних ролях.
+   *
+   * ⛔ До цього запиту перелік складався як
+   * `[...new Set(roles.flatMap(r => r.permissions))]`: право, якого ще жодна
+   * роль не отримала, не існувало для форми створення ролі взагалі —
+   * призначити його вперше можна було лише прямим записом у базу.
+   */
+  const permissionCatalog = useQuery({
+    queryKey: ['permissions'],
+    queryFn: () => apiFetch<PermissionCatalogItem[]>('/api/v1/permissions'),
+  });
+
+  const permissions = [...(permissionCatalog.data ?? [])].sort((a, b) =>
+    a.code.localeCompare(b.code),
+  );
 
   return (
     <>
@@ -241,8 +258,8 @@ export function SecurityPage(): JSX.Element {
               <Table.Tr>
                 <Table.Th>{t('security.role')}</Table.Th>
                 {permissions.map((permission) => (
-                  <Table.Th key={permission}>
-                    <Text size="xs">{permission}</Text>
+                  <Table.Th key={permission.code}>
+                    <Text size="xs">{permission.code}</Text>
                   </Table.Th>
                 ))}
               </Table.Tr>
@@ -268,8 +285,8 @@ export function SecurityPage(): JSX.Element {
                     )}
                   </Table.Td>
                   {permissions.map((permission) => (
-                    <Table.Td key={permission}>
-                      {role.permissions.includes(permission) ? '✓' : ''}
+                    <Table.Td key={permission.code}>
+                      {role.permissions.includes(permission.code) ? '✓' : ''}
                     </Table.Td>
                   ))}
                 </Table.Tr>
@@ -417,22 +434,36 @@ export function SecurityPage(): JSX.Element {
           {t('security.permissionsHint')}
         </Text>
 
-        {/* ⚠ Перелік — це права, ЯКІ ВЖЕ ОГОЛОШЕНІ в наявних ролях.
-            Вигадати право на клієнті не можна: сервер приймає лише коди з
-            каталогу, і показувати поле вільного вводу означало б обіцяти
-            те, що завершиться відмовою. */}
+        {/* ⚠ Перелік — це ПОВНИЙ каталог (директива №11, T2), а не перетин
+            того, що вже оголошено в наявних ролях: право без жодного носія
+            інакше не можна було б призначити НІКОМУ. Вигадати право на
+            клієнті все одно не можна — сервер приймає лише коди з каталогу,
+            і показувати поле вільного вводу означало б обіцяти те, що
+            завершиться відмовою. */}
         <ScrollArea h={220}>
           <Stack gap="xs">
             {permissions.map((permission) => (
               <Checkbox
-                key={permission}
-                label={permission}
-                checked={rolePermissions.includes(permission)}
+                key={permission.code}
+                label={
+                  <Group gap="xs" wrap="nowrap">
+                    <Text size="sm">{permission.code}</Text>
+                    {/* ⚠ Небезпечні позначені ОКРЕМО (ФВ-6.12, D-40): їх
+                        видають поіменно, і адміністратор має бачити, яке саме
+                        право це таке, ще до того, як позначить прапорець. */}
+                    {permission.isDangerous && (
+                      <Badge size="xs" color="statusError" variant="light">
+                        {t('security.dangerous', { count: 1 })}
+                      </Badge>
+                    )}
+                  </Group>
+                }
+                checked={rolePermissions.includes(permission.code)}
                 onChange={(event) =>
                   setRolePermissions((current) =>
                     event.currentTarget.checked
-                      ? [...current, permission]
-                      : current.filter((code) => code !== permission),
+                      ? [...current, permission.code]
+                      : current.filter((code) => code !== permission.code),
                   )
                 }
               />

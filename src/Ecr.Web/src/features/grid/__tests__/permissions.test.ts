@@ -1,6 +1,6 @@
 ﻿import { describe, it, expect, vi } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
-import { cellKey, decide, guardOf } from '@/features/grid/permissions';
+import { cellKey, confirmationOf, decide, guardOf } from '@/features/grid/permissions';
 
 /** Права по комірках приходять із сервера і показуються, а не вгадуються. */
 function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
@@ -21,7 +21,11 @@ function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
   };
 }
 
-function slice(permissions: Record<string, string>, columns: ColumnDto[] = [column()]): TableSliceDto {
+function slice(
+  permissions: Record<string, string>,
+  columns: ColumnDto[] = [column()],
+  confirmations: Record<string, string> = {},
+): TableSliceDto {
   return {
     tableInstanceId: 1,
     periodKey: 202603,
@@ -38,6 +42,7 @@ function slice(permissions: Record<string, string>, columns: ColumnDto[] = [colu
       },
     ],
     cellPermissions: permissions,
+    cellConfirmations: confirmations,
   };
 }
 
@@ -159,5 +164,38 @@ describe('Права по комірках', () => {
     const data = slice({ [cellKey('R1', 'C1')]: 'DocumentSubmitted' });
 
     expect(guardOf(data)('R1', 'C1')).toBe(decide(data, 'R1', column()).hint);
+  });
+});
+
+describe('Підтвердження перед правкою (ФВ-2.16, #43)', () => {
+  it('комірка без запису в cellConfirmations підтвердження не потребує', () => {
+    expect(confirmationOf(slice({}), 'R1', column())).toBeNull();
+  });
+
+  it('комірка з cellConfirmations повертає пояснення для діалогу', () => {
+    const hint = 'Період поза вікном дії дозволу.';
+    const data = slice({}, [column()], { [cellKey('R1', 'C1')]: hint });
+
+    expect(confirmationOf(data, 'R1', column())).toBe(hint);
+  });
+
+  it('комірка лишається редаговною — AllowWithConfirmation не заборона', () => {
+    // ⚠ `#43` не про сіру комірку: `cellPermissions` для неї порожній,
+    // `decide(...).editable` — `true`. Гейт — окремий, у `onBeforeEdit`.
+    const data = slice({}, [column()], { [cellKey('R1', 'C1')]: 'Потрібне підтвердження.' });
+
+    expect(decide(data, 'R1', column()).editable).toBe(true);
+    expect(confirmationOf(data, 'R1', column())).not.toBeNull();
+  });
+
+  it('заборона й підтвердження на різних комірках не плутаються', () => {
+    const data = slice(
+      { [cellKey('R1', 'C1')]: 'PeriodClosed' },
+      [column({ code: 'C1' }), column({ code: 'C2' })],
+      { [cellKey('R1', 'C2')]: 'Потрібне підтвердження.' },
+    );
+
+    expect(confirmationOf(data, 'R1', column({ code: 'C1' }))).toBeNull();
+    expect(confirmationOf(data, 'R1', column({ code: 'C2' }))).not.toBeNull();
   });
 });

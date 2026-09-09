@@ -340,6 +340,22 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Група виводиться з префікса коду (<c>"Calculation.Publish"</c> →
+    /// <c>"Calculation"</c>) — так само, як насправді наповнена таблиця
+    /// `sec.Permission` у `09-seed.sql`: там кожен рядок групи дослівно
+    /// збігається з текстом до першої крапки коду. Фікстура не тримає
+    /// окремого поля групи, бо жоден тест сьогодні не перевіряє групування —
+    /// додати поле буде однорядковою правкою, коли перевірка з'явиться.
+    /// </remarks>
+    public Task<IReadOnlyList<PermissionCatalogItem>> ListPermissionsAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<PermissionCatalogItem>>(
+            [.. Permissions
+                .OrderBy(code => code, StringComparer.Ordinal)
+                .Select(code => new PermissionCatalogItem(
+                    code, code.Split('.')[0], Dangerous.Contains(code)))]);
+
+    /// <inheritdoc />
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct) => Task.FromResult(Policy);
 
     /// <summary>Активний доменний користувач для сценаріїв входу.</summary>

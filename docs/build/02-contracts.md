@@ -2708,6 +2708,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/expressions/metadata` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
+| `GET` | `/api/v1/permissions` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
@@ -3122,12 +3123,19 @@ namespace Ecr.Application.Documents.Dto;
 /// <c>DefaultValue</c> з опису колонки (ФВ-3.8).
 /// Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2).
 /// </summary>
+/// <param name="CellConfirmations">
+/// Комірки, дозволені лише після ЯВНОГО підтвердження оператора
+/// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>, <c>#43</c>). Ключ — той
+/// самий формат, що й у <c>CellPermissions</c>; значення — пояснення для
+/// діалогу підтвердження.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ColumnDto> Columns,
     IReadOnlyList<RowDto> Rows,
-    IReadOnlyDictionary<string, string> CellPermissions);
+    IReadOnlyDictionary<string, string> CellPermissions,
+    IReadOnlyDictionary<string, string> CellConfirmations);
 
 /// <summary>Опис колонки для клієнта.</summary>
 public sealed record ColumnDto(

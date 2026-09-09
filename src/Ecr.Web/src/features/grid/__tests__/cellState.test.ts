@@ -40,6 +40,7 @@ function slice(overrides: Partial<TableSliceDto> = {}): TableSliceDto {
       },
     ],
     cellPermissions: {},
+    cellConfirmations: {},
     ...overrides,
   };
 }

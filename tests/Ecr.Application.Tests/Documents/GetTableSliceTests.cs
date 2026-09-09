@@ -188,6 +188,36 @@ public sealed class GetTableSliceTests
         Assert.Equal("ECR-DOC-0404", notFound.ErrorCode);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Комірка_AllowWithConfirmation_потрапляє_у_CellConfirmations_а_не_в_CellPermissions()
+    {
+        // ⛔ `#43`. `GetTableSliceHandler` до цього мав рівно одну гілку для
+        // рішень зі зрізу: `decision.IsAllowed → continue`. Рішення
+        // `EditDecision.AllowWithConfirmation(...)` теж `IsAllowed == true`,
+        // тож потрапляло в ту саму гілку і зникало НАЗАВЖДИ — жодне поле
+        // відповіді про нього не знало.
+        Cells(Cell(Row1, new CellValueData { ValueNumeric = 1m }));
+
+        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<CellAddress, EditDecision>
+            {
+                [new CellAddress(new PeriodKey(Period), Row1, VolumeId)] =
+                    EditDecision.AllowWithConfirmation("Період поза вікном дії дозволу."),
+            });
+
+        var slice = await Handler().HandleAsync(700, TableInstance, Profile(), "en", CancellationToken.None);
+
+        var key = "7001001:Volume";
+
+        // Комірка НЕ заборонена — вона не має права опинитися в
+        // `CellPermissions`, інакше клієнт намалював би її сірою.
+        Assert.False(slice.CellPermissions.ContainsKey(key));
+
+        Assert.True(slice.CellConfirmations.ContainsKey(key));
+        Assert.Equal("Період поза вікном дії дозволу.", slice.CellConfirmations[key]);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.10")]
     public async Task Права_перевіряються_одним_викликом_на_зріз()

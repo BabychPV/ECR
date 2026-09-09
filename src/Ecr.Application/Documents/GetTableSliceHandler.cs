@@ -154,15 +154,13 @@ public sealed class GetTableSliceHandler(
                 IsOrphaned: orphans.TryGetValue(r.RowId, out var orph) && orph))
             .ToList();
 
-        // 5. Компактна мапа заборон: grid має одразу знати, що сіре і чому,
-        //    без другого запиту.
+        // 5. Компактні мапи: grid має одразу знати, що сіре і чому (заборони),
+        //    і що дозволене лише з підтвердженням (`ФВ-2.16`, `#43`), — без
+        //    другого запиту в обох випадках.
         var permissions = new Dictionary<string, string>(StringComparer.Ordinal);
+        var confirmations = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (address, decision) in decisions)
         {
-            if (decision.IsAllowed)
-            {
-                continue;
-            }
             if (!keyById.TryGetValue(address.TableRowId, out var rowKey))
             {
                 continue;
@@ -171,10 +169,27 @@ public sealed class GetTableSliceHandler(
             {
                 continue;
             }
-            permissions[$"{rowKey}:{code}"] = decision.Reason.ToString();
+
+            var key = $"{rowKey}:{code}";
+
+            if (!decision.IsAllowed)
+            {
+                permissions[key] = decision.Reason.ToString();
+                continue;
+            }
+
+            // ⛔ До цього поля `RequiresConfirmation` ніхто не читав: рішення
+            // рахувалося (`AccessDecisionService.Decide`), а сюди, у
+            // відповідь клієнту, не потрапляло НІЧОГО — `AllowWithConfirmation`
+            // і звичайний дозвіл були на виході з обробника нерозрізненні (`#43`).
+            if (decision.RequiresConfirmation)
+            {
+                confirmations[key] = decision.Detail ?? string.Empty;
+            }
         }
 
-        return new TableSliceDto(tableInstanceId, instance.PeriodKey, columns, rows, permissions);
+        return new TableSliceDto(
+            tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations);
     }
 
     /// <summary>Позначення одиниці колонки; <c>null</c> — колонка безрозмірна.</summary>

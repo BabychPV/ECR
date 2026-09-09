@@ -399,6 +399,23 @@ public sealed class AccessDecisionService(
             {
                 decision = EditDecision.Deny(outcome.Reason, outcome.Detail);
             }
+            else if (outcome.Reason != EditDenyReason.None
+                     && outcome.Behavior == OutOfWindowBehavior.AllowWithConfirmation)
+            {
+                // ⛔ До цього гілка не існувала: `outcome`, який не блокує
+                // (`Warn` і `AllowWithConfirmation` обидва такі — `ФВ-2.16`),
+                // просто відкидався, і рішення лишалося звичайним `Allow()`.
+                // `AllowWithConfirmation` від щойного дозволу нічим не
+                // відрізнявся НІДЕ — жоден виклик далі по ланцюгу не бачив
+                // навіть того, що правило спрацювало (`#43`).
+                //
+                // ⚠ `Warn` тут навмисно НЕ чіпається: третя, «позначкова»
+                // поведінка `ФВ-2.16` — окрема, ще не підключена ланка
+                // (клієнт не показує позначку взагалі), і розширювати цю
+                // гілку на неї означало б закрити одну прогалину, вдаючи, що
+                // закрив дві.
+                decision = EditDecision.AllowWithConfirmation(outcome.Detail);
+            }
         }
 
         return decision;
