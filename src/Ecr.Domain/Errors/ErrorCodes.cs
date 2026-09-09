@@ -202,6 +202,19 @@ public static class ErrorCodes
     public const string RegistryEntryNotFound = "ECR-REG-0404";
     public const string RegistryEntryInUse = "ECR-REG-0409";
     public const string RegistrySwitchInOpenPeriod = "ECR-REG-0422";
+
+    /// <summary>
+    /// Довідник із таким кодом уже є (<c>ECR-REG-4091</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>4091</c>, а не <c>0409</c>: той код уже зайнятий
+    /// <see cref="RegistryEntryInUse"/>, і два стани під одним кодом означали
+    /// б, що «цей довідник уже є» неможливо відрізнити від «цей запис
+    /// видалити не можна» — форма, як у <see cref="ReportDefDuplicate"/>
+    /// (<c>ECR-RPT-4091</c>).
+    /// </remarks>
+    public const string RegistryDefDuplicate = "ECR-REG-4091";
+
     public const string UnitDimensionMismatch = "ECR-UOM-0422";
 
     /// <summary>Одиниці з таким кодом немає в довіднику (<c>ECR-UOM-0404</c>).</summary>

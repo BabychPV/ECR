@@ -1,9 +1,10 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Select, Table, Text } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { Badge, Button, Checkbox, Group, Modal, Select, Stack, Table, Text, TextInput } from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
+import { createRegistry } from '@/features/registries/api';
 import {
   RegistryEntryEditor,
   ValidityEditor,
@@ -13,6 +14,7 @@ import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -26,6 +28,7 @@ import { t } from '@/shared/i18n';
 export function RegistriesPage(): JSX.Element {
   const [code, setCode] = useUrlState('code');
   const session = useSession();
+  const queryClient = useQueryClient();
 
   // `undefined` — діалог закритий; `null` — новий запис; об'єкт — правка.
   const [editing, setEditing] = useState<RegistryEntryDto | null | undefined>(undefined);
@@ -33,9 +36,35 @@ export function RegistriesPage(): JSX.Element {
   // Для якого запису правимо вікно чинності.
   const [validity, setValidity] = useState<RegistryEntryDto | null>(null);
 
+  // Заведення довідника з нуля (директива №11, T4): доти в системі не було
+  // жодного способу, доступного людині, додати довідник, якого немає в seed.
+  const [creating, setCreating] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newIsTemporal, setNewIsTemporal] = useState(false);
+
   const registries = useQuery({
     queryKey: ['registries'],
     queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+  });
+
+  const create = useMutation({
+    mutationFn: () =>
+      createRegistry({
+        code: newCode,
+        nameL10n: { en: newName },
+        isTemporal: newIsTemporal,
+      }),
+    onSuccess: async (created) => {
+      await queryClient.invalidateQueries({ queryKey: ['registries'] });
+      setCreating(false);
+      setNewCode('');
+      setNewName('');
+      setNewIsTemporal(false);
+      setCode(created.code);
+      showDone(t('registries.created'));
+    },
+    onError: showApiError,
   });
 
   const entries = useQuery({
@@ -67,6 +96,16 @@ export function RegistriesPage(): JSX.Element {
                 label: `${localized(registry.nameL10n)} (${registry.code})`,
               }))}
             />
+
+            {/* ⛔ Заведення НОВОГО довідника не мало кнопки (директива №11,
+                T4): контролер умів лише читати перелік і правити опис
+                НАЯВНОГО довідника, а сам довідник заводив тільки офлайновий
+                seed — тобто довідника, якого там немає, не міг завести ніхто. */}
+            {can(session.data, 'Registry.EditDefinition') && (
+              <Button size="xs" variant="default" onClick={() => setCreating(true)}>
+                {t('registries.newRegistry')}
+              </Button>
+            )}
 
             {/* ⛔ Заведення запису не мало кнопки (`A7-42`). Довідник без
                 записів — це колонка типу `Lookup`, яка не пропонує нічого,
@@ -218,6 +257,45 @@ export function RegistriesPage(): JSX.Element {
         entry={validity}
         onClose={() => setValidity(null)}
       />
+
+      <Modal
+        opened={creating}
+        onClose={() => setCreating(false)}
+        title={t('registries.newRegistryTitle')}
+      >
+        <Stack gap="sm">
+          <TextInput
+            label={t('registries.code')}
+            description={t('registries.registryCodeHint')}
+            value={newCode}
+            onChange={(event) => setNewCode(event.currentTarget.value)}
+            data-autofocus
+          />
+
+          <TextInput
+            label={t('registries.name')}
+            value={newName}
+            onChange={(event) => setNewName(event.currentTarget.value)}
+          />
+
+          {/* ⛔ Рішення приймається ОДИН РАЗ при заведенні: змінити його для
+              довідника з даними означало б перетлумачити вже введені записи. */}
+          <Checkbox
+            label={t('registries.temporalField')}
+            description={t('registries.temporalFieldHint')}
+            checked={newIsTemporal}
+            onChange={(event) => setNewIsTemporal(event.currentTarget.checked)}
+          />
+
+          <Button
+            disabled={newCode.trim().length === 0 || newName.trim().length === 0}
+            loading={create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {t('registries.newRegistry')}
+          </Button>
+        </Stack>
+      </Modal>
     </>
   );
 }

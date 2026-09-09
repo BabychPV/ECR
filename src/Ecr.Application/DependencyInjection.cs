@@ -152,6 +152,7 @@ public static class DependencyInjection
         // Етап 4 — довідники та одиниці.
         services.AddSingleton<Registries.RegistryResolver>();
         services.AddScoped<Registries.ListRegistriesHandler>();
+        services.AddScoped<Registries.CreateRegistryHandler>();
         services.AddScoped<Registries.GetRegistryEntriesHandler>();
         services.AddScoped<Registries.UpsertRegistryEntryHandler>();
         services.AddScoped<Registries.SetEntryValidityHandler>();

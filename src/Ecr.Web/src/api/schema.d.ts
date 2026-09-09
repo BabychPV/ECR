@@ -3401,7 +3401,54 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Заводить довідник-контейнер, без жодного поля. Право
+         *     `Registry.EditDefinition`.
+         * @description ⛔ Поля заводяться ОКРЕМОЮ дією — тим самим `PUT …/{code}/definition`,
+         *     що вже редагує наявний довідник (`ФВ-8.12`). Довідник без жодного поля
+         *     нічого не порушує: обов'язковість ключового поля перевіряється лише при
+         *     збереженні опису, коли поля вже є що перевіряти.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateRegistryDto"];
+                    "application/json": components["schemas"]["CreateRegistryDto"];
+                    "text/json": components["schemas"]["CreateRegistryDto"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefDto"];
+                        "text/json": components["schemas"]["RegistryDefDto"];
+                        "text/plain": components["schemas"]["RegistryDefDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -7538,6 +7585,18 @@ export interface components {
              * @description Звітний рік; типово поточний.
              */
             year?: null | number;
+        };
+        /** @description Заведення довідника з нуля — **без жодного поля**. */
+        CreateRegistryDto: {
+            /** @description Код, унікальний серед довідників. */
+            code: string;
+            /** @description Чи мають майбутні записи вікно дії. Рішення приймається один раз: змінити
+             *     його для довідника з даними означало б перетлумачити вже введені записи. */
+            isTemporal: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
         };
         /** @description Запит на створення опису звіту разом із першою версією. */
         CreateReportDefRequest: {

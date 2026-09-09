@@ -2541,6 +2541,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-0404` | 404 | запис реєстру не знайдено |
 | `ECR-REG-0409` | 409 | видалення запису, на який посилаються дані (ФВ-8.6) |
 | `ECR-REG-0422` | 422 | перемикання `SourceKind` у відкритому періоді (ФВ-8.9) |
+| `ECR-REG-4091` | 409 | довідник із таким кодом уже є |
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія між різними розмірностями (ФВ-16.3) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
@@ -2734,6 +2735,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |
 | `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
+| `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
@@ -2795,6 +2797,21 @@ public sealed class NotFoundException(string errorCode, string message)
 > немає навмисно: вікно чинності це **поля запису** `ValidFrom`/`ValidTo`
 > (`ФВ-8.5`), а не правило, і правило-дублер дало б два джерела істини про
 > чинність, які розійшлися б мовчки на межі вікна.
+
+> **`POST /registries` заводить довідник-контейнер, без жодного поля**
+> (директива №11, T4). До цього маршруту в контролері не існувало взагалі:
+> `RegistriesController` умів лише читати перелік і правити опис НАЯВНОГО
+> довідника — сам довідник заводив тільки офлайновий seed, тобто новий
+> довідник, якого там немає, не міг з'явитися в системі жодним шляхом,
+> доступним людині.
+>
+> ⛔ Право те саме, що на `PUT …/{code}/definition` — `Registry.EditDefinition`,
+> а не окреме: заведення довідника і зміна складу його полів — той самий клас
+> рішення, і ухвалює його одна й та сама людина.
+>
+> ⚠ Дублікат коду відхиляється `409` (`ECR-REG-4091`), а не мовчазним
+> перезаписом: код — те, чим на довідник посилаються поля-посилання інших
+> довідників і колонки шаблону типу `Lookup`.
 
 > **Методології читаються двома різними маршрутами, і це не дублювання**
 > (`ФВ-9.15`). `GET /methodologies` віддає те, чим **рахують**: лише
