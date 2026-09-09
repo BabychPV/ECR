@@ -591,6 +591,19 @@ public sealed class AccessDecisionService(
     }
 
     /// <inheritdoc />
+    public async Task<EditDecision> CanReopenAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var context = await BuildContextAsync(
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
+            .ConfigureAwait(false);
+
+        return EditRules.CanReopen(profile, context);
+    }
+
+    /// <inheritdoc />
     public async Task<ApprovalStepView?> CurrentApprovalStepAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
     {
