@@ -9183,6 +9183,12 @@ export interface components {
         ReplaceUserRolesRequest: {
             /** @description Коди ролей; порожній набір прибирає всі. */
             roleCodes: string[];
+            /** @description Межі чинності за кодом ролі (ФВ-6.16) — підміна на час відпустки; код
+             *     без запису тут або відсутній словник узагалі — роль безстрокова, як і
+             *     раніше (сумісно з клієнтами, які про це поле не знають). */
+            validity?: null | {
+                [key: string]: components["schemas"]["RoleValidityWindow"];
+            };
         };
         /** @description Колонка зрізу в описі версії звіту. */
         ReportColumnCommand: {
@@ -9303,6 +9309,19 @@ export interface components {
              * @description Ідентифікатор.
              */
             roleId: number;
+        };
+        /** @description Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16). */
+        RoleValidityWindow: {
+            /**
+             * Format: date
+             * @description Початок дії; `null` — від завжди.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Кінець дії; `null` — безстроково.
+             */
+            validTo: null | string;
         };
         /** @description Роль із її правами. */
         RoleView: {

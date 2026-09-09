@@ -24,6 +24,19 @@ public sealed class FakeUserStore : IUserStore
     public List<(string UserName, string RoleCode)> Grants { get; } = [];
 
     /// <summary>
+    /// Особисті призначення з межами чинності, виставлені через
+    /// <see cref="ReplaceRolesAsync"/> (`#48`, ФВ-6.16 — підміна на час
+    /// відпустки).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремо від <see cref="Grants"/>, бо система теж тримає їх окремо:
+    /// <see cref="Grants"/> — безстроковий набір, яким керує «заміна
+    /// набором», а тут — строкові підміни, які та сама заміна не чіпає, поки
+    /// виклик явно не задав меж саме для цієї ролі.
+    /// </remarks>
+    public List<(string UserName, string RoleCode, DateOnly? ValidFrom, DateOnly? ValidTo)> DatedGrants { get; } = [];
+
+    /// <summary>
     /// Ролі, призначені НА ГРУПУ — основний спосіб для доменних користувачів
     /// (<c>ФВ-6.15</c>).
     /// </summary>
@@ -130,7 +143,11 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
-    public Task<int> ReplaceRolesAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct)
+    public Task<int> ReplaceRolesAsync(
+        int userId,
+        IReadOnlyList<string> roleCodes,
+        IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
 
@@ -148,10 +165,34 @@ public sealed class FakeUserStore : IUserStore
                 "ECR-SEC-0404", $"Ролей не існує: {string.Join(", ", unknown)}.");
         }
 
-        Grants.RemoveAll(g => g.UserName == user.UserName);
+        // Той самий поділ, що й у бойовому `UserStore.ReplaceRolesAsync`
+        // (`#48`): межі задає ВИКЛИК, а не роль.
+        var permanentCodes = new List<string>();
+        var datedCodes = new List<(string Code, DateOnly? From, DateOnly? To)>();
         foreach (var code in roleCodes)
         {
+            if (validity is not null
+                && validity.TryGetValue(code, out var window)
+                && (window.ValidFrom is not null || window.ValidTo is not null))
+            {
+                datedCodes.Add((code, window.ValidFrom, window.ValidTo));
+            }
+            else
+            {
+                permanentCodes.Add(code);
+            }
+        }
+
+        Grants.RemoveAll(g => g.UserName == user.UserName);
+        foreach (var code in permanentCodes)
+        {
             Grants.Add((user.UserName, code));
+        }
+
+        foreach (var (code, from, to) in datedCodes)
+        {
+            DatedGrants.RemoveAll(g => g.UserName == user.UserName && g.RoleCode == code);
+            DatedGrants.Add((user.UserName, code, from, to));
         }
 
         // Штамп безпеки крутиться і у фікстурі: тест, який цього не бачить,
@@ -254,14 +295,22 @@ public sealed class FakeUserStore : IUserStore
 
         var user = _users.Find(u => u.Id == userId);
 
-        // Особисті призначення фікстура тримає безстроковими — рівно як
-        // `ReplaceRolesAsync`, який ними і керує.
+        // Безстрокові особисті призначення — керує ними `ReplaceRolesAsync`.
         var personal = user is null
             ? new List<RoleAssignmentTrace>()
             : [.. Grants
                 .Where(g => string.Equals(g.UserName, user.UserName, StringComparison.Ordinal))
                 .Select(g => new RoleAssignmentTrace(
                     RoleIdByCode(g.RoleCode), g.RoleCode, null, null, null, IsEffective: true))];
+
+        // Строкові особисті призначення (`#48`, ФВ-6.16) — та сама заміна
+        // ПОРОЛЬНО, що й у бойовому сховищі; чинність рахує ДОМЕН, а не
+        // друга копія умови тут.
+        var personalDated = user is null
+            ? new List<RoleAssignmentTrace>()
+            : [.. DatedGrants
+                .Where(g => string.Equals(g.UserName, user.UserName, StringComparison.Ordinal))
+                .Select(g => TracePersonal(g, asOf))];
 
         // ⚠ Без урахування регістру — так само, як зіставляє SQL Server із
         // типовим порівнянням. Фікстура, суворіша за систему, показувала б
@@ -270,7 +319,8 @@ public sealed class FakeUserStore : IUserStore
             .Where(a => groupSids.Contains(a.Sid, StringComparer.OrdinalIgnoreCase))
             .Select(a => Trace(a, asOf));
 
-        return Task.FromResult<IReadOnlyList<RoleAssignmentTrace>>([.. personal, .. byGroup]);
+        return Task.FromResult<IReadOnlyList<RoleAssignmentTrace>>(
+            [.. personal, .. personalDated, .. byGroup]);
     }
 
     /// <inheritdoc />
@@ -287,16 +337,17 @@ public sealed class FakeUserStore : IUserStore
     /// друга копія умови у фікстурі. Копія збігалася б із доменом рівно до
     /// першої правки одного з них — і саме тому `H-23a` існує як знахідка.
     ///
-    /// ⚠ Межі дії виставляються рефлексією: заповнити їх не має чим ЖОДЕН
-    /// прикладний шлях (`D2-61`). Це факт про систему, а не зручність тесту.
+    /// ⚠ Межі дії виставляються через <see cref="RoleAssignment.SetValidity"/>
+    /// (`#48`) — до нього тут стояла рефлексія, бо жоден прикладний шлях
+    /// сетера не мав (`D2-61`); тепер шлях є, і фікстура використовує той
+    /// самий метод, що й бойове сховище.
     /// </remarks>
     private RoleAssignmentTrace Trace(GroupRoleAssignment assignment, DateOnly asOf)
     {
         var entity = new RoleAssignment(
             RoleIdByCode(assignment.RoleCode), userId: null, principalSid: assignment.Sid);
 
-        SetValidity(entity, nameof(RoleAssignment.ValidFrom), assignment.ValidFrom);
-        SetValidity(entity, nameof(RoleAssignment.ValidTo), assignment.ValidTo);
+        entity.SetValidity(assignment.ValidFrom, assignment.ValidTo);
 
         return new RoleAssignmentTrace(
             entity.RoleId,
@@ -307,15 +358,28 @@ public sealed class FakeUserStore : IUserStore
             entity.IsEffectiveOn(asOf));
     }
 
-    /// <summary>Виставляє межу дії призначення.</summary>
-    /// <param name="assignment">Призначення.</param>
-    /// <param name="property">Назва властивості межі.</param>
-    /// <param name="value">Значення; <c>null</c> — межі немає.</param>
-    private static void SetValidity(RoleAssignment assignment, string property, DateOnly? value)
-        => typeof(RoleAssignment)
-            .GetProperty(property)!
-            .GetSetMethod(nonPublic: true)!
-            .Invoke(assignment, [value]);
+    /// <summary>Переводить строкове ОСОБИСТЕ призначення у зріз для діагностики.</summary>
+    /// <param name="assignment">Ім'я користувача, код ролі й межі дії.</param>
+    /// <param name="asOf">Дата, на яку рахується чинність.</param>
+    /// <remarks>
+    /// ⚠ Дзеркало <see cref="Trace(GroupRoleAssignment,DateOnly)"/> для
+    /// адресата «особа», а не «група» (`#48`): чинність так само рахує
+    /// <see cref="RoleAssignment.IsEffectiveOn"/>, а не копія умови тут.
+    /// </remarks>
+    private RoleAssignmentTrace TracePersonal(
+        (string UserName, string RoleCode, DateOnly? ValidFrom, DateOnly? ValidTo) assignment, DateOnly asOf)
+    {
+        var entity = new RoleAssignment(RoleIdByCode(assignment.RoleCode), userId: null, principalSid: null);
+        entity.SetValidity(assignment.ValidFrom, assignment.ValidTo);
+
+        return new RoleAssignmentTrace(
+            entity.RoleId,
+            assignment.RoleCode,
+            PrincipalSid: null,
+            assignment.ValidFrom,
+            assignment.ValidTo,
+            entity.IsEffectiveOn(asOf));
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> FilterUnknownAsync(

@@ -4672,6 +4672,16 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "validity": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RoleValidityWindow"
+            },
+            "description": "Межі чинності за кодом ролі (ФВ-6.16) — підміна на час відпустки; код\nбез запису тут або відсутній словник узагалі — роль безстрокова, як і\nраніше (сумісно з клієнтами, які про це поле не знають).",
+            "type": [
+              "null",
+              "object"
+            ]
           }
         },
         "required": [
@@ -4906,6 +4916,32 @@
         },
         "required": [
           "roleId"
+        ],
+        "type": "object"
+      },
+      "RoleValidityWindow": {
+        "description": "Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16).",
+        "properties": {
+          "validFrom": {
+            "description": "Початок дії; `null` — від завжди.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець дії; `null` — безстроково.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "validFrom",
+          "validTo"
         ],
         "type": "object"
       },

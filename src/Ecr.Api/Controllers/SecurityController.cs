@@ -190,7 +190,9 @@ public sealed class SecurityController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var count = await replaceRoles.HandleAsync(id, request.RoleCodes, ct).ConfigureAwait(false);
+        var count = await replaceRoles
+            .HandleAsync(id, request.RoleCodes, request.Validity, ct)
+            .ConfigureAwait(false);
 
         return Ok(new Contracts.AffectedRolesResponse(count));
     }
@@ -362,7 +364,14 @@ public sealed record ChangePasswordRequest(string CurrentPassword, string NewPas
 
 /// <summary>Запит на заміну набору ролей користувача.</summary>
 /// <param name="RoleCodes">Коди ролей; порожній набір прибирає всі.</param>
-public sealed record ReplaceUserRolesRequest(IReadOnlyList<string> RoleCodes);
+/// <param name="Validity">
+/// Межі чинності за кодом ролі (ФВ-6.16) — підміна на час відпустки; код
+/// без запису тут або відсутній словник узагалі — роль безстрокова, як і
+/// раніше (сумісно з клієнтами, які про це поле не знають).
+/// </param>
+public sealed record ReplaceUserRolesRequest(
+    IReadOnlyList<string> RoleCodes,
+    IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? Validity = null);
 
 /// <summary>Запит на зміну адреси користувача.</summary>
 /// <param name="Email">Адреса; порожньо — прибрати разом із прапорцем алертів.</param>

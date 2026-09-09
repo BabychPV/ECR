@@ -178,7 +178,7 @@ public sealed class AccessDiagnosticsTests
         var me = AddDomain("ivanov", OwnSid);
         _user.GroupSids.Returns([GroupWithRole]);
         _users.GroupAssignments.Add(new GroupRoleAssignment(GroupWithRole, "Approver"));
-        await _users.ReplaceRolesAsync(me.Id, ["DataEntry"], CancellationToken.None);
+        await _users.ReplaceRolesAsync(me.Id, ["DataEntry"], validity: null, CancellationToken.None);
 
         var view = await Handler().HandleAsync(subjectUserId: null, CancellationToken.None);
 

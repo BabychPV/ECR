@@ -27,6 +27,17 @@ public sealed record RoleView(
     IReadOnlyList<string> Permissions,
     IReadOnlyList<string> DangerousPermissions);
 
+/// <summary>Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16).</summary>
+/// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
+/// <param name="ValidTo">Кінець дії; <c>null</c> — безстроково.</param>
+/// <remarks>
+/// ⚠ Відсутність запису під кодом ролі в словнику, де цей тип — значення,
+/// означає те саме, що й запис із двома <c>null</c>: роль безстрокова. Два
+/// способи сказати одне й те саме тут не розходяться, бо перевіряються в
+/// ОДНОМУ місці (<see cref="ReplaceUserRolesHandler"/>).
+/// </remarks>
+public sealed record RoleValidityWindow(DateOnly? ValidFrom, DateOnly? ValidTo);
+
 /// <summary>Обліковий запис у переліку.</summary>
 /// <remarks>⛔ Ні хеша пароля, ні солі, ні <c>SecurityStamp</c> тут немає (ФВ-6.11).</remarks>
 /// <param name="Id">Ідентифікатор.</param>
@@ -201,7 +212,8 @@ public sealed class ReplaceUserRolesHandler(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IAuditWriter audit,
-    Domain.Abstractions.IClock clock)
+    Domain.Abstractions.IClock clock,
+    DisableBootstrapAdminHandler disableBootstrap)
 {
     /// <summary>Право керування користувачами.</summary>
     public const string Permission = "Security.ManageUsers";
@@ -209,9 +221,18 @@ public sealed class ReplaceUserRolesHandler(
     /// <summary>Замінює ролі користувача.</summary>
     /// <param name="userId">Користувач.</param>
     /// <param name="roleCodes">Коди ролей; порожньо — прибрати всі.</param>
+    /// <param name="validity">
+    /// Межі чинності за кодом ролі (ФВ-6.16 — підміна на час відпустки); код
+    /// без запису тут або відсутній словник — роль безстрокова, як і
+    /// раніше.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки ролей тепер призначено.</returns>
-    public async Task<int> HandleAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct)
+    public async Task<int> HandleAsync(
+        int userId,
+        IReadOnlyList<string> roleCodes,
+        IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
 
@@ -224,8 +245,10 @@ public sealed class ReplaceUserRolesHandler(
             throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
         }
 
+        ValidateValidity(roleCodes, validity);
+
         var before = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
-        var count = await users.ReplaceRolesAsync(userId, roleCodes, ct).ConfigureAwait(false);
+        var count = await users.ReplaceRolesAsync(userId, roleCodes, validity, ct).ConfigureAwait(false);
 
         // ⛔ Зміна повноважень — подія безпеки, і вона мусить бути в журналі
         // з обома наборами. «Хто це йому видав» — питання, на яке через рік
@@ -247,7 +270,48 @@ public sealed class ReplaceUserRolesHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⚠ Той самий виклик, що й після кожного призначення ролі при
+        // створенні (`CreateUserHandler`, D-97): заміна набору — це так само
+        // місце, де в системи міг з'явитися перший активний доменний
+        // адміністратор. Без цього виклику bootstrap-запис лишався
+        // технічно чинним НАЗАВЖДИ, якщо роль видавали через ЦЕЙ шлях, а не
+        // через створення нового користувача (`#20`) — сам виклик ідемпотентний
+        // і сам вирішує, чи справді настали умови (`DisableBootstrapAdminHandler`).
+        await disableBootstrap.HandleAsync(ct).ConfigureAwait(false);
+
         return count;
+    }
+
+    /// <summary>Перевіряє межі чинності з тіла запиту (ФВ-6.16).</summary>
+    /// <remarks>
+    /// ⚠ Це помилка ЗАПиту, а не доменного інваріанта (переплутані дати в
+    /// наказі про підміну), тому ловиться тут, до звернення до сховища —
+    /// відповідь називає конкретне поле, а не абстрактний внутрішній стан.
+    /// </remarks>
+    private static void ValidateValidity(
+        IReadOnlyList<string> roleCodes, IReadOnlyDictionary<string, RoleValidityWindow>? validity)
+    {
+        if (validity is null)
+        {
+            return;
+        }
+
+        foreach (var (code, window) in validity)
+        {
+            if (!roleCodes.Contains(code, StringComparer.Ordinal))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.RequestInvalid,
+                    $"Межі чинності задано для ролі «{code}», якої немає в наборі, що призначається.");
+            }
+
+            if (window.ValidFrom is { } from && window.ValidTo is { } to && from > to)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.RequestInvalid,
+                    $"Роль «{code}»: початок дії ({from}) пізніше за кінець ({to}).");
+            }
+        }
     }
 }
 
