@@ -232,7 +232,7 @@
 | Q-184 | CONFLICT | `ConsistencyCheckJobTests` (3 тести) перевіряють лише текст `ConsistencyCheckJob.cs` (`File.ReadAllText` + `Assert.Contains`) — жодного запуску job, жодної реальної осиротілої комірки чи розбіжності | RESOLVED |
 | Q-185 | CONFLICT | `PartitionCheckJobTests.Достатній_запас_не_породжує_шуму` перевіряє лише текст тернарного виразу в `PartitionCheckJob.cs` — інверсія умови (`enough`) лишає перевірений підрядок незмінним | RESOLVED |
 | Q-186 | CONFLICT | `CollectionCoverage.Skipped(...)` пише `CollectionRunId = 0` — рядка `itg.CollectionRun` з таким `Id` не існує ніде, `FK_CCov_Run` відхиляє КОЖЕН запис journal покриття на пропуск/конфлікт; знайдено емпірично (реальний `DbUpdateException` на SQL Server), не аудитом | RESOLVED |
-| Q-187 | CONFLICT | `AccessProfileCache.GetOrCreateAsync` кешує профіль за ключем `(userId, securityStamp)` БЕЗ `groupsFingerprint`, хоча `LoadAsync` рахує права по-різному залежно від наявності групових SID — власна сесія користувача й перегляд/симуляція чужого профілю можуть ділити один кеш-запис і 30 хв повертати права ІНШОГО контексту | OPEN |
+| Q-187 | CONFLICT | `AccessProfileCache.GetOrCreateAsync` кешує профіль за ключем `(userId, securityStamp)` БЕЗ `groupsFingerprint`, хоча `LoadAsync` рахує права по-різному залежно від наявності групових SID — власна сесія користувача й перегляд/симуляція чужого профілю можуть ділити один кеш-запис і 30 хв повертати права ІНШОГО контексту | RESOLVED |
 | Q-188 | SCOPE | `GetCurrentUserHandler.LevelForProject` дублює логіку `AccessProfile.LevelFor` (deny виграє, потім grant) — друга реалізація того самого правила на іншій формі даних (string-серіалізований DTO замість домену) | OPEN |
 | Q-189 | SCOPE | `PatchCellsHandler.HandleAsync` — ~340 рядків одним методом (права, побудова рядків, валідація, застосування, аудит, підсумок) в одній функції | OPEN |
 | Q-190 | SCOPE | `TableDef.SwitchStorage`/`CellStorageMode.Hybrid` — мертвий код: `StorageMode` вставляється як `Normalized` у конструкторі й ніде не читається умовно; `SwitchStorage` не має жодного викликача | OPEN |
@@ -8411,7 +8411,45 @@ Ecr.sln` проти локального SQLEXPRESS (Docker недоступни
 того самого `userId` — саме той клас помилки, від якого написаний
 коментар про «токена в нас немає» мав захищати.
 
-**Статус:** OPEN
+#### Закрито
+
+Реальний ключ `IMemoryCache` тепер несе той самий відбиток груп, яким
+`AccessProfile.CacheKey` уже описував себе. `AccessDecisionService.BuildProfileAsync`
+рахує `groupSids`/`groupsFingerprint` ОДИН раз (новий приватний
+`GroupSidsFor(userId)` — те саме правило «свій → токен, чужий → `[]`»,
+раніше продубльоване лише в `LoadAsync`) і передає його водночас у
+`AccessProfileCache.GetOrCreateAsync` (реальний ключ пошуку/запису) і в
+`LoadAsync` (той самий набір груп, яким рахується `CacheKey` і права).
+`AccessProfileCache.GetOrCreateAsync`/`Evict` тепер приймають
+`groupsFingerprint` ОБОВ'ЯЗКОВИМ аргументом (без дефолту) — саме забутий
+третій аргумент дав знахідку, і дефолт відтворив би той самий клас
+дефекту в наступного викликача.
+
+Побічно виправлено те саме в `InvalidateProfileAsync`
+(`GrantOwnershipAsync` кличе його для точкового скидання кешу власника
+щойно створеного проєкту): без відповідного відбитку в `Evict` цей виклик
+цілив би в порожній варіант ключа, а реальний запис власної сесії (є
+групи → непорожній відбиток) лишався б недоторканим — тобто щойно
+виданий грант знову чекав би сплину 30 хв, новий варіант того самого
+класу помилки.
+
+**Тест:** `tests/Ecr.Infrastructure.Tests/Security/AccessProfileGroupFingerprintTests.cs`
+(`[Collection("SqlServer")]`, реальна БД) — `RoleAssignment` на групу
+дає право `Template.View` лише через AD-групу; `BuildProfileAsync`
+власною сесією (`currentUser.UserId == userId`, є `GroupSids`) бачить
+право, той самий виклик з ІНШИМ `currentUser.UserId` (перегляд
+адміністратора) — ні; повторний виклик власної сесії й далі бачить своє
+право (симетрична половина атаки з опису вище).
+
+Доказ мутацією: тимчасово повернув реальний ключ `GetOrCreateAsync` до
+порожнього відбитку (`""` замість `groupsFingerprint`) — новий тест упав
+рівно на тому симптомі, що описаний вище (`Assert.DoesNotContain` знайшов
+`Template.View` у профілі перегляду адміністратора — чужий кеш-запис
+дістався іншому виклику); відновив фікс — тест знову зелений.
+`AccessProfileCacheTests` (4 тести) і `PeriodAccessSliceTests` (10
+тестів) — без регресій, `Ecr.sln` збирається цілком.
+
+**Статус:** RESOLVED · PR #TBD
 
 ---
 

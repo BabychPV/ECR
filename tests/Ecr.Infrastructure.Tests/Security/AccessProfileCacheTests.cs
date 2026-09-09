@@ -25,8 +25,8 @@ public sealed class AccessProfileCacheTests : IDisposable
         var cache = new AccessProfileCache(_memory);
         var builds = 0;
 
-        var first = await cache.GetOrCreateAsync(UserId, "s1", _ => Build(ref builds, "s1"), CancellationToken.None);
-        var second = await cache.GetOrCreateAsync(UserId, "s1", _ => Build(ref builds, "s1"), CancellationToken.None);
+        var first = await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        var second = await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
 
         // Резолвити права на кожну комірку — гарантована смерть продуктивності:
         // на права відведено 50 мс на весь запит відкриття таблиці 500×60.
@@ -40,8 +40,8 @@ public sealed class AccessProfileCacheTests : IDisposable
         var cache = new AccessProfileCache(_memory);
         var builds = 0;
 
-        await cache.GetOrCreateAsync(UserId, "s1", _ => Build(ref builds, "s1"), CancellationToken.None);
-        await cache.GetOrCreateAsync(UserId, "s2", _ => Build(ref builds, "s2"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s1", "", _ => Build(ref builds, "s1"), CancellationToken.None);
+        await cache.GetOrCreateAsync(UserId, "s2", "", _ => Build(ref builds, "s2"), CancellationToken.None);
 
         Assert.Equal(2, builds);
 
@@ -58,13 +58,13 @@ public sealed class AccessProfileCacheTests : IDisposable
         var builds = 0;
 
         var before = await cache.GetOrCreateAsync(
-            UserId, "s1", _ => Build(ref builds, "s1", GrantLevel.Manage), CancellationToken.None);
+            UserId, "s1", "", _ => Build(ref builds, "s1", GrantLevel.Manage), CancellationToken.None);
         Assert.Equal(GrantLevel.Manage, before.LevelFor(ResourceKind.Project, AccessBuilder.ProjectId));
 
         // Відкликання ролі крутить SecurityStamp у sec.User; наступний запит
         // приходить уже з новим штампом.
         var after = await cache.GetOrCreateAsync(
-            UserId, "s2", _ => Build(ref builds, "s2", GrantLevel.None), CancellationToken.None);
+            UserId, "s2", "", _ => Build(ref builds, "s2", GrantLevel.None), CancellationToken.None);
 
         // ⚠ Якби ключ був лише за userId, відкликана роль жила б до кінця
         // cookie — тобто «негайно» перетворилося б на «колись», і це була б
@@ -80,9 +80,9 @@ public sealed class AccessProfileCacheTests : IDisposable
         var builds = 0;
 
         var first = await cache.GetOrCreateAsync(
-            UserId, "s1", _ => Simulated(ref builds), CancellationToken.None);
+            UserId, "s1", "", _ => Simulated(ref builds), CancellationToken.None);
         var second = await cache.GetOrCreateAsync(
-            UserId, "s1", _ => Simulated(ref builds), CancellationToken.None);
+            UserId, "s1", "", _ => Simulated(ref builds), CancellationToken.None);
 
         // ⚠ Ключ складається з користувача і штампа, тому профіль суб'єкта ліг
         // би саме туди, звідки його візьме справжній користувач — разом із

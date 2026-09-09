@@ -45,10 +45,19 @@ public sealed class AccessDecisionService(
                 "ECR-AUTH-0401", "Обліковий запис не існує або вимкнений.");
         }
 
-        // Ключ кешу — користувач + штамп: зміна ролей крутить штамп, тому
-        // старий запис просто перестає адресуватися (ФВ-6.7).
+        // Ключ кешу — користувач + штамп + відбиток груп: зміна ролей крутить
+        // штамп, тому старий запис просто перестає адресуватися (ФВ-6.7); а
+        // відбиток груп рахується ТУТ, ОДИН раз, і йде ОДНОЧАСНО в реальний
+        // ключ `IMemoryCache` (`GetOrCreateAsync`) і в `LoadAsync` — щоб ключ,
+        // за яким запис кладеться, і ключ, під яким `AccessProfile` сам себе
+        // описує (`CacheKey`), не могли розійтися (`Q-187`).
+        var groupSids = GroupSidsFor(userId);
+        var groupsFingerprint = Fingerprint(groupSids);
+
         return await profileCache
-            .GetOrCreateAsync(userId, account.SecurityStamp, token => LoadAsync(userId, account.SecurityStamp, token), ct)
+            .GetOrCreateAsync(
+                userId, account.SecurityStamp, groupsFingerprint,
+                token => LoadAsync(userId, account.SecurityStamp, groupSids, token), ct)
             .ConfigureAwait(false);
     }
 
@@ -64,9 +73,24 @@ public sealed class AccessDecisionService(
 
         if (stamp is not null)
         {
-            profileCache.Evict(userId, stamp);
+            // ⚠ Той самий відбиток груп, яким `BuildProfileAsync` кладе запис
+            // (`Q-187`): без нього точкове скидання відбирало б за ключем
+            // `groupsFingerprint: ""`, а реальний запис власної сесії творця
+            // (є групи → непорожній відбиток) лишався б у кеші недоторканим —
+            // тобто щойно виданий грант знову чекав би сплину 30 хв.
+            profileCache.Evict(userId, stamp, Fingerprint(GroupSidsFor(userId)));
         }
     }
+
+    /// <summary>Групи, з якими будується профіль користувача <paramref name="userId"/>.</summary>
+    /// <remarks>
+    /// ⚠ Групи беруться З ТОКЕНА поточної сесії (ФВ-6.15a), і лише тоді, коли
+    /// профіль будується для НЕЇ САМОЇ. Для чужого користувача — перегляд
+    /// адміністратором, симуляція — токена в нас немає, і взяти чужі групи зі
+    /// своєї сесії означало б показати не ті права (`P-02`).
+    /// </remarks>
+    private IReadOnlyList<string> GroupSidsFor(int userId)
+        => userId == currentUser.UserId ? currentUser.GroupSids : [];
 
     /// <summary>
     /// Сталий відбиток набору груп.
@@ -101,7 +125,17 @@ public sealed class AccessDecisionService(
     private const int MaxRoleAssignments = 200;
 
     /// <summary>Збирає профіль із бази. Викликається лише при промаху кешу.</summary>
-    private async Task<AccessProfile> LoadAsync(int userId, string securityStamp, CancellationToken ct)
+    /// <param name="userId">Користувач, для якого будується профіль.</param>
+    /// <param name="securityStamp">Його поточний штамп безпеки.</param>
+    /// <param name="groupSids">
+    /// Групи, з якими рахувати профіль — вважай <see cref="GroupSidsFor"/>
+    /// єдиним місцем, що вирішує, чи вони тут є (`Q-187`): рахувати їх ще раз
+    /// тут означало б друге формулювання того самого правила поруч із
+    /// ключем кешу, який на ньому й тримається.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<AccessProfile> LoadAsync(
+        int userId, string securityStamp, IReadOnlyList<string> groupSids, CancellationToken ct)
     {
         // ⚠ «Сьогодні» тут — у UTC, і це СВІДОМО, а не забутий переклад у пояс
         // майданчика (`H-13`, `D2-78`). Строкове призначення ролі належить
@@ -119,14 +153,6 @@ public sealed class AccessDecisionService(
         // ⚠ Строкові призначення враховуються тут, а не «десь у перевірці»:
         // підміна на час відпустки має закінчитися сама, інакше її доводиться
         // знімати руками — а того, хто мав би зняти, саме й немає на місці.
-        // ⚠ Групи беруться З ТОКЕНА поточної сесії (ФВ-6.15a), і лише тоді,
-        // коли профіль будується для НЕЇ САМОЇ. Для чужого користувача —
-        // перегляд адміністратором, симуляція — токена в нас немає, і взяти
-        // чужі групи зі своєї сесії означало б показати не ті права (`P-02`).
-        var groupSids = userId == currentUser.UserId
-            ? currentUser.GroupSids
-            : [];
-
         // ⛔ Межі дії перевіряє ДОМЕН (`RoleAssignment.IsEffectiveOn`), а не
         // копія його умови в запиті (`H-23a`). Умова тут стояла дослівно та
         // сама, і саме тому це було небезпечно: два формулювання одного
