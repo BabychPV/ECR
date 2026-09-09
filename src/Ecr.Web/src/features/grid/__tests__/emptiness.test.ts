@@ -15,6 +15,7 @@ const Slice = (columns: number, rows: number): TableSliceDto => ({
   tableInstanceId: 1,
   periodKey: 202601,
   cellPermissions: {},
+  cellConfirmations: {},
   columns: Array.from({ length: columns }, (_, i) => ({
     id: i + 1,
     code: `C${i + 1}`,
