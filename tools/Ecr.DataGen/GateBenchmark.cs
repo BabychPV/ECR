@@ -110,7 +110,7 @@ public sealed class GateBenchmark
         var notes = new List<string>();
 
         await using var db = CreateContext(connectionString);
-        var store = new NormalizedCellStore(db, new BulkCellLoader(connectionString, 10_000));
+        var store = new NormalizedCellStore(db);
 
         // Обсяг фіксується ПЕРШИМ і потрапляє в звіт: замір на недоборі — це
         // інший замір, і читач звіту має бачити, на чому саме він зроблений.
@@ -576,7 +576,7 @@ public sealed class GateBenchmark
         CancellationToken ct)
     {
         await using var db = CreateContext(connectionString);
-        var store = new NormalizedCellStore(db, new BulkCellLoader(connectionString, 1000));
+        var store = new NormalizedCellStore(db);
 
         try
         {
