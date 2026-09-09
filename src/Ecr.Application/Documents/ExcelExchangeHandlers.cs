@@ -88,11 +88,27 @@ public sealed class PreviewImportHandler(
     /// <param name="documentId">Документ.</param>
     /// <param name="file">Книга.</param>
     /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Q-178 (аудит фази 2, авторизація). Узгоджено з патерном
+    /// <see cref="ExportDocumentHandler"/> (`A7-55`): глобальне право —
+    /// це «користувач узагалі імпортує», грант на документ — «У ЦЕЙ».
+    /// Фактичний захист комірок уже був глибше (`ExcelImporter.PreviewAsync`
+    /// → `CanEditSliceAsync` на кожен блок), але вхідна перевірка тепер є
+    /// й тут — заради того самого дизайну, що й в експорту, а не тому, що
+    /// без неї була доведена діра.
+    /// </remarks>
     public async Task<ImportPreview> HandleAsync(long documentId, Stream file, CancellationToken ct)
     {
-        await ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
 
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
         // без нього не може зробити наступний крок. Перегляд у фоні означав би
@@ -114,12 +130,23 @@ public sealed class ApplyImportHandler(
     /// <param name="documentId">Документ.</param>
     /// <param name="previewToken">Токен раніше побудованого diff.</param>
     /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Q-178, той самий патерн, що й <see cref="PreviewImportHandler"/>
+    /// вище і <see cref="ExportDocumentHandler"/>.
+    /// </remarks>
     public async Task<PatchCellsResponse> HandleAsync(
         long documentId, string previewToken, CancellationToken ct)
     {
-        await ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
 
         return await importer.ApplyAsync(documentId, previewToken, ct).ConfigureAwait(false);
     }
