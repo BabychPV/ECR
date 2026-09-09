@@ -329,7 +329,12 @@ public sealed class JobProgress
     /// <param name="jobId">Ідентифікатор задачі — він же ключ.</param>
     /// <param name="jobCode">Код задачі.</param>
     /// <param name="utcNow">Час початку в UTC.</param>
-    public JobProgress(string jobId, string jobCode, DateTime utcNow)
+    /// <param name="createdByUserId">
+    /// Хто поставив задачу; <c>null</c> — системна задача (за розкладом,
+    /// або постановка без інтерактивного користувача). Автор власної
+    /// задачі читає її стан без права <c>System.ViewHealth</c> (Q-156).
+    /// </param>
+    public JobProgress(string jobId, string jobCode, DateTime utcNow, int? createdByUserId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
         ArgumentException.ThrowIfNullOrWhiteSpace(jobCode);
@@ -339,6 +344,7 @@ public sealed class JobProgress
         StartedAt = utcNow;
         UpdatedAt = utcNow;
         State = "Running";
+        CreatedByUserId = createdByUserId;
     }
 
     public string JobId { get; private set; } = null!;
@@ -349,6 +355,9 @@ public sealed class JobProgress
     public DateTime StartedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
     public string? Error { get; private set; }
+
+    /// <summary>Хто поставив задачу; <c>null</c> — системна (Q-156).</summary>
+    public int? CreatedByUserId { get; private set; }
 
     /// <summary>
     /// Ставить стан «у черзі».

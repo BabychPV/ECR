@@ -74,7 +74,7 @@ public sealed class ExportAccessTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
-        _jobs.EnqueueAsync<IExcelExportJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
+        _jobs.EnqueueAsync<IExcelExportJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("job-1");
 
         var jobId = await Handler().HandleAsync(DocumentId, Options(), CancellationToken.None);

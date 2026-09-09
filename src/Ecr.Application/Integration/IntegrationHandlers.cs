@@ -115,18 +115,44 @@ public sealed class GetJobStatusHandler(
     /// ⚠ Невідома задача — це <c>null</c>, який контролер перетворює на 404, а
     /// не порожній стан: інакше клієнт нескінченно опитував би ідентифікатор,
     /// якого не існує, і показував би вічний прогрес.
+    /// <para>
+    /// ⛔ Q-156 (конфлікт, Етап I). До цього метод вимагав `System.ViewHealth`
+    /// — право на стан СИСТЕМИ — навіть щоб дізнатися стан ВЛАСНОЇ задачі
+    /// експорту чи перерахунку: автор отримував <c>jobId</c> у відповіді
+    /// <c>202</c> і одразу після — <c>403</c> на першому ж опитуванні
+    /// (`S-28`). Рішення людини: автор задачі читає її стан завжди,
+    /// `System.ViewHealth` лишається для стеження за ЧУЖИМИ задачами.
+    /// Існування перевіряється ПЕРЕД грантом (той самий порядок, що й у
+    /// Q-179/Q-180) — інакше невідомий `jobId` завжди впав би на «немає
+    /// права», ховаючи справжню причину (задачі просто немає) за 403.
+    /// </para>
     /// </remarks>
     public async Task<JobStatus?> HandleAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        await ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
-            .ConfigureAwait(false);
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
 
         var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
 
-        return string.Equals(status.State, "Unknown", StringComparison.Ordinal) ? null : status;
+        if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        if (!profile.Has(Permission))
+        {
+            var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+            if (createdByUserId != userId)
+            {
+                throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            }
+        }
+
+        return status;
     }
 }
 

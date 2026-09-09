@@ -170,20 +170,17 @@ public sealed class OutputScenarios(SqlServerFixture sql)
     public async Task Експорт_подання_і_погодження_рецензентом()
     {
         using var app = new EcrApiFactory(sql);
+        // ⛔ Q-156: БЕЗ `System.ViewHealth`. До фіксу авторові, який щойно
+        // отримав `202` з `jobId` власного експорту, доводилося давати ще й
+        // право на стан СИСТЕМИ, щоб узагалі дочекатися результату
+        // (`GetJobStatusHandler` перевіряв лише `System.ViewHealth`, не
+        // авторство). Тепер автор читає стан ВЛАСНОЇ задачі без нього —
+        // саме це нижче й доводить `AwaitJobAsync` тим самим клієнтом.
         var author = await Provisioning.AdministratorAsync(
             app, "S28a",
             [
                 "Project.Manage", "Document.View", "Document.Create", "Template.Edit",
                 "Template.Publish", "Document.Export",
-
-                // ⚠ ЗАМІР: щоб ДОЧЕКАТИСЯ власної задачі експорту, авторові
-                // потрібне `System.ViewHealth` — `GET /api/v1/jobs/{id}`
-                // вимагає саме його (`GetJobStatusHandler.Permission`). Тобто
-                // «експортувати» і «забрати книгу» — різні права, і без
-                // другого автор отримує `202` з `jobId`, за яким йому нічого
-                // не видно. Це видима межа моделі прав, а не сценарію
-                // (`Q-156`); сценарій її називає й іде далі.
-                "System.ViewHealth",
             ]);
 
         // Правило рівня рядка: значення колонки `A` не більше за 100.

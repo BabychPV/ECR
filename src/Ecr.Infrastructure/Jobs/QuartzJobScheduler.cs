@@ -50,7 +50,7 @@ public sealed class QuartzJobScheduler(
     public bool IsConfigured => schedulerFactory is not null;
 
     /// <inheritdoc />
-    public async Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct)
+    public async Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob
     {
         var scheduler = Scheduler(typeof(TJob).Name);
@@ -60,7 +60,8 @@ public sealed class QuartzJobScheduler(
         // різних документів — це дві задачі, і спільний ключ зробив би другу
         // «вже запланованою».
         return await EnqueueCoreAsync<TJob>(
-            instance, $"{typeof(TJob).Name}-{Guid.NewGuid():N}", payload, ct).ConfigureAwait(false);
+            instance, $"{typeof(TJob).Name}-{Guid.NewGuid():N}", payload, ct, createdByUserId)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Спільна частина постановки: запис прогресу і планування.</summary>
@@ -69,6 +70,7 @@ public sealed class QuartzJobScheduler(
     /// <param name="jobId">Готовий ідентифікатор задачі.</param>
     /// <param name="payload">Завдання.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
     /// <returns>Ідентифікатор задачі.</returns>
     /// <remarks>
     /// ⚠ Виділено тому, що постановок стало дві — звичайна і з витісненням
@@ -77,7 +79,7 @@ public sealed class QuartzJobScheduler(
     /// клієнт отримав би <c>404</c> на задачу, яку щойно прийняли.
     /// </remarks>
     private async Task<string> EnqueueCoreAsync<TJob>(
-        IScheduler instance, string jobId, object? payload, CancellationToken ct)
+        IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob
     {
         var detail = JobBuilder.Create<QuartzJobAdapter>()
@@ -98,7 +100,7 @@ public sealed class QuartzJobScheduler(
         if (progress is not null && clock is not null)
         {
             await progress
-                .QueueAsync(jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct)
+                .QueueAsync(jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct, createdByUserId)
                 .ConfigureAwait(false);
         }
 
@@ -109,7 +111,7 @@ public sealed class QuartzJobScheduler(
 
     /// <inheritdoc />
     public async Task<string> EnqueueExclusiveAsync<TJob>(
-        string targetKey, object? payload, CancellationToken ct)
+        string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
@@ -140,7 +142,8 @@ public sealed class QuartzJobScheduler(
         }
 
         return await EnqueueCoreAsync<TJob>(
-            instance, prefix + Guid.NewGuid().ToString("N"), payload, ct).ConfigureAwait(false);
+            instance, prefix + Guid.NewGuid().ToString("N"), payload, ct, createdByUserId)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Роздільник між типом задачі, ціллю і хвостом ідентифікатора.</summary>
@@ -240,6 +243,16 @@ public sealed class QuartzJobScheduler(
 
         return await progress.FindAsync(jobId, ct).ConfigureAwait(false)
                ?? new JobStatus(jobId, "Unknown", 0, null, null);
+    }
+
+    /// <inheritdoc />
+    public async Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        return progress is null
+            ? null
+            : await progress.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
