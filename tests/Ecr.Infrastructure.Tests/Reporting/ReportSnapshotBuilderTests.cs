@@ -1,8 +1,13 @@
 ﻿// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuilderTests.cs
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
@@ -12,7 +17,8 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// включно з `Draft` — щоб числа можна було перевірити **до** затвердження
 /// (D-65). Фільтр для регулятора стоїть у вʼюсі, не в RDL (ФВ-10.11).
 /// </summary>
-public sealed class ReportSnapshotBuilderTests
+[Collection("SqlServer")]
+public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
 {
     private const int Version = 1;
     private const int Project = 1;
@@ -61,24 +67,123 @@ public sealed class ReportSnapshotBuilderTests
         Assert.Equal(12, draft.RowCount);
     }
 
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    /// <remarks>
+    /// ⛔ Аудит фази 2 (чесність тестів). Стара версія лише шукала текст
+    /// `s.Status IN (1, 2)` у файлі скрипта — не виконувала запит, не
+    /// заводила жодного `Draft`-зрізу. Доведено мутацією: заміна фільтра на
+    /// `1 = 1` (реальний витік чернеток регулятору) лишала літеральний
+    /// підрядок усередині коментаря — тест і далі проходив.
+    ///
+    /// ⚠ Реальна перевірка тому — запит до РОЗГОРНУТОЇ вʼюхи на живому SQL
+    /// Server: два зрізи ОДНІЄЇ версії й проєкту, різні періоди (унікальний
+    /// індекс `UX_ReportSnapshot_Current` не дозволив би два поточні зрізи в
+    /// одному періоді), обидва з реальним рядком — Draft і Approved.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-10.11")]
-    public void Вʼюха_для_регулятора_віддає_лише_Approved_і_Submitted()
+    public async Task Вʼюха_для_регулятора_віддає_лише_Approved_і_Submitted()
     {
-        // Фільтр стоїть у ВʼЮСІ (`05-rpt-views.sql`: `s.Status IN (1, 2)`), а
-        // не в RDL: інакше його одного дня забудуть поставити в новому звіті,
-        // і регулятор побачить чернетку (ФВ-10.11, D-65).
-        var script = File.ReadAllText(Path.Combine(
-            SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "05-rpt-views.sql"));
+        const int draftPeriod = 202601;
+        const int approvedPeriod = 202602;
 
-        Assert.Contains("s.Status IN (1, 2)", script, StringComparison.Ordinal);
-        Assert.Contains("s.IsCurrent = 1", script, StringComparison.Ordinal);
+        await DeployViewAsync();
 
-        // Числа фільтра — це саме Approved і Submitted, а не «перші два».
-        Assert.Equal(1, (byte)SnapshotStatus.Approved);
-        Assert.Equal(2, (byte)SnapshotStatus.Submitted);
-        Assert.Equal(0, (byte)SnapshotStatus.Draft);
+        await using var db = CreateContext();
+
+        // ⛔ ReportSnapshot.ProjectId несе реальний зовнішній ключ на
+        // doc.Project (FK_Snap_Project) — на відміну від TemplateVersionId/
+        // PeriodPolicyId проєкту, які такого обмеження не мають.
+        var project = new Project(
+            EcrCode.Create($"P{Guid.NewGuid():N}"[..12]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water report project" }),
+            new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
+            templateVersionId: 2, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+        db.Projects.Add(project);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var def = new ReportDef(
+            EcrCode.Create("WaterReport"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }),
+            isRegulatory: true);
+        db.ReportDefs.Add(def);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var version = new ReportVersion(def.Id, "v1", "[]", "{}", Now);
+        db.ReportVersions.Add(version);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var draft = new ReportSnapshot(version.Id, project.Id, draftPeriod, SnapshotStatus.Draft, Now, builtByUserId: null);
+        draft.Complete(rowCount: 1, contentHash: null, calculationRunId: null, parametersJson: null);
+        draft.MakeCurrent();
+
+        var approved = new ReportSnapshot(version.Id, project.Id, approvedPeriod, SnapshotStatus.Approved, Now, builtByUserId: null);
+        approved.Complete(rowCount: 1, contentHash: null, calculationRunId: null, parametersJson: null);
+        approved.MakeCurrent();
+
+        db.ReportSnapshots.AddRange(draft, approved);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var draftRow = new ReportRow(draft.Id, rowNo: 1, columnCode: "A");
+        draftRow.SetValue(valueString: null, valueNumeric: 1m, valueDate: null);
+        var approvedRow = new ReportRow(approved.Id, rowNo: 1, columnCode: "A");
+        approvedRow.SetValue(valueString: null, valueNumeric: 2m, valueDate: null);
+        db.ReportRows.AddRange(draftRow, approvedRow);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var periods = await QueryPeriodsAsync(project.Id);
+
+        // ⛔ Доказ сценарію: період Approved-зрізу є, період Draft-зрізу —
+        // немає. Обидва зрізи мають РЕАЛЬНИЙ рядок і РЕАЛЬНИЙ поточний
+        // прапорець — розрізняє їх лише статус, той самий, який фільтрує
+        // вʼюха.
+        Assert.DoesNotContain(draftPeriod, periods);
+        Assert.Contains(approvedPeriod, periods);
     }
+
+    /// <summary>
+    /// Розгортає `rpt.v_WaterReport_v1` виконанням РЕАЛЬНОГО файлу скрипта —
+    /// не власним переказом його вмісту. `SqlServerFixture` цей скрипт не
+    /// накочує сама (він не в переліку `RunScriptAsync`), тож без цього
+    /// кроку вʼюхи в тестовій базі не існувало б узагалі.
+    /// </summary>
+    private async Task DeployViewAsync()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Persistence", "Sql", "05-rpt-views.sql");
+        var script = await File.ReadAllTextAsync(path).ConfigureAwait(false);
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        foreach (var batch in Ecr.Infrastructure.Persistence.SqlBatches.Split(script))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = batch;
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Періоди, видимі крізь регуляторну вʼюху для проєкту.</summary>
+    private async Task<List<int>> QueryPeriodsAsync(int projectId)
+    {
+        var result = new List<int>();
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT PeriodKey FROM rpt.v_WaterReport_v1 WHERE ProjectId = @p";
+        command.Parameters.AddWithValue("@p", projectId);
+        await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            result.Add(reader.GetInt32(0));
+        }
+
+        return result;
+    }
+
+    private EcrDbContext CreateContext()
+        => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void IsCurrent_перемикається_однією_транзакцією()
