@@ -327,6 +327,12 @@ export type FormulaResultType = Schemas['FormulaResultType'];
 /** Роль із оголошеними правами. */
 export type RoleView = Schemas['RoleView'];
 
+/**
+ * Право з ПОВНОГО каталогу системи — усі, а не лише вже оголошені в
+ * наявних ролях (директива №11, T2).
+ */
+export type PermissionCatalogItem = Schemas['PermissionCatalogItem'];
+
 /** Користувач; ані хеша пароля, ані солі тут немає за побудовою (ФВ-6.11). */
 export type UserView = Schemas['UserView'];
 

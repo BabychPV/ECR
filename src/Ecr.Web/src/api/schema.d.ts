@@ -2837,6 +2837,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Повний каталог системних прав, включно з тими, яких не має жодна роль.
+         *     Право `Security.ManageRoles`.
+         * @description ⛔ До появи цього маршруту клієнт складав перелік прав перетином того,
+         *     що вже оголошено в наявних ролях: право без жодного носія не можна було
+         *     призначити НІКОМУ — форма створення ролі його просто не показувала
+         *     (директива №11, трек T2, `#19`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermissionCatalogItem"][];
+                        "text/json": components["schemas"]["PermissionCatalogItem"][];
+                        "text/plain": components["schemas"]["PermissionCatalogItem"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects": {
         parameters: {
             query?: never;
@@ -8741,6 +8786,16 @@ export interface components {
          * @enum {unknown}
          */
         PeriodState: "Scheduled" | "Open" | "Grace" | "Closed";
+        /** @description Право з ПОВНОГО каталогу системи (`sec.Permission`). */
+        PermissionCatalogItem: {
+            /** @description Код права; саме він перевіряється в обробниках. */
+            code: string;
+            /** @description Група для угруповання в UI: `Template`, `Document`, `Calculation` тощо. */
+            group: string;
+            /** @description Небезпечне право (`ФВ-6.12`, `D-40`): у складені ролі не входить
+             *     за seed і видається поіменно, а не через матрицю. */
+            isDangerous: boolean;
+        };
         /** @description Нова ревізія презентаційного шару. */
         PresentationRevisionResponse: {
             /**
