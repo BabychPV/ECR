@@ -17,6 +17,21 @@ public interface ICellStore
     /// </summary>
     public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct);
 
+    /// <summary>
+    /// Зрізи кількох таблиць ОДНИМ запитом; екземпляр без жодної непорожньої
+    /// комірки в результат не потрапляє (шукай його ключ через
+    /// <see cref="IReadOnlyDictionary{TKey,TValue}.TryGetValue"/>, а не
+    /// індексатор).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Q-165 (аудит фази 2, продуктивність). <see cref="ReadSliceAsync"/> у
+    /// циклі по таблицях документа — це похід у базу на кожну з ~90 таблиць;
+    /// сам метод-виклювач (<c>ValidateDocumentHandler</c>) вже документує
+    /// бюджет 3с p95 на документ, у який ~90 запитів не вкладаються.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+        IReadOnlyList<long> tableInstanceIds, CancellationToken ct);
+
     /// <summary>Значення конкретних комірок.</summary>
     public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);

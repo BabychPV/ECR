@@ -47,8 +47,11 @@ public sealed class ValidateDocumentHandler(
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
-        var messages = new List<ValidationMessage>();
-
+        // ⛔ Q-165 (аудит фази 2, продуктивність): які таблиці мають правила
+        // з'ясовується з кешу метаданих (без походу в базу) ДО читання
+        // комірок і рядків — так у пакетні запити нижче йдуть лише таблиці,
+        // які реально валідуються, а не всі ~90 таблиць документа.
+        var toValidate = new List<(TableInstanceRef Instance, TableDef Table)>();
         foreach (var instance in instances)
         {
             var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
@@ -61,15 +64,34 @@ public sealed class ValidateDocumentHandler(
                 continue;
             }
 
-            var cells = await cellStore
-                .ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
+            toValidate.Add((instance, table));
+        }
 
-            // ⛔ Рядки екземпляра читаються ЯВНО: правило рівня рядка має
-            // назвати `RowKey`, а зі самих комірок його не взяти — рядок без
-            // жодного значення в зрізі не з'являється взагалі (`ФВ-3.8`), і
-            // саме він найчастіше і порушує «поле обов'язкове».
-            var rowIds = await rowStore
-                .GetRowIdsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
+        var instanceIds = toValidate.Select(t => t.Instance.TableInstanceId).ToList();
+
+        // ⚠ Обидва зрізи беруться ОДНИМ запитом на весь документ, а не по
+        // аркушах: бюджет — 3 с p95 на весь документ, і похід у базу на
+        // кожну таблицю у нього не вкладається (той самий принцип, що вже
+        // застосований вище до `GetTableInstancesAsync`).
+        var cellsByInstance = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
+
+        // ⛔ Рядки екземпляра читаються ЯВНО: правило рівня рядка має назвати
+        // `RowKey`, а зі самих комірок його не взяти — рядок без жодного
+        // значення в зрізі не з'являється взагалі (`ФВ-3.8`), і саме він
+        // найчастіше і порушує «поле обов'язкове».
+        var rowIdsByInstance = await rowStore
+            .GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
+
+        var messages = new List<ValidationMessage>();
+
+        foreach (var (instance, table) in toValidate)
+        {
+            var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var found)
+                ? found
+                : [];
+            var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var foundRows)
+                ? foundRows
+                : new Dictionary<string, long>(StringComparer.Ordinal);
 
             messages.AddRange(TableValidation.Run(engine, table, cells, rowIds));
         }
