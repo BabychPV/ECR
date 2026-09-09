@@ -505,7 +505,7 @@ export function TemplateVersionPage(): JSX.Element {
                 <Button
                   size="xs"
                   variant="default"
-                  color="red"
+                  color="statusError"
                   onClick={() => setDeprecating(true)}
                 >
                   {t('version.deprecate')}
@@ -580,7 +580,7 @@ export function TemplateVersionPage(): JSX.Element {
                           <Button
                             size="compact-xs"
                             variant="subtle"
-                            color="red"
+                            color="statusError"
                             loading={deleteSheetMutation.isPending}
                             onClick={() => deleteSheetMutation.mutate(sheet.code)}
                           >
@@ -644,7 +644,7 @@ export function TemplateVersionPage(): JSX.Element {
                                   <Button
                                     size="compact-xs"
                                     variant="subtle"
-                                    color="red"
+                                    color="statusError"
                                     loading={
                                       deleteTableMutation.isPending &&
                                       deleteTableMutation.variables?.code === table.code
@@ -752,7 +752,7 @@ export function TemplateVersionPage(): JSX.Element {
                                             <Button
                                               size="compact-xs"
                                               variant="subtle"
-                                              color="red"
+                                              color="statusError"
                                               loading={
                                                 deleteColumnMutation.isPending
                                                 && deleteColumnMutation.variables?.code === column.code
@@ -850,7 +850,7 @@ export function TemplateVersionPage(): JSX.Element {
                                                 <Button
                                                   size="compact-xs"
                                                   variant="subtle"
-                                                  color="red"
+                                                  color="statusError"
                                                   loading={
                                                     deleteRowMutation.isPending
                                                     && deleteRowMutation.variables?.rowKey === row.rowKey
@@ -1055,7 +1055,7 @@ export function TemplateVersionPage(): JSX.Element {
                 onChange={(event) => setDeleteRuleCode(event.currentTarget.value)}
               />
               <Button
-                color="red"
+                color="statusError"
                 variant="default"
                 disabled={!canEditSheets || deleteRuleCode.trim().length === 0}
                 loading={deleteValidationRuleMutation.isPending}

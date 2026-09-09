@@ -130,5 +130,5 @@ function details(report: HealthReport): Record<string, unknown> | null {
 function badgeColor(status: string): string {
   if (status === 'Healthy') return 'green';
 
-  return status === 'Degraded' ? 'yellow' : 'red';
+  return status === 'Degraded' ? 'statusWarning' : 'statusError';
 }

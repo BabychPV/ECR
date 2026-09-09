@@ -124,7 +124,7 @@ export function DocumentPage(): JSX.Element {
       // завершилася: сам перелік — на екрані, під заголовком. Число без
       // переліку не веде до жодної дії (`ФВ-14.24`).
       notifications.show({
-        color: errors.length === 0 ? 'green' : 'red',
+        color: errors.length === 0 ? 'green' : 'statusError',
         message:
           errors.length === 0
             ? t('document.validationClean')

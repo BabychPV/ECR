@@ -103,7 +103,7 @@ export function MappingPreviewPage(): JSX.Element {
                   менша, `Last` просто інша. Мовчати про це означало б, що
                   перегляд бреше рівно там, де на нього дивляться. */}
               {data.isTruncated && (
-                <Alert color="orange" mb="md" title={t('mapping.truncated')}>
+                <Alert color="statusWarning" mb="md" title={t('mapping.truncated')}>
                   {t('mapping.truncatedHint')}
                 </Alert>
               )}

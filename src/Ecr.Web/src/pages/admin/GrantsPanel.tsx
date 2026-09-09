@@ -51,7 +51,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
     },
     onError: (error) => {
       notifications.show({
-        color: 'red',
+        color: 'statusError',
         message: error instanceof EcrApiError ? error.message : String(error),
       });
     },
@@ -186,7 +186,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 <Table.Td>
                   <Button
                     size="compact-xs"
-                    color="red"
+                    color="statusError"
                     variant="subtle"
                     onClick={() => setDraft(draft.filter((_, i) => i !== index))}
                   >

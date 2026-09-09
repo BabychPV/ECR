@@ -16,7 +16,7 @@ import { EcrApiError } from '@/api/client';
  */
 export function showApiError(error: unknown): void {
   notifications.show({
-    color: 'red',
+    color: 'statusError',
     message: error instanceof EcrApiError ? error.message : String(error),
   });
 }

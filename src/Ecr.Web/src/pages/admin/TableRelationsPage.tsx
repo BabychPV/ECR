@@ -166,7 +166,7 @@ export function TableRelationsPage(): JSX.Element {
                         <Button
                           size="compact-xs"
                           variant="subtle"
-                          color="red"
+                          color="statusError"
                           loading={remove.isPending}
                           onClick={() => remove.mutate(relation.code)}
                         >
