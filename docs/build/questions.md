@@ -223,7 +223,7 @@
 | Q-175 | CONFLICT | `GetCalculationResultsHandler` (`GET …/calculation-results`) не перевіряє грант на проєкт — віддає результати методологій (речовини, обсяги) по будь-якому `documentId` | RESOLVED · `GetCalculationResultsHandler.cs`, PR #75 |
 | Q-176 | CONFLICT | `CreateDocumentHandler` не перевіряє грант на `projectId` із тіла запиту — можна завести документ у чужому проєкті | RESOLVED · `CreateDocumentHandler.cs`, PR #75 |
 | Q-177 | CONFLICT | `GetCellChangesHandler` (`GET /audit/cells`) не фільтрує за грантом на проєкт; без `documentId` — необмежений запит по всіх проєктах, включно зі старими/новими значеннями комірок | RESOLVED |
-| Q-178 | QUESTION | `ExcelExchangeHandlers` (import preview/apply) перевіряють лише RBAC на контролері, без гранта на проєкт — фактичний захист є глибше (`ExcelImporter`→`CanEditSliceAsync`), але це розбіжність із патерном `ExportDocumentHandler` (`A7-55`), не доведена вразливість | OPEN |
+| Q-178 | QUESTION | `ExcelExchangeHandlers` (import preview/apply) перевіряють лише RBAC на контролері, без гранта на проєкт — фактичний захист є глибше (`ExcelImporter`→`CanEditSliceAsync`), але це розбіжність із патерном `ExportDocumentHandler` (`A7-55`), не доведена вразливість | RESOLVED |
 | Q-179 | QUESTION | `ProjectsController`: Activate/Archive/Clone/ApprovalRoute перевіряють лише глобальний `Project.Manage`, без гранта на конкретний `projectId` — може бути навмисним (адмінське право), потребує підтвердження заміру | RESOLVED |
 | Q-180 | QUESTION | `DownloadExportHandler` не перевіряє грант на проєкт — захищений лише непередбачуваністю `exportId` (128-бітний GUID); задокументована, практично нездобувна прогалина | OPEN |
 | Q-181 | CONFLICT | `ConcurrencyTests.Запис_зі_застарілою_версією_рядка_відхиляється` не відхиляв жодного запису — дублював сусідній тест, справжнє відхилення доводить `PatchCellsTests` | RESOLVED · видалено дублікат, PR #74 |
@@ -7678,7 +7678,28 @@ Application-порту й самої реалізації в Infrastructure од
 послідовності дизайну (додати перевірку на вході, а не покладатися лише на
 захист у глибині), чи залишити як є, довірившись глибинному захисту.
 
-**Статус:** OPEN
+#### Закрито (рішення людини)
+
+Так, додати перевірку на вході — «додати handler-level grant check per
+ExportDocumentHandler pattern». `PreviewImportHandler`/`ApplyImportHandler`
+(`src/Ecr.Application/Documents/ExcelExchangeHandlers.cs`) тепер, як і
+`ExportDocumentHandler`, спершу перевіряють функціональне право через
+`Security.PermissionCheck.RequireAsync` (замість `ListTemplatesHandler.RequireAsync`,
+яка відкидала профіль), потім `access.CanReadDocumentAsync(profile,
+documentId, ct)`. Це не закриває доведену вразливість — глибинний захист
+(`ExcelImporter` → `CanEditSliceAsync` на кожен табличний блок) уже
+відмовляв чужим коміркам, — а узгоджує вхідну перевірку з дизайном
+`ExportDocumentHandler`.
+
+Тестів на ці два обробники раніше не існувало взагалі — додано
+`tests/Ecr.Application.Tests/Documents/ImportAccessTests.cs` (3 тести,
+за зразком `ExportAccessTests.cs`). Доказ мутацією (×2, по одному на
+обробник): тимчасово вимкнув перевірку гранта (`if (false && !read.IsAllowed)`) —
+відповідний тест (`Без_гранта_на_проєкт_перегляд_імпорту_відхиляється`,
+`Без_гранта_на_проєкт_застосування_імпорту_відхиляється`) падав, бо
+`AccessDeniedException` не кидався; відновлення — знову зелено (3/3).
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR #97
 
 ---
 
