@@ -243,6 +243,7 @@
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
 | Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
+| Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
 | Q-207 | CONFLICT | Директива №11, трек T11 (чотири самосуперечності пакета документації): `decisions.md` цитує «директива №04 §3» для двох різних тез; `07-checkpoints.md` каже «сім етапів `0`…`6`», хоча в самому документі є `ЕТАП 7` і згадка `ЕТАП 8`; шапка `02-requirements.md` підсумовує 215, фактичних листових вимог — 253; `04-environment.md`/`09-commands.md` стверджували, що інтеграційні тести виключені з `dotnet test` за замовчуванням, а `verify-all.ps1` жодного фільтра `Category` не застосовує | RESOLVED |
 | Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
@@ -8825,6 +8826,78 @@ Engine достатньо близька до 2024 R2, щоб ця схема б
 `docs/build/roadmap.md` — знято те саме формулювання.
 
 **Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #114
+
+---
+
+### Q-203 · CONFLICT · Директива №11, трек T7 (`#38` автозбереження, `#43` AllowWithConfirmation), 2026-09-10
+
+**Де:** `src/Ecr.Web/src/features/grid/useCellPatch.ts`,
+`src/Ecr.Web/src/features/grid/autosave.ts` (новий); `src/Ecr.Application/Security/EditDecision.cs`,
+`src/Ecr.Infrastructure/Security/AccessDecisionService.cs`,
+`src/Ecr.Application/Documents/{Dto/TableSliceDto.cs,GetTableSliceHandler.cs}`,
+`src/Ecr.Web/src/features/grid/{permissions.ts,DocumentGrid.tsx}`.
+
+**Що знайшлося — крок 1 (`#38`, автозбереження):** `useCellPatch.ts` обіцяв
+коментарем дебаунс ~500 мс і збереження при закритті вкладки — жоден із
+двох механізмів не існував у коді. Оператор, що закривав вкладку одразу
+після правки, втрачав її мовчки: `pending` жив лише в пам'яті компонента,
+без явного `Ctrl+S` чи кнопки «Зберегти» нічого не відправлялося.
+
+**Що знайшлося — крок 2 (`#43`, `AllowWithConfirmation`):** ФВ-2.16 називає
+три поведінки поза вікном доступу: заборонити, дозволити з позначкою
+(`Warn`), дозволити лише після ЯВНОГО підтвердження (`AllowWithConfirmation`).
+Третю `PeriodAccessRules.Evaluate` рахувала коректно, але
+`AccessDecisionService.Decide()` відкидав результат щоразу, коли він не
+блокує — гілка на `AllowWithConfirmation` просто не існувала, і рішення
+лишалося звичайним `Allow()`. Клієнт і сервер ніде не розрізняли
+`AllowWithConfirmation` від звичайного дозволу: жодного діалогу
+підтвердження не було в коді взагалі, попри те що значення enum і
+коментар при ньому (`Enums.cs`) вже давно закладали цю поведінку.
+
+**Рішення — реалізувати, не вилучити** (директива явно залишає вибір за
+виконавцем): значення `tinyint` у БД додане свідомо під цю вимогу,
+ФВ-2.16 прямо називає три окремі поведінки в `docs/tz/02-requirements.md`,
+і в репозиторії вже усталений патерн для точно такого дефекту — «правило
+пораховане, викликача немає» (`A7-51`, `H-23a`) — читається підключенням
+виклику, а не видаленням правила. Вилучення enum-значення потребувало б
+переглянути саму вимогу ФВ-2.16, а це рішення поза межами судження
+виконавця. Реалізовано лише як клієнтський UX-гейт, без окремого
+серверного примусу понад звичайну перевірку дозволу — той самий рівень
+довіри, що вже є для `Warn`; `Warn` (позначкова поведінка) цим PR не
+чіпалася — окрема прогалина, лишена як є.
+
+**Виправлення:**
+- `#38`: `autosave.ts` (новий) — `createDebouncer` (дебаунс 500 мс, не
+  троттлінг) і `registerUnloadFlush` (слухач `beforeunload`, без діалогу
+  «покинути сторінку?» — мета саме прибрати потребу питати оператора).
+  `useCellPatch.ts` — видимий `status` (`idle`/`saving`/`saved`/`error`) і
+  `sendPatchBeacon` (`fetch` із `keepalive: true`, бо `beforeunload` не чекає
+  на звичайний `fetch`). `DocumentGrid.tsx` — кожна правка перезапускає
+  дебаунс, `beforeunload` шле останній пакет через beacon, у панелі
+  інструментів — текстовий індикатор статусу.
+- `#43`: `EditDecision.AllowWithConfirmation(detail)` (новий фабричний
+  метод, `RequiresConfirmation: true`, завжди `false` при відмові);
+  `AccessDecisionService.Decide()` переносить прапорець із `outcome`.
+  `TableSliceDto.CellConfirmations` (новий рядок:колонка → пояснення для
+  діалогу), контракт перегенеровано (`contracts/openapi.snapshot.json`,
+  `docs/build/02-contracts.md`, `schema.d.ts`). `permissions.ts
+  confirmationOf()` + `DocumentGrid.tsx onBeforeedit`: значення блокується
+  синхронно, показується модалка, підтвердження веде тим самим шляхом
+  (`applyEditedValue`), що й звичайна правка — включно з дебаунсом кроку 1.
+
+**Тест (D-134):** крок 1 — `registerUnloadFlush` перетворений на no-op →
+`autosave.test.ts` падає (`expected spy to be called once, but got 0
+calls`); `createDebouncer.trigger()` перетворений на no-op → та сама
+причина для дебаунс-тесту. Відновлено → зелено. Крок 2 — гілка
+`AllowWithConfirmation` в `Decide()` вимкнена → `PeriodAccessSliceTests`
+падає на `Assert.True(decision.RequiresConfirmation)` (Actual: False);
+`GetTableSliceHandler`'s `if (decision.RequiresConfirmation)` вимкнено →
+`GetTableSliceTests` падає так само; `confirmationOf` завжди повертає
+`null` → три тести `permissions.test.ts` падають на
+`toBe(hint)`/`not.toBeNull()`. Усі відновлено → зелено.
+
+**Статус:** RESOLVED · `autosave.ts`, `EditDecision.cs`,
+`AccessDecisionService.cs`, `TableSliceDto.cs`, `DocumentGrid.tsx`, PR #119
 
 ---
 
