@@ -13,6 +13,14 @@ namespace Ecr.Domain.Entities.Workflow;
 /// ⛔ Зрізи **накопичуються**, а не перезаписуються: після повторного подання
 /// старий лишається назавжди і не перераховується ніколи (ФВ-9.17). Тому в
 /// класі немає жодного методу зміни — тільки конструктор.
+///
+/// ⚠ `NumericMode`/`CalendarMode` — `byte?`, а не `byte` (Q-155): обробник
+/// подання (`SubmitSheetHandler`) не має відкіля взяти чинний режим на
+/// момент виклику, і запис підставного значення («щоб не порожньо») там,
+/// де насправді нічого не відомо, — це фальсифікація факту, а не
+/// оформлення. `NULL` тут видно й перевіряється; підставне число виглядало
+/// б як зафіксований вибір (той самий урок, що й `TemplateVersionId: 0` у
+/// `W8`, тільки виявлений до того, як хтось на це значення поклався).
 /// </remarks>
 public sealed class SubmissionSnapshot : Entity<long>
 {
@@ -24,8 +32,14 @@ public sealed class SubmissionSnapshot : Entity<long>
     /// <param name="periodKey">Період.</param>
     /// <param name="templateVersionId">Версія шаблону на момент подання.</param>
     /// <param name="methodologyVersionsJson">Версії методологій.</param>
-    /// <param name="numericMode">Режим чисел (ФВ-9.9).</param>
-    /// <param name="calendarMode">Календарна конвенція (D-78).</param>
+    /// <param name="numericMode">
+    /// Режим чисел (ФВ-9.9); <c>null</c>, якщо обробник подання не провів
+    /// чинний режим на момент виклику (Q-155).
+    /// </param>
+    /// <param name="calendarMode">
+    /// Календарна конвенція (D-78); <c>null</c> з тієї самої причини, що й
+    /// <paramref name="numericMode"/> (Q-155).
+    /// </param>
     /// <param name="payloadJson">Значення комірок.</param>
     /// <param name="contentHash">Контрольна сума вмісту.</param>
     /// <param name="submittedAt">Момент подання.</param>
@@ -36,8 +50,8 @@ public sealed class SubmissionSnapshot : Entity<long>
         int periodKey,
         int templateVersionId,
         string methodologyVersionsJson,
-        byte numericMode,
-        byte calendarMode,
+        byte? numericMode,
+        byte? calendarMode,
         string payloadJson,
         byte[] contentHash,
         DateTime submittedAt,
@@ -71,11 +85,19 @@ public sealed class SubmissionSnapshot : Entity<long>
     /// <summary>Версії методологій у JSON.</summary>
     public string MethodologyVersionsJson { get; private set; } = null!;
 
-    /// <summary>Режим чисел (ФВ-9.9).</summary>
-    public byte NumericMode { get; private set; }
+    /// <summary>
+    /// Режим чисел (ФВ-9.9). <c>null</c> означає, що на момент подання чинний
+    /// режим не був відомий обробнику (Q-155) — це навмисна порожнеча, а не
+    /// втрачене значення: фіктивне число тут виглядало б як зафіксований
+    /// вибір і приховало б, що рішення насправді не приймалося.
+    /// </summary>
+    public byte? NumericMode { get; private set; }
 
-    /// <summary>Календарна конвенція (D-78).</summary>
-    public byte CalendarMode { get; private set; }
+    /// <summary>
+    /// Календарна конвенція (D-78). <c>null</c> з тієї самої причини, що й
+    /// <see cref="NumericMode"/> (Q-155).
+    /// </summary>
+    public byte? CalendarMode { get; private set; }
 
     /// <summary>Значення комірок у JSON.</summary>
     public string PayloadJson { get; private set; } = null!;

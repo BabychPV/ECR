@@ -308,7 +308,14 @@ public sealed class SubmitApproveTests
         // перевіряв: зріз, створений заради відповіді «за якою структурою це
         // подавали», не ніс структури взагалі (директива №09 `W8` п.5).
         Assert.Equal(TemplateVersion, snapshot.TemplateVersionId);
-        Assert.Equal((byte)CalendarMode.Actual, snapshot.CalendarMode);
+
+        // ⛔ `NumericMode`/`CalendarMode` — `null`, НЕ підставні `Legacy`/
+        // `Actual` (Q-155, RESOLVED). Обробник не знає чинного режиму на
+        // момент подання, і писати сюди правдоподібне число замість
+        // порожнечі — фальсифікація факту: воно виглядало б як зафіксований
+        // вибір, якого насправді ніхто не робив.
+        Assert.Null(snapshot.NumericMode);
+        Assert.Null(snapshot.CalendarMode);
         Assert.Equal(Now, snapshot.SubmittedAt);
         Assert.Contains("12500", snapshot.PayloadJson, StringComparison.Ordinal);
         Assert.Equal(64, snapshot.ContentHash.Length);

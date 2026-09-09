@@ -132,8 +132,15 @@ public interface IWorkflowStore
 /// <param name="PeriodKey">Період.</param>
 /// <param name="TemplateVersionId">Версія шаблону на момент подання.</param>
 /// <param name="MethodologyVersionsJson">Версії методологій.</param>
-/// <param name="NumericMode">Режим чисел (ФВ-9.9).</param>
-/// <param name="CalendarMode">Календарна конвенція (D-78).</param>
+/// <param name="NumericMode">
+/// Режим чисел (ФВ-9.9); <c>null</c>, якщо на момент подання чинний режим
+/// не проведено в обробник (Q-155) — навмисна порожнеча, не втрачене
+/// значення.
+/// </param>
+/// <param name="CalendarMode">
+/// Календарна конвенція (D-78); <c>null</c> з тієї самої причини, що й
+/// <paramref name="NumericMode"/> (Q-155).
+/// </param>
 /// <param name="PayloadJson">Значення комірок.</param>
 /// <param name="ContentHash">Контрольна сума вмісту.</param>
 /// <param name="SubmittedAt">Момент подання.</param>
@@ -144,8 +151,8 @@ public sealed record SubmissionSnapshotRecord(
     int PeriodKey,
     int TemplateVersionId,
     string? MethodologyVersionsJson,
-    byte NumericMode,
-    byte CalendarMode,
+    byte? NumericMode,
+    byte? CalendarMode,
     string PayloadJson,
     string ContentHash,
     DateTime SubmittedAt,
