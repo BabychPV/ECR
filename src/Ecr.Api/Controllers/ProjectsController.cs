@@ -123,7 +123,8 @@ public sealed class ProjectsController(
                 request.Year,
                 request.TemplateVersionId ?? 0,
                 request.PeriodPolicyId ?? 0,
-                ct)
+                ct,
+                request.CustomPeriodCount)
             .ConfigureAwait(false);
 
         return Created($"/api/v1/projects/{projectId}", new Contracts.ProjectIdResponse(projectId));
@@ -264,11 +265,17 @@ public sealed class ProjectsController(
 /// <param name="Year">Звітний рік; типово поточний.</param>
 /// <param name="TemplateVersionId">Версія шаблону, за якою заповнюються документи.</param>
 /// <param name="PeriodPolicyId">Політика зсувів періодів.</param>
+/// <param name="CustomPeriodCount">
+/// Кількість періодів для <c>PeriodKind = "Custom"</c> (T6/#36); для решти
+/// періодичностей ігнорується. Має ділити рік нарівно (1..12), інакше
+/// <c>ECR-PRD-4224</c>.
+/// </param>
 /// <remarks>
-/// ⚠ Три останні поля додані понад форму <c>05h</c>: без версії шаблону
-/// проєкт не має структури, без політики — меж періодів, а без року календар
-/// нема на що будувати. Позиційний префікс контракту не змінений
-/// (<c>D1-01</c>).
+/// ⚠ Чотири останні поля додані понад форму <c>05h</c>: без версії шаблону
+/// проєкт не має структури, без політики — меж періодів, без року календар
+/// нема на що будувати, а без кількості <c>Custom</c> лишався оголошеним у
+/// домені й недосяжним через API (T6/#36). Позиційний префікс контракту не
+/// змінений (<c>D1-01</c>).
 /// </remarks>
 public sealed record CreateProjectRequest(
     string Code,
@@ -277,7 +284,8 @@ public sealed record CreateProjectRequest(
     string PeriodKind,
     int? Year = null,
     int? TemplateVersionId = null,
-    int? PeriodPolicyId = null);
+    int? PeriodPolicyId = null,
+    int? CustomPeriodCount = null);
 
 /// <summary>Запит на заміну маршруту погодження.</summary>
 /// <param name="RoleIds">

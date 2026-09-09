@@ -950,6 +950,11 @@ USING (VALUES
     (N'periods.templateVersionHint',     N'en', N'Published versions only: a draft has no frozen structure.', 1),
     (N'periods.policy',                  N'en', N'Period policy', 1),
     (N'periods.policyHint',              N'en', N'Grace and hard-close offsets in days; they define when a period stops accepting data.', 1),
+    -- T6/#36: кількість періодів для `Custom` — без цього поля вид
+    -- `PeriodKind.Custom` був оголошений у домені й недосяжний через
+    -- інтерфейс, бо форма не мала звідки взяти кількість.
+    (N'periods.customCount',             N'en', N'Number of periods', 1),
+    (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
     (N'workflow.route',                  N'en', N'Approval route', 1),
     (N'workflow.routeHint',              N'en', N'Who approves, and in what order', 1),
     (N'workflow.routeEmptyHint',         N'en', N'No route means single-stage approval: one holder of the Approve level is enough. Removing every step returns the project to that.', 1),

@@ -20,6 +20,9 @@ public static class TestCategories
     public const string Stage6 = "Stage6";
     public const string Stage7 = "Stage7";
 
+    /// <summary>Директива №11 і далі: треки поза початковим сімиетапним планом.</summary>
+    public const string Stage8 = "Stage8";
+
     /// <summary>Потребує реального SQL Server; не входить у прогін за замовчуванням.</summary>
     public const string Integration = "Integration";
 

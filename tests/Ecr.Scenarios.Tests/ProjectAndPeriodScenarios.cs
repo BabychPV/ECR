@@ -161,14 +161,91 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
             activate.StatusCode);
     }
 
-    /// <summary>Створює проєкт із IANA-поясом і повертає його ідентифікатор.</summary>
-    internal static async Task<int> CreateProjectAsync(HttpClient client, string prefix, string timeZoneId)
+    /// <summary>
+    /// T6/#36. <c>PeriodKind.Custom</c> — раніше недосяжний через API:
+    /// обробник створення не приймав кількості періодів узагалі, а календар
+    /// (<c>GET …/periods</c>) завжди рахував customCount як <c>0</c>, тобто
+    /// відмовляв <c>ECR-PRD-4224</c> для БУДЬ-ЯКОГО Custom-проєкту.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "T6-36")]
+    public async Task Custom_періодичність_будує_календар_із_заданою_кількістю_періодів()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(app, "T636", ["Project.Manage", "Document.View", "Template.Edit"]);
+
+        var projectId = await CreateProjectAsync(
+            admin.Client, "T636", "Asia/Almaty", periodKind: "Custom", customPeriodCount: 6);
+
+        var periods = await admin.Client.GetAsync(new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, periods.StatusCode);
+
+        var calendar = await periods.Content.ReadFromJsonAsync<JsonElement>();
+        var items = calendar.GetProperty("periods").EnumerateArray().ToList();
+
+        // Шість періодів, послідовно занумерованих 1..6: раніше `Custom` не
+        // проходив узагалі (0 доступних раніше `customCount` завжди давав
+        // `ECR-PRD-4224` на першому ж `GET …/periods`). Точне покриття року
+        // датами перевіряють швидші доменні тести (`SequenceRangeTests`,
+        // `BuildPeriodCalendarTests`) — тут важливо, що ланцюжок
+        // API → домен → база довозить саме те число, яке ввів користувач.
+        Assert.Equal(6, items.Count);
+        Assert.Equal(
+            [1, 2, 3, 4, 5, 6],
+            items.Select(p => p.GetProperty("sequence").GetInt32()).Order());
+    }
+
+    /// <summary>
+    /// T6/#36 — D-134. Кількість, що НЕ ділить рік нарівно, відхиляється при
+    /// створенні, а не мовчки дає зламаний календар пізніше.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "T6-36")]
+    public async Task D_134_Custom_кількість_5_відхиляється_при_створенні()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(app, "T636bad", ["Project.Manage", "Document.View", "Template.Edit"]);
+
+        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, "T636bad");
+        var policyId = await FirstPeriodPolicyIdAsync(admin.Client);
+
+        var create = await admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/projects", UriKind.Relative),
+            new
+            {
+                code = $"T636bad_{Guid.NewGuid():N}"[..20],
+                nameL10n = new Dictionary<string, string> { ["en"] = "T636bad project" },
+                timeZoneId = "Asia/Almaty",
+                periodKind = "Custom",
+                year = DateTime.UtcNow.Year,
+                templateVersionId = versionId,
+                periodPolicyId = policyId,
+                customPeriodCount = 5,
+            });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, create.StatusCode);
+        var body = await create.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-PRD-4224", body.GetProperty("errorCode").GetString());
+    }
+
+    /// <summary>Перша політика періодів, доступна для вибору (seed завжди має ECR-Standard).</summary>
+    private static async Task<int> FirstPeriodPolicyIdAsync(HttpClient client)
     {
         var policiesResponse = await client.GetAsync(new Uri("/api/v1/projects/period-policies", UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, policiesResponse.StatusCode);
         var policies = await policiesResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(policies.GetArrayLength() > 0, "seed не завів жодної doc.PeriodPolicy — ECR-Standard відсутня");
-        var policyId = policies[0].GetProperty("id").GetInt32();
+        return policies[0].GetProperty("id").GetInt32();
+    }
+
+    /// <summary>Створює проєкт із IANA-поясом і повертає його ідентифікатор.</summary>
+    internal static async Task<int> CreateProjectAsync(
+        HttpClient client, string prefix, string timeZoneId,
+        string periodKind = "Monthly", int? customPeriodCount = null)
+    {
+        var policyId = await FirstPeriodPolicyIdAsync(client);
 
         // ⚠ `TemplateVersionId` типізований як `int?` (опційний, ФВ-1.2), але
         // РЕАЛЬНА поведінка інша: без версії обробник відмовляє з
@@ -186,10 +263,11 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = $"{prefix} project" },
                 timeZoneId,
-                periodKind = "Monthly",
+                periodKind,
                 year = DateTime.UtcNow.Year,
                 templateVersionId = versionId,
                 periodPolicyId = policyId,
+                customPeriodCount,
             });
 
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);

@@ -7513,6 +7513,13 @@ export interface components {
         CreateProjectRequest: {
             /** @description Код проєкту. */
             code: string;
+            /**
+             * Format: int32
+             * @description Кількість періодів для `PeriodKind = "Custom"` (T6/#36); для решти
+             *     періодичностей ігнорується. Має ділити рік нарівно (1..12), інакше
+             *     `ECR-PRD-4224`.
+             */
+            customPeriodCount?: null | number;
             /** @description Назва мовами каталогу. */
             nameL10n: {
                 [key: string]: string;

@@ -118,7 +118,6 @@ public sealed record PeriodPolicyDto(
     int GraceOffsetDays,
     int HardCloseOffsetDays,
     int YearGraceOffsetDays);
-
 /// <summary>Створення проєкту. Право <c>Project.Manage</c>.</summary>
 public sealed class CreateProjectHandler(
     IPeriodStore periods,
@@ -140,9 +139,15 @@ public sealed class CreateProjectHandler(
     /// <param name="year">Звітний рік; <c>null</c> — поточний **у поясі майданчика**.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
     /// <param name="periodPolicyId">Політика періодів.</param>
+    /// <param name="customPeriodCount">
+    /// Кількість періодів для <see cref="PeriodKind.Custom"/> (T6/#36);
+    /// ігнорується для решти періодичностей.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="DomainException">
-    /// <c>ECR-CFG-4221</c> — пояс порожній, невідомий або не є ідентифікатором IANA.
+    /// <c>ECR-CFG-4221</c> — пояс порожній, невідомий або не є ідентифікатором IANA;
+    /// <c>ECR-PRD-4224</c> — <paramref name="customPeriodCount"/> поза межами
+    /// 1..12 або не ділить рік нарівно (лише для <see cref="PeriodKind.Custom"/>).
     /// </exception>
     public async Task<int> HandleAsync(
         string code,
@@ -152,7 +157,8 @@ public sealed class CreateProjectHandler(
         int? year,
         int templateVersionId,
         int periodPolicyId,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? customPeriodCount = null)
     {
         ArgumentNullException.ThrowIfNull(name);
 
@@ -199,6 +205,13 @@ public sealed class CreateProjectHandler(
                 "ECR-PRD-0422", "Проєкт неможливо створити без політики періодів.");
         }
 
+        // ⛔ T6/#36: перевіряється ТУТ, а не відкладається до першого
+        // `GET …/periods`. `PeriodCalendar.CountFor` кидає `ECR-PRD-4224`, якщо
+        // кількість поза 1..12 або не ділить рік нарівно — а для решти
+        // періодичностей (`Monthly`/`Quarterly`/`Yearly`) аргумент просто
+        // ігнорується, тож виклик безпечний завжди.
+        var validatedCustomCount = Domain.Services.PeriodCalendar.CountFor(periodKind, customPeriodCount ?? 0);
+
         var project = new Project(
             EcrCode.Create(code),
             new LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
@@ -210,7 +223,12 @@ public sealed class CreateProjectHandler(
 
             // Перевірене значення, а не вхідний рядок: у базу має лягти рівно
             // те, за чим порахований `reportingYear` вище.
-            zone);
+            zone,
+
+            // Зберігається лише для Custom: для решти періодичностей кількість
+            // визначає сам `PeriodKind`, і зберігати тут щось означало б давати
+            // друге джерело істини про те саме число.
+            periodKind == PeriodKind.Custom ? validatedCustomCount : null);
 
         await periods.AddProjectAsync(project, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

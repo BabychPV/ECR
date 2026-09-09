@@ -1019,6 +1019,14 @@
             "description": "Код проєкту.",
             "type": "string"
           },
+          "customPeriodCount": {
+            "description": "Кількість періодів для `PeriodKind = \"Custom\"` (T6/#36); для решти\nперіодичностей ігнорується. Має ділити рік нарівно (1..12), інакше\n`ECR-PRD-4224`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "nameL10n": {
             "additionalProperties": {
               "type": "string"

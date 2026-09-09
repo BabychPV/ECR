@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -11,8 +12,26 @@ public sealed class Project : Entity<int>
 
     private Project() { }
 
+    /// <param name="code">Код проєкту.</param>
+    /// <param name="name">Назва мовами каталогу.</param>
+    /// <param name="periodStart">Перший день проєкту.</param>
+    /// <param name="periodEnd">Останній день проєкту.</param>
+    /// <param name="templateVersionId">Версія шаблону, за якою заповнюються документи.</param>
+    /// <param name="periodKind">Періодичність.</param>
+    /// <param name="periodPolicyId">Політика зсувів періодів.</param>
+    /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA.</param>
+    /// <param name="customPeriodCount">
+    /// Кількість періодів для <see cref="Enums.PeriodKind.Custom"/> (T6/#36);
+    /// для решти періодичностей ігнорується. Зберігається В
+    /// <see cref="ExternalSettingsJson"/>, а не окремою колонкою: колонка вже
+    /// існує, задокументована як «разові налаштування, зібрані ззовні при
+    /// створенні» — рівно цей випадок, — і завести під одне ціле число нову
+    /// колонку означало б міграцію схеми заради значення, для якого вже є
+    /// призначене місце.
+    /// </param>
     public Project(EcrCode code, LocalizedText name, DateOnly periodStart, DateOnly periodEnd,
-                   int templateVersionId, PeriodKind periodKind, int periodPolicyId, string timeZoneId)
+                   int templateVersionId, PeriodKind periodKind, int periodPolicyId, string timeZoneId,
+                   int? customPeriodCount = null)
     {
         Code = code.Value;
         NameL10n = name;
@@ -31,6 +50,10 @@ public sealed class Project : Entity<int>
         Status = ProjectStatus.Draft;
         CurrentPeriodMode = CurrentPeriodMode.Auto;
         YearGraceOffsetDays = 45;
+
+        ExternalSettingsJson = customPeriodCount is { } count
+            ? JsonSerializer.Serialize(new ExternalSettingsPayload(count))
+            : null;
     }
 
     public string Code { get; private set; } = null!;
@@ -73,6 +96,21 @@ public sealed class Project : Entity<int>
 
     /// <summary>Разові налаштування, зібрані ззовні при створенні. **Не постійна залежність.**</summary>
     public string? ExternalSettingsJson { get; private set; }
+
+    /// <summary>
+    /// Кількість періодів для <see cref="Enums.PeriodKind.Custom"/> (T6/#36);
+    /// <c>null</c> для решти періодичностей.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обчислюється з <see cref="ExternalSettingsJson"/>, а не власною
+    /// колонкою. Get-only властивість без бекінг-поля EF Core не мапить (той
+    /// самий прийом, що й <see cref="Period.Key"/>) — тому додавання цього
+    /// поля не потребує міграції схеми: значення живе в колонці, яка вже є.
+    /// </remarks>
+    public int? CustomPeriodCount
+        => ExternalSettingsJson is { } json
+            ? JsonSerializer.Deserialize<ExternalSettingsPayload>(json)?.CustomPeriodCount
+            : null;
 
     public ProjectStatus Status { get; private set; }
 
@@ -248,4 +286,12 @@ public sealed class Project : Entity<int>
 
     /// <summary>Перевіряє, що дата належить проєкту (ФВ-1.11).</summary>
     public bool ContainsDate(DateOnly date) => date >= PeriodStart && date <= PeriodEnd;
+
+    /// <summary>Форма <see cref="ExternalSettingsJson"/> (T6/#36).</summary>
+    /// <remarks>
+    /// ⚠ Один параметр сьогодні, а не довільний словник: інших разових
+    /// налаштувань цей клас поки не використовує, і поле для них заводять,
+    /// коли з'явиться друге, а не наперед.
+    /// </remarks>
+    private sealed record ExternalSettingsPayload(int? CustomPeriodCount);
 }
