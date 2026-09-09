@@ -62,21 +62,25 @@ public sealed class GetCurrentUserHandler(IAccessDecisionService access, ICurren
     /// <summary>Рівень гранта на проєкт — для швидкої перевірки на клієнті.</summary>
     /// <param name="view">Проєкція профілю.</param>
     /// <param name="projectId">Проєкт.</param>
+    /// <remarks>
+    /// Саме правило («заборона виграє, інакше грант, інакше None») тут не
+    /// реалізується — воно живе рівно в одному місці,
+    /// <see cref="AccessProfile.Resolve"/> (<c>Q-188</c>). Тут лише
+    /// адаптація: <c>CurrentUserView</c> — серіалізована у рядки форма
+    /// (потрібна для JSON-відповіді клієнту), тож грант доводиться
+    /// розпарсити назад в <see cref="GrantLevel"/> перед передачею в
+    /// спільне рішення.
+    /// </remarks>
     public static GrantLevel LevelForProject(CurrentUserView view, int projectId)
     {
         ArgumentNullException.ThrowIfNull(view);
 
         var key = $"{ResourceKind.Project}:{projectId}";
 
-        // Заборона виграє на будь-якому рівні (ФВ-6.6) — і на клієнті теж, бо
-        // інакше UI показував би доступним те, що сервер відхилить.
-        if (view.Denies.Contains(key))
-        {
-            return GrantLevel.None;
-        }
+        var grant = view.Grants.TryGetValue(key, out var raw) && Enum.TryParse<GrantLevel>(raw, out var parsed)
+            ? (GrantLevel?)parsed
+            : null;
 
-        return view.Grants.TryGetValue(key, out var level) && Enum.TryParse<GrantLevel>(level, out var parsed)
-            ? parsed
-            : GrantLevel.None;
+        return AccessProfile.Resolve(view.Denies.Contains(key), grant);
     }
 }
