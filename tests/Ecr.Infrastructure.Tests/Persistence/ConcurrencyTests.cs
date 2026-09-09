@@ -61,24 +61,18 @@ public sealed class ConcurrencyTests(SqlServerFixture sql)
         Assert.Equal(before[doc.RowIds[2]], after[doc.RowIds[2]]);
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Запис_зі_застарілою_версією_рядка_відхиляється()
-    {
-        var (doc, store, rows) = await ArrangeAsync();
-        var stale = await VersionsAsync(rows, doc);
-
-        // Хтось інший уже записав у цей рядок.
-        await store.ApplyAsync(Change(doc, rowIndex: 0, value: 1m), CancellationToken.None);
-
-        var current = await VersionsAsync(rows, doc);
-        var rowKey = rows[doc.RowIds[0]];
-
-        // Клієнт приходить із версією, яку прочитав ДО чужого запису.
-        Assert.NotEqual(stale[doc.RowIds[0]], current[doc.RowIds[0]]);
-        Assert.NotEqual(stale[doc.RowIds[0]], await RowVersionAsync(doc, rowKey));
-    }
+    // ⛔ Аудит фази 2 (чесність тестів): тут стояв
+    // `Запис_зі_застарілою_версією_рядка_відхиляється`, який не відхиляв
+    // жодного запису — `NormalizedCellStore.ApplyAsync`/`CellChangeSet` на
+    // цьому шарі взагалі не несе `BaseVersion`, і тест лише повторював
+    // перевірку сусіднього `Зміна_комірки_піднімає_RowVersion_рядка` (що
+    // версія змінюється після запису), називаючи це «відхиленням». Саме
+    // відхилення застарілої версії — рішення ПРИКЛАДНОГО шару
+    // (`PatchCellsHandler`), і воно вже доведено реальним викликом
+    // обробника в `PatchCellsTests.Конфлікт_в_одному_рядку_відхиляє_весь_батч_із_переліком_конфліктів`
+    // (перевірено мутацією окремо: вимкнення порівняння версій у
+    // `PatchCellsHandler` валить саме цей тест). Дублювати неіснуючою на
+    // цьому шарі перевіркою сенсу не було.
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

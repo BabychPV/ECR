@@ -1,5 +1,4 @@
 ﻿// tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs
-using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -71,8 +70,23 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-5.20a")]
-    public async Task Програвший_бачить_актуальний_стан_і_відмовляє_з_причиною()
+    public async Task Програвший_бачить_актуальний_стан_після_гонки()
     {
+        // ⛔ Аудит фази 2 (чесність тестів): попередня версія цього тесту
+        // ІМІТУВАЛА відмову — `seen.State == PeriodState.Closed ? throw ... :
+        // 0` — замість виклику `ReopenDocumentHandler`. Умова, яку сам тест
+        // щойно перевірив рядком вище, лише повторно кидала виняток: тест
+        // проходив би незалежно від того, чи справжній обробник узагалі
+        // перевіряє стан періоду. Доведено мутацією: вимкнення реальної
+        // перевірки в `ReopenDocumentHandler` (`if (false && period.State ==
+        // PeriodState.Closed)`) не міняло результат цього тесту.
+        //
+        // Справжню відмову з причиною ECR-PRD-4223 через РЕАЛЬНИЙ
+        // `ReopenDocumentHandler` доводить
+        // `SubmitApproveTests.Reopen_документа_при_закритому_періоді_відхиляється_ECR_PRD_4223`
+        // (мокований `IWorkflowStore`, реальний обробник). Це видно тут
+        // лишається унікальне: що СЕРІАЛІЗОВАНА через SQL `UPDLOCK` гонка
+        // справді віддає програвшому СВІЖИЙ рядок, а не кешований застарілий.
         var (documentId, periodId) = await ArrangeAsync(PeriodState.Grace).ConfigureAwait(true);
 
         // Задача станів закриває період і комітить.
@@ -85,24 +99,14 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             await tx.CommitAsync().ConfigureAwait(true);
         }
 
-        // Reopen документа заходить після і бачить АКТУАЛЬНИЙ стан.
+        // Reopen документа заходить після і бачить АКТУАЛЬНИЙ стан — не той,
+        // що був на момент початку своєї транзакції.
         await using var loser = CreateContext();
         await using var loserTx = await loser.Database.BeginTransactionAsync().ConfigureAwait(true);
         var seen = await LockAsync(loser, documentId).ConfigureAwait(true);
 
         Assert.Equal(PeriodState.Closed, seen.State);
 
-        // ⚠ Відмова з причиною, а не тиха правка: спершу Reopen ПЕРІОДУ, потім
-        // аркуша (ФВ-5.20a). Інакше зміна пішла б у період, який уже віддали
-        // назовні.
-        var error = Assert.Throws<BusinessRuleException>(() =>
-            seen.State == PeriodState.Closed
-                ? throw new BusinessRuleException(
-                    "ECR-PRD-4223",
-                    $"Період {PeriodKeyValue} закрито: спершу відкрийте період, потім аркуш.")
-                : 0);
-
-        Assert.Equal("ECR-PRD-4223", error.ErrorCode);
         await loserTx.RollbackAsync().ConfigureAwait(true);
 
         await using var check = CreateContext();
