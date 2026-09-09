@@ -8449,7 +8449,7 @@ Ecr.sln` проти локального SQLEXPRESS (Docker недоступни
 `AccessProfileCacheTests` (4 тести) і `PeriodAccessSliceTests` (10
 тестів) — без регресій, `Ecr.sln` збирається цілком.
 
-**Статус:** RESOLVED · PR #TBD
+**Статус:** RESOLVED · PR #111
 
 ---
 
