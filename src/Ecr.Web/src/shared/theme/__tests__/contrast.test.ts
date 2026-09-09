@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { AA, contrast } from '../contrast';
-import { cellState, themeSurface } from '../theme';
+import { brand, cellState, themeSurface } from '../theme';
 
 // ⚠ Шлях від кореня проєкту, а не від import.meta.url: під jsdom
 // він не має схеми file:, і fileURLToPath кидає виняток.
@@ -53,9 +53,13 @@ describe('Контраст токенів (ФВ-14.17)', () => {
   });
 
   it('ФВ-14.15: кільце фокуса контрастне в обох темах', () => {
-    // `brand-6` у світлій, `brand-4` у темній — так задано в `motion.css`.
-    expect(contrast('#5474b4', themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
-    expect(contrast('#748dc1', themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
+    // `brand[6]` у світлій, `brand[4]` у темній — так задано в `motion.css`
+    // (`--mantine-color-brand-6` / `--mantine-color-brand-4`). Береться з
+    // `theme.ts`, а не літералом: інакше заміна плейсхолдерної палітри на
+    // фірмову NCOC не зрушила б цей тест ні на йоту, і він мовчки перевіряв
+    // би контраст кольору, якого вже немає в застосунку.
+    expect(contrast(brand[6], themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
+    expect(contrast(brand[4], themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
   });
 
   it('обчислення контрасту дає відомі значення', () => {
