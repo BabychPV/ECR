@@ -63,6 +63,19 @@ public interface IRowStore
         IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Поточні версії рядків кількох таблиць ОДНИМ запитом; екземпляр без
+    /// жодного рядка в результат не потрапляє.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Q-168 (аудит фази 2, продуктивність), той самий випадок, що й
+    /// <see cref="GetRowIdsBatchAsync"/> поруч: <see cref="GetRowVersionsAsync"/>
+    /// у циклі по таблицях книги імпорту коштує другого походу в базу НА
+    /// КОЖНУ з ~90 таблиць.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> GetRowVersionsBatchAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Створює рядок і повертає його <c>Id</c>.
     /// </summary>
     /// <remarks>

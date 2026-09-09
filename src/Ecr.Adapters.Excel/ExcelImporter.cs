@@ -7,6 +7,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Adapters.Excel;
 
@@ -25,8 +26,19 @@ public sealed class ExcelImporter(
     ICurrentUser currentUser,
     IImportPreviewStore previews,
     PatchCellsHandler patch,
-    ImportDiffBuilder diffBuilder) : IExcelImporter
+    ImportDiffBuilder diffBuilder,
+    ICellStore cellStore,
+    IRowStore rowStore) : IExcelImporter
 {
+    /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
+    private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
+        new Dictionary<string, long>(StringComparer.Ordinal);
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyVersions =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    private static readonly IReadOnlyList<CellRecord> EmptySlice = [];
+
     /// <summary>
     /// Скільки живе побудований diff.
     /// </summary>
@@ -78,6 +90,13 @@ public sealed class ExcelImporter(
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
 
+        // ⛔ Q-168 (аудит фази 2, продуктивність). Таблиці з файлу, яких немає
+        // в чинній версії шаблону, відхиляються ТУТ, ДО пакетного читання —
+        // інакше довелося б або читати рядки/комірки для екземпляра, який
+        // діагностика все одно відкине, або гілкувати пакетний запит під
+        // список, що звужується в циклі.
+        var validBlocks = new List<(ExcelTableBlock Block, TableDef Table)>(map.Tables.Count);
+
         foreach (var block in map.Tables)
         {
             if (!tables.TryGetValue(block.TableDefId, out var table))
@@ -89,6 +108,22 @@ public sealed class ExcelImporter(
                 continue;
             }
 
+            validBlocks.Add((block, table));
+        }
+
+        var period = new PeriodKey(map.PeriodKey);
+        var tableInstanceIds = validBlocks.ConvertAll(v => v.Block.TableInstanceId);
+
+        // ⛔ Три пакетні запити на ВСЮ книгу замість трьох на КОЖНУ таблицю
+        // (~90 у типовому шаблоні): GetRowIdsBatchAsync і GetRowVersionsBatchAsync
+        // поруч, ReadSlicesAsync — той самий прийом, що вже закрив Q-165 для
+        // ValidateDocumentHandler.
+        var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
+        var versionsBatch = await rowStore.GetRowVersionsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
+        var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
+
+        foreach (var (block, table) in validBlocks)
+        {
             var worksheet = workbook.Worksheet(block.SheetName);
 
             // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
@@ -98,9 +133,15 @@ public sealed class ExcelImporter(
                 .CanEditSliceAsync(profile, block.TableInstanceId, ct)
                 .ConfigureAwait(false);
 
-            var diff = await diffBuilder
-                .BuildAsync(worksheet, block, map.PeriodKey, table, decisions, lookups, ct)
-                .ConfigureAwait(false);
+            var rowIds = rowIdsBatch.GetValueOrDefault(
+                block.TableInstanceId, (IReadOnlyDictionary<string, long>)EmptyRowIds);
+            var versions = versionsBatch.GetValueOrDefault(
+                block.TableInstanceId, (IReadOnlyDictionary<string, string>)EmptyVersions);
+            var current = slicesBatch.GetValueOrDefault(
+                block.TableInstanceId, (IReadOnlyList<CellRecord>)EmptySlice);
+
+            var diff = diffBuilder.Build(
+                worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current);
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
