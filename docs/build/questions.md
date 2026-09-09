@@ -242,6 +242,7 @@
 | Q-194 | CONFLICT | `DeleteRegistryEntryHandler` (перевірка `ECR-REG-0409`, покритий тестом) без жодного `[HttpDelete]` — помилково заведений запис довідника не можна прибрати через API взагалі | OPEN |
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
+| Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
 | Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
 
@@ -8776,6 +8777,53 @@ doc-коментарем немає ні в `src/`, ні в тестах — з�
 не судження про реалізацію.
 
 **Статус:** OPEN
+
+---
+
+### Q-197 · CONFLICT · Директива №11 T1, 2026-09-09 · `PiSqlClientDataSource.DefaultCatalogQuery` читає неіснуючі колонки RTQP
+
+**Де:** `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs:44`
+(`DefaultCatalogQuery`).
+
+**Що знайшлося:** запит читав `a.UOM AS Uom, a.Type AS DataType` з
+`[Master].[Element].[Attribute]`. Обох колонок під цими іменами не існує.
+Офіційна AVEVA PI SQL DAS (RTQP Engine) Reference, Element schema
+(`docs.aveva.com/bundle/pi-sql-data-access-server-rtqp-engine/page/1016070.html`,
+станом на 2026-03-12) називає їх `UnitOfMeasure` і `ValueType`.
+Продуктивний експорт NCOC (`ECR_01_Air_PISqlClientExportedObjects.sql`,
+63 процедури) не суперечить: жодного входження `UOM`/`Type` у старому
+значенні. `a.Name` і `a.ElementID` — підтверджені окремо, не чіпалися.
+Другий запит у тому самому файлі (`[Master].[Element].[Value]` із
+псевдонімами `Ts`/`Val`/`Uom`) — синтаксично коректний, підтверджено
+офіційним прикладом, коду там не міняли.
+
+**Виправлення:** `a.UOM AS Uom` → `a.UnitOfMeasure AS Uom`, `a.Type AS
+DataType` → `a.ValueType AS DataType`. XML-коментар над
+`DefaultCatalogQuery` тепер цитує обидва джерела.
+
+**Тест (D-134):** новий `tests/Ecr.Adapters.Tests/PiAf/PiSqlClientDataSourceQueryTests.cs`
+стверджує точний текст запиту: `Contains("a.UnitOfMeasure")`,
+`Contains("a.ValueType")`, `DoesNotContain("a.UOM")`,
+`DoesNotContain("a.Type")` — саме в кваліфікованому вигляді (з `a.` і
+крапкою), бо голе `Contains("Type")` дало б хибнопозитивний тест на
+`"ValueType"`. Мутація: тимчасово повернуто `a.UOM`/`a.Type` — усі чотири
+тести впали з очікуваним повідомленням (`Sub-string not found` /
+`Sub-string found`); після відновлення правильних назв — знову зелені.
+
+**Не факт, а судження, де воно не моє:** чи встановлена в NCOC версія RTQP
+Engine достатньо близька до 2024 R2, щоб ця схема була чинною саме для
+них. Схема базових системних таблиць рідко міняється між версіями
+продукту такого класу — не вигадую відповідь, називаю залишок у
+`questions-for-customer.md` (`C-2`).
+
+**Документація того самого PR:** `docs/build/problems.md` (`P-11`) —
+колонки каталогу закриті без живого з'єднання, два дрібні пункти лишено
+відкритими; `docs/build/pk1-handover.md` `§6.4`, `§9` — знято рамку
+«блокує рівно одне»; `docs/build/questions-for-customer.md` (`C-2`) —
+звужено до версії RTQP Engine і двох дрібних пунктів;
+`docs/build/roadmap.md` — знято те саме формулювання.
+
+**Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #114
 
 ---
 
