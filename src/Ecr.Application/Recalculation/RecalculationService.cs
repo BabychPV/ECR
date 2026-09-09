@@ -220,15 +220,24 @@ public sealed class RecalculationService(
             .GetTableInstancesAsync(instance.DocumentId, periodKey, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Q-166 (аудит фази 2, продуктивність): ОДИН пакетний запит на
+        // рядки ВСІХ таблиць документа замість запиту на кожну — цей прогін
+        // виконується на КОЖНЕ редагування комірки (через
+        // `FormulaRecalculationJob`), а не лише на повний перерахунок, тож
+        // N+1 тут коштує найдорожче серед усіх знахідок цього виміру.
+        var rowIdsBatch = await rowStore
+            .GetRowIdsBatchAsync([.. instances.Select(t => t.TableInstanceId)], periodKey, ct)
+            .ConfigureAwait(false);
+
         var rowIdsByTable = new Dictionary<int, IReadOnlyDictionary<string, long>>();
         var instanceByTable = new Dictionary<int, long>();
 
         foreach (var table in instances)
         {
             instanceByTable[table.TableDefId] = table.TableInstanceId;
-            rowIdsByTable[table.TableDefId] = await rowStore
-                .GetRowIdsAsync(table.TableInstanceId, periodKey, ct)
-                .ConfigureAwait(false);
+            rowIdsByTable[table.TableDefId] = rowIdsBatch.TryGetValue(table.TableInstanceId, out var found)
+                ? found
+                : new Dictionary<string, long>(StringComparer.Ordinal);
         }
 
         var plan = RecalculationPlanBuilder.Build(snapshot, dependencies, rowIdsByTable, periodKey);
@@ -499,13 +508,25 @@ public sealed class RecalculationService(
         CancellationToken ct)
     {
         var instances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var instanceIds = instances.Select(t => t.TableInstanceId).ToList();
+
+        // ⛔ Q-166 (аудит фази 2, продуктивність): той самий випадок, що й у
+        // `RunAsync` вище — ОДИН пакетний запит на рядки і на комірки ВСІХ
+        // таблиць документа за період замість запиту на кожну; викликається
+        // на кожне редагування комірки (`LoadValuesAsync` читає ДВА періоди).
+        var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
+        var cellsBatch = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
 
         foreach (var table in instances)
         {
-            var keys = await rowStore.GetRowIdsAsync(table.TableInstanceId, periodKey, ct).ConfigureAwait(false);
+            var keys = rowIdsBatch.TryGetValue(table.TableInstanceId, out var foundKeys)
+                ? foundKeys
+                : new Dictionary<string, long>(StringComparer.Ordinal);
             var byId = keys.ToDictionary(pair => pair.Value, pair => pair.Key);
 
-            var cells = await cellStore.ReadSliceAsync(table.TableInstanceId, ct).ConfigureAwait(false);
+            var cells = cellsBatch.TryGetValue(table.TableInstanceId, out var foundCells)
+                ? foundCells
+                : [];
 
             foreach (var cell in cells)
             {
