@@ -187,6 +187,14 @@ public sealed class ConsistencyCheckJob(
     /// перетворив би журнал на копії однієї проблеми — і справжня нова
     /// знахідка потонула б серед них.
     /// </remarks>
+    /// <summary>Скільки знахідок іде в один <c>MERGE</c>.</summary>
+    /// <remarks>
+    /// SQL Server приймає максимум 2100 параметрів на запит, а тут їх 6 на
+    /// знахідку. 300 × 6 = 1800 — із запасом на службові (той самий розрахунок,
+    /// що й <c>NormalizedCellStore.MergeChunkSize</c>).
+    /// </remarks>
+    private const int IssueChunkSize = 300;
+
     private async Task WriteIssuesAsync(IReadOnlyList<ConsistencyIssue> issues, CancellationToken ct)
     {
         if (issues.Count == 0)
@@ -194,29 +202,55 @@ public sealed class ConsistencyCheckJob(
             return;
         }
 
+        // ⛔ Q-169 (аудит фази 2, продуктивність): ОДИН MERGE на чанк замість
+        // окремого `IF NOT EXISTS...INSERT` на кожну знахідку — та сама
+        // ідемпотентність за трійкою (RuleCode, EntityType, EntityId) серед
+        // НЕЗАКРИТИХ знахідок, лише пакетна умова замість запиту на рядок.
         var now = clock.UtcNow;
 
-        foreach (var issue in issues)
+        foreach (var chunk in issues.Chunk(IssueChunkSize))
         {
-            await db.Database.ExecuteSqlRawAsync(
-                """
-                IF NOT EXISTS (
-                    SELECT 1 FROM aud.ConsistencyIssue
-                    WHERE RuleCode = @rule AND EntityType = @type AND EntityId = @id
-                      AND ResolvedAt IS NULL)
-                INSERT INTO aud.ConsistencyIssue
-                    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
-                VALUES (@now, @severity, @rule, @type, @id, @message);
-                """,
-                [
-                    new SqlParameter("@now", now),
-                    new SqlParameter("@severity", issue.Severity),
-                    new SqlParameter("@rule", issue.RuleCode),
-                    new SqlParameter("@type", issue.EntityType),
-                    new SqlParameter("@id", issue.EntityId),
-                    new SqlParameter("@message", issue.Message),
-                ],
-                ct).ConfigureAwait(false);
+            var parameters = new List<SqlParameter>(chunk.Length * 6);
+            var values = new System.Text.StringBuilder();
+
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                var issue = chunk[i];
+
+                if (i > 0)
+                {
+                    values.Append(',');
+                }
+
+                values.Append(CultureInfo.InvariantCulture,
+                    $"(@now{i},@severity{i},@rule{i},@type{i},@id{i},@message{i})");
+
+                parameters.Add(new SqlParameter($"@now{i}", now));
+                parameters.Add(new SqlParameter($"@severity{i}", issue.Severity));
+                parameters.Add(new SqlParameter($"@rule{i}", issue.RuleCode));
+                parameters.Add(new SqlParameter($"@type{i}", issue.EntityType));
+                parameters.Add(new SqlParameter($"@id{i}", issue.EntityId));
+                parameters.Add(new SqlParameter($"@message{i}", issue.Message));
+            }
+
+            // ⚠ Конкатенація, а не `$"""..."""`: EF1002 забороняє інтерпольований
+            // рядок у `ExecuteSqlRawAsync` навіть коли підставляються лише
+            // ІМЕНА параметрів (`values` — плейсхолдери `@now0`..`@messageN`,
+            // не значення) — аналізатор не вміє довести це статично.
+            var sql =
+                "MERGE aud.ConsistencyIssue WITH (HOLDLOCK) AS target\n" +
+                "USING (VALUES " + values + ") AS source\n" +
+                "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)\n" +
+                "ON  target.RuleCode = source.RuleCode\n" +
+                "AND target.EntityType = source.EntityType\n" +
+                "AND target.EntityId = source.EntityId\n" +
+                "AND target.ResolvedAt IS NULL\n" +
+                "WHEN NOT MATCHED THEN INSERT\n" +
+                "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)\n" +
+                "    VALUES (source.DetectedAt, source.Severity, source.RuleCode,\n" +
+                "            source.EntityType, source.EntityId, source.Message);";
+
+            await db.Database.ExecuteSqlRawAsync(sql, parameters.ToArray(), ct).ConfigureAwait(false);
         }
     }
 
