@@ -230,6 +230,46 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         Assert.Equal("ECR-PRD-4224", body.GetProperty("errorCode").GetString());
     }
 
+    /// <summary>
+    /// T6/#37. CRUD політик періодів: до цього обробника завести чи змінити
+    /// політику можна було лише сідингом або рукою DBA.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "T6-37")]
+    public async Task Політика_періодів_створюється_і_редагується()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(app, "T637", ["Project.Manage"]);
+
+        var code = $"T637_{Guid.NewGuid():N}"[..20];
+        var create = await admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/projects/period-policies", UriKind.Relative),
+            new { code, openOffsetDays = 0, graceOffsetDays = 15, hardCloseOffsetDays = 45, yearGraceOffsetDays = 45 });
+
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var created = await create.Content.ReadFromJsonAsync<JsonElement>();
+        var policyId = created.GetProperty("id").GetInt32();
+
+        var update = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/projects/period-policies/{policyId}", UriKind.Relative),
+            new { openOffsetDays = 0, graceOffsetDays = 20, hardCloseOffsetDays = 90, yearGraceOffsetDays = 120 });
+
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        var updated = await update.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(90, updated.GetProperty("hardCloseOffsetDays").GetInt32());
+        Assert.Equal(120, updated.GetProperty("yearGraceOffsetDays").GetInt32());
+
+        // D-134: грейс довший за жорстке закриття — «неможливе значення».
+        var invalid = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/projects/period-policies/{policyId}", UriKind.Relative),
+            new { openOffsetDays = 0, graceOffsetDays = 100, hardCloseOffsetDays = 45, yearGraceOffsetDays = 45 });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+        var invalidBody = await invalid.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-PRD-4225", invalidBody.GetProperty("errorCode").GetString());
+    }
+
     /// <summary>Перша політика періодів, доступна для вибору (seed завжди має ECR-Standard).</summary>
     private static async Task<int> FirstPeriodPolicyIdAsync(HttpClient client)
     {

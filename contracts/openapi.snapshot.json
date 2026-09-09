@@ -1012,6 +1012,43 @@
         ],
         "type": "object"
       },
+      "CreatePeriodPolicyRequest": {
+        "description": "Запит на створення політики періодів (T6/#37).",
+        "properties": {
+          "code": {
+            "description": "Код політики; має бути унікальним.",
+            "type": "string"
+          },
+          "graceOffsetDays": {
+            "description": "Пільговий строк після кінця періоду.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hardCloseOffsetDays": {
+            "description": "Коли період закривається остаточно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openOffsetDays": {
+            "description": "Коли період відкривається від початку. Може бути від'ємним.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yearGraceOffsetDays": {
+            "description": "Пільговий строк після кінця року.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "openOffsetDays",
+          "graceOffsetDays",
+          "hardCloseOffsetDays",
+          "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
       "CreateProjectRequest": {
         "description": "Запит на створення проєкту.",
         "properties": {
@@ -6984,6 +7021,38 @@
         ],
         "type": "object"
       },
+      "UpdatePeriodPolicyRequest": {
+        "description": "Запит на зміну offsets наявної політики періодів (T6/#37).",
+        "properties": {
+          "graceOffsetDays": {
+            "description": "Пільговий строк після кінця періоду.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hardCloseOffsetDays": {
+            "description": "Коли період закривається остаточно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openOffsetDays": {
+            "description": "Коли період відкривається від початку. Може бути від'ємним.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yearGraceOffsetDays": {
+            "description": "Пільговий строк після кінця року.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "openOffsetDays",
+          "graceOffsetDays",
+          "hardCloseOffsetDays",
+          "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
       "UserIdResponse": {
         "description": "Створений користувач.",
         "properties": {
@@ -11150,6 +11219,198 @@
           }
         },
         "summary": "Політики періодів для форми створення проєкту. Право `Project.Manage`.",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "description": "⛔ До цього годі було завести політику інакше, ніж сідингом або рукою\nDBA: річний пільговий строк проєкту (`Project.YearGraceOffsetDays`)\nстояв літералом `45` незалежно від того, яку політику обрали.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePeriodPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePeriodPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePeriodPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює політику періодів. Право `Project.Manage` (T6/#37).",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/period-policies/{id}": {
+      "put": {
+        "description": "⚠ Проєкти, які вже посилаються на цю політику, підхоплюють нові offsets\nна наступному ідемпотентному `GET …/periods` — межі наявних\nперіодів перераховуються там щоразу (ФВ-1.5).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює offsets наявної політики періодів. Право `Project.Manage`\n(T6/#37).",
         "tags": [
           "Projects"
         ]

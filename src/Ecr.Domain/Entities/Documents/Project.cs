@@ -20,6 +20,16 @@ public sealed class Project : Entity<int>
     /// <param name="periodKind">Періодичність.</param>
     /// <param name="periodPolicyId">Політика зсувів періодів.</param>
     /// <param name="timeZoneId">Пояс майданчика — ідентифікатор IANA.</param>
+    /// <param name="yearGraceOffsetDays">
+    /// Пільговий строк на рік — днів після архівації, доки фізичне перенесення
+    /// в <c>arc.*</c> заборонене (<c>ArchiveJob</c>). Типово <c>45</c> —
+    /// значення, яке раніше стояло тут ЛІТЕРАЛОМ незалежно від
+    /// <paramref name="periodPolicyId"/> (T6/#37): дві політики з різним
+    /// <c>PeriodPolicy.YearGraceOffsetDays</c> давали проєктам ОДНАКОВИЙ
+    /// грейс. Тепер значення передає викликач — типово це
+    /// <c>PeriodPolicy.YearGraceOffsetDays</c> обраної політики
+    /// (<c>CreateProjectHandler</c>), а не постійна.
+    /// </param>
     /// <param name="customPeriodCount">
     /// Кількість періодів для <see cref="Enums.PeriodKind.Custom"/> (T6/#36);
     /// для решти періодичностей ігнорується. Зберігається В
@@ -31,7 +41,7 @@ public sealed class Project : Entity<int>
     /// </param>
     public Project(EcrCode code, LocalizedText name, DateOnly periodStart, DateOnly periodEnd,
                    int templateVersionId, PeriodKind periodKind, int periodPolicyId, string timeZoneId,
-                   int? customPeriodCount = null)
+                   int yearGraceOffsetDays = 45, int? customPeriodCount = null)
     {
         Code = code.Value;
         NameL10n = name;
@@ -49,7 +59,7 @@ public sealed class Project : Entity<int>
         TimeZoneId = SiteTimeZone.Create(timeZoneId);
         Status = ProjectStatus.Draft;
         CurrentPeriodMode = CurrentPeriodMode.Auto;
-        YearGraceOffsetDays = 45;
+        YearGraceOffsetDays = yearGraceOffsetDays;
 
         ExternalSettingsJson = customPeriodCount is { } count
             ? JsonSerializer.Serialize(new ExternalSettingsPayload(count))

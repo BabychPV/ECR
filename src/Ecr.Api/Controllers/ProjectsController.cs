@@ -21,6 +21,8 @@ public sealed class ProjectsController(
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
     ListPeriodPoliciesHandler policies,
+    CreatePeriodPolicyHandler createPolicy,
+    UpdatePeriodPolicyHandler updatePolicy,
     RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
     Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
@@ -51,6 +53,59 @@ public sealed class ProjectsController(
     public async Task<ActionResult<IReadOnlyList<Ecr.Application.Projects.PeriodPolicyDto>>> PeriodPolicies(
         CancellationToken ct)
         => Ok(await policies.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Створює політику періодів. Право <c>Project.Manage</c> (T6/#37).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього годі було завести політику інакше, ніж сідингом або рукою
+    /// DBA: річний пільговий строк проєкту (<c>Project.YearGraceOffsetDays</c>)
+    /// стояв літералом <c>45</c> незалежно від того, яку політику обрали.
+    /// </remarks>
+    [HttpPost("period-policies")]
+    [ProducesResponseType<Ecr.Application.Projects.PeriodPolicyDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CreatePeriodPolicy(
+        [FromBody] CreatePeriodPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await createPolicy
+            .HandleAsync(
+                request.Code, request.OpenOffsetDays, request.GraceOffsetDays,
+                request.HardCloseOffsetDays, request.YearGraceOffsetDays, ct)
+            .ConfigureAwait(false);
+
+        return Created($"/api/v1/projects/period-policies/{created.Id}", created);
+    }
+
+    /// <summary>
+    /// Змінює offsets наявної політики періодів. Право <c>Project.Manage</c>
+    /// (T6/#37).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Проєкти, які вже посилаються на цю політику, підхоплюють нові offsets
+    /// на наступному ідемпотентному <c>GET …/periods</c> — межі наявних
+    /// періодів перераховуються там щоразу (ФВ-1.5).
+    /// </remarks>
+    [HttpPut("period-policies/{id:int}")]
+    [ProducesResponseType<Ecr.Application.Projects.PeriodPolicyDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdatePeriodPolicy(
+        int id, [FromBody] UpdatePeriodPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var updated = await updatePolicy
+            .HandleAsync(
+                id, request.OpenOffsetDays, request.GraceOffsetDays,
+                request.HardCloseOffsetDays, request.YearGraceOffsetDays, ct)
+            .ConfigureAwait(false);
+
+        return Ok(updated);
+    }
 
     /// <summary>
     /// Маршрут погодження проєкту. Право <c>Project.Manage</c>.
@@ -311,3 +366,27 @@ public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason
 /// <param name="ApprovalReason">Причина погодження; обов'язкова разом із <c>ApprovedByUserId</c>.</param>
 public sealed record ProjectRecalculationRequest(
     int? PeriodKey, int? ApprovedByUserId, string? ApprovalReason);
+
+/// <summary>Запит на створення політики періодів (T6/#37).</summary>
+/// <param name="Code">Код політики; має бути унікальним.</param>
+/// <param name="OpenOffsetDays">Коли період відкривається від початку. Може бути від'ємним.</param>
+/// <param name="GraceOffsetDays">Пільговий строк після кінця періоду.</param>
+/// <param name="HardCloseOffsetDays">Коли період закривається остаточно.</param>
+/// <param name="YearGraceOffsetDays">Пільговий строк після кінця року.</param>
+public sealed record CreatePeriodPolicyRequest(
+    string Code,
+    int OpenOffsetDays,
+    int GraceOffsetDays,
+    int HardCloseOffsetDays,
+    int YearGraceOffsetDays);
+
+/// <summary>Запит на зміну offsets наявної політики періодів (T6/#37).</summary>
+/// <param name="OpenOffsetDays">Коли період відкривається від початку. Може бути від'ємним.</param>
+/// <param name="GraceOffsetDays">Пільговий строк після кінця періоду.</param>
+/// <param name="HardCloseOffsetDays">Коли період закривається остаточно.</param>
+/// <param name="YearGraceOffsetDays">Пільговий строк після кінця року.</param>
+public sealed record UpdatePeriodPolicyRequest(
+    int OpenOffsetDays,
+    int GraceOffsetDays,
+    int HardCloseOffsetDays,
+    int YearGraceOffsetDays);

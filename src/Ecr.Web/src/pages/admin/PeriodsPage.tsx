@@ -15,6 +15,7 @@ import type {
 } from '@/api/types';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
+import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -295,6 +296,10 @@ export function PeriodsPage(): JSX.Element {
                 {t('periods.create')}
               </Button>
             )}
+
+            {/* T6/#37: CRUD політик — без нього завести чи змінити політику
+                можна було лише сідингом або рукою DBA. */}
+            {manages && <PeriodPolicyManager />}
 
             {/* ⛔ Кнопка є лише для чернетки. Доки проєкт не активований,
                 задача станів до нього не доходить, періоди лишаються

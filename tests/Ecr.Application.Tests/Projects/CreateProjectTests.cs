@@ -68,6 +68,13 @@ public sealed class CreateProjectTests
                 Permissions: ["Project.Manage"], DangerousPermissions: [])]);
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
+
+        // ⛔ T6/#37: обробник тепер ЗАВАНТАЖУЄ політику (щоб узяти
+        // `YearGraceOffsetDays`), а не лише перевіряє, що ідентифікатор
+        // додатний. Без цього стаба кожен тест, що доходить до
+        // `new Project(...)`, падав би `NullReferenceException`.
+        _periods.GetPolicyAsync(PolicyId, Arg.Any<CancellationToken>())
+            .Returns(new PeriodPolicy(EcrCode.Create("STD"), 0, 15, 45, yearGraceOffsetDays: 45));
     }
 
     [Theory]
@@ -170,6 +177,44 @@ public sealed class CreateProjectTests
         var project = (Project)call.GetArguments()[0]!;
 
         Assert.Equal("Asia/Almaty", project.TimeZoneId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Річний_грейс_береться_з_обраної_політики_а_не_з_45_T6_37()
+    {
+        // ⛔ T6/#37. До цього `Project.YearGraceOffsetDays` стояв літералом
+        // `45` НЕЗАЛЕЖНО від того, яку політику обрали — дві політики з
+        // різним `YearGraceOffsetDays` давали проєктам ОДНАКОВИЙ результат.
+        _periods.GetPolicyAsync(PolicyId, Arg.Any<CancellationToken>())
+            .Returns(new PeriodPolicy(EcrCode.Create("LONG"), 0, 15, 60, yearGraceOffsetDays: 90));
+
+        await Create("Asia/Almaty");
+
+        var call = _periods.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name == nameof(IPeriodStore.AddProjectAsync));
+        var project = (Project)call.GetArguments()[0]!;
+
+        Assert.Equal(90, project.YearGraceOffsetDays);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Неіснуюча_політика_дає_ECR_PRD_0422_замість_падіння_на_SaveChanges_T6_37()
+    {
+        _periods.GetPolicyAsync(999, Arg.Any<CancellationToken>())
+            .Returns<PeriodPolicy>(_ => throw new NotFoundException(
+                "ECR-PRD-0422", "Політику періодів 999 не знайдено."));
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(
+            () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
+                .HandleAsync(
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    PeriodKind.Monthly, year: 2026, templateVersionId: 42, periodPolicyId: 999,
+                    CancellationToken.None));
+
+        Assert.Equal("ECR-PRD-0422", error.ErrorCode);
+        await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
     }
 
     [Theory]

@@ -2532,7 +2532,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-PRD-0404` | 404 | періоду з таким ключем у проєкті немає |
 | `ECR-PRD-0422` | 422 | період поза межами проєкту (ФВ-1.11) |
 | `ECR-PRD-4223` | 422 | `Reopen` документа при закритому періоді |
-| `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108) |
+| `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108); **або** кількість періодів `Custom` не ділить рік нарівно |
+| `ECR-PRD-4225` | 422 | політика періодів: пільговий строк довший за жорстке закриття, або річний пільговий строк від'ємний (T6/#37) |
+| `ECR-PRD-4091` | 409 | політика періодів із таким кодом уже існує (`UQ_PeriodPolicy`, T6/#37) |
 | `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13) |
 | `ECR-SIM-0403` | 403 | спроба запису в сеансі симуляції (`SimulationReadOnly`, ФВ-6.16a) |
 | `ECR-SIM-0422` | 422 | симуляція самого себе або без причини |
@@ -2648,6 +2650,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects` | `Document.View` | 1 |
 | `POST` | `/api/v1/projects` | `Project.Manage` | 1 |
 | `GET` | `/api/v1/projects/period-policies` | `Project.Manage` | 1 |
+| `POST` | `/api/v1/projects/period-policies` | `Project.Manage` | 8 |
+| `PUT` | `/api/v1/projects/period-policies/{id}` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |

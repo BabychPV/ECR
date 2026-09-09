@@ -2965,6 +2965,135 @@ export interface paths {
             };
         };
         put?: never;
+        /**
+         * Створює політику періодів. Право `Project.Manage` (T6/#37).
+         * @description ⛔ До цього годі було завести політику інакше, ніж сідингом або рукою
+         *     DBA: річний пільговий строк проєкту (`Project.YearGraceOffsetDays`)
+         *     стояв літералом `45` незалежно від того, яку політику обрали.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreatePeriodPolicyRequest"];
+                    "application/json": components["schemas"]["CreatePeriodPolicyRequest"];
+                    "text/json": components["schemas"]["CreatePeriodPolicyRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PeriodPolicyDto"];
+                        "text/json": components["schemas"]["PeriodPolicyDto"];
+                        "text/plain": components["schemas"]["PeriodPolicyDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/period-policies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює offsets наявної політики періодів. Право `Project.Manage`
+         *     (T6/#37).
+         * @description ⚠ Проєкти, які вже посилаються на цю політику, підхоплюють нові offsets
+         *     на наступному ідемпотентному `GET …/periods` — межі наявних
+         *     періодів перераховуються там щоразу (ФВ-1.5).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdatePeriodPolicyRequest"];
+                    "application/json": components["schemas"]["UpdatePeriodPolicyRequest"];
+                    "text/json": components["schemas"]["UpdatePeriodPolicyRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PeriodPolicyDto"];
+                        "text/json": components["schemas"]["PeriodPolicyDto"];
+                        "text/plain": components["schemas"]["PeriodPolicyDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -7509,6 +7638,31 @@ export interface components {
             /** @description Номер нової версії; унікальний у межах методології (`UQ_MethodologyVersion`). */
             versionNumber: string;
         };
+        /** @description Запит на створення політики періодів (T6/#37). */
+        CreatePeriodPolicyRequest: {
+            /** @description Код політики; має бути унікальним. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Пільговий строк після кінця періоду.
+             */
+            graceOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Коли період закривається остаточно.
+             */
+            hardCloseOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Коли період відкривається від початку. Може бути від'ємним.
+             */
+            openOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Пільговий строк після кінця року.
+             */
+            yearGraceOffsetDays: number;
+        };
         /** @description Запит на створення проєкту. */
         CreateProjectRequest: {
             /** @description Код проєкту. */
@@ -10299,6 +10453,29 @@ export interface components {
              * @description Таблиця, якої стосується правило.
              */
             tableDefId: null | number;
+        };
+        /** @description Запит на зміну offsets наявної політики періодів (T6/#37). */
+        UpdatePeriodPolicyRequest: {
+            /**
+             * Format: int32
+             * @description Пільговий строк після кінця періоду.
+             */
+            graceOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Коли період закривається остаточно.
+             */
+            hardCloseOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Коли період відкривається від початку. Може бути від'ємним.
+             */
+            openOffsetDays: number;
+            /**
+             * Format: int32
+             * @description Пільговий строк після кінця року.
+             */
+            yearGraceOffsetDays: number;
         };
         /** @description Створений користувач. */
         UserIdResponse: {

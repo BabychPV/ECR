@@ -955,6 +955,17 @@ USING (VALUES
     -- інтерфейс, бо форма не мала звідки взяти кількість.
     (N'periods.customCount',             N'en', N'Number of periods', 1),
     (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
+    -- T6/#37: CRUD політик періодів — до цього завести чи змінити політику
+    -- можна було лише сідингом або рукою DBA.
+    (N'periods.managePolicies',          N'en', N'Manage policies', 1),
+    (N'periods.policyCode',              N'en', N'Code', 1),
+    (N'periods.policyOpenOffset',        N'en', N'Open offset (days)', 1),
+    (N'periods.policyGraceOffset',       N'en', N'Grace offset (days)', 1),
+    (N'periods.policyHardClose',         N'en', N'Hard-close offset (days)', 1),
+    (N'periods.policyYearGrace',         N'en', N'Year grace (days)', 1),
+    (N'periods.policyCreate',            N'en', N'Add policy', 1),
+    (N'periods.policyCreated',           N'en', N'The policy is created.', 1),
+    (N'periods.policyUpdated',           N'en', N'The policy is updated. Projects pick up the new offsets on their next calendar rebuild.', 1),
     (N'workflow.route',                  N'en', N'Approval route', 1),
     (N'workflow.routeHint',              N'en', N'Who approves, and in what order', 1),
     (N'workflow.routeEmptyHint',         N'en', N'No route means single-stage approval: one holder of the Approve level is enough. Removing every step returns the project to that.', 1),
