@@ -234,7 +234,7 @@
 | Q-186 | CONFLICT | `CollectionCoverage.Skipped(...)` пише `CollectionRunId = 0` — рядка `itg.CollectionRun` з таким `Id` не існує ніде, `FK_CCov_Run` відхиляє КОЖЕН запис journal покриття на пропуск/конфлікт; знайдено емпірично (реальний `DbUpdateException` на SQL Server), не аудитом | RESOLVED |
 | Q-187 | CONFLICT | `AccessProfileCache.GetOrCreateAsync` кешує профіль за ключем `(userId, securityStamp)` БЕЗ `groupsFingerprint`, хоча `LoadAsync` рахує права по-різному залежно від наявності групових SID — власна сесія користувача й перегляд/симуляція чужого профілю можуть ділити один кеш-запис і 30 хв повертати права ІНШОГО контексту | OPEN |
 | Q-188 | SCOPE | `GetCurrentUserHandler.LevelForProject` дублює логіку `AccessProfile.LevelFor` (deny виграє, потім grant) — друга реалізація того самого правила на іншій формі даних (string-серіалізований DTO замість домену) | RESOLVED · спільний `AccessProfile.Resolve`, PR #109 |
-| Q-189 | SCOPE | `PatchCellsHandler.HandleAsync` — ~340 рядків одним методом (права, побудова рядків, валідація, застосування, аудит, підсумок) в одній функції | OPEN |
+| Q-189 | SCOPE | `PatchCellsHandler.HandleAsync` — ~340 рядків одним методом (права, побудова рядків, валідація, застосування, аудит, підсумок) в одній функції | RESOLVED · розкладено на приватні методи за фазами, PR #110 |
 | Q-190 | SCOPE | `TableDef.SwitchStorage`/`CellStorageMode.Hybrid` — мертвий код: `StorageMode` вставляється як `Normalized` у конструкторі й ніде не читається умовно; `SwitchStorage` не має жодного викликача | OPEN |
 | Q-191 | CONFLICT | `permissions.ts.decide()` вирішує `CalculatedCell`/`ColumnReadOnly` ЛОКАЛЬНО, не питаючи сервер, тоді як `EditRules.CanEdit` перевіряє симуляцію, стан проєкту/періоду/аркуша РАНІШЕ за ці дві причини — клієнт може показати «комірка обчислюється» на комірці, яку сервер відхилив би через «документ подано» чи «період закрито» | RESOLVED · `permissions.ts` (`decide`), PR #108 |
 
@@ -8476,7 +8476,29 @@ upsert/delete, застосування через `ICellStore`, запис ау
 щоб зрозуміти один крок, потрібно тримати в голові контекст усіх
 попередніх 300+ рядків.
 
-**Статус:** OPEN
+**Статус:** RESOLVED · розкладено на приватні методи за фазами, PR #110
+
+#### Закрито
+
+`HandleAsync` розкладено на приватні методи за фазами, які вже були
+позначені нумерованими коментарями (1..8) у самому методі:
+`LoadContextAsync` (структура таблиці й стан рядків), `EnforceRowCreationRules`
+(Fixed/Dynamic ключі, стеля динамічних рядків, дублікати — Q-148),
+`EnsureNoVersionConflicts`, `EnsureAccessAsync`, `BuildCellChangesAsync`
+(створення рядків + розподіл upsert/delete), `EnsureValidationPasses`,
+`ReadPreviousValuesAsync`, `DetermineIsLateEditAsync`, `PersistChangesAsync`
+(+ `WriteAuditAsync` усередині тієї ж транзакції), `EnqueueRecalculationAsync`,
+`BuildResponseAsync`. `HandleAsync` тепер лише викликає їх послідовно.
+
+Контекст між фазами передається через приватні record-и `RequestContext` і
+`CellChangeLists`, а не набором окремих параметрів. Порядок побічних дій і всі
+коди помилок/винятків збережено буквально; коментарі `⛔`/`⚠`, що пояснюють,
+чому порядок саме такий (межі транзакції, валідація-до-запису тощо),
+перенесено разом із кодом у відповідні методи.
+
+Це рефактор без зміни поведінки: `PatchCellsTests` (24/24) і
+`DataEntryScenarios` (18/18, включно з S-13 через реальний HTTP) пройшли без
+жодної зміни тестового коду. PR #110.
 
 ---
 
