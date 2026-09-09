@@ -8,20 +8,27 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 {
     /// <inheritdoc />
-    public Task QueueAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct)
-        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Queue(utcNow), ct);
+    public Task QueueAsync(
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null)
+        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Queue(utcNow), createdByUserId, ct);
 
     /// <inheritdoc />
     public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct)
-        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Begin(utcNow), ct);
+        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Begin(utcNow), createdByUserId: null, ct);
 
     /// <summary>Створює або оновлює запис прогресу.</summary>
     /// <remarks>
     /// Повторний виклик із тим самим ідентифікатором — це перезапуск після
     /// збою, а не друга задача: запис оновлюється, а не дублюється.
+    ///
+    /// ⚠ <paramref name="createdByUserId"/> зберігається ЛИШЕ при створенні
+    /// нового запису (Q-156). Перезапуск після збою (<c>StartAsync</c> на
+    /// вже наявний запис) не передає автора — і не повинен: автор уже
+    /// записаний першим <c>QueueAsync</c>, а другий виклик його б стер.
     /// </remarks>
     private async Task UpsertAsync(
-        string jobId, string jobCode, DateTime utcNow, Action<JobProgress> apply, CancellationToken ct)
+        string jobId, string jobCode, DateTime utcNow, Action<JobProgress> apply, int? createdByUserId,
+        CancellationToken ct)
     {
         var entry = await db.JobProgresses
             .FirstOrDefaultAsync(p => p.JobId == jobId, ct)
@@ -29,7 +36,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 
         if (entry is null)
         {
-            entry = new JobProgress(jobId, jobCode, utcNow);
+            entry = new JobProgress(jobId, jobCode, utcNow, createdByUserId);
             db.JobProgresses.Add(entry);
         }
 
@@ -80,6 +87,15 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .AsNoTracking()
             .Where(p => p.JobId == jobId)
             .Select(p => new JobStatus(p.JobId, p.State, p.Percent, p.Message, p.Error))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct)
+        => await db.JobProgresses
+            .AsNoTracking()
+            .Where(p => p.JobId == jobId)
+            .Select(p => (int?)p.CreatedByUserId)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

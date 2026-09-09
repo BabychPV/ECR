@@ -69,11 +69,16 @@ public sealed class RecalculateDocumentHandler(
         // документа (`RecalculationJob`): payload не мусить нести те, що й так
         // виводиться з `DocumentId`, і друге джерело правди про проєкт
         // документа розійшлося б із першим на першій же помилці копіювання.
+        // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
+        // System.ViewHealth (Q-156). Окремо від `TriggeredByUserId` у payload
+        // вище: те поле бачить сама задача перерахунку, це — лише журнал
+        // прогресу для перевірки прав при опитуванні.
         return await jobs
             .EnqueueExclusiveAsync<IRecalculationJob>(
                 TargetOf(documentId, periodKey),
                 new { DocumentId = documentId, PeriodKey = periodKey.Value, TriggeredByUserId = currentUser.UserId },
-                ct)
+                ct,
+                currentUser.UserId)
             .ConfigureAwait(false);
     }
 

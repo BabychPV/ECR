@@ -27,7 +27,9 @@ public interface IJobProgressStore
     /// цього запису клієнт, який одразу опитує стан, отримує <c>404</c> на
     /// задачу, яку щойно прийняли, — і вважає, що вона загубилася.
     /// </remarks>
-    public Task QueueAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct);
+    /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    public Task QueueAsync(
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null);
 
     public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct);
 
@@ -40,6 +42,9 @@ public interface IJobProgressStore
 
     /// <summary>Стан задачі; <c>null</c> — такої немає.</summary>
     public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
+
+    /// <summary>Хто поставив задачу; <c>null</c> — системна, або такої немає (Q-156).</summary>
+    public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct);
 
     /// <summary>Останні задачі, найновіші перші.</summary>
     /// <param name="limit">Скільки повернути.</param>

@@ -56,8 +56,11 @@ public sealed class ExportDocumentHandler(
         // постановки, а задача має знати, куди класти результат, до запуску.
         var exportId = Guid.NewGuid().ToString("N");
 
+        // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
+        // System.ViewHealth (Q-156).
         return await jobs
-            .EnqueueAsync<IExcelExportJob>(new ExcelExportTask(documentId, options, exportId), ct)
+            .EnqueueAsync<IExcelExportJob>(
+                new ExcelExportTask(documentId, options, exportId), ct, currentUser.UserId)
             .ConfigureAwait(false);
     }
 }

@@ -9,7 +9,17 @@ namespace Ecr.Application.Ports;
 public interface IBackgroundJobScheduler
 {
     /// <summary>Ставить задачу в чергу негайно.</summary>
-    public Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+    /// <param name="payload">Завдання.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="createdByUserId">
+    /// Хто поставив задачу; <c>null</c> — системна задача без автора
+    /// (за розкладом, витіснена іншою задачею). Потрібен, щоб автор міг
+    /// прочитати стан ВЛАСНОЇ задачі без права <c>System.ViewHealth</c>
+    /// (Q-156) — <see cref="GetStatusAsync"/> порівнює це значення з
+    /// поточним користувачем.
+    /// </param>
+    public Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob;
 
     /// <summary>
     /// Ставить задачу в чергу, ВИТІСНЯЮЧИ незавершену задачу того самого типу
@@ -41,7 +51,9 @@ public interface IBackgroundJobScheduler
     /// Убита посеред пакета, вона лишила б половину результатів записаними без
     /// жодного сліду про це.
     /// </remarks>
-    public Task<string> EnqueueExclusiveAsync<TJob>(string targetKey, object? payload, CancellationToken ct)
+    /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    public Task<string> EnqueueExclusiveAsync<TJob>(
+        string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob;
 
     /// <summary>Планує задачу за cron-виразом.</summary>
@@ -52,6 +64,20 @@ public interface IBackgroundJobScheduler
 
     /// <summary>Стан виконання для UI прогресу.</summary>
     public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
+
+    /// <summary>
+    /// Хто поставив задачу; <c>null</c> — системна задача, або такої задачі
+    /// немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий метод, а не поле в <see cref="JobStatus"/> (Q-156):
+    /// <c>JobStatus</c> — тіло HTTP-відповіді <c>GET /jobs/{jobId}</c>, і
+    /// ідентифікатор автора там нікому не потрібен — лише
+    /// <see cref="GetStatusAsync"/>-виклику ВСЕРЕДИНІ <c>GetJobStatusHandler</c>,
+    /// щоб порівняти з поточним користувачем ДО того, як тіло взагалі
+    /// збирається.
+    /// </remarks>
+    public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct);
 
     /// <summary>
     /// Останні задачі, найновіші перші — для черги в інтерфейсі.
