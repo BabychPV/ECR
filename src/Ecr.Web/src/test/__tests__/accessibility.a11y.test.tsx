@@ -11,6 +11,7 @@ import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
 import { theme } from '@/shared/theme/theme';
 import { DocumentsPage } from '@/pages/DocumentsPage';
+import { DocumentPage } from '@/pages/DocumentPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 import { HealthPage } from '@/pages/admin/HealthPage';
@@ -22,10 +23,15 @@ import { SecurityPage } from '@/pages/admin/SecurityPage';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { TemplatesPage } from '@/pages/admin/TemplatesPage';
+import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
 import { TableRelationsPage } from '@/pages/admin/TableRelationsPage';
 import { MethodologiesPage } from '@/pages/admin/MethodologiesPage';
 import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
+import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
+import { AuditPage } from '@/pages/admin/AuditPage';
+import { UnitsPage } from '@/pages/admin/UnitsPage';
+import { UiStringsPage } from '@/pages/admin/UiStringsPage';
 import { KitchenSinkPage } from '@/pages/KitchenSinkPage';
 import { MyGroupsPage } from '@/pages/MyGroupsPage';
 
@@ -97,11 +103,20 @@ const Themes: readonly ('light' | 'dark')[] =
  * не дійшов через корпоративний канал, і саме тоді доступність важить
  * найбільше.
  */
+/**
+ * ⛔ Q-204 / T8 (директива №11). Було 18 із 24 маршрутів `router.tsx`
+ * (166–195): бракувало `DocumentPage`, `TemplateVersionPage`,
+ * `SnapshotsPage`, `AuditPage`, `UnitsPage`, `UiStringsPage`. Шість
+ * маршрутів, на яких `axe` не виконувався НІКОЛИ — до першого живого
+ * запуску різниці ніхто б не побачив (той самий клас дефекту, що й `A7-33`).
+ */
 const Pages: [string, () => JSX.Element][] = [
   ['/login', LoginPage],
   ['/change-password', ChangePasswordPage],
   ['/', DocumentsPage],
+  ['/documents/1', DocumentPage],
   ['/admin/templates', TemplatesPage],
+  ['/admin/templates/1/versions/1', TemplateVersionPage],
   ['/admin/templates/1/versions/1/relations', TableRelationsPage],
   ['/admin/registries', RegistriesPage],
   ['/admin/registries/:code/definition', RegistryConstructorPage],
@@ -113,6 +128,10 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/sources', SourcesPage],
   ['/admin/mapping', MappingPreviewPage],
   ['/admin/jobs', JobsPage],
+  ['/admin/snapshots', SnapshotsPage],
+  ['/admin/audit', AuditPage],
+  ['/admin/units', UnitsPage],
+  ['/admin/ui-strings', UiStringsPage],
   ['/admin/health', HealthPage],
   ['/my-groups', MyGroupsPage],
   ['/_kitchen-sink', KitchenSinkPage],
@@ -148,6 +167,97 @@ function seededStrings(): Record<string, string> {
 }
 
 const Catalog = seededStrings();
+
+/**
+ * Профіль `/me` для сканування — ПОВНИЙ каталог прав, а не порожній масив.
+ *
+ * ⛔ Q-204 / T8 (директива №11). До цього запису `/me` віддавав
+ * `permissions: []`, тобто `can(me, '…')` скрізь у клієнті повертав `false`
+ * — і кожна кнопка, форма чи посилання, сховані за правом (кнопки
+ * `Document.Import`/`Document.Export` на `DocumentPage`, «Додати аркуш» на
+ * `TemplateVersionPage`, «Побудувати зріз» на `SnapshotsPage`, «Новий
+ * зв'язок» на вже перевіреній `TableRelationsPage` тощо), НІКОЛИ не
+ * потрапляли під `axe`. Гейт `a11y` рік перевіряв порожній екран без прав, а
+ * не той, який бачить оператор чи адміністратор, — той самий клас дефекту,
+ * що й порожня тема `MantineProvider` до W4.3 (див. коментар вище).
+ *
+ * ⚠ Перелік — дослівна копія каталогу `sec.Permission` із `09-seed.sql`
+ * (рядки 38–67), тобто те, що фактично видає роль `SystemAdministrator`
+ * (`%`, звідси розгорнутий список — рядковий фетчер тут не читає SQL-маску).
+ *
+ * ⛔ Директива №11 (T8) посилається на фікстуру `water-demo`
+ * (`tests/Ecr.TestKit/Fixtures/water-demo.json`, див. `pk1-handover.md`
+ * §7) як на «вже узгоджений напрям». Перевірено: ця фікстура — про ІНШИЙ
+ * механізм (рядок `7001001`/дозвіл `P-001`/вікно `PeriodAccessRuleDef` для
+ * бекендових золотих тестів `Ecr.Expressions.Tests`), а не про
+ * `CurrentUserDto.permissions` клієнта. Застосувати її тут буквально
+ * неможливо — це не той тип фікстури. Рішення (документується тут, а не
+ * замовчується): повний каталог прав із seed — той самий факт джерела
+ * істини, лише для іншого шару.
+ */
+const FullAccessPermissions: readonly string[] = [
+  'Template.View',
+  'Template.Edit',
+  'Template.Publish',
+  'Template.Migrate',
+  'Registry.View',
+  'Registry.EditData',
+  'Registry.EditDefinition',
+  'Registry.Publish',
+  'Document.View',
+  'Document.Create',
+  'Document.Delete',
+  'Document.Import',
+  'Document.Export',
+  'Document.Reopen',
+  'Project.Manage',
+  'Period.Configure',
+  'Period.Reopen',
+  'Calculation.View',
+  'Calculation.EditFormula',
+  'Calculation.EditConstant',
+  'Calculation.EditRule',
+  'Calculation.EditScript',
+  'Calculation.Publish',
+  'Calculation.Recalculate',
+  'Report.ViewRegulatory',
+  'Report.BuildSnapshot',
+  'Report.MarkSubmitted',
+  'Report.Export',
+  'Report.EditDefinition',
+  'Integration.View',
+  'Integration.Manage',
+  'Integration.EditSchedule',
+  'Security.ManageUsers',
+  'Security.ManageRoles',
+  'Security.ViewAudit',
+  'Security.Simulate',
+  'System.ViewHealth',
+  'System.RunJob',
+  'System.ManageLocalization',
+];
+
+/**
+ * Один непорожній документ для `DocumentPage` (`ФВ-14.16`).
+ *
+ * ⛔ `DocumentPage` кладе заголовок і кнопки `Document.Import`/`Export`/
+ * `SheetActions` УСЕРЕДИНУ `AsyncBoundary`: порожній перелік таблиць — це
+ * порожній стан БЕЗ жодної кнопки, незалежно від прав. Права відкривають
+ * кнопку лише тоді, коли є що редагувати, — тому зріз тут не порожній.
+ */
+const DocumentTableFixture = {
+  allowsDynamicRows: false,
+  maxDynamicRows: null as number | null,
+  sheetCode: 'GEN',
+  sheetDefId: 1,
+  sheetNameL10n: { values: { en: 'General' } },
+  sheetOrdinal: 0,
+  tableCode: 'T1',
+  tableDefId: 1,
+  tableInstanceId: 1,
+  tableNameL10n: { values: { en: 'Table 1' } },
+  tableOrdinal: 0,
+};
 
 function emptyBodyFor(url: string): unknown {
   if (url.includes('/ui-strings/')) {
@@ -195,8 +305,16 @@ function emptyBodyFor(url: string): unknown {
   // ⛔ Структура версії — ОБ'ЄКТ із аркушами; порожній масив тут упав би на
   // `structure.sheets`, і редактор зв'язків «не мав би порушень доступності»
   // рівно тому, що не намалювався б.
+  //
+  // ⚠ `isEditable: true` (Q-204 / T8) — до цього поля тут не було взагалі, і
+  // `TemplateVersionPage.canEditSheets` (`can(me,'Template.Edit') &&
+  // structure.data?.isEditable`) був хибним НАЗАВЖДИ, незалежно від прав:
+  // `undefined ?? false` завжди `false`. Кнопка «Додати аркуш»
+  // (`emptyAction` порожнього стану) і решта форм правки структури не
+  // з'являлися на екрані ніколи — той самий клас дефекту, що й порожній
+  // профіль прав вище, тільки в іншому полі.
   if (url.includes('/structure')) {
-    return { templateVersionId: 0, presentationRevision: 0, sheets: [] };
+    return { templateVersionId: 0, presentationRevision: 0, sheets: [], isEditable: true };
   }
 
   // ⛔ Зв'язки таблиць віддають КОНВЕРТ із `isEditable`: порожній масив тут
@@ -224,7 +342,64 @@ function emptyBodyFor(url: string): unknown {
   }
 
   if (url.includes('/me')) {
-    return { userId: 0, userName: 'test', language: 'en', permissions: [], isSimulation: false };
+    return {
+      userId: 0,
+      userName: 'test',
+      language: 'en',
+      permissions: FullAccessPermissions,
+      isSimulation: false,
+    };
+  }
+
+  // ⛔ Журнал аудиту (`AuditPage`, Q-204 / T8) віддає КОНВЕРТ із курсором
+  // (`CellChangePage`), а `/audit/cells` не збігається з жодним рядком
+  // `paged` нижче — без цієї гілки перевірка падала б на `.items.length`
+  // об'єкта-заглушки, тобто на власній заглушці, а не на доступності.
+  if (url.includes('/audit/cells')) return { items: [], nextCursor: null };
+
+  // ⛔ Результати методології на документі (`CalculationResultsPanel`,
+  // споживач `DocumentPage`) — МАСИВ, а не конверт. `/calculation-results`
+  // містить підрядок `/documents`, тому без цієї гілки він потрапив би в
+  // `paged` нижче і повернув би конверт: `AsyncBoundary<CalculationResultDto[]>`
+  // отримав би не-масив і впав би на `list.map`, коли документ став
+  // непорожнім (див. `DocumentTableFixture` вище).
+  if (url.includes('/calculation-results')) return [];
+
+  // ⛔ Зріз таблиці документа (`DocumentGrid`, `GET …/tables/{tableInstanceId}`)
+  // — ОБ'ЄКТ, а не масив і не конверт; перевіряється РАНІШЕ переліку таблиць
+  // нижче, бо обидві адреси містять підрядок `/tables`. Нуль колонок —
+  // навмисно: `isSliceEmpty` тоді показує власний порожній стан грида, а не
+  // намагається змонтувати RevoGrid (веб-компонент) у jsdom, де редактор
+  // виразів Monaco вже ламається з тієї самої причини (коментар вище).
+  if (/\/tables\/[^/?]+/.test(url)) {
+    return { cellPermissions: {}, columns: [], periodKey: 0, rows: [], tableInstanceId: 1 };
+  }
+
+  // ⛔ Перелік таблиць документа (`DocumentPage`, `GET …/tables?periodKey=`)
+  // — МАСИВ, і НЕПОРОЖНІЙ (Q-204 / T8): порожній перелік — це порожній стан
+  // `AsyncBoundary`, а весь заголовок із кнопками `Document.Import`/`Export`
+  // і `SheetActions` мальований лише в гілці «дані є» (`DocumentPage.tsx`,
+  // `{(document) => (...)}`). Права без непорожніх даних кнопки б не
+  // показали — обидві причини мають бути усунені разом.
+  if (url.includes('/tables')) return [DocumentTableFixture];
+
+  // ⛔ Перевірка документа (`GET …/validation?periodKey=`) — ОБ'ЄКТ
+  // `ValidationResultResponse`, не конверт `paged` нижче.
+  if (url.includes('/validation')) return { documentId: 1, messages: [], periodKey: 0 };
+
+  // ⛔ Один документ (`GET /documents/{id}?periodKey=`) — ОБ'ЄКТ
+  // `DocumentSummary`, не конверт `paged` нижче. `sheetStates.GEN` збігається
+  // з `DocumentTableFixture.sheetCode`, інакше стан аркуша впав би на
+  // запасне `'Draft'`, і збіг був би випадковим, а не перевіреним.
+  if (/\/documents\/[^/?]+\?/.test(url)) {
+    return {
+      businessKey: 'DOC-0001',
+      createdAt: '2026-01-01T00:00:00Z',
+      id: 1,
+      projectId: 1,
+      sheetCount: 1,
+      sheetStates: { GEN: 'Draft' },
+    };
   }
 
   // Сторінкові переліки віддають конверт із курсором, решта — масив.
