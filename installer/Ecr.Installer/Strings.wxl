@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
+  <String Id="ProductName" Value="ECR Web" />
+  <String Id="Manufacturer" Value="ECR" />
+  <String Id="FeatureMain" Value="ECR Web application service" />
+  <String Id="ServiceDisplayName" Value="ECR Web API" />
+  <String Id="ServiceDescription"
+          Value="Environmental Compliance Reporting web application. Serves the SPA and the REST API." />
+  <String Id="FirewallRuleName" Value="ECR Web API (TCP-in)" />
+  <String Id="DowngradeError"
+          Value="A newer version of ECR Web is already installed. Uninstall it before installing an older version." />
+  <String Id="RequireWin2012R2" Value="Windows Server 2012 R2 x64 or later is required." />
+  <String Id="RequireAdmin" Value="Administrator privileges are required." />
+</WixLocalization>

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+
+  <Fragment>
+    <ComponentGroup Id="AppService" Directory="INSTALLFOLDER">
+      <Component Id="EcrService" Guid="*">
+
+        <File Id="EcrApiExe" Source="$(PublishDir)\Ecr.Api.exe" KeyPath="yes" />
+
+        <ServiceInstall Id="EcrApiServiceInstall"
+                        Name="EcrApi"
+                        DisplayName="!(loc.ServiceDisplayName)"
+                        Description="!(loc.ServiceDescription)"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="[SERVICE_ACCOUNT]"
+                        Password="[SERVICE_PASSWORD]"
+                        Vital="yes">
+
+          <!--
+            Відновлення після збою: три спроби з наростанням, потім пауза.
+            Четверта спроба НЕ робиться навмисно — служба, що вічно
+            перезапускається, споживає ресурси і виглядає живою, тож збій
+            лишається непоміченим (той самий принцип, що у ФВ-12.4a).
+
+            ⛔ `DelayedAutoStart` тут НЕ через ServiceConfig (ні core-, ні
+            util:-версію): компілятор відмовляє на `util:ServiceConfig` з
+            цим атрибутом (WIX0004 — його там просто немає в 5.0.2), а
+            core-версія компілюється, але власним попередженням компілятора
+            (WIX1149) названа такою, що «документовано як не працює як
+            очікується». Реєстровий ключ нижче — відомий надійний обхід:
+            те саме, що ставить сам Windows, коли адміністратор вручну
+            вмикає «Automatic (Delayed Start)» у services.msc.
+          -->
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="none"
+                              RestartServiceDelayInSeconds="30"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\EcrApi"
+                       Name="DelayedAutoStart"
+                       Type="integer"
+                       Value="1" />
+
+        <!--
+          Stop="both" Remove="uninstall": служба зупиняється і при установці,
+          і при видаленні. Без Stop при оновленні файли будуть заблоковані
+          запущеним процесом, і MSI попросить перезавантаження — тобто
+          оновлення служби стане простоєм сервера.
+        -->
+        <ServiceControl Id="EcrApiServiceControl"
+                        Name="EcrApi"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+
+        <!-- Джерело журналу подій: інакше служба пише в Application під іменем .NET Runtime. -->
+        <util:EventSource Log="Application" Name="ECR"
+                          EventMessageFile="%SystemRoot%\System32\EventCreate.exe" />
+
+        <!--
+          Правило брандмауера ЛИШЕ для профілю домену. Public і Private не
+          відкриваються: система внутрішня, і випадкове ввімкнення
+          публічного профілю на сервері не має відкривати порт у світ.
+        -->
+        <fw:FirewallException Id="EcrApiPort"
+                              Name="!(loc.FirewallRuleName)"
+                              Port="[APP_PORT]"
+                              Protocol="tcp"
+                              Scope="localSubnet"
+                              Profile="domain" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

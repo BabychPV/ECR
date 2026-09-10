@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Fragment>
+
+    <!-- 64-бітна тека: служба x64, у Program Files (x86) їй не місце. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="COMPANYFOLDER" Name="ECR">
+        <Directory Id="INSTALLFOLDER" Name="Api" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="ECR">
+        <Directory Id="LOGSFOLDER" Name="logs" />
+        <Directory Id="CONFIGFOLDER" Name="config" />
+      </Directory>
+    </StandardDirectory>
+
+    <!--
+      Файли застосунку. Include забирає ВЕСЬ вихід публікації разом із
+      рантаймом і статикою SPA: перелічувати файли руками означало б
+      забути один при наступному релізі.
+
+      ⚠ Справжня причина попередньої помилки WIX8602 «already been
+      harvested» — НЕ цей елемент: `.wixproj` явно перелічував `Package.wxs`
+      /`Folders.wxs`/`Service.wxs` в `<Compile Include=...>`, хоча
+      WixToolset.Sdk (як і Microsoft.NET.Sdk) неявно бере всі `*.wxs` теки
+      сам — кожен файл компілювався ДВІЧІ, і другий прохід `Files.Include`
+      бачив уже оброблені файли першого. Прибрано явний ItemGroup — і
+      власне цей, найпростіший механізм запрацював без змін.
+    -->
+    <!--
+      Exclude Ecr.Api.exe: цей файл — окремий компонент у Service.wxs
+      (KeyPath ServiceInstall/ServiceControl), інакше той самий файл
+      потрапляє у два компоненти з різними GUID — WIX0369/WIX1070.
+    -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(PublishDir)\**">
+        <Exclude Files="$(PublishDir)\Ecr.Api.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="AppFolders">
+
+      <!--
+        ACL на теку логів. Служба пише, Users лише читають.
+        Без явного ACL тека успадкує права ProgramData, де Users можуть
+        створювати файли — а це чужий запис у наш журнал.
+
+        ⚠ `util:PermissionEx` у WiX 5.0.2 НЕ підтримує умову — ні атрибутом
+        (WIX0004), ні дочірнім елементом, своїм чи `util:` (WIX0200/WIX0005:
+        компілятор перевірено emпірично на всіх трьох варіантах). Тому
+        умовний грант SERVICE_ACCOUNT — ОКРЕМИЙ компонент з умовою на самому
+        `<Component>` (перевірений, стандартний механізм), а не на
+        `PermissionEx` усередині нього.
+
+        ⚠ Явний GUID, не "*": компонент, чий KeyPath — сама тека
+        (CreateFolder без File), не приймає автогенерований GUID (WIX0230).
+      -->
+      <Component Id="LogsFolder" Directory="LOGSFOLDER" Guid="c1a9e6b2-4f3d-4e2a-9c7f-1a2b3c4d5e6f">
+        <CreateFolder>
+          <util:PermissionEx User="Users" GenericRead="yes" GenericExecute="yes" />
+        </CreateFolder>
+        <RemoveFolder Id="RemoveLogsFolder" On="uninstall" />
+      </Component>
+
+      <Component Id="LogsFolderServiceAccountAcl" Directory="LOGSFOLDER"
+                 Guid="7e2d4a91-6c3b-4f5e-8a1d-2f9c6b7e0a3d" Condition="SERVICE_ACCOUNT">
+        <CreateFolder>
+          <util:PermissionEx User="[SERVICE_ACCOUNT]" GenericAll="yes" />
+        </CreateFolder>
+      </Component>
+
+      <!--
+        NeverOverwrite — атрибут КОМПОНЕНТА, не File (перевірено компілятором:
+        на File — WIX0004, невідомий атрибут). Конфіг кладеться ОДИН РАЗ і
+        переживає оновлення та видалення. Інакше кожне оновлення затирало б
+        налаштування майданчика, і це виявилося б після рестарту служби.
+      -->
+      <Component Id="ConfigFolder" Directory="CONFIGFOLDER" Guid="*" NeverOverwrite="yes">
+        <File Id="AppSettingsProd"
+              Source="$(PublishDir)\appsettings.Production.json"
+              KeyPath="yes" />
+      </Component>
+
+      <Component Id="ConfigFolderServiceAccountAcl" Directory="CONFIGFOLDER"
+                 Guid="9b4f1e28-3a6d-4c9b-9e2f-5d8a0c1b3e6f" Condition="SERVICE_ACCOUNT">
+        <CreateFolder>
+          <util:PermissionEx User="[SERVICE_ACCOUNT]" GenericRead="yes" GenericExecute="yes" />
+        </CreateFolder>
+      </Component>
+
+    </ComponentGroup>
+
+    <!--
+      ⚠ Логи при видаленні НЕ прибираються (RemoveFolder спрацює лише якщо
+      тека порожня). Це навмисно: журнал переживає видалення застосунку.
+      Прибирає адміністратор, якщо вважає потрібним.
+    -->
+
+  </Fragment>
+</Wix>

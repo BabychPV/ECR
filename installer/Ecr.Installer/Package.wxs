@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!--
+    UpgradeCode НЕ ЗМІНЮЄТЬСЯ НІКОЛИ, за весь час життя продукту. Це той
+    ідентифікатор, за яким Windows розуміє «це те саме, що вже стоїть».
+    Зміна UpgradeCode дає дві паралельні установки замість оновлення —
+    помилка, яку виявляють уже в продуктиві.
+  -->
+  <Package Name="!(loc.ProductName)"
+           Manufacturer="!(loc.Manufacturer)"
+           Version="$(ProductVersion)"
+           UpgradeCode="8f3a1d64-2b7e-4c19-9a55-6d0e7b41c832"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500"
+           Language="1033">
+
+    <SummaryInformation Description="!(loc.ProductName) $(ProductVersion)" />
+
+    <!--
+      Покриває перевстановлення, оновлення і блокування відкату однією
+      декларацією. afterInstallInitialize: стара версія знімається ПІСЛЯ
+      початку установки нової, тому збій відкатує до робочої старої, а не
+      лишає сервер без служби (docs/build/10-installer.md §1.5).
+    -->
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="!(loc.DowngradeError)" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Вимоги до платформи. Перевірка ДО будь-яких змін у системі. -->
+    <Launch Condition="Installed OR VersionNT64 &gt;= 603"
+            Message="!(loc.RequireWin2012R2)" />
+    <Launch Condition="Installed OR Privileged"
+            Message="!(loc.RequireAdmin)" />
+
+    <!-- ───────────── Властивості ───────────── -->
+
+    <!-- Обліковий запис служби. Порожній = служба не стартує (§1.4). -->
+    <Property Id="SERVICE_ACCOUNT" Secure="yes" />
+
+    <!--
+      Hidden="yes": пароль не потрапляє в лог MSI (компілятор сам заповнює
+      MsiHiddenProperties із цього атрибута — авторити цю службову властивість
+      як окремий Property заборонено, WIX0070).
+      msiexec /l*v за замовчуванням пише всі властивості у файл на диску.
+    -->
+    <Property Id="SERVICE_PASSWORD" Secure="yes" Hidden="yes" />
+
+    <Property Id="APP_PORT" Value="5000" Secure="yes" />
+    <Property Id="SQL_CONNECTION" Secure="yes" Hidden="yes" />
+
+    <!-- Стартувати службу після установки лише якщо є під чим. -->
+    <SetProperty Id="START_SERVICE" Value="1" After="AppSearch"
+                 Condition="SERVICE_ACCOUNT" />
+
+    <!-- ───────────── Склад ───────────── -->
+
+    <Feature Id="Main" Title="!(loc.FeatureMain)" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="AppFolders" />
+      <ComponentGroupRef Id="AppService" />
+    </Feature>
+
+    <!-- ───────────── UI ───────────── -->
+
+    <!--
+      MSI-діалоги не можуть виглядати сучасно — це обмеження формату, не
+      наше рішення (докладніше — docs/build/10-installer.md §5.6). Для
+      серверного продукту головний шлях установки все одно тихий (/qn),
+      тому UI лишається мінімальним і надійним.
+    -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+
+  </Package>
+</Wix>
