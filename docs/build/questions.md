@@ -244,6 +244,7 @@
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | RESOLVED |
 | Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
 | Q-199 | CONFLICT | Директива №11, трек T3 (`#20`+`#48`, один Q-номер на трек): bootstrap-адміністратор вимикався лише при СТВОРЕННІ нового користувача, не при заміні ролей наявному через `PUT .../users/{id}/roles`; межі чинності призначення — див. Q-196 | RESOLVED |
+| Q-200 | CONFLICT | Директива №11, трек T4 (`#28`): `RegistriesController` мав `PUT .../{code}/definition` для правки опису НАЯВНОГО довідника, але жодного `[HttpPost]` для колекції — новий довідник, якого немає в офлайновому seed, не міг з'явитися в системі жодним шляхом, доступним людині | RESOLVED · `CreateRegistryHandler.cs`, `RegistriesController.cs`, PR #122 |
 | Q-201 | CONFLICT | Директива №11, трек T5: `PublishTemplateVersionHandler.PublishAsync` писав у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на кожен виклик — рядок, що виглядає як причина публікації версії шаблону, але нею не є | RESOLVED · `PublishVersionRequest`, PR #121 |
 | Q-202 | SCOPE | Директива №11, трек T6 (`#36`→`#37`→`#52`): `ProjectsController.cs` не мав жодного шляху задати межі `Custom`-періоду, редагувати політику періодів (`YearGraceOffsetDays` зашитий `45`) чи змінити часовий пояс проєкту — усі три механізми існували в домені й були недосяжні з API | RESOLVED · `CreateProjectHandler`, `PeriodPolicyCrudHandlers`, `ChangeProjectTimeZoneHandler` |
 | Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
@@ -8908,6 +8909,71 @@ Engine достатньо близька до 2024 R2, щоб ця схема б
 
 **Статус:** RESOLVED · `RoleAndUserHandlers.cs`, `UserStore.cs`,
 директива №11 T3 `#20`, PR #118
+
+---
+
+### Q-200 · CONFLICT · Директива №11, трек T4 (`#28`), 2026-09-10 · `RegistriesController` без `POST /registries` — довідник заводив лише офлайновий seed
+
+**Де:** `src/Ecr.Api/Controllers/RegistriesController.cs`,
+`src/Ecr.Application/Registries/CreateRegistryHandler.cs` (новий),
+`src/Ecr.Application/Ports/IRegistryStore.cs`,
+`src/Ecr.Infrastructure/Persistence/RegistryStore.cs`,
+`src/Ecr.Domain/Errors/ErrorCodes.cs`,
+`src/Ecr.Api/Errors/ExceptionHandlingMiddleware.cs`.
+
+**Що знайшлося:** `RegistriesController` умів читати перелік довідників
+(`GET /registries`) і правити ОПИС наявного довідника — склад полів,
+зв'язки (`PUT .../{code}/definition`, `SaveRegistryDefinitionHandler`) —
+але не мав жодного `[HttpPost]` для самої колекції. Сам довідник — перший
+рядок `cfg.RegistryDef` — заводив лише офлайновий seed (`09-seed.sql`);
+новий довідник, якого там немає, не міг з'явитися в системі жодним
+шляхом, доступним людині — ні через інтерфейс, ні через API.
+
+**Виправлення:**
+- `CreateRegistryHandler` заводить `RegistryDef` без жодного поля: код,
+  назва мовами каталогу (`nameL10n`), `isTemporal`. Поля додаються
+  окремою дією — тим самим конструктором, що вже редагує наявний
+  довідник (`ФВ-8.12`); перше поле майже завжди ключове, і тип,
+  обов'язковість та зв'язок на інший довідник — рішення, які при
+  заведенні ще ніхто не ухвалив.
+- Право — **перевикористане** `Registry.EditDefinition` (те саме, що на
+  `PUT .../{code}/definition`), не нове: заведення довідника і зміна
+  складу його полів — той самий клас рішення («що довідник узагалі
+  описує»), і ухвалює його одна й та сама людина.
+- Дублікат коду → `409 Conflict` з новим кодом `ECR-REG-4091` (не
+  `ECR-REG-0409`: той код уже зайнятий `RegistryEntryInUse` — видалення
+  запису, на який посилаються дані). Форма — як `ECR-RPT-4091`/
+  `ReportDefDuplicate`; `ExceptionHandlingMiddleware` отримав відповідну
+  гілку мапінгу.
+- `IRegistryStore.AddDefinition` + реалізація в `RegistryStore`
+  (`db.RegistryDefs.Add`).
+- `POST /api/v1/registries` у контролері (`CreatedAtAction` на
+  `Definition`); `docs/build/02-contracts.md` §7 (новий код помилки) і §9
+  (новий рядок таблиці ендпоінтів, право, етап 8); OpenAPI-знімок і
+  клієнтську схему (`schema.d.ts`, `types.ts`) перегенеровано.
+- Клієнт: `features/registries/api.ts` (`createRegistry`) + кнопка «New
+  registry» і модалка (код/назва/`isTemporal`) на `RegistriesPage.tsx` —
+  без цього сторож `Кожна_дія_сервера_має_споживача_в_інтерфейсі`
+  (`EndpointCoverageTests`) лишився б червоним.
+
+**Судження (документується тут, а не ескалацією):** довідник за
+замовчуванням не темпоральний, але `isTemporal` — явне поле форми, не
+прихований дефолт: рішення приймається один раз і незмінне після
+заведення (конструктор `RegistryDef` не має сетера), тому воно свідомо
+винесене у форму, а не вгадане.
+
+**Тест (D-134):** `CreateRegistryTests` — 5 тестів (успішне створення без
+полів, дублікат коду → `ECR-REG-4091`, відсутність права → `403`, анонім
+→ `401`, недопустимий код → `422`). Мутація: `PermissionCheck.RequireAsync`
+замінено на `access.BuildProfileAsync(...)` без вимоги права (профіль
+будується, але не перевіряється) → рівно два тести падають з правильної
+причини (`Анонімний_запит_відхиляється_до_перевірки_права`,
+`Без_права_Registry_EditDefinition_довідник_не_заводиться` —
+`Assert.Throws() Failure: No exception was thrown`). Мутацію відкочено,
+`dotnet test --filter "FullyQualifiedName~CreateRegistryTests"` — 5/5
+зелено.
+
+**Статус:** RESOLVED · `CreateRegistryHandler.cs`, `RegistriesController.cs`, PR #122
 
 ---
 

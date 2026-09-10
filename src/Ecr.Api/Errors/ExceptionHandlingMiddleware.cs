@@ -270,6 +270,13 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.ReportDefDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Той самий клас розбіжності, що й `ECR-RPT-4091` вище: цифри коду
+        // означають наш HTTP-статус, і «цей довідник уже є» — конфлікт, а не
+        // помилка введення. Клієнт, що читає статус раніше за код, показав би
+        // «дані невірні» там, де правильна відповідь — «код уже зайнято».
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryDefDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // Той самий клас, що й `ECR-RPT-4091` вище: код політики періодів —
         // адреса вибору у формі створення проєкту (T6/#37), і дублікат має
         // читатися як «цей код зайнятий», а не як помилка введення.

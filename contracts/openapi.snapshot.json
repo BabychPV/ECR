@@ -1125,6 +1125,32 @@
         ],
         "type": "object"
       },
+      "CreateRegistryDto": {
+        "description": "Заведення довідника з нуля — **без жодного поля**.",
+        "properties": {
+          "code": {
+            "description": "Код, унікальний серед довідників.",
+            "type": "string"
+          },
+          "isTemporal": {
+            "description": "Чи мають майбутні записи вікно дії. Рішення приймається один раз: змінити\nйого для довідника з даними означало б перетлумачити вже введені записи.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "isTemporal"
+        ],
+        "type": "object"
+      },
       "CreateReportDefRequest": {
         "description": "Запит на створення опису звіту разом із першою версією.",
         "properties": {
@@ -12205,6 +12231,76 @@
           }
         },
         "summary": "Перелік довідників. Право `Registry.View`.",
+        "tags": [
+          "Registries"
+        ]
+      },
+      "post": {
+        "description": "⛔ Поля заводяться ОКРЕМОЮ дією — тим самим `PUT …/{code}/definition`,\nщо вже редагує наявний довідник (`ФВ-8.12`). Довідник без жодного поля\nнічого не порушує: обов'язковість ключового поля перевіряється лише при\nзбереженні опису, коли поля вже є що перевіряти.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRegistryDto"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRegistryDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRegistryDto"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Заводить довідник-контейнер, без жодного поля. Право\n`Registry.EditDefinition`.",
         "tags": [
           "Registries"
         ]

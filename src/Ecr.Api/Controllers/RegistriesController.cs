@@ -11,6 +11,7 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class RegistriesController(
     ListRegistriesHandler listRegistries,
+    CreateRegistryHandler createRegistry,
     GetRegistryEntriesHandler getEntries,
     UpsertRegistryEntryHandler upsert,
     SetEntryValidityHandler setValidity,
@@ -25,6 +26,32 @@ public sealed class RegistriesController(
     [ProducesResponseType<IReadOnlyList<RegistryDefDto>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<RegistryDefDto>>> List(CancellationToken ct)
         => Ok(await listRegistries.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Заводить довідник-контейнер, без жодного поля. Право
+    /// <c>Registry.EditDefinition</c>.
+    /// </summary>
+    /// <param name="dto">Код, назва мовами каталогу і темпоральність.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Поля заводяться ОКРЕМОЮ дією — тим самим <c>PUT …/{code}/definition</c>,
+    /// що вже редагує наявний довідник (`ФВ-8.12`). Довідник без жодного поля
+    /// нічого не порушує: обов'язковість ключового поля перевіряється лише при
+    /// збереженні опису, коли поля вже є що перевіряти.
+    /// </remarks>
+    [HttpPost]
+    [ProducesResponseType<RegistryDefDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Create([FromBody] CreateRegistryDto dto, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var created = await createRegistry
+            .HandleAsync(dto.Code, dto.NameL10n, dto.IsTemporal, ct)
+            .ConfigureAwait(false);
+
+        return CreatedAtAction(nameof(Definition), new { code = created.Code }, created);
+    }
 
     /// <summary>
     /// Записи довідника на дату. Право <c>Registry.View</c>.

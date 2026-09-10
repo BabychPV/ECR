@@ -957,6 +957,12 @@ USING (VALUES
     (N'registries.changedAt',            N'en', N'Changed at', 1),
     (N'registries.operation',            N'en', N'Operation', 1),
     (N'registries.author',               N'en', N'Author', 1),
+    (N'registries.newRegistry',          N'en', N'New registry', 1),
+    (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
+    (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
+    (N'registries.temporalField',        N'en', N'Time-bound (entries have a validity window)', 1),
+    (N'registries.temporalFieldHint',    N'en', N'Decide once: turning this on later would reinterpret entries already entered.', 1),
+    (N'registries.created',              N'en', N'The registry has been created.', 1),
     (N'periods.timeZone',                N'en', N'Site time zone (IANA)', 1),
     -- ⚠ Підказка називає IANA і незмінність разом: поле обов'язкове і без
     -- початкового значення (H-13), тож користувач має знати обидві причини,

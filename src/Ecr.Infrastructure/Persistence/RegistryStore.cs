@@ -47,6 +47,9 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
                    .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public void AddDefinition(RegistryDef definition) => db.RegistryDefs.Add(definition);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Темпорального фільтра тут немає навмисно: чинність рахує
     /// <c>RegistryResolver</c>. Продублювати умову в SQL означало б мати два

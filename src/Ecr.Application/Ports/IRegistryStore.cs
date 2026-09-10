@@ -33,6 +33,13 @@ public interface IRegistryStore
     public Task<IReadOnlyList<RegistryDef>> ListDefinitionsAsync(CancellationToken ct);
 
     /// <summary>
+    /// Ставить нове визначення довідника в чергу на вставку; ідентифікатор
+    /// з'являється після збереження.
+    /// </summary>
+    /// <param name="definition">Довідник-контейнер — без жодного поля.</param>
+    public void AddDefinition(RegistryDef definition);
+
+    /// <summary>
     /// Записи довідника **без темпорального фільтра**.
     /// </summary>
     /// <remarks>

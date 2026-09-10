@@ -49,3 +49,24 @@ public sealed record RegistryFieldDto(
     bool IsScopeField,
     int? LookupRegistryDefId,
     int? UnitId);
+
+/// <summary>
+/// Заведення довідника з нуля — **без жодного поля**.
+/// </summary>
+/// <remarks>
+/// ⛔ Поля заводяться окремою дією (<c>PUT …/{code}/definition</c>), і це не
+/// зайвий крок: перше поле майже завжди ключове, а тип, обов'язковість і
+/// зв'язок на інший довідник — рішення, які тут ще ніхто не ухвалив.
+/// Склеїти обидві дії означало б вимагати від того, хто ще навіть не назвав
+/// довідник, одразу описати його схему.
+/// </remarks>
+/// <param name="Code">Код, унікальний серед довідників.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <param name="IsTemporal">
+/// Чи мають майбутні записи вікно дії. Рішення приймається один раз: змінити
+/// його для довідника з даними означало б перетлумачити вже введені записи.
+/// </param>
+public sealed record CreateRegistryDto(
+    string Code,
+    Dictionary<string, string> NameL10n,
+    bool IsTemporal);

@@ -230,6 +230,9 @@ export type SaveRegistryDefinitionDto = Schemas['SaveRegistryDefinitionDto'];
 /** Нова версія опису після збереження. */
 export type RegistryDefinitionVersionResponse = Schemas['RegistryDefinitionVersionResponse'];
 
+/** Заведення довідника з нуля: код, назва, темпоральність — без жодного поля. */
+export type CreateRegistryDto = Schemas['CreateRegistryDto'];
+
 /** Методологія з версіями. */
 export type MethodologyDto = Schemas['MethodologyDto'];
 
