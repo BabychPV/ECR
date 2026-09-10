@@ -31,15 +31,35 @@ public sealed class PublishTemplateVersionHandler(
     /// <summary>Виконує публікацію.</summary>
     /// <param name="templateVersionId">Версія.</param>
     /// <param name="userId">Хто публікує.</param>
+    /// <param name="reason">
+    /// Причина публікації; обов'язкова (той самий патерн, що й
+    /// <c>PublishMethodologyHandler.HandleAsync</c>, ФВ-14.7). Потрапляє в
+    /// журнал публікацій — раніше тут завжди писався літерал
+    /// <c>"Publish"</c>, однаковий для кожного виклику.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.BusinessRuleException">
-    /// Валідація не пройдена; у <c>Details</c> — перелік діагностик.
+    /// Валідація не пройдена; у <c>Details</c> — перелік діагностик. Порожня
+    /// причина відхиляється тим самим кодом до початку діагностик структури.
     /// </exception>
-    public async Task PublishAsync(int templateVersionId, int userId, CancellationToken ct)
+    public async Task PublishAsync(int templateVersionId, int userId, string reason, CancellationToken ct)
     {
         await ListTemplatesHandler
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Причина перевіряється ПЕРШОЮ, до діагностик структури — так само,
+        // як `PublishMethodologyHandler` перевіряє `effectiveFrom` до diff і
+        // золотого набору. Без цього версія публікувалася б із порожньою
+        // причиною, поки формули справні, і відмова прийшла б лише тоді, коли
+        // хтось додав у версію дефект структури, — випадково, а не системно.
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new BusinessRuleException(
+                "ECR-TMPL-0422",
+                "Публікацію відхилено: причина обов'язкова — порожній рядок нічого не "
+                + "пояснює тому, хто за рік питає, чому цю версію ввели в обіг.");
+        }
 
         // ⛔ Саме `GetWithStructureAsync`, а не `IRepository.GetAsync`. Другий —
         // це `FindAsync` без жодного `Include` при вимкненому лінивому
@@ -126,7 +146,7 @@ public sealed class PublishTemplateVersionHandler(
         await audit.WritePublicationEventAsync(
             new PublicationEventRecord(
                 clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
-                ResultDiffJson: null, ChangeReason: "Publish", ChangedByUserId: userId),
+                ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
             ct).ConfigureAwait(false);
 
         // Аудит і зміна стану — в одній транзакції: подія публікації без
