@@ -22,21 +22,42 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# ⛔ PowerShell 7.3+: $PSNativeCommandUseErrorActionPreference за
-# замовчуванням $true — будь-який запис нативної команди в stderr (навіть
-# звичайне попередження, не помилку) підпадає під $ErrorActionPreference і
-# зупиняє скрипт ДО того, як власна перевірка $LASTEXITCODE нижче встигає
-# спрацювати. Реальний прогін упав саме тут: "npm warn deprecated ..." від
-# `npm ci` (не помилка, код виходу 0) зупинив збірку як "NativeCommandError".
-# Вимкнено навмисно: єдине джерело істини про успіх нативного виклику в
-# цьому скрипті — явний $LASTEXITCODE, як і скрізь нижче.
-$PSNativeCommandUseErrorActionPreference = $false
-
 $root       = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $root 'artifacts\publish'
 $msiDir     = Join-Path $root 'artifacts\msi'
 $wixproj    = Join-Path $root 'installer\Ecr.Installer\Ecr.Installer.wixproj'
 $clientDir  = Join-Path $root 'src\Ecr.Web'
+
+# ⛔ Q-217 (реальний прогін): PowerShell перетворює КОЖЕН запис нативної
+# команди в stderr на запис у потоці помилок — і $ErrorActionPreference =
+# 'Stop' зупиняє скрипт на цьому записі, незалежно від коду виходу.
+# "npm warn deprecated ..." (звичайне попередження, код виходу 0) зупинив
+# збірку саме так, ДО власної перевірки $LASTEXITCODE. Це не про
+# $PSNativeCommandUseErrorActionPreference (та змінна за замовчуванням і
+# так $false — попередня версія цього фікса міняла її на те саме
+# значення, тобто не робила нічого). Єдине надійне джерело істини —
+# фактичний код виходу; ця функція послаблює ErrorActionPreference РІВНО
+# на час виклику й перевіряє $LASTEXITCODE явно, а не покладається на те,
+# як PowerShell трактує stderr.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 # ── 0. Інструменти на місці? ──────────────────────────────────────────────
 # Перевірка ПЕРЕД довгою публікацією: інакше про відсутність wix/npm
@@ -60,14 +81,15 @@ if (-not $SkipPublish) {
     # (docs/build/10-installer.md §1.2). ReadyToRun скорочує холодний старт
     # служби; для служби це важливо, бо перший запит після рестарту сервера
     # інакше чекає JIT.
-    dotnet publish (Join-Path $root 'src\Ecr.Api\Ecr.Api.csproj') `
-        -c $Configuration `
-        -r $Runtime `
-        --self-contained true `
-        -p:PublishReadyToRun=true `
-        -p:Version=$Version `
-        -o $publishDir
-    if ($LASTEXITCODE) { throw "dotnet publish завершився з кодом $LASTEXITCODE" }
+    Invoke-NativeStep "dotnet publish" {
+        dotnet publish (Join-Path $root 'src\Ecr.Api\Ecr.Api.csproj') `
+            -c $Configuration `
+            -r $Runtime `
+            --self-contained true `
+            -p:PublishReadyToRun=true `
+            -p:Version=$Version `
+            -o $publishDir
+    }
 }
 
 if (-not (Test-Path (Join-Path $publishDir 'Ecr.Api.exe'))) {
@@ -97,11 +119,8 @@ if (-not $SkipWeb) {
         #
         # npm ci, не install: відтворюваність з package-lock.json, той самий
         # принцип, що self-contained публікація для .NET-частини.
-        & npm.cmd ci
-        if ($LASTEXITCODE) { throw "npm ci завершився з кодом $LASTEXITCODE" }
-
-        & npm.cmd run build
-        if ($LASTEXITCODE) { throw "npm run build завершився з кодом $LASTEXITCODE" }
+        Invoke-NativeStep "npm ci" { & npm.cmd ci }
+        Invoke-NativeStep "npm run build" { & npm.cmd run build }
     }
     finally {
         Pop-Location
@@ -124,12 +143,13 @@ elseif (-not (Test-Path (Join-Path $publishDir 'wwwroot\index.html'))) {
 # ── 2. Збірка MSI ─────────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path $msiDir | Out-Null
 
-dotnet build $wixproj `
-    -c $Configuration `
-    -p:VersionPrefix=$Version `
-    -p:PublishDir=$publishDir `
-    -p:OutputPath=$msiDir
-if ($LASTEXITCODE) { throw "збірка MSI завершилася з кодом $LASTEXITCODE" }
+Invoke-NativeStep "збірка MSI" {
+    dotnet build $wixproj `
+        -c $Configuration `
+        -p:VersionPrefix=$Version `
+        -p:PublishDir=$publishDir `
+        -p:OutputPath=$msiDir
+}
 
 # -Recurse: WiX кладе фінальний .msi в підтеку культури (en-US тощо), не
 # прямо в $msiDir.

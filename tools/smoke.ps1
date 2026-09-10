@@ -38,10 +38,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
-# зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
-$PSNativeCommandUseErrorActionPreference = $false
-
 $root = Split-Path -Parent $PSScriptRoot
 $base = "http://localhost:$Port"
 $password = 'Smoke-Bootstrap-2026!'
@@ -111,9 +107,15 @@ Step 'чиста база і розгортання через sqlcmd'
 # аркуші, таблиці й колонки через API неможливо — структура приходить із
 # `tools/Ecr.Bootstrap.Excel`, який поки заглушка. Це відома межа сценарію, а
 # не спрощення: усе, що після структури, іде саме по HTTP.
-& powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
-    -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password | Out-Null
-
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
+        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password | Out-Null
+}
+finally {
+    $ErrorActionPreference = $previousEap
+}
 if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
 
 $connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
@@ -385,11 +387,18 @@ try {
 finally {
     if ($api -and -not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
 
-    & sqlcmd -S $Server -E -C -b -Q @"
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd -S $Server -E -C -b -Q @"
 IF DB_ID('$Database') IS NOT NULL
 BEGIN
     ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
     DROP DATABASE [$Database];
 END;
 "@ | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
 }

@@ -25,10 +25,31 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
-# (dotnet/npm/wix) зупиняє скрипт ДО власної перевірки $LASTEXITCODE
-# (реальний прогін — build-msi.ps1, "npm warn deprecated" зупинив збірку).
-$PSNativeCommandUseErrorActionPreference = $false
+# ⛔ Q-217 (реальний прогін): PowerShell перетворює КОЖЕН запис нативної
+# команди в stderr на запис у потоці помилок, і $ErrorActionPreference =
+# 'Stop' зупиняє скрипт на цьому записі незалежно від коду виходу —
+# "npm warn deprecated ..." зупинило build-msi.ps1 саме так. Не про
+# $PSNativeCommandUseErrorActionPreference (за замовчуванням і так
+# $false). Єдине надійне джерело істини — фактичний код виходу.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 $root       = Split-Path -Parent $PSScriptRoot
 $apiProject = Join-Path $root 'src\Ecr.Api\Ecr.Api.csproj'
@@ -40,9 +61,8 @@ Write-Host "== Ребілд Ecr.Api ($Configuration) ==" -ForegroundColor Cyan
 # Саме так спливають помилки, які інкрементна збірка могла тихо
 # пропустити на застарілому кеші (обіч цієї сесії таке вже траплялося
 # з WiX-проєктом — коротший, дешевший спосіб перевірити тут вартий того).
-dotnet build $apiProject -c $Configuration --no-incremental
-if ($LASTEXITCODE) {
-    throw "dotnet build завершився з кодом $LASTEXITCODE — помилка компіляції, до пакування не дійшло"
+Invoke-NativeStep "dotnet build (Ecr.Api)" {
+    dotnet build $apiProject -c $Configuration --no-incremental
 }
 
 Write-Host ""
