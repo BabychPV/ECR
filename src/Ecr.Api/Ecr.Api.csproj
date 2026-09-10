@@ -19,6 +19,9 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" />
     <PackageReference Include="Scalar.AspNetCore" />
+    <!-- Windows-служба (docs/build/10-installer.md): без UseWindowsService()
+         процес не відповідає на запити SCM старт/стоп правильно. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
   </ItemGroup>
 
 </Project>

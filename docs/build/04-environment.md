@@ -97,6 +97,7 @@ SELECT SERVERPROPERTY('Edition')             AS Edition,
 | `Quartz.Extensions.Hosting` | 3.13.1 | Apache-2.0 | інтеграція з host |
 | ~~`Microsoft.CodeAnalysis.CSharp.Scripting`~~ | — | MIT | **не підключається** (`D-105`, `D-113`): рівень 2 у першому релізі не будується, залежність під нереалізовану функцію суперечить `D-12` |
 | `System.IdentityModel.Tokens.Jwt` | — | — | ⛔ **не використовуємо** — автентифікація на cookie |
+| `Microsoft.Extensions.Hosting.WindowsServices` | 10.0.11 | MIT | `UseWindowsService()` — без нього процес не відповідає на старт/стоп SCM (`docs/build/10-installer.md`) |
 
 > **Чому Quartz, а не Hangfire.** `D-09` дозволяє обидва **за портом
 > `IBackgroundJobScheduler`**. Hangfire — LGPL, і його допустимість — відкрите
@@ -126,6 +127,27 @@ SELECT SERVERPROPERTY('Edition')             AS Edition,
 `EFCore.BulkExtensions` · `HyperFormula` · `EPPlus` 5+ · `Handsontable` ·
 `NBomber` 5+ · `FluentAssertions` 8+ · будь-який Redis-сервер ·
 `AG Grid Enterprise` · усе під GPL / AGPL / SSPL / Polyform / cFOSS / noncommercial.
+
+### 3.4 Інсталятор (`installer/`, `docs/build/10-installer.md`)
+
+Не входить у `Ecr.sln` (WiX не збирається на Linux, а `build`/`test`/`server`
+CI — виключно ubuntu-latest). Версії — у `Directory.Packages.props` разом із
+рештою реєстру, окрім самого SDK (`Sdk="WixToolset.Sdk/5.0.2"` — атрибут
+проєкту, не `PackageReference`).
+
+| Пакет | Версія | Ліцензія | Навіщо |
+|---|---|---|---|
+| `WixToolset.Sdk` | 5.0.2 | MS-RL | MSBuild SDK інсталятора |
+| `WixToolset.Util.wixext` | 5.0.2 | MS-RL | ACL, служба |
+| `WixToolset.Firewall.wixext` | 5.0.2 | MS-RL | правило брандмауера |
+| `WixToolset.UI.wixext` | 5.0.2 | MS-RL | стандартні діалоги |
+
+> ⛔ **Не 6.x і новіші.** З `6.0.0` (квітень 2025) FireGiant вимагає Open
+> Source Maintenance Fee за комерційне використання офіційних збірок понад
+> $10k доходу — сам код лишається MS-RL, але це вже платне зобов'язання, не
+> технічне рішення. `5.0.2` — останній випуск до цієї моделі, той самий
+> формат `.wxs`. Платити за `6.x`/новіше чи лишатися на `5.x` — рішення не
+> моє (`Q-210`, `docs/build/questions.md`).
 
 **Нова залежність додається лише так:** запис у `questions.md` → перевірка
 ліцензії за першоджерелом → додавання в `Directory.Packages.props`. CI має

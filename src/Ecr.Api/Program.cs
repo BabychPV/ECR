@@ -13,6 +13,13 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ⚠ Без цього виклику процес не відповідає на старт/стоп SCM правильно і
+// службу, зареєстровану інсталятором (docs/build/10-installer.md), не
+// вдасться підняти. Поза Windows-службою — інертний no-op (перевірено,
+// впливу на dev/тести/Linux CI немає): WindowsServiceHelpers.IsWindowsService()
+// вмикає цю поведінку лише тоді, коли процес і справді піднятий SCM.
+builder.Host.UseWindowsService();
+
 // Конфігурація: змінні оточення з префіксом ECR_ перекривають файли
 builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
 

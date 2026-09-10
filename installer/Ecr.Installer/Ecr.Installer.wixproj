@@ -1,0 +1,72 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputName>Ecr</OutputName>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+
+    <!--
+      Валідація ICE увімкнена НАВМИСНО. Вона знаходить те, що інакше
+      виявиться на машині адміністратора: невірні KeyPath, конфлікти
+      компонентів, некоректні умови. Вимикати заборонено.
+    -->
+    <SuppressValidation>false</SuppressValidation>
+
+    <!--
+      ICE61 — єдине придушене, і саме тому, а не «зручності заради»:
+      команда Windows Installer сама вважає AllowSameVersionUpgrades="yes"
+      поганою ідеєю й ICE61 буквально проти НЬОГО, а не проти помилки в
+      цьому дереві — це задокументована, загальновідома взаємодія (WiX
+      issue #3025 і давніше), не обхід реальної проблеми. Без
+      AllowSameVersionUpgrades сценарій 5 матриці («той самий MSI поверх»)
+      падав би помилкою 1638 замість тихої переустановки.
+    -->
+    <SuppressIces>ICE61</SuppressIces>
+
+    <!-- Три поля: MSI порівнює версії лише за ними (docs/build/10-installer.md §1.5). -->
+    <DefineConstants>ProductVersion=$(VersionPrefix);PublishDir=$(PublishDir)</DefineConstants>
+
+    <!--
+      ⛔ Перекриває `Directory.Build.props` (`DebugType=portable` у Release):
+      той запис — для .NET-компілятора, а `wix.exe` розуміє лише `full`/
+      `none` і падає з WIX0268 на будь-якому іншому значенні. Пакування не
+      компілює код, тож PDB тут не потрібен узагалі.
+    -->
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!--
+    ⛔ Навмисно НЕ в Ecr.sln. `dotnet build Ecr.sln`/`dotnet test Ecr.sln` —
+    гейти CI (`build`/`test`/`server`) — виконуються на ubuntu-latest
+    (`.github/workflows/ci.yml`: «Платформа — Linux, і це не вибір»), а WiX
+    не має нативної збірки під Linux (лише Windows; є обхід через Wine в
+    Docker, якого в цьому конвеєрі немає). Додавання цього проєкту до
+    Ecr.sln зробило б `dotnet build Ecr.sln` червоним на КОЖНОМУ пуші —
+    для всього репозиторію, не лише для інсталятора. `scripts/build-msi.ps1`
+    лишається єдиною точкою входу «одна команда → .msi» (docs/build/
+    10-installer.md, розділ про відхилення від первинного тексту).
+  -->
+
+  <!--
+    Версії розширень — у Directory.Packages.props (реєстр стека, D-12), як і
+    решта пакетів дерева: PackageReference тут БЕЗ Version навмисно.
+  -->
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" />
+    <PackageReference Include="WixToolset.Firewall.wixext" />
+    <PackageReference Include="WixToolset.UI.wixext" />
+  </ItemGroup>
+
+  <!--
+    ⛔ Без явного ItemGroup для .wxs: WixToolset.Sdk, як і Microsoft.NET.Sdk,
+    неявно бере всі *.wxs з теки проєкту (SDK default items). Явний
+    `<Compile Include="Package.wxs" />` поруч із цим подвоював кожен файл —
+    звідси WIX0089 «Multiple entry sections» (Package.wxs компілювався
+    двічі: раз неявно, раз явно).
+  -->
+
+  <ItemGroup>
+    <WixLocalization Include="Strings.wxl" />
+  </ItemGroup>
+
+</Project>
