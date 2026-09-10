@@ -29,7 +29,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "Майстер встановлення ECR Web";
+        Text = "ECR Web Setup Wizard";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(680, 520);
         Size = new Size(720, 560);
@@ -60,13 +60,13 @@ internal sealed class MainForm : Form
 
         _content = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12) };
 
-        _cancelButton = new Button { Text = "Скасувати", AutoSize = true, Margin = new Padding(12, 8, 12, 8) };
+        _cancelButton = new Button { Text = "Cancel", AutoSize = true, Margin = new Padding(12, 8, 12, 8) };
         _cancelButton.Click += (_, _) => OnCancel();
 
-        _backButton = new Button { Text = "Назад", AutoSize = true, Margin = new Padding(0, 8, 8, 8) };
+        _backButton = new Button { Text = "Back", AutoSize = true, Margin = new Padding(0, 8, 8, 8) };
         _backButton.Click += (_, _) => OnBack();
 
-        _primaryButton = new Button { Text = "Далі", AutoSize = true, Margin = new Padding(0, 8, 12, 8) };
+        _primaryButton = new Button { Text = "Next", AutoSize = true, Margin = new Padding(0, 8, 12, 8) };
         _primaryButton.Click += (_, _) => OnPrimary();
 
         var leftFlow = new FlowLayoutPanel { Dock = DockStyle.Left, FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
@@ -118,7 +118,7 @@ internal sealed class MainForm : Form
 
         if (!current.Validate(out var error))
         {
-            MessageBox.Show(this, error, "Перевірте введені дані", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, error, "Check the entered data", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -165,8 +165,8 @@ internal sealed class MainForm : Form
 
         var confirm = MessageBox.Show(
             this,
-            "Точно скасувати встановлення?",
-            "Скасування",
+            "Are you sure you want to cancel the installation?",
+            "Cancel Setup",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
 
@@ -214,7 +214,7 @@ internal sealed class MainForm : Form
         var visibleSteps = _steps.Where(s => !ShouldSkip(s)).ToList();
         var current = _steps[_currentIndex];
         var position = visibleSteps.IndexOf(current) + 1;
-        _stepLabel.Text = $"Крок {position} з {visibleSteps.Count}: {current.Title}";
+        _stepLabel.Text = $"Step {position} of {visibleSteps.Count}: {current.Title}";
     }
 
     private void UpdateButtons()
@@ -232,17 +232,17 @@ internal sealed class MainForm : Form
 
             if (_installRunning || install.Succeeded is null)
             {
-                _primaryButton.Text = "Встановлення...";
+                _primaryButton.Text = "Installing...";
                 _primaryButton.Enabled = false;
             }
             else if (install.Succeeded == true)
             {
-                _primaryButton.Text = "Завершити";
+                _primaryButton.Text = "Finish";
                 _primaryButton.Enabled = true;
             }
             else
             {
-                _primaryButton.Text = "Спробувати ще раз";
+                _primaryButton.Text = "Try Again";
                 _primaryButton.Enabled = true;
             }
 
@@ -252,7 +252,7 @@ internal sealed class MainForm : Form
         _cancelButton.Enabled = true;
         _backButton.Enabled = AdjustedIndex(_currentIndex - 1, -1) >= 0;
         _primaryButton.Enabled = true;
-        _primaryButton.Text = step is ReviewStep ? "Встановити" : "Далі";
+        _primaryButton.Text = step is ReviewStep ? "Install" : "Next";
     }
 
     private int AdjustedIndex(int index, int direction)

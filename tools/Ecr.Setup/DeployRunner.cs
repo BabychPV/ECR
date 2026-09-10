@@ -61,8 +61,8 @@ internal sealed class DeployRunner
         }
 
         ps.Streams.Information.DataAdded += (_, e) => OutputReceived?.Invoke(FormatInformation(ps.Streams.Information[e.Index]));
-        ps.Streams.Warning.DataAdded += (_, e) => OutputReceived?.Invoke("УВАГА: " + ps.Streams.Warning[e.Index].Message);
-        ps.Streams.Error.DataAdded += (_, e) => OutputReceived?.Invoke("ПОМИЛКА: " + ps.Streams.Error[e.Index]);
+        ps.Streams.Warning.DataAdded += (_, e) => OutputReceived?.Invoke("WARNING: " + ps.Streams.Warning[e.Index].Message);
+        ps.Streams.Error.DataAdded += (_, e) => OutputReceived?.Invoke("ERROR: " + ps.Streams.Error[e.Index]);
 
         try
         {
@@ -70,7 +70,7 @@ internal sealed class DeployRunner
         }
         catch (Exception ex)
         {
-            OutputReceived?.Invoke("ПОМИЛКА (зупинка скрипта): " + ex.Message);
+            OutputReceived?.Invoke("ERROR (script stopped): " + ex.Message);
             return false;
         }
 

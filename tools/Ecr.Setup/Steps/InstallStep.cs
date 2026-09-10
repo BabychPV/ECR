@@ -13,13 +13,13 @@ internal sealed partial class InstallStep : IWizardStep
 {
     private static readonly (int Number, string Name)[] ScriptSteps =
     {
-        (1, "Передумови"),
-        (2, "Схема"),
+        (1, "Prerequisites"),
+        (2, "Schema"),
         (3, "MSI"),
-        (4, "Секрети служби"),
-        (5, "Конфігурація"),
-        (6, "Старт служби"),
-        (7, "Перевірка здоров'я"),
+        (4, "Service secrets"),
+        (5, "Configuration"),
+        (6, "Start service"),
+        (7, "Health check"),
     };
 
     private readonly Dictionary<int, Label> _checklistLabels = new();
@@ -40,7 +40,7 @@ internal sealed partial class InstallStep : IWizardStep
     /// <summary>Піднімається один раз, коли скрипт завершив роботу (успішно чи ні).</summary>
     public event Action<bool>? Completed;
 
-    public string Title => "Встановлення";
+    public string Title => "Installation";
 
     public Control BuildView()
     {
@@ -57,7 +57,7 @@ internal sealed partial class InstallStep : IWizardStep
             Height = 40,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
-            Text = "Встановлення виконується...",
+            Text = "Installation in progress...",
         };
 
         var checklistPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Dock = DockStyle.Top };
@@ -68,7 +68,7 @@ internal sealed partial class InstallStep : IWizardStep
             checklistPanel.Controls.Add(label);
         }
 
-        _toggleLogButton = new Button { Text = "Показати детальний журнал", AutoSize = true, Dock = DockStyle.Top };
+        _toggleLogButton = new Button { Text = "Show detailed log", AutoSize = true, Dock = DockStyle.Top };
         _toggleLogButton.Click += (_, _) => ToggleLog();
 
         _logBox = new TextBox
@@ -111,7 +111,7 @@ internal sealed partial class InstallStep : IWizardStep
             _checklistLabels[number].ForeColor = SystemColors.ControlText;
         }
 
-        _bannerLabel!.Text = "Встановлення виконується...";
+        _bannerLabel!.Text = "Installation in progress...";
         _bannerLabel.ForeColor = SystemColors.ControlText;
         _logBox!.Clear();
 
@@ -136,13 +136,13 @@ internal sealed partial class InstallStep : IWizardStep
             if (success)
             {
                 MarkCompleted(_lastAnnouncedStep == 0 ? 7 : _lastAnnouncedStep);
-                _bannerLabel!.Text = "Готово — служба відповідає на /health/live";
+                _bannerLabel!.Text = "Done — the service responds on /health/live";
                 _bannerLabel.ForeColor = Color.DarkGreen;
             }
             else
             {
                 MarkFailed(_lastAnnouncedStep);
-                _bannerLabel!.Text = "Не вдалося завершити встановлення — див. детальний журнал нижче.";
+                _bannerLabel!.Text = "Installation failed — see the detailed log below.";
                 _bannerLabel.ForeColor = Color.DarkRed;
             }
 
@@ -208,7 +208,7 @@ internal sealed partial class InstallStep : IWizardStep
     private void ToggleLog()
     {
         _logBox!.Visible = !_logBox.Visible;
-        _toggleLogButton!.Text = _logBox.Visible ? "Сховати детальний журнал" : "Показати детальний журнал";
+        _toggleLogButton!.Text = _logBox.Visible ? "Hide detailed log" : "Show detailed log";
     }
 
     private static string ResolveScriptPath()

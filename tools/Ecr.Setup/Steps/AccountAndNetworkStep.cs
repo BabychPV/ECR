@@ -13,7 +13,7 @@ internal sealed class AccountAndNetworkStep : IWizardStep
     private NumericUpDown? _portUpDown;
     private TextBox? _msiPathBox;
 
-    public string Title => "Обліковий запис і мережа";
+    public string Title => "Service Account and Network";
 
     public Control BuildView()
     {
@@ -36,25 +36,25 @@ internal sealed class AccountAndNetworkStep : IWizardStep
 
         if ((_gmsaOption!.Checked || _domainUserOption!.Checked) && string.IsNullOrWhiteSpace(_accountNameBox!.Text))
         {
-            error = "Вкажіть ім'я облікового запису служби.";
+            error = "Enter the service account name.";
             return false;
         }
 
         if (_domainUserOption!.Checked && string.IsNullOrWhiteSpace(_passwordBox!.Text))
         {
-            error = "Вкажіть пароль облікового запису служби.";
+            error = "Enter the service account password.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(_msiPathBox!.Text))
         {
-            error = "Вкажіть шлях до файлу Ecr.msi.";
+            error = "Enter the path to the Ecr.msi file.";
             return false;
         }
 
         if (!File.Exists(_msiPathBox!.Text))
         {
-            error = "Файл MSI за вказаним шляхом не знайдено.";
+            error = "The MSI file was not found at the specified path.";
             return false;
         }
 
@@ -83,15 +83,15 @@ internal sealed class AccountAndNetworkStep : IWizardStep
 
     private GroupBox BuildAccountGroup()
     {
-        var group = new GroupBox { Text = "Обліковий запис служби", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var group = new GroupBox { Text = "Service account", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        _localSystemOption = new RadioButton { Text = "Local System (не рекомендовано)", AutoSize = true, Checked = true };
+        _localSystemOption = new RadioButton { Text = "Local System (not recommended)", AutoSize = true, Checked = true };
         _gmsaOption = new RadioButton { Text = "gMSA", AutoSize = true };
-        _domainUserOption = new RadioButton { Text = "Обліковий запис і пароль", AutoSize = true };
+        _domainUserOption = new RadioButton { Text = "Account and password", AutoSize = true };
 
         _accountNameBox = new TextBox { Dock = DockStyle.Fill, Enabled = false };
         _passwordBox = new TextBox { Dock = DockStyle.Fill, Enabled = false, UseSystemPasswordChar = true };
@@ -107,10 +107,10 @@ internal sealed class AccountAndNetworkStep : IWizardStep
         layout.Controls.Add(_domainUserOption, 0, 2);
         layout.SetColumnSpan(_domainUserOption, 2);
 
-        layout.Controls.Add(new Label { Text = "Ім'я облікового запису:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 3);
+        layout.Controls.Add(new Label { Text = "Account name:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 3);
         layout.Controls.Add(_accountNameBox, 1, 3);
 
-        layout.Controls.Add(new Label { Text = "Пароль:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 4);
+        layout.Controls.Add(new Label { Text = "Password:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 4);
         layout.Controls.Add(_passwordBox, 1, 4);
 
         group.Controls.Add(layout);
@@ -119,7 +119,7 @@ internal sealed class AccountAndNetworkStep : IWizardStep
 
     private GroupBox BuildNetworkGroup()
     {
-        var group = new GroupBox { Text = "Мережа й пакет", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var group = new GroupBox { Text = "Network and package", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, AutoSize = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -127,11 +127,11 @@ internal sealed class AccountAndNetworkStep : IWizardStep
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         _portUpDown = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = 5000, Width = 100 };
-        layout.Controls.Add(new Label { Text = "Порт:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
+        layout.Controls.Add(new Label { Text = "Port:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
         layout.Controls.Add(_portUpDown, 1, 0);
 
         _msiPathBox = new TextBox { Dock = DockStyle.Fill };
-        var browseButton = new Button { Text = "Огляд..." };
+        var browseButton = new Button { Text = "Browse..." };
         browseButton.Click += (_, _) => BrowseForMsi();
 
         var detected = TryDetectMsi();
@@ -140,7 +140,7 @@ internal sealed class AccountAndNetworkStep : IWizardStep
             _msiPathBox.Text = detected;
         }
 
-        layout.Controls.Add(new Label { Text = "Файл Ecr.msi:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
+        layout.Controls.Add(new Label { Text = "Ecr.msi file:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
         layout.Controls.Add(_msiPathBox, 1, 1);
         layout.Controls.Add(browseButton, 2, 1);
 
@@ -157,7 +157,7 @@ internal sealed class AccountAndNetworkStep : IWizardStep
 
     private void BrowseForMsi()
     {
-        using var dialog = new OpenFileDialog { Filter = "Пакет установки (*.msi)|*.msi", CheckFileExists = true };
+        using var dialog = new OpenFileDialog { Filter = "Installation package (*.msi)|*.msi", CheckFileExists = true };
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             _msiPathBox!.Text = dialog.FileName;

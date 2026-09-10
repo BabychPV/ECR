@@ -16,7 +16,7 @@ internal sealed class CredentialsStep : IWizardStep
     private TextBox? _confirmBox;
     private CheckBox? _showPasswordCheckBox;
 
-    public string Title => "Пароль адміністратора";
+    public string Title => "Administrator Password";
 
     public Control BuildView()
     {
@@ -29,7 +29,7 @@ internal sealed class CredentialsStep : IWizardStep
 
         var explanation = new Label
         {
-            Text = "Цей пароль потрібен лише для першого входу — система одразу попросить його змінити.",
+            Text = "This password is needed only for the first sign-in — the system will immediately ask to change it.",
             AutoSize = true,
             MaximumSize = new Size(520, 0),
             Margin = new Padding(4, 4, 4, 12),
@@ -43,15 +43,15 @@ internal sealed class CredentialsStep : IWizardStep
         _passwordBox = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
         _confirmBox = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
 
-        fields.Controls.Add(new Label { Text = "Пароль:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
+        fields.Controls.Add(new Label { Text = "Password:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
         fields.Controls.Add(_passwordBox, 1, 0);
 
-        fields.Controls.Add(new Label { Text = "Підтвердження:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
+        fields.Controls.Add(new Label { Text = "Confirm:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
         fields.Controls.Add(_confirmBox, 1, 1);
 
         root.Controls.Add(fields);
 
-        _showPasswordCheckBox = new CheckBox { Text = "Показати паролі", AutoSize = true, Margin = new Padding(4, 8, 4, 0) };
+        _showPasswordCheckBox = new CheckBox { Text = "Show passwords", AutoSize = true, Margin = new Padding(4, 8, 4, 0) };
         _showPasswordCheckBox.CheckedChanged += (_, _) =>
         {
             _passwordBox!.UseSystemPasswordChar = !_showPasswordCheckBox!.Checked;
@@ -71,13 +71,13 @@ internal sealed class CredentialsStep : IWizardStep
 
         if (password.Length < MinimumLength)
         {
-            error = $"Пароль має містити щонайменше {MinimumLength} символів.";
+            error = $"Password must be at least {MinimumLength} characters long.";
             return false;
         }
 
         if (password != confirm)
         {
-            error = "Паролі не збігаються.";
+            error = "Passwords do not match.";
             return false;
         }
 
