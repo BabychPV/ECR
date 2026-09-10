@@ -66,11 +66,24 @@ public static partial class StartupSequence
         //
         //     ⚠ Йде ПІСЛЯ seed: роль `Administrator` створює саме seed, і
         //     без неї видати її нікому.
+        // ⚠ Директива №13 (Q-215): одноразовий файл — ПЕРШЕ джерело; змінна
+        // оточення ECR_Bootstrap__Password лишається запасним шляхом для
+        // dev/CI. Файл читається й видаляється тут-таки, ДО виклику
+        // HandleAsync — не після, щоб виняток усередині HandleAsync не
+        // лишив пароль непрочищеним.
+        var secretFile = BootstrapSecretFile.ReadAndDelete(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+
+        if (secretFile.DeleteError is not null)
+        {
+            LogBootstrapSecretNotDeleted(logger, secretFile.DeleteError);
+        }
+
         var bootstrap = scope.ServiceProvider
             .GetRequiredService<Application.Security.EnsureBootstrapAdminHandler>();
 
         await bootstrap
-            .HandleAsync(app.Configuration["Bootstrap:Password"], CancellationToken.None)
+            .HandleAsync(secretFile.Password ?? app.Configuration["Bootstrap:Password"], CancellationToken.None)
             .ConfigureAwait(false);
 
         // ⚠ Попередження ВИДИМІ. «Увійти буде нікому» — це стан, про який
@@ -254,4 +267,9 @@ public static partial class StartupSequence
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Старт: попереду лише {Ahead} партицій. Виконайте 04-partition-maintenance.sql.")]
     private static partial void LogFewPartitions(ILogger logger, int ahead);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Старт: не вдалося видалити одноразовий файл bootstrap-пароля: {Error}. " +
+                   "Пароль у ньому вже використано — прибери файл вручну.")]
+    private static partial void LogBootstrapSecretNotDeleted(ILogger logger, string error);
 }
