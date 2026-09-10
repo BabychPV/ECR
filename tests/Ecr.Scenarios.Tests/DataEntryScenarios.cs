@@ -1176,8 +1176,9 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             Assert.True(addRule.StatusCode == HttpStatusCode.OK, $"{addRule.StatusCode}: {app.ErrorsText}");
         }
 
-        var publish = await client.PostAsync(
-            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative), content: null);
+        var publish = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),
+            new { reason = "Побудова структури для сценарію" });
         Assert.True(publish.StatusCode == HttpStatusCode.NoContent, $"{publish.StatusCode}: {app.ErrorsText}");
 
         return new TemplateStructure(versionId, sheetDefId, tableDefId, rowKeys, formulaColumnDefId);

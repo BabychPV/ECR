@@ -518,6 +518,9 @@ export type SetValidityRequest = Schemas['SetValidityRequest'];
 /** Клонування версії шаблону. */
 export type CloneVersionRequest = Schemas['CloneVersionRequest'];
 
+/** Публікація версії шаблону; причина обов'язкова (той самий патерн, що й методологія). */
+export type PublishVersionRequest = Schemas['PublishVersionRequest'];
+
 /** Виведення версії шаблону з обігу (`ФВ-7.8`). */
 export type DeprecateVersionRequest = Schemas['DeprecateVersionRequest'];
 

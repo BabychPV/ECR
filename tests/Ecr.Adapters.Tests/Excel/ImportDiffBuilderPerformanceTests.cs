@@ -75,7 +75,7 @@ public sealed class ImportDiffBuilderPerformanceTests(SqlServerFixture sql)
         var executed = new List<string>();
         var bulk = new BulkCellLoader(sql.ConnectionString, 1000);
         await using var countingDb = CreateCountingContext(executed);
-        var cellStore = new NormalizedCellStore(countingDb, bulk);
+        var cellStore = new NormalizedCellStore(countingDb);
         var rowStore = new RowStore(countingDb, bulk, new TestClock(DateTime.UtcNow));
         var diffBuilder = new ImportDiffBuilder();
 

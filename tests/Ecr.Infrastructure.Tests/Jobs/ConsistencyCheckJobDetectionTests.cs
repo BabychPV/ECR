@@ -28,6 +28,43 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "T10-41")]
+    public async Task Знахідка_видима_в_метриках()
+    {
+        // ⛔ D-134 (директива №11, T10 #41): EcrMetrics.RecordConsistencyIssues
+        // існував і не мав жодного викликача — ConsistencyCheckJob писав
+        // знахідки лише в aud.ConsistencyIssue, журнал, який ніхто не читає
+        // проактивно. Прибери виклик metrics.RecordIssues у
+        // ConsistencyCheckJob.ExecuteAsync — цей тест почервоніє.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync(CancellationToken.None);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT doc.CellValue
+                    (PeriodKey, TableRowId, TableDefId, ColumnDefId, ValueRegistryEntryId, IsCalculated, IsEmpty)
+                VALUES (@p, @r, @t, @c, @reg, 0, 0);
+                """;
+            command.Parameters.AddWithValue("@p", doc.PeriodKey.Value);
+            command.Parameters.AddWithValue("@r", doc.RowIds[0]);
+            command.Parameters.AddWithValue("@t", doc.TableDefId);
+            command.Parameters.AddWithValue("@c", doc.ColumnDefIds[0]);
+            command.Parameters.AddWithValue("@reg", -900_103);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+
+        var metrics = Substitute.For<IConsistencyMetrics>();
+        await RunJobAsync(metrics);
+
+        metrics.Received(1).RecordIssues(Arg.Is<int>(count => count > 0), "ORPHANED_CELL");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.7")]
     public async Task Виявляє_осиротілу_комірку()
     {
@@ -151,7 +188,9 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
         Assert.Equal(3, issue.Value.Severity);
     }
 
-    private async Task RunJobAsync()
+    private Task RunJobAsync() => RunJobAsync(Substitute.For<IConsistencyMetrics>());
+
+    private async Task RunJobAsync(IConsistencyMetrics metrics)
     {
         await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
             .UseSqlServer(sql.ConnectionString)
@@ -159,7 +198,8 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
 
         var job = new ConsistencyCheckJob(
             db, Substitute.For<IOrphanScanner>(),
-            new TestClock(new DateTime(2026, 2, 1, 3, 0, 0, DateTimeKind.Utc)));
+            new TestClock(new DateTime(2026, 2, 1, 3, 0, 0, DateTimeKind.Utc)),
+            metrics);
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
     }

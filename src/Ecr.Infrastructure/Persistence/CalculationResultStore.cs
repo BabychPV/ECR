@@ -13,14 +13,25 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICalculationResultStore
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
+    /// одним викликом <c>sp_sequence_get_range</c>.
+    /// </summary>
     /// <remarks>
     /// ⚠ Діапазон береться ОДНИМ викликом на весь пакет, а не по одному
     /// значенню: <c>Id</c> потрібні ДО вставки, щоб завантажити результати і
     /// трейс одним проходом. Звернення до послідовності на кожен рядок
     /// коштувало б мільйонів round-trip на річному перерахунку.
+    /// <para>
+    /// ⛔ Директива №11, T10 #50: був публічним членом <c>ICalculationResultStore</c>
+    /// без жодного зовнішнього викликача через порт (тільки внутрішній
+    /// виклик із <see cref="WriteResultsAsync"/>) — той самий шаблон, що й
+    /// приватний <see cref="NextStepIdAsync"/> поруч. Прибрано з порту, а не
+    /// видалено: логіка жива й потрібна, просто ніхто, крім цього класу, її
+    /// не викликає.
+    /// </para>
     /// </remarks>
-    public async Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct)
+    private async Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 

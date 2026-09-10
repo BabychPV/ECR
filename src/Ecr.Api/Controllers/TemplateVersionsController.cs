@@ -59,19 +59,33 @@ public sealed class TemplateVersionsController(
     /// <summary>
     /// Публікує версію. Право <c>Template.Publish</c>.
     /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="request">Причина публікації.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Після публікації структура незмінна: тригер БД відхиляє структурний
     /// <c>UPDATE</c>, презентаційний пропускає. Цикл у графі формул — помилка
     /// **публікації** (<c>ECR-TMPL-4221</c>), а не рантайму (ФВ-9.4).
+    ///
+    /// ⛔ Причина обов'язкова — той самий патерн, що й <c>PublishMethodologyRequest.ChangeReason</c>
+    /// (`ФВ-14.7`, `MethodologiesController`) і сусідній <see cref="DeprecateVersionRequest"/>
+    /// нижче: до цього поле не існувало взагалі, і журнал публікацій ніс
+    /// літерал <c>"Publish"</c> — рядок, що ВИГЛЯДАЄ як причина, але нею не є,
+    /// і однаковий для кожної публікації без винятку. За рік «Publish» у
+    /// журналі не відповідає на питання «чому саме цю версію ввели в обіг».
     /// </remarks>
     [HttpPost("publish")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> Publish(int id, CancellationToken ct)
+    public async Task<IActionResult> Publish(
+        int id, [FromBody] PublishVersionRequest request, CancellationToken ct)
     {
-        // Цикл у графі формул, нерозв'язані посилання і несумісні одиниці —
-        // помилки ПУБЛІКАЦІЇ, і кидає їх обробник. Контролер лише передає.
-        await publish.PublishAsync(id, UserId, ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Цикл у графі формул, нерозв'язані посилання, несумісні одиниці і
+        // порожня причина — помилки ПУБЛІКАЦІЇ, і кидає їх обробник.
+        // Контролер лише передає.
+        await publish.PublishAsync(id, UserId, request.Reason, ct).ConfigureAwait(false);
         return NoContent();
     }
 
@@ -735,6 +749,16 @@ public sealed class TemplateVersionsController(
         ?? throw new Application.Errors.AccessDeniedException(
             ErrorCodes.Unauthorized, "Сесія не містить користувача.");
 }
+
+/// <summary>Запит на публікацію версії.</summary>
+/// <param name="Reason">
+/// Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —
+/// той самий патерн, що й <c>PublishMethodologyRequest.ChangeReason</c>
+/// (ФВ-14.7): «чому цю версію ввели в обіг» — питання, на яке через рік
+/// має бути відповідь, а не літерал <c>"Publish"</c>, однаковий для кожної
+/// публікації.
+/// </param>
+public sealed record PublishVersionRequest(string Reason);
 
 /// <summary>Запит на виведення версії з обігу.</summary>
 /// <param name="Reason">

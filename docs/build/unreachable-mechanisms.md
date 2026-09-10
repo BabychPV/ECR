@@ -242,7 +242,8 @@
 | ⛔ Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope`, `ScriptVersion.MarkCompiled` | 6 (`B-3`) — закритий | `A10` пункт 6. ⚠ `SetModes` не кличе ніхто, тобто `NumericMode = Strict` увімкнути **неможливо в принципі** |
 | ⛔ Конфігурація збору: `DataSource.Configure`, `CollectionSchedule.SetLookback`, `EntityFieldMap.*`, `LegacyMappings.*` | 7 (`B-5`, перегляд мапінгу) — закритий | екран показує мапінг, але не дає його заводити |
 | `IAccessDecisionService.CanEditCellAsync` | до кроку не прив'язаний | не потрібен: усі шляхи запису йдуть через зріз; **або прибрати з порту** |
-| `ICellStore.ReadCellsAsync` / `BulkInsertAsync` | до кроку не прив'язаний | використовує `ExcelImporter` і фікстури; лишити |
+| `ICellStore.ReadCellsAsync` | до кроку не прив'язаний | використовує `ExcelImporter` і фікстури; лишити |
+| ⛔ `ICellStore.BulkInsertAsync` | до кроку не прив'язаний | директива №11, T10 #50: твердження «використовує `ExcelImporter`» тут не підтвердилось — `ExcelImporter` кличе лише `ReadSlicesAsync`; нуль викликів поза власною реалізацією й тестами реалізації. Прибрано з порту; `BulkCellLoader.LoadAsync` лишається — його напряму кличе `Ecr.DataGen` (генератор, реальний споживач) |
 | ⛔ `RegistryEntry.Restore`, `RegistryEntry.SetOrdinal`, `RegistryExternalKey.MarkSynced`, `RegistryEntryLink.SetPayload` | 8 (`B-1`) — закритий | `A10` пункт 5 |
 | ⛔ `IntegrationLogs.MarkPeriodDone`, `RecordChecksums` | 7 (`B-5`) — закритий | `A10` пункт 3 (перерахунок і задачі) |
 

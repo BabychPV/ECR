@@ -42,9 +42,6 @@ public interface ICellStore
     /// Бюджет: p95 &lt; 150 мс на 100 комірок.
     /// </summary>
     public Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
-
-    /// <summary>Масове завантаження через <c>SqlBulkCopy</c>: імпорт, генератор, міграція.</summary>
-    public Task BulkInsertAsync(IReadOnlyList<CellRecord> records, CancellationToken ct);
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>

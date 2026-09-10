@@ -211,6 +211,7 @@ public static class DependencyInjection
         services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
         services.AddScoped<IExcelExportJob, Jobs.ExcelExportJob>();
+        services.AddScoped<IExcelImportJob, Jobs.ExcelImportJob>();
 
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
