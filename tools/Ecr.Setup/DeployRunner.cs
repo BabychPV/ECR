@@ -1,4 +1,5 @@
 using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using System.Runtime.InteropServices;
 using System.Security;
 
@@ -21,7 +22,22 @@ internal sealed class DeployRunner
 
     public async Task<bool> RunAsync(WizardState state, string scriptPath, CancellationToken ct)
     {
-        using var ps = PowerShell.Create();
+        // ⛔ Реальний прогін (людина): "cannot be loaded because running
+        // scripts is disabled on this system" — виконання .ps1-ФАЙЛУ
+        // підкоряється execution policy машини, НЕЗАЛЕЖНО від того, що
+        // PowerShell хоститься в своєму процесі (те, що вирішує
+        // SecureString-пастку вище, тут не рятує: обидва обмеження діють
+        // одночасно й незалежно). §2.2 install-guide каже адміністратору
+        // самому виконати `Set-ExecutionPolicy -Scope Process -Bypass`
+        // ПЕРЕД викликом CLI — майстер, хостячи PowerShell сам, мусить
+        // зробити те саме сам. `ExecutionPolicy.Bypass` на InitialSessionState
+        // діє лише в межах ЦЬОГО процесу (EcrSetup.exe) і лише в пам'яті —
+        // не чіпає ні реєстр, ні політику машини/користувача, і зникає
+        // разом із процесом.
+        var sessionState = InitialSessionState.CreateDefault();
+        sessionState.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
+
+        using var ps = PowerShell.Create(sessionState);
 
         ps.AddCommand(scriptPath)
             .AddParameter("SqlInstance", state.SqlInstance)

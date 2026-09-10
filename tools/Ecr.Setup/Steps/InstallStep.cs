@@ -60,7 +60,12 @@ internal sealed partial class InstallStep : IWizardStep
             Text = "Installation in progress...",
         };
 
-        var checklistPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Dock = DockStyle.Top };
+        // WrapContents=false: той самий захист, що в MainForm (кнопки "Next"
+        // зникали через перенос на "новий рядок" при заниженій оцінці
+        // ширини/висоти) — тут напрям TopDown, тож перенос ліг би новим
+        // СТОВПЦЕМ праворуч; Dock=Top дає доволі ширини, щоб це не різалось,
+        // але сім пунктів чеклиста мають лишатися одним стовпцем, не двома.
+        var checklistPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Dock = DockStyle.Top, WrapContents = false };
         foreach (var (number, name) in ScriptSteps)
         {
             var label = new Label { Text = "• " + name, AutoSize = true, Margin = new Padding(4, 2, 4, 2) };

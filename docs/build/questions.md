@@ -264,6 +264,7 @@
 | Q-217 | CONFLICT | Реальний прогін людиною `rebuild-and-package-msi.ps1`: `npm ci` впав з `NativeCommandError` на самому виклику через звичайне попередження `npm warn deprecated` у stderr, не помилку (код виходу `0`). Перший фікс сесії виявився no-op (`$PSNativeCommandUseErrorActionPreference` за замовчуванням і так `$false`) — підтверджено повторним прогоном людини з тим самим симптомом | RESOLVED (підтверджено реальним прогоном удруге) · другий фікс — тимчасове `$ErrorActionPreference = 'Continue'` на час кожного нативного виклику — людина прогнала `rebuild-and-package-msi.ps1` повторно: `NativeCommandError` і далі ДРУКУЄТЬСЯ (нешкідливий текст попередження в консолі), але скрипт більше НЕ зупиняється — `npm ci`, `npm run build`, збірка MSI пройшли до кінця, готовий `Ecr.msi` (64.4 МБ, SHA-256 надрукований). Залишковий косметичний шум (червоний текст, хоч і не помилка) — окреме, необов'язкове полірування, не дефект |
 | Q-218 | CONFLICT | Людина відкрила `EcrSetup.exe` (`Q-216`): написи майстра українською не відповідали вимозі «зрозумілий інтерфейс» (людина попросила англійську), і крок 1 («Режим») мав реальний дефект — `ModeStep.BuildOption` загортав КОЖЕН перемикач в ОКРЕМИЙ `FlowLayoutPanel`; WinForms групує `RadioButton` у взаємовиключну групу за безпосереднім батьком, а не спільним предком, тож обидва варіанти можна було позначити одночасно («неможливо щось обрати» — вибір другого не знімав позначку з першого) | RESOLVED · `ModeStep.cs` тепер має обидва перемикачі прямими дітьми ОДНОГО `TableLayoutPanel` (в `GroupBox`, для візуальної єдності з кроками 2/3); увесь текст інтерфейсу майстра (написи, кнопки, повідомлення про помилки, назви кроків чеклиста) перекладено англійською в усіх шести кроках і `MainForm`/`DeployRunner`; сирий вивід `deploy-ecr.ps1` у «Detailed log» лишається українською навмисно — це вивід самого скрипта, не текст майстра; збірка перевірена (`dotnet build`, 0 Warning(s)/0 Error(s)) |
 | Q-219 | CONFLICT | Людина запитала, які файли мають бути поруч для установки — відповідь на це відкрила реальний розрив: `deploy-ecr.ps1` (без `-SkipSchema`, тобто завжди на First Deployment) читає `dotnet ef migrations script` і `src/Ecr.Infrastructure/Persistence/Sql/*.sql` ВІДНОСНО СЕБЕ, тобто вимагав повний клон репозиторію + .NET SDK + `dotnet-ef` НА СЕРВЕРІ — прямо суперечило `11-install-guide.md` §0 («сервер отримує вже готовий .msi, більше нічого»). Людина сформулювала мету прямо: не розкладати десяток файлів по теці, а мати РІВНО один файл-інсталятор | RESOLVED · новий `tools/build-installer.ps1`: збирає `Ecr.msi`, генерує `migration.sql` (`dotnet ef`) НА МАШИНІ ЗБІРКИ, стейджить payload (`Ecr.msi`, `deploy-ecr.ps1`, `migration.sql`, `sql\*.sql`) в `artifacts\wizard-payload\`, і публікує `EcrSetup.exe` як **self-contained single-file** (`-p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true`) — .NET сам вбудовує payload У СЕРЕДИНУ `.exe` й розпаковує його в тимчасову теку при кожному запуску; `deploy-ecr.ps1` тепер спершу шукає `sql\`/`migration.sql` ПОРУЧ ІЗ СОБОЮ (пакований запуск) і лише як fallback — у дереві репозиторію (dev/CI, без змін для цього шляху). Результат — `artifacts\installer\Ecr-Setup-<версія>.exe`, на сервер їде РІВНО один файл, без .NET SDK/Node/dotnet-ef/клону репозиторію. Підтверджено РЕАЛЬНИМИ прогонами тут: (1) `dotnet publish` без single-file — `Link=%(RecursiveDir)%(Filename)%(Extension)` кладе `Ecr.msi`/`deploy-ecr.ps1`/`migration.sql` в корінь публікації і `sql\*.sql` у підтеку, точно як задумано; (2) окремий пробний консольний проєкт із тим самим `Content`/single-file налаштуванням, реально опублікований і ЗАПУЩЕНИЙ — надрукував `AppContext.BaseDirectory`, що вказує на тимчасову теку розпакування, і повний список файлів у ній, включно з payload — підтверджує механізм `IncludeAllContentForSelfExtract` насправді працює так, як описано |
+| Q-220 | CONFLICT | Людина реально прогнала свіжий `Ecr-Setup-1.1.1.exe` (`Q-219`) і надіслала скріншоти двох незалежних дефектів: (1) на кроці 1 кнопка "Next" не потрапляла у видиму область вікна взагалі — лише "Cancel"/"Back"; (2) на кроці 6 `deploy-ecr.ps1` падав з `PSSecurityException: ... cannot be loaded because running scripts is disabled on this system` — майстер хостить PowerShell у своєму процесі (`Q-216`, вирішує пастку `SecureString`), але це НЕ звільняє від execution policy машини, яка діє незалежно | RESOLVED · (1) `MainForm.cs`/`InstallStep.cs`: `WrapContents = false` на всіх кнопкових/чеклистових `FlowLayoutPanel` — за замовчуванням `true`, і занижена оцінка ширини/висоти на першому проході `AutoSize` переносила другий контрол на "новий рядок", який фіксована висота батьківської `Panel` відрізала; (2) `DeployRunner.cs`: `PowerShell.Create(InitialSessionState)` з `ExecutionPolicy = Bypass` — діє лише в межах процесу `EcrSetup.exe`, не чіпає реєстр/машину/користувача, той самий принцип, що ручний `Set-ExecutionPolicy -Scope Process -Bypass` у §2.2 install-guide, лише виконаний майстром самим. Фікс (2) підтверджено РЕАЛЬНИМ прогоном: окремий пробний консольний проєкт примусово поставив `Process`-scope на `Restricted`, відтворив ІДЕНТИЧНИЙ `PSSecurityException` без фіксу, і в ТОМУ САМОМУ процесі — успішний запуск скрипта з фіксом. Фікс (1) не підтверджено власним прогоном (немає інтерактивного Windows-стенда в цій сесії) — очікує підтвердження людиною |
 
 ---
 
@@ -10425,3 +10426,103 @@ MSI-кроку.
 **Статус:** RESOLVED (механізм пакування) · очікує підтвердження
 реальним прогоном `build-installer.ps1` end-to-end на машині з
 робочим Windows Installer.
+
+### Q-220 · CONFLICT · Людина прогнала `Ecr-Setup-1.1.1.exe` (`Q-219`), 2026-09-11 · зникла кнопка "Next" і execution policy зупиняє deploy-ecr.ps1
+
+**Де:** `tools/Ecr.Setup/MainForm.cs`, `tools/Ecr.Setup/Steps/
+InstallStep.cs`, `tools/Ecr.Setup/DeployRunner.cs`.
+
+**Що сталося.** Людина реально запустила щойно зібраний `Ecr-
+Setup-1.1.1.exe` і надіслала п'ять скріншотів. Два незалежні дефекти:
+
+**1. Кнопка "Next" не показувалась на кроці 1.** Скріншот — «Крок 1 з
+6», лише "Cancel" і "Back" внизу, жодного "Next"/"Install" праворуч
+від "Back". Людина запитала прямо: "де кнопка далі?".
+
+`MainForm.cs` будує кнопкову панель через `FlowLayoutPanel` (`rightFlow`
+з `_backButton` і `_primaryButton`, `Dock = DockStyle.Right, AutoSize =
+true`), вкладену в `Panel` з ФІКСОВАНОЮ висотою (`buttonBar`, `Height =
+56`). `FlowLayoutPanel.WrapContents` за замовчуванням `true`. Якщо
+перший прикидковий прохід обчислення `AutoSize`-ширини (відомий крихкий
+момент для `Dock=Right`/`Left` разом з `AutoSize` — батько питає "яка
+твоя ширина?" ДО того, як власний препрохід дітей повністю усталився)
+занизив доступний простір, другий контрол (`_primaryButton`) переносився
+на "новий рядок" усередині `rightFlow` — а висота цього нового рядка
+виходить за межі фіксованих 56px `buttonBar` і просто відрізається:
+контрол існує, увімкнений, реагував би на клік, але фізично поза межами
+видимої області.
+
+Той самий клас ризику — у `InstallStep.checklistPanel`
+(`FlowDirection.TopDown`, теж `AutoSize = true`, теж без явного
+`WrapContents`): напрям переносу інший (новий СТОВПЕЦЬ праворуч, а
+не рядок знизу), і `Dock = DockStyle.Top` дає значно більше вільної
+ширини, тож там ризик клipування нижчий, але механізм ідентичний.
+
+**Фікс:** `WrapContents = false` на `rightFlow`, `leftFlow` (`MainForm.
+cs`) і `checklistPanel` (`InstallStep.cs`) — прибирає саму МОЖЛИВІСТЬ
+переносу на новий рядок/стовпець, незалежно від того, як саме
+порахувалась ширина/висота на першому проході. Це не косметика "про
+всяк випадок" — `WrapContents=true` (дефолт) на боковому/кнопковому
+флоу — сама причина класу дефектів, до якого належить конкретно ця
+скарга.
+
+**2. `deploy-ecr.ps1` падав з `PSSecurityException`.** Скріншот кроку
+6 (детальний журнал): `ERROR (script stopped): File ...\deploy-ecr.ps1
+cannot be loaded because running scripts is disabled on this system.`
+— класична PowerShell execution-policy помилка (`about_Execution_
+Policies`).
+
+`Q-216`'s `DeployRunner.cs` уже вирішував ІНШУ пастку — `SecureString`
+не переживає межу процесів, тому PowerShell хоститься в тому самому
+процесі, що й `EcrSetup.exe`, через `Microsoft.PowerShell.SDK`. Але
+хостинг у своєму процесі НІЯК не звільняє від execution policy машини
+— вона перевіряється незалежно, на рівні кожного файлу `.ps1`, що
+завантажується, і типова конфігурація поза доменом (`LocalMachine =
+Restricted`) блокує це так само, як заблокувала б звичайний
+`powershell.exe -File deploy-ecr.ps1` без `-ExecutionPolicy Bypass`.
+`11-install-guide.md` §2.2 вже каже адміністратору зробити
+`Set-ExecutionPolicy -Scope Process -Bypass` руками ПЕРЕД CLI-викликом
+— але майстер, замінюючи собою весь цей ручний шлях, цього самого кроку
+не робив.
+
+**Фікс:** замість голого `PowerShell.Create()` —
+```csharp
+var sessionState = InitialSessionState.CreateDefault();
+sessionState.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
+using var ps = PowerShell.Create(sessionState);
+```
+Діє РІВНО в межах цього процесу (`EcrSetup.exe`) і зникає разом із ним
+— не чіпає реєстр, не чіпає машину чи користувача, той самий принцип
+масштабу, що вже обраний для `-Scope Process` у §2.2, лише виконаний
+програмно, а не людиною руками.
+
+**Доказ — реальний прогін, не лише читання документації API.** Окремий
+одноразовий пробний консольний проєкт (поза цим репозиторієм, у
+сесійному scratchpad, видалений після перевірки):
+1. Примусово поставив `Set-ExecutionPolicy -Scope Process -Restricted`
+   у своєму ж процесі, тоді спробував завантажити маленький `.ps1`
+   голим `PowerShell.Create()` — отримав ТОЧНО той самий виняток, що на
+   скріншоті людини: `PSSecurityException: ... cannot be loaded because
+   running scripts is disabled on this system.`
+2. У ТОМУ САМОМУ процесі (Process-scope усе ще `Restricted`!) створив
+   ДРУГИЙ `PowerShell` через `PowerShell.Create(iss)` з `iss.
+   ExecutionPolicy = Bypass` і запустив ТОЙ САМИЙ файл — успіх:
+   `HadErrors: False`, скрипт справді виконався.
+
+Це доводить: `Bypass` на `InitialSessionState` дійсно перекриває
+Process-scope `Restricted` для ЦЬОГО конкретного `PowerShell`-інстансу,
+без жодних прав адміністратора чи змін поза процесом — точно механізм,
+який тепер у `DeployRunner.cs`.
+
+**Не підтверджено:** фікс (1) (кнопка "Next") — власним прогоном:
+немає інтерактивного Windows-стенда з реальним екраном у цій сесії,
+щоб буквально побачити кнопку. Обґрунтування спирається на
+задокументовану поведінку `FlowLayoutPanel.WrapContents` і на те, що
+`WrapContents=false` структурно унеможливлює саме той механізм
+переносу, який пояснює спостережуваний симптом — але це логічний
+доказ, не візуальне підтвердження. Фікс (2) — підтверджено реальним
+прогоном вище.
+
+**Статус:** RESOLVED · execution-policy фікс підтверджено реальним
+прогоном; фікс кнопки "Next" очікує підтвердження людиною на
+реальному екрані.
