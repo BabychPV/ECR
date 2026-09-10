@@ -97,6 +97,17 @@
   </ItemGroup>
 
   <!--
+    Директива №13: майстер встановлення (tools/Ecr.Setup, поза Ecr.sln —
+    Windows-only GUI, як і .wixproj поряд). SecureString не переживає
+    перехід в ОКРЕМИЙ процес (docs/build/11-install-guide.md), тому
+    deploy-ecr.ps1 хоститься в процесі GUI через цей SDK, а не через
+    pwsh.exe дочірнім процесом.
+  -->
+  <ItemGroup Label="Майстер встановлення (GUI)">
+    <PackageVersion Include="Microsoft.PowerShell.SDK" Version="7.5.0" />
+  </ItemGroup>
+
+  <!--
     ⛔ ЗАБОРОНЕНІ ПАКЕТИ (D-12, docs/15-verified-stack.md).
     Додавання будь-якого з них ламає збірку через тест ліцензій:
       FluentAssertions 8+  — комерційна ліцензія Xceed
