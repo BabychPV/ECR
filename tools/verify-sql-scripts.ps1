@@ -48,6 +48,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження sqlcmd зупиняє
+# скрипт ДО власної перевірки $LASTEXITCODE.
+$PSNativeCommandUseErrorActionPreference = $false
+
 if ($null -eq (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     Write-Error 'sqlcmd не знайдено. Саме ним DBA виконує розгортання: без нього перевірка беззмістовна.'
 }

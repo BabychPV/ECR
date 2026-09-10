@@ -88,6 +88,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
+# зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root = Split-Path -Parent $PSScriptRoot
 $sql = Join-Path $root 'src/Ecr.Infrastructure/Persistence/Sql'
 $artifacts = Join-Path $root 'artifacts'

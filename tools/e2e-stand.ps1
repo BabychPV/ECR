@@ -46,6 +46,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
+# (dotnet/npm) зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root = Split-Path -Parent $PSScriptRoot
 $client = Join-Path $root 'src/Ecr.Web'
 $base = "http://localhost:$Port"

@@ -38,6 +38,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
+# зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root = Split-Path -Parent $PSScriptRoot
 $base = "http://localhost:$Port"
 $password = 'Smoke-Bootstrap-2026!'

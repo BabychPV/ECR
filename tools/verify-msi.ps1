@@ -14,6 +14,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
+# (msiexec/dotnet/npm) зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
+$PSNativeCommandUseErrorActionPreference = $false
+
 if ($env:COMPUTERNAME -eq 'PROD-SERVER') { throw "не запускати на продуктиві" }
 
 $results = [System.Collections.Generic.List[object]]::new()

@@ -14,6 +14,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження signtool зупиняє
+# скрипт ДО перевірки фактичного результату.
+$PSNativeCommandUseErrorActionPreference = $false
+
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
     /n $SubjectName $MsiPath
 if ($LASTEXITCODE) { throw "signtool завершився з кодом $LASTEXITCODE" }

@@ -204,6 +204,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
+# (sqlcmd/msiexec/dotnet/npm) зупиняє скрипт ДО власної перевірки
+# $LASTEXITCODE нижче (реальний прогін — build-msi.ps1, "npm warn
+# deprecated" зупинив збірку, хоча код виходу був 0).
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root      = Split-Path -Parent $PSScriptRoot
 $sqlDir    = Join-Path $root 'src\Ecr.Infrastructure\Persistence\Sql'
 $artifacts = Join-Path $root 'artifacts'
