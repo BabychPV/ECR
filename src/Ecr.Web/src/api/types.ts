@@ -330,6 +330,12 @@ export type FormulaResultType = Schemas['FormulaResultType'];
 /** Роль із оголошеними правами. */
 export type RoleView = Schemas['RoleView'];
 
+/**
+ * Право з ПОВНОГО каталогу системи — усі, а не лише вже оголошені в
+ * наявних ролях (директива №11, T2).
+ */
+export type PermissionCatalogItem = Schemas['PermissionCatalogItem'];
+
 /** Користувач; ані хеша пароля, ані солі тут немає за побудовою (ФВ-6.11). */
 export type UserView = Schemas['UserView'];
 
@@ -511,6 +517,9 @@ export type SetValidityRequest = Schemas['SetValidityRequest'];
 
 /** Клонування версії шаблону. */
 export type CloneVersionRequest = Schemas['CloneVersionRequest'];
+
+/** Публікація версії шаблону; причина обов'язкова (той самий патерн, що й методологія). */
+export type PublishVersionRequest = Schemas['PublishVersionRequest'];
 
 /** Виведення версії шаблону з обігу (`ФВ-7.8`). */
 export type DeprecateVersionRequest = Schemas['DeprecateVersionRequest'];

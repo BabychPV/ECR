@@ -3760,6 +3760,29 @@
           "Closed"
         ]
       },
+      "PermissionCatalogItem": {
+        "description": "Право з ПОВНОГО каталогу системи (`sec.Permission`).",
+        "properties": {
+          "code": {
+            "description": "Код права; саме він перевіряється в обробниках.",
+            "type": "string"
+          },
+          "group": {
+            "description": "Група для угруповання в UI: `Template`, `Document`, `Calculation` тощо.",
+            "type": "string"
+          },
+          "isDangerous": {
+            "description": "Небезпечне право (`ФВ-6.12`, `D-40`): у складені ролі не входить\nза seed і видається поіменно, а не через матрицю.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "group",
+          "isDangerous"
+        ],
+        "type": "object"
+      },
       "PresentationRevisionResponse": {
         "description": "Нова ревізія презентаційного шару.",
         "properties": {
@@ -3962,6 +3985,19 @@
         "required": [
           "changeReason",
           "effectiveFrom"
+        ],
+        "type": "object"
+      },
+      "PublishVersionRequest": {
+        "description": "Запит на публікацію версії.",
+        "properties": {
+          "reason": {
+            "description": "Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —\nтой самий патерн, що й `PublishMethodologyRequest.ChangeReason`\n(ФВ-14.7): «чому цю версію ввели в обіг» — питання, на яке через рік\nмає бути відповідь, а не літерал `\"Publish\"`, однаковий для кожної\nпублікації.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ],
         "type": "object"
       },
@@ -6427,29 +6463,41 @@
       "TableSliceDto": {
         "description": "Зріз таблиці для grid. Порожні комірки не передаються — клієнт бере\n`DefaultValue` з опису колонки (ФВ-3.8).\nБюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2).",
         "properties": {
+          "cellConfirmations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Комірки, дозволені лише після ЯВНОГО підтвердження оператора\n(`ФВ-2.16`, `AllowWithConfirmation`, `#43`). Ключ — той\nсамий формат, що й у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions\n(`\"{rowKey}:{columnCode}\"`); значення — пояснення для діалогу\nпідтвердження. Комірка, якої тут немає, підтвердження не потребує.",
+            "type": "object"
+          },
           "cellPermissions": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Компактна мапа заборон: ключ — `\"{rowKey}:{columnCode}\"`, значення —\nназва EditDenyReason. Комірка, якої тут\nнемає, дозволена.",
             "type": "object"
           },
           "columns": {
+            "description": "Опис колонок таблиці.",
             "items": {
               "$ref": "#/components/schemas/ColumnDto"
             },
             "type": "array"
           },
           "periodKey": {
+            "description": "Період екземпляра.",
             "format": "int32",
             "type": "integer"
           },
           "rows": {
+            "description": "Рядки зі значеннями.",
             "items": {
               "$ref": "#/components/schemas/RowDto"
             },
             "type": "array"
           },
           "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
             "format": "int64",
             "type": "integer"
           }
@@ -6459,7 +6507,8 @@
           "periodKey",
           "columns",
           "rows",
-          "cellPermissions"
+          "cellPermissions",
+          "cellConfirmations"
         ],
         "type": "object"
       },
@@ -8184,6 +8233,7 @@
     },
     "/api/v1/documents/{id}/import/apply": {
       "post": {
+        "description": "⚠ 202 з jobId — лише для diff, що перевищує поріг\nint ApplyImportHandler.LargeImportThreshold\n(директива №11, T10 #45); звичайний, невеликий імпорт лишається 200 із\nрезультатом одразу, як і раніше.",
         "parameters": [
           {
             "in": "path",
@@ -8236,6 +8286,26 @@
               }
             },
             "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "409": {
             "content": {
@@ -8958,6 +9028,87 @@
           }
         },
         "summary": "Стан задачі за її ідентифікатором. Право `System.ViewHealth`.",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/{jobId}/restart": {
+      "post": {
+        "description": "⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:\nклієнт, що вже показує цю задачу, продовжує опитувати той самий\n`GET /jobs/{jobId}`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "jobId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth`\n(директива №11, T10 #40).",
         "tags": [
           "Jobs"
         ]
@@ -11078,6 +11229,46 @@
         "summary": "Відкриває закритий період. Право `Period.Reopen`.",
         "tags": [
           "Periods"
+        ]
+      }
+    },
+    "/api/v1/permissions": {
+      "get": {
+        "description": "⛔ До появи цього маршруту клієнт складав перелік прав перетином того,\nщо вже оголошено в наявних ролях: право без жодного носія не можна було\nпризначити НІКОМУ — форма створення ролі його просто не показувала\n(директива №11, трек T2, `#19`).",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogItem"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogItem"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionCatalogItem"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Повний каталог системних прав, включно з тими, яких не має жодна роль.\nПраво `Security.ManageRoles`.",
+        "tags": [
+          "Security"
         ]
       }
     },
@@ -14124,9 +14315,10 @@
     },
     "/api/v1/template-versions/{id}/publish": {
       "post": {
-        "description": "Після публікації структура незмінна: тригер БД відхиляє структурний\n`UPDATE`, презентаційний пропускає. Цикл у графі формул — помилка\n**публікації** (`ECR-TMPL-4221`), а не рантайму (ФВ-9.4).",
+        "description": "Після публікації структура незмінна: тригер БД відхиляє структурний\n`UPDATE`, презентаційний пропускає. Цикл у графі формул — помилка\n**публікації** (`ECR-TMPL-4221`), а не рантайму (ФВ-9.4).\n\n⛔ Причина обов'язкова — той самий патерн, що й `PublishMethodologyRequest.ChangeReason`\n(`ФВ-14.7`, `MethodologiesController`) і сусідній DeprecateVersionRequest\nнижче: до цього поле не існувало взагалі, і журнал публікацій ніс\nлітерал `\"Publish\"` — рядок, що ВИГЛЯДАЄ як причина, але нею не є,\nі однаковий для кожної публікації без винятку. За рік «Publish» у\nжурналі не відповідає на питання «чому саме цю версію ввели в обіг».",
         "parameters": [
           {
+            "description": "Версія-чернетка.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -14137,6 +14329,27 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "No Content"

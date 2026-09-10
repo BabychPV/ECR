@@ -402,6 +402,12 @@ USING (VALUES
     (N'grid.roundedTitle',               N'en', N'Rounded {count} value(s)', 1),
     (N'grid.roundedHint',                N'en', N'Extra decimals from the pasted sheet were rounded to the column scale. Nothing was rounded silently.', 1),
     (N'grid.roundedShow',                N'en', N'Show the list', 1),
+    (N'grid.saving',                     N'en', N'Saving...', 1),
+    (N'grid.saved',                      N'en', N'Saved', 1),
+    (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    (N'grid.confirmTitle',               N'en', N'Confirm this change', 1),
+    (N'grid.confirmCancel',              N'en', N'Cancel', 1),
+    (N'grid.confirmProceed',             N'en', N'Proceed', 1),
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
     (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),
@@ -429,6 +435,7 @@ USING (VALUES
     (N'templates.versions',              N'en', N'Versions', 1),
     (N'version.title',                   N'en', N'Template version', 1),
     (N'version.publish',                 N'en', N'Publish', 1),
+    (N'version.publishHint',             N'en', N'After this the structure is frozen: fix a wrong rule now, not after publishing.', 1),
     (N'version.published',               N'en', N'The version has been published.', 1),
     (N'version.column',                  N'en', N'Column', 1),
     (N'version.type',                    N'en', N'Type', 1),
@@ -704,6 +711,8 @@ USING (VALUES
     (N'sources.emptyHint',               N'en', N'Without sources the system works fine: data is entered by hand.', 1),
     (N'jobs.pick',                       N'en', N'Enter a job id', 1),
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
+    (N'jobs.restart',                    N'en', N'Restart', 1),
+    (N'jobs.restarting',                 N'en', N'Restarting…', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
 
@@ -723,6 +732,13 @@ USING (VALUES
     (N'profile.density',                 N'en', N'Row height', 1),
     (N'profile.densityCompact',          N'en', N'Compact', 1),
     (N'profile.densityComfortable',      N'en', N'Comfortable', 1),
+
+    -- ⚠ Лише підпис перемикача — англійський, як і решта каталогу. Самі
+    -- переклади ru/kz — робота термінолога (`C-7`, T9 директиви №11):
+    -- реєстр мов (`sys_ecr.Language`, вище) уже мав ru/kz, каталог рядків —
+    -- ще ні, і перемикач без цього підпису показував би позначений ключ
+    -- (`D-138`) у списку, що вже дає вибір трьох мов.
+    (N'profile.language',                N'en', N'Language', 1),
     (N'profile.logout',                  N'en', N'Sign out', 1),
 
     -- Робочий процес аркуша: подання, погодження, повернення в роботу.

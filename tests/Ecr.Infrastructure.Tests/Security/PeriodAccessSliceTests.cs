@@ -119,6 +119,44 @@ public sealed class PeriodAccessSliceTests(SqlServerFixture sql) : IDisposable
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task AllowWithConfirmation_дозволяє_комірку_але_вимагає_підтвердження()
+    {
+        // ⛔ `#43`. До цієї гілки `AllowWithConfirmation` рахувався
+        // (`PeriodAccessRules.Evaluate` повертав правильну `Behavior`), але
+        // результат ніхто не читав: `Decide()` бачив, що правило НЕ блокує
+        // (`outcome.Blocks == false` — те саме, що й для `Warn`), і рішення
+        // лишалося звичайним `Allow()` без жодного сліду того, що правило
+        // взагалі спрацювало. Клієнт не мав чим відрізнити цю комірку від
+        // будь-якої іншої дозволеної.
+        var (doc, builder) = await ArrangeAsync();
+
+        await ArrangePermitAsync(
+            builder, doc,
+            validFrom: new DateOnly(2026, 1, 1),
+            validTo: new DateOnly(2026, 8, 31),
+            forRows: [doc.RowIds[0]],
+            behavior: OutOfWindowBehavior.AllowWithConfirmation);
+
+        var decisions = await DecideAsync(builder, doc);
+        var monthColumn = doc.ColumnDefIds[2];
+
+        var decision = decisions[
+            new CellAddress(new PeriodKey(PeriodKeyValue), doc.RowIds[0], monthColumn)];
+
+        // Дозволено — комірка НЕ сіра, на відміну від `ReadOnly` вище.
+        Assert.True(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.None, decision.Reason);
+
+        // Але позначено як таке, що потребує явного підтвердження, і з
+        // поясненням, яке підуть у діалог — не голе "true".
+        Assert.True(decision.RequiresConfirmation);
+        Assert.False(string.IsNullOrWhiteSpace(decision.Detail));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-5.20")]
     public async Task Місяць_у_межах_дії_дозволу_редагується()
     {
@@ -221,7 +259,8 @@ public sealed class PeriodAccessSliceTests(SqlServerFixture sql) : IDisposable
         TestDocument doc,
         DateOnly validFrom,
         DateOnly validTo,
-        IReadOnlyList<long> forRows)
+        IReadOnlyList<long> forRows,
+        OutOfWindowBehavior behavior = OutOfWindowBehavior.ReadOnly)
     {
         await using var db = builder.CreateContext();
 
@@ -237,7 +276,7 @@ public sealed class PeriodAccessSliceTests(SqlServerFixture sql) : IDisposable
         // Правило вказує на ПЕРШУ колонку — ту, де рядок обирає дозвіл.
         // Блокує воно при цьому місячні колонки, а не себе саме.
         var rule = PeriodAccessRuleDef
-            .ForSourceWindow(doc.TemplateVersionId, doc.ColumnDefIds[0], OutOfWindowBehavior.ReadOnly)
+            .ForSourceWindow(doc.TemplateVersionId, doc.ColumnDefIds[0], behavior)
             .ForTable(doc.TableDefId);
 
         db.PeriodAccessRules.Add(rule);

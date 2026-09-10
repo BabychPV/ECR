@@ -39,7 +39,8 @@ public sealed class ConsistencyCheckJobWriteTests(SqlServerFixture sql)
         var executed = new List<string>();
         await using var counting = CreateCountingContext(executed);
         var job = new ConsistencyCheckJob(
-            counting, Substitute.For<IOrphanScanner>(), new TestClock(new DateTime(2026, 2, 1, 3, 0, 0, DateTimeKind.Utc)));
+            counting, Substitute.For<IOrphanScanner>(), new TestClock(new DateTime(2026, 2, 1, 3, 0, 0, DateTimeKind.Utc)),
+            Substitute.For<IConsistencyMetrics>());
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 

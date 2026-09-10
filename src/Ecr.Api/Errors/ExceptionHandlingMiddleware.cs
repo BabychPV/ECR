@@ -276,6 +276,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PeriodPolicyDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⚠ Той самий клас, що й `ECR-ROW-0409`/`ECR-RPT-0409` вище: задача не
+        // в стані `Failed` — це конфлікт стану на дії, а не невірні дані
+        // запиту (директива №11, T10 #40).
+        BusinessRuleException e when e.ErrorCode == Ecr.Application.Integration.RestartJobHandler.NotFailedErrorCode =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 

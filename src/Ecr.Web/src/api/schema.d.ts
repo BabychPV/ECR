@@ -635,7 +635,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Застосування раніше переглянутого імпорту. Право `Document.Import`. */
+        /**
+         * Застосування раніше переглянутого імпорту. Право `Document.Import`.
+         * @description ⚠ 202 з jobId — лише для diff, що перевищує поріг
+         *     int ApplyImportHandler.LargeImportThreshold
+         *     (директива №11, T10 #45); звичайний, невеликий імпорт лишається 200 із
+         *     результатом одразу, як і раніше.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -662,6 +668,17 @@ export interface paths {
                         "application/json": components["schemas"]["PatchCellsResponse"];
                         "text/json": components["schemas"]["PatchCellsResponse"];
                         "text/plain": components["schemas"]["PatchCellsResponse"];
+                    };
+                };
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
                     };
                 };
                 /** @description Conflict */
@@ -1271,6 +1288,74 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{jobId}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth`
+         *     (директива №11, T10 #40).
+         * @description ⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:
+         *     клієнт, що вже показує цю задачу, продовжує опитувати той самий
+         *     `GET /jobs/{jobId}`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2831,6 +2916,51 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Повний каталог системних прав, включно з тими, яких не має жодна роль.
+         *     Право `Security.ManageRoles`.
+         * @description ⛔ До появи цього маршруту клієнт складав перелік прав перетином того,
+         *     що вже оголошено в наявних ролях: право без жодного носія не можна було
+         *     призначити НІКОМУ — форма створення ролі його просто не показувала
+         *     (директива №11, трек T2, `#19`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PermissionCatalogItem"][];
+                        "text/json": components["schemas"]["PermissionCatalogItem"][];
+                        "text/plain": components["schemas"]["PermissionCatalogItem"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5312,17 +5442,32 @@ export interface paths {
          * @description Після публікації структура незмінна: тригер БД відхиляє структурний
          *     `UPDATE`, презентаційний пропускає. Цикл у графі формул — помилка
          *     **публікації** (`ECR-TMPL-4221`), а не рантайму (ФВ-9.4).
+         *
+         *     ⛔ Причина обов'язкова — той самий патерн, що й `PublishMethodologyRequest.ChangeReason`
+         *     (`ФВ-14.7`, `MethodologiesController`) і сусідній DeprecateVersionRequest
+         *     нижче: до цього поле не існувало взагалі, і журнал публікацій ніс
+         *     літерал `"Publish"` — рядок, що ВИГЛЯДАЄ як причина, але нею не є,
+         *     і однаковий для кожної публікації без винятку. За рік «Publish» у
+         *     журналі не відповідає на питання «чому саме цю версію ввели в обіг».
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
+                    /** @description Версія-чернетка. */
                     id: number;
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishVersionRequest"];
+                    "application/json": components["schemas"]["PublishVersionRequest"];
+                    "text/json": components["schemas"]["PublishVersionRequest"];
+                };
+            };
             responses: {
                 /** @description No Content */
                 204: {
@@ -8967,6 +9112,16 @@ export interface components {
          * @enum {unknown}
          */
         PeriodState: "Scheduled" | "Open" | "Grace" | "Closed";
+        /** @description Право з ПОВНОГО каталогу системи (`sec.Permission`). */
+        PermissionCatalogItem: {
+            /** @description Код права; саме він перевіряється в обробниках. */
+            code: string;
+            /** @description Група для угруповання в UI: `Template`, `Document`, `Calculation` тощо. */
+            group: string;
+            /** @description Небезпечне право (`ФВ-6.12`, `D-40`): у складені ролі не входить
+             *     за seed і видається поіменно, а не через матрицю. */
+            isDangerous: boolean;
+        };
         /** @description Нова ревізія презентаційного шару. */
         PresentationRevisionResponse: {
             /**
@@ -9062,6 +9217,15 @@ export interface components {
              *     цією версією, а які — попередньою.
              */
             effectiveFrom: null | string;
+        };
+        /** @description Запит на публікацію версії. */
+        PublishVersionRequest: {
+            /** @description Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —
+             *     той самий патерн, що й `PublishMethodologyRequest.ChangeReason`
+             *     (ФВ-14.7): «чому цю версію ввели в обіг» — питання, на яке через рік
+             *     має бути відповідь, а не літерал `"Publish"`, однаковий для кожної
+             *     публікації. */
+            reason: string;
         };
         /** @description Прийнятий у чергу перерахунок. */
         RecalculationAcceptedResponse: {
@@ -10217,14 +10381,33 @@ export interface components {
          *     `DefaultValue` з опису колонки (ФВ-3.8).
          *     Бюджет усієї операції: p95 1.5 с на 500×60 (tz/08 §8.2). */
         TableSliceDto: {
+            /** @description Комірки, дозволені лише після ЯВНОГО підтвердження оператора
+             *     (`ФВ-2.16`, `AllowWithConfirmation`, `#43`). Ключ — той
+             *     самий формат, що й у IReadOnlyDictionary&lt;string, string&gt; TableSliceDto.CellPermissions
+             *     (`"{rowKey}:{columnCode}"`); значення — пояснення для діалогу
+             *     підтвердження. Комірка, якої тут немає, підтвердження не потребує. */
+            cellConfirmations: {
+                [key: string]: string;
+            };
+            /** @description Компактна мапа заборон: ключ — `"{rowKey}:{columnCode}"`, значення —
+             *     назва EditDenyReason. Комірка, якої тут
+             *     немає, дозволена. */
             cellPermissions: {
                 [key: string]: string;
             };
+            /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Період екземпляра.
+             */
             periodKey: number;
+            /** @description Рядки зі значеннями. */
             rows: components["schemas"]["RowDto"][];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці.
+             */
             tableInstanceId: number;
         };
         TemplateChangeDto: {

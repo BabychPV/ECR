@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace Ecr.Scenarios.Tests;
@@ -447,8 +448,9 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             new { dialect = "Template", expression = "SUM(A, B" });
         Assert.True(saveFormula.StatusCode == HttpStatusCode.OK, $"{saveFormula.StatusCode}: {app.ErrorsText}");
 
-        var publish = await admin.Client.PostAsync(
-            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative), content: null);
+        var publish = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),
+            new { reason = "S-08 звірка" });
 
         // ⛔ Не лише «не 204»: код має бути САМЕ той, що каталог відводить
         // непридатній структурі публікації (`ECR-TMPL-0422`,
@@ -483,8 +485,9 @@ public sealed class StructureScenarios(SqlServerFixture sql)
 
         var emptyVersionId = await CreateEmptyDraftVersionAsync(admin.Client, "S09empty");
 
-        var publishEmpty = await admin.Client.PostAsync(
-            new Uri($"/api/v1/template-versions/{emptyVersionId}/publish", UriKind.Relative), content: null);
+        var publishEmpty = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{emptyVersionId}/publish", UriKind.Relative),
+            new { reason = "S-09 звірка: порожня версія" });
 
         // Директива очікує 422 (ECR-TMPL-0422); довіряємо контракту, а не
         // числу — головне, щоб це НЕ БУВ успіх (204).
@@ -553,12 +556,138 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             });
         Assert.True(addRow.StatusCode == HttpStatusCode.OK, $"{addRow.StatusCode}: {app.ErrorsText}");
 
-        var publishFull = await admin.Client.PostAsync(
-            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative), content: null);
+        var publishFull = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),
+            new { reason = "S-09 звірка: справна структура" });
 
         Assert.True(
             publishFull.StatusCode == HttpStatusCode.NoContent,
             $"публікація версії зі справною структурою мала пройти, а повернула {publishFull.StatusCode}: {app.ErrorsText}");
+    }
+
+    /// <summary>
+    /// T5 (директива №11, `#30`). Публікація без причини відхиляється, а
+    /// справжня причина — не літерал <c>"Publish"</c> — потрапляє в журнал.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього ендпоінт не мав поля <c>reason</c> взагалі, а
+    /// <c>PublishTemplateVersionHandler</c> писав у <c>aud.PublicationEvent</c>
+    /// однаковий літерал <c>"Publish"</c> на кожен виклик — рядок, що ВИГЛЯДАЄ
+    /// як причина, але нею не є. Тест доводить обидві половини виправлення на
+    /// СПРАВНІЙ структурі (та сама версія, що й вище): порожня причина
+    /// відхиляється до діагностик структури, а прийнята причина доходить до
+    /// журналу дослівно.
+    ///
+    /// ⚠ Структура версії СПРАВНА (той самий `versionId`, щойно з аркушем,
+    /// таблицею, колонкою й рядком): відмова публікації з порожньою причиною
+    /// тут не може пояснюватися нічим іншим, окрім самої причини.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-09")]
+    public async Task Публікація_без_причини_відхиляється_а_причина_потрапляє_в_журнал()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(
+            app, "S09reason", ["Template.View", "Template.Edit", "Template.Publish"]);
+
+        var versionId = await CreateEmptyDraftVersionAsync(admin.Client, "S09reason");
+
+        await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1", UriKind.Relative),
+            new
+            {
+                nameL10n = new Dictionary<string, string> { ["en"] = "Sheet 1" },
+                ordinal = 1,
+                sheetGroup = (string?)null,
+                isMandatory = true,
+                isVisible = true,
+            });
+
+        var addTable = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/sheets/SHEET1/tables/TABLE1", UriKind.Relative),
+            new
+            {
+                nameL10n = new Dictionary<string, string> { ["en"] = "Table 1" },
+                ordinal = 1,
+                layoutKind = "PerPeriodInstance",
+                rowMode = "Fixed",
+                maxDynamicRows = (int?)null,
+            });
+        var tableId = (await addTable.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/columns/A", UriKind.Relative),
+            new
+            {
+                headerL10n = new Dictionary<string, string> { ["en"] = "A" },
+                ordinal = 1,
+                dataType = "Decimal",
+                isRequired = false,
+                isReadOnly = false,
+                isHidden = false,
+                precision = (byte?)null,
+                scale = (byte?)null,
+                defaultValue = (string?)null,
+                displayFormat = (string?)null,
+                styleId = (int?)null,
+                lookupRegistryDefId = (int?)null,
+                lookupFilter = (string?)null,
+                unitId = (int?)null,
+            });
+
+        await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/rows/ROW1", UriKind.Relative),
+            new
+            {
+                labelL10n = new Dictionary<string, string> { ["en"] = "Row 1" },
+                ordinal = 1,
+                rowKind = "Item",
+                parentRowKey = (string?)null,
+                isReadOnly = false,
+            });
+
+        // ⛔ Причина — порожній рядок, а не пропущене поле: `Reason` в
+        // `PublishVersionRequest` незаперечно required (без нього модель узагалі
+        // не зв'яжеться), і саме порожній/пробільний рядок — той випадок, який
+        // раніше не перевіряв ніхто.
+        var publishBlank = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),
+            new { reason = "   " });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, publishBlank.StatusCode);
+        var blankBody = await publishBlank.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-TMPL-0422", blankBody.GetProperty("errorCode").GetString());
+
+        const string realReason = "T5 звірка: перша публікація версії S09reason";
+
+        var publishReal = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),
+            new { reason = realReason });
+
+        Assert.True(
+            publishReal.StatusCode == HttpStatusCode.NoContent,
+            $"справна структура з непорожньою причиною мала опублікуватися, а повернула "
+            + $"{publishReal.StatusCode}: {app.ErrorsText}");
+
+        // ⛔ Головний доказ: журнал несе СПРАВЖНЮ причину, а не літерал
+        // "Publish". Якби виклик перестав передавати `reason` далі (мутація
+        // D-134), тут був би саме він.
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT ChangeReason
+            FROM   aud.PublicationEvent
+            WHERE  EntityType = 'TemplateVersion' AND EntityId = @v;
+            """;
+        command.Parameters.AddWithValue("@v", versionId);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync(), "публікація мала лишити подію в aud.PublicationEvent");
+        Assert.Equal(realReason, reader.GetString(0));
+        Assert.False(await reader.ReadAsync(), "відхилена публікація без причини не мала писати другий запис");
     }
 
     /// <summary>Створює шаблон і чернеткову версію без клону — спільний перший крок S-04..S-09.</summary>

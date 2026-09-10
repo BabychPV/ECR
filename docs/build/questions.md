@@ -238,10 +238,17 @@
 | Q-190 | SCOPE | `TableDef.SwitchStorage`/`CellStorageMode.Hybrid` — мертвий код: `StorageMode` вставляється як `Normalized` у конструкторі й ніде не читається умовно; `SwitchStorage` не має жодного викликача | OPEN |
 | Q-191 | CONFLICT | `permissions.ts.decide()` вирішує `CalculatedCell`/`ColumnReadOnly` ЛОКАЛЬНО, не питаючи сервер, тоді як `EditRules.CanEdit` перевіряє симуляцію, стан проєкту/періоду/аркуша РАНІШЕ за ці дві причини — клієнт може показати «комірка обчислюється» на комірці, яку сервер відхилив би через «документ подано» чи «період закрито» | RESOLVED · `permissions.ts` (`decide`), PR #108 |
 | Q-192 | SCOPE | `ITemplateStructure`/`CachedTemplateStructure` — мертвий код: порт існував лише заради синхронного читання кешу для `ExtractDependencies`, з `H-3` знімок приходить параметром, і читати кеш нікому | OPEN |
-| Q-193 | CONFLICT | `TableRow.SetOrphaned` не кличе ніхто; `OrphanScanner` пише ознаку пакетним `ExecuteUpdate` і повторює текстом інваріант «`OrphanedAt` нульується разом з ознакою» замість посилання на домен | OPEN |
+| Q-193 | CONFLICT | `TableRow.SetOrphaned` не кличе ніхто; `OrphanScanner` пише ознаку пакетним `ExecuteUpdate` і повторює текстом інваріант «`OrphanedAt` нульується разом з ознакою» замість посилання на домен | RESOLVED · директива №11 §4 `#49` — свідомий компроміс, doc-коментарі перехресно пов'язані |
 | Q-194 | CONFLICT | `DeleteRegistryEntryHandler` (перевірка `ECR-REG-0409`, покритий тестом) без жодного `[HttpDelete]` — помилково заведений запис довідника не можна прибрати через API взагалі | OPEN |
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
+| Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
+| Q-201 | CONFLICT | Директива №11, трек T5: `PublishTemplateVersionHandler.PublishAsync` писав у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на кожен виклик — рядок, що виглядає як причина публікації версії шаблону, але нею не є | RESOLVED · `PublishVersionRequest`, PR #121 |
+| Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
+| Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
+| Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED частково · #40/#41/#45/#50 закрито, #44 STOPPED (схемна міграція, рішення людини) |
+| Q-207 | CONFLICT | Директива №11, трек T11 (чотири самосуперечності пакета документації): `decisions.md` цитує «директива №04 §3» для двох різних тез; `07-checkpoints.md` каже «сім етапів `0`…`6`», хоча в самому документі є `ЕТАП 7` і згадка `ЕТАП 8`; шапка `02-requirements.md` підсумовує 215, фактичних листових вимог — 253; `04-environment.md`/`09-commands.md` стверджували, що інтеграційні тести виключені з `dotnet test` за замовчуванням, а `verify-all.ps1` жодного фільтра `Category` не застосовує | RESOLVED |
+| Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
 
 ---
 
@@ -8672,13 +8679,29 @@ doc-коментарем немає ні в `src/`, ні в тестах — з�
 кодом, що вводить в оману: читач бачить метод і думає, що саме він і є
 джерелом правди про інваріант.
 
-**Рішення (моє, судження про ЯК, не факт):** прибрати `SetOrphaned` як
-недосяжний домен-метод (сканер — єдине місце, що ставить/знімає цю
-ознаку, і робить це навмисно в обхід домену), а сирий SQL-інваріант
-закріпити тестом, який ламається, якщо два `SET`-вирази розійдуться
-(а не покладатися на коментар).
+**Первісне рішення (переглянуте нижче):** прибрати `SetOrphaned` як
+недосяжний домен-метод, а сирий SQL-інваріант закріпити тестом.
 
-**Статус:** OPEN
+#### Закрито (директива №11 §4, пункт `#49`)
+
+Директива №11 (2026-09-09, звірка беклогу `PC2-09-annex.md §B`) розглянула
+ЦЕЙ САМИЙ факт незалежно — і винесла інший вирок: «свідомий компроміс
+заради продуктивності масового сканера, інваріант усе одно тримається —
+документація, не код». Директива важливіша за мою первісну пропозицію тут:
+рішення про те, чи компроміс продуктивності виправданий, — суто інженерне
+судження, і принципал уже його виніс.
+
+Прийнято вирок директиви. Замість видалення методу — виправлено ЗВОРОТНИЙ
+дефект, який первісний аналіз якраз і виявив: doc-коментар `SetOrphaned`
+стверджував, що його кличе `OrphanScanJob`, — і це вже було неправдою
+(сканер завжди працював через `ExecuteUpdateAsync` напряму). Коментар
+переписано: `SetOrphaned` лишається АВТОРИТЕТНИМ визначенням інваріанту,
+`OrphanScanner.cs` — свідомий пакетний дублікат із явним посиланням на
+джерело правди й на цей запис. Обидва місця тепер цитують одне одного,
+замість мовчазного дрейфу.
+
+**Статус:** RESOLVED · doc-коментарі `TableRow.cs`/`OrphanScanner.cs` перехресно
+пов'язані з поясненням компромісу; код-зміни не було (директива №11 §4)
 
 ---
 
@@ -8756,5 +8779,425 @@ doc-коментарем немає ні в `src/`, ні в тестах — з�
 відповіді на це питання — вигадана функція, яка може не відповідати
 жодному реальному сценарію майданчика. Це факт про потребу замовника,
 не судження про реалізацію.
+
+**Статус:** OPEN
+
+---
+
+### Q-197 · CONFLICT · Директива №11 T1, 2026-09-09 · `PiSqlClientDataSource.DefaultCatalogQuery` читає неіснуючі колонки RTQP
+
+**Де:** `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs:44`
+(`DefaultCatalogQuery`).
+
+**Що знайшлося:** запит читав `a.UOM AS Uom, a.Type AS DataType` з
+`[Master].[Element].[Attribute]`. Обох колонок під цими іменами не існує.
+Офіційна AVEVA PI SQL DAS (RTQP Engine) Reference, Element schema
+(`docs.aveva.com/bundle/pi-sql-data-access-server-rtqp-engine/page/1016070.html`,
+станом на 2026-03-12) називає їх `UnitOfMeasure` і `ValueType`.
+Продуктивний експорт NCOC (`ECR_01_Air_PISqlClientExportedObjects.sql`,
+63 процедури) не суперечить: жодного входження `UOM`/`Type` у старому
+значенні. `a.Name` і `a.ElementID` — підтверджені окремо, не чіпалися.
+Другий запит у тому самому файлі (`[Master].[Element].[Value]` із
+псевдонімами `Ts`/`Val`/`Uom`) — синтаксично коректний, підтверджено
+офіційним прикладом, коду там не міняли.
+
+**Виправлення:** `a.UOM AS Uom` → `a.UnitOfMeasure AS Uom`, `a.Type AS
+DataType` → `a.ValueType AS DataType`. XML-коментар над
+`DefaultCatalogQuery` тепер цитує обидва джерела.
+
+**Тест (D-134):** новий `tests/Ecr.Adapters.Tests/PiAf/PiSqlClientDataSourceQueryTests.cs`
+стверджує точний текст запиту: `Contains("a.UnitOfMeasure")`,
+`Contains("a.ValueType")`, `DoesNotContain("a.UOM")`,
+`DoesNotContain("a.Type")` — саме в кваліфікованому вигляді (з `a.` і
+крапкою), бо голе `Contains("Type")` дало б хибнопозитивний тест на
+`"ValueType"`. Мутація: тимчасово повернуто `a.UOM`/`a.Type` — усі чотири
+тести впали з очікуваним повідомленням (`Sub-string not found` /
+`Sub-string found`); після відновлення правильних назв — знову зелені.
+
+**Не факт, а судження, де воно не моє:** чи встановлена в NCOC версія RTQP
+Engine достатньо близька до 2024 R2, щоб ця схема була чинною саме для
+них. Схема базових системних таблиць рідко міняється між версіями
+продукту такого класу — не вигадую відповідь, називаю залишок у
+`questions-for-customer.md` (`C-2`).
+
+**Документація того самого PR:** `docs/build/problems.md` (`P-11`) —
+колонки каталогу закриті без живого з'єднання, два дрібні пункти лишено
+відкритими; `docs/build/pk1-handover.md` `§6.4`, `§9` — знято рамку
+«блокує рівно одне»; `docs/build/questions-for-customer.md` (`C-2`) —
+звужено до версії RTQP Engine і двох дрібних пунктів;
+`docs/build/roadmap.md` — знято те саме формулювання.
+
+**Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #114
+
+---
+
+### Q-201 · CONFLICT · Директива №11, трек T5, 2026-09-10 · `PublishTemplateVersionHandler` писав хардкод `"Publish"` замість причини публікації
+
+**Де:** `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs`
+(`PublishAsync`); `src/Ecr.Api/Controllers/TemplateVersionsController.cs`
+(`Publish`, `PublishVersionRequest`); `src/Ecr.Web/src/pages/admin/TemplateVersionPage.tsx`.
+
+**Що знайшлося:** ендпоінт `POST /api/v1/template-versions/{id}/publish` не
+мав тіла запиту взагалі; `PublishTemplateVersionHandler.PublishAsync` писав
+у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на
+кожен виклик — рядок, що ВИГЛЯДАЄ як причина, але не є нею й однаковий
+незалежно від того, хто й навіщо публікує версію. За рік журнал публікацій
+не відповідає на питання «чому саме цю версію ввели в обіг».
+
+**Рішення (директива лишала вибір на розсуд виконавця): `reason`
+обов'язковий, не optional; маркера «не вказано» немає.** Зміряно вже
+наявний і щойно змержений патерн методології
+(`PublishMethodologyRequest.ChangeReason`, `MethodologiesController`,
+ФВ-14.7, `#29`) — там причина теж обов'язкова й валідується як непорожня.
+Сусідній `Deprecate` у ТОМУ Ж контролері вже вимагає непорожню причину
+(`DeprecateVersionRequest`) — інша форма для `Publish` дала б два різні
+контракти на дві однаково важливі операції в одному файлі. Маркер «не
+вказано» (варіант «optional») підійшов би, якби причина була другорядним
+полем звітності — тут вона ні: `#29` для методології зробив причину
+обов'язковою з тієї ж причини (найважливіша дія над версією — після
+публікації структура заморожена), і публікація шаблону несе ту саму вагу
+рішення.
+
+**Що зроблено:**
+
+- **Контракт**: `PublishVersionRequest(string Reason)` — синтаксис
+  ідентичний сусідньому `DeprecateVersionRequest`; OpenAPI-знімок і
+  клієнтські типи (`schema.d.ts`/`types.ts`) регенеровано.
+- **Обробник**: `PublishTemplateVersionHandler.PublishAsync(int, int,
+  string reason, CancellationToken)` валідує `reason` ПЕРШИМ — до
+  діагностик структури графа формул — за зразком перевірки `effectiveFrom`
+  у `PublishMethodologyHandler`; порожній/пробільний рядок відхиляється
+  `ECR-TMPL-0422`. Валідне значення йде в `ChangeReason` аудиту замість
+  хардкоду `"Publish"`.
+- **Клієнт**: кнопка «Опублікувати» в `TemplateVersionPage.tsx` відкриває
+  вже наявний `ReasonModal` — той самий компонент, що вже стоїть на кнопці
+  «Вивести з обігу» в цьому ж файлі, — замість миттєвого виклику без
+  причини.
+
+**Тест (D-134):** новий сценарій у `StructureScenarios.cs` на живій БД —
+публікація справної структури без причини відхиляється `ECR-TMPL-0422`, а
+прийнята причина дослівно доходить до `aud.PublicationEvent.ChangeReason`
+(не `"Publish"`). Мутація 1: заміна `reason` на хардкод `"Publish"` у
+виклику `WritePublicationEventAsync` — тест падає (`Expected: "T5 звірка:
+перша публікація версії S09rea"… Actual: "Publish"`). Мутація 2: вимкнення
+guard-перевірки (`if (string.IsNullOrWhiteSpace(reason))` → `if (false)`)
+— тест падає (`Expected: UnprocessableEntity Actual: NoContent`). Після
+кожної мутації відновлено вихідний код; `StructureScenarios`: 8/8 passed.
+
+**Статус:** RESOLVED · PR #121
+
+---
+
+### Q-203 · CONFLICT · Директива №11, трек T7 (`#38` автозбереження, `#43` AllowWithConfirmation), 2026-09-10
+
+**Де:** `src/Ecr.Web/src/features/grid/useCellPatch.ts`,
+`src/Ecr.Web/src/features/grid/autosave.ts` (новий); `src/Ecr.Application/Security/EditDecision.cs`,
+`src/Ecr.Infrastructure/Security/AccessDecisionService.cs`,
+`src/Ecr.Application/Documents/{Dto/TableSliceDto.cs,GetTableSliceHandler.cs}`,
+`src/Ecr.Web/src/features/grid/{permissions.ts,DocumentGrid.tsx}`.
+
+**Що знайшлося — крок 1 (`#38`, автозбереження):** `useCellPatch.ts` обіцяв
+коментарем дебаунс ~500 мс і збереження при закритті вкладки — жоден із
+двох механізмів не існував у коді. Оператор, що закривав вкладку одразу
+після правки, втрачав її мовчки: `pending` жив лише в пам'яті компонента,
+без явного `Ctrl+S` чи кнопки «Зберегти» нічого не відправлялося.
+
+**Що знайшлося — крок 2 (`#43`, `AllowWithConfirmation`):** ФВ-2.16 називає
+три поведінки поза вікном доступу: заборонити, дозволити з позначкою
+(`Warn`), дозволити лише після ЯВНОГО підтвердження (`AllowWithConfirmation`).
+Третю `PeriodAccessRules.Evaluate` рахувала коректно, але
+`AccessDecisionService.Decide()` відкидав результат щоразу, коли він не
+блокує — гілка на `AllowWithConfirmation` просто не існувала, і рішення
+лишалося звичайним `Allow()`. Клієнт і сервер ніде не розрізняли
+`AllowWithConfirmation` від звичайного дозволу: жодного діалогу
+підтвердження не було в коді взагалі, попри те що значення enum і
+коментар при ньому (`Enums.cs`) вже давно закладали цю поведінку.
+
+**Рішення — реалізувати, не вилучити** (директива явно залишає вибір за
+виконавцем): значення `tinyint` у БД додане свідомо під цю вимогу,
+ФВ-2.16 прямо називає три окремі поведінки в `docs/tz/02-requirements.md`,
+і в репозиторії вже усталений патерн для точно такого дефекту — «правило
+пораховане, викликача немає» (`A7-51`, `H-23a`) — читається підключенням
+виклику, а не видаленням правила. Вилучення enum-значення потребувало б
+переглянути саму вимогу ФВ-2.16, а це рішення поза межами судження
+виконавця. Реалізовано лише як клієнтський UX-гейт, без окремого
+серверного примусу понад звичайну перевірку дозволу — той самий рівень
+довіри, що вже є для `Warn`; `Warn` (позначкова поведінка) цим PR не
+чіпалася — окрема прогалина, лишена як є.
+
+**Виправлення:**
+- `#38`: `autosave.ts` (новий) — `createDebouncer` (дебаунс 500 мс, не
+  троттлінг) і `registerUnloadFlush` (слухач `beforeunload`, без діалогу
+  «покинути сторінку?» — мета саме прибрати потребу питати оператора).
+  `useCellPatch.ts` — видимий `status` (`idle`/`saving`/`saved`/`error`) і
+  `sendPatchBeacon` (`fetch` із `keepalive: true`, бо `beforeunload` не чекає
+  на звичайний `fetch`). `DocumentGrid.tsx` — кожна правка перезапускає
+  дебаунс, `beforeunload` шле останній пакет через beacon, у панелі
+  інструментів — текстовий індикатор статусу.
+- `#43`: `EditDecision.AllowWithConfirmation(detail)` (новий фабричний
+  метод, `RequiresConfirmation: true`, завжди `false` при відмові);
+  `AccessDecisionService.Decide()` переносить прапорець із `outcome`.
+  `TableSliceDto.CellConfirmations` (новий рядок:колонка → пояснення для
+  діалогу), контракт перегенеровано (`contracts/openapi.snapshot.json`,
+  `docs/build/02-contracts.md`, `schema.d.ts`). `permissions.ts
+  confirmationOf()` + `DocumentGrid.tsx onBeforeedit`: значення блокується
+  синхронно, показується модалка, підтвердження веде тим самим шляхом
+  (`applyEditedValue`), що й звичайна правка — включно з дебаунсом кроку 1.
+
+**Тест (D-134):** крок 1 — `registerUnloadFlush` перетворений на no-op →
+`autosave.test.ts` падає (`expected spy to be called once, but got 0
+calls`); `createDebouncer.trigger()` перетворений на no-op → та сама
+причина для дебаунс-тесту. Відновлено → зелено. Крок 2 — гілка
+`AllowWithConfirmation` в `Decide()` вимкнена → `PeriodAccessSliceTests`
+падає на `Assert.True(decision.RequiresConfirmation)` (Actual: False);
+`GetTableSliceHandler`'s `if (decision.RequiresConfirmation)` вимкнено →
+`GetTableSliceTests` падає так само; `confirmationOf` завжди повертає
+`null` → три тести `permissions.test.ts` падають на
+`toBe(hint)`/`not.toBeNull()`. Усі відновлено → зелено.
+
+**Статус:** RESOLVED · `autosave.ts`, `EditDecision.cs`,
+`AccessDecisionService.cs`, `TableSliceDto.cs`, `DocumentGrid.tsx`, PR #119
+
+---
+
+### Q-205 · SCOPE · T9 директиви №11, 2026-09-09 · перемикач мови інтерфейсу (en/ru/kz)
+
+**Де:** `src/Ecr.Web/src/shared/ui/LanguageSwitcher.tsx` (новий),
+`src/Ecr.Web/src/shared/ui/UserMenu.tsx`, `shared/i18n/index.ts`
+(`setLanguage`), `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql`.
+
+**Що знайшлося:** `shared/i18n/index.ts` мав функцію `setLanguage` без
+жодного викликача в `src/` — код, що зберігає вибір мови
+(`localStorage`) і синхронно оновлює `current`, існував, але нічого його
+не кликало. Перевірено окремо: англійський fallback при відсутньому
+перекладі вже працював і був покритий — сервер (`UiStringResolver.Compose`
+підміняє відсутній переклад до відправки) і клієнт (`t()` пробує
+`lookup(current) ?? lookup(DefaultLanguage)`) — новий код для самого
+fallback-у не був потрібен, тільки перемикач, що дає користувачу вибір.
+
+**Що зроблено:** `LanguageSwitcher.tsx` (Mantine `NativeSelect`, реєстр
+мов через наявний `useLanguages`/`GET /api/v1/languages`), розміщений у
+`UserMenu.tsx` поруч із перемикачами теми й щільності. Вибір викликає і
+`setLanguage()` (зберігає вибір, оновлює `current` синхронно), і
+`loadCatalog(value, 'private')` (фактично підвантажує каталог обраної
+мови — без цього перемикач лише запам'ятовував би код мови, не змінюючи
+видимий текст). У `09-seed.sql` додано один рядок реєстру каталогу —
+підпис перемикача (`profile.language`); самі мови (`sys_ecr.Language`,
+en/ru/kz) уже існували в реєстрі до цієї роботи.
+
+**Перевірка мутацією (D-134):** директива вимагала доказу мутацією, що
+`setLanguage` — не no-op. Емпірично: прибрати виклик `loadCatalog` —
+3 з 4 тестів червоніють з правильної причини (видимий текст лишається
+старим назавжди); окремий тест ловить саме no-op `setLanguage` через
+`localStorage` (`uiLanguage`), що залежить лише від нього.
+
+**Статус:** RESOLVED · PR #116
+
+---
+
+### Q-206 · SCOPE · Директива №11, T10, 2026-09-09 · п'ять незалежних знахідок аудиту (`#40`, `#41`, `#44`, `#45`, `#50`)
+
+**Де:** `src/Ecr.Infrastructure/Jobs/QuartzJobAdapter.cs`,
+`src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs`,
+`src/Ecr.Application/Integration/IntegrationHandlers.cs` (`RestartJobHandler`),
+`src/Ecr.Api/Controllers/JobsController.cs` (`#40`); `src/Ecr.Api/Observability/EcrMetrics.cs:114`,
+`src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs`,
+`src/Ecr.Application/Ports/IConsistencyMetrics.cs`,
+`src/Ecr.Api/Observability/ConsistencyMetricsAdapter.cs` (`#41`);
+`src/Ecr.Domain/Entities/Calculations/ScriptVersion.cs` (`#44`, НЕ ЧІПАВ);
+`src/Ecr.Application/Documents/ExcelExchangeHandlers.cs` (`ApplyImportHandler`),
+`src/Ecr.Infrastructure/Jobs/ExcelImportJob.cs` (`#45`);
+`src/Ecr.Application/Ports/ICellStore.cs`, `src/Ecr.Application/Ports/ICalculationResultStore.cs`,
+`src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs`,
+`src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`#50`).
+
+**Що знайшлося й що зроблено:**
+
+**#40 — нема `RetryPolicy`.** Підтверджено: `QuartzJobAdapter.Execute` ловив
+провал, писав `Failed` і кидав `JobExecutionException(refireImmediately: false)`
+— жодного ретраю, жодного способу перезапустити задачу, крім постановки
+НОВОЇ (з новим `jobId`, втратою зв'язку з попереднім прогресом). Додано
+експоненційний відступ — до трьох ретраїв (`QuartzJobAdapter.MaxRetryAttempts`,
+30 с / 60 с / 120 с; судження, задокументоване в коді) — і ендпоінт
+`POST /api/v1/jobs/{jobId}/restart` (право `System.ViewHealth`, лише для
+задачі в стані `Failed`). Обидва спираються на `.StoreDurably()` у
+`QuartzJobScheduler.EnqueueCoreAsync`: задача, яка вичерпала ретраї, лишається
+в планувальнику (успіх/скасування прибирають деталь самі), тож перезапуск
+має що перезапускати. D-134: тимчасово прибрано перевірку
+`attempt < MaxRetryAttempts` (замінено на `false`) — тест
+`Провал_після_вичерпання_ліміту_...` у
+`QuartzJobAdapterRetryTests.cs` (той, що очікує РІВНО одну зупинку на межі)
+почервонів, бо ретрай планувався б і на межі; повернуто, зелено.
+
+**#41 — мертва метрика.** Підтверджено: `EcrMetrics.RecordConsistencyIssues`
+(рядок 114) не мав жодного викликача — `ConsistencyCheckJob` пише знахідки
+лише в `aud.ConsistencyIssue`. Проблема шару: `ConsistencyCheckJob` живе в
+`Ecr.Infrastructure`, яка на `Ecr.Api` (де `EcrMetrics`) не посилається.
+Додано порт `IConsistencyMetrics` (`Ecr.Application.Ports`) з адаптером
+`ConsistencyMetricsAdapter` у `Ecr.Api`, зареєстрованим у `Program.cs`
+поруч із самим `EcrMetrics`. `ConsistencyCheckJob.ExecuteAsync` тепер кличе
+`metrics.RecordIssues(count, ruleCode)` за КОЖНИМ різновидом знахідки
+(`GroupBy(RuleCode)`) після побудови списку `issues`. D-134: тимчасово
+прибрано виклик `metrics.RecordIssues` — новий тест
+`Знахідка_видима_в_метриках` у `ConsistencyCheckJobDetectionTests.cs`
+почервонів (`metrics.Received(1).RecordIssues(...)` не справдився); повернуто,
+зелено.
+
+**#44 — `ScriptVersion` без творця. ЗУПИНЕНО, код не змінено.** Підтверджено:
+нуль `new ScriptVersion(` поза тестами (перевіряє й окремий сторож
+`MethodologyCloneCompletenessTests.Скрипт_рівня_2_не_створює_ніщо_...`),
+`MarkCompiled`/`MarkTested`/`HasGreenTest` теж без викликачів поза тестами
+власної сутності. Директива каже прибрати `ScriptVersion` і прапорець
+`HasGreenTest` — але `calc.ScriptVersion` це РЕАЛЬНА таблиця з РЕАЛЬНОЮ
+колонкою `HasGreenTest`, заведена міграцією `20260904232328_Stage4Calculations`
+і присутня в моделі БЕЗПЕРЕРВНО аж до найновішої міграції
+(`20260909161652_Q155NullableSnapshotModes`) — тобто застосована в кожному
+середовищі, що прогнало міграції за останні кілька днів. Прибрати сутність
+означає `DROP TABLE calc.ScriptVersion` (нова міграція), а не редагування
+коду. Це рівно сценарій, який сама директива називає підставою зупинитися:
+«якщо прибрати ризикованіше, ніж очікувалось — STOP і звітуй, а не форсуй
+схемну зміну». Судження про безпечність міграції — не моє.
+
+**Чому не вирішив сам (лише #44):** схемна міграція — завжди стоп у цьому
+проєкті, без винятку «але ця безпечна». Потрібне пряме підтвердження людини:
+чи можна `DROP TABLE calc.ScriptVersion` (і колонку `HasGreenTest`) новою
+міграцією зараз, чи рівень 2 залишиться в схемі до конкретнішого рішення про
+реліз, у якому він з'явиться.
+
+**#45 — синхронний імпорт без порогу.** Підтверджено: `ApplyImportHandler`
+завжди викликав `IExcelImporter.ApplyAsync` синхронно, на відміну від
+`ExportDocumentHandler`, який давно й безумовно йде в чергу. Додано
+`IExcelImporter.CountPendingChangesAsync` (рахує зміни РАНІШЕ побудованого
+`ImportPlan`, не розбираючи вдруге) і поріг
+`ApplyImportHandler.LargeImportThreshold = 2000` комірок — судження від уже
+задокументованого бюджету `ICellStore.ApplyAsync` (p95 &lt; 150 мс на 100
+комірок). Вище порогу — `IExcelImportJob` у черзі (той самий шлях запису,
+`IExcelImporter.ApplyAsync`, лише з боку задачі), контролер повертає `202` з
+`jobId`, як і в експорту; нижче — як і раніше, `200` синхронно. D-134:
+тимчасово замінено умову порогу на `false` (завжди синхронно) — новий тест
+`Великий_diff_не_блокує_запит_довше_за_поріг_часу` у
+`ApplyImportThresholdTests.cs` (штучно повільний `ApplyAsync`, бюджет 500 мс
+на виклик обробника) почервонів, бо обробник чекав на 5-секундну затримку
+синхронно; повернуто, зелено.
+
+**#50 — два мертві члени порту.** `ICellStore.BulkInsertAsync`: перевірено
+свіжим пошуком (не з довіри до `unreachable-mechanisms.md`, чий запис
+стверджував «використовує `ExcelImporter`» — неправда, `ExcelImporter`
+кличе лише `ReadSlicesAsync`) — нуль викликів поза власною реалізацією й
+тестами реалізації; `git log -S` показує єдиний комівт, що торкався методу
+(скелет). Прибрано з порту й реалізації; `BulkCellLoader.LoadAsync`
+(нижчий шар, на якому будувався метод) лишився — його напряму кличе
+`Ecr.DataGen` (реальний споживач: генератор обсягу). Два тести, що раніше
+викликали `store.BulkInsertAsync` заради перевірки `SqlBulkCopy`
+(перевірка ключів), переписано на прямий виклик `BulkCellLoader.LoadAsync`
+— та сама перевірка, без мертвого порту між нею й реалізацією.
+`ICalculationResultStore.ReserveResultIdRangeAsync`: підтверджено нуль
+ЗОВНІШНІХ викликів через порт (єдиний виклик — внутрішній, з
+`CalculationResultStore.WriteResultsAsync`, той самий об'єкт). Перевірено
+`RunCalculationHandler`: не викликає напряму, ідентифікатори видаються
+винятково всередині `WriteResultsAsync`. Прибрано з інтерфейсу
+`ICalculationResultStore`, зроблено `private` у `CalculationResultStore` —
+той самий шаблон, що вже мав сусідній `NextStepIdAsync` (private, ніколи не
+був на порту). Логіка жива й потрібна, просто не мала бути публічним
+контрактом.
+
+**Статус:** RESOLVED частково · `#40`/`#41`/`#45`/`#50` закрито кодом і
+тестами; `#44` — STOPPED, чекає підтвердження людини на схемну міграцію,
+PR #120
+
+---
+
+### Q-207 · CONFLICT · Директива №11, трек T11 (документація без коду), 2026-09-09 · чотири самосуперечності пакета документації
+
+**Де:** `docs/build/decisions.md:102,435`; `docs/build/07-checkpoints.md:1-9`;
+`docs/tz/02-requirements.md:9-27` (документ замовника, не редагується) +
+`docs/build/02-requirements-addendum.md` (новий); `docs/build/04-environment.md`
+§5/§5.1, `docs/build/09-commands.md` §2, `tools/verify-all.ps1` (крок «Тести
+.NET»), `tests/Ecr.TestKit/SqlServerFixture.cs`.
+
+**Що знайшлося (директива №11, `PC2-directive-11.md` §2, T11, `[звірка]`
+перевірено особисто перед правкою):**
+
+1. **`decisions.md` — «директива №04 §3» означала два різні тексти.**
+   `D4-32` (`:102`) цитує §3 як обґрунтування рішення «група довідників — факт
+   перемикання, не сутність». `A7-38` (`:435`) цитує §3 як джерело методу
+   «описати контракт помилки типом зі знімка». Сам текст директиви №04 в
+   репозиторії не зберігся (лише похідні документи — `pk1-directive-04-questions.md`,
+   записи `decisions.md`/`pk1-handover.md`/`questions-for-customer.md` за її
+   кроками), тож відновити канонічний текст §3 неможливо; розрізнено самі
+   цитування — `§3-А` (модель довідників, `D4-32`) і `§3-Б` (метод контрактних
+   типів, `A7-38`) — з явним взаємним посиланням в обох рядках.
+
+2. **`07-checkpoints.md` — заявлені «сім етапів `0`…`6`», а в документі є
+   `ЕТАП 7` (`:387`) і згадка `ЕТАП 8` (`:396`, інсталятор, `D-133`).**
+   Фактично в документі описано вісім етапів (`0`…`7`); `ЕТАП 8` — за межами
+   цього документа (перенесений директивою №03). Вступ виправлено на «вісім
+   етапів `0`…`7`» з приміткою, що `ЕТАП 8` тут не описаний.
+
+3. **`02-requirements.md` — шапка підсумовує розділи `ФВ-0`…`ФВ-16` до 215,
+   фактичних листових вимог — 253.** Перевірено незалежно:
+   `grep -c '^\*\*ФВ-[0-9]' docs/tz/02-requirements.md` → `253`; те саме число
+   рахує `RequirementCensus.Take` і вже зафіксовано в `decisions.md` (`D2-275`)
+   та `roadmap.md`. `02-requirements.md` — документ замовника під
+   `docs/CHECKSUMS.txt`, редагується лише замовником (та сама практика вже
+   застосована в `RequirementCensus.cs`, поле `Historical`). Інструменти цієї
+   сесії й фізично відмовляють писати в `docs/tz/`. Розбіжність зафіксована
+   окремим документом-поправкою `docs/build/02-requirements-addendum.md`
+   (у `docs/build/`, не в `docs/tz/`, — з тієї самої причини) і одним рядком
+   у `roadmap.md` як покажчик на нього.
+
+4. **`04-environment.md`/`09-commands.md` стверджували, що `dotnet test` за
+   замовчуванням виключає інтеграційні тести, а `verify-all.ps1` жодного
+   фільтра `Category` не застосовує.** Перевірено особисто: крок «Тести .NET»
+   кличе `dotnet test Ecr.sln --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests'`
+   — виключено лише `Ecr.Scenarios.Tests` (директива №09), фільтра `Category`
+   немає. Тестів із трейтом `[Trait("Category","Integration")]` (через
+   `TestCategories.Category`/`TestCategories.Integration`) — **кількасот**, у
+   `Ecr.Api.Tests`, `Ecr.Application.Tests`, `Ecr.Infrastructure.Tests`,
+   `Ecr.Adapters.Tests`. CI (`.github/workflows/ci.yml`, job `server`)
+   піднімає реальний SQL Server у контейнері й прокидає `ECR_TEST_SQL` саме в
+   крок «Тести .NET» — це має сенс лише якщо інтеграційні тести в ньому й
+   справді виконуються.
+
+   **Рішення (реальний вибір поведінки, не лише тексту):** залишити
+   поведінку скрипта — вона й є фактичним станом CI, і додавання фільтра
+   `Category!=Integration` до `verify-all.ps1` зняло б кількасот тестів із
+   будь-якого гейту конвеєра (жоден інший крок їх не підбирає) — тобто тихо
+   зменшило б покриття, а не узгодило текст із кодом. Замість цього виправлено
+   документацію (`04-environment.md`, `09-commands.md`) і супутній
+   XML-коментар у `SqlServerFixture.cs`, які стверджували протилежне: тепер
+   усі три джерела погоджені, що `Category!=Integration` — явний вибір
+   розробника без Docker/SQL Server, а не типова поведінка. У сам
+   `verify-all.ps1` додано коментар, що фіксує це рішення і чому (щоб та сама
+   розбіжність не завелася знову мовчки).
+
+**Статус:** RESOLVED
+
+---
+
+### Q-208 · SCOPE · T9 директиви №11, 2026-09-09 · `02a-db-schema.md` §17 роками розійшовся з чинним `09-seed.sql`
+
+**Де:** `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`, рядки
+2941-2962), `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql` (той
+самий `MERGE`, рядки 324 і далі).
+
+**Що знайшлося:** заголовок `09-seed.sql` каже: «Витягнуто ДОСЛІВНО з
+`02a-db-schema.md` §17 — щоб не з'явилося другої, розбіжної копії. Правити
+треба контракт, а не цей файл». Це вже неправда. Контракт має 15 рядків
+під іменами `auth.title`/`auth.windows`/… (`Scope`-стовпець без
+`profile.*`, `nav.*`, `err.*` та інших); чинний `09-seed.sql` — близько
+940 рядків, і той самий екран входу читає ключі `login.title` тощо, яких
+у контракті НЕМАЄ. Розбіжність не моя: перевірено `git log -p` по
+обох файлах — `profile.theme` тощо додавалися в `09-seed.sql` без
+відповідної правки контракту задовго до цієї гілки.
+
+**Чому не виправив сам у межах T9:** T9 — це перемикач мови
+(`shared/ui/LanguageSwitcher.tsx`), і я додав рівно один рядок
+(`profile.language`) до `09-seed.sql` за тим самим (уже розбіжним)
+патерном. Звести контракт і код докупи — це редагування ~940 рядків
+однієї сторони чи виправлення посилання на «дослівність» іншої, окрема
+робота, що зачіпає файл, який читають і інші паралельні гілки директиви
+№11. Судження про ЯК звести — не моє одноосібне рішення без огляду
+масштабу; сам факт розбіжності — не вигадка, а перевірена лінія коду.
 
 **Статус:** OPEN

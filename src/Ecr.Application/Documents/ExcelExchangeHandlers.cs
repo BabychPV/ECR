@@ -121,23 +121,52 @@ public sealed class PreviewImportHandler(
 }
 
 /// <summary>Застосування раніше переглянутого імпорту. Право <c>Document.Import</c>.</summary>
+/// <remarks>
+/// ⚠ Директива №11, T10 #45: на відміну від <see cref="ExportDocumentHandler"/>
+/// (завжди в чергу), тут поріг — більшість імпортів переглядають і
+/// застосовують кілька змінених рядків, і черга додала б лише затримку
+/// опитування там, де відповідь готова за долі секунди.
+/// </remarks>
 public sealed class ApplyImportHandler(
     IExcelImporter importer,
+    IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
     /// <summary>Право на імпорт (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Import";
 
-    /// <summary>Застосовує diff.</summary>
+    /// <summary>
+    /// Поріг: скільки змінених комірок іще застосовується синхронно.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Судження (директива №11, T10 #45), не факт із документа. Орієнтир —
+    /// вже задокументовані бюджети запису: <c>ICellStore.ApplyAsync</c> обіцяє
+    /// p95 &lt; 150 мс на 100 комірок (`ICellStore.cs`), тобто ~1.5 мс/комірку
+    /// на СХОДЖЕННІ SQL, без урахування валідації й перерахунку зверху. Дві
+    /// тисячі комірок — це вже кілька секунд разом з накладними витратами
+    /// PatchCellsHandler на кожну із задіяних таблиць, комфортно нижче
+    /// типового тайм-ауту проксі, але досить високо, щоб рідкісна правка
+    /// кількох рядків (типовий випадок) не потрапляла в чергу даремно.
+    /// </remarks>
+    public const int LargeImportThreshold = 2_000;
+
+    /// <summary>Застосовує diff — синхронно або, для великого, у черзі.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="previewToken">Токен раніше побудованого diff.</param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ Q-178, той самий патерн, що й <see cref="PreviewImportHandler"/>
     /// вище і <see cref="ExportDocumentHandler"/>.
+    /// <para>
+    /// ⛔ D-134 (T10 #45): без порогу великий імпорт застосовувався б
+    /// синхронно завжди, і запит блокувався б доти, доки
+    /// <c>PatchCellsHandler</c> не пройде кожну зі змінених таблиць —
+    /// секунди чи десятки секунд утримання HTTP-з'єднання й потоку на
+    /// операцію, для якої вже є готовий шлях у чергу (як і в експорту).
+    /// </para>
     /// </remarks>
-    public async Task<PatchCellsResponse> HandleAsync(
+    public async Task<ImportApplyResult> HandleAsync(
         long documentId, string previewToken, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
@@ -151,6 +180,52 @@ public sealed class ApplyImportHandler(
                 "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
         }
 
-        return await importer.ApplyAsync(documentId, previewToken, ct).ConfigureAwait(false);
+        var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);
+
+        if (pendingCount > LargeImportThreshold)
+        {
+            var jobId = await jobs
+                .EnqueueAsync<IExcelImportJob>(
+                    new ExcelImportTask(documentId, previewToken), ct, currentUser.UserId)
+                .ConfigureAwait(false);
+
+            return ImportApplyResult.Queued(jobId);
+        }
+
+        var applied = await importer.ApplyAsync(documentId, previewToken, ct).ConfigureAwait(false);
+
+        return ImportApplyResult.Applied(applied);
     }
 }
+
+/// <summary>Результат застосування імпорту: синхронно ГОТОВО, або в ЧЕРЗІ.</summary>
+/// <remarks>
+/// ⚠ Рівно одне з двох полів не <c>null</c> — конструктори приховані навмисно
+/// (директива №11, T10 #45): виклик через <see cref="Applied"/>/<see cref="Queued"/>
+/// не дає зібрати запис, у якому «застосовано» й «у черзі» правдиві одночасно.
+/// </remarks>
+public sealed record ImportApplyResult
+{
+    private ImportApplyResult(PatchCellsResponse? response, string? jobId)
+    {
+        Response = response;
+        JobId = jobId;
+    }
+
+    /// <summary>Результат синхронного застосування; <c>null</c> — пішло в чергу.</summary>
+    public PatchCellsResponse? Response { get; }
+
+    /// <summary>Ідентифікатор фонової задачі; <c>null</c> — застосовано синхронно.</summary>
+    public string? JobId { get; }
+
+    /// <summary>Застосовано синхронно.</summary>
+    public static ImportApplyResult Applied(PatchCellsResponse response) => new(response, null);
+
+    /// <summary>Поставлено в чергу — завелике для синхронного шляху.</summary>
+    public static ImportApplyResult Queued(string jobId) => new(null, jobId);
+}
+
+/// <summary>Завдання застосування великого імпорту у фоні.</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="PreviewToken">Токен раніше побудованого diff.</param>
+public sealed record ExcelImportTask(long DocumentId, string PreviewToken);

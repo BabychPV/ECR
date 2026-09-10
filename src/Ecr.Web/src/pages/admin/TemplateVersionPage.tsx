@@ -17,6 +17,7 @@ import { apiFetch } from '@/api/client';
 import type {
   CloneVersionRequest,
   DeprecateVersionRequest,
+  PublishVersionRequest,
   TemplateColumnDto,
   TemplateStructureDto,
   VersionIdResponse,
@@ -88,6 +89,7 @@ export function TemplateVersionPage(): JSX.Element {
 
   const [cloning, setCloning] = useState(false);
   const [newVersion, setNewVersion] = useState('');
+  const [publishing, setPublishing] = useState(false);
   const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
   const [sheetDraft, setSheetDraft] = useState<SheetDraft | null>(null);
@@ -155,10 +157,25 @@ export function TemplateVersionPage(): JSX.Element {
     queryFn: () => apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${id}/structure`),
   });
 
+  /**
+   * Публікація версії. Право `Template.Publish`.
+   *
+   * ⛔ Причина обов'язкова — той самий патерн, що й публікація методології
+   * (`MethodologiesPage.tsx`, ФВ-14.7) і сусідня кнопка «вивести з обігу»
+   * нижче: до цього поля не було взагалі, і журнал публікацій ніс літерал
+   * `"Publish"` — рядок, що ВИГЛЯДАЄ як причина, але однаковий для кожного
+   * виклику. За рік «Publish» у журналі не відповідає на питання «чому саме
+   * цю версію ввели в обіг».
+   */
   const publish = useMutation({
-    mutationFn: () => apiFetch(`/api/v1/template-versions/${id}/publish`, { method: 'POST' }),
+    mutationFn: (reason: string) =>
+      apiFetch(`/api/v1/template-versions/${id}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({ reason } satisfies PublishVersionRequest),
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      setPublishing(false);
       showDone(t('version.published'));
     },
 
@@ -495,7 +512,7 @@ export function TemplateVersionPage(): JSX.Element {
 
             {editable && can(session.data, 'Template.Publish') && (
               <>
-                <Button size="xs" loading={publish.isPending} onClick={() => publish.mutate()}>
+                <Button size="xs" onClick={() => setPublishing(true)}>
                   {t('version.publish')}
                 </Button>
 
@@ -895,6 +912,17 @@ export function TemplateVersionPage(): JSX.Element {
         templateVersionId={id}
         column={editing}
         onClose={() => setEditing(null)}
+      />
+
+      <ReasonModal
+        opened={publishing}
+        title={t('version.publish')}
+        label={t('workflow.reason')}
+        description={t('version.publishHint')}
+        confirmLabel={t('version.publish')}
+        isPending={publish.isPending}
+        onConfirm={(reason) => publish.mutate(reason)}
+        onClose={() => setPublishing(false)}
       />
 
       <ReasonModal

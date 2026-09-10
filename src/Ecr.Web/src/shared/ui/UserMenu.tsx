@@ -12,13 +12,15 @@ import {
 import { apiFetch } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { applyDensity, density, setDensity, type Density } from '@/shared/theme/preferences';
+import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
 
 /**
- * Профіль користувача: тема, щільність, вихід (`ФВ-14.14`, `ФВ-14.15`, `D-131`).
+ * Профіль користувача: тема, мова, щільність, вихід
+ * (`ФВ-14.14`, `ФВ-14.15`, `ФВ-14.9`, `D-131`).
  *
- * ⚠ Обидва перемикачі — тут, а не в «Налаштуваннях»: окремої сторінки
- * налаштувань у системі немає, і заводити її заради двох перемикачів означало б
- * ще один пункт меню, який відкривають двічі за весь час роботи.
+ * ⚠ Усі перемикачі — тут, а не в «Налаштуваннях»: окремої сторінки
+ * налаштувань у системі немає, і заводити її заради жменьки перемикачів
+ * означало б ще один пункт меню, який відкривають двічі за весь час роботи.
  */
 export function UserMenu({ userName }: { userName: string }): JSX.Element {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
@@ -70,6 +72,8 @@ export function UserMenu({ userName }: { userName: string }): JSX.Element {
               ]}
             />
           </div>
+
+          <LanguageSwitcher />
 
           <div>
             <Text size="xs" c="dimmed" mb="xs" id="ecr-density-label">

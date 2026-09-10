@@ -13,6 +13,18 @@ public interface IExcelImporter
 
     /// <summary>Застосовує раніше побудований diff після підтвердження користувачем.</summary>
     public Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки комірок змінить раніше побудований diff — БЕЗ застосування
+    /// (директива №11, T10 #45).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Потрібен ДО рішення «синхронно чи в чергу»: щоб не запускати
+    /// застосування заради виміру його ж розміру, обробник питає ЦЕ
+    /// напередодні, беручи вже підрахований <c>ImportPlan</c> (той самий,
+    /// що збережено при <see cref="PreviewAsync"/>), а не рахує наново з файлу.
+    /// </remarks>
+    public Task<int> CountPendingChangesAsync(string previewToken, CancellationToken ct);
 }
 
 /// <summary>Результат попереднього перегляду імпорту.</summary>

@@ -125,6 +125,7 @@ public static class DependencyInjection
 
         // Безпека: ролі, користувачі, аудит (модулі 3.2, 3.9)
         services.AddScoped<Security.ListRolesHandler>();
+        services.AddScoped<Security.ListPermissionsHandler>();
         services.AddScoped<Security.ListResourceGrantsHandler>();
         services.AddScoped<Security.ReplaceResourceGrantsHandler>();
         services.AddScoped<Security.SetReceivesAlertsHandler>();
@@ -230,6 +231,7 @@ public static class DependencyInjection
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.GetJobStatusHandler>();
         services.AddScoped<Integration.ListJobsHandler>();
+        services.AddScoped<Integration.RestartJobHandler>();
 
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
