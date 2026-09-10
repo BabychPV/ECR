@@ -15,25 +15,32 @@ param(
     [Parameter(Mandatory)] [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [string] $Configuration = 'Release',
     [string] $Runtime = 'win-x64',
-    [switch] $SkipPublish
+    [switch] $SkipPublish,
+    [switch] $SkipWeb
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$root      = Split-Path -Parent $PSScriptRoot
+$root       = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $root 'artifacts\publish'
 $msiDir     = Join-Path $root 'artifacts\msi'
 $wixproj    = Join-Path $root 'installer\Ecr.Installer\Ecr.Installer.wixproj'
+$clientDir  = Join-Path $root 'src\Ecr.Web'
 
-# ── 0. Інструмент на місці? ───────────────────────────────────────────────
-# Перевірка ПЕРЕД довгою публікацією: інакше про відсутність wix дізнаємося
-# через три хвилини, коли публікація вже пройшла.
+# ── 0. Інструменти на місці? ──────────────────────────────────────────────
+# Перевірка ПЕРЕД довгою публікацією: інакше про відсутність wix/npm
+# дізнаємося через кілька хвилин, коли публікація чи збірка клієнта вже
+# пройшла.
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix) {
     throw "WiX CLI не знайдено. Встановити: dotnet tool install --global wix --version 5.0.2"
 }
 Write-Host "WiX: $(wix --version)" -ForegroundColor Cyan
+
+if (-not $SkipWeb -and -not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    throw "npm не знайдено -- потрібен для збірки src/Ecr.Web (Q-214). Пропустити: -SkipWeb (MSI вийде без вебки)."
+}
 
 # ── 1. Публікація ─────────────────────────────────────────────────────────
 if (-not $SkipPublish) {
@@ -55,6 +62,53 @@ if (-not $SkipPublish) {
 
 if (-not (Test-Path (Join-Path $publishDir 'Ecr.Api.exe'))) {
     throw "У публікації немає Ecr.Api.exe — перевір, чи це проєкт служби."
+}
+
+# ── 1b. Веб-клієнт (Q-214) ───────────────────────────────────────────────
+# Кладеться в $publishDir\wwwroot, а не окремим ComponentGroup у .wxs:
+# `Folders.wxs`/`AppFiles` уже забирає ВЕСЬ $(PublishDir)\** одним `Files
+# Include` (коментар там від самого початку згадував "статику SPA" —
+# механізм на це чекав, просто нічого туди не клалось). `Program.cs`
+# (`UseStaticFiles`/`MapFallbackToFile`) читає САМЕ wwwroot поруч із
+# Ecr.Api.exe за замовчуванням ASP.NET Core — жодного додаткового
+# налаштування шляху не треба.
+if (-not $SkipWeb) {
+    Write-Host ""
+    Write-Host "Збірка веб-клієнта (src/Ecr.Web)..." -ForegroundColor Cyan
+
+    Push-Location $clientDir
+    try {
+        # ⛔ npm.cmd, НЕ npm(.ps1): власний npm.ps1 (Node.js для Windows)
+        # звертається до $MyInvocation.Statement/.PipelineElements, яких
+        # немає під Set-StrictMode -Version Latest цього скрипта —
+        # "The property 'Statement' cannot be found on this object" — не
+        # наша помилка, а несумісність самого npm.ps1 зі строгим режимом.
+        # npm.cmd — той самий npm, інший вхідний файл, без цього коду.
+        #
+        # npm ci, не install: відтворюваність з package-lock.json, той самий
+        # принцип, що self-contained публікація для .NET-частини.
+        & npm.cmd ci
+        if ($LASTEXITCODE) { throw "npm ci завершився з кодом $LASTEXITCODE" }
+
+        & npm.cmd run build
+        if ($LASTEXITCODE) { throw "npm run build завершився з кодом $LASTEXITCODE" }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $clientDist = Join-Path $clientDir 'dist'
+    if (-not (Test-Path (Join-Path $clientDist 'index.html'))) {
+        throw "У $clientDist немає index.html — vite build нічого не зібрав, перевір вивід вище."
+    }
+
+    $wwwroot = Join-Path $publishDir 'wwwroot'
+    if (Test-Path $wwwroot) { Remove-Item $wwwroot -Recurse -Force }
+    Copy-Item $clientDist $wwwroot -Recurse
+    Write-Host "Веб-клієнт: $wwwroot" -ForegroundColor Green
+}
+elseif (-not (Test-Path (Join-Path $publishDir 'wwwroot\index.html'))) {
+    Write-Warning "-SkipWeb: MSI збереться БЕЗ веб-клієнта (немає index.html у wwwroot)."
 }
 
 # ── 2. Збірка MSI ─────────────────────────────────────────────────────────

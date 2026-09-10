@@ -51,11 +51,6 @@
     <Property Id="SERVICE_PASSWORD" Secure="yes" Hidden="yes" />
 
     <Property Id="APP_PORT" Value="5000" Secure="yes" />
-    <Property Id="SQL_CONNECTION" Secure="yes" Hidden="yes" />
-
-    <!-- Стартувати службу після установки лише якщо є під чим. -->
-    <SetProperty Id="START_SERVICE" Value="1" After="AppSearch"
-                 Condition="SERVICE_ACCOUNT" />
 
     <!-- ───────────── Склад ───────────── -->
 

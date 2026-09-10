@@ -122,6 +122,16 @@ await app.RunEcrStartupSequenceAsync();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// ⚠ Веб-клієнт (src/Ecr.Web, збирається в wwwroot інсталятором —
+// tools/build-msi.ps1) НЕ вимагає автентифікації сам по собі: сторінку
+// логіну (index.html, JS/CSS) має бути можливо завантажити ДО логіну,
+// інакше завантажити її неможливо взагалі. API нижче захищене окремо,
+// незалежно від цього виклику. У dev/тестах wwwroot не існує — middleware
+// просто нічого не знаходить, без винятку (перевірено: 60/60 Ecr.Api.Tests
+// без wwwroot проходять як і раніше).
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації
 app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль закриває все, крім його зміни
@@ -147,6 +157,27 @@ app.MapHealthChecks("/health/db", new HealthCheckOptions
     Predicate = check => check.Tags.Contains("db"),
     ResponseWriter = HealthResponse.WriteAsync,
 });
+
+// ⚠ Явний 404 для api/health/openapi/scalar ПЕРЕД загальним SPA-фолбеком
+// — обов'язково, інакше помилковий запит на неіснуючий `/api/v1/typo`
+// отримав би 200 з index.html замість чіткого 404 (контракт
+// ECR-DOC-0404) — класична пастка спільного хостингу SPA+API. Це, а не
+// один regex на catch-all: конструкція `{*path:nonfile:regex(...)}` на
+// ПОРОЖНЬОМУ залишку шляху (сам корінь "/") ламала фолбек узагалі —
+// перевірено реальним прогоном проти справжнього `dist` (Q-214). Ці
+// маршрути — MapFallback, тому програють будь-якому реальному
+// контролеру/health-check вище, і водночас точніші за загальний
+// `{*path}` нижче, тож саме вони спрацьовують на цих префіксах.
+app.MapFallback("/api/{**_}", () => Results.NotFound());
+app.MapFallback("/health/{**_}", () => Results.NotFound());
+app.MapFallback("/openapi/{**_}", () => Results.NotFound());
+app.MapFallback("/scalar/{**_}", () => Results.NotFound());
+
+// Усе інше (включно з коренем "/") — SPA-шелл; `:nonfile` — запит на
+// реально відсутній статичний файл (наприклад, видалену картинку) так
+// само лишається 404 від UseStaticFiles вище, а не підміняється
+// сторінкою застосунку.
+app.MapFallbackToFile("index.html");
 
 app.Run();
 

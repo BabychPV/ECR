@@ -13,15 +13,17 @@
                              14-agent-jobs.sql, якщо не задано -FirstDeployment.
       3. MSI              — build-msi.ps1 (якщо -MsiPath не задано), потім
                              msiexec /qn.
-      4. Рядок підключення — у реєстрі служби (HKLM\...\Services\EcrApi\
+      4. Секрети служби   — рядок підключення й (за потреби, перше
+                             розгортання) пароль bootstrap-адміністратора —
+                             у реєстрі служби (HKLM\...\Services\EcrApi\
                              Environment), НЕ у файлі: секрети ніколи не
                              потрапляють у appsettings.json (D-11,
                              docs/build/04-environment.md §6) — і
                              `%ProgramData%\ECR\config\appsettings.
                              Production.json` тут не виняток, хоч і не файл
                              публікації. Знайдено реальним прогоном людини
-                             (Q-213): без цього кроку застосунок падає з
-                             "Рядок підключення 'Ecr' не заданий" при
+                             (Q-213): без рядка підключення застосунок падає
+                             з "Рядок підключення 'Ecr' не заданий" при
                              будь-якій спробі стартувати службу.
       5. Конфігурація     — appsettings.Production.json у %ProgramData%\ECR\
                              config: НЕсекретні значення (наприклад,
@@ -89,6 +91,23 @@
     gMSA (без пароля взагалі). Скрипт про це попереджає вголос, а не
     вдає безпеку, якої тут немає.
 
+.PARAMETER BootstrapPassword
+    Пароль для одноразового локального адміністратора `bootstrap`
+    (`Ecr.Application.Security.BootstrapAdmin`) — пишеться як
+    `ECR_Bootstrap__Password` у той самий реєстр служби, що й
+    `-ConnectionString`, тим самим механізмом. Потрібен ЛИШЕ на першому
+    розгортанні порожньої бази: застосунок сам створює користувача
+    `bootstrap` з роллю `BootstrapAdministrator`, якщо жоден
+    домен-адміністратор ще не існує, і сам деактивує його, щойно
+    домен-користувач отримає право `Security.ManageUsers` — після цього
+    прибери параметр і перезапусти службу без нього (реєстр служби
+    зберігає значення, поки не переписано явно).
+
+    Без пароля, зазначеного тут ХОЧ РАЗ (уручну чи цим параметром),
+    увійти в порожню базу нічим — Windows-автентифікація (`Negotiate`)
+    працює лише для вже відомого домен-користувача з роллю в системі, а
+    такого на порожній базі ще немає.
+
 .PARAMETER AppPort
     Порт Kestrel і правило брандмауера. За замовчуванням 5000.
 
@@ -124,11 +143,12 @@
         -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -WhatIf
 
 .EXAMPLE
-    # Перше розгортання на чистому сервері
+    # Перше розгортання на чистому сервері (порожня база — потрібен bootstrap)
     $cs = Read-Host -AsSecureString -Prompt 'Рядок підключення'
+    $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адміністратора'
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
         -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
-        -ConfigValues .\uat-config.json -FirstDeployment
+        -BootstrapPassword $bp -ConfigValues .\uat-config.json -FirstDeployment
 
 .NOTES
     Не переписує tools/build-msi.ps1, tools/sign-msi.ps1,
@@ -153,6 +173,7 @@ param(
     [string] $ServiceAccount,
     [System.Security.SecureString] $ServicePassword,
     [System.Security.SecureString] $ConnectionString,
+    [System.Security.SecureString] $BootstrapPassword,
     [int] $AppPort = 5000,
     [string] $ConfigValues,
     [string] $MsiPath,
@@ -399,7 +420,7 @@ if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
 }
 
 # ---------------------------------------------------------------------
-Write-Step "Крок 4/7: рядок підключення (реєстр служби EcrApi)"
+Write-Step "Крок 4/7: секрети служби (реєстр EcrApi\Environment)"
 
 if (-not $ConnectionString) {
     Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
@@ -409,7 +430,24 @@ elseif ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\
         'записати ECR_ConnectionStrings__Ecr')) {
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' `
         -Value (ConvertFrom-SecureStringPlain $ConnectionString)
-    Write-Host "Записано." -ForegroundColor Green
+    Write-Host "Рядок підключення записано." -ForegroundColor Green
+}
+
+if ($BootstrapPassword) {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+            'записати ECR_Bootstrap__Password')) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Bootstrap__Password' `
+            -Value (ConvertFrom-SecureStringPlain $BootstrapPassword)
+        Write-Host ("Пароль bootstrap-адміністратора записано. Після першого входу під " +
+            "користувачем 'bootstrap' і видачі прав реальному домен-акаунту — прибери цей " +
+            "параметр і перезапусти службу (докладніше: -BootstrapPassword у Get-Help).") `
+            -ForegroundColor Green
+    }
+}
+else {
+    Write-Host ("-BootstrapPassword не задано — якщо база порожня і жоден " +
+        "домен-адміністратор ще не існує, увійти в застосунок після першого розгортання " +
+        "нічим (bootstrap-користувача не буде створено).") -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------
