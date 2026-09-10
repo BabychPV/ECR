@@ -104,7 +104,10 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
     /// <inheritdoc />
     public async Task<int> ReplaceRolesAsync(
-        int userId, IReadOnlyList<string> roleCodes, CancellationToken ct)
+        int userId,
+        IReadOnlyList<string> roleCodes,
+        IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? validity,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
 
@@ -132,9 +135,29 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.");
         }
 
-        // ⚠ Призначення з обмеженням строку (`ValidFrom`/`ValidTo`) НЕ
-        // чіпаються: вони заведені навмисно — підміна на час відпустки — і
-        // заміна набору не має скасовувати те, що поставили окремим рішенням.
+        // ⚠ Кожна роль набору йде в одну з двох груп (`#48`, ФВ-6.16): якщо
+        // виклик задав для неї межі — вона СТРОКОВА (підміна на час
+        // відпустки), інакше — БЕЗСТРОКОВА, як і завжди. Групу визначає САМ
+        // ВИКЛИК, а не роль: та сама роль в іншому виклику може прийти без
+        // меж і стати постійною.
+        var permanentRoles = new List<(int Id, string Code)>();
+        var datedRoles = new List<(int Id, string Code, DateOnly? From, DateOnly? To)>();
+        foreach (var role in roles)
+        {
+            if (validity is not null
+                && validity.TryGetValue(role.Code, out var window)
+                && (window.ValidFrom is not null || window.ValidTo is not null))
+            {
+                datedRoles.Add((role.Id, role.Code, window.ValidFrom, window.ValidTo));
+            }
+            else
+            {
+                permanentRoles.Add((role.Id, role.Code));
+            }
+        }
+
+        // Безстрокові — заміна НАБОРОМ, як і раніше: строкові підміни нижче
+        // сюди не входять навіть якщо роль там уже є.
         var permanent = await db.RoleAssignments
             .Where(a => a.UserId == userId && a.ValidFrom == null && a.ValidTo == null)
             .ToListAsync(ct)
@@ -142,14 +165,38 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
         db.RoleAssignments.RemoveRange(permanent);
 
-        foreach (var role in roles)
+        foreach (var role in permanentRoles)
         {
             db.RoleAssignments.Add(new RoleAssignment(role.Id, user));
         }
 
+        // Строкові — заміна ПОРОЛЬНО: попереднє строкове призначення саме цієї
+        // ролі цьому користувачу заміняється новими межами (ідемпотентно на
+        // повторний виклик), а строкові призначення ІНШИХ ролей і чужі
+        // групові — не чіпаються. Це та сама обіцянка, що й раніше («заміна
+        // набору не має скасовувати те, що поставили окремим рішенням»), лише
+        // тепер «окреме рішення» може бути і цим самим викликом для іншої ролі.
+        foreach (var (roleId, _, from, to) in datedRoles)
+        {
+            var existingDated = await db.RoleAssignments
+                .Where(a => a.UserId == userId && a.RoleId == roleId
+                            && (a.ValidFrom != null || a.ValidTo != null))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            db.RoleAssignments.RemoveRange(existingDated);
+
+            var assignment = new RoleAssignment(roleId, user);
+            assignment.SetValidity(from, to);
+            db.RoleAssignments.Add(assignment);
+        }
+
         // ⛔ Штамп безпеки крутиться: інакше вже побудований профіль доступу
         // живе в кеші до кінця сесії, і людина або лишається без щойно
-        // виданих прав, або зберігає щойно відібрані (`ФВ-6.7`).
+        // виданих прав, або зберігає щойно відібрані (`ФВ-6.7`). Той самий
+        // штамп покриває і строкові призначення: редагування меж підміни
+        // теж має вимкнути стару копію профілю негайно, а не чекати сплину
+        // 30-хвилинного кешу (`AccessProfileCache`).
         user.RefreshSecurityStamp();
 
         return roles.Count;

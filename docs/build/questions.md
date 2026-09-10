@@ -241,10 +241,12 @@
 | Q-193 | CONFLICT | `TableRow.SetOrphaned` не кличе ніхто; `OrphanScanner` пише ознаку пакетним `ExecuteUpdate` і повторює текстом інваріант «`OrphanedAt` нульується разом з ознакою» замість посилання на домен | RESOLVED · директива №11 §4 `#49` — свідомий компроміс, doc-коментарі перехресно пов'язані |
 | Q-194 | CONFLICT | `DeleteRegistryEntryHandler` (перевірка `ECR-REG-0409`, покритий тестом) без жодного `[HttpDelete]` — помилково заведений запис довідника не можна прибрати через API взагалі | OPEN |
 | Q-195 | SCOPE | немає ендпоінта, що показав би стан затвердження всіх аркушів документа за період чи історію поданих зрізів, хоча `IWorkflowStore.GetSheetsAsync`/`GetSnapshotsAsync` пишуть ці дані й не мають жодного викликача | OPEN |
-| Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
+| Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | RESOLVED |
 | Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
+| Q-199 | CONFLICT | Директива №11, трек T3 (`#20`+`#48`, один Q-номер на трек): bootstrap-адміністратор вимикався лише при СТВОРЕННІ нового користувача, не при заміні ролей наявному через `PUT .../users/{id}/roles`; межі чинності призначення — див. Q-196 | RESOLVED |
 | Q-200 | CONFLICT | Директива №11, трек T4 (`#28`): `RegistriesController` мав `PUT .../{code}/definition` для правки опису НАЯВНОГО довідника, але жодного `[HttpPost]` для колекції — новий довідник, якого немає в офлайновому seed, не міг з'явитися в системі жодним шляхом, доступним людині | RESOLVED · `CreateRegistryHandler.cs`, `RegistriesController.cs`, PR #122 |
 | Q-201 | CONFLICT | Директива №11, трек T5: `PublishTemplateVersionHandler.PublishAsync` писав у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на кожен виклик — рядок, що виглядає як причина публікації версії шаблону, але нею не є | RESOLVED · `PublishVersionRequest`, PR #121 |
+| Q-202 | SCOPE | Директива №11, трек T6 (`#36`→`#37`→`#52`): `ProjectsController.cs` не мав жодного шляху задати межі `Custom`-періоду, редагувати політику періодів (`YearGraceOffsetDays` зашитий `45`) чи змінити часовий пояс проєкту — усі три механізми існували в домені й були недосяжні з API | RESOLVED · `CreateProjectHandler`, `PeriodPolicyCrudHandlers`, `ChangeProjectTimeZoneHandler` |
 | Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
 | Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED частково · #40/#41/#45/#50 закрито, #44 STOPPED (схемна міграція, рішення людини) |
@@ -8781,7 +8783,33 @@ doc-коментарем немає ні в `src/`, ні в тестах — з�
 жодному реальному сценарію майданчика. Це факт про потребу замовника,
 не судження про реалізацію.
 
-**Статус:** OPEN
+#### Закрито
+
+Питання «чи потрібне» зняла директива №11 (трек T3, пункт `#48`): людина
+прямо доручила додати спосіб виставляти межі дії через ЦЕЙ САМИЙ
+обробник — не моє припущення про потребу, а виконання прямої настанови.
+
+Додано `RoleAssignment.SetValidity(validFrom, validTo)` (сеттер, а не нова
+фабрика: конструкторів і так два, і різниця між ними — адресат «особа» чи
+«ще не збережений користувач», а не строк дії). `PUT /api/v1/users/{id}/roles`
+отримав необов'язкове поле `validity` — словник «код ролі → межі»
+(`ReplaceUserRolesRequest.Validity`, `RoleValidityWindow`): відсутнє поле
+або код без запису в ньому — роль безстрокова, як і раніше (сумісно з
+клієнтами, які про нове поле не знають). `UserStore.ReplaceRolesAsync`
+ділить набір на безстрокові (заміна набором, як завжди) і строкові
+(заміна порольно — попереднє строкове призначення саме цієї ролі цьому
+користувачу заміняється нове, чужі ролі й групові призначення не
+чіпаються). Перевірка `validFrom > validTo` — у прикладному шарі
+(`ECR-REQ-0422`), до звернення до сховища.
+
+`RoleAssignment.IsEffectiveOn` не змінювався: механізм перевірки меж уже
+працював правильно (`H-23a`), бракувало лише шляху ЗАПИСУ. Тестова
+фікстура (`FakeUserStore`), яка раніше заповнювала ці поля рефлексією
+саме тому, що прикладного шляху не було, тепер використовує той самий
+публічний `SetValidity`, що й бойове сховище.
+
+**Статус:** RESOLVED · `RoleAssignment.cs`, `RoleAndUserHandlers.cs`,
+`UserStore.cs`, `SecurityController.cs`, директива №11 T3 `#48`, PR #118
 
 ---
 
@@ -8829,6 +8857,58 @@ Engine достатньо близька до 2024 R2, щоб ця схема б
 `docs/build/roadmap.md` — знято те саме формулювання.
 
 **Статус:** RESOLVED · `PiSqlClientDataSource.cs`, PR #114
+
+---
+
+### Q-199 · CONFLICT · Директива №11 `T3` (`#20`+`#48`), 2026-09-10 — bootstrap-адміністратор не вимикався при заміні ролей наявному користувачу
+
+**Де:** `src/Ecr.Application/Security/RoleAndUserHandlers.cs`
+(`ReplaceUserRolesHandler`), `src/Ecr.Infrastructure/Security/UserStore.cs`.
+
+**Контекст:** директива №11 доручила трек T3 як одне ціле — пункти `#20`
+(bootstrap-вимкнення при заміні ролей) і `#48` (межі чинності ролі) лягли
+в один комітований крок, тому й позначені ОДНИМ номером журналу за
+власним правилом директиви «свій Q-номер на трек, не на під-пункт».
+`#48` уже має власний детальний запис — Q-196; тут він лише згадується
+коротко, щоб не дублювати.
+
+#### `#20` — що знайшлося
+
+`DisableBootstrapAdminHandler` викликався лише з `CreateUserHandler` —
+тобто єдиний шлях вимкнути початковий bootstrap-обліковий запис ішов
+через СТВОРЕННЯ нового користувача з іменованими ролями.
+`ReplaceUserRolesHandler.HandleAsync` (видача/заміна ролей НАЯВНОМУ
+користувачу — типовий спосіб «замінити bootstrap-адміністратора
+іменованим», якщо обліковий запис для цього вже існує) цей виклик не
+робив узагалі. Наслідок: людина видає ролі наявному користувачу, вважає,
+що тим самим замінила технічного адміністратора, а bootstrap-запис
+лишається технічно чинним назавжди — до першого `CreateUserHandler`,
+якого могло й не бути.
+
+#### `#20` — що зробив
+
+`ReplaceUserRolesHandler` тепер отримує той самий `DisableBootstrapAdminHandler`,
+що й `CreateUserHandler` (через DI, конструкторний параметр), і викликає
+його після `IUserStore.ReplaceRolesAsync` та збереження змін — тим самим
+кодовим шляхом, який уже безпечно ідемпотентний і сам вирішує, чи
+настали умови вимкнення. Нового домену чи інваріанта це не вводить: це
+той самий виклик, підключений до другого місця, де він мав бути з
+самого початку.
+
+#### `#48` — коротко (деталі в Q-196)
+
+`RoleValidityWindow`/`SetValidity` і необов'язкове поле `validity` в
+`PUT /api/v1/users/{id}/roles` — той самий метод `HandleAsync`, той самий
+коміт. Повний виклад причини, рішення й доказу — у тілі Q-196; тут не
+повторюється.
+
+**Доказ мутацією:** `#20` перевірено окремо від `#48` — тимчасова заміна
+виклику `disableBootstrap.HandleAsync` на холостий призвела до падіння
+тесту, що очікує вимкнення bootstrap-запису після заміни ролей
+(`UserAccessTests.cs`); відновлення виклику — знову зелено.
+
+**Статус:** RESOLVED · `RoleAndUserHandlers.cs`, `UserStore.cs`,
+директива №11 T3 `#20`, PR #118
 
 ---
 
@@ -8951,6 +9031,80 @@ guard-перевірки (`if (string.IsNullOrWhiteSpace(reason))` → `if (fals
 кожної мутації відновлено вихідний код; `StructureScenarios`: 8/8 passed.
 
 **Статус:** RESOLVED · PR #121
+
+---
+
+### Q-202 · SCOPE · Директива №11, трек T6, 2026-09-10 · `ProjectsController.cs` не мав ендпоінтів для меж `Custom`-періоду, CRUD політик періодів чи зміни часового поясу проєкту
+
+**Де:** `src/Ecr.Api/Controllers/ProjectsController.cs`,
+`src/Ecr.Domain/Services/PeriodCalendar.cs`,
+`src/Ecr.Domain/Entities/Documents/{Project,PeriodPolicy}.cs`.
+
+**Що знайшлося (перевірено особисто автором директиви, `[факт]`):** три
+незалежні механізми існували в домені й були недосяжні з API:
+
+1. **`#36`.** `PeriodKind.Custom` розумів домен (`PeriodCalendar.CountFor`
+   приймав `customCount`), але `CreateProjectRequest` не мав поля його
+   задати — кожен `Custom`-проєкт падав на `ECR-PRD-4224` на першому
+   `GET .../periods`.
+2. **`#37`.** Політик періодів не можна було ні створити, ні змінити:
+   `YearGraceOffsetDays` завжди зашитий `45` у конструкторі `Project`,
+   незалежно від обраної політики.
+3. **`#52`.** `Project.ChangeTimeZone` — повністю коректний, укритий
+   доменними тестами (`ProjectTimeZoneIanaTests`,
+   `TimeZoneImmutabilityTests`) метод — не мав ЖОДНОГО прикладного
+   обробника чи маршруту, що його кличе.
+
+#### Закрито
+
+1. `CreateProjectRequest`/`CreateProjectHandler` отримали
+   `CustomPeriodCount`, перевірений одразу при створенні через
+   `PeriodCalendar.CountFor` — заразом виправлено суміжний дефект:
+   `CountFor` мовчки приймав кількість, що не ділить рік порівну (напр. 5),
+   лишаючи «хвіст» року (листопад/грудень) поза жодним періодом; тепер
+   такий вибір відхиляється як `ECR-PRD-4224`. Значення зберігається в
+   наявному `ExternalSettingsJson` — без міграції схеми.
+2. `PeriodPolicy` отримав валідацію офсетів (конструктор і новий
+   `UpdateOffsets`, `ECR-PRD-4225`) плюс `POST`/`PUT
+   /api/v1/projects/period-policies(/{id})` (право `Project.Manage`,
+   дублікат коду — `ECR-PRD-4091`/409, не сирий `UQ_PeriodPolicy`).
+   `CreateProjectHandler` тепер підвантажує обрану політику і бере з неї
+   `YearGraceOffsetDays` замість константи `45`.
+3. `ChangeProjectTimeZoneHandler` + `PUT /api/v1/projects/{id}/timezone`
+   (право `Project.Manage` на конкретний проєкт, той самий патерн, що
+   `Activate`/`Archive`/`Clone`) — тонкий прохідний виклик, домен
+   лишається єдиним джерелом правила `ECR-PRD-0409` («не після відкриття
+   першого періоду»).
+
+**Друга частина `#52` (деактивація «шести пов'язаних сутностей») —
+НЕ реалізована.** Жоден текст у репозиторії (код, коментарі, історія
+git) не називає, які саме шість сутностей маються на увазі, і сама
+директива позначає цей підпункт як «частково незрозуміло». Вигадати
+шість сутностей означало б відповісти на запитання, яке не моє (той
+самий виняток «факти проти судження») — назване тут прямо, а не
+пропущене мовчки.
+
+**Доказ (D-134):**
+- `#36`: `SequenceRangeTests`/`CreateProjectTests` — `customPeriodCount`
+  5/0/13 відхиляються `ECR-PRD-4224`; вимкнення перевірки `12 % count != 0`
+  у `PeriodCalendar.CountFor` дає червоний (календар мовчки губить
+  листопад/грудень), відновлення — зелений.
+- `#37`: `PeriodPolicyTests`/`PeriodPolicyCrudTests` — політика з
+  `GraceOffsetDays > HardCloseOffsetDays` відхиляється і конструктором, і
+  `UpdateOffsets`; вимкнення перевірки в `PeriodPolicy.ApplyOffsets` дає
+  червоний, відновлення — зелений.
+- `#52`: перевикористано наявне доменне покриття
+  (`TimeZoneImmutabilityTests`) плюс новий `ChangeProjectTimeZoneTests` і
+  сценарій T6/#52 — вимкнення перевірки `period.State !=
+  PeriodState.Scheduled` у `Project.ChangeTimeZone` дає мовчазний успіх
+  після відкриття періоду (червоний), відновлення — зелений.
+
+Перевірено: `dotnet build ECR.sln` чисто; 52 нових/змінених тести
+`Ecr.Application.Tests`, 6 `Ecr.Domain.Tests`, 8 сценаріїв
+(`ProjectAndPeriodScenarios`, реальний HTTP на SQL Server) — усі зелені.
+
+**Статус:** RESOLVED · часткове — `#36`/`#37`/`#52` (прохід) закрито,
+деактивація шести сутностей лишається невідповідженим фактом, не судженням
 
 ---
 

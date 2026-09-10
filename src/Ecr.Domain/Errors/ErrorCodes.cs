@@ -149,6 +149,15 @@ public static class ErrorCodes
     /// <summary><c>Sequence</c> поза діапазоном <c>1…12</c> (ФВ-1.5a, <c>D-108</c>).</summary>
     public const string PeriodSequenceOutOfRange = "ECR-PRD-4224";
 
+    /// <summary>
+    /// Політика періодів: пільговий строк довший за жорстке закриття, або
+    /// річний пільговий строк від'ємний (T6/#37, <c>ECR-PRD-4225</c>).
+    /// </summary>
+    public const string PeriodPolicyOrderInvalid = "ECR-PRD-4225";
+
+    /// <summary>Політика періодів із таким кодом уже існує (<c>UQ_PeriodPolicy</c>, T6/#37).</summary>
+    public const string PeriodPolicyDuplicate = "ECR-PRD-4091";
+
     /// <summary>Активація проєкту, який уже не чернетка або не має періодів (<c>A7-25</c>).</summary>
     public const string ProjectActivationInvalid = "ECR-PRJ-0422";
 

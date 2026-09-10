@@ -92,4 +92,31 @@ public sealed class RoleAssignment : Entity<int>
     /// </remarks>
     public bool IsEffectiveOn(DateOnly on)
         => (ValidFrom is null || ValidFrom <= on) && (ValidTo is null || ValidTo >= on);
+
+    /// <summary>
+    /// Виставляє межі чинності — підміна ролі на час відпустки (ФВ-6.16,
+    /// `#48`).
+    /// </summary>
+    /// <param name="validFrom">Початок дії; <c>null</c> — від завжди.</param>
+    /// <param name="validTo">Кінець дії; <c>null</c> — безстроково.</param>
+    /// <remarks>
+    /// ⛔ До цього методу задати межі не міг ЖОДЕН прикладний шлях: поля мали
+    /// лише приватний сетер, і єдиним місцем, що заповнювало їх узагалі, була
+    /// рефлексія у тестовій фікстурі (`FakeUserStore.SetValidity`) — факт про
+    /// систему, а не про зручність тесту. <see cref="IsEffectiveOn"/>
+    /// перевіряв межі коректно, але жодне збережене призначення їх не мало:
+    /// підміна на час відпустки (<c>ФВ-6.16</c>) лишалася полем схеми без
+    /// шляху запису.
+    ///
+    /// ⚠ Порядок меж НЕ перевіряється тут: <c>validFrom &gt; validTo</c> —
+    /// помилка ЗАПИТУ (переплутані дати в наказі про підміну), а не
+    /// доменного інваріанта, і ловить її прикладний шар до виклику
+    /// (<c>ReplaceUserRolesHandler</c>, <c>ECR-REQ-0422</c>) — так відповідь
+    /// називає поле форми, а не абстрактний «внутрішній стан недійсний».
+    /// </remarks>
+    public void SetValidity(DateOnly? validFrom, DateOnly? validTo)
+    {
+        ValidFrom = validFrom;
+        ValidTo = validTo;
+    }
 }

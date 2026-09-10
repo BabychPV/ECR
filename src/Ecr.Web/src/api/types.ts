@@ -125,6 +125,9 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 /** Структура версії шаблону: аркуші, таблиці, колонки. */
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
 export type PeriodPolicyDto = Schemas['PeriodPolicyDto'];
+export type CreatePeriodPolicyRequest = Schemas['CreatePeriodPolicyRequest'];
+export type UpdatePeriodPolicyRequest = Schemas['UpdatePeriodPolicyRequest'];
+export type ChangeProjectTimeZoneRequest = Schemas['ChangeProjectTimeZoneRequest'];
 export type ApprovalRouteDto = Schemas['ApprovalRouteDto'];
 export type AffectedRolesResponse = Schemas['AffectedRolesResponse'];
 export type AffectedStepsResponse = Schemas['AffectedStepsResponse'];

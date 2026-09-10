@@ -70,6 +70,41 @@ public sealed class SequenceRangeTests
         Assert.Equal("ECR-PRD-4224", error.ErrorCode);
     }
 
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData(5)] [InlineData(7)] [InlineData(9)] [InlineData(10)] [InlineData(11)]
+    [Trait("Requirement", "D-108")]
+    public void Custom_кількість_яка_не_ділить_рік_нарівно_відхиляється(int customCount)
+    {
+        // ⛔ T6/#36. `Bounds()` ділить 12 місяців на `count` періодів
+        // ЦІЛОЧИСЕЛЬНО (`monthsPerPeriod = 12 / count`): для `count = 5` це
+        // дало б п'ять періодів по два місяці — лише десять місяців із
+        // дванадцяти, — і листопад та грудень не потрапили б у ЖОДЕН період.
+        // Календар виглядав би зібраним (`periods.Count == 5`), а частина
+        // року не мала б куди прийняти дані.
+        var error = Assert.Throws<DomainException>(
+            () => PeriodCalendar.CountFor(PeriodKind.Custom, customCount));
+
+        Assert.Equal("ECR-PRD-4224", error.ErrorCode);
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)]
+    [InlineData(6)] [InlineData(12)]
+    public void Custom_кількість_яка_ділить_рік_нарівно_приймається(int customCount)
+        => Assert.Equal(customCount, PeriodCalendar.CountFor(PeriodKind.Custom, customCount));
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void Стандартні_періодичності_завжди_ділять_рік_нарівно()
+    {
+        // Регресія формулювання: перевірка ділення застосована до ВСІХ
+        // гранулярностей (спільний код у `CountFor`), а не лише до Custom —
+        // 12/4/1 усі ділять 12, тож Monthly/Quarterly/Yearly не повинні
+        // почати відмовляти після цієї зміни.
+        Assert.Equal(12, PeriodCalendar.CountFor(PeriodKind.Monthly));
+        Assert.Equal(4, PeriodCalendar.CountFor(PeriodKind.Quarterly));
+        Assert.Equal(1, PeriodCalendar.CountFor(PeriodKind.Yearly));
+    }
+
     private static string SolutionRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

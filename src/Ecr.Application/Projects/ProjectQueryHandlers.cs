@@ -119,6 +119,113 @@ public sealed record PeriodPolicyDto(
     int HardCloseOffsetDays,
     int YearGraceOffsetDays);
 
+/// <summary>
+/// Створення політики періодів (T6/#37). Право <c>Project.Manage</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ До цього CRUD не було: єдиний спосіб завести політику — сідинг або рука
+/// DBA. Річний пільговий строк <c>Project.cs:33</c> стояв літералом
+/// <c>45</c> НЕЗАЛЕЖНО від політики саме тому — політику неможливо було
+/// налаштувати інакше, ніж редагуючи `09-seed.sql` і перерозгортаючи базу.
+/// </remarks>
+public sealed class CreatePeriodPolicyHandler(
+    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+{
+    /// <summary>Право керування проєктами.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Створює політику.</summary>
+    /// <param name="code">Код політики; має бути унікальним.</param>
+    /// <param name="openOffsetDays">Коли період відкривається від початку.</param>
+    /// <param name="graceOffsetDays">Пільговий строк після кінця періоду.</param>
+    /// <param name="hardCloseOffsetDays">Коли період закривається остаточно.</param>
+    /// <param name="yearGraceOffsetDays">Пільговий строк після кінця року.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">Код зайнятий (<c>ECR-PRD-4091</c>).</exception>
+    /// <exception cref="DomainException">
+    /// <c>ECR-PRD-4225</c> — пільговий строк довший за жорстке закриття, або
+    /// річний пільговий строк від'ємний.
+    /// </exception>
+    public async Task<PeriodPolicyDto> HandleAsync(
+        string code, int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays,
+        int yearGraceOffsetDays, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var ecrCode = EcrCode.Create(code);
+
+        // ⚠ Перевірка ТУТ, а не покладання на `UQ_PeriodPolicy`: без неї
+        // помилка друкарки в коді доїжджала б `500`-кою без пояснення поля —
+        // той самий клас дефекту, що й `ECR-USR-0409`/`ECR-RPT-4091`.
+        // Політик — одиниці (`ListPoliciesAsync` не має межі сторінки саме
+        // тому), тож другий похід у базу не потрібен.
+        var existing = await periods.ListPoliciesAsync(ct).ConfigureAwait(false);
+        if (existing.Any(p => string.Equals(p.Code, ecrCode.Value, StringComparison.Ordinal)))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.PeriodPolicyDuplicate,
+                $"Політика з кодом «{ecrCode.Value}» уже існує.");
+        }
+
+        var policy = new PeriodPolicy(
+            ecrCode, openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+
+        periods.AddPolicy(policy);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return PeriodPolicyMapping.ToDto(policy);
+    }
+}
+
+/// <summary>
+/// Зміна offsets наявної політики періодів (T6/#37). Право <c>Project.Manage</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ Проєкти, які вже посилаються на цю політику, не перераховують межі
+/// автоматично: наступний ідемпотентний виклик <c>GET …/periods</c>
+/// (<c>BuildPeriodCalendarHandler</c>) підхопить нові offsets сам.
+/// </remarks>
+public sealed class UpdatePeriodPolicyHandler(
+    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+{
+    /// <summary>Право керування проєктами.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Змінює offsets політики.</summary>
+    /// <param name="id">Політика.</param>
+    /// <param name="openOffsetDays">Коли період відкривається від початку.</param>
+    /// <param name="graceOffsetDays">Пільговий строк після кінця періоду.</param>
+    /// <param name="hardCloseOffsetDays">Коли період закривається остаточно.</param>
+    /// <param name="yearGraceOffsetDays">Пільговий строк після кінця року.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Політики немає (<c>ECR-PRD-0422</c>).</exception>
+    /// <exception cref="DomainException">
+    /// <c>ECR-PRD-4225</c> — пільговий строк довший за жорстке закриття, або
+    /// річний пільговий строк від'ємний.
+    /// </exception>
+    public async Task<PeriodPolicyDto> HandleAsync(
+        int id, int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays,
+        int yearGraceOffsetDays, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var policy = await periods.GetPolicyAsync(id, ct).ConfigureAwait(false);
+        policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return PeriodPolicyMapping.ToDto(policy);
+    }
+}
+
+/// <summary>Спільне перетворення сутності в DTO для обох обробників CRUD політик.</summary>
+internal static class PeriodPolicyMapping
+{
+    public static PeriodPolicyDto ToDto(PeriodPolicy policy) => new(
+        policy.Id, policy.Code, policy.OpenOffsetDays, policy.GraceOffsetDays,
+        policy.HardCloseOffsetDays, policy.YearGraceOffsetDays);
+}
+
 /// <summary>Створення проєкту. Право <c>Project.Manage</c>.</summary>
 public sealed class CreateProjectHandler(
     IPeriodStore periods,
@@ -140,9 +247,15 @@ public sealed class CreateProjectHandler(
     /// <param name="year">Звітний рік; <c>null</c> — поточний **у поясі майданчика**.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
     /// <param name="periodPolicyId">Політика періодів.</param>
+    /// <param name="customPeriodCount">
+    /// Кількість періодів для <see cref="PeriodKind.Custom"/> (T6/#36);
+    /// ігнорується для решти періодичностей.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="DomainException">
-    /// <c>ECR-CFG-4221</c> — пояс порожній, невідомий або не є ідентифікатором IANA.
+    /// <c>ECR-CFG-4221</c> — пояс порожній, невідомий або не є ідентифікатором IANA;
+    /// <c>ECR-PRD-4224</c> — <paramref name="customPeriodCount"/> поза межами
+    /// 1..12 або не ділить рік нарівно (лише для <see cref="PeriodKind.Custom"/>).
     /// </exception>
     public async Task<int> HandleAsync(
         string code,
@@ -152,7 +265,8 @@ public sealed class CreateProjectHandler(
         int? year,
         int templateVersionId,
         int periodPolicyId,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? customPeriodCount = null)
     {
         ArgumentNullException.ThrowIfNull(name);
 
@@ -199,6 +313,24 @@ public sealed class CreateProjectHandler(
                 "ECR-PRD-0422", "Проєкт неможливо створити без політики періодів.");
         }
 
+        // ⛔ Політика завантажується ТУТ, а не лише посилається ідентифікатором
+        // (T6/#37): дві причини одразу. Перша — `YearGraceOffsetDays` проєкту
+        // раніше був літералом `45` НЕЗАЛЕЖНО від обраної політики (`Project.cs`
+        // до цієї правки), тобто дві політики з різним річним грейсом давали
+        // проєктам однаковий результат; тепер значення проєкту — це знімок
+        // `PeriodPolicy.YearGraceOffsetDays` політики, обраної при створенні.
+        // Друга — неіснуючий `periodPolicyId` раніше падав аж на
+        // `FK_Project_Policy` під час `SaveChanges` (500 без коду й тексту),
+        // а `GetPolicyAsync` віддає `ECR-PRD-0422` заздалегідь.
+        var policy = await periods.GetPolicyAsync(periodPolicyId, ct).ConfigureAwait(false);
+
+        // ⛔ T6/#36: перевіряється ТУТ, а не відкладається до першого
+        // `GET …/periods`. `PeriodCalendar.CountFor` кидає `ECR-PRD-4224`, якщо
+        // кількість поза 1..12 або не ділить рік нарівно — а для решти
+        // періодичностей (`Monthly`/`Quarterly`/`Yearly`) аргумент просто
+        // ігнорується, тож виклик безпечний завжди.
+        var validatedCustomCount = Domain.Services.PeriodCalendar.CountFor(periodKind, customPeriodCount ?? 0);
+
         var project = new Project(
             EcrCode.Create(code),
             new LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
@@ -210,7 +342,13 @@ public sealed class CreateProjectHandler(
 
             // Перевірене значення, а не вхідний рядок: у базу має лягти рівно
             // те, за чим порахований `reportingYear` вище.
-            zone);
+            zone,
+            policy.YearGraceOffsetDays,
+
+            // Зберігається лише для Custom: для решти періодичностей кількість
+            // визначає сам `PeriodKind`, і зберігати тут щось означало б давати
+            // друге джерело істини про те саме число.
+            periodKind == PeriodKind.Custom ? validatedCustomCount : null);
 
         await periods.AddProjectAsync(project, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -495,6 +633,71 @@ public sealed class ArchiveProjectHandler(
         }
 
         project.Archive(clock.UtcNow);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
+/// Змінює пояс майданчика проєкту. Право <c>Project.Manage</c> (T6/#52).
+/// </summary>
+/// <remarks>
+/// ⚠ Ре-верифіковано проти твердження аудиту (`[звірка]`, слабша впевненість):
+/// домен УЖЕ мав повний, протестований <see cref="Project.ChangeTimeZone"/>
+/// (перевірено — <c>TimeZoneImmutabilityTests</c> покриває і дозволений, і
+/// заборонений випадок), просто без застосункового обробника й ендпоінта над
+/// ним. Тобто прогалина була рівно там, де аудит і назвав: не в правилі, а в
+/// доступі до нього через API. Само правило («не після відкриття першого
+/// періоду», <c>ECR-CFG-4221</c>/<c>ECR-PRD-0409</c>) не чіпається: обробник
+/// лише виносить наявний метод сутності на HTTP.
+///
+/// ⛔ «Шість сутностей для деактивації», згадані в тому ж пункті аудиту, — не
+/// реалізовано. Жодного тексту, який їх називає (структура, коментарі, історія
+/// git), у цьому репозиторії не знайдено: сам аудит зізнається, що цей
+/// підпункт «частково незрозумілий». Вигадувати шість сутностей означало б
+/// закривати рядок аудиту, а не проблему; правильна дія тут — назвати
+/// прогалину, а не заповнити її здогадкою (правило винятку «факти, яких я не
+/// знаю» цього ж проєкту).
+/// </remarks>
+public sealed class ChangeProjectTimeZoneHandler(
+    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+{
+    /// <summary>Право на зміну поясу.</summary>
+    public const string Permission = "Project.Manage";
+
+    /// <summary>Змінює пояс майданчика.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="timeZoneId">Новий пояс — ідентифікатор IANA.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Проєкту немає (<c>ECR-PRJ-0404</c>).</exception>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CFG-4221</c> — значення не є відомим ідентифікатором IANA;
+    /// <c>ECR-PRD-0409</c> — перший період уже відкривався (ФВ-1.1a).
+    /// </exception>
+    public async Task HandleAsync(int projectId, string timeZoneId, CancellationToken ct)
+    {
+        var profile = await PermissionCheck
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
+        // грант на неіснуючий `projectId` не буває виданий нікому.
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+
+        // ⛔ Той самий патерн гранта на КОНКРЕТНИЙ проєкт, що й
+        // Activate/Archive/Clone (Q-179): глобальне `Project.Manage` каже «ця
+        // людина взагалі керує проєктами», грант — «саме цим».
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
+
+        // Уся перевірка — в сутності: невідомий IANA-ідентифікатор і спроба
+        // зміни після відкриття першого періоду обидва йдуть звідти
+        // (`Project.ChangeTimeZone`), обробник нічого не дублює.
+        project.ChangeTimeZone(timeZoneId);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

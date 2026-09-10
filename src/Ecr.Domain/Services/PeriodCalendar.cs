@@ -39,11 +39,31 @@ public static class PeriodCalendar
             _ => customCount,
         };
 
-        return count is >= 1 and <= MaxSequence
-            ? count
-            : throw new DomainException(
+        if (count is < 1 or > MaxSequence)
+        {
+            throw new DomainException(
                 "ECR-PRD-4224",
                 $"Кількість періодів {count} поза межами 1..{MaxSequence} (D-108).");
+        }
+
+        // ⛔ T6/#36: кількість МУСИТЬ ділити рік нарівно. `Bounds()` нижче
+        // ділить 12 місяців на `count` періодів цілочисельно
+        // (`monthsPerPeriod = 12 / count`), і недільник лишив би хвіст року
+        // без жодного періоду: наприклад, `count = 5` дав би п'ять періодів по
+        // два місяці (лише десять місяців із дванадцяти), а листопад і грудень
+        // не потрапили б у ЖОДЕН період — календар виглядав би зібраним, а
+        // частина року не мала б куди прийняти дані. Для Monthly/Quarterly/
+        // Yearly перевірка проходить завжди (12, 4, 1 — усі ділять 12);
+        // єдина періодичність, де це можна порушити, — Custom.
+        if (12 % count != 0)
+        {
+            throw new DomainException(
+                "ECR-PRD-4224",
+                $"Кількість періодів {count} не ділить рік нарівно: 12 має ділитися на неї без "
+                + "остачі, інакше частина року лишиться без жодного періоду (D-108).");
+        }
+
+        return count;
     }
 
     /// <summary>Ключ періоду: <c>Year*100 + Sequence</c> (R-A6).</summary>

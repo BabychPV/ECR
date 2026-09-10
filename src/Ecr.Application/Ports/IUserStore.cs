@@ -65,9 +65,17 @@ public interface IUserStore
     /// </remarks>
     /// <param name="userId">Користувач.</param>
     /// <param name="roleCodes">Коди ролей; порожньо — прибрати всі.</param>
+    /// <param name="validity">
+    /// Межі чинності за кодом ролі (<c>ФВ-6.16</c>) — підміна на час
+    /// відпустки; <c>null</c> або код без запису тут — роль безстрокова.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки ролей тепер призначено.</returns>
-    public Task<int> ReplaceRolesAsync(int userId, IReadOnlyList<string> roleCodes, CancellationToken ct);
+    public Task<int> ReplaceRolesAsync(
+        int userId,
+        IReadOnlyList<string> roleCodes,
+        IReadOnlyDictionary<string, Security.RoleValidityWindow>? validity,
+        CancellationToken ct);
 
     /// <summary>
     /// Коди БЕЗСТРОКОВИХ ролей користувача.
