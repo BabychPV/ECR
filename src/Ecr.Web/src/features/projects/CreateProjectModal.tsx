@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, Select, TextInput } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type {
@@ -28,7 +28,7 @@ const PeriodKinds = ['Monthly', 'Quarterly', 'Yearly', 'Custom'];
  * запасного варіанта поле лишалося б порожнім, а проєкт — нествореним: сервер
  * відхиляє створення без поясу.
  */
-function timeZones(): string[] {
+export function timeZones(): string[] {
   const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
   const all = typeof supported === 'function' ? supported('timeZone') : [];
 
@@ -57,6 +57,7 @@ export function createProjectBody(form: {
   timeZoneId: string;
   versionId: string | null;
   policyId: string | null;
+  customPeriodCount?: number | null;
 }): CreateProjectRequest {
   return {
     code: form.code.trim(),
@@ -69,6 +70,11 @@ export function createProjectBody(form: {
     timeZoneId: form.timeZoneId,
     templateVersionId: Number(form.versionId),
     periodPolicyId: Number(form.policyId),
+
+    // ⛔ T6/#36: надсилається лише для `Custom` — для решти періодичностей
+    // кількість визначає сам вид, і поле лишається `null`, а не нулем чи
+    // старим значенням із попереднього вибору `Custom` у тій самій формі.
+    customPeriodCount: form.periodKind === 'Custom' ? (form.customPeriodCount ?? null) : null,
   };
 }
 
@@ -90,13 +96,19 @@ export function createProjectIncomplete(form: {
   timeZoneId: string | null;
   versionId: string | null;
   policyId: string | null;
+  periodKind?: string;
+  customPeriodCount?: number | null;
 }): boolean {
   return (
     form.code.trim().length === 0 ||
     !hasAnyText(form.name) ||
     form.timeZoneId === null ||
     form.versionId === null ||
-    form.policyId === null
+    form.policyId === null ||
+    // ⛔ T6/#36: `Custom` без кількості надсилає `customPeriodCount: null`,
+    // і сервер відхиляє це як `0` поза межами `1..12` (`ECR-PRD-4224`) —
+    // краще не давати надіслати запит, який гарантовано відмовлять.
+    (form.periodKind === 'Custom' && !(form.customPeriodCount && form.customPeriodCount > 0))
   );
 }
 
@@ -139,6 +151,10 @@ export function CreateProjectModal({
   const [versionId, setVersionId] = useState<string | null>(null);
   const [policyId, setPolicyId] = useState<string | null>(null);
 
+  // T6/#36: скільки періодів у Custom-проєкті; сенс має лише при
+  // `periodKind === 'Custom'` — для решти вид сам визначає кількість.
+  const [customPeriodCount, setCustomPeriodCount] = useState<number | null>(null);
+
   const templates = useQuery({
     queryKey: ['templates'],
     queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
@@ -177,7 +193,9 @@ export function CreateProjectModal({
         body: JSON.stringify(
           // `timeZoneId` тут уже не `null`: кнопка недоступна, доки пояс не
           // обрано (`incomplete` нижче).
-          createProjectBody({ code, name, periodKind, timeZoneId: timeZoneId ?? '', versionId, policyId }),
+          createProjectBody({
+            code, name, periodKind, timeZoneId: timeZoneId ?? '', versionId, policyId, customPeriodCount,
+          }),
         ),
       }),
     onSuccess: async (result) => {
@@ -186,6 +204,7 @@ export function CreateProjectModal({
       setTimeZoneId(null);
       setVersionId(null);
       setPolicyId(null);
+      setCustomPeriodCount(null);
       onClose();
       await onCreated(result.projectId);
     },
@@ -195,7 +214,9 @@ export function CreateProjectModal({
   // ⛔ Пояс у переліку обов'язкових. Без нього форму можна було надіслати
   // (браузерне значення підставлялося саме), і сервер приймав її — з чужим
   // поясом, який після відкриття першого періоду вже не змінити (`ФВ-1.1a`).
-  const incomplete = createProjectIncomplete({ code, name, timeZoneId, versionId, policyId });
+  const incomplete = createProjectIncomplete({
+    code, name, timeZoneId, versionId, policyId, periodKind, customPeriodCount,
+  });
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('periods.create')}>
@@ -221,6 +242,23 @@ export function CreateProjectModal({
         onChange={(value) => setPeriodKind(value ?? 'Monthly')}
         allowDeselect={false}
       />
+
+      {/* ⛔ T6/#36: без цього поля `PeriodKind.Custom` був недосяжний через
+          API — домен розумів його, а форма не мала звідки взяти кількість
+          періодів, тож запит завжди йшов би з нею відсутньою. Видиме лише
+          для `Custom`: для решти видів кількість визначає сам вид. */}
+      {periodKind === 'Custom' && (
+        <NumberInput
+          mt="sm"
+          required
+          label={t('periods.customCount')}
+          description={t('periods.customCountHint')}
+          min={1}
+          max={12}
+          value={customPeriodCount ?? ''}
+          onChange={(value) => setCustomPeriodCount(typeof value === 'number' ? value : null)}
+        />
+      )}
 
       {/* ⛔ Пояс ВИДИМИЙ, ОБОВ'ЯЗКОВИЙ і без початкового значення (директива
           ПК-1 №06 §3). Спершу він надсилався мовчки з браузера, потім браузер

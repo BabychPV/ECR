@@ -57,6 +57,9 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public void AddPolicy(PeriodPolicy policy) => db.PeriodPolicies.Add(policy);
+
+    /// <inheritdoc />
     public Task<Period?> LockAsync(int periodId, CancellationToken ct)
         // ⚠ UPDLOCK тримається до кінця транзакції: адміністративне відкриття і
         // PeriodStateJob беруть той самий рядок і мусять серіалізуватися

@@ -244,6 +244,7 @@
 | Q-196 | SCOPE | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити: немає ні фабрики зі строком, ні поля в `PUT .../users/{id}/roles` — чи потрібне строкове призначення ролі як функція, вирішує замовник | OPEN |
 | Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
 | Q-201 | CONFLICT | Директива №11, трек T5: `PublishTemplateVersionHandler.PublishAsync` писав у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на кожен виклик — рядок, що виглядає як причина публікації версії шаблону, але нею не є | RESOLVED · `PublishVersionRequest`, PR #121 |
+| Q-202 | SCOPE | Директива №11, трек T6 (`#36`→`#37`→`#52`): `ProjectsController.cs` не мав жодного шляху задати межі `Custom`-періоду, редагувати політику періодів (`YearGraceOffsetDays` зашитий `45`) чи змінити часовий пояс проєкту — усі три механізми існували в домені й були недосяжні з API | RESOLVED · `CreateProjectHandler`, `PeriodPolicyCrudHandlers`, `ChangeProjectTimeZoneHandler` |
 | Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
 | Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED частково · #40/#41/#45/#50 закрито, #44 STOPPED (схемна міграція, рішення людини) |
@@ -8885,6 +8886,80 @@ guard-перевірки (`if (string.IsNullOrWhiteSpace(reason))` → `if (fals
 кожної мутації відновлено вихідний код; `StructureScenarios`: 8/8 passed.
 
 **Статус:** RESOLVED · PR #121
+
+---
+
+### Q-202 · SCOPE · Директива №11, трек T6, 2026-09-10 · `ProjectsController.cs` не мав ендпоінтів для меж `Custom`-періоду, CRUD політик періодів чи зміни часового поясу проєкту
+
+**Де:** `src/Ecr.Api/Controllers/ProjectsController.cs`,
+`src/Ecr.Domain/Services/PeriodCalendar.cs`,
+`src/Ecr.Domain/Entities/Documents/{Project,PeriodPolicy}.cs`.
+
+**Що знайшлося (перевірено особисто автором директиви, `[факт]`):** три
+незалежні механізми існували в домені й були недосяжні з API:
+
+1. **`#36`.** `PeriodKind.Custom` розумів домен (`PeriodCalendar.CountFor`
+   приймав `customCount`), але `CreateProjectRequest` не мав поля його
+   задати — кожен `Custom`-проєкт падав на `ECR-PRD-4224` на першому
+   `GET .../periods`.
+2. **`#37`.** Політик періодів не можна було ні створити, ні змінити:
+   `YearGraceOffsetDays` завжди зашитий `45` у конструкторі `Project`,
+   незалежно від обраної політики.
+3. **`#52`.** `Project.ChangeTimeZone` — повністю коректний, укритий
+   доменними тестами (`ProjectTimeZoneIanaTests`,
+   `TimeZoneImmutabilityTests`) метод — не мав ЖОДНОГО прикладного
+   обробника чи маршруту, що його кличе.
+
+#### Закрито
+
+1. `CreateProjectRequest`/`CreateProjectHandler` отримали
+   `CustomPeriodCount`, перевірений одразу при створенні через
+   `PeriodCalendar.CountFor` — заразом виправлено суміжний дефект:
+   `CountFor` мовчки приймав кількість, що не ділить рік порівну (напр. 5),
+   лишаючи «хвіст» року (листопад/грудень) поза жодним періодом; тепер
+   такий вибір відхиляється як `ECR-PRD-4224`. Значення зберігається в
+   наявному `ExternalSettingsJson` — без міграції схеми.
+2. `PeriodPolicy` отримав валідацію офсетів (конструктор і новий
+   `UpdateOffsets`, `ECR-PRD-4225`) плюс `POST`/`PUT
+   /api/v1/projects/period-policies(/{id})` (право `Project.Manage`,
+   дублікат коду — `ECR-PRD-4091`/409, не сирий `UQ_PeriodPolicy`).
+   `CreateProjectHandler` тепер підвантажує обрану політику і бере з неї
+   `YearGraceOffsetDays` замість константи `45`.
+3. `ChangeProjectTimeZoneHandler` + `PUT /api/v1/projects/{id}/timezone`
+   (право `Project.Manage` на конкретний проєкт, той самий патерн, що
+   `Activate`/`Archive`/`Clone`) — тонкий прохідний виклик, домен
+   лишається єдиним джерелом правила `ECR-PRD-0409` («не після відкриття
+   першого періоду»).
+
+**Друга частина `#52` (деактивація «шести пов'язаних сутностей») —
+НЕ реалізована.** Жоден текст у репозиторії (код, коментарі, історія
+git) не називає, які саме шість сутностей маються на увазі, і сама
+директива позначає цей підпункт як «частково незрозуміло». Вигадати
+шість сутностей означало б відповісти на запитання, яке не моє (той
+самий виняток «факти проти судження») — назване тут прямо, а не
+пропущене мовчки.
+
+**Доказ (D-134):**
+- `#36`: `SequenceRangeTests`/`CreateProjectTests` — `customPeriodCount`
+  5/0/13 відхиляються `ECR-PRD-4224`; вимкнення перевірки `12 % count != 0`
+  у `PeriodCalendar.CountFor` дає червоний (календар мовчки губить
+  листопад/грудень), відновлення — зелений.
+- `#37`: `PeriodPolicyTests`/`PeriodPolicyCrudTests` — політика з
+  `GraceOffsetDays > HardCloseOffsetDays` відхиляється і конструктором, і
+  `UpdateOffsets`; вимкнення перевірки в `PeriodPolicy.ApplyOffsets` дає
+  червоний, відновлення — зелений.
+- `#52`: перевикористано наявне доменне покриття
+  (`TimeZoneImmutabilityTests`) плюс новий `ChangeProjectTimeZoneTests` і
+  сценарій T6/#52 — вимкнення перевірки `period.State !=
+  PeriodState.Scheduled` у `Project.ChangeTimeZone` дає мовчазний успіх
+  після відкриття періоду (червоний), відновлення — зелений.
+
+Перевірено: `dotnet build ECR.sln` чисто; 52 нових/змінених тести
+`Ecr.Application.Tests`, 6 `Ecr.Domain.Tests`, 8 сценаріїв
+(`ProjectAndPeriodScenarios`, реальний HTTP на SQL Server) — усі зелені.
+
+**Статус:** RESOLVED · часткове — `#36`/`#37`/`#52` (прохід) закрито,
+деактивація шести сутностей лишається невідповідженим фактом, не судженням
 
 ---
 
