@@ -69,10 +69,18 @@ internal sealed class MainForm : Form
         _primaryButton = new Button { Text = "Next", AutoSize = true, Margin = new Padding(0, 8, 12, 8) };
         _primaryButton.Click += (_, _) => OnPrimary();
 
-        var leftFlow = new FlowLayoutPanel { Dock = DockStyle.Left, FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
+        // ⛔ Реальний прогін (людина): кнопка "Next" зникала з поля зору.
+        // WrapContents за замовчуванням true — якщо перший прикидковий
+        // прохід AutoSize занизив доступну ширину (Dock=Right/Left разом з
+        // AutoSize — відомий крихкий випадок), другий контрол переносився
+        // на "новий рядок", який висота батьківської Panel (фіксовані 56px,
+        // buttonBar) просто відрізає. WrapContents=false прибирає це явище
+        // повністю: один рядок, завжди, незалежно від того, як порахувалась
+        // ширина.
+        var leftFlow = new FlowLayoutPanel { Dock = DockStyle.Left, FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false };
         leftFlow.Controls.Add(_cancelButton);
 
-        var rightFlow = new FlowLayoutPanel { Dock = DockStyle.Right, FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
+        var rightFlow = new FlowLayoutPanel { Dock = DockStyle.Right, FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false };
         rightFlow.Controls.Add(_backButton);
         rightFlow.Controls.Add(_primaryButton);
 
