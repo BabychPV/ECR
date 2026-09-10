@@ -127,9 +127,11 @@ public sealed class RecalculationService(
     ///
     /// ⚠ Формула, результат якої НЕ можна обчислити чесно, не рахується
     /// зовсім: краще старе число з відомою причиною, ніж нове й неправильне.
-    /// Таких випадків три, і всі названі: знімок (<c>IsSnapshot</c>),
-    /// крос-аркушний rollup (<c>IsCrossSheet</c>, відкладається) і предикат
-    /// динамічного діапазону, для якого потрібні значення інших колонок.
+    /// Таких випадків два, і обидва названі: знімок (<c>IsSnapshot</c>) і
+    /// крос-аркушний rollup (<c>IsCrossSheet</c>, відкладається, а не
+    /// пропускається). Предикат динамічного діапазону був третім до директиви
+    /// №11 (T12, `#26`) — <see cref="SliceEvaluationContext.Read"/> тепер уміє
+    /// його обчислити, і виключення нижче зняте.
     /// </remarks>
     public async Task<int> RecalculateAsync(long tableInstanceId, DirtySet dirty, CancellationToken ct)
     {
@@ -276,20 +278,6 @@ public sealed class RecalculationService(
             .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
             .ToDictionary(pair => pair.Formula.Id);
 
-        // ⛔ Формули з предикатом динамічного діапазону виключаються ЯВНО —
-        // і на інкрементному шляху, і на повному. Обчислити предикат нічим
-        // НІ ТУТ, НІ ТАМ: єдина реалізація —
-        // `SliceEvaluationContext.GetCellsByPredicate`, і вона повертає `#REF`
-        // безумовно, бо предикат читає інші колонки кожного рядка, а не ту, на
-        // яку посилається. Фоновий прогін не має жодного додаткового джерела
-        // даних — той самий контекст, ті самі значення, — тож включити ці
-        // формули означало б витратити обчислення на гарантований `#REF`
-        // (директива №10 `W10.0`, `D2-338`).
-        var predicated = dependencies
-            .Where(d => d is { FormulaDefId: not null, RowKey: null, FilterJson: not null })
-            .Select(d => d.FormulaDefId!.Value)
-            .ToHashSet();
-
         var values = await LoadValuesAsync(instance, ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
@@ -298,7 +286,8 @@ public sealed class RecalculationService(
         // джерела одиниць, і `CONVERT` у формулі шаблону відмовляв БЕЗУМОВНО,
         // незалежно від того, чи існує сама конверсія (директива №09 §6.5, `S-22`).
         var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
-        var context = new SliceEvaluationContext(snapshot, values, EmptyHeaders, PeriodOf(periodKey), catalogue);
+        var context = new SliceEvaluationContext(
+            snapshot, values, EmptyHeaders, PeriodOf(periodKey), catalogue, rowIdsByTable);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
@@ -306,7 +295,7 @@ public sealed class RecalculationService(
 
         foreach (var formulaId in targets)
         {
-            if (predicated.Contains(formulaId) || !formulas.TryGetValue(formulaId, out var owner))
+            if (!formulas.TryGetValue(formulaId, out var owner))
             {
                 continue;
             }

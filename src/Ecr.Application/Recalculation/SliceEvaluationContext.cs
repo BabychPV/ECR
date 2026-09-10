@@ -6,6 +6,7 @@ using Ecr.Expressions;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
 using Ecr.Expressions.Evaluation;
+using Ecr.Expressions.Functions;
 
 namespace Ecr.Application.Recalculation;
 
@@ -34,7 +35,17 @@ public sealed class SliceEvaluationContext : IEvaluationContext
     private readonly IReadOnlyDictionary<CellKey, ExpressionValue> _values;
     private readonly IReadOnlyDictionary<string, ExpressionValue> _headers;
     private readonly UnitCatalogSnapshot _units;
+    private readonly IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> _rowsByTable;
     private static readonly UnitConverter Converter = new();
+
+    /// <summary>
+    /// Обчислювач умови предиката (<see cref="EvaluatePredicate"/>) — окремий
+    /// від <c>IFormulaEngine</c>, яким рахує формулу викликач
+    /// (<c>RecalculationService</c>): умова предиката НЕ формула, а фрагмент
+    /// AST, уже розібраний разом із нею, і другий прохід через парсер сюди
+    /// нічого не додав би.
+    /// </summary>
+    private static readonly Evaluator PredicateEvaluator = new(new FunctionRegistry());
 
     /// <summary>Створює контекст над завантаженими значеннями.</summary>
     /// <param name="snapshot">Структура версії шаблону.</param>
@@ -46,12 +57,20 @@ public sealed class SliceEvaluationContext : IEvaluationContext
     /// готовим, а не читається звідси: <see cref="IUnitCatalog.GetAsync"/>
     /// асинхронний, а цей контекст — синхронний діалект виразів.
     /// </param>
+    /// <param name="rowsByTable">
+    /// Таблиця → (ключ рядка → ідентифікатор рядка) у поточному екземплярі
+    /// документа за цей період. Джерело рядків для предиката
+    /// (<see cref="EvaluatePredicate"/>): список рядків таблиці НЕ виводиться
+    /// зі <paramref name="values"/>, бо рядок без жодної заповненої комірки
+    /// туди не потрапив би взагалі, і предикат мовчки не побачив би його.
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
         IReadOnlyDictionary<string, ExpressionValue> headers,
         PeriodContext period,
-        UnitCatalogSnapshot units)
+        UnitCatalogSnapshot units,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> rowsByTable)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -60,6 +79,7 @@ public sealed class SliceEvaluationContext : IEvaluationContext
         _values = values ?? throw new ArgumentNullException(nameof(values));
         _headers = headers ?? throw new ArgumentNullException(nameof(headers));
         _units = units ?? throw new ArgumentNullException(nameof(units));
+        _rowsByTable = rowsByTable ?? throw new ArgumentNullException(nameof(rowsByTable));
         Period = period;
     }
 
@@ -106,6 +126,17 @@ public sealed class SliceEvaluationContext : IEvaluationContext
             ];
         }
 
+        // ⚠ Предикат обчислюється ТУТ, а не в GetCellsByPredicate нижче: умова
+        // вже розібрана в AST разом з рештою формули (`RowSelector.Predicate.
+        // Condition`), і другий прохід через `FilterJson` (текстовий запис для
+        // `cfg.FormulaDependency`, не виконуваний вираз) означав би розібрати
+        // те саме двічі на кожен рядок кожної правки комірки.
+        if (reference.Row is RowSelector.Predicate predicate)
+        {
+            return EvaluatePredicate(
+                resolved.TableDefId, predicate.Condition, resolved.ColumnDefId, reference.PeriodOffset);
+        }
+
         return [Value(resolved.TableDefId, resolved.RowKey, resolved.ColumnDefId, reference.PeriodOffset)];
     }
 
@@ -115,15 +146,70 @@ public sealed class SliceEvaluationContext : IEvaluationContext
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ Предикат динамічного діапазону обчислюється не тут: він потребує
-    /// значень ІНШИХ колонок кожного рядка, а не лише тієї, яку читають.
-    /// Формули з таким посиланням у каскад не потрапляють — див.
-    /// <see cref="RecalculationService"/>, — тож мовчазної підміни порожнім
-    /// набором тут не стається.
+    /// ⛔ Ніколи не викликається. Обчислювач (<c>Evaluator.EvaluateGroup</c>)
+    /// диспетчеризує КОЖЕН <c>CellReferenceNode</c>, зокрема й предикатний, у
+    /// <see cref="Read"/> — так само в усіх реалізаціях <c>IEvaluationContext</c>
+    /// цього дерева (див. <c>TestEvaluationContext</c>). Метод лишається в
+    /// інтерфейсі як контракт на майбутнє (директива №11, T12); прибрати його
+    /// звідси — заміна одного дизайнерського рішення на інше, а не частина
+    /// цієї правки.
     /// </remarks>
     public IReadOnlyList<ExpressionValue> GetCellsByPredicate(
         int tableDefId, string filterJson, int columnDefId)
         => [ExpressionValue.Error(ExpressionErrors.BadReference)];
+
+    /// <summary>Рядки предикатного посилання: обчислює умову для кожного рядка таблиці.</summary>
+    /// <remarks>
+    /// ⚠ Директива №11 T12 (`#26`). До цієї правки предикатні формули
+    /// виключалися з каскаду ЯВНО (`RecalculationService`) саме тому, що
+    /// обчислити їх не було чим: єдина тодішня реалізація повертала `#REF`
+    /// безумовно. Порожня множина тут — не помилка (02b §6.1): документ, у
+    /// якому жоден рядок динамічної таблиці не задовольняє умову, — нормальний
+    /// документ, а не збій.
+    ///
+    /// ⚠ `CurrentTableDefId`/`CurrentRowKey` контексту тимчасово підміняються
+    /// на кожен перевірюваний рядок і повертаються в `finally`: умова читає
+    /// колонки ЦЬОГО рядка через звичайний `[Current]`-шлях (`RowSelector.
+    /// Current` у <see cref="Read"/>), а не через окремий механізм, — саме
+    /// так само, як формула, що дійшла до цього рядка в обчисленні.
+    /// </remarks>
+    private List<ExpressionValue> EvaluatePredicate(
+        int tableDefId, AstNode condition, int columnDefId, int periodOffset)
+    {
+        if (!_rowsByTable.TryGetValue(tableDefId, out var rows))
+        {
+            return [];
+        }
+
+        var matched = new List<ExpressionValue>();
+        var savedTable = CurrentTableDefId;
+        var savedRow = CurrentRowKey;
+        try
+        {
+            CurrentTableDefId = tableDefId;
+
+            // ⚠ Порядок обходу — детермінований (Ordinal), а не порядок
+            // словника: два прогони на тих самих даних мають дати той самий
+            // список, інакше звірка з еталоном (ФВ-9.5) стає неможливою.
+            foreach (var rowKey in rows.Keys.OrderBy(k => k, StringComparer.Ordinal))
+            {
+                CurrentRowKey = rowKey;
+                var verdict = PredicateEvaluator.Evaluate(
+                    condition, this, Domain.Enums.ExpressionDialect.Template);
+                if (verdict.Type == ExpressionValueType.Boolean && (bool)verdict.Value!)
+                {
+                    matched.Add(Value(tableDefId, rowKey, columnDefId, periodOffset));
+                }
+            }
+        }
+        finally
+        {
+            CurrentTableDefId = savedTable;
+            CurrentRowKey = savedRow;
+        }
+
+        return matched;
+    }
 
     /// <inheritdoc />
     public ExpressionValue GetArgument(string name) => ExpressionValue.Error(ExpressionErrors.BadReference);
