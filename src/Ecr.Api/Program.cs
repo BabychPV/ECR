@@ -147,16 +147,21 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => fa
 app.MapHealthChecks("/health/ready", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready"),
-    ResponseWriter = HealthResponse.WriteAsync,
+    ResponseWriter = HealthResponse.WriteReadyAsync,
 });
 
 // /health/db віддає ПОДРОБИЦІ: режим редакції, RCSI, файлові групи, запас
 // партицій і перелік того, що в цьому режимі недоступне (АРХ-7 п. 5).
+// ⛔ Q-221: на відміну від /health/live й /health/ready (моніторинг/SCM,
+// анонімний доступ — навмисно), цей ендпоінт розкриває внутрішню будову
+// бази будь-якому, хто дістанеться порту. Споживач — адмінська сторінка
+// HealthPage.tsx: фронтенд ховає пункт меню від неавторизованих, але без
+// .RequireAuthorization() тут це лише візуальна, не справжня межа.
 app.MapHealthChecks("/health/db", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("db"),
     ResponseWriter = HealthResponse.WriteAsync,
-});
+}).RequireAuthorization();
 
 // ⚠ Явний 404 для api/health/openapi/scalar ПЕРЕД загальним SPA-фолбеком
 // — обов'язково, інакше помилковий запит на неіснуючий `/api/v1/typo`

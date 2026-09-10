@@ -23,8 +23,35 @@ public static class HealthResponse
         WriteIndented = true,
     };
 
-    /// <summary>Пише звіт у форматі JSON.</summary>
+    /// <summary>Перевірки, чиї подробиці НЕ йдуть в анонімно доступні звіти.</summary>
+    /// <remarks>
+    /// ⛔ Q-221: <c>DatabaseHealthCheck</c> зареєстрований з тегами <c>["db",
+    /// "ready"]</c> — тобто той самий екземпляр, з тими самими <c>Data</c>
+    /// (редакція SQL Server, RCSI, файлові групи, запас партицій), потрапляє
+    /// і в <c>/health/db</c> (тепер під <c>RequireAuthorization</c>), і в
+    /// <c>/health/ready</c> (навмисно анонімний — його читає інсталятор і
+    /// моніторинг, D-139). Гейт на самому <c>/health/db</c> нічого не
+    /// закриває, доки писар сліпо копіює <c>Data</c> В ОБИДВА звіти: та сама
+    /// «подробиця» просто дублюється в ендпоінт, де на неї ще ніхто не
+    /// поставив авторизацію — і продовжила б витікати навіть після фіксу
+    /// самого <c>/health/db</c>.
+    /// </remarks>
+    private static readonly IReadOnlySet<string> ReadyReportRedactedChecks =
+        new HashSet<string>(StringComparer.Ordinal) { "db" };
+
+    /// <summary>Пише звіт у форматі JSON, з усіма подробицями (для <c>/health/db</c>).</summary>
     public static Task WriteAsync(HttpContext context, HealthReport report)
+        => WriteAsync(context, report, redactedChecks: null);
+
+    /// <summary>
+    /// Пише звіт у форматі JSON для <c>/health/ready</c>: подробиці перевірок
+    /// із <see cref="ReadyReportRedactedChecks"/> порожні — сам статус і опис
+    /// лишаються (моніторингу потрібен саме він), детальні дані — ні.
+    /// </summary>
+    public static Task WriteReadyAsync(HttpContext context, HealthReport report)
+        => WriteAsync(context, report, ReadyReportRedactedChecks);
+
+    private static Task WriteAsync(HttpContext context, HealthReport report, IReadOnlySet<string>? redactedChecks)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(report);
@@ -48,7 +75,9 @@ public static class HealthResponse
                     // ⚠ Виняток НЕ віддається клієнту: у ньому бувають імена
                     // об'єктів БД і фрагменти запитів. Клієнту — сам факт, у
                     // логи — подробиці (ФВ-6.11).
-                    e.Value.Data))
+                    redactedChecks?.Contains(e.Key) == true
+                        ? new Dictionary<string, object>()
+                        : e.Value.Data))
                 .ToList());
 
         return JsonSerializer.SerializeAsync(context.Response.Body, payload, Options, context.RequestAborted);

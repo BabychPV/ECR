@@ -85,7 +85,16 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
               {t('grants.add')}
             </Button>
 
-            <Button size="xs" loading={save.isPending} onClick={() => save.mutate(draft)}>
+            {/* ⛔ Заблоковано, поки чернетка не наповнена ВІДПОВІДДю САМЕ на
+                цю роль: перемикання ролі чи невдалий запит лишають `draft`
+                чужим (попередньої ролі) або порожнім, а збереження в цьому
+                стані замінило б справжні гранти чужими/пусткою. */}
+            <Button
+              size="xs"
+              loading={save.isPending}
+              disabled={grants.isPending || Boolean(grants.error)}
+              onClick={() => save.mutate(draft)}
+            >
               {t('common.save')}
             </Button>
           </>

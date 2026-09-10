@@ -360,7 +360,16 @@ public sealed class CascadeRecalculationTests
     {
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
-        return new(_cells, _rows, Substitute.For<IPeriodStore>(), _metadata, _versions, new RealFormulaEngine(), _units, _uow);
+        // ⚠ Реальні межі періоду, а не заглушка, що повертає null: календарний
+        // контекст (PeriodOf) резолвиться через IPeriodStore, а не арифметикою
+        // з PeriodKey (Q-221) — без цього стабу RunAsync падає з
+        // DomainException "періоду не існує" ще ДО того, як дійде до каскаду,
+        // який ці тести й перевіряють.
+        var periods = Substitute.For<IPeriodStore>();
+        periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
+            .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+
+        return new(_cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units, _uow);
     }
 
     /// <summary>Комірки, які служба віддала на запис.</summary>
