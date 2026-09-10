@@ -48,7 +48,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         // виходив достроково з коментарем «це теж коректна поведінка» — тобто
         // не перевіряв нічого і був зелений завжди. Анонімний запит зупиняє
         // автентифікація ще до конвеєра помилок, з порожнім тілом.
-        var (userName, _) = await ArrangeAsync().ConfigureAwait(true);
+        var (userName, _, _) = await ArrangeAsync().ConfigureAwait(true);
 
         var login = await client.PostAsJsonAsync(
             new Uri("/api/v1/login/local", UriKind.Relative),
@@ -185,7 +185,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         using var client = app.CreateClient();
 
         // Користувач без жодного гранта: автентифікований, але нічого не може.
-        var (name, documentId) = await ArrangeAsync().ConfigureAwait(true);
+        var (name, documentId, sheetDefId) = await ArrangeAsync().ConfigureAwait(true);
         var login = await client.PostAsJsonAsync(
             new Uri("/api/v1/login/local", UriKind.Relative),
             new { userName = name, password = LoginPassword }).ConfigureAwait(true);
@@ -193,7 +193,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
 
         var response = await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{documentId}/submit", UriKind.Relative),
-            new { sheetDefId = 20, periodKey = 202601 }).ConfigureAwait(true);
+            new { sheetDefId, periodKey = 202601 }).ConfigureAwait(true);
 
         Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{response.StatusCode}: {app.ErrorsText}");
 
@@ -277,7 +277,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     private const string LoginPassword = "Contract-2026-Check!";
 
     /// <summary>Локальний користувач без грантів і документ, який він не може подати.</summary>
-    private async Task<(string UserName, long DocumentId)> ArrangeAsync()
+    private async Task<(string UserName, long DocumentId, int SheetDefId)> ArrangeAsync()
     {
         var name = $"nogrant_{Guid.NewGuid():N}"[..20];
 
@@ -291,12 +291,33 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash(LoginPassword));
         db.Users.Add(user);
 
+        // ⛔ Q-222: templateVersionId/periodPolicyId тут раніше були голими
+        // константами (1) без жодного реального рядка — FK_Project_TV
+        // (2a-db-schema.md, ніколи не потрапляв у конфігурацію до цього
+        // фіксу) тепер це ловить по-справжньому. periodPolicyId=1 лишається
+        // коректним — його сіє SeedRunner ("ECR-Standard"); templateVersionId
+        // такого сідінгу не має, тож заводимо реальний Template/TemplateVersion,
+        // той самий патерн, що вже в TestDocumentBuilder.BuildAsync.
+        var tag = Guid.NewGuid().ToString("N")[..12];
+        var template = new Ecr.Domain.Entities.Configuration.Template(
+            Ecr.Domain.ValueObjects.EcrCode.Create($"TPL{tag}"),
+            new Ecr.Domain.ValueObjects.LocalizedText(
+                new Dictionary<string, string> { ["en"] = "Template" }),
+            1, DateTime.UtcNow);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var version = new Ecr.Domain.Entities.Configuration.TemplateVersion(
+            template.Id, "1.0.0.0", 1, DateTime.UtcNow);
+        db.TemplateVersions.Add(version);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
         var project = new Ecr.Domain.Entities.Documents.Project(
             Ecr.Domain.ValueObjects.EcrCode.Create($"P{Guid.NewGuid():N}"[..12]),
             new Ecr.Domain.ValueObjects.LocalizedText(
                 new Dictionary<string, string> { ["en"] = "Contract" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: 1, Ecr.Domain.Enums.PeriodKind.Monthly,
+            templateVersionId: version.Id, Ecr.Domain.Enums.PeriodKind.Monthly,
             periodPolicyId: 1, "Asia/Almaty");
 
         db.Projects.Add(project);
@@ -309,19 +330,31 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
             new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
         period.AdvanceTo(Ecr.Domain.Enums.PeriodState.Open, DateTime.UtcNow);
 
+        // ⛔ Q-222: аркуш раніше був голою константою (20) без жодного
+        // реального рядка — FK_DocSheet_Sheet (2a-db-schema.md, той самий
+        // фікс, що FK_Project_TV вище) тепер це ловить. Заводимо реальний
+        // SheetDef під тим самим TemplateVersion.
+        var sheet = new Ecr.Domain.Entities.Configuration.SheetDef(
+            version.Id, Ecr.Domain.ValueObjects.EcrCode.Create($"SHEET{tag}"),
+            new Ecr.Domain.ValueObjects.LocalizedText(
+                new Dictionary<string, string> { ["en"] = "Sheet" }),
+            1);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
         var document = new Ecr.Domain.Entities.Documents.Document(
             project.Id, $"DOC-{Guid.NewGuid():N}"[..20], user.Id, DateTime.UtcNow);
 
-        // ⚠ Аркуш 20 — той самий, на який тест подає: без нього подання
+        // Той самий аркуш, на який тест подає: без нього подання
         // відхилялося б перевіркою складу документа (`ECR-DOC-0404`, S-17)
         // раніше, ніж дійшло б до перевірки прав, яку цей тест і заявляє.
-        document.IncludeSheet(20);
+        document.IncludeSheet(sheet.Id);
 
         db.Periods.Add(period);
         db.Documents.Add(document);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return (name, document.Id);
+        return (name, document.Id, sheet.Id);
     }
 
     /// <summary>

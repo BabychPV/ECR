@@ -58,6 +58,13 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
                .IsUnique()
                .HasFilter("[IsBootstrapAdmin] = 1")
                .HasDatabaseName("UX_User_Bootstrap");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_User_Policy), ніколи не
+        // потрапив у цю конфігурацію.
+        builder.HasOne<PasswordPolicy>()
+               .WithMany()
+               .HasForeignKey(x => x.PasswordPolicyId)
+               .HasConstraintName("FK_User_Policy");
     }
 }
 
@@ -138,6 +145,18 @@ public sealed class ApprovalStateConfiguration : IEntityTypeConfiguration<Approv
         builder.Property(x => x.RejectedReason).HasMaxLength(1000);
         builder.Property(x => x.ReopenReason).HasMaxLength(1000);
         builder.Property(x => x.RowVersion).IsRowVersion();
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_ApprState_Doc/_Sheet), ніколи
+        // не потрапили в цю конфігурацію.
+        builder.HasOne<Domain.Entities.Documents.Document>()
+               .WithMany()
+               .HasForeignKey(x => x.DocumentId)
+               .HasConstraintName("FK_ApprState_Doc");
+
+        builder.HasOne<Domain.Entities.Configuration.SheetDef>()
+               .WithMany()
+               .HasForeignKey(x => x.SheetDefId)
+               .HasConstraintName("FK_ApprState_Sheet");
     }
 }
 

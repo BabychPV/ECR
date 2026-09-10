@@ -67,6 +67,34 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
                .HasConstraintName("FK_CellValue_Column")
                .OnDelete(DeleteBehavior.Restrict);
 
+        // ⛔ Q-222: FK_CellValue_Entry (ValueRegistryEntryId → dic.RegistryEntry)
+        // з 02a-db-schema.md НАВМИСНО НЕ додано тут — не тому, що не
+        // помітили, а тому, що додати правильно не вдалося: ValueRegistryEntryId
+        // тут — голий int?, а RegistryEntry : Entity<long> (Id — long,
+        // конвертований у int лише для зберігання, RegistryEntryConfiguration.cs:41).
+        // EF звіряє СУМІСНІСТЬ CLR-типів залежного й головного ключа ДО
+        // конвертації, тож int? проти long не проходить — попри те, що
+        // фізично обидва зберігаються як int. Той самий зв'язок в іншому
+        // місці (MethodologyConstant.SubstanceEntryId) зроблено правильно:
+        // long? + HasConversion<int?>() — той самий CLR-тип, що в
+        // RegistryEntry.Id, тому FK_MC_Substance вже працює. Виправити тут
+        // так само означало б поміняти CellValue.ValueRegistryEntryId на
+        // long? — а це ~18 файлів поза міграціями (RegistryStore,
+        // AccessDecisionService, BulkCellLoader, ExcelExporter, ...) на
+        // НАЙгарячішому шляху системи (~108 млн рядків/рік). Свідомо
+        // залишено як окрема, задокументована прогалина — не мій виклик
+        // мовчки поміняти тип на гарячому шляху без окремого рев'ю.
+        //
+        // FK_CellValue_Unit — не той самий випадок: Unit.Id це голий int
+        // (не Entity<T>, без конвертації), тому ValueUnitId (int?) і
+        // Unit.Id (int) сумісні напряму.
+
+        builder.HasOne<Domain.Entities.Units.Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.ValueUnitId)
+               .HasConstraintName("FK_CellValue_Unit")
+               .OnDelete(DeleteBehavior.Restrict);
+
         // ⚠ Жодного некластерного індексу. На ~108 млн рядків кожен коштує
         // гігабайти; усі альтернативні доступи йдуть через doc.DocumentIndexValue.
     }

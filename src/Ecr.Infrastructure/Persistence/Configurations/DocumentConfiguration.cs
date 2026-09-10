@@ -68,6 +68,27 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode");
         builder.Property(x => x.IsArchiving).HasDefaultValue(false, "DF_Project_Arch");
         builder.Navigation(x => x.Periods).UsePropertyAccessMode(PropertyAccessMode.Field);
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_Project_TV/_Policy/
+        // _CurrentPeriod), ніколи не потрапили в цю конфігурацію.
+        builder.HasOne<Domain.Entities.Configuration.TemplateVersion>()
+               .WithMany()
+               .HasForeignKey(x => x.TemplateVersionId)
+               .HasConstraintName("FK_Project_TV");
+
+        builder.HasOne<PeriodPolicy>()
+               .WithMany()
+               .HasForeignKey(x => x.PeriodPolicyId)
+               .HasConstraintName("FK_Project_Policy");
+
+        // Той самий двосторонній зв'язок, що в doc.Period.FK_Period_Project —
+        // Project.CurrentPeriodId вказує НАЗАД на doc.Period, схема свідомо
+        // додає цей FK окремим ALTER TABLE (02a-db-schema.md:1095-1096) саме
+        // через цю циклічність.
+        builder.HasOne<Period>()
+               .WithMany()
+               .HasForeignKey(x => x.CurrentPeriodId)
+               .HasConstraintName("FK_Project_CurrentPeriod");
     }
 }
 
@@ -192,7 +213,14 @@ public sealed class DocumentSheetConfiguration : IEntityTypeConfiguration<Docume
         builder.HasOne<Document>()
                .WithMany(d => d.Sheets)
                .HasForeignKey(x => x.DocumentId)
-               .HasConstraintName("FK_DocSheet_Document");
+               .HasConstraintName("FK_DocSheet_Doc");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_DocSheet_Sheet), ніколи не
+        // потрапив у цю конфігурацію.
+        builder.HasOne<Domain.Entities.Configuration.SheetDef>()
+               .WithMany()
+               .HasForeignKey(x => x.SheetDefId)
+               .HasConstraintName("FK_DocSheet_Sheet");
     }
 }
 
@@ -218,6 +246,21 @@ public sealed class TableInstanceConfiguration : IEntityTypeConfiguration<TableI
 
         builder.HasIndex(x => new { x.PeriodKeyValue, x.DocumentId, x.TableDefId })
                .IsUnique().HasDatabaseName("UQ_TableInstance");
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_TableInstance_Doc/_Table),
+        // ніколи не потрапили в цю конфігурацію. Прості (не складені) FK:
+        // doc.Document і cfg.TableDef не партиційовані, тож партиційний
+        // стовпець тут не потрібен — на відміну від FK_TableRow_Instance/
+        // FK_CellValue_Row нижче за течією, де обидві сторони партиційовані.
+        builder.HasOne<Document>()
+               .WithMany()
+               .HasForeignKey(x => x.DocumentId)
+               .HasConstraintName("FK_TableInstance_Doc");
+
+        builder.HasOne<Domain.Entities.Configuration.TableDef>()
+               .WithMany()
+               .HasForeignKey(x => x.TableDefId)
+               .HasConstraintName("FK_TableInstance_Table");
     }
 }
 
@@ -254,6 +297,14 @@ public sealed class TableRowConfiguration : IEntityTypeConfiguration<TableRow>
                .WithMany()
                .HasForeignKey(x => new { x.PeriodKeyValue, x.TableInstanceId })
                .HasConstraintName("FK_TableRow_Instance");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_TableRow_RowDef), ніколи не
+        // потрапив у цю конфігурацію. Нуль-able: RowDefId заповнюється лише
+        // для RowMode = Fixed.
+        builder.HasOne<Domain.Entities.Configuration.RowDef>()
+               .WithMany()
+               .HasForeignKey(x => x.RowDefId)
+               .HasConstraintName("FK_TableRow_RowDef");
 
         builder.Ignore(x => x.PeriodKey);
         builder.Ignore(x => x.RowKey);

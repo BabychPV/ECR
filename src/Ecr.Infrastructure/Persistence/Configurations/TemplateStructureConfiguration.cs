@@ -148,6 +148,13 @@ public sealed class ColumnDefConfiguration : IEntityTypeConfiguration<ColumnDef>
 
         builder.HasIndex(x => new { x.TableDefId, x.Code })
                .IsUnique().HasDatabaseName("UQ_ColumnDef");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_ColumnDef_Cascade), ніколи не
+        // потрапив у цю конфігурацію.
+        builder.HasOne<ColumnDef>()
+               .WithMany()
+               .HasForeignKey(x => x.CascadeFromColumnId)
+               .HasConstraintName("FK_ColumnDef_Cascade");
     }
 }
 
@@ -176,6 +183,13 @@ public sealed class RowDefConfiguration : IEntityTypeConfiguration<RowDef>
 
         builder.HasIndex(x => new { x.TableDefId, x.RowKeyValue })
                .IsUnique().HasDatabaseName("UQ_RowDef");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_RowDef_Parent), ніколи не
+        // потрапив у цю конфігурацію.
+        builder.HasOne<RowDef>()
+               .WithMany()
+               .HasForeignKey(x => x.ParentRowDefId)
+               .HasConstraintName("FK_RowDef_Parent");
     }
 }
 
@@ -203,5 +217,12 @@ public sealed class StyleDefConfiguration : IEntityTypeConfiguration<StyleDef>
         builder.Property(x => x.WrapText).HasDefaultValue(false, "DF_Style_Wrap");
         builder.HasIndex(x => new { x.TemplateVersionId, x.Code })
                .IsUnique().HasDatabaseName("UQ_StyleDef");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_StyleDef_TV), ніколи не
+        // потрапив у цю конфігурацію.
+        builder.HasOne<Domain.Entities.Configuration.TemplateVersion>()
+               .WithMany()
+               .HasForeignKey(x => x.TemplateVersionId)
+               .HasConstraintName("FK_StyleDef_TV");
     }
 }

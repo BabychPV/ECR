@@ -266,6 +266,7 @@
 | Q-219 | CONFLICT | Людина запитала, які файли мають бути поруч для установки — відповідь на це відкрила реальний розрив: `deploy-ecr.ps1` (без `-SkipSchema`, тобто завжди на First Deployment) читає `dotnet ef migrations script` і `src/Ecr.Infrastructure/Persistence/Sql/*.sql` ВІДНОСНО СЕБЕ, тобто вимагав повний клон репозиторію + .NET SDK + `dotnet-ef` НА СЕРВЕРІ — прямо суперечило `11-install-guide.md` §0 («сервер отримує вже готовий .msi, більше нічого»). Людина сформулювала мету прямо: не розкладати десяток файлів по теці, а мати РІВНО один файл-інсталятор | RESOLVED · новий `tools/build-installer.ps1`: збирає `Ecr.msi`, генерує `migration.sql` (`dotnet ef`) НА МАШИНІ ЗБІРКИ, стейджить payload (`Ecr.msi`, `deploy-ecr.ps1`, `migration.sql`, `sql\*.sql`) в `artifacts\wizard-payload\`, і публікує `EcrSetup.exe` як **self-contained single-file** (`-p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true`) — .NET сам вбудовує payload У СЕРЕДИНУ `.exe` й розпаковує його в тимчасову теку при кожному запуску; `deploy-ecr.ps1` тепер спершу шукає `sql\`/`migration.sql` ПОРУЧ ІЗ СОБОЮ (пакований запуск) і лише як fallback — у дереві репозиторію (dev/CI, без змін для цього шляху). Результат — `artifacts\installer\Ecr-Setup-<версія>.exe`, на сервер їде РІВНО один файл, без .NET SDK/Node/dotnet-ef/клону репозиторію. Підтверджено РЕАЛЬНИМИ прогонами тут: (1) `dotnet publish` без single-file — `Link=%(RecursiveDir)%(Filename)%(Extension)` кладе `Ecr.msi`/`deploy-ecr.ps1`/`migration.sql` в корінь публікації і `sql\*.sql` у підтеку, точно як задумано; (2) окремий пробний консольний проєкт із тим самим `Content`/single-file налаштуванням, реально опублікований і ЗАПУЩЕНИЙ — надрукував `AppContext.BaseDirectory`, що вказує на тимчасову теку розпакування, і повний список файлів у ній, включно з payload — підтверджує механізм `IncludeAllContentForSelfExtract` насправді працює так, як описано |
 | Q-220 | CONFLICT | Людина реально прогнала свіжий `Ecr-Setup-1.1.1.exe` (`Q-219`) і надіслала скріншоти двох незалежних дефектів: (1) на кроці 1 кнопка "Next" не потрапляла у видиму область вікна взагалі — лише "Cancel"/"Back"; (2) на кроці 6 `deploy-ecr.ps1` падав з `PSSecurityException: ... cannot be loaded because running scripts is disabled on this system` — майстер хостить PowerShell у своєму процесі (`Q-216`, вирішує пастку `SecureString`), але це НЕ звільняє від execution policy машини, яка діє незалежно | RESOLVED · (1) `MainForm.cs`/`InstallStep.cs`: `WrapContents = false` на всіх кнопкових/чеклистових `FlowLayoutPanel` — за замовчуванням `true`, і занижена оцінка ширини/висоти на першому проході `AutoSize` переносила другий контрол на "новий рядок", який фіксована висота батьківської `Panel` відрізала; (2) `DeployRunner.cs`: `PowerShell.Create(InitialSessionState)` з `ExecutionPolicy = Bypass` — діє лише в межах процесу `EcrSetup.exe`, не чіпає реєстр/машину/користувача, той самий принцип, що ручний `Set-ExecutionPolicy -Scope Process -Bypass` у §2.2 install-guide, лише виконаний майстром самим. Фікс (2) підтверджено РЕАЛЬНИМ прогоном: окремий пробний консольний проєкт примусово поставив `Process`-scope на `Restricted`, відтворив ІДЕНТИЧНИЙ `PSSecurityException` без фіксу, і в ТОМУ САМОМУ процесі — успішний запуск скрипта з фіксом. Фікс (1) не підтверджено власним прогоном (немає інтерактивного Windows-стенда в цій сесії) — очікує підтвердження людиною |
 | Q-221 | CONFLICT | Директива людини: повний аудит проєкту, PK2-стиль, самостійне виправлення. Шість паралельних агентів знайшли, серед іншого: (1) `CalculationOrchestrator.PeriodDate`/`RecalculationService.PeriodOf` тлумачили `PeriodKey.Sequence` як номер МІСЯЦЯ для БУДЬ-ЯКОГО `PeriodKind` — для квартальних/річних проєктів це підставляло чужі межі періоду (28 днів замість 91/365) у методологію й `[Period].Days/.Hours/.Seconds`, без жодної помилки, що це впіймала б (D-112, сусідній `GenericCalculationModule.PeriodAsync` явно уникає цього тим самим способом); (2) `/health/db` не мав `RequireAuthorization()` — і навіть якби мав, `/health/ready` (навмисно анонімний, D-139) віддає ТІ САМІ подробиці, бо `DatabaseHealthCheck` тегований і "db", і "ready", а спільний writer копіює `Data` в обидва звіти без розбору; (3) Kestrel слухає лише вбудований дефолт `http://localhost:$AppPort` — інсталятор відкриває фаєрвол на `$AppPort`, а слухати нікому, всупереч `11-install-guide.md`, що каже відкрити з іншої машини; (4) три Save-кнопки (`GrantsPanel.tsx`, `UserAccessEditor.tsx`, `ApprovalRouteEditor.tsx`) не блокувались на `isPending`/`error` джерельного запиту — перемикання ролі/користувача чи збій мережі лишали чернетку чужою чи порожньою, а збереження (усі три — ПОВНА заміна на сервері) мовчки стирало чи підміняло чужі дані | RESOLVED · (1) обидва методи тепер резолвлять межі через `IPeriodStore.FindPeriodBoundsAsync(documentId, periodKey, ct)` — реальні межі документа, не арифметика ключа; підтверджено: 529/529 `Ecr.Application.Tests` + 68/68 `Ecr.Calculations.Tests` зелені реальним прогоном (включно з `CascadeRecalculationTests`, де фікс сам виявив і зламав тестовий стаб, що раніше мовчки покладався на стару, неправильну поведінку — виправлено); (2) `.RequireAuthorization()` на `/health/db`, і новий `HealthResponse.WriteReadyAsync` з редакцією `Data` саме для checks у списку `ReadyReportRedactedChecks` (лише "db") на `/health/ready` — статус лишається справжнім, подробиці порожні; 2 нові тести (401 без сеансу, редакція на ready) + 3 існуючі оновлено на реальний логін; 68/68 `Ecr.Api.Tests` зелені реальним прогоном проти локального SQL Server; (3) `deploy-ecr.ps1` крок 4/7 тепер пише `ASPNETCORE_URLS=http://+:$AppPort` у реєстр служби (той самий канал, що й рядок підключення) — без коду в `Program.cs`, ASP.NET Core читає цю змінну як стандартну; (4) усі три кнопки тепер `disabled={джерело.isPending \|\| Boolean(джерело.error)}`; `npm run typecheck` зелений. Не підтверджено реальним прогоном: (3) — немає другої машини в мережі цієї сесії, щоб перевірити фактичну досяжність |
+| Q-222 | CONFLICT | Той самий аудит (Q-221): окремий під-агент інфраструктурного виміру знайшов ~20 зовнішніх ключів і 2 обмеження унікальності з `02a-db-schema.md`, які НІКОЛИ не потрапили в EF-конфігурації — `doc.Project` (усі 3), `doc.CellValue` (2 з 4), `wf.ApprovalState` (обидва), `sec.RoleAssignment` (унікальність — прості неунікальні індекси замість двох фільтрованих UNIQUE), `uom.Dimension`/`Unit`/`Conversion` (7 разом), `cfg.CalculationBinding`/`TableRelationDef`/`SheetGroupRule`/`PeriodAccessRuleDef`/`TemplateVersion`/`ColumnDef`/`RowDef`/`StyleDef` (по 1-3 кожен), `calc.MethodologyConstant` (унікальність відсутня зовсім) — роками жодна з цих таблиць не мала референтної цілісності на рівні бази, лише процедурну (код, що сам стежить за коректністю посилань) | RESOLVED частково · 19 з ~20 зв'язків додано (перелік — у детальному записі нижче), 2 фільтровані UNIQUE для `sec.RoleAssignment`, і `UQ_MethodologyConstant` через обчислювані стовпці (`ISNULL`, `CONVERT(..., 112)` — не голий `CAST`, реальний прогін міграції спершу впав на "non-deterministic"). Одну міграцію згенеровано (`Q222MissingForeignKeysAndConstraints`) і ПОВНІСТЮ ЗАСТОСОВАНО на реальному локальному SQL Server (не лише скомпільовано) — підтверджено прямим запитом до `sys.foreign_keys`/`sys.indexes`: усі 33 очікувані FK і 3 обмеження на місці. Після застосування нова референтна цілісність спіймала дві реальні дірки в тестових фікстурах (`CascadeRecalculationTests`, `ErrorContractTests` — обидві посилались на неіснуючі рядки константами, що працювало лише тому, що FK ще не існував) — виправлено. Повний прогін реальним SQL Server: 174/174 `Ecr.Infrastructure.Tests`, 529/529 `Ecr.Application.Tests`, 68/68 `Ecr.Api.Tests`, 68/68 `Ecr.Calculations.Tests`, 242/242 `Ecr.Domain.Tests`, 75/75 `Ecr.Architecture.Tests`. Свідомо НЕ додано: `FK_CellValue_Entry` (`ValueRegistryEntryId → dic.RegistryEntry`) — `RegistryEntry : Entity<long>` (Id конвертований у int лише для зберігання), а `CellValue.ValueRegistryEntryId` — голий `int?`; EF звіряє CLR-сумісність ДО конвертації, тож додати правильно означало б поміняти тип на `long?` у ~18 файлах поза міграціями на найгарячішому шляху системи (`doc.CellValue`, ~108 млн рядків/рік) — окрема, свідомо не зроблена в цьому проході робота, задокументована нижче |
 
 ---
 
@@ -10649,3 +10650,147 @@ Core не знадобилось: ASP.NET Core сам читає `ASPNETCORE_URL
 
 **Статус:** RESOLVED (1-2-4 підтверджено реальними тестами; 3 — лише
 кодом, чекає перевірки мережевої досяжності).
+
+### Q-222 · CONFLICT · Той самий аудит (Q-221), 2026-09-11 · ~20 зовнішніх ключів із 02a-db-schema.md ніколи не потрапили в EF-конфігурації
+
+**Де:** `src/Ecr.Infrastructure/Persistence/Configurations/*.cs` (сім
+файлів), нова міграція `Q222MissingForeignKeysAndConstraints`,
+`docs/build/02a-db-schema.md` (§10 `wf.ApprovalRoute`),
+`tests/Ecr.Application.Tests/Recalculation/CascadeRecalculationTests.cs`,
+`tests/Ecr.Api.Tests/ErrorContractTests.cs`.
+
+**Що знайшлося.** Окремий під-агент аудиту порівняв КОЖЕН FK з
+`02a-db-schema.md` проти фактичних `IEntityTypeConfiguration<T>` і
+знайшов систематичний, повторюваний пропуск: FK/UNIQUE описані в схемі,
+але НІКОЛИ не потрапляли в код, що її насправді застосовує. Не один
+випадковий недогляд — ціла КАТЕГОРІЯ: FK, налаштовані з боку
+"батьківської" агрегатної колекції (`HasMany().WithOne()`), стабільно
+на місці; FK, які є ЄДИНОЮ точкою конфігурації для стовпця (самопосилання,
+чи сутність без власної колекції), — стабільно пропущені.
+
+**Перелік доданого (19 зв'язків, 7 файлів):**
+- `DocumentConfiguration.cs`: `doc.Project` — `FK_Project_TV`,
+  `FK_Project_Policy`, `FK_Project_CurrentPeriod` (двосторонній з
+  `doc.Period`, окремим `ALTER TABLE` в схемі — та сама причина, що
+  `uom.Dimension`/`Unit` нижче); `doc.DocumentSheet` —
+  `FK_DocSheet_Sheet` (і перейменовано `FK_DocSheet_Document` →
+  `FK_DocSheet_Doc`, за схемою); `doc.TableInstance` —
+  `FK_TableInstance_Doc`, `FK_TableInstance_Table`; `doc.TableRow` —
+  `FK_TableRow_RowDef`.
+- `CellValueConfiguration.cs`: `FK_CellValue_Unit` (див. нижче — чому НЕ
+  `FK_CellValue_Entry`).
+- `SecurityWorkflowConfiguration.cs`: `wf.ApprovalState` —
+  `FK_ApprState_Doc`, `FK_ApprState_Sheet`; `sec.User` — `FK_User_Policy`.
+- `SecurityStage3Configuration.cs`: `sec.RoleAssignment` — прості
+  неунікальні `IX_RoleAssignment_User`/`_Sid` замінено на два
+  ФІЛЬТРОВАНІ `UQ_RoleAssignment_User`/`_Sid` (складений `UNIQUE` тут не
+  ловить дублікати — одна з двох колонок завжди `NULL` за
+  `CK_RoleAssign_Principal`, а SQL Server трактує `NULL` як унікальне
+  значення в звичайному складеному `UNIQUE`).
+- `ConfigurationRestConfiguration.cs`: `cfg.TableRelationDef` —
+  `FK_Rel_Source`/`_Target`; `cfg.PeriodAccessRuleDef` — `FK_PAR_TV`,
+  `FK_PAR_Sheet`, `FK_PAR_Table` (RoleId навмисно без FK — так само в
+  схемі); `cfg.SheetGroupRule` — `FK_SGR_TV`; `cfg.CalculationBinding` —
+  `FK_CalcBind_Table`/`_Column`; `uom.Dimension` — `FK_Dim_Num`/`_Den`
+  (самопосилання) і `FK_Dim_BaseUnit`; `uom.Unit` — перейменовано
+  `FK_Unit_Dimension` → `FK_Unit_Dim` (за схемою) і додано
+  `FK_Unit_Num`/`_Den` (самопосилання, не в первинному переліку
+  агента — та сама категорія, знайдена по дорозі); `uom.Conversion` —
+  `FK_Conv_From`/`_To`.
+- `TemplateVersionConfiguration.cs`: `FK_TV_ClonedFrom`
+  (самопосилання).
+- `TemplateStructureConfiguration.cs`: `FK_ColumnDef_Cascade`
+  (самопосилання), `FK_RowDef_Parent` (самопосилання), `FK_StyleDef_TV`.
+- `CalculationsConfiguration.cs`: `calc.MethodologyConstant` —
+  `UQ_MethodologyConstant` через обчислювані стовпці (нижче).
+
+**`UQ_MethodologyConstant` — вираз у схемі не літеральний T-SQL.** Схема
+описує `UNIQUE (MethodologyVersionId, Code, ISNULL(Category, N''),
+ISNULL(ValidFrom, '1900-01-01'))` — SQL Server не дозволяє вирази
+всередині `UNIQUE CONSTRAINT` напряму. Реалізовано через два
+обчислювані (persisted) тіньові стовпці — `CategoryNorm`/`ValidFromNorm`
+— і звичайний унікальний індекс на них. Два реальні провали при
+застосуванні міграції, обидва виправлені лише завдяки тому, що міграція
+дійсно ЗАСТОСОВУВАЛАСЬ, а не лише генерувалась:
+1. `ISNULL([ValidFrom], CAST('1900-01-01' AS date))` — SQL Server:
+   "cannot be persisted because the column is non-deterministic".
+   Ізольовано мінімальним відтворенням: НАВІТЬ голий
+   `CAST('1900-01-01' AS date)` без жодного стовпця вважається
+   недетермінованим — конверсія рядка в дату теоретично залежить від
+   сесійних `DATEFORMAT`/мови, і статичний аналіз SQL Server не робить
+   винятку для рядків, однозначних для людини. Фікс — стиль 112:
+   `CONVERT(date, '19000101', 112)` (ISO `yyyyMMdd`, задокументовано
+   детермінований і мовонезалежний) — підтверджено тим самим мінімальним
+   відтворенням, уже без помилки.
+2. Після фіксу (1): "Filtered index ... cannot be created ... because
+   the column 'CategoryNorm' ... is a computed column" — EF сам додав
+   `WHERE [CategoryNorm] IS NOT NULL` до індексу, бо вважав стовпець
+   потенційно `NULL` (насправді `ISNULL(...)` ніколи не дає `NULL`).
+   Фікс — явний `.IsRequired()` на тіньовій властивості: без цього
+   EF не мав підстави вважати стовпець ненульовим і сам додавав фільтр,
+   а SQL Server забороняє фільтр за обчислюваним стовпцем узагалі.
+
+**Свідомо НЕ додано: `FK_CellValue_Entry`.** Спроба вперше провалилась
+на генерації міграції: "foreign key properties {'ValueRegistryEntryId'
+: int?} cannot target the primary key {'Id' : long}". `RegistryEntry :
+Entity<long>` — `Id` конвертований у `int` ЛИШЕ для зберігання
+(`RegistryEntryConfiguration.cs:41`, `.HasConversion<int>()`), а EF
+звіряє СУМІСНІСТЬ CLR-типів залежного й головного ключа ДО
+конвертації — `int?` проти `long` не проходить, попри те, що фізично
+обидва зберігаються як `int`. Сусідній, уже робочий зв'язок
+(`calc.MethodologyConstant.SubstanceEntryId → dic.RegistryEntry`)
+зроблений правильно: `SubstanceEntryId` там — `long?` із власним
+`.HasConversion<int?>()`, тобто той самий CLR-тип (`long`), що й
+`RegistryEntry.Id` — ось чому `FK_MC_Substance` уже працював, а
+`FK_CellValue_Entry` — ні. Виправити означало б поміняти
+`CellValue.ValueRegistryEntryId` з `int?` на `long?` — зміна, що
+торкається ~18 файлів ПОЗА міграціями (`RegistryStore.cs`,
+`AccessDecisionService.cs`, `BulkCellLoader.cs`, `ExcelExporter.cs`,
+`PatchCellsHandler.cs`, ...) на найгарячішому шляху всієї системи
+(`doc.CellValue`, ~108 млн рядків/рік, документовано як таблиця БЕЗ
+жодного некластерного індексу через вартість). Свідомо залишено
+незробленим у цьому проході — не мій виклик мовчки поміняти тип на
+такому шляху без окремого рев'ю; `FK_CellValue_Unit` не той самий
+випадок (`Unit.Id` — голий `int`, без `Entity<T>`/конвертації, сумісний
+з `int?` напряму) і доданий без проблем.
+
+**`wf.ApprovalRoute` — навпаки, доку бракувало.** Код (`SecurityStage3
+Configuration.cs`) уже мав `ProjectId`, `FK_AR_Project`,
+`IX_ApprovalRoute_Scope` (`A2ApprovalRouteProject`, ФВ-5.17) — доку
+ніколи не оновили. Виправлено `02a-db-schema.md`, не код.
+
+**Доказ — реальне застосування, не лише компіляція.** Міграцію
+застосовано на справжньому локальному SQL Server (не Testcontainers/
+Docker — тут його й нема): чиста база, усі 27 міграцій підряд,
+включно з `Q222...`, — `Done` без жодної помилки. Прямий запит
+`sys.foreign_keys`/`sys.indexes` після застосування підтвердив: усі 33
+очікувані FK на місці, `UQ_RoleAssignment_User`/`_Sid` — з правильними
+фільтрами, `UQ_MethodologyConstant` — без фільтра (обидва обчислювані
+стовпці справді ненульові).
+
+**Нова цілісність відразу спіймала дві реальні дірки в тестових
+фікстурах** (не в продуктивному коді) — обидві існували ЛИШЕ тому, що
+FK ще не існував:
+- `CascadeRecalculationTests.Service()`: `Substitute.For<IPeriodStore>()`
+  ніколи не був налаштований повертати межі періоду — виправлено
+  Q-221-фіксом (`PeriodOf` тепер РЕАЛЬНО звертається до `IPeriodStore`),
+  конфігурацією стаба на реальні межі січня 2026.
+- `ErrorContractTests.ArrangeAsync()`: `Project` створювався з
+  `templateVersionId: 1` (жодного реального рядка `TemplateVersion` з
+  таким Id), а `Document.IncludeSheet(20)` — з голою константою без
+  реального `SheetDef`. Обидва замінено на справжні, щойно створені
+  `Template`/`TemplateVersion`/`SheetDef` (той самий патерн, що вже в
+  `TestDocumentBuilder.BuildAsync`), і `sheetDefId` тепер повертається з
+  `ArrangeAsync()` та передається в запит, а не дублюється як окрема
+  константа.
+
+**Повний прогін, реальний SQL Server:** 174/174
+`Ecr.Infrastructure.Tests`, 529/529 `Ecr.Application.Tests`, 68/68
+`Ecr.Api.Tests`, 68/68 `Ecr.Calculations.Tests`, 242/242
+`Ecr.Domain.Tests`, 75/75 `Ecr.Architecture.Tests`.
+
+**Статус:** RESOLVED частково · 19 з ~20 зв'язків і всі знайдені
+обмеження унікальності додано й підтверджено реальним застосуванням
+міграції та повним прогоном тестів; `FK_CellValue_Entry` свідомо
+залишено як окрему, названу прогалину — вимагає зміни типу на гарячому
+шляху системи, поза обсягом цього проходу.

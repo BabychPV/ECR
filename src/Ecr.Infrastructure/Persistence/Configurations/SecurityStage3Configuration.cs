@@ -61,8 +61,23 @@ public sealed class RoleAssignmentConfiguration : IEntityTypeConfiguration<RoleA
         builder.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId)
                .HasConstraintName("FK_RoleAssign_User");
 
-        builder.HasIndex(x => x.UserId).HasDatabaseName("IX_RoleAssignment_User");
-        builder.HasIndex(x => x.PrincipalSid).HasDatabaseName("IX_RoleAssignment_Sid");
+        // ⛔ Q-222: були прості неунікальні індекси — 02a-db-schema.md вимагає
+        // УНІКАЛЬНІСТЬ, двома ФІЛЬТРОВАНИМИ індексами, а не одним складеним
+        // UNIQUE(UserId, RoleId): з NULL-адресатом (одна з двох колонок завжди
+        // NULL, CK_RoleAssign_Principal) звичайний складений UNIQUE дублікати
+        // не ловить узагалі — SQL Server трактує NULL як унікальне значення.
+        // Без цього ту саму роль можна було призначити тому самому
+        // користувачу/групі двічі: єдиним захистом лишався процедурний
+        // "видалити й вставити знову" в UserStore.cs, без жодної перевірки.
+        builder.HasIndex(x => new { x.UserId, x.RoleId })
+               .IsUnique()
+               .HasFilter("[UserId] IS NOT NULL")
+               .HasDatabaseName("UQ_RoleAssignment_User");
+
+        builder.HasIndex(x => new { x.PrincipalSid, x.RoleId })
+               .IsUnique()
+               .HasFilter("[PrincipalSid] IS NOT NULL")
+               .HasDatabaseName("UQ_RoleAssignment_Sid");
     }
 }
 
