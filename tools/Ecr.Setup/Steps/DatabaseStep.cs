@@ -23,7 +23,7 @@ internal sealed class DatabaseStep : IWizardStep
         _state = state;
     }
 
-    public string Title => "База даних";
+    public string Title => "Database";
 
     public Control BuildView()
     {
@@ -39,7 +39,7 @@ internal sealed class DatabaseStep : IWizardStep
 
         _skipSchemaCheckBox = new CheckBox
         {
-            Text = "Схему вже накочено окремо (пропустити)",
+            Text = "Schema already applied separately (skip)",
             AutoSize = true,
             Margin = new Padding(4, 12, 4, 0),
         };
@@ -67,13 +67,13 @@ internal sealed class DatabaseStep : IWizardStep
 
         if (string.IsNullOrWhiteSpace(_instanceBox!.Text))
         {
-            error = "Вкажіть екземпляр SQL Server.";
+            error = "Enter the SQL Server instance.";
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(_databaseBox!.Text))
         {
-            error = "Вкажіть назву бази даних.";
+            error = "Enter the database name.";
             return false;
         }
 
@@ -81,13 +81,13 @@ internal sealed class DatabaseStep : IWizardStep
         {
             if (string.IsNullOrWhiteSpace(_loginBox!.Text))
             {
-                error = "Вкажіть SQL-логін.";
+                error = "Enter the SQL login.";
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(_sqlPasswordBox!.Text))
             {
-                error = "Вкажіть пароль SQL-логіна.";
+                error = "Enter the SQL login password.";
                 return false;
             }
         }
@@ -107,7 +107,7 @@ internal sealed class DatabaseStep : IWizardStep
 
     private GroupBox BuildConnectionGroup()
     {
-        var group = new GroupBox { Text = "Сервер", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var group = new GroupBox { Text = "Server", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -116,10 +116,10 @@ internal sealed class DatabaseStep : IWizardStep
         _instanceBox = new TextBox { Dock = DockStyle.Fill, Text = _state.SqlInstance };
         _databaseBox = new TextBox { Dock = DockStyle.Fill, Text = _state.Database };
 
-        layout.Controls.Add(new Label { Text = "Екземпляр SQL Server:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
+        layout.Controls.Add(new Label { Text = "SQL Server instance:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
         layout.Controls.Add(_instanceBox, 1, 0);
 
-        layout.Controls.Add(new Label { Text = "Назва бази даних:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
+        layout.Controls.Add(new Label { Text = "Database name:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
         layout.Controls.Add(_databaseBox, 1, 1);
 
         group.Controls.Add(layout);
@@ -128,14 +128,14 @@ internal sealed class DatabaseStep : IWizardStep
 
     private GroupBox BuildAuthGroup()
     {
-        var group = new GroupBox { Text = "Автентифікація", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var group = new GroupBox { Text = "Authentication", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        _windowsAuthOption = new RadioButton { Text = "Windows-автентифікація", AutoSize = true, Checked = true };
-        _sqlAuthOption = new RadioButton { Text = "SQL-логін", AutoSize = true };
+        _windowsAuthOption = new RadioButton { Text = "Windows Authentication", AutoSize = true, Checked = true };
+        _sqlAuthOption = new RadioButton { Text = "SQL login", AutoSize = true };
 
         _loginBox = new TextBox { Dock = DockStyle.Fill, Enabled = false };
         _sqlPasswordBox = new TextBox { Dock = DockStyle.Fill, Enabled = false, UseSystemPasswordChar = true };
@@ -148,10 +148,10 @@ internal sealed class DatabaseStep : IWizardStep
         layout.Controls.Add(_sqlAuthOption, 0, 1);
         layout.SetColumnSpan(_sqlAuthOption, 2);
 
-        layout.Controls.Add(new Label { Text = "Логін:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 2);
+        layout.Controls.Add(new Label { Text = "Login:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 2);
         layout.Controls.Add(_loginBox, 1, 2);
 
-        layout.Controls.Add(new Label { Text = "Пароль:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 3);
+        layout.Controls.Add(new Label { Text = "Password:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 3);
         layout.Controls.Add(_sqlPasswordBox, 1, 3);
 
         group.Controls.Add(layout);

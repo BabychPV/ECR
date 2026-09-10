@@ -10,7 +10,7 @@ internal sealed class ReviewStep : IWizardStep
 {
     private ListView? _list;
 
-    public string Title => "Огляд";
+    public string Title => "Review";
 
     public Control BuildView()
     {
@@ -22,8 +22,8 @@ internal sealed class ReviewStep : IWizardStep
             GridLines = true,
             HeaderStyle = ColumnHeaderStyle.Nonclickable,
         };
-        _list.Columns.Add("Параметр", 220);
-        _list.Columns.Add("Значення", 320);
+        _list.Columns.Add("Parameter", 220);
+        _list.Columns.Add("Value", 320);
 
         return _list;
     }
@@ -34,26 +34,26 @@ internal sealed class ReviewStep : IWizardStep
         // користувач міг повернутись "Назад" і щось змінити.
         _list!.Items.Clear();
 
-        AddRow("Режим", state.Mode == WizardMode.FirstDeployment ? "Перше розгортання" : "Оновлення наявної установки");
-        AddRow("Екземпляр SQL Server", state.SqlInstance);
-        AddRow("База даних", state.Database);
+        AddRow("Mode", state.Mode == WizardMode.FirstDeployment ? "First deployment" : "Update existing installation");
+        AddRow("SQL Server instance", state.SqlInstance);
+        AddRow("Database", state.Database);
         AddRow(
-            "Автентифікація SQL",
+            "SQL Authentication",
             state.SqlAuthIsWindows
-                ? "Windows-автентифікація"
-                : $"SQL-логін ({state.SqlLogin}), пароль: {Presence(state.SqlLoginPassword is not null)}");
-        AddRow("Обліковий запис служби", DescribeServiceAccount(state));
-        AddRow("Порт", state.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        AddRow("Файл Ecr.msi", state.MsiPath ?? "не вказано");
+                ? "Windows Authentication"
+                : $"SQL login ({state.SqlLogin}), password: {Presence(state.SqlLoginPassword is not null)}");
+        AddRow("Service account", DescribeServiceAccount(state));
+        AddRow("Port", state.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        AddRow("Ecr.msi file", state.MsiPath ?? "not specified");
         AddRow(
-            "Схема бази даних",
+            "Database schema",
             state.Mode == WizardMode.Update
-                ? (state.SkipSchema ? "не застосовувати (вже накочена окремо)" : "застосувати")
-                : "застосувати (перше розгортання)");
+                ? (state.SkipSchema ? "do not apply (already applied separately)" : "apply")
+                : "apply (first deployment)");
 
         if (state.Mode == WizardMode.FirstDeployment)
         {
-            AddRow("Пароль bootstrap-адміністратора", Presence(state.BootstrapPassword is not null));
+            AddRow("Bootstrap administrator password", Presence(state.BootstrapPassword is not null));
         }
     }
 
@@ -72,15 +72,15 @@ internal sealed class ReviewStep : IWizardStep
     {
         return state.ServiceAccountMode switch
         {
-            ServiceAccountMode.LocalSystem => "Local System (не рекомендовано)",
+            ServiceAccountMode.LocalSystem => "Local System (not recommended)",
             ServiceAccountMode.Gmsa => $"gMSA ({state.ServiceAccountName})",
             ServiceAccountMode.DomainUser =>
-                $"{state.ServiceAccountName}, пароль: {Presence(state.ServicePassword is not null)}",
-            _ => "не вказано",
+                $"{state.ServiceAccountName}, password: {Presence(state.ServicePassword is not null)}",
+            _ => "not specified",
         };
     }
 
-    private static string Presence(bool provided) => provided ? "вказано" : "не вказано";
+    private static string Presence(bool provided) => provided ? "provided" : "not provided";
 
     private void AddRow(string parameter, string value)
     {
