@@ -348,31 +348,6 @@ public sealed class MethodologyRuleConfiguration : IEntityTypeConfiguration<Meth
     }
 }
 
-/// <summary>Конфігурація <see cref="ScriptVersion"/>.</summary>
-public sealed class ScriptVersionConfiguration : IEntityTypeConfiguration<ScriptVersion>
-{
-    /// <inheritdoc />
-    public void Configure(EntityTypeBuilder<ScriptVersion> builder)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        builder.ToTable("ScriptVersion", "calc");
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.SourceCode).IsRequired();
-        builder.Property(x => x.CompiledAt).HasColumnType("datetime2(3)");
-        builder.Property(x => x.HasGreenTest).HasDefaultValue(false);
-        builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)").IsRequired();
-
-        // Один скрипт на версію: два означали б, що незрозуміло, який із них
-        // рахував уже подані числа.
-        builder.HasIndex(x => x.MethodologyVersionId)
-               .IsUnique().HasDatabaseName("UQ_ScriptVersion");
-
-        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
-               .HasConstraintName("FK_SV_Version");
-    }
-}
-
 /// <summary>Конфігурація <see cref="CalculationRun"/>.</summary>
 public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<CalculationRun>
 {

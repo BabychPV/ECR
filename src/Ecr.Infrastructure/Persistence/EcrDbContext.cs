@@ -97,7 +97,6 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
 
     /// <summary>Ребра графа між методологіями: без них порядок перерахунку неповний (`B13` §4.3).</summary>
     public DbSet<MethodologyDependency> MethodologyDependencies => Set<MethodologyDependency>();
-    public DbSet<ScriptVersion> ScriptVersions => Set<ScriptVersion>();
     public DbSet<CalculationRun> CalculationRuns => Set<CalculationRun>();
     public DbSet<CalculationResult> CalculationResults => Set<CalculationResult>();
     public DbSet<CalculationInputRow> CalculationInputs => Set<CalculationInputRow>();

@@ -249,7 +249,7 @@
 | Q-202 | SCOPE | Директива №11, трек T6 (`#36`→`#37`→`#52`): `ProjectsController.cs` не мав жодного шляху задати межі `Custom`-періоду, редагувати політику періодів (`YearGraceOffsetDays` зашитий `45`) чи змінити часовий пояс проєкту — усі три механізми існували в домені й були недосяжні з API | RESOLVED · `CreateProjectHandler`, `PeriodPolicyCrudHandlers`, `ChangeProjectTimeZoneHandler` |
 | Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
-| Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED частково · #40/#41/#45/#50 закрито, #44 STOPPED (схемна міграція, рішення людини) |
+| Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED · усі п'ять пунктів закрито; #44 отримав пряме підтвердження людини 2026-09-10, `DROP TABLE calc.ScriptVersion` — міграція `Q206DropScriptVersion` |
 | Q-207 | CONFLICT | Директива №11, трек T11 (чотири самосуперечності пакета документації): `decisions.md` цитує «директива №04 §3» для двох різних тез; `07-checkpoints.md` каже «сім етапів `0`…`6`», хоча в самому документі є `ЕТАП 7` і згадка `ЕТАП 8`; шапка `02-requirements.md` підсумовує 215, фактичних листових вимог — 253; `04-environment.md`/`09-commands.md` стверджували, що інтеграційні тести виключені з `dotnet test` за замовчуванням, а `verify-all.ps1` жодного фільтра `Category` не застосовує | RESOLVED |
 | Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
 
@@ -9263,26 +9263,43 @@ en/ru/kz) уже існували в реєстрі до цієї роботи.
 почервонів (`metrics.Received(1).RecordIssues(...)` не справдився); повернуто,
 зелено.
 
-**#44 — `ScriptVersion` без творця. ЗУПИНЕНО, код не змінено.** Підтверджено:
-нуль `new ScriptVersion(` поза тестами (перевіряє й окремий сторож
+**#44 — `ScriptVersion` без творця. ЗАКРИТО (пряме підтвердження людини
+2026-09-10).** Підтверджено: нуль `new ScriptVersion(` поза тестами
+(перевіряв і окремий сторож
 `MethodologyCloneCompletenessTests.Скрипт_рівня_2_не_створює_ніщо_...`),
 `MarkCompiled`/`MarkTested`/`HasGreenTest` теж без викликачів поза тестами
-власної сутності. Директива каже прибрати `ScriptVersion` і прапорець
-`HasGreenTest` — але `calc.ScriptVersion` це РЕАЛЬНА таблиця з РЕАЛЬНОЮ
-колонкою `HasGreenTest`, заведена міграцією `20260904232328_Stage4Calculations`
-і присутня в моделі БЕЗПЕРЕРВНО аж до найновішої міграції
-(`20260909161652_Q155NullableSnapshotModes`) — тобто застосована в кожному
-середовищі, що прогнало міграції за останні кілька днів. Прибрати сутність
-означає `DROP TABLE calc.ScriptVersion` (нова міграція), а не редагування
-коду. Це рівно сценарій, який сама директива називає підставою зупинитися:
-«якщо прибрати ризикованіше, ніж очікувалось — STOP і звітуй, а не форсуй
-схемну зміну». Судження про безпечність міграції — не моє.
+власної сутності. `calc.ScriptVersion` — РЕАЛЬНА таблиця, заведена міграцією
+`20260904232328_Stage4Calculations` і присутня в моделі до найновішої на той
+момент (`20260909161652_Q155NullableSnapshotModes`) — прибрати означало
+`DROP TABLE calc.ScriptVersion` новою міграцією, а не редагування коду. Це
+й було підставою зупинитися: судження про безпечність схемної зміни — не
+моє.
 
-**Чому не вирішив сам (лише #44):** схемна міграція — завжди стоп у цьому
-проєкті, без винятку «але ця безпечна». Потрібне пряме підтвердження людини:
-чи можна `DROP TABLE calc.ScriptVersion` (і колонку `HasGreenTest`) новою
-міграцією зараз, чи рівень 2 залишиться в схемі до конкретнішого рішення про
-реліз, у якому він з'явиться.
+Людина дала пряме підтвердження продовжувати без окремого рішення й
+перевірити роботоспроможність. Зроблено:
+- Видалено `ScriptVersion.cs` (домен), `ScriptVersionConfiguration` (EF),
+  `DbSet<ScriptVersion>` (`EcrDbContext`).
+- Видалено мертвий прапорець `HasGreenTest` разом із сутністю (він і був
+  тим самим прапорцем, що директива назвала «супутнім»): підтверджено
+  окремо, що РЕАЛЬНА умова публікації (`ФВ-9.12`) рахується в
+  `PublishMethodologyHandler.IsGreenAsync` із golden-набору
+  `MethodologyTestCaseEntity` — `ScriptVersion.HasGreenTest` була другою,
+  ніким не читаною умовою з тим самим ім'ям, що й справжня.
+- Прибрано мертвий член `CalculationLevel.Script = 2` (жодного викликача
+  ніде в `src/`/`tests/`) — лишено прогалину в нумерації (`Configuration=1`,
+  `Module=3`), не перенумеровано, щоб не змінити сенс уже збереженого
+  значення `3`.
+- Прибрано сторож-тест `Скрипт_рівня_2_не_створює_ніщо_...` і запис
+  `ScriptVersion` у `Excluded` (`MethodologyCloneCompletenessTests.cs`) —
+  сторож існував рівно доти, доки існував тип, на який він дивився.
+- Нова міграція `20260910054347_Q206DropScriptVersion`: `DropTable` уверх,
+  повний симетричний `CreateTable`/`CreateIndex` униз (згенеровано
+  `dotnet ef migrations add`, не написано руками).
+
+**Перевірка роботоспроможності:** `dotnet build ECR.sln` — 0 помилок;
+повний `dotnet test ECR.sln` (усі бекенд-проєкти, реальна SQL Server) —
+без регресій; `EcrDbContextModelSnapshot.cs` більше не згадує
+`ScriptVersion` жодним рядком.
 
 **#45 — синхронний імпорт без порогу.** Підтверджено: `ApplyImportHandler`
 завжди викликав `IExcelImporter.ApplyAsync` синхронно, на відміну від

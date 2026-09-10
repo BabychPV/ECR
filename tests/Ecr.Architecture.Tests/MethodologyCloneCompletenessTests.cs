@@ -50,36 +50,6 @@ public sealed class MethodologyCloneCompletenessTests
             + Environment.NewLine + string.Join(Environment.NewLine, forgotten));
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Скрипт_рівня_2_не_створює_ніщо_а_отже_клонові_нема_чого_переносити()
-    {
-        // ⛔ Це не окрема перевірка, а **термін придатності** звільнення вище.
-        // `ScriptVersion` належить версії методології, і клон його не копіює —
-        // законно рівно доти, доки рівень 2 не будується (ФВ-9.3, `D-105`) і
-        // рядків цієї таблиці не існує в принципі.
-        //
-        // ⚠ Тому звільнення прив'язане до факту, а не до наміру: щойн хтось
-        // напише `new ScriptVersion(`, цей тест почервоніє і змусить довчити
-        // клон. Інакше день, коли рівень 2 ухвалять, став би днем, коли клони
-        // почали мовчки губити код методології — а ФВ-9.1 обіцяє, що клон є
-        // повною копією.
-        var constructed = SourceTree
-            .Production()
-            .Where(file => file.CodeLines().Any(line => line.Text.Contains(
-                $"new {nameof(ScriptVersion)}(", StringComparison.Ordinal)))
-            .Select(file => file.Path)
-            .Order(StringComparer.Ordinal)
-            .ToList();
-
-        Assert.True(
-            constructed.Count == 0,
-            $"{nameof(ScriptVersion)} тепер створюється — клон версії методології "
-            + "зобов'язаний його переносити:"
-            + Environment.NewLine + string.Join(Environment.NewLine, constructed));
-    }
-
     /// <summary>
     /// Набори, які клон не переносить **навмисно**.
     /// </summary>
@@ -90,14 +60,15 @@ public sealed class MethodologyCloneCompletenessTests
     /// питання «яким прогоном пораховано цей рядок» дістало б відповідь, якої
     /// не було.
     ///
-    /// ⚠ <c>ScriptVersion</c> — рівень 2, який не будується (ФВ-9.3,
-    /// <c>D-105</c>). Звільнення діє, доки цю сутність не створює ніщо; за цим
-    /// стежить сусідній тест.
+    /// ⛔ `ScriptVersion` (рівень 2, `ФВ-9.3`, `D-105`) видалено разом з усім
+    /// рівнем 2 (директива №11, `#44`) — сутності, а отже й типу, якого клон
+    /// міг би "забути", більше немає. Колишній сусідній тест-звільнення
+    /// (`Скрипт_рівня_2_не_створює_ніщо...`) видалено разом з ним, а не
+    /// лишено як мертвий сторож на неіснуючий тип.
     /// </remarks>
     private static readonly HashSet<string> Excluded = new(StringComparer.Ordinal)
     {
         nameof(CalculationResult),
-        nameof(ScriptVersion),
     };
 
     /// <summary>Типи домену, що належать версії методології.</summary>

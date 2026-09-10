@@ -1436,21 +1436,14 @@ CREATE TABLE calc.MethodologyOutput
 );
 GO
 
--- Рівень 2 драбини: скрипт як ДАНІ. Компілюється при публікації, не при прогоні.
-CREATE TABLE calc.ScriptVersion
-(
-    Id                   int            IDENTITY(1,1) NOT NULL,
-    MethodologyVersionId int            NOT NULL,
-    SourceCode           nvarchar(max)  NOT NULL,
-    CompiledAt           datetime2(3)   NULL,
-    CompilerDiagnostics  nvarchar(max)  NULL,
-    HasGreenTest         bit            NOT NULL CONSTRAINT DF_SV_Test DEFAULT(0),
-    ContentHash          varbinary(32)  NOT NULL,
-    CONSTRAINT PK_ScriptVersion PRIMARY KEY (Id),
-    CONSTRAINT UQ_ScriptVersion UNIQUE (MethodologyVersionId),
-    CONSTRAINT FK_SV_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id)
-);
-GO
+-- ⛔ `calc.ScriptVersion` (рівень 2 драбини: скрипт як ДАНІ) видалено
+-- `DROP TABLE` міграцією `Q206DropScriptVersion` (директива №11, `#44`,
+-- пряме підтвердження людини 2026-09-10) — рівень 2 не входить у перший
+-- реліз (`ФВ-9.3`, `D-105`, `D-113`), і сутність без жодного писаря
+-- (нуль `new ScriptVersion(` поза тестами) лишалася мертвою вагою в схемі.
+-- Якщо рівень 2 колись увійде в обсяг — таблиця заводиться новою міграцією
+-- заново, а не відновленням цього блоку: контракт версій методології до
+-- того моменту про неї не знає нічого.
 
 CREATE TABLE calc.CalculationRun
 (
