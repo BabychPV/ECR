@@ -431,12 +431,9 @@ export function MethodologyVersionsPage(): JSX.Element {
               value={level}
               data={[
                 { value: 'Configuration', label: 'Configuration' },
-                { value: 'Script', label: 'Script' },
                 { value: 'Module', label: 'Module' },
               ]}
-              onChange={(value) =>
-                setLevel(value === 'Script' ? 'Script' : value === 'Module' ? 'Module' : 'Configuration')
-              }
+              onChange={(value) => setLevel(value === 'Module' ? 'Module' : 'Configuration')}
             />
           )}
 

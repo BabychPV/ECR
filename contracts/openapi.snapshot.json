@@ -402,7 +402,6 @@
         "description": "Рівень драбини виразності для методології (ФВ-9.2).",
         "enum": [
           "Configuration",
-          "Script",
           "Module"
         ]
       },

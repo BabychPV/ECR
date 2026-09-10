@@ -239,7 +239,7 @@
 |---|---|---|
 | ⛔ Авторство структури шаблону: `ColumnDef.SetUnit`/`SetLookup`/`SetNumericFormat`/`SetPresentation`, `TableDef.AddFormula`/`AddValidationRule`/`SetMaxDynamicRows` | 8 (`B-1`, конструктор) — закритий, екрана немає | `A10` пункт 5 |
 | ⛔ Фабрики `PeriodAccessRuleDef` — кличуть лише тести | 8: редактор правил доступу — закритий, редактора немає | `A10` пункт 5 |
-| ⛔ Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope`, `ScriptVersion.MarkCompiled` | 6 (`B-3`) — закритий | `A10` пункт 6. ⚠ `SetModes` не кличе ніхто, тобто `NumericMode = Strict` увімкнути **неможливо в принципі** |
+| ⛔ Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope` | 6 (`B-3`) — закритий | `A10` пункт 6. ⚠ `SetModes` не кличе ніхто, тобто `NumericMode = Strict` увімкнути **неможливо в принципі**. `ScriptVersion.MarkCompiled` виключено з переліку: сама сутність видалена разом із рівнем 2 (`Q-206`, `#44`, директива №11) — метод, якого без викликача не буде, більше не рахується |
 | ⛔ Конфігурація збору: `DataSource.Configure`, `CollectionSchedule.SetLookback`, `EntityFieldMap.*`, `LegacyMappings.*` | 7 (`B-5`, перегляд мапінгу) — закритий | екран показує мапінг, але не дає його заводити |
 | `IAccessDecisionService.CanEditCellAsync` | до кроку не прив'язаний | не потрібен: усі шляхи запису йдуть через зріз; **або прибрати з порту** |
 | `ICellStore.ReadCellsAsync` | до кроку не прив'язаний | використовує `ExcelImporter` і фікстури; лишити |

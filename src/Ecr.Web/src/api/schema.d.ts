@@ -7627,7 +7627,7 @@ export interface components {
          * @description Рівень драбини виразності для методології (ФВ-9.2).
          * @enum {unknown}
          */
-        CalculationLevel: "Configuration" | "Script" | "Module";
+        CalculationLevel: "Configuration" | "Module";
         /** @description Число, яке дав актуальний прогін розрахунку на документі. */
         CalculationResultDto: {
             /**
