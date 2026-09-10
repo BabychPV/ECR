@@ -88,9 +88,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
-# зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
-$PSNativeCommandUseErrorActionPreference = $false
+# ⛔ Q-217: PowerShell перетворює запис нативної команди в stderr на
+# помилку, і $ErrorActionPreference = 'Stop' зупиняє скрипт на ньому
+# незалежно від коду виходу (не про $PSNativeCommandUseErrorActionPreference
+# — та за замовчуванням і так $false). Єдине надійне джерело істини —
+# фактичний код виходу.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 $root = Split-Path -Parent $PSScriptRoot
 $sql = Join-Path $root 'src/Ecr.Infrastructure/Persistence/Sql'
@@ -107,8 +128,7 @@ if ($null -eq (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
 # навантаження заміру №6 сам стає вузьким місцем: 125 RPS не досягаються, і
 # гейт червоніє через конфігурацію збірки, а не через модель даних.
 Write-Host 'Складання (Release)…'
-& dotnet build $datagen -c Release -v q --nologo | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "dotnet build повернув $LASTEXITCODE" }
+Invoke-NativeStep "dotnet build" { dotnet build $datagen -c Release -v q --nologo | Out-Null }
 
 function Invoke-Sql {
     param([string] $Db, [string] $Query, [string] $File)
@@ -116,7 +136,14 @@ function Invoke-Sql {
     $arguments = @('-S', $Server, '-E', '-C', '-b', '-I', '-d', $Db)
     if ($File) { $arguments += @('-i', $File) } else { $arguments += @('-Q', $Query) }
 
-    & sqlcmd @arguments | Out-Null
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd @arguments | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "sqlcmd повернув $LASTEXITCODE на $(if ($File) { $File } else { $Query })"
     }
@@ -129,7 +156,14 @@ function Invoke-Sql {
 function Show-Sql {
     param([string] $Db, [string] $Query)
 
-    & sqlcmd -S $Server -E -C -b -I -W -s ' | ' -d $Db -Q "SET NOCOUNT ON; $Query"
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd -S $Server -E -C -b -I -W -s ' | ' -d $Db -Q "SET NOCOUNT ON; $Query"
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
     if ($LASTEXITCODE -ne 0) { throw "sqlcmd повернув $LASTEXITCODE на $Query" }
 }
 
@@ -216,12 +250,12 @@ EXEC sys.sp_addextendedproperty @name = N'Ecr_Br07_Temp', @value = 1;
 
     Write-Host 'Генерую migration.sql…'
     New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-    & dotnet ef migrations script --idempotent `
-        --project (Join-Path $root 'src/Ecr.Infrastructure') `
-        --startup-project (Join-Path $root 'src/Ecr.Infrastructure') `
-        --output $migration | Out-Null
-
-    if ($LASTEXITCODE -ne 0) { throw "dotnet ef migrations script повернув $LASTEXITCODE" }
+    Invoke-NativeStep "dotnet ef migrations script" {
+        dotnet ef migrations script --idempotent `
+            --project (Join-Path $root 'src/Ecr.Infrastructure') `
+            --startup-project (Join-Path $root 'src/Ecr.Infrastructure') `
+            --output $migration | Out-Null
+    }
 
     # ⛔ Перелік і порядок — з `09-commands.md` §3, той самий, що в
     # `setup-dev-db.ps1`. `07` переносить таблиці на схеми партиціонування і
@@ -290,10 +324,10 @@ IF @cmd <> N'' EXEC sys.sp_executesql @cmd;
     Write-Host "Наповнюю doc.CellValue до $Cells комірок (заповненість $Fill %)…"
     $started = Get-Date
 
-    & dotnet run --project $datagen --no-build -c Release -- `
-        --cells $Cells --fill $Fill --year 2026 --connection $connection
-
-    if ($LASTEXITCODE -ne 0) { throw "Ecr.DataGen повернув $LASTEXITCODE" }
+    Invoke-NativeStep "Ecr.DataGen" {
+        dotnet run --project $datagen --no-build -c Release -- `
+            --cells $Cells --fill $Fill --year 2026 --connection $connection
+    }
 
     Write-Host "Наповнення зайняло $([math]::Round(((Get-Date) - $started).TotalMinutes, 1)) хв."
 
@@ -324,8 +358,15 @@ SELECT wait_type, waiting_tasks_count, wait_time_ms, signal_wait_time_ms
 INTO dbo.Br07Waits FROM sys.dm_os_wait_stats;
 '@
 
-& dotnet run --project $datagen --no-build -c Release -- `
-    --gate --load-seconds $LoadSeconds --connection $connection
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    dotnet run --project $datagen --no-build -c Release -- `
+        --gate --load-seconds $LoadSeconds --connection $connection
+}
+finally {
+    $ErrorActionPreference = $previousEap
+}
 
 $gate = $LASTEXITCODE
 

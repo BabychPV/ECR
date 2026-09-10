@@ -14,10 +14,18 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження signtool зупиняє
-# скрипт ДО перевірки фактичного результату.
-$PSNativeCommandUseErrorActionPreference = $false
-
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-    /n $SubjectName $MsiPath
+# ⛔ Q-217: PowerShell перетворює запис нативної команди в stderr на
+# помилку, і $ErrorActionPreference = 'Stop' зупиняє скрипт на ньому
+# незалежно від коду виходу (signtool іноді пише в stderr нешкідливо,
+# напр. про CRL-перевірку). Тимчасове послаблення + явний $LASTEXITCODE —
+# єдине надійне джерело істини.
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+        /n $SubjectName $MsiPath
+}
+finally {
+    $ErrorActionPreference = $previousEap
+}
 if ($LASTEXITCODE) { throw "signtool завершився з кодом $LASTEXITCODE" }

@@ -48,9 +48,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження sqlcmd зупиняє
-# скрипт ДО власної перевірки $LASTEXITCODE.
-$PSNativeCommandUseErrorActionPreference = $false
+# ⛔ Q-217: PowerShell перетворює запис нативної команди в stderr на
+# помилку, і $ErrorActionPreference = 'Stop' зупиняє скрипт на ньому
+# незалежно від коду виходу (не про $PSNativeCommandUseErrorActionPreference
+# — та за замовчуванням і так $false). Єдине надійне джерело істини —
+# фактичний код виходу.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 if ($null -eq (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     Write-Error 'sqlcmd не знайдено. Саме ним DBA виконує розгортання: без нього перевірка беззмістовна.'
@@ -74,7 +95,14 @@ function Invoke-Sql {
     $arguments = @('-S', $Server) + $auth + @('-C', '-b', '-I', '-d', $Db)
     if ($File) { $arguments += @('-i', $File) } else { $arguments += @('-Q', $Query) }
 
-    & sqlcmd @arguments | Out-Null
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd @arguments | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
     if ($LASTEXITCODE -ne 0) {
         $what = if ($File) { $File } else { $Query }
         throw "sqlcmd повернув $LASTEXITCODE на $what"
@@ -95,13 +123,11 @@ function Invoke-Script {
 
 Write-Host 'Генерую migration.sql…'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-& dotnet ef migrations script --idempotent `
-    --project (Join-Path $root 'src/Ecr.Infrastructure') `
-    --startup-project (Join-Path $root 'src/Ecr.Infrastructure') `
-    --output $migration | Out-Null
-
-if ($LASTEXITCODE -ne 0) {
-    throw "dotnet ef migrations script повернув $LASTEXITCODE"
+Invoke-NativeStep "dotnet ef migrations script" {
+    dotnet ef migrations script --idempotent `
+        --project (Join-Path $root 'src/Ecr.Infrastructure') `
+        --startup-project (Join-Path $root 'src/Ecr.Infrastructure') `
+        --output $migration | Out-Null
 }
 
 Write-Host "Створюю тимчасову базу $Database…"

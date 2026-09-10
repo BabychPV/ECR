@@ -46,9 +46,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
-# (dotnet/npm) зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
-$PSNativeCommandUseErrorActionPreference = $false
+# ⛔ Q-217: PowerShell перетворює запис нативної команди в stderr на
+# помилку, і $ErrorActionPreference = 'Stop' зупиняє скрипт на ньому
+# незалежно від коду виходу (не про $PSNativeCommandUseErrorActionPreference
+# — та за замовчуванням і так $false). Єдине надійне джерело істини —
+# фактичний код виходу.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 $root = Split-Path -Parent $PSScriptRoot
 $client = Join-Path $root 'src/Ecr.Web'
@@ -100,9 +121,15 @@ Write-Host ''
 Write-Host "Стенд Playwright на базі $Database" -ForegroundColor Cyan
 
 Step 'чиста база і розгортання через sqlcmd'
-& powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
-    -Server $Server -Database $Database -Documents 1 -BootstrapPassword $bootstrapPassword | Out-Null
-
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
+        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $bootstrapPassword | Out-Null
+}
+finally {
+    $ErrorActionPreference = $previousEap
+}
 if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
 
 # ⛔ Позначка ставиться ОДРАЗУ після створення і потрібна лише для одного:
@@ -113,7 +140,14 @@ if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
 # ⚠ Урок не новий: рівно такий сторож стоїть у `br07-load-test.ps1:209`
 # із тим самим поясненням. Сюди він не доїхав — і це знайшов аудит, а не
 # випадок, якому пощастило статися на чужій базі.
-& sqlcmd -S $Server -E -C -b -d $Database -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_E2E_Temp', @value = 1;" | Out-Null
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & sqlcmd -S $Server -E -C -b -d $Database -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_E2E_Temp', @value = 1;" | Out-Null
+}
+finally {
+    $ErrorActionPreference = $previousEap
+}
 if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
 
 $connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
@@ -286,7 +320,14 @@ finally {
             | Select-Object -Last 1
 
         if ($mine -eq '1') {
-            & sqlcmd -S $Server -E -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
+            $previousEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & sqlcmd -S $Server -E -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
+            }
+            finally {
+                $ErrorActionPreference = $previousEap
+            }
         }
         else {
             Write-Warning "База $Database не має позначки Ecr_E2E_Temp - НЕ чіпаю її."

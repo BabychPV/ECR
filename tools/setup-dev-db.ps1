@@ -44,9 +44,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження sqlcmd/dotnet
-# зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
-$PSNativeCommandUseErrorActionPreference = $false
+# ⛔ Q-217: PowerShell перетворює запис нативної команди в stderr на
+# помилку, і $ErrorActionPreference = 'Stop' зупиняє скрипт на ньому
+# незалежно від коду виходу (не про $PSNativeCommandUseErrorActionPreference
+# — та за замовчуванням і так $false). Єдине надійне джерело істини —
+# фактичний код виходу.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 if ($null -eq (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     Write-Error 'sqlcmd не знайдено. Саме ним виконується розгортання.'
@@ -64,7 +85,14 @@ function Invoke-Sql {
     $arguments = @('-S', $Server, '-E', '-C', '-b', '-I', '-d', $Db)
     if ($File) { $arguments += @('-i', $File) } else { $arguments += @('-Q', $Query) }
 
-    & sqlcmd @arguments | Out-Null
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd @arguments | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "sqlcmd повернув $LASTEXITCODE на $(if ($File) { $File } else { $Query })"
     }
@@ -82,12 +110,12 @@ function Invoke-Script {
 
 Write-Host 'Генерую migration.sql…'
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-& dotnet ef migrations script --idempotent `
-    --project (Join-Path $root 'src/Ecr.Infrastructure') `
-    --startup-project (Join-Path $root 'src/Ecr.Infrastructure') `
-    --output $migration | Out-Null
-
-if ($LASTEXITCODE -ne 0) { throw "dotnet ef migrations script повернув $LASTEXITCODE" }
+Invoke-NativeStep "dotnet ef migrations script" {
+    dotnet ef migrations script --idempotent `
+        --project (Join-Path $root 'src/Ecr.Infrastructure') `
+        --startup-project (Join-Path $root 'src/Ecr.Infrastructure') `
+        --output $migration | Out-Null
+}
 
 Write-Host "Створюю базу $Database…"
 Invoke-Sql -Db 'master' -Query @"
@@ -165,8 +193,9 @@ if ($Documents -gt 0) {
     # дерева. Той самий клас пастки, що й інкрементне складання, яке ховає
     # попередження.
     Write-Host 'Складаю (щоб --no-build нижче взяв поточне дерево)…'
-    & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "dotnet build повернув $LASTEXITCODE" }
+    Invoke-NativeStep "dotnet build" {
+        dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo | Out-Null
+    }
 
     Write-Host 'Перший старт: seed і bootstrap-адміністратор…'
 
@@ -214,10 +243,10 @@ if ($Documents -gt 0) {
     }
 
     Write-Host "Генерую $Documents документ(ів)…"
-    & dotnet run --project (Join-Path $root 'tools/Ecr.DataGen') --no-build -- `
-        --documents $Documents --fill 90 --year 2026 --connection $connection | Out-Null
-
-    if ($LASTEXITCODE -ne 0) { throw "Ecr.DataGen повернув $LASTEXITCODE" }
+    Invoke-NativeStep "Ecr.DataGen" {
+        dotnet run --project (Join-Path $root 'tools/Ecr.DataGen') --no-build -- `
+            --documents $Documents --fill 90 --year 2026 --connection $connection | Out-Null
+    }
 }
 
 Write-Host ''

@@ -204,11 +204,32 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
-# (sqlcmd/msiexec/dotnet/npm) зупиняє скрипт ДО власної перевірки
-# $LASTEXITCODE нижче (реальний прогін — build-msi.ps1, "npm warn
-# deprecated" зупинив збірку, хоча код виходу був 0).
-$PSNativeCommandUseErrorActionPreference = $false
+# ⛔ Q-217 (реальний прогін): PowerShell перетворює КОЖЕН запис нативної
+# команди в stderr на запис у потоці помилок, і $ErrorActionPreference =
+# 'Stop' зупиняє скрипт на цьому записі незалежно від коду виходу —
+# "npm warn deprecated ..." зупинило build-msi.ps1 саме так. Не про
+# $PSNativeCommandUseErrorActionPreference (за замовчуванням і так
+# $false — попередня версія цього фікса міняла її на те саме значення).
+# Єдине надійне джерело істини — фактичний код виходу.
+function Invoke-NativeStep {
+    param(
+        [Parameter(Mandatory)] [string] $Description,
+        [Parameter(Mandatory)] [scriptblock] $Command
+    )
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+
+    if ($LASTEXITCODE) {
+        throw "$Description завершився з кодом $LASTEXITCODE"
+    }
+}
 
 $root      = Split-Path -Parent $PSScriptRoot
 $sqlDir    = Join-Path $root 'src\Ecr.Infrastructure\Persistence\Sql'
@@ -375,7 +396,14 @@ function Invoke-DeploySql {
     $what = if ($File) { Split-Path -Leaf $File } else { $Query }
 
     if ($PSCmdlet.ShouldProcess("$SqlInstance / $TargetDb", "sqlcmd -i $what")) {
-        & sqlcmd @arguments
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & sqlcmd @arguments
+        }
+        finally {
+            $ErrorActionPreference = $previousEap
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "sqlcmd повернув $LASTEXITCODE на ${what}: файли до цього застосовані, ${what} і все після — ні."
         }
@@ -400,11 +428,12 @@ try {
         New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 
         if ($PSCmdlet.ShouldProcess($migration, 'dotnet ef migrations script --idempotent')) {
-            & dotnet ef migrations script --idempotent `
-                --project (Join-Path $root 'src\Ecr.Infrastructure') `
-                --startup-project (Join-Path $root 'src\Ecr.Infrastructure') `
-                --output $migration
-            if ($LASTEXITCODE -ne 0) { throw "dotnet ef migrations script повернув $LASTEXITCODE" }
+            Invoke-NativeStep "dotnet ef migrations script" {
+                dotnet ef migrations script --idempotent `
+                    --project (Join-Path $root 'src\Ecr.Infrastructure') `
+                    --startup-project (Join-Path $root 'src\Ecr.Infrastructure') `
+                    --output $migration
+            }
         }
 
         # ⛔ Та сама послідовність, що verify-sql-scripts.ps1 (docs/build/
