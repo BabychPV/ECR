@@ -43,6 +43,8 @@ public static class DependencyInjection
         services.AddScoped<GetTemplateStructureHandler>();
         services.AddScoped<GetAccessMatrixHandler>();
         services.AddScoped<Projects.ListPeriodPoliciesHandler>();
+        services.AddScoped<Projects.CreatePeriodPolicyHandler>();
+        services.AddScoped<Projects.UpdatePeriodPolicyHandler>();
         services.AddScoped<Workflow.GetApprovalRouteHandler>();
         services.AddScoped<Workflow.ReplaceApprovalRouteHandler>();
         services.AddScoped<Security.ListUserRolesHandler>();
@@ -96,6 +98,7 @@ public static class DependencyInjection
         services.AddScoped<Projects.CreateProjectHandler>();
         services.AddScoped<Projects.ActivateProjectHandler>();
         services.AddScoped<Projects.ArchiveProjectHandler>();
+        services.AddScoped<Projects.ChangeProjectTimeZoneHandler>();
 
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();

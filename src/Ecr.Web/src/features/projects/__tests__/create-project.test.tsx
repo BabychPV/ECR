@@ -65,6 +65,59 @@ describe('Тіло запиту на створення проєкту', () => {
 });
 
 /**
+ * Кількість періодів для `Custom` (T6/#36).
+ *
+ * ⛔ Домен розумів `PeriodKind.Custom` — `PeriodCalendar.CountFor` приймав
+ * `customCount` від самого початку, — а форма не мала звідки взяти це число:
+ * запит завжди йшов без нього, і сервер відмовляв би `ECR-PRD-4224`
+ * (`0` поза межами `1..12`) для БУДЬ-ЯКОГО `Custom`-проєкту.
+ */
+describe('Кількість періодів для Custom (T6/#36)', () => {
+  const base = {
+    code: 'KASH_2026',
+    name: { en: 'Kashagan' },
+    timeZoneId: 'Asia/Almaty',
+    versionId: '42',
+    policyId: '7',
+  };
+
+  it('надсилається для Custom', () => {
+    const body = createProjectBody({ ...base, periodKind: 'Custom', customPeriodCount: 6 });
+
+    expect(body.customPeriodCount).toBe(6);
+  });
+
+  it('НЕ надсилається для решти видів, навіть якщо число лишилося у формі', () => {
+    // ⚠ Стан форми зберігається між перемиканнями `Select`: користувач міг
+    // спершу обрати Custom і ввести число, а тоді передумати. Старе число не
+    // має доїхати до сервера як властивість Monthly-проєкту.
+    const body = createProjectBody({ ...base, periodKind: 'Monthly', customPeriodCount: 6 });
+
+    expect(body.customPeriodCount).toBeNull();
+  });
+
+  it('без введеного числа Custom-форма НЕ готова', () => {
+    // ⛔ Головне твердження D-134 на клієнті: замість гарантованої відмови
+    // `ECR-PRD-4224` (`0` поза межами `1..12`) кнопка лишається неактивною.
+    expect(createProjectIncomplete({
+      ...base, periodKind: 'Custom', customPeriodCount: null,
+    })).toBe(true);
+  });
+
+  it('з числом Custom-форма готова', () => {
+    expect(createProjectIncomplete({
+      ...base, periodKind: 'Custom', customPeriodCount: 6,
+    })).toBe(false);
+  });
+
+  it('для Monthly відсутність числа не блокує форму', () => {
+    expect(createProjectIncomplete({
+      ...base, periodKind: 'Monthly', customPeriodCount: null,
+    })).toBe(false);
+  });
+});
+
+/**
  * Готовність форми до надсилання.
  *
  * ⛔ Директива ПК-1 №06 §3 скасувала `D1-09` — «пояс браузера як ПОЧАТКОВЕ

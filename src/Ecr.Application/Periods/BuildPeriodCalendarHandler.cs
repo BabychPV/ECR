@@ -48,7 +48,15 @@ public sealed class BuildPeriodCalendarHandler(
         // Ідемпотентність забезпечує сам календар: він СТВОРЮЄ лише ті періоди,
         // яких ще немає, і перераховує межі наявних. Повторний виклик після
         // зміни меж проєкту добудує хвіст, а не подвоїть наявне.
-        var created = PeriodCalendar.Build(project, policy, zone, project.Periods);
+        //
+        // ⛔ T6/#36: `CustomPeriodCount` передається ЯВНО, а не через параметр
+        // за замовчуванням. До цього виклик завжди йшов з `customCount = 0`, і
+        // `PeriodKind.Custom` був недосяжний через API: `CountFor` кидав
+        // `ECR-PRD-4224` для БУДЬ-ЯКОГО Custom-проєкту на першому ж
+        // `GET …/periods`, незалежно від того, що ввів користувач при
+        // створенні.
+        var created = PeriodCalendar.Build(
+            project, policy, zone, project.Periods, project.CustomPeriodCount ?? 0);
 
         if (created.Count > 0)
         {

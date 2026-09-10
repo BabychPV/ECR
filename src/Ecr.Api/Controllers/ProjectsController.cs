@@ -21,6 +21,9 @@ public sealed class ProjectsController(
     ActivateProjectHandler activate,
     ArchiveProjectHandler archive,
     ListPeriodPoliciesHandler policies,
+    CreatePeriodPolicyHandler createPolicy,
+    UpdatePeriodPolicyHandler updatePolicy,
+    ChangeProjectTimeZoneHandler changeTimeZone,
     RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
     Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
@@ -51,6 +54,59 @@ public sealed class ProjectsController(
     public async Task<ActionResult<IReadOnlyList<Ecr.Application.Projects.PeriodPolicyDto>>> PeriodPolicies(
         CancellationToken ct)
         => Ok(await policies.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Створює політику періодів. Право <c>Project.Manage</c> (T6/#37).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього годі було завести політику інакше, ніж сідингом або рукою
+    /// DBA: річний пільговий строк проєкту (<c>Project.YearGraceOffsetDays</c>)
+    /// стояв літералом <c>45</c> незалежно від того, яку політику обрали.
+    /// </remarks>
+    [HttpPost("period-policies")]
+    [ProducesResponseType<Ecr.Application.Projects.PeriodPolicyDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CreatePeriodPolicy(
+        [FromBody] CreatePeriodPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await createPolicy
+            .HandleAsync(
+                request.Code, request.OpenOffsetDays, request.GraceOffsetDays,
+                request.HardCloseOffsetDays, request.YearGraceOffsetDays, ct)
+            .ConfigureAwait(false);
+
+        return Created($"/api/v1/projects/period-policies/{created.Id}", created);
+    }
+
+    /// <summary>
+    /// Змінює offsets наявної політики періодів. Право <c>Project.Manage</c>
+    /// (T6/#37).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Проєкти, які вже посилаються на цю політику, підхоплюють нові offsets
+    /// на наступному ідемпотентному <c>GET …/periods</c> — межі наявних
+    /// періодів перераховуються там щоразу (ФВ-1.5).
+    /// </remarks>
+    [HttpPut("period-policies/{id:int}")]
+    [ProducesResponseType<Ecr.Application.Projects.PeriodPolicyDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdatePeriodPolicy(
+        int id, [FromBody] UpdatePeriodPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var updated = await updatePolicy
+            .HandleAsync(
+                id, request.OpenOffsetDays, request.GraceOffsetDays,
+                request.HardCloseOffsetDays, request.YearGraceOffsetDays, ct)
+            .ConfigureAwait(false);
+
+        return Ok(updated);
+    }
 
     /// <summary>
     /// Маршрут погодження проєкту. Право <c>Project.Manage</c>.
@@ -123,7 +179,8 @@ public sealed class ProjectsController(
                 request.Year,
                 request.TemplateVersionId ?? 0,
                 request.PeriodPolicyId ?? 0,
-                ct)
+                ct,
+                request.CustomPeriodCount)
             .ConfigureAwait(false);
 
         return Created($"/api/v1/projects/{projectId}", new Contracts.ProjectIdResponse(projectId));
@@ -198,6 +255,29 @@ public sealed class ProjectsController(
     }
 
     /// <summary>
+    /// Змінює пояс майданчика проєкту. Право <c>Project.Manage</c> (T6/#52).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Дозволено лише поки жоден період проєкту не виходив зі стану
+    /// <c>Scheduled</c> (ФВ-1.1a, <c>ECR-PRD-0409</c>) — те саме правило, що й
+    /// при створенні (<c>ECR-CFG-4221</c> на невідомий IANA-ідентифікатор).
+    /// Перевіряє сутність (<see cref="Ecr.Domain.Entities.Documents.Project.ChangeTimeZone"/>),
+    /// не цей ендпоінт.
+    /// </remarks>
+    [HttpPut("{id:int}/timezone")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ChangeTimeZone(
+        int id, [FromBody] ChangeProjectTimeZoneRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await changeTimeZone.HandleAsync(id, request.TimeZoneId, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
     /// Перерахунок УСЬОГО проєкту. Право <c>Calculation.Recalculate</c>.
     /// </summary>
     /// <remarks>
@@ -264,11 +344,17 @@ public sealed class ProjectsController(
 /// <param name="Year">Звітний рік; типово поточний.</param>
 /// <param name="TemplateVersionId">Версія шаблону, за якою заповнюються документи.</param>
 /// <param name="PeriodPolicyId">Політика зсувів періодів.</param>
+/// <param name="CustomPeriodCount">
+/// Кількість періодів для <c>PeriodKind = "Custom"</c> (T6/#36); для решти
+/// періодичностей ігнорується. Має ділити рік нарівно (1..12), інакше
+/// <c>ECR-PRD-4224</c>.
+/// </param>
 /// <remarks>
-/// ⚠ Три останні поля додані понад форму <c>05h</c>: без версії шаблону
-/// проєкт не має структури, без політики — меж періодів, а без року календар
-/// нема на що будувати. Позиційний префікс контракту не змінений
-/// (<c>D1-01</c>).
+/// ⚠ Чотири останні поля додані понад форму <c>05h</c>: без версії шаблону
+/// проєкт не має структури, без політики — меж періодів, без року календар
+/// нема на що будувати, а без кількості <c>Custom</c> лишався оголошеним у
+/// домені й недосяжним через API (T6/#36). Позиційний префікс контракту не
+/// змінений (<c>D1-01</c>).
 /// </remarks>
 public sealed record CreateProjectRequest(
     string Code,
@@ -277,7 +363,8 @@ public sealed record CreateProjectRequest(
     string PeriodKind,
     int? Year = null,
     int? TemplateVersionId = null,
-    int? PeriodPolicyId = null);
+    int? PeriodPolicyId = null,
+    int? CustomPeriodCount = null);
 
 /// <summary>Запит на заміну маршруту погодження.</summary>
 /// <param name="RoleIds">
@@ -303,3 +390,31 @@ public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason
 /// <param name="ApprovalReason">Причина погодження; обов'язкова разом із <c>ApprovedByUserId</c>.</param>
 public sealed record ProjectRecalculationRequest(
     int? PeriodKey, int? ApprovedByUserId, string? ApprovalReason);
+
+/// <summary>Запит на створення політики періодів (T6/#37).</summary>
+/// <param name="Code">Код політики; має бути унікальним.</param>
+/// <param name="OpenOffsetDays">Коли період відкривається від початку. Може бути від'ємним.</param>
+/// <param name="GraceOffsetDays">Пільговий строк після кінця періоду.</param>
+/// <param name="HardCloseOffsetDays">Коли період закривається остаточно.</param>
+/// <param name="YearGraceOffsetDays">Пільговий строк після кінця року.</param>
+public sealed record CreatePeriodPolicyRequest(
+    string Code,
+    int OpenOffsetDays,
+    int GraceOffsetDays,
+    int HardCloseOffsetDays,
+    int YearGraceOffsetDays);
+
+/// <summary>Запит на зміну offsets наявної політики періодів (T6/#37).</summary>
+/// <param name="OpenOffsetDays">Коли період відкривається від початку. Може бути від'ємним.</param>
+/// <param name="GraceOffsetDays">Пільговий строк після кінця періоду.</param>
+/// <param name="HardCloseOffsetDays">Коли період закривається остаточно.</param>
+/// <param name="YearGraceOffsetDays">Пільговий строк після кінця року.</param>
+public sealed record UpdatePeriodPolicyRequest(
+    int OpenOffsetDays,
+    int GraceOffsetDays,
+    int HardCloseOffsetDays,
+    int YearGraceOffsetDays);
+
+/// <summary>Запит на зміну поясу майданчика проєкту (T6/#52).</summary>
+/// <param name="TimeZoneId">Новий пояс — ідентифікатор IANA (<c>Asia/Aqtau</c>).</param>
+public sealed record ChangeProjectTimeZoneRequest(string TimeZoneId);

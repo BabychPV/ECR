@@ -80,7 +80,15 @@ public sealed class CloneProjectHandler(
             source.TemplateVersionId,
             source.PeriodKind,
             source.PeriodPolicyId,
-            source.TimeZoneId);
+            source.TimeZoneId,
+
+            // ⛔ T6/#37 і T6/#36: обидва — знімки, взяті з ДЖЕРЕЛА, а не
+            // перечитані з поточної політики. Клон копіює НАЛАШТУВАННЯ проєкту
+            // (коментар класу вище), а не підв'язується до політики заново —
+            // якщо політику відредагували між створенням джерела і клонуванням,
+            // клон отримує те, що мав сам проєкт-джерело, а не нове значення.
+            source.YearGraceOffsetDays,
+            source.CustomPeriodCount);
 
         // ⚠ Періоди НЕ копіюються: їх будує PeriodCalendar за датами нового
         // проєкту. Скопійовані, вони принесли б із собою стани і межі старого

@@ -270,6 +270,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.ReportDefDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // Той самий клас, що й `ECR-RPT-4091` вище: код політики періодів —
+        // адреса вибору у формі створення проєкту (T6/#37), і дублікат має
+        // читатися як «цей код зайнятий», а не як помилка введення.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.PeriodPolicyDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⚠ Той самий клас, що й `ECR-ROW-0409`/`ECR-RPT-0409` вище: задача не
         // в стані `Failed` — це конфлікт стану на дії, а не невірні дані
         // запиту (директива №11, T10 #40).

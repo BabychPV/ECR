@@ -605,6 +605,19 @@
         ],
         "type": "object"
       },
+      "ChangeProjectTimeZoneRequest": {
+        "description": "Запит на зміну поясу майданчика проєкту (T6/#52).",
+        "properties": {
+          "timeZoneId": {
+            "description": "Новий пояс — ідентифікатор IANA (`Asia/Aqtau`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timeZoneId"
+        ],
+        "type": "object"
+      },
       "CloneProjectRequest": {
         "description": "Запит на клонування проєкту.",
         "properties": {
@@ -1012,12 +1025,57 @@
         ],
         "type": "object"
       },
+      "CreatePeriodPolicyRequest": {
+        "description": "Запит на створення політики періодів (T6/#37).",
+        "properties": {
+          "code": {
+            "description": "Код політики; має бути унікальним.",
+            "type": "string"
+          },
+          "graceOffsetDays": {
+            "description": "Пільговий строк після кінця періоду.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hardCloseOffsetDays": {
+            "description": "Коли період закривається остаточно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openOffsetDays": {
+            "description": "Коли період відкривається від початку. Може бути від'ємним.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yearGraceOffsetDays": {
+            "description": "Пільговий строк після кінця року.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "openOffsetDays",
+          "graceOffsetDays",
+          "hardCloseOffsetDays",
+          "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
       "CreateProjectRequest": {
         "description": "Запит на створення проєкту.",
         "properties": {
           "code": {
             "description": "Код проєкту.",
             "type": "string"
+          },
+          "customPeriodCount": {
+            "description": "Кількість періодів для `PeriodKind = \"Custom\"` (T6/#36); для решти\nперіодичностей ігнорується. Має ділити рік нарівно (1..12), інакше\n`ECR-PRD-4224`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "nameL10n": {
             "additionalProperties": {
@@ -7025,6 +7083,38 @@
         ],
         "type": "object"
       },
+      "UpdatePeriodPolicyRequest": {
+        "description": "Запит на зміну offsets наявної політики періодів (T6/#37).",
+        "properties": {
+          "graceOffsetDays": {
+            "description": "Пільговий строк після кінця періоду.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hardCloseOffsetDays": {
+            "description": "Коли період закривається остаточно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "openOffsetDays": {
+            "description": "Коли період відкривається від початку. Може бути від'ємним.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yearGraceOffsetDays": {
+            "description": "Пільговий строк після кінця року.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "openOffsetDays",
+          "graceOffsetDays",
+          "hardCloseOffsetDays",
+          "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
       "UserIdResponse": {
         "description": "Створений користувач.",
         "properties": {
@@ -11336,6 +11426,198 @@
         "tags": [
           "Projects"
         ]
+      },
+      "post": {
+        "description": "⛔ До цього годі було завести політику інакше, ніж сідингом або рукою\nDBA: річний пільговий строк проєкту (`Project.YearGraceOffsetDays`)\nстояв літералом `45` незалежно від того, яку політику обрали.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePeriodPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePeriodPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePeriodPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює політику періодів. Право `Project.Manage` (T6/#37).",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/period-policies/{id}": {
+      "put": {
+        "description": "⚠ Проєкти, які вже посилаються на цю політику, підхоплюють нові offsets\nна наступному ідемпотентному `GET …/periods` — межі наявних\nперіодів перераховуються там щоразу (ФВ-1.5).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePeriodPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeriodPolicyDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює offsets наявної політики періодів. Право `Project.Manage`\n(T6/#37).",
+        "tags": [
+          "Projects"
+        ]
       }
     },
     "/api/v1/projects/{id}/activate": {
@@ -11782,6 +12064,72 @@
           }
         },
         "summary": "Перерахунок УСЬОГО проєкту. Право `Calculation.Recalculate`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/timezone": {
+      "put": {
+        "description": "⚠ Дозволено лише поки жоден період проєкту не виходив зі стану\n`Scheduled` (ФВ-1.1a, `ECR-PRD-0409`) — те саме правило, що й\nпри створенні (`ECR-CFG-4221` на невідомий IANA-ідентифікатор).\nПеревіряє сутність (void Project.ChangeTimeZone(string timeZoneId)),\nне цей ендпоінт.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeProjectTimeZoneRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeProjectTimeZoneRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeProjectTimeZoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює пояс майданчика проєкту. Право `Project.Manage` (T6/#52).",
         "tags": [
           "Projects"
         ]
