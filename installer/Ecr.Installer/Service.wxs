@@ -49,14 +49,23 @@
                        Value="1" />
 
         <!--
-          Stop="both" Remove="uninstall": служба зупиняється і при установці,
-          і при видаленні. Без Stop при оновленні файли будуть заблоковані
-          запущеним процесом, і MSI попросить перезавантаження — тобто
-          оновлення служби стане простоєм сервера.
+          Stop="both" Remove="uninstall", БЕЗ Start="install" тут: старт
+          винесено в окремий умовний компонент нижче (EcrServiceAutoStart)
+          — ServiceControl/@Condition не підтримується компілятором
+          (WIX0004, перевірено емпірично, та сама історія, що з
+          util:PermissionEx у Folders.wxs). Stop/Remove лишаються
+          безумовними: якщо службу колись запустили вручну (наприклад,
+          пізніше додали обліковий запис через services.msc), оновлення й
+          видалення однаково мають її зупинити/прибрати, незалежно від
+          того, яким був SERVICE_ACCOUNT САМЕ ПІД ЧАС цієї конкретної
+          установки.
+
+          Без Stop при оновленні файли будуть заблоковані запущеним
+          процесом, і MSI попросить перезавантаження — тобто оновлення
+          служби стане простоєм сервера.
         -->
         <ServiceControl Id="EcrApiServiceControl"
                         Name="EcrApi"
-                        Start="install"
                         Stop="both"
                         Remove="uninstall"
                         Wait="yes" />
@@ -76,6 +85,20 @@
                               Protocol="tcp"
                               Scope="localSubnet"
                               Profile="domain" />
+      </Component>
+
+      <!--
+        ⚠ Явний GUID, не "*": компонент без File — KeyPath стає самою
+        текою, а такий компонент не приймає автогенерований GUID
+        (WIX0230, той самий урок, що й LogsFolder у Folders.wxs).
+        Умовний саме тому, що документована поведінка (docs/build/
+        10-installer.md §1.4, сценарій 2 матриці) — «порожній обліковий
+        запис → служба зареєстрована, але НЕ запущена», а не «запущена
+        під LocalSystem за замовчуванням».
+      -->
+      <Component Id="EcrServiceAutoStart" Directory="INSTALLFOLDER"
+                 Guid="4d8f2a71-9e3c-4b6d-a2f5-7c1e9b0d3a6f" Condition="SERVICE_ACCOUNT">
+        <ServiceControl Id="EcrApiServiceStart" Name="EcrApi" Start="install" Wait="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>

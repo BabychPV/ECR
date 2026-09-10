@@ -20,7 +20,20 @@ var builder = WebApplication.CreateBuilder(args);
 // вмикає цю поведінку лише тоді, коли процес і справді піднятий SCM.
 builder.Host.UseWindowsService();
 
+// Персистентна конфігурація майданчика (НЕсекретні значення — Q-213):
+// інсталятор кладе сюди копію appsettings.Production.json і більше НЕ
+// перезаписує при оновленнях (NeverOverwrite, docs/build/10-installer.md,
+// Folders.wxs: ConfigFolder) — на відміну від однойменного файлу поруч з
+// Ecr.Api.exe, який кожне оновлення MSI перезаписує заповнювачем. Без
+// цього рядка ця копія існувала на диску, але жодного налаштування з неї
+// застосунок ніколи не читав — знайдено реальним прогоном на
+// LenovoNakuLaptop. Логіка — в ProgramDataConfiguration (Ecr.Api.Startup),
+// не тут: інакше не піддавалась би прямій перевірці без підняття хоста.
+builder.Configuration.AddProgramDataConfig(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+
 // Конфігурація: змінні оточення з префіксом ECR_ перекривають файли
+// (тому й секрети — лише сюди, ніколи в жоден із файлів вище, D-11).
 builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
 
 builder.Services.AddEcrInfrastructure(builder.Configuration);
