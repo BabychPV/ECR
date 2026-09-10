@@ -263,6 +263,7 @@
 | Q-216 | CODE | Директива №13: людина назвала поточний процес встановлення незручним і попросила «максимально зрозумілий інтерфейс» — перший начерк (суцільна форма з ~15 полів) відхилено як недостатньо ясний | RESOLVED · майстер `tools/Ecr.Setup` (`EcrSetup.exe`, поза `Ecr.sln`): п'ять екранів введення (Режим → Обліковий запис і мережа → База даних → Пароль адміністратора, пропускається в режимі «Оновлення» → Огляд без жодного значення пароля) плюс живий екран виконання (чеклист 7 кроків `deploy-ecr.ps1`); PowerShell хоститься в процесі (`Microsoft.PowerShell.SDK`), бо `SecureString` не переживає межу процесів (`Q-213`). Побіжна знахідка при рев'ю: інлайн-версія пакета в `csproj` ламала `LicenseComplianceTests` (сканує кожен `*.csproj`, не лише `Ecr.sln`) — виправлено, версія централізовано в `Directory.Packages.props`; PR #137 |
 | Q-217 | CONFLICT | Реальний прогін людиною `rebuild-and-package-msi.ps1`: `npm ci` впав з `NativeCommandError` на самому виклику через звичайне попередження `npm warn deprecated` у stderr, не помилку (код виходу `0`). Перший фікс сесії виявився no-op (`$PSNativeCommandUseErrorActionPreference` за замовчуванням і так `$false`) — підтверджено повторним прогоном людини з тим самим симптомом | RESOLVED (підтверджено реальним прогоном удруге) · другий фікс — тимчасове `$ErrorActionPreference = 'Continue'` на час кожного нативного виклику — людина прогнала `rebuild-and-package-msi.ps1` повторно: `NativeCommandError` і далі ДРУКУЄТЬСЯ (нешкідливий текст попередження в консолі), але скрипт більше НЕ зупиняється — `npm ci`, `npm run build`, збірка MSI пройшли до кінця, готовий `Ecr.msi` (64.4 МБ, SHA-256 надрукований). Залишковий косметичний шум (червоний текст, хоч і не помилка) — окреме, необов'язкове полірування, не дефект |
 | Q-218 | CONFLICT | Людина відкрила `EcrSetup.exe` (`Q-216`): написи майстра українською не відповідали вимозі «зрозумілий інтерфейс» (людина попросила англійську), і крок 1 («Режим») мав реальний дефект — `ModeStep.BuildOption` загортав КОЖЕН перемикач в ОКРЕМИЙ `FlowLayoutPanel`; WinForms групує `RadioButton` у взаємовиключну групу за безпосереднім батьком, а не спільним предком, тож обидва варіанти можна було позначити одночасно («неможливо щось обрати» — вибір другого не знімав позначку з першого) | RESOLVED · `ModeStep.cs` тепер має обидва перемикачі прямими дітьми ОДНОГО `TableLayoutPanel` (в `GroupBox`, для візуальної єдності з кроками 2/3); увесь текст інтерфейсу майстра (написи, кнопки, повідомлення про помилки, назви кроків чеклиста) перекладено англійською в усіх шести кроках і `MainForm`/`DeployRunner`; сирий вивід `deploy-ecr.ps1` у «Detailed log» лишається українською навмисно — це вивід самого скрипта, не текст майстра; збірка перевірена (`dotnet build`, 0 Warning(s)/0 Error(s)) |
+| Q-219 | CONFLICT | Людина запитала, які файли мають бути поруч для установки — відповідь на це відкрила реальний розрив: `deploy-ecr.ps1` (без `-SkipSchema`, тобто завжди на First Deployment) читає `dotnet ef migrations script` і `src/Ecr.Infrastructure/Persistence/Sql/*.sql` ВІДНОСНО СЕБЕ, тобто вимагав повний клон репозиторію + .NET SDK + `dotnet-ef` НА СЕРВЕРІ — прямо суперечило `11-install-guide.md` §0 («сервер отримує вже готовий .msi, більше нічого»). Людина сформулювала мету прямо: не розкладати десяток файлів по теці, а мати РІВНО один файл-інсталятор | RESOLVED · новий `tools/build-installer.ps1`: збирає `Ecr.msi`, генерує `migration.sql` (`dotnet ef`) НА МАШИНІ ЗБІРКИ, стейджить payload (`Ecr.msi`, `deploy-ecr.ps1`, `migration.sql`, `sql\*.sql`) в `artifacts\wizard-payload\`, і публікує `EcrSetup.exe` як **self-contained single-file** (`-p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true`) — .NET сам вбудовує payload У СЕРЕДИНУ `.exe` й розпаковує його в тимчасову теку при кожному запуску; `deploy-ecr.ps1` тепер спершу шукає `sql\`/`migration.sql` ПОРУЧ ІЗ СОБОЮ (пакований запуск) і лише як fallback — у дереві репозиторію (dev/CI, без змін для цього шляху). Результат — `artifacts\installer\Ecr-Setup-<версія>.exe`, на сервер їде РІВНО один файл, без .NET SDK/Node/dotnet-ef/клону репозиторію. Підтверджено РЕАЛЬНИМИ прогонами тут: (1) `dotnet publish` без single-file — `Link=%(RecursiveDir)%(Filename)%(Extension)` кладе `Ecr.msi`/`deploy-ecr.ps1`/`migration.sql` в корінь публікації і `sql\*.sql` у підтеку, точно як задумано; (2) окремий пробний консольний проєкт із тим самим `Content`/single-file налаштуванням, реально опублікований і ЗАПУЩЕНИЙ — надрукував `AppContext.BaseDirectory`, що вказує на тимчасову теку розпакування, і повний список файлів у ній, включно з payload — підтверджує механізм `IncludeAllContentForSelfExtract` насправді працює так, як описано |
 
 ---
 
@@ -10310,3 +10311,117 @@ WinForms-групування контейнерів (звірка з крока
 патерн уже працює), не власним скріншотом.
 
 **Статус:** RESOLVED · очікує підтвердження реальним прогоном.
+
+### Q-219 · CONFLICT · Людина запитала "які файли поруч" (`Q-216`/`Q-218` довели дорогою), 2026-09-11 · `deploy-ecr.ps1` насправді вимагав увесь репозиторій на сервері
+
+**Де:** `tools/deploy-ecr.ps1`, новий `tools/build-installer.ps1`,
+`tools/Ecr.Setup/Ecr.Setup.csproj`, `docs/build/11-install-guide.md`.
+
+**Що сталося.** Пряме запитання людини — "скажи які файли мають бути
+поруч для установки" — після відповіді розкрило реальний, а не
+косметичний розрив: `deploy-ecr.ps1` (без `-SkipSchema`, тобто ЗАВЖДИ на
+First Deployment) читає
+
+```powershell
+$root   = Split-Path -Parent $PSScriptRoot
+$sqlDir = Join-Path $root 'src\Ecr.Infrastructure\Persistence\Sql'
+...
+dotnet ef migrations script --project (Join-Path $root 'src\Ecr.Infrastructure') ...
+```
+
+тобто рахує, що на рівень вище за СЕБЕ лежить весь `src\Ecr.
+Infrastructure` (придатний до збірки .NET-проєкт, не просто файли) і що
+на машині стоять `dotnet-ef` і .NET SDK. У теці `artifacts\setup\`
+(`EcrSetup.exe` + `deploy-ecr.ps1`), яку `11-install-guide.md` §0 і §2.1
+документували як "усе, що треба на сервері", цього `src\` НЕМА — First
+Deployment впав би на кроці 2/7. Це прямо суперечило тому самому §0:
+«сервер отримує вже готовий `.msi`, більше нічого».
+
+**Мета, сформульована людиною напряму:** не ранжувати десяток файлів по
+теці на сервері, а мати РІВНО один файл-інсталятор — "якщо EcrSetup це
+як конфігуратор, то треба створити ДЛЯ НЬОГО інсталятор і покласти все
+необхідне в нього".
+
+**Рішення — `tools/build-installer.ps1`, новий скрипт:**
+1. Збирає `Ecr.msi` (`build-msi.ps1`, без змін).
+2. Генерує `migration.sql` (`dotnet ef migrations script --idempotent`)
+   — ТУТ, на машині збірки, де `dotnet-ef`/SDK вже стоять за
+   визначенням (потрібні для публікації `Ecr.Api` й так).
+3. Стейджить payload (`Ecr.msi`, `deploy-ecr.ps1`, `migration.sql`,
+   `sql\*.sql`) в `artifacts\wizard-payload\` (корінь `artifacts/` і так
+   поза git).
+4. Публікує `EcrSetup.exe` як **self-contained single-file**:
+   `-r win-x64 --self-contained true -p:PublishSingleFile=true
+   -p:IncludeAllContentForSelfExtract=true` — .NET сам вбудовує весь
+   payload У СЕРЕДИНУ `.exe` і розпаковує його в тимчасову теку щоразу
+   при запуску; `AppContext.BaseDirectory` в процесі, що вже стартував,
+   резолвиться саме туди.
+5. Копіює результат як `artifacts\installer\Ecr-Setup-<версія>.exe`.
+
+**`Ecr.Setup.csproj`** отримав один новий `ItemGroup`:
+
+```xml
+<Content Include="..\..\artifacts\wizard-payload\**\*.*">
+  <Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
+  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+</Content>
+```
+
+`Link` знімає префікс шляху до payload, лишаючи те, що після нього:
+`Ecr.msi` — у корінь публікації, `sql\NN-*.sql` — у підтеку `sql\`.
+Коли `artifacts\wizard-payload\` не існує (звичайний `dotnet build`/
+`dotnet publish` без попереднього кроку `build-installer.ps1`) — глоб
+просто нічого не знаходить, помилки немає (перевірено: `dotnet build`
+на порожньому payload — 0 Warning(s)/0 Error(s), як і до цієї зміни).
+
+**`deploy-ecr.ps1`** тепер має два джерела схеми: спершу перевіряє
+`sql\`/`migration.sql` ПОРУЧ ІЗ СОБОЮ (пакований запуск), і лише якщо
+їх нема — дерево репозиторію, як і раніше (dev/CI-запуск напряму з
+репозиторію, `-MsiPath`, §2.2 гайду — той шлях не змінився і досі
+вимагає SDK/`dotnet-ef` на тій самій машині, це задокументовано і
+свідомо: то не "чистий сервер", то машина автоматизації).
+
+**Доказ — реальні прогони, не лише читання коду:**
+1. `dotnet publish tools\Ecr.Setup\Ecr.Setup.csproj -c Release -o
+   artifacts\setup-publish-plain` із тестовим payload (`Ecr.msi`,
+   `deploy-ecr.ps1`, `migration.sql`, `sql\01-test.sql`,
+   `sql\02-test.sql`) — вивід публікації підтвердив: `Ecr.msi`,
+   `deploy-ecr.ps1`, `migration.sql` лягли В КОРІНЬ, `sql\*.sql` —
+   у підтеку `sql\`, точно як задумано `Link`.
+2. Окремий одноразовий пробний консольний проєкт (поза цим репозиторієм,
+   у сесійному scratchpad, видалений після перевірки) з тим самим
+   `Content`/`Link` і тими самими `-p:PublishSingleFile=true
+   -p:IncludeAllContentForSelfExtract=true` — опублікований і РЕАЛЬНО
+   ЗАПУЩЕНИЙ. Надрукував:
+   ```
+   BaseDirectory: C:\Users\...\AppData\Local\Temp\.net\Probe\...\
+    - Ecr.msi
+    - migration.sql
+    - sql\01-test.sql
+    - ... (увесь рантайм поруч)
+   ```
+   Тобто механізм `IncludeAllContentForSelfExtract` дійсно розпаковує
+   payload у тимчасову теку, і `AppContext.BaseDirectory` в процесі, що
+   вже запущений, дійсно вказує саме туди — те саме, що вже читають
+   `ResolveScriptPath`/`TryDetectMsi` в майстрі, без жодної зміни їхнього
+   коду.
+3. Публікація САМОГО `Ecr.Setup.csproj` тим самим способом (без
+   реального payload, лише щоб перевірити розмір/факт однофайлової
+   збірки) — вивід публікації: рівно один файл `EcrSetup.exe` у теці
+   призначення, жодних `.dll`/`.pdb` поруч.
+
+⚠ **Не підтверджено реальним прогоном:** повний `build-installer.ps1`
+end-to-end із РЕАЛЬНИМ `Ecr.msi` — крок збірки MSI впав у цьому
+середовищі на `WIX0001: The Windows Installer service failed to start`
+(служба `msiserver` тут не піднімається по-справжньому навіть після
+`Start-Service`, попри статус `Running`) — оточення цієї сесії, не
+дефект зміни: `build-msi.ps1` тут не мій код і не змінювався, і та сама
+помилка стається для БУДЬ-ЯКОГО виклику `build-msi.ps1`, не лише через
+`build-installer.ps1`. Механізм самого пакування (Content/Link/single-
+file/self-extract) перевірено реальними прогонами вище, незалежно від
+MSI-кроку.
+
+**Статус:** RESOLVED (механізм пакування) · очікує підтвердження
+реальним прогоном `build-installer.ps1` end-to-end на машині з
+робочим Windows Installer.

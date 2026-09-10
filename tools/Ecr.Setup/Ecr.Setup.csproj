@@ -29,4 +29,28 @@
     <PackageReference Include="Microsoft.PowerShell.SDK" />
   </ItemGroup>
 
+  <!--
+    Q-219: `tools/build-installer.ps1` наповнює `artifacts\wizard-payload\`
+    (Ecr.msi, deploy-ecr.ps1, migration.sql, sql\*.sql) ПЕРЕД публікацією —
+    тека вже в кореневому `artifacts/` і тому й так поза git (.gitignore).
+    `Link` знімає префікс `..\..\artifacts\wizard-payload\`, лишаючи лише
+    те, що після нього: `Ecr.msi` — у корінь публікації, `sql\NN-*.sql` —
+    у підтеку `sql\`. Разом із `-p:PublishSingleFile=true
+    -p:IncludeAllContentForSelfExtract=true` (застосовується лише в
+    `dotnet publish`, тут не заданий навмисно — звичайний `dotnet build`
+    цієї зміни не потребує) це вбудовує payload У САМ .exe: сервер
+    отримує РІВНО один файл, розпакування — в тимчасову теку при кожному
+    запуску, куди й так уже дивляться ResolveScriptPath/TryDetectMsi
+    (AppContext.BaseDirectory) — без жодної зміни коду майстра.
+    Коли теки немає (build/publish без попереднього build-installer.ps1
+    кроку) — глоб просто нічого не знаходить, помилки немає.
+  -->
+  <ItemGroup>
+    <Content Include="..\..\artifacts\wizard-payload\**\*.*">
+      <Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
