@@ -13,26 +13,39 @@
                              14-agent-jobs.sql, якщо не задано -FirstDeployment.
       3. MSI              — build-msi.ps1 (якщо -MsiPath не задано), потім
                              msiexec /qn.
-      4. Секрети служби   — рядок підключення й (за потреби, перше
-                             розгортання) пароль bootstrap-адміністратора —
-                             у реєстрі служби (HKLM\...\Services\EcrApi\
-                             Environment), НЕ у файлі: секрети ніколи не
-                             потрапляють у appsettings.json (D-11,
-                             docs/build/04-environment.md §6) — і
-                             `%ProgramData%\ECR\config\appsettings.
-                             Production.json` тут не виняток, хоч і не файл
-                             публікації. Знайдено реальним прогоном людини
-                             (Q-213): без рядка підключення застосунок падає
-                             з "Рядок підключення 'Ecr' не заданий" при
-                             будь-якій спробі стартувати службу.
+      4. Секрети служби   — рядок підключення (постійний секрет — служба
+                             читає його щоразу при старті) у реєстрі служби
+                             (HKLM\...\Services\EcrApi\Environment), НЕ у
+                             файлі: секрети ніколи не потрапляють у
+                             appsettings.json (D-11, docs/build/
+                             04-environment.md §6) — і `%ProgramData%\ECR\
+                             config\appsettings.Production.json` тут не
+                             виняток, хоч і не файл публікації. Знайдено
+                             реальним прогоном людини (Q-213): без рядка
+                             підключення застосунок падає з "Рядок
+                             підключення 'Ecr' не заданий" при будь-якій
+                             спробі стартувати службу. Пароль
+                             bootstrap-адміністратора (за потреби, перше
+                             розгортання) — НЕ туди: він одноразовий (на
+                             відміну від рядка підключення), тож пишеться в
+                             окремий файл `%ProgramData%\ECR\config\
+                             bootstrap.secret` з ACL лише на обліковий
+                             запис служби — застосунок сам читає й видаляє
+                             його одразу після першого старту (директива
+                             №13, Q-215, `BootstrapSecretFile.cs`).
       5. Конфігурація     — appsettings.Production.json у %ProgramData%\ECR\
                              config: НЕсекретні значення (наприклад,
                              Telemetry:OtlpEndpoint), пише лише в ПОРОЖНІЙ
                              заповнювач, ніколи не перезаписує заповнений
                              (`Folders.wxs`: NeverOverwrite; той самий
                              принцип тут — на рівні оркестратора, а не MSI).
-      6. Старт служби     — лише якщо -ServiceAccount задано і служба сама
-                             не піднялась.
+      6. Старт служби     — лише якщо -ServiceAccount задано; тоді
+                             БЕЗУМОВНИЙ Restart-Service, навіть якщо MSI
+                             (Q-212) уже підняв службу під час msiexec
+                             кроком 3, до того, як цей скрипт устиг
+                             записати секрети кроком 4 — свіжозаписане
+                             оточення побачить лише новий запуск процесу,
+                             не вже працюючий.
       7. Здоров'я         — GET /health/live.
 
     Крок схеми виконується під `-SqlLogin`/інтегрованими обліковими даними
@@ -93,15 +106,21 @@
 
 .PARAMETER BootstrapPassword
     Пароль для одноразового локального адміністратора `bootstrap`
-    (`Ecr.Application.Security.BootstrapAdmin`) — пишеться як
-    `ECR_Bootstrap__Password` у той самий реєстр служби, що й
-    `-ConnectionString`, тим самим механізмом. Потрібен ЛИШЕ на першому
+    (`Ecr.Application.Security.BootstrapAdmin`). НЕ йде в реєстр служби —
+    на відміну від `-ConnectionString`, цей секрет одноразовий: потрібен
+    рівно одному виклику при першому старті, а не щоразу, коли служба
+    піднімається. Тримати його в реєстрі назавжди означало б ще один
+    секрет, який довелося б прибирати вручну. Замість цього пишеться у
+    файл `%ProgramData%\ECR\config\bootstrap.secret` з ACL, обмеженим лише
+    обліковим записом служби (`-ServiceAccount`, або `NT AUTHORITY\SYSTEM`
+    для Local System) і `BUILTIN\Administrators` — застосунок сам читає
+    цей файл і одразу видаляє його при першому старті (директива №13,
+    Q-215, `BootstrapSecretFile.cs`, `StartupSequence.cs`), незалежно від
+    того, чи вдалося пароль потім використати. Потрібен ЛИШЕ на першому
     розгортанні порожньої бази: застосунок сам створює користувача
     `bootstrap` з роллю `BootstrapAdministrator`, якщо жоден
     домен-адміністратор ще не існує, і сам деактивує його, щойно
-    домен-користувач отримає право `Security.ManageUsers` — після цього
-    прибери параметр і перезапусти службу без нього (реєстр служби
-    зберігає значення, поки не переписано явно).
+    домен-користувач отримає право `Security.ManageUsers`.
 
     Без пароля, зазначеного тут ХОЧ РАЗ (уручну чи цим параметром),
     увійти в порожню базу нічим — Windows-автентифікація (`Negotiate`)
@@ -254,6 +273,33 @@ function Set-ServiceEnvironmentVariable {
     $updated = Merge-ServiceEnvironmentEntry -Existing $existing -Name $Name -Value $Value
 
     Set-ItemProperty -Path $keyPath -Name Environment -Value $updated -Type MultiString
+}
+
+# ⚠ Директива №13 (Q-215): bootstrap-пароль — ОДНОРАЗОВИЙ, на відміну від
+# рядка підключення. У реєстрі служби він лишався б назавжди. Файл з ACL на
+# -ServiceAccount; застосунок сам читає й видаляє його при старті
+# (BootstrapSecretFile.cs, окрема зміна на боці .NET).
+function Set-BootstrapSecretFile {
+    param(
+        [Parameter(Mandatory)] [string] $ConfigFolder,
+        [Parameter(Mandatory)] [string] $Password,
+        [Parameter(Mandatory)] [string] $Principal   # DOMAIN\ecr-svc$, DOMAIN\user, чи NT AUTHORITY\SYSTEM
+    )
+
+    $path = Join-Path $ConfigFolder 'bootstrap.secret'
+    Set-Content -Path $path -Value $Password -Encoding UTF8 -NoNewline
+
+    $acl = Get-Acl -Path $path
+    $acl.SetAccessRuleProtection($true, $false)   # прибрати успадкування — не звичайний файл конфігу
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+
+    $account = New-Object System.Security.Principal.NTAccount($Principal)
+    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+        $account, 'Read,Delete', 'Allow'))
+    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+        'BUILTIN\Administrators', 'FullControl', 'Allow'))
+
+    Set-Acl -Path $path -AclObject $acl
 }
 
 # ⚠ Окрема функція, а не вбудований код кроку 4: єдиний спосіб перевірити
@@ -434,14 +480,16 @@ elseif ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\
 }
 
 if ($BootstrapPassword) {
-    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
-            'записати ECR_Bootstrap__Password')) {
-        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Bootstrap__Password' `
-            -Value (ConvertFrom-SecureStringPlain $BootstrapPassword)
-        Write-Host ("Пароль bootstrap-адміністратора записано. Після першого входу під " +
-            "користувачем 'bootstrap' і видачі прав реальному домен-акаунту — прибери цей " +
-            "параметр і перезапусти службу (докладніше: -BootstrapPassword у Get-Help).") `
-            -ForegroundColor Green
+    # ⚠ Local System — окремий випадок: обліковий запис комп'ютера немає
+    # сенсу писати як ACL-принципал так само, як доменний, бо служба під
+    # ним працює як NT AUTHORITY\SYSTEM.
+    $principal = if ($ServiceAccount) { $ServiceAccount } else { 'NT AUTHORITY\SYSTEM' }
+
+    if ($PSCmdlet.ShouldProcess((Join-Path (Split-Path $configPath -Parent) 'bootstrap.secret'),
+            'записати одноразовий файл bootstrap-пароля')) {
+        Set-BootstrapSecretFile -ConfigFolder (Split-Path $configPath -Parent) `
+            -Password (ConvertFrom-SecureStringPlain $BootstrapPassword) -Principal $principal
+        Write-Host "Одноразовий файл пароля записано — застосунок прибере його сам після першого старту." -ForegroundColor Green
     }
 }
 else {
@@ -476,11 +524,15 @@ if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована, але не стартує (навмисно, docs/build/10-installer.md §1.4)." -ForegroundColor Yellow
 }
 else {
+    # ⛔ БЕЗУМОВНИЙ перезапуск, не "старт, якщо не Running": MSI (Q-212)
+    # стартує службу ПІД ЧАС msiexec, ДО того, як цей скрипт встиг записати
+    # секрети кроком 4 — щойно записане оточення побачить лише СВІЖИЙ запуск
+    # процесу, не вже працюючий.
     $svc = Get-Service -Name EcrApi -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq 'Running') {
-        Write-Host 'Служба вже Running.' -ForegroundColor Green
+    if ($svc -and $PSCmdlet.ShouldProcess('EcrApi', 'Restart-Service')) {
+        Restart-Service -Name EcrApi -Force
     }
-    elseif ($PSCmdlet.ShouldProcess('EcrApi', 'Start-Service')) {
+    elseif (-not $svc -and $PSCmdlet.ShouldProcess('EcrApi', 'Start-Service')) {
         Start-Service -Name EcrApi
     }
 }
