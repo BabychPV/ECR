@@ -202,6 +202,17 @@ powershell -File tools/verify-sql-scripts.ps1
 ⚠ `-b` теж: без нього `sqlcmd` повертає 0 навіть після помилки, і конвеєр
 вважає розгортання успішним.
 
+### Стисла форма: `tools/deploy-ecr.ps1`
+
+Уся послідовність вище — схема, MSI, конфігурація, старт служби,
+перевірка здоров'я — одним викликом, без ризику пропустити крок уручну
+(директива №12, `docs/build/10-installer.md` §10):
+
+```powershell
+.\tools\deploy-ecr.ps1 -SqlInstance <instance> -Database ECR `
+    -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -WhatIf   # спершу план
+```
+
 ### Гейт продуктивності `BR-07`
 
 ```powershell
