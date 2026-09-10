@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Ребілд Ecr.Api, потім збірка MSI одним викликом.
 .EXAMPLE
