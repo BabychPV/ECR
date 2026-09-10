@@ -711,6 +711,8 @@ USING (VALUES
     (N'sources.emptyHint',               N'en', N'Without sources the system works fine: data is entered by hand.', 1),
     (N'jobs.pick',                       N'en', N'Enter a job id', 1),
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
+    (N'jobs.restart',                    N'en', N'Restart', 1),
+    (N'jobs.restarting',                 N'en', N'Restarting…', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
 
@@ -964,6 +966,28 @@ USING (VALUES
     (N'periods.templateVersionHint',     N'en', N'Published versions only: a draft has no frozen structure.', 1),
     (N'periods.policy',                  N'en', N'Period policy', 1),
     (N'periods.policyHint',              N'en', N'Grace and hard-close offsets in days; they define when a period stops accepting data.', 1),
+    -- T6/#36: кількість періодів для `Custom` — без цього поля вид
+    -- `PeriodKind.Custom` був оголошений у домені й недосяжний через
+    -- інтерфейс, бо форма не мала звідки взяти кількість.
+    (N'periods.customCount',             N'en', N'Number of periods', 1),
+    (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
+    -- T6/#37: CRUD політик періодів — до цього завести чи змінити політику
+    -- можна було лише сідингом або рукою DBA.
+    (N'periods.managePolicies',          N'en', N'Manage policies', 1),
+    (N'periods.policyCode',              N'en', N'Code', 1),
+    (N'periods.policyOpenOffset',        N'en', N'Open offset (days)', 1),
+    (N'periods.policyGraceOffset',       N'en', N'Grace offset (days)', 1),
+    (N'periods.policyHardClose',         N'en', N'Hard-close offset (days)', 1),
+    (N'periods.policyYearGrace',         N'en', N'Year grace (days)', 1),
+    (N'periods.policyCreate',            N'en', N'Add policy', 1),
+    (N'periods.policyCreated',           N'en', N'The policy is created.', 1),
+    (N'periods.policyUpdated',           N'en', N'The policy is updated. Projects pick up the new offsets on their next calendar rebuild.', 1),
+    -- T6/#52: зміна поясу майданчика — дозволена лише поки жоден період не
+    -- відкривався (ФВ-1.1a); кнопка доступна лише чернетці з тієї ж причини,
+    -- що й активація вище.
+    (N'periods.timezoneChange',          N'en', N'Change time zone', 1),
+    (N'periods.timezoneChangeHint',      N'en', N'Allowed only while every period of the project is still Scheduled: once one opens, the boundaries become someone''s obligation.', 1),
+    (N'periods.timezoneChanged',         N'en', N'The site time zone is changed.', 1),
     (N'workflow.route',                  N'en', N'Approval route', 1),
     (N'workflow.routeHint',              N'en', N'Who approves, and in what order', 1),
     (N'workflow.routeEmptyHint',         N'en', N'No route means single-stage approval: one holder of the Approve level is enough. Removing every step returns the project to that.', 1),

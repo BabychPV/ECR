@@ -32,6 +32,9 @@ public interface IPeriodStore
     /// </remarks>
     public Task<IReadOnlyList<PeriodPolicy>> ListPoliciesAsync(CancellationToken ct);
 
+    /// <summary>Додає нову політику періодів (T6/#37).</summary>
+    public void AddPolicy(PeriodPolicy policy);
+
     /// <summary>Період із <c>UPDLOCK</c> до кінця транзакції.</summary>
     public Task<Period?> LockAsync(int periodId, CancellationToken ct);
 

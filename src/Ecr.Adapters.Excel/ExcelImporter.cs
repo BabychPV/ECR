@@ -165,25 +165,17 @@ public sealed class ExcelImporter(
     }
 
     /// <inheritdoc />
+    public async Task<int> CountPendingChangesAsync(string previewToken, CancellationToken ct)
+    {
+        var plan = await LoadPlanAsync(previewToken, documentId: null, ct).ConfigureAwait(false);
+
+        return plan.Tables.Sum(t => t.Changes.Count);
+    }
+
+    /// <inheritdoc />
     public async Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(previewToken);
-
-        var stored = await previews.FindAsync(previewToken, ct).ConfigureAwait(false)
-                     ?? throw new BusinessRuleException(
-                         "ECR-IMP-0422",
-                         "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.");
-
-        var plan = JsonSerializer.Deserialize<ImportPlan>(stored, Options)
-                   ?? throw new BusinessRuleException(
-                       "ECR-IMP-0422", "Збережений перегляд імпорту не читається.");
-
-        if (plan.DocumentId != documentId)
-        {
-            throw new BusinessRuleException(
-                "ECR-IMP-0422",
-                $"Перегляд належить документу {plan.DocumentId}, а застосування йде в {documentId}.");
-        }
+        var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
 
         var applied = 0;
         var versions = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -228,6 +220,45 @@ public sealed class ExcelImporter(
         await previews.RemoveAsync(previewToken, ct).ConfigureAwait(false);
 
         return new PatchCellsResponse(applied, versions, validation);
+    }
+
+    /// <summary>
+    /// Читає й розбирає раніше збережений <see cref="ImportPlan"/>.
+    /// </summary>
+    /// <param name="previewToken">Токен перегляду.</param>
+    /// <param name="documentId">
+    /// Документ застосування; <c>null</c> — виклик лише РАХУЄ зміни
+    /// (<see cref="CountPendingChangesAsync"/>) і документ ще невідомий обробнику.
+    /// </param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Спільна для <see cref="CountPendingChangesAsync"/> і
+    /// <see cref="ApplyAsync"/> (директива №11, T10 #45): порогове рішення
+    /// «синхронно чи в чергу» рахує зміни ТИМ САМИМ читанням, яким їх потім
+    /// застосовують, — другий незалежний розбір <c>previewToken</c> міг би
+    /// одного дня порахувати інакше, ніж застосує.
+    /// </remarks>
+    private async Task<ImportPlan> LoadPlanAsync(string previewToken, long? documentId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(previewToken);
+
+        var stored = await previews.FindAsync(previewToken, ct).ConfigureAwait(false)
+                     ?? throw new BusinessRuleException(
+                         "ECR-IMP-0422",
+                         "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.");
+
+        var plan = JsonSerializer.Deserialize<ImportPlan>(stored, Options)
+                   ?? throw new BusinessRuleException(
+                       "ECR-IMP-0422", "Збережений перегляд імпорту не читається.");
+
+        if (documentId is not null && plan.DocumentId != documentId)
+        {
+            throw new BusinessRuleException(
+                "ECR-IMP-0422",
+                $"Перегляд належить документу {plan.DocumentId}, а застосування йде в {documentId}.");
+        }
+
+        return plan;
     }
 
     /// <summary>Відкриває книгу або каже, що це не книга.</summary>

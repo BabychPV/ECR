@@ -23,6 +23,7 @@ public sealed class ImportAccessTests
     private const long DocumentId = 700;
 
     private readonly IExcelImporter _importer = Substitute.For<IExcelImporter>();
+    private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
@@ -73,7 +74,7 @@ public sealed class ImportAccessTests
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
-            () => new ApplyImportHandler(_importer, _access, _user)
+            () => new ApplyImportHandler(_importer, _jobs, _access, _user)
                 .HandleAsync(DocumentId, "token-1", CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);

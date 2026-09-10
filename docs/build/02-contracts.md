@@ -2175,6 +2175,20 @@ public interface IJobProgressStore
 }
 ```
 
+#### `IConsistencyMetrics`
+
+Видимість знахідок `ConsistencyCheckJob` у метриках (директива №11, T10 #41).
+Порт, а не прямий виклик `EcrMetrics`: та живе в `Ecr.Api`, а
+`ConsistencyCheckJob` — в `Ecr.Infrastructure`, яка на `Ecr.Api` не
+посилається.
+
+```csharp
+public interface IConsistencyMetrics
+{
+    public void RecordIssues(int count, string kind);
+}
+```
+
 #### `IMethodologyDraftStore`
 
 Сховище **редагованої** частини методології (`ФВ-9.15`): усі версії, включно з чернетками, і формули, які в чернетці правлять. Порт окремий від `IMethodologyStore` навмисно — той обслуговує розрахунок і показує лише опубліковане, бо рахувати чернеткою не можна ніколи. Клон версії переносить **весь** вміст джерела; за повнотою переліку стежить архітектурний сторож.
@@ -2532,7 +2546,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-PRD-0404` | 404 | періоду з таким ключем у проєкті немає |
 | `ECR-PRD-0422` | 422 | період поза межами проєкту (ФВ-1.11) |
 | `ECR-PRD-4223` | 422 | `Reopen` документа при закритому періоді |
-| `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108) |
+| `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108); **або** кількість періодів `Custom` не ділить рік нарівно |
+| `ECR-PRD-4225` | 422 | політика періодів: пільговий строк довший за жорстке закриття, або річний пільговий строк від'ємний (T6/#37) |
+| `ECR-PRD-4091` | 409 | політика періодів із таким кодом уже існує (`UQ_PeriodPolicy`, T6/#37) |
 | `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13) |
 | `ECR-SIM-0403` | 403 | спроба запису в сеансі симуляції (`SimulationReadOnly`, ФВ-6.16a) |
 | `ECR-SIM-0422` | 422 | симуляція самого себе або без причини |
@@ -2562,6 +2578,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
+| `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
+| `ECR-JOB-0409` | 409 | ручний перезапуск задачі, яка не в стані `Failed` (директива №11, T10 #40) |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
 | `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`) |
 
@@ -2648,12 +2666,15 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/projects` | `Document.View` | 1 |
 | `POST` | `/api/v1/projects` | `Project.Manage` | 1 |
 | `GET` | `/api/v1/projects/period-policies` | `Project.Manage` | 1 |
+| `POST` | `/api/v1/projects/period-policies` | `Project.Manage` | 8 |
+| `PUT` | `/api/v1/projects/period-policies/{id}` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/current-period` | `Period.Configure` | 3 |
+| `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
@@ -2717,6 +2738,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |

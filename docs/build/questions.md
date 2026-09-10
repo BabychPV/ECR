@@ -245,8 +245,10 @@
 | Q-197 | CONFLICT | `PiSqlClientDataSource.DefaultCatalogQuery` читав неіснуючі колонки `a.UOM`/`a.Type` з `[Master].[Element].[Attribute]` — офіційна AVEVA PI SQL DAS (RTQP Engine) Reference і продуктивний експорт NCOC (63 процедури, 0 входжень старих імен) сходяться на `UnitOfMeasure`/`ValueType` | RESOLVED · `PiSqlClientDataSource.cs`, PR #114 |
 | Q-199 | CONFLICT | Директива №11, трек T3 (`#20`+`#48`, один Q-номер на трек): bootstrap-адміністратор вимикався лише при СТВОРЕННІ нового користувача, не при заміні ролей наявному через `PUT .../users/{id}/roles`; межі чинності призначення — див. Q-196 | RESOLVED |
 | Q-201 | CONFLICT | Директива №11, трек T5: `PublishTemplateVersionHandler.PublishAsync` писав у `aud.PublicationEvent.ChangeReason` однаковий літерал `"Publish"` на кожен виклик — рядок, що виглядає як причина публікації версії шаблону, але нею не є | RESOLVED · `PublishVersionRequest`, PR #121 |
+| Q-202 | SCOPE | Директива №11, трек T6 (`#36`→`#37`→`#52`): `ProjectsController.cs` не мав жодного шляху задати межі `Custom`-періоду, редагувати політику періодів (`YearGraceOffsetDays` зашитий `45`) чи змінити часовий пояс проєкту — усі три механізми існували в домені й були недосяжні з API | RESOLVED · `CreateProjectHandler`, `PeriodPolicyCrudHandlers`, `ChangeProjectTimeZoneHandler` |
 | Q-203 | CONFLICT | Директива №11, трек T7 (`#38`/`#43`): `useCellPatch.ts` обіцяв коментарем дебаунс і збереження при закритті вкладки — жодне не існувало; `AllowWithConfirmation` рахувалася (`PeriodAccessRules.Evaluate`), але `AccessDecisionService.Decide()` відкидала її, і від звичайного дозволу вона ніде не відрізнялася | RESOLVED · `autosave.ts`, `EditDecision.cs`, `AccessDecisionService.cs`, `DocumentGrid.tsx`, PR #119 |
 | Q-205 | SCOPE | T9 директиви №11 — перемикач мови інтерфейсу (en/ru/kz): `setLanguage` не мав жодного викликача, англійський fallback уже працював справно | RESOLVED · `LanguageSwitcher.tsx`, `UserMenu.tsx`, PR #116 |
+| Q-206 | SCOPE | Директива №11, T10 (п'ять незалежних знахідок): #40 нема ретраю фонових задач і ручного перезапуску; #41 `EcrMetrics.RecordConsistencyIssues` без викликача; #44 `ScriptVersion` (рівень 2) без творця — власна таблиця в схемі; #45 `ApplyImportHandler` завжди синхронний; #50 `ICellStore.BulkInsertAsync`/`ICalculationResultStore.ReserveResultIdRangeAsync` — мертві члени порту | RESOLVED частково · #40/#41/#45/#50 закрито, #44 STOPPED (схемна міграція, рішення людини) |
 | Q-207 | CONFLICT | Директива №11, трек T11 (чотири самосуперечності пакета документації): `decisions.md` цитує «директива №04 §3» для двох різних тез; `07-checkpoints.md` каже «сім етапів `0`…`6`», хоча в самому документі є `ЕТАП 7` і згадка `ЕТАП 8`; шапка `02-requirements.md` підсумовує 215, фактичних листових вимог — 253; `04-environment.md`/`09-commands.md` стверджували, що інтеграційні тести виключені з `dotnet test` за замовчуванням, а `verify-all.ps1` жодного фільтра `Category` не застосовує | RESOLVED |
 | Q-208 | SCOPE | `docs/build/02a-db-schema.md` §17 (`MERGE sys_ecr.UiString`) — 15 рядків під іменами `auth.*`, розбіжними з кодом (`login.*`); чинний `09-seed.sql` того самого MERGE має ~940 рядків. Коментар файлу каже «витягнуто ДОСЛІВНО … правити треба контракт» — контракт не правили роками | OPEN |
 
@@ -8966,6 +8968,80 @@ guard-перевірки (`if (string.IsNullOrWhiteSpace(reason))` → `if (fals
 
 ---
 
+### Q-202 · SCOPE · Директива №11, трек T6, 2026-09-10 · `ProjectsController.cs` не мав ендпоінтів для меж `Custom`-періоду, CRUD політик періодів чи зміни часового поясу проєкту
+
+**Де:** `src/Ecr.Api/Controllers/ProjectsController.cs`,
+`src/Ecr.Domain/Services/PeriodCalendar.cs`,
+`src/Ecr.Domain/Entities/Documents/{Project,PeriodPolicy}.cs`.
+
+**Що знайшлося (перевірено особисто автором директиви, `[факт]`):** три
+незалежні механізми існували в домені й були недосяжні з API:
+
+1. **`#36`.** `PeriodKind.Custom` розумів домен (`PeriodCalendar.CountFor`
+   приймав `customCount`), але `CreateProjectRequest` не мав поля його
+   задати — кожен `Custom`-проєкт падав на `ECR-PRD-4224` на першому
+   `GET .../periods`.
+2. **`#37`.** Політик періодів не можна було ні створити, ні змінити:
+   `YearGraceOffsetDays` завжди зашитий `45` у конструкторі `Project`,
+   незалежно від обраної політики.
+3. **`#52`.** `Project.ChangeTimeZone` — повністю коректний, укритий
+   доменними тестами (`ProjectTimeZoneIanaTests`,
+   `TimeZoneImmutabilityTests`) метод — не мав ЖОДНОГО прикладного
+   обробника чи маршруту, що його кличе.
+
+#### Закрито
+
+1. `CreateProjectRequest`/`CreateProjectHandler` отримали
+   `CustomPeriodCount`, перевірений одразу при створенні через
+   `PeriodCalendar.CountFor` — заразом виправлено суміжний дефект:
+   `CountFor` мовчки приймав кількість, що не ділить рік порівну (напр. 5),
+   лишаючи «хвіст» року (листопад/грудень) поза жодним періодом; тепер
+   такий вибір відхиляється як `ECR-PRD-4224`. Значення зберігається в
+   наявному `ExternalSettingsJson` — без міграції схеми.
+2. `PeriodPolicy` отримав валідацію офсетів (конструктор і новий
+   `UpdateOffsets`, `ECR-PRD-4225`) плюс `POST`/`PUT
+   /api/v1/projects/period-policies(/{id})` (право `Project.Manage`,
+   дублікат коду — `ECR-PRD-4091`/409, не сирий `UQ_PeriodPolicy`).
+   `CreateProjectHandler` тепер підвантажує обрану політику і бере з неї
+   `YearGraceOffsetDays` замість константи `45`.
+3. `ChangeProjectTimeZoneHandler` + `PUT /api/v1/projects/{id}/timezone`
+   (право `Project.Manage` на конкретний проєкт, той самий патерн, що
+   `Activate`/`Archive`/`Clone`) — тонкий прохідний виклик, домен
+   лишається єдиним джерелом правила `ECR-PRD-0409` («не після відкриття
+   першого періоду»).
+
+**Друга частина `#52` (деактивація «шести пов'язаних сутностей») —
+НЕ реалізована.** Жоден текст у репозиторії (код, коментарі, історія
+git) не називає, які саме шість сутностей маються на увазі, і сама
+директива позначає цей підпункт як «частково незрозуміло». Вигадати
+шість сутностей означало б відповісти на запитання, яке не моє (той
+самий виняток «факти проти судження») — назване тут прямо, а не
+пропущене мовчки.
+
+**Доказ (D-134):**
+- `#36`: `SequenceRangeTests`/`CreateProjectTests` — `customPeriodCount`
+  5/0/13 відхиляються `ECR-PRD-4224`; вимкнення перевірки `12 % count != 0`
+  у `PeriodCalendar.CountFor` дає червоний (календар мовчки губить
+  листопад/грудень), відновлення — зелений.
+- `#37`: `PeriodPolicyTests`/`PeriodPolicyCrudTests` — політика з
+  `GraceOffsetDays > HardCloseOffsetDays` відхиляється і конструктором, і
+  `UpdateOffsets`; вимкнення перевірки в `PeriodPolicy.ApplyOffsets` дає
+  червоний, відновлення — зелений.
+- `#52`: перевикористано наявне доменне покриття
+  (`TimeZoneImmutabilityTests`) плюс новий `ChangeProjectTimeZoneTests` і
+  сценарій T6/#52 — вимкнення перевірки `period.State !=
+  PeriodState.Scheduled` у `Project.ChangeTimeZone` дає мовчазний успіх
+  після відкриття періоду (червоний), відновлення — зелений.
+
+Перевірено: `dotnet build ECR.sln` чисто; 52 нових/змінених тести
+`Ecr.Application.Tests`, 6 `Ecr.Domain.Tests`, 8 сценаріїв
+(`ProjectAndPeriodScenarios`, реальний HTTP на SQL Server) — усі зелені.
+
+**Статус:** RESOLVED · часткове — `#36`/`#37`/`#52` (прохід) закрито,
+деактивація шести сутностей лишається невідповідженим фактом, не судженням
+
+---
+
 ### Q-203 · CONFLICT · Директива №11, трек T7 (`#38` автозбереження, `#43` AllowWithConfirmation), 2026-09-10
 
 **Де:** `src/Ecr.Web/src/features/grid/useCellPatch.ts`,
@@ -9070,6 +9146,118 @@ en/ru/kz) уже існували в реєстрі до цієї роботи.
 `localStorage` (`uiLanguage`), що залежить лише від нього.
 
 **Статус:** RESOLVED · PR #116
+
+---
+
+### Q-206 · SCOPE · Директива №11, T10, 2026-09-09 · п'ять незалежних знахідок аудиту (`#40`, `#41`, `#44`, `#45`, `#50`)
+
+**Де:** `src/Ecr.Infrastructure/Jobs/QuartzJobAdapter.cs`,
+`src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs`,
+`src/Ecr.Application/Integration/IntegrationHandlers.cs` (`RestartJobHandler`),
+`src/Ecr.Api/Controllers/JobsController.cs` (`#40`); `src/Ecr.Api/Observability/EcrMetrics.cs:114`,
+`src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs`,
+`src/Ecr.Application/Ports/IConsistencyMetrics.cs`,
+`src/Ecr.Api/Observability/ConsistencyMetricsAdapter.cs` (`#41`);
+`src/Ecr.Domain/Entities/Calculations/ScriptVersion.cs` (`#44`, НЕ ЧІПАВ);
+`src/Ecr.Application/Documents/ExcelExchangeHandlers.cs` (`ApplyImportHandler`),
+`src/Ecr.Infrastructure/Jobs/ExcelImportJob.cs` (`#45`);
+`src/Ecr.Application/Ports/ICellStore.cs`, `src/Ecr.Application/Ports/ICalculationResultStore.cs`,
+`src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs`,
+`src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`#50`).
+
+**Що знайшлося й що зроблено:**
+
+**#40 — нема `RetryPolicy`.** Підтверджено: `QuartzJobAdapter.Execute` ловив
+провал, писав `Failed` і кидав `JobExecutionException(refireImmediately: false)`
+— жодного ретраю, жодного способу перезапустити задачу, крім постановки
+НОВОЇ (з новим `jobId`, втратою зв'язку з попереднім прогресом). Додано
+експоненційний відступ — до трьох ретраїв (`QuartzJobAdapter.MaxRetryAttempts`,
+30 с / 60 с / 120 с; судження, задокументоване в коді) — і ендпоінт
+`POST /api/v1/jobs/{jobId}/restart` (право `System.ViewHealth`, лише для
+задачі в стані `Failed`). Обидва спираються на `.StoreDurably()` у
+`QuartzJobScheduler.EnqueueCoreAsync`: задача, яка вичерпала ретраї, лишається
+в планувальнику (успіх/скасування прибирають деталь самі), тож перезапуск
+має що перезапускати. D-134: тимчасово прибрано перевірку
+`attempt < MaxRetryAttempts` (замінено на `false`) — тест
+`Провал_після_вичерпання_ліміту_...` у
+`QuartzJobAdapterRetryTests.cs` (той, що очікує РІВНО одну зупинку на межі)
+почервонів, бо ретрай планувався б і на межі; повернуто, зелено.
+
+**#41 — мертва метрика.** Підтверджено: `EcrMetrics.RecordConsistencyIssues`
+(рядок 114) не мав жодного викликача — `ConsistencyCheckJob` пише знахідки
+лише в `aud.ConsistencyIssue`. Проблема шару: `ConsistencyCheckJob` живе в
+`Ecr.Infrastructure`, яка на `Ecr.Api` (де `EcrMetrics`) не посилається.
+Додано порт `IConsistencyMetrics` (`Ecr.Application.Ports`) з адаптером
+`ConsistencyMetricsAdapter` у `Ecr.Api`, зареєстрованим у `Program.cs`
+поруч із самим `EcrMetrics`. `ConsistencyCheckJob.ExecuteAsync` тепер кличе
+`metrics.RecordIssues(count, ruleCode)` за КОЖНИМ різновидом знахідки
+(`GroupBy(RuleCode)`) після побудови списку `issues`. D-134: тимчасово
+прибрано виклик `metrics.RecordIssues` — новий тест
+`Знахідка_видима_в_метриках` у `ConsistencyCheckJobDetectionTests.cs`
+почервонів (`metrics.Received(1).RecordIssues(...)` не справдився); повернуто,
+зелено.
+
+**#44 — `ScriptVersion` без творця. ЗУПИНЕНО, код не змінено.** Підтверджено:
+нуль `new ScriptVersion(` поза тестами (перевіряє й окремий сторож
+`MethodologyCloneCompletenessTests.Скрипт_рівня_2_не_створює_ніщо_...`),
+`MarkCompiled`/`MarkTested`/`HasGreenTest` теж без викликачів поза тестами
+власної сутності. Директива каже прибрати `ScriptVersion` і прапорець
+`HasGreenTest` — але `calc.ScriptVersion` це РЕАЛЬНА таблиця з РЕАЛЬНОЮ
+колонкою `HasGreenTest`, заведена міграцією `20260904232328_Stage4Calculations`
+і присутня в моделі БЕЗПЕРЕРВНО аж до найновішої міграції
+(`20260909161652_Q155NullableSnapshotModes`) — тобто застосована в кожному
+середовищі, що прогнало міграції за останні кілька днів. Прибрати сутність
+означає `DROP TABLE calc.ScriptVersion` (нова міграція), а не редагування
+коду. Це рівно сценарій, який сама директива називає підставою зупинитися:
+«якщо прибрати ризикованіше, ніж очікувалось — STOP і звітуй, а не форсуй
+схемну зміну». Судження про безпечність міграції — не моє.
+
+**Чому не вирішив сам (лише #44):** схемна міграція — завжди стоп у цьому
+проєкті, без винятку «але ця безпечна». Потрібне пряме підтвердження людини:
+чи можна `DROP TABLE calc.ScriptVersion` (і колонку `HasGreenTest`) новою
+міграцією зараз, чи рівень 2 залишиться в схемі до конкретнішого рішення про
+реліз, у якому він з'явиться.
+
+**#45 — синхронний імпорт без порогу.** Підтверджено: `ApplyImportHandler`
+завжди викликав `IExcelImporter.ApplyAsync` синхронно, на відміну від
+`ExportDocumentHandler`, який давно й безумовно йде в чергу. Додано
+`IExcelImporter.CountPendingChangesAsync` (рахує зміни РАНІШЕ побудованого
+`ImportPlan`, не розбираючи вдруге) і поріг
+`ApplyImportHandler.LargeImportThreshold = 2000` комірок — судження від уже
+задокументованого бюджету `ICellStore.ApplyAsync` (p95 &lt; 150 мс на 100
+комірок). Вище порогу — `IExcelImportJob` у черзі (той самий шлях запису,
+`IExcelImporter.ApplyAsync`, лише з боку задачі), контролер повертає `202` з
+`jobId`, як і в експорту; нижче — як і раніше, `200` синхронно. D-134:
+тимчасово замінено умову порогу на `false` (завжди синхронно) — новий тест
+`Великий_diff_не_блокує_запит_довше_за_поріг_часу` у
+`ApplyImportThresholdTests.cs` (штучно повільний `ApplyAsync`, бюджет 500 мс
+на виклик обробника) почервонів, бо обробник чекав на 5-секундну затримку
+синхронно; повернуто, зелено.
+
+**#50 — два мертві члени порту.** `ICellStore.BulkInsertAsync`: перевірено
+свіжим пошуком (не з довіри до `unreachable-mechanisms.md`, чий запис
+стверджував «використовує `ExcelImporter`» — неправда, `ExcelImporter`
+кличе лише `ReadSlicesAsync`) — нуль викликів поза власною реалізацією й
+тестами реалізації; `git log -S` показує єдиний комівт, що торкався методу
+(скелет). Прибрано з порту й реалізації; `BulkCellLoader.LoadAsync`
+(нижчий шар, на якому будувався метод) лишився — його напряму кличе
+`Ecr.DataGen` (реальний споживач: генератор обсягу). Два тести, що раніше
+викликали `store.BulkInsertAsync` заради перевірки `SqlBulkCopy`
+(перевірка ключів), переписано на прямий виклик `BulkCellLoader.LoadAsync`
+— та сама перевірка, без мертвого порту між нею й реалізацією.
+`ICalculationResultStore.ReserveResultIdRangeAsync`: підтверджено нуль
+ЗОВНІШНІХ викликів через порт (єдиний виклик — внутрішній, з
+`CalculationResultStore.WriteResultsAsync`, той самий об'єкт). Перевірено
+`RunCalculationHandler`: не викликає напряму, ідентифікатори видаються
+винятково всередині `WriteResultsAsync`. Прибрано з інтерфейсу
+`ICalculationResultStore`, зроблено `private` у `CalculationResultStore` —
+той самий шаблон, що вже мав сусідній `NextStepIdAsync` (private, ніколи не
+був на порту). Логіка жива й потрібна, просто не мала бути публічним
+контрактом.
+
+**Статус:** RESOLVED частково · `#40`/`#41`/`#45`/`#50` закрито кодом і
+тестами; `#44` — STOPPED, чекає підтвердження людини на схемну міграцію,
+PR #120
 
 ---
 

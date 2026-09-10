@@ -25,7 +25,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// </para>
 /// </remarks>
 public sealed class ConsistencyCheckJob(
-    EcrDbContext db, IOrphanScanner scanner, IClock clock) : IBackgroundJob
+    EcrDbContext db, IOrphanScanner scanner, IClock clock, IConsistencyMetrics metrics) : IBackgroundJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "consistency-check";
@@ -66,6 +66,16 @@ public sealed class ConsistencyCheckJob(
         var rescanned = await scanner.ScanAllAsync(ct).ConfigureAwait(false);
 
         await WriteIssuesAsync(issues, ct).ConfigureAwait(false);
+
+        // ⚠ Метрика — ЗА РІЗНОВИДОМ (RuleCode), а не одним сумарним числом
+        // (директива №11, T10 #41): "ORPHANED_CELL" росте поступово (хтось
+        // видаляє записи довідника), а "ARCHIVE_CHECKSUM" — це завжди
+        // системна аварія; злите в одне число, друге ховалося б у шумі
+        // першого на графіку.
+        foreach (var group in issues.GroupBy(i => i.RuleCode, StringComparer.Ordinal))
+        {
+            metrics.RecordIssues(group.Count(), group.Key);
+        }
 
         // ⚠ Підсумок пишеться ЗАВЖДИ, зокрема нульовий. Знахідка — баг, а не
         // шум (ФВ-7.7): якщо перевірка регулярно щось знаходить і це вважають

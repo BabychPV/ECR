@@ -160,8 +160,7 @@ public sealed class ConcurrencyTests(SqlServerFixture sql)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(ct: CancellationToken.None);
-        var store = new NormalizedCellStore(
-            builder.CreateContext(), new BulkCellLoader(sql.ConnectionString, 1000));
+        var store = new NormalizedCellStore(builder.CreateContext());
 
         var rows = new Dictionary<long, string>();
         foreach (var id in doc.RowIds)

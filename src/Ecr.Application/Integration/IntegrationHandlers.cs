@@ -188,3 +188,71 @@ public sealed class ListJobsHandler(
         return await jobs.ListRecentAsync(Limit, ct).ConfigureAwait(false);
     }
 }
+
+/// <summary>
+/// Ручний перезапуск проваленої фонової задачі. Право <c>System.ViewHealth</c>
+/// (директива №11, T10 #40).
+/// </summary>
+/// <remarks>
+/// ⛔ До цього обробника провалену задачу МІГ повторити лише автоматичний
+/// ретрай (<c>QuartzJobAdapter</c>) — а той зупиняється на межі спроб навмисно
+/// (D-134): систематично зламана задача не має спамити чергу вічно. Після
+/// цього людина, що полагодила причину (недоступне джерело, зайняте
+/// з'єднання), не мала способу сказати системі «спробуй знову» — лишалося
+/// ставити нову задачу вручну й губити її історію прогресу.
+/// <para>
+/// ⚠ Право — <c>System.ViewHealth</c>, те саме, що й перегляд і перелік, а не
+/// право автора власної задачі (як у <see cref="GetJobStatusHandler"/>):
+/// перезапуск — мутація стану системи, а не читання власного результату, і
+/// призначений для того, хто відповідає за чергу, а не для будь-кого, хто її
+/// поставив.
+/// </para>
+/// </remarks>
+public sealed class RestartJobHandler(
+    IBackgroundJobScheduler jobs,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Код помилки: задачу можна перезапустити, лише коли вона провалилась.</summary>
+    public const string NotFailedErrorCode = "ECR-JOB-0409";
+
+    /// <summary>Перезапускає провалену задачу.</summary>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="NotFoundException">Задачі немає, або деталь зникла з планувальника.</exception>
+    /// <exception cref="BusinessRuleException">Задача не в стані <c>Failed</c>.</exception>
+    public async Task HandleAsync(string jobId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
+
+        if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
+        {
+            throw new NotFoundException("ECR-JOB-0404", $"Задачі {jobId} не існує.");
+        }
+
+        if (!string.Equals(status.State, "Failed", StringComparison.Ordinal))
+        {
+            throw new BusinessRuleException(
+                NotFailedErrorCode,
+                $"Задача {jobId} у стані «{status.State}», перезапустити можна лише провалену.");
+        }
+
+        var restarted = await jobs.RestartAsync(jobId, ct).ConfigureAwait(false);
+
+        if (!restarted)
+        {
+            // ⚠ Стан у базі каже Failed, а деталі в планувальнику вже немає —
+            // сховище Quartz В ПАМ'ЯТІ (D-66) і не пережило перезапуск процесу
+            // між провалом і спробою перезапуску.
+            throw new NotFoundException(
+                "ECR-JOB-0404",
+                $"Задачу {jobId} не можна перезапустити: деталі задачі не пережили перезапуск сервера.");
+        }
+    }
+}
