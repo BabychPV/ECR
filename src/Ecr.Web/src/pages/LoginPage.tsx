@@ -12,12 +12,30 @@ import {
   Title,
 } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { isCatalogResolved, loadCatalog, preferredLanguage, t } from '@/shared/i18n';
+import { isCatalogFailed, isCatalogResolved, loadCatalog, preferredLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { useEffect } from 'react';
+
+/**
+ * Помилка «каталог перекладів не завантажився» (`D-138`).
+ *
+ * ⛔ Текст ЖОРСТКО закодований, а не з `t()`: якщо не завантажився сам
+ * каталог, будь-який виклик `t('...')` тут повернув би позначений ключ
+ * (`⟦...⟧`) замість пояснення причини — рівно той дефект, від якого це
+ * повідомлення й рятує. `EcrApiError` узято тому, що `ErrorAlert` показує
+ * `problem.title`/`message` напряму, у ЦЕЙ каталог не заглядаючи.
+ */
+const CATALOG_LOAD_FAILED = new EcrApiError({
+  title: 'Переклади інтерфейсу не завантажилися',
+  status: 0,
+  errorCode: 'ECR-I18N-CATALOG-FAILED',
+  correlationId: '-',
+  detail:
+    'Не вдалося завантажити текстовий каталог інтерфейсу. Перевірте з’єднання з мережею та оновіть сторінку.',
+});
 
 /**
  * Вхід: доменний і локальний.
@@ -74,6 +92,20 @@ export function LoginPage(): JSX.Element {
     return (
       <Center h="100vh">
         <Loader size="sm" />
+      </Center>
+    );
+  }
+
+  // ⛔ Каталог розв'язано, але невдало: показуємо причину, а не форму з
+  // голими ключами (`⟦login.title⟧` тощо) замість написів (`D-138`).
+  // Раніше «розв'язано порожнім через збій» і «розв'язано успішно» нічим не
+  // різнилися для цієї перевірки, і форма малювалася в обох випадках.
+  if (isCatalogFailed(preferredLanguage(), 'public')) {
+    return (
+      <Center h="100vh">
+        <Card withBorder w={380} p="lg">
+          <ErrorAlert error={CATALOG_LOAD_FAILED} />
+        </Card>
       </Center>
     );
   }
