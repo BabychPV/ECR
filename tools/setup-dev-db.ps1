@@ -44,6 +44,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження sqlcmd/dotnet
+# зупиняє скрипт ДО власної перевірки $LASTEXITCODE.
+$PSNativeCommandUseErrorActionPreference = $false
+
 if ($null -eq (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     Write-Error 'sqlcmd не знайдено. Саме ним виконується розгортання.'
 }

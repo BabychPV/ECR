@@ -22,6 +22,16 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# ⛔ PowerShell 7.3+: $PSNativeCommandUseErrorActionPreference за
+# замовчуванням $true — будь-який запис нативної команди в stderr (навіть
+# звичайне попередження, не помилку) підпадає під $ErrorActionPreference і
+# зупиняє скрипт ДО того, як власна перевірка $LASTEXITCODE нижче встигає
+# спрацювати. Реальний прогін упав саме тут: "npm warn deprecated ..." від
+# `npm ci` (не помилка, код виходу 0) зупинив збірку як "NativeCommandError".
+# Вимкнено навмисно: єдине джерело істини про успіх нативного виклику в
+# цьому скрипті — явний $LASTEXITCODE, як і скрізь нижче.
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root       = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $root 'artifacts\publish'
 $msiDir     = Join-Path $root 'artifacts\msi'

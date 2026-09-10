@@ -25,6 +25,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# ⛔ PS 7.3+: без цього нешкідливе stderr-попередження нативної команди
+# (dotnet/npm/wix) зупиняє скрипт ДО власної перевірки $LASTEXITCODE
+# (реальний прогін — build-msi.ps1, "npm warn deprecated" зупинив збірку).
+$PSNativeCommandUseErrorActionPreference = $false
+
 $root       = Split-Path -Parent $PSScriptRoot
 $apiProject = Join-Path $root 'src\Ecr.Api\Ecr.Api.csproj'
 $buildMsi   = Join-Path $root 'tools\build-msi.ps1'
