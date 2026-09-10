@@ -13,14 +13,25 @@
                              14-agent-jobs.sql, якщо не задано -FirstDeployment.
       3. MSI              — build-msi.ps1 (якщо -MsiPath не задано), потім
                              msiexec /qn.
-      4. Конфігурація     — appsettings.Production.json у %ProgramData%\ECR\
-                             config: пише лише в ПОРОЖНІЙ заповнювач, ніколи
-                             не перезаписує заповнений (`Folders.wxs`:
-                             NeverOverwrite; той самий принцип тут — на рівні
-                             оркестратора, а не MSI).
-      5. Старт служби     — лише якщо -ServiceAccount задано і служба сама
+      4. Рядок підключення — у реєстрі служби (HKLM\...\Services\EcrApi\
+                             Environment), НЕ у файлі: секрети ніколи не
+                             потрапляють у appsettings.json (D-11,
+                             docs/build/04-environment.md §6) — і
+                             `%ProgramData%\ECR\config\appsettings.
+                             Production.json` тут не виняток, хоч і не файл
+                             публікації. Знайдено реальним прогоном людини
+                             (Q-213): без цього кроку застосунок падає з
+                             "Рядок підключення 'Ecr' не заданий" при
+                             будь-якій спробі стартувати службу.
+      5. Конфігурація     — appsettings.Production.json у %ProgramData%\ECR\
+                             config: НЕсекретні значення (наприклад,
+                             Telemetry:OtlpEndpoint), пише лише в ПОРОЖНІЙ
+                             заповнювач, ніколи не перезаписує заповнений
+                             (`Folders.wxs`: NeverOverwrite; той самий
+                             принцип тут — на рівні оркестратора, а не MSI).
+      6. Старт служби     — лише якщо -ServiceAccount задано і служба сама
                              не піднялась.
-      6. Здоров'я         — GET /health/live.
+      7. Здоров'я         — GET /health/live.
 
     Крок схеми виконується під `-SqlLogin`/інтегрованими обліковими даними
     ВИКОНАВЦЯ скрипта (DBA), НІКОЛИ під `-ServiceAccount`: сервісний
@@ -56,6 +67,18 @@
 .PARAMETER ServicePassword
     Лише для не-gMSA облікового запису.
 
+.PARAMETER ConnectionString
+    Рядок підключення до -Database. Пишеться у реєстр служби
+    (`HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment`, REG_MULTI_SZ,
+    змінна `ECR_ConnectionStrings__Ecr`) — САМЕ там і НІКОЛИ у
+    appsettings.json-родину файлів (D-11). Без цього параметра служба
+    зареєструється й навіть підніметься (Windows Installer/SCM про нього
+    не знає), але сам застосунок одразу впаде з `InvalidOperationException`
+    при першій спробі побудувати DI-контейнер (Q-213, знайдено реальним
+    прогоном на LenovoNakuLaptop). Існуючі інші записи в Environment цієї
+    служби не чіпаються — лише ECR_ConnectionStrings__Ecr додається чи
+    замінюється.
+
     ⛔ Чесно, а не мовчки: Windows Installer не має механізму прочитати
     властивість MSI зі змінної оточення (на відміну від sqlcmd), а
     `installer/Ecr.Installer/*.wxs` цей PR НЕ чіпає (директива №12,
@@ -70,9 +93,11 @@
     Порт Kestrel і правило брандмауера. За замовчуванням 5000.
 
 .PARAMETER ConfigValues
-    Шлях до JSON-файлу з реальними значеннями appsettings.Production.json
-    цього майданчика. Записується ЛИШЕ якщо цільовий файл ще заповнювач
-    (порожній об'єкт) — інакше крок 4 попереджає і нічого не чіпає.
+    Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
+    цього майданчика (наприклад, Telemetry:OtlpEndpoint) — НІКОЛИ рядок
+    підключення чи інший секрет, для нього -ConnectionString (D-11).
+    Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
+    інакше крок 5 попереджає і нічого не чіпає.
 
 .PARAMETER MsiPath
     Готовий Ecr.msi. Якщо не задано — скрипт сам викликає
@@ -100,8 +125,9 @@
 
 .EXAMPLE
     # Перше розгортання на чистому сервері
+    $cs = Read-Host -AsSecureString -Prompt 'Рядок підключення'
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
-        -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 `
+        -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
         -ConfigValues .\uat-config.json -FirstDeployment
 
 .NOTES
@@ -126,6 +152,7 @@ param(
     [Parameter(Mandatory)] [string] $Database,
     [string] $ServiceAccount,
     [System.Security.SecureString] $ServicePassword,
+    [System.Security.SecureString] $ConnectionString,
     [int] $AppPort = 5000,
     [string] $ConfigValues,
     [string] $MsiPath,
@@ -158,6 +185,56 @@ function ConvertFrom-SecureStringPlain {
     finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
+# ⚠ Чиста функція, без реєстру, — єдиний спосіб перевірити (D-134) саме
+# логіку злиття без прав адміністратора й без реального ключа служби:
+# чужі записи Environment мають лишитись незайманими, змінюється лише
+# запис з іменем $Name (замінюється, якщо вже був, інакше додається).
+#
+# ⛔ `return ,(...)` — КОМА ОБОВ'ЯЗКОВА. Без неї PowerShell розгортає
+# масив з ОДНИМ елементом назад у скаляр на виході з функції (класична
+# пастка): $result.Count і далі показує 1 (ETS-властивість скаляра теж
+# дорівнює 1), але $result[0] тоді індексує СИМВОЛ рядка, а не елемент
+# масиву — і Set-ItemProperty -Type MultiString отримає рядок замість
+# REG_MULTI_SZ-масиву. Проявляється ЛИШЕ коли в реєстрі опиняється рівно
+# один запис (типово — перше встановлення без інших змінних служби), тож
+# без D-134 на порожньому масиві цей конкретний випадок легко не помітити.
+function Merge-ServiceEnvironmentEntry {
+    param(
+        [string[]] $Existing,
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Value
+    )
+
+    $prefix = "$Name="
+    $untouched = @($Existing | Where-Object { $_ -notlike "$prefix*" })
+    return ,([string[]]($untouched + "$prefix$Value"))
+}
+
+# ⚠ Windows Installer/MSI не має механізму передати змінну оточення в
+# процес служби (D-11 забороняє appsettings.json, а ServiceInstall у WiX
+# не бере оточення взагалі) — реєстр служби це єдиний канал, яким сам
+# Windows SCM користується для застосунків, що читають ASP.NET Core
+# `AddEnvironmentVariables`. Саме злиття — в Merge-ServiceEnvironmentEntry
+# вище; тут лише читання й запис реєстру.
+function Set-ServiceEnvironmentVariable {
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Value
+    )
+
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    if (-not (Test-Path $keyPath)) {
+        throw "Немає ${keyPath}: службу $ServiceName ще не встановлено (крок 3 мав відбутися першим)."
+    }
+
+    $prop = Get-ItemProperty -Path $keyPath -Name Environment -ErrorAction SilentlyContinue
+    $existing = if ($prop) { @($prop.Environment) } else { @() }
+    $updated = Merge-ServiceEnvironmentEntry -Existing $existing -Name $Name -Value $Value
+
+    Set-ItemProperty -Path $keyPath -Name Environment -Value $updated -Type MultiString
+}
+
 # ⚠ Окрема функція, а не вбудований код кроку 4: єдиний спосіб перевірити
 # цю логіку по-справжньому (D-134), не проганяючи весь конвеєр до msiexec
 # (реальний, а не заповнювач appsettings.Production.json — той самий факт
@@ -179,7 +256,7 @@ function Test-ConfigIsPlaceholder {
 
 # ⚠ ПЕРЕДУМОВИ — до будь-якої зміни системи (дешевша відмова тут, ніж на
 # кроці 3 з наполовину встановленою службою).
-Write-Step "Крок 1/6: передумови"
+Write-Step "Крок 1/7: передумови"
 
 if (-not (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
     throw "sqlcmd не знайдено. Ним DBA виконує розгортання — без нього продовжувати нема сенсу."
@@ -204,6 +281,11 @@ if ($ServicePassword) {
 }
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
+}
+if (-not $ConnectionString) {
+    Write-Warning ("-ConnectionString не задано — застосунок впаде з InvalidOperationException " +
+        "(D-11) при першій спробі стартувати, поки ECR_ConnectionStrings__Ecr не буде додано " +
+        "вручну в HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment.")
 }
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
@@ -237,10 +319,10 @@ try {
 
     # ---------------------------------------------------------------------
     if ($SkipSchema) {
-        Write-Step "Крок 2/6: схема — ПРОПУЩЕНО (-SkipSchema)"
+        Write-Step "Крок 2/7: схема — ПРОПУЩЕНО (-SkipSchema)"
     }
     else {
-        Write-Step "Крок 2/6: схема ($Database на $SqlInstance)"
+        Write-Step "Крок 2/7: схема ($Database на $SqlInstance)"
 
         New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 
@@ -283,7 +365,7 @@ finally {
 }
 
 # ---------------------------------------------------------------------
-Write-Step "Крок 3/6: MSI"
+Write-Step "Крок 3/7: MSI"
 
 if (-not $MsiPath) {
     if ($PSCmdlet.ShouldProcess('build-msi.ps1', "build-msi.ps1 -Version $Version")) {
@@ -317,7 +399,21 @@ if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
 }
 
 # ---------------------------------------------------------------------
-Write-Step "Крок 4/6: конфігурація ($configPath)"
+Write-Step "Крок 4/7: рядок підключення (реєстр служби EcrApi)"
+
+if (-not $ConnectionString) {
+    Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
+        "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
+}
+elseif ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+        'записати ECR_ConnectionStrings__Ecr')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' `
+        -Value (ConvertFrom-SecureStringPlain $ConnectionString)
+    Write-Host "Записано." -ForegroundColor Green
+}
+
+# ---------------------------------------------------------------------
+Write-Step "Крок 5/7: конфігурація ($configPath)"
 
 $isPlaceholder = Test-ConfigIsPlaceholder -Path $configPath
 
@@ -336,7 +432,7 @@ else {
 }
 
 # ---------------------------------------------------------------------
-Write-Step "Крок 5/6: старт служби"
+Write-Step "Крок 6/7: старт служби"
 
 if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована, але не стартує (навмисно, docs/build/10-installer.md §1.4)." -ForegroundColor Yellow
@@ -352,7 +448,7 @@ else {
 }
 
 # ---------------------------------------------------------------------
-Write-Step "Крок 6/6: перевірка здоров'я"
+Write-Step "Крок 7/7: перевірка здоров'я"
 
 $healthUrl = "http://localhost:$AppPort/health/live"
 if ($PSCmdlet.ShouldProcess($healthUrl, 'GET /health/live')) {
