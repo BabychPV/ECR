@@ -65,7 +65,8 @@ public sealed class UserAccessTests
     {
         var user = Add("ivanov");
 
-        var count = await Roles().HandleAsync(user.Id, ["Approver", "DataEntry"], CancellationToken.None);
+        var count = await Roles().HandleAsync(
+            user.Id, ["Approver", "DataEntry"], validity: null, CancellationToken.None);
 
         Assert.Equal(2, count);
         Assert.Equal(
@@ -85,8 +86,8 @@ public sealed class UserAccessTests
         // ⚠ «Хто це йому видав» — питання, на яке через рік має бути
         // відповідь, а не здогад. Тому в записі і те, що було, і те, що стало.
         var user = Add("petrov");
-        await Roles().HandleAsync(user.Id, ["DataEntry"], CancellationToken.None);
-        await Roles().HandleAsync(user.Id, ["Approver"], CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["DataEntry"], validity: null, CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["Approver"], validity: null, CancellationToken.None);
 
         var events = _audit.ReceivedCalls()
             .Where(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteSecurityEventAsync))
@@ -110,10 +111,11 @@ public sealed class UserAccessTests
         // ⛔ Призначити «те, що знайшлося» гірше за відмову: людина отримала б
         // частину повноважень і вважала б, що отримала всі.
         var user = Add("sydorenko");
-        await Roles().HandleAsync(user.Id, ["DataEntry"], CancellationToken.None);
+        await Roles().HandleAsync(user.Id, ["DataEntry"], validity: null, CancellationToken.None);
 
         await Assert.ThrowsAsync<NotFoundException>(
-            () => Roles().HandleAsync(user.Id, ["Approver", "NoSuchRole"], CancellationToken.None));
+            () => Roles().HandleAsync(
+                user.Id, ["Approver", "NoSuchRole"], validity: null, CancellationToken.None));
 
         Assert.Equal(
             ["DataEntry"],
@@ -152,7 +154,7 @@ public sealed class UserAccessTests
         var user = Add("stranger");
 
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Roles().HandleAsync(user.Id, ["Approver"], CancellationToken.None));
+            () => Roles().HandleAsync(user.Id, ["Approver"], validity: null, CancellationToken.None));
 
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Email().HandleAsync(user.Id, "x@y.z", CancellationToken.None));
@@ -161,9 +163,113 @@ public sealed class UserAccessTests
         Assert.Null(user.Email);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "D-97")]
+    public async Task Заміна_ролей_вимикає_bootstrap_коли_зʼявився_доменний_адміністратор()
+    {
+        // ⛔ `#20` (директива №11, T3): способу вимкнути bootstrap-запис через
+        // ЦЕЙ шлях не було взагалі — `DisableBootstrapAdminHandler` кликав
+        // лише `CreateUserHandler`. Роль доменному користувачу, який УЖЕ
+        // існував, видавали саме через `ReplaceUserRolesHandler`, і після
+        // такої видачі bootstrap лишався технічно чинним назавжди.
+        var bootstrap = _users.Seed(
+            Domain.Entities.Security.User.CreateBootstrap("bootstrap-admin", "hash", Now));
+        var domainAdmin = Add("ivanov.admin");
+
+        // Умова вимкнення в `DisableBootstrapAdminHandler` — глобальна («чи є
+        // ВЖЕ активний доменний адміністратор»), а не «чи саме ЦЕЙ виклик
+        // видав право»: фікстура моделює цю умову прапорцем, так само, як
+        // моделює її бойове сховище окремим SQL-запитом.
+        _users.HasDomainAdmin = true;
+
+        Assert.True(bootstrap.IsActive);
+
+        await Roles().HandleAsync(domainAdmin.Id, ["Approver"], validity: null, CancellationToken.None);
+
+        Assert.False(bootstrap.IsActive);
+
+        // Запис лишається в базі й лишається позначеним (D-97) — вимкнення,
+        // а не видалення.
+        Assert.Contains(bootstrap, _users.Users);
+        Assert.True(bootstrap.IsBootstrapAdmin);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.16")]
+    public async Task Строкове_призначення_діє_за_домену_і_негайно_стає_нечинним()
+    {
+        // `#48` (директива №11, T3): до цього `RoleAssignment.ValidFrom`/
+        // `ValidTo` нічим було заповнити — ні фабрики зі строком, ні поля в
+        // запиті. `IsEffectiveOn` перевіряв межі правильно (`H-23a`), але
+        // жодне збережене призначення їх не мало.
+        var user = Add("kovalenko");
+
+        var validity = new Dictionary<string, RoleValidityWindow>
+        {
+            ["Approver"] = new RoleValidityWindow(
+                ValidFrom: new DateOnly(2026, 3, 1), ValidTo: new DateOnly(2026, 3, 31)),
+        };
+
+        await Roles().HandleAsync(user.Id, ["Approver"], validity, CancellationToken.None);
+
+        // Строкове призначення НЕ входить у безстроковий перелік — той самий
+        // контракт, що й для групових підмін (ФВ-6.16): збереження форми не
+        // має перетворювати тимчасове на постійне.
+        Assert.Empty(await _users.ListUserRolesAsync(user.Id, CancellationToken.None));
+
+        var traceInWindow = await _users.ListAssignmentsAsync(
+            user.Id, groupSids: [], asOf: new DateOnly(2026, 3, 15), CancellationToken.None);
+        Assert.True(Assert.Single(traceInWindow).IsEffective);
+
+        // ⚠ D-134: `ValidTo` в МИНУЛОМУ відносно дати перевірки — призначення
+        // стає нечинним НЕГАЙНО (рахує домен, `IsEffectiveOn`), а не після
+        // повторного входу. Це саме той шлях, яким живиться діагностика
+        // (`GetAccessDiagnosticsHandler`) і яким `AccessDecisionService.LoadAsync`
+        // фільтрує ролі при (пере)побудові профілю — жива перевірка на кожен
+        // виклик, а не збережений прапорець.
+        var traceAfterWindow = await _users.ListAssignmentsAsync(
+            user.Id, groupSids: [], asOf: new DateOnly(2026, 4, 1), CancellationToken.None);
+        Assert.False(Assert.Single(traceAfterWindow).IsEffective);
+
+        // Повторний виклик тієї самої ролі з новими межами замінює попереднє
+        // строкове призначення, а не накопичує дублі.
+        var extended = new Dictionary<string, RoleValidityWindow>
+        {
+            ["Approver"] = new RoleValidityWindow(ValidFrom: null, ValidTo: new DateOnly(2026, 6, 30)),
+        };
+        await Roles().HandleAsync(user.Id, ["Approver"], extended, CancellationToken.None);
+
+        var traceAfterExtend = await _users.ListAssignmentsAsync(
+            user.Id, groupSids: [], asOf: new DateOnly(2026, 4, 1), CancellationToken.None);
+        Assert.True(Assert.Single(traceAfterExtend).IsEffective);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Межі_з_переплутаними_датами_відхиляються_як_помилка_запиту()
+    {
+        var user = Add("sadykova");
+
+        var validity = new Dictionary<string, RoleValidityWindow>
+        {
+            ["Approver"] = new RoleValidityWindow(
+                ValidFrom: new DateOnly(2026, 5, 1), ValidTo: new DateOnly(2026, 4, 1)),
+        };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Roles().HandleAsync(user.Id, ["Approver"], validity, CancellationToken.None));
+
+        Assert.Equal(Domain.Errors.ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Empty(await _users.ListUserRolesAsync(user.Id, CancellationToken.None));
+    }
+
     private string StampBefore { get; set; } = string.Empty;
 
-    private ReplaceUserRolesHandler Roles() => new(_users, _access, _uow, _user, _audit, _clock);
+    private ReplaceUserRolesHandler Roles() => new(
+        _users, _access, _uow, _user, _audit, _clock,
+        new DisableBootstrapAdminHandler(_users, _uow, _audit, _user, _clock));
 
     private SetUserEmailHandler Email() => new(_users, _access, _uow, _user);
 
