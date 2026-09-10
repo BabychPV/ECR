@@ -1848,11 +1848,21 @@ CREATE TABLE wf.ApprovalRoute
     Id                int           IDENTITY(1,1) NOT NULL,
     Code              nvarchar(64)  NOT NULL,
     NameL10n          nvarchar(max) NOT NULL,
+    -- Друга половина області дії маршруту (ФВ-5.17, A2ApprovalRouteProject):
+    -- маршрут неіснуючого проєкту ніколи не спрацював би, і знайшли б це
+    -- лише тоді, коли документ не затверджується.
+    ProjectId         int           NULL,
     TemplateVersionId int           NULL,
     IsActive          bit           NOT NULL CONSTRAINT DF_AR_Act DEFAULT(1),
     CONSTRAINT PK_ApprovalRoute PRIMARY KEY (Id),
-    CONSTRAINT UQ_ApprovalRoute UNIQUE (Code)
+    CONSTRAINT UQ_ApprovalRoute UNIQUE (Code),
+    CONSTRAINT FK_AR_Project FOREIGN KEY (ProjectId) REFERENCES doc.Project (Id)
 );
+GO
+
+-- Резолюція маршруту — запит виду «ProjectId = @p OR ProjectId IS NULL»,
+-- виконується на кожне подання й затвердження.
+CREATE INDEX IX_ApprovalRoute_Scope ON wf.ApprovalRoute (ProjectId, TemplateVersionId);
 GO
 
 CREATE TABLE wf.ApprovalStep

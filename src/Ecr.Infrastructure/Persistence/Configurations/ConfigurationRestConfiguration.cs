@@ -128,6 +128,18 @@ public sealed class TableRelationDefConfiguration : IEntityTypeConfiguration<Tab
         builder.Property(x => x.OnSourceChange).HasDefaultValueSql("0", "DF_Rel_OnChange");
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_Rel_Active");
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_TableRelationDef");
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_Rel_Source/_Target), ніколи не
+        // потрапили в цю конфігурацію.
+        builder.HasOne<TableDef>()
+               .WithMany()
+               .HasForeignKey(x => x.SourceTableDefId)
+               .HasConstraintName("FK_Rel_Source");
+
+        builder.HasOne<TableDef>()
+               .WithMany()
+               .HasForeignKey(x => x.TargetTableDefId)
+               .HasConstraintName("FK_Rel_Target");
     }
 }
 
@@ -171,6 +183,24 @@ public sealed class PeriodAccessRuleDefConfiguration : IEntityTypeConfiguration<
                .HasForeignKey(x => x.SourceColumnDefId)
                .HasConstraintName("FK_PAR_SourceColumn")
                .OnDelete(DeleteBehavior.Restrict);
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_PAR_TV/_Sheet/_Table), ніколи
+        // не потрапили в цю конфігурацію. RoleId навмисно без FK — так само
+        // в 02a-db-schema.md, там немає CONSTRAINT для нього.
+        builder.HasOne<TemplateVersion>()
+               .WithMany()
+               .HasForeignKey(x => x.TemplateVersionId)
+               .HasConstraintName("FK_PAR_TV");
+
+        builder.HasOne<SheetDef>()
+               .WithMany()
+               .HasForeignKey(x => x.SheetDefId)
+               .HasConstraintName("FK_PAR_Sheet");
+
+        builder.HasOne<TableDef>()
+               .WithMany()
+               .HasForeignKey(x => x.TableDefId)
+               .HasConstraintName("FK_PAR_Table");
     }
 }
 
@@ -186,6 +216,13 @@ public sealed class SheetGroupRuleConfiguration : IEntityTypeConfiguration<Sheet
         builder.HasKey(x => x.Id);
         builder.Property(x => x.SheetGroup).HasMaxLength(64).IsRequired();
         builder.Property(x => x.TargetGroup).HasMaxLength(64);
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_SGR_TV), ніколи не потрапив у
+        // цю конфігурацію.
+        builder.HasOne<TemplateVersion>()
+               .WithMany()
+               .HasForeignKey(x => x.TemplateVersionId)
+               .HasConstraintName("FK_SGR_TV");
     }
 }
 
@@ -299,6 +336,19 @@ public sealed class CalculationBindingConfiguration : IEntityTypeConfiguration<C
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_CalcBind_Act");
         builder.HasIndex(x => new { x.ColumnDefId, x.MethodologyId, x.OutputCode })
                .IsUnique().HasDatabaseName("UQ_CalculationBinding");
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_CalcBind_Table/_Column), ніколи
+        // не потрапили в цю конфігурацію. MethodologyId навмисно без FK — так
+        // само в 02a-db-schema.md.
+        builder.HasOne<TableDef>()
+               .WithMany()
+               .HasForeignKey(x => x.TableDefId)
+               .HasConstraintName("FK_CalcBind_Table");
+
+        builder.HasOne<ColumnDef>()
+               .WithMany()
+               .HasForeignKey(x => x.ColumnDefId)
+               .HasConstraintName("FK_CalcBind_Column");
     }
 }
 
@@ -322,6 +372,26 @@ public sealed class DimensionConfiguration : IEntityTypeConfiguration<Dimension>
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsDerived).HasDefaultValue(false, "DF_Dim_Derived");
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_Dimension_Code");
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_Dim_Num/_Den/_BaseUnit), ніколи
+        // не потрапили в цю конфігурацію. BaseUnitId — двосторонній зв'язок
+        // із uom.Unit (Unit.DimensionId вказує назад) — схема свідомо додає
+        // цей FK окремим ALTER TABLE (02a-db-schema.md:846-847) через ту саму
+        // циклічність, що doc.Project.CurrentPeriodId/doc.Period.
+        builder.HasOne<Dimension>()
+               .WithMany()
+               .HasForeignKey(x => x.NumeratorDimensionId)
+               .HasConstraintName("FK_Dim_Num");
+
+        builder.HasOne<Dimension>()
+               .WithMany()
+               .HasForeignKey(x => x.DenominatorDimensionId)
+               .HasConstraintName("FK_Dim_Den");
+
+        builder.HasOne<Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.BaseUnitId)
+               .HasConstraintName("FK_Dim_BaseUnit");
     }
 }
 
@@ -369,7 +439,19 @@ public sealed class UnitConfiguration : IEntityTypeConfiguration<Unit>
                .HasDatabaseName("UX_Unit_BasePerDimension");
 
         builder.HasOne<Dimension>().WithMany().HasForeignKey(x => x.DimensionId)
-               .HasConstraintName("FK_Unit_Dimension");
+               .HasConstraintName("FK_Unit_Dim");
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_Unit_Num/_Den), ніколи не
+        // потрапили в цю конфігурацію.
+        builder.HasOne<Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.NumeratorUnitId)
+               .HasConstraintName("FK_Unit_Num");
+
+        builder.HasOne<Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.DenominatorUnitId)
+               .HasConstraintName("FK_Unit_Den");
     }
 }
 
@@ -402,5 +484,19 @@ public sealed class UnitConversionConfiguration : IEntityTypeConfiguration<UnitC
         builder.Property(x => x.Offset).HasDefaultValue(0m, "DF_Conv_Offset");
         builder.HasIndex(x => new { x.FromUnitId, x.ToUnitId })
                .IsUnique().HasDatabaseName("UQ_Conversion");
+
+        // ⛔ Q-222: були в 02a-db-schema.md (FK_Conv_From/_To), ніколи не
+        // потрапили в цю конфігурацію. Разом із CK_Conv_SameDimension (нижче
+        // за течією в самому запиті — тут лише FK) це те, що не давало
+        // конверсії посилатись на видалену чи чужу одиницю.
+        builder.HasOne<Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.FromUnitId)
+               .HasConstraintName("FK_Conv_From");
+
+        builder.HasOne<Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.ToUnitId)
+               .HasConstraintName("FK_Conv_To");
     }
 }

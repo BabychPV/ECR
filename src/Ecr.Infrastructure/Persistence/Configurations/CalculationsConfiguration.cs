@@ -278,6 +278,37 @@ public sealed class MethodologyConstantConfiguration : IEntityTypeConfiguration<
                .HasConstraintName("FK_MC_Unit");
         builder.HasOne<RegistryEntry>().WithMany().HasForeignKey(x => x.SubstanceEntryId)
                .HasConstraintName("FK_MC_Substance");
+
+        // ⛔ Q-222: був у 02a-db-schema.md (UQ_MethodologyConstant), ніколи не
+        // потрапив у цю конфігурацію — без нього той самий код константи міг
+        // повторитися в тій самій версії методології двічі. Схема нормалізує
+        // Category/ValidFrom через ISNULL(...) прямо в UNIQUE — SQL Server не
+        // дозволяє вирази в UNIQUE CONSTRAINT напряму, тому тут — обчислювані
+        // тіньові стовпці (не властивість домену: нормалізація існує лише для
+        // унікальності, ValidFrom/Category лишаються nullable в моделі).
+        // ⚠ CONVERT(date, '19000101', 112) — не CAST('1900-01-01' AS date).
+        // Перевірено реальним прогоном застосування міграції: SQL Server
+        // вважає НАВІТЬ голий CAST рядкового літерала на date недетермінованим
+        // ("cannot be persisted because the column is non-deterministic") —
+        // формат рядка теоретично залежить від сесійних DATEFORMAT/мови,
+        // навіть коли сам рядок ('1900-01-01') однозначний для людини. Стиль
+        // 112 (ISO, yyyyMMdd) — один із задокументовано детермінованих і
+        // мовонезалежних стилів CONVERT, підтверджено реальним застосуванням.
+        // ⚠ IsRequired() обов'язковий: без нього EF вважає CategoryNorm
+        // потенційно NULL і сам додає WHERE [CategoryNorm] IS NOT NULL до
+        // унікального індексу — а SQL Server забороняє фільтр за
+        // ОБЧИСЛЮВАНИМ стовпцем узагалі ("Rewrite the filter expression so
+        // that it does not include this column"), перевірено реальним
+        // застосуванням міграції. Само значення й справді ніколи не NULL:
+        // ISNULL(...) завжди повертає або Category, або порожній рядок.
+        builder.Property<string>("CategoryNorm")
+               .HasComputedColumnSql("ISNULL([Category], N'')", stored: true)
+               .IsRequired();
+        builder.Property<DateOnly>("ValidFromNorm")
+               .HasComputedColumnSql("ISNULL([ValidFrom], CONVERT(date, '19000101', 112))", stored: true);
+        builder.HasIndex("MethodologyVersionId", "Code", "CategoryNorm", "ValidFromNorm")
+               .IsUnique()
+               .HasDatabaseName("UQ_MethodologyConstant");
     }
 }
 

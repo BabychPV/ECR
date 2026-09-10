@@ -50,5 +50,12 @@ public sealed class TemplateVersionConfiguration : IEntityTypeConfiguration<Temp
 
         builder.Ignore(x => x.IsStructurallyFrozen);
         builder.Ignore(x => x.CacheKey);
+
+        // ⛔ Q-222: був у 02a-db-schema.md (FK_TV_ClonedFrom), ніколи не
+        // потрапив у цю конфігурацію.
+        builder.HasOne<TemplateVersion>()
+               .WithMany()
+               .HasForeignKey(x => x.ClonedFromVersionId)
+               .HasConstraintName("FK_TV_ClonedFrom");
     }
 }
