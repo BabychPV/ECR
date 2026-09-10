@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>Ecr.Setup</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>EcrSetup</AssemblyName>
+
+    <!--
+      Репозиторний Directory.Packages.props вмикає централізоване керування
+      версіями пакетів (CPM) для всього дерева. Цей проєкт навмисно поза
+      Ecr.sln (Windows-only GUI, як і installer/Ecr.Installer поряд) і має
+      рівно одну пряму залежність — простіше й безпечніше для сусідніх
+      завдань тримати її версію тут-таки, ніж дописувати спільний
+      Directory.Packages.props заради одного рядка.
+    -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+
+    <!--
+      CA1001: кожен крок майстра тримає власні WinForms-контроли (TextBox,
+      RadioButton тощо) як приватні поля — це IDisposable, і аналізатор
+      хоче, щоб IWizardStep-реалізації самі стали IDisposable. Не варто:
+      кожен контрол одразу додається у Controls свого контейнера
+      (BuildView повертає його в ієрархію MainForm._content), і Windows
+      Forms сама викликає Dispose() на кожному нащадку каскадно, коли
+      Dispose() доходить до батьківської форми. Ручний IDisposable у
+      кожному кроці був би мертвим кодом, що дублює те, що вже робить
+      Control.Dispose(bool).
+    -->
+    <NoWarn>$(NoWarn);CA1001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.5.0" />
+  </ItemGroup>
+
+</Project>
