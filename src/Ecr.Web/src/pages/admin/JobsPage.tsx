@@ -1,11 +1,12 @@
 ﻿import { useState, type JSX } from 'react';
 import { Badge, Button, Card, Group, Progress, Stack, Table, Text, TextInput } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { apiEnqueue, apiFetch } from '@/api/client';
 import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
+import { showApiError } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
 /** Як часто опитувати стан задачі, поки вона виконується. */
@@ -38,6 +39,18 @@ export function JobsPage(): JSX.Element {
       return state === 'Queued' || state === 'Running' ? PollMs : false;
     },
     retry: false,
+  });
+
+  // ⛔ Директива №11, T10 #40. До цього ендпоінта провалена задача, чию
+  // причину вже полагодили (недоступне джерело, зайняте з'єднання), можна
+  // було повторити лише поставивши НОВУ — і зв'язок зі старим прогресом,
+  // на який уже дивиться колега, губився.
+  const restart = useMutation({
+    mutationFn: () => apiEnqueue(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}/restart`),
+    // ⚠ Той самий jobId — не новий. `refetch`, а не інвалідація: опитування
+    // саме підхопить `Queued` і продовжить, як після першої постановки.
+    onSuccess: () => void job.refetch(),
+    onError: showApiError,
   });
 
   return (
@@ -89,6 +102,21 @@ export function JobsPage(): JSX.Element {
               <Text size="sm" c="statusError">
                 {status.error}
               </Text>
+            )}
+
+            {/* ⛔ Лише для Failed: перезапускати задачу, що виконується чи вже
+                успішна, немає сенсу — і сервер (ECR-JOB-0409) це відхилить. */}
+            {status.state === 'Failed' && (
+              <Group justify="flex-end">
+                <Button
+                  size="xs"
+                  variant="default"
+                  loading={restart.isPending}
+                  onClick={() => restart.mutate()}
+                >
+                  {restart.isPending ? t('jobs.restarting') : t('jobs.restart')}
+                </Button>
+              </Group>
             )}
           </Stack>
         </Card>

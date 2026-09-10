@@ -20,12 +20,6 @@ namespace Ecr.Application.Ports;
 public interface ICalculationResultStore
 {
     /// <summary>
-    /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
-    /// одним викликом <c>sp_sequence_get_range</c>.
-    /// </summary>
-    public Task<long> ReserveResultIdRangeAsync(int count, CancellationToken ct);
-
-    /// <summary>
     /// Пише результати пакетно (<c>SqlBulkCopy</c>). <c>SaveChanges</c> у циклі
     /// заборонений: бюджет річного перерахунку — 10 хвилин (ПРД-13).
     /// </summary>

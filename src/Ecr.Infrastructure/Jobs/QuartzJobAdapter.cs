@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,24 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed partial class QuartzJobAdapter(
     IServiceProvider services, ILogger<QuartzJobAdapter> logger) : IJob
 {
+    /// <summary>
+    /// Скільки РЕТРАЇВ (не спроб) дозволено після першого провалу (D-134, №11
+    /// T10 #40).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Судження, не факт із документа (жоден тікет не називає число):
+    /// три ретраї покривають типову транзієнтну відмову (дедлок, обрив
+    /// з'єднання з SQL Server) без нескінченного спаму на систематично
+    /// зламаній задачі. Значення суто внутрішнє — конфігурації, яку читав би
+    /// хтось іззовні, тут немає.
+    /// </remarks>
+    public const int MaxRetryAttempts = 3;
+
+    /// <summary>
+    /// Базова затримка експоненційного відступу: 30 с, 60 с, 120 с.
+    /// </summary>
+    public static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(30);
+
     /// <inheritdoc />
     public async Task Execute(IJobExecutionContext context)
     {
@@ -60,6 +79,13 @@ public sealed partial class QuartzJobAdapter(
 
             await FinishAsync(progress, jobId, "Succeeded", null, clock, context.CancellationToken)
                 .ConfigureAwait(false);
+
+            // ⚠ Дурабельність (QuartzJobScheduler.EnqueueCoreAsync) існує
+            // ЛИШЕ заради ручного перезапуску провалу — успіх її не потребує,
+            // і держати деталь задачі в пам'яті планувальника навічно означало
+            // б повільну витік пам'яті на кожен успішний прогін.
+            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -67,17 +93,87 @@ public sealed partial class QuartzJobAdapter(
             // мусить це розрізняти.
             await FinishAsync(progress, jobId, "Cancelled", null, clock, CancellationToken.None)
                 .ConfigureAwait(false);
+            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
+                .ConfigureAwait(false);
             throw;
         }
         catch (Exception ex)
         {
+            var attempt = CurrentAttempt(context);
+
+            if (attempt < MaxRetryAttempts)
+            {
+                // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
+                // бачити задачу «у виконанні», а не короткий спалах «провалу»,
+                // який за кілька секунд сам собою стає «виконується» знову.
+                await ScheduleRetryAsync(context, attempt, progress, clock, ex).ConfigureAwait(false);
+                return;
+            }
+
             // ⚠ Текст помилки в прогрес — БЕЗ стека (ФВ-6.11, D-11): стек
             // виносить назовні шляхи, імена і подекуди значення.
             await FinishAsync(progress, jobId, "Failed", ex.Message, clock, CancellationToken.None)
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—");
+
+            // ⛔ Деталь задачі НЕ видаляється тут. Дурабельна саме на цей
+            // випадок (QuartzJobScheduler.EnqueueCoreAsync): без неї
+            // IBackgroundJobScheduler.RestartAsync не мав би що перезапускати
+            // — Quartz прибрав би задачу сам одразу після цього прогону.
             throw new JobExecutionException(ex, refireImmediately: false);
+        }
+    }
+
+    /// <summary>Скільки РЕТРАЇВ уже було — з даних триґера, що щойно відпрацював.</summary>
+    private static int CurrentAttempt(IJobExecutionContext context)
+    {
+        var map = context.Trigger.JobDataMap;
+
+        return map.ContainsKey(QuartzJobScheduler.RetryAttemptKey)
+               && int.TryParse(
+                   map.GetString(QuartzJobScheduler.RetryAttemptKey), out var attempt)
+            ? attempt
+            : 0;
+    }
+
+    /// <summary>
+    /// Планує новий одноразовий триґер того самого <c>JobKey</c> з
+    /// експоненційним відступом і пише в прогрес, ЩО задача повторює спробу.
+    /// </summary>
+    private static async Task ScheduleRetryAsync(
+        IJobExecutionContext context, int attempt, IJobProgressStore? progress, IClock clock, Exception ex)
+    {
+        var jobId = context.JobDetail.Key.Name;
+        var nextAttempt = attempt + 1;
+
+        // ⚠ 2^(спроба-1) на базову затримку: 30 с, 60 с, 120 с — типовий
+        // експоненційний відступ, а не лінійний, щоб транзієнтна відмова
+        // джерела (наприклад, SQL Server під навантаженням) мала час
+        // розвантажитися, а не отримувала три удари поспіль за секунди.
+        var delay = TimeSpan.FromTicks(RetryBaseDelay.Ticks * (1L << (nextAttempt - 1)));
+
+        // ⚠ Час — через IClock, не DateTimeOffset.UtcNow: годинник підмінний
+        // у тестах (ForbiddenApiTests пильнує саме прямі виклики годинника
+        // поза SystemClock), і ретрай мусить бути так само відтворюваним, як
+        // решта логіки часу в системі.
+        var startAt = new DateTimeOffset(clock.UtcNow, TimeSpan.Zero).Add(delay);
+
+        var trigger = TriggerBuilder.Create()
+            .ForJob(context.JobDetail.Key)
+            .WithIdentity($"{jobId}-retry{nextAttempt}-{Guid.NewGuid():N}-trigger")
+            .UsingJobData(QuartzJobScheduler.RetryAttemptKey, nextAttempt.ToString(CultureInfo.InvariantCulture))
+            .StartAt(startAt)
+            .Build();
+
+        await context.Scheduler.ScheduleJob(trigger, CancellationToken.None).ConfigureAwait(false);
+
+        if (progress is not null)
+        {
+            await progress.ReportAsync(
+                jobId, 0,
+                $"Спроба {nextAttempt}/{MaxRetryAttempts} за {delay.TotalSeconds:0} с після помилки: {ex.Message}",
+                clock.UtcNow, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

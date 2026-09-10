@@ -36,6 +36,12 @@ builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
 // треба не забути дописати, рано чи пізно не дописується. До цього
 // `EcrMetrics` існував і не викликався жодного разу (аудит Етапу 5).
 builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
+// ⚠ ConsistencyCheckJob живе в Ecr.Infrastructure, яка Ecr.Api не бачить:
+// адаптер закриває EcrMetrics портом IConsistencyMetrics, щоб задача могла
+// викликати метрику, не порушуючи напрямок залежностей (директива №11, T10
+// #41 — RecordConsistencyIssues існував і не мав жодного викликача).
+builder.Services.AddSingleton<Ecr.Application.Ports.IConsistencyMetrics,
+    Ecr.Api.Observability.ConsistencyMetricsAdapter>();
 builder.Services.AddScoped<Ecr.Api.Observability.BudgetMetricsFilter>();
 builder.Services
     .AddControllers(options => options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>())

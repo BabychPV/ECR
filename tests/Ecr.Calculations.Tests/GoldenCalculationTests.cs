@@ -172,8 +172,6 @@ public sealed class GoldenCalculationTests
         // нічний перерахунок писав би десятки мільйонів рядків у партиції
         // документів і роздував aud.CellChange історією, якої ніхто не робив.
         await cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
-        await cells.DidNotReceive().BulkInsertAsync(
-            Arg.Any<IReadOnlyList<CellRecord>>(), Arg.Any<CancellationToken>());
 
         // Результат ПОВЕРТАЄТЬСЯ; запис робить CalculationOutputWriter в
         // calc.CalculationResult.

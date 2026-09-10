@@ -17,7 +17,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// Ці числа і є критерієм гейта Етапу 0: якщо не проходить після індексів і
 /// стиснення — вибірково по таблицях вмикається гібрид, а не глобально.
 /// </remarks>
-public sealed class NormalizedCellStore(EcrDbContext db, BulkCellLoader bulk) : ICellStore
+public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
 {
     /// <summary>
     /// Скільки комірок іде в один <c>MERGE</c>.
@@ -235,10 +235,6 @@ public sealed class NormalizedCellStore(EcrDbContext db, BulkCellLoader bulk) : 
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
-
-    /// <inheritdoc />
-    public Task BulkInsertAsync(IReadOnlyList<CellRecord> records, CancellationToken ct)
-        => bulk.LoadAsync(records, ct);
 
     private static async Task DeleteAsync(
         SqlConnection connection, SqlTransaction tx, IReadOnlyList<CellAddress> deletes, CancellationToken ct)

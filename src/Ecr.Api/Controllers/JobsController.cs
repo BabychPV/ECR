@@ -9,7 +9,8 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/jobs")]
 [Authorize]
-public sealed class JobsController(GetJobStatusHandler status, ListJobsHandler list) : ControllerBase
+public sealed class JobsController(
+    GetJobStatusHandler status, ListJobsHandler list, RestartJobHandler restart) : ControllerBase
 {
     /// <summary>
     /// Останні фонові задачі. Право <c>System.ViewHealth</c>.
@@ -40,5 +41,25 @@ public sealed class JobsController(GetJobStatusHandler status, ListJobsHandler l
         var found = await status.HandleAsync(jobId, ct).ConfigureAwait(false);
 
         return found is null ? NotFound() : Ok(found);
+    }
+
+    /// <summary>
+    /// Ручний перезапуск проваленої задачі. Право <c>System.ViewHealth</c>
+    /// (директива №11, T10 #40).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Той самий <c>jobId</c> знову «у черзі» — не новий ідентифікатор:
+    /// клієнт, що вже показує цю задачу, продовжує опитувати той самий
+    /// <c>GET /jobs/{jobId}</c>.
+    /// </remarks>
+    [HttpPost("{jobId}/restart")]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Restart(string jobId, CancellationToken ct)
+    {
+        await restart.HandleAsync(jobId, ct).ConfigureAwait(false);
+
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
 }

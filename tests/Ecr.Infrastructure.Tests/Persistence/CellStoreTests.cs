@@ -131,7 +131,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
         // а бюджет: 500 рядків × окремий запит у 600 мс не вкладаються ніяк.
         var executed = new List<string>();
         await using var counting = CreateCountingContext(executed);
-        var countingStore = new NormalizedCellStore(counting, new BulkCellLoader(sql.ConnectionString, 1000));
+        var countingStore = new NormalizedCellStore(counting);
 
         var slice = await countingStore.ReadSliceAsync(doc.TableInstanceId, ct);
 
@@ -144,6 +144,10 @@ public sealed class CellStoreTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Масове_завантаження_вантажить_рядки_і_комірки_одним_проходом()
     {
+        // ⚠ Директива №11, T10 #50: BulkCellLoader.LoadAsync тепер
+        // викликається НАПРЯМУ, а не через ICellStore.BulkInsertAsync — той
+        // порт прибрано (нуль викликачів поза цим файлом і Ecr.DataGen, який
+        // і так бере BulkCellLoader напряму, а не через порт).
         var (doc, store) = await ArrangeAsync(rowCount: 50);
         var ct = CancellationToken.None;
 
@@ -154,7 +158,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
                 new CellValueData { ValueNumeric = 1m })))
             .ToList();
 
-        await store.BulkInsertAsync(records, ct);
+        await new BulkCellLoader(sql.ConnectionString, 1000).LoadAsync(records, ct);
 
         var slice = await store.ReadSliceAsync(doc.TableInstanceId, ct);
         Assert.Equal(records.Count, slice.Count);
@@ -215,7 +219,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
         // ⚠ Помічено не тестом, а спостереженням: після генерації обсягу два
         // ключі `doc.CellValue` ставали недовіреними, хоч розгортання лишало
         // їх довіреними. Тест закриває шлях, яким це прийшло.
-        var (doc, store) = await ArrangeAsync();
+        var (doc, _) = await ArrangeAsync();
         var alien = await AlienColumnIdAsync(doc.SheetDefId, doc.TableDefId, CancellationToken.None);
 
         var record = new CellRecord(
@@ -223,8 +227,10 @@ public sealed class CellStoreTests(SqlServerFixture sql)
             doc.TableDefId,
             new CellValueData { ValueNumeric = 1m });
 
+        // ⚠ Директива №11, T10 #50: напряму через BulkCellLoader — див.
+        // коментар вище про прибраний ICellStore.BulkInsertAsync.
         await Assert.ThrowsAnyAsync<Exception>(
-            () => store.BulkInsertAsync([record], CancellationToken.None));
+            () => new BulkCellLoader(sql.ConnectionString, 1000).LoadAsync([record], CancellationToken.None));
     }
 
     /// <summary>
@@ -262,8 +268,7 @@ public sealed class CellStoreTests(SqlServerFixture sql)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(rowCount: rowCount, ct: CancellationToken.None);
-        var store = new NormalizedCellStore(
-            builder.CreateContext(), new BulkCellLoader(sql.ConnectionString, 1000));
+        var store = new NormalizedCellStore(builder.CreateContext());
         return (doc, store);
     }
 

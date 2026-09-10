@@ -635,7 +635,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Застосування раніше переглянутого імпорту. Право `Document.Import`. */
+        /**
+         * Застосування раніше переглянутого імпорту. Право `Document.Import`.
+         * @description ⚠ 202 з jobId — лише для diff, що перевищує поріг
+         *     int ApplyImportHandler.LargeImportThreshold
+         *     (директива №11, T10 #45); звичайний, невеликий імпорт лишається 200 із
+         *     результатом одразу, як і раніше.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -662,6 +668,17 @@ export interface paths {
                         "application/json": components["schemas"]["PatchCellsResponse"];
                         "text/json": components["schemas"]["PatchCellsResponse"];
                         "text/plain": components["schemas"]["PatchCellsResponse"];
+                    };
+                };
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
                     };
                 };
                 /** @description Conflict */
@@ -1271,6 +1288,74 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{jobId}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth`
+         *     (директива №11, T10 #40).
+         * @description ⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:
+         *     клієнт, що вже показує цю задачу, продовжує опитувати той самий
+         *     `GET /jobs/{jobId}`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
