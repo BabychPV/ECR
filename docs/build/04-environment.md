@@ -245,18 +245,32 @@ Docker, не поведінка за замовчуванням (команда 
 | Змінна | Приклад | Навіщо |
 |---|---|---|
 | `ECR_ConnectionStrings__Ecr` | `Server=localhost;Database=Ecr;Trusted_Connection=True;TrustServerCertificate=True` | основна БД |
-| `ECR_Database__EditionMode` | `Auto` \| `Standard` \| `Enterprise` | АРХ-7 |
+| `ECR_Database__EditionMode` ⚠ | `Auto` \| `Standard` \| `Enterprise` | АРХ-7 |
 | `ECR_Schema__StartupMode` | `Validate` (прод) \| `Migrate` (dev/test) | `B01` §6.3 |
 | `ECR_Auth__CookieName` | `ecr.auth` | |
 | `ECR_Auth__SlidingHours` | `8` | |
-| `ECR_Jobs__Provider` | `Quartz` | реалізація порту |
-| `ECR_Jobs__WorkerCount` | `4` | |
-| `ECR_Cache__DistributedProvider` | `SqlServer` | без Redis |
-| `ECR_ExternalSources__PiAf__SecretName` | `pi-af-service-account` | **лише ім'я секрету** |
-| `ECR_Bootstrap__Password` | одноразовий пароль | **лише перший старт** (`D-115`): застосунок створює локального адміністратора з `MustChangePassword = 1`. Якщо запис уже існує — змінна ігнорується. Після першого входу її прибирають |
+| `ECR_Jobs__Provider` ⚠ | `Quartz` | реалізація порту |
+| `ECR_Jobs__WorkerCount` ⚠ | `4` | |
+| `ECR_Cache__DistributedProvider` ⚠ | `SqlServer` | без Redis |
+| `ECR_ExternalSources__PiAf__SecretName` ⚠ | `pi-af-service-account` | **лише ім'я секрету** |
+| `ECR_Bootstrap__Password` | одноразовий пароль | **лише перший старт** (`D-115`): застосунок створює локального адміністратора з `MustChangePassword = 1`. Якщо запис уже існує — змінна ігнорується. Джерело — не сама змінна оточення (`Q-215`, `Q-222` аудит): застосунок читає й одразу видаляє одноразовий файл `%ProgramData%\ECR\config\bootstrap.secret`, куди `deploy-ecr.ps1 -BootstrapPassword` записує значення. Сам bootstrap-обліковий запис деактивується не власним входом, а коли БУДЬ-ЯКИЙ домен-користувач отримує `Security.ManageUsers` (`DisableBootstrapAdminHandler`) |
 | `ECR_TEST_SQL` | `Server=localhost\SQLEXPRESS;Integrated Security=true;TrustServerCertificate=true` | рядок підключення до **сервера** для інтеграційних тестів замість Testcontainers. ⚠ Саме рядок, а не `1`: фікстура підключається за ним, а базу створює свою |
 | `ECR_TEST_DB` | `EcrTest_Infrastructure` | перевизначає ім'я тестової бази. За замовчуванням — своє на кожну збірку тестів (`Q-055`) |
 
+> ⚠ **Позначені `⚠` рядки (Q-223, аудит, OPEN) — код НЕ читає ці змінні.**
+> `Database:EditionMode` завжди `Auto` (`StartupSequence.cs`, хардкод),
+> `Jobs:Provider`/`Jobs:WorkerCount` не читаються ніде (Quartz завжди
+> in-memory), `Cache:DistributedProvider` не читається (кеш завжди
+> SQL Server, і насправді читає незадокументовані `Cache:SchemaName`/
+> `Cache:TableName`), `ExternalSources:PiAf:SecretName` не існує як ключ
+> конфігурації взагалі (`SecretName` — колонка `ext.DataSource` у базі,
+> а фактичний секрет іде через `ECR_Secrets__<назва>`). Чи це
+> справді потрібна, але не реалізована конфігурованість (і тоді ІЗ
+> ЯКИМ значенням — факт, не судження), чи застаріла документація
+> підходу, який замінили на щось інше (як-от `Ecr_SmallFiles` — окрема,
+> вже робоча заміна для "виміряти як на Standard/Express", яку
+> `EditionMode` міг би дублювати) — не мій виклик вирішувати мовчки.
+>
 > **`ECR_Bootstrap__Password` не має значення за замовчуванням і не потрапляє
 > нікуди, крім пам'яті процесу**: ні в seed, ні в `appsettings`, ні в лог
 > (`ФВ-6.11`). Якщо змінної немає і bootstrap-адміністратора теж немає,

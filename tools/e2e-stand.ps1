@@ -287,8 +287,18 @@ try {
     Step 'прогони Playwright'
     Push-Location $client
     try {
-        if ($Grep) { & npx.cmd playwright test --grep $Grep }
-        else { & npx.cmd playwright test }
+        # ⛔ Q-222 (аудит): той самий Q-217 клас — без тимчасового послаблення
+        # звичайний вивід Playwright у stderr зупинив би скрипт ДО перевірки
+        # $LASTEXITCODE нижче.
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            if ($Grep) { & npx.cmd playwright test --grep $Grep }
+            else { & npx.cmd playwright test }
+        }
+        finally {
+            $ErrorActionPreference = $previousEap
+        }
 
         if ($LASTEXITCODE -ne 0) { Fail 'прогони не пройшли' }
     }
@@ -310,14 +320,35 @@ finally {
     # ⚠ Два простих запити замість одного складеного: питання «чи існує»
     # адресується `master`, питання «чи моя» — самій базі. Вкладений динамічний
     # SQL з підстановкою імені бази — саме те місце, де сторож стає діркою.
-    $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
-        -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>$null) `
-        | Select-Object -Last 1
+    #
+    # ⛔ Q-222 (аудит): `2>$null` тут НЕ рятує від Q-217-класу — перевірено
+    # реальним відтворенням (`cmd /c "echo w 1>&2 & exit 0"` під
+    # `$ErrorActionPreference = 'Stop'` кидає виняток навіть із `2>$null`,
+    # бо PowerShell перетворює запис у stderr на помилку СВОГО потоку до
+    # того, як спрацьовує перенаправлення). Обидва виклики — під тим самим
+    # тимчасовим послабленням, що DROP DATABASE нижче.
+    $previousEapExists = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>$null) `
+            | Select-Object -Last 1
+    }
+    finally {
+        $ErrorActionPreference = $previousEapExists
+    }
 
     if ($exists -eq '1') {
-        $mine = (& sqlcmd -S $Server -E -C -b -h -1 -W -d $Database `
-            -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.extended_properties WHERE class = 0 AND name = N'Ecr_E2E_Temp';" 2>$null) `
-            | Select-Object -Last 1
+        $previousEapMine = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $mine = (& sqlcmd -S $Server -E -C -b -h -1 -W -d $Database `
+                -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.extended_properties WHERE class = 0 AND name = N'Ecr_E2E_Temp';" 2>$null) `
+                | Select-Object -Last 1
+        }
+        finally {
+            $ErrorActionPreference = $previousEapMine
+        }
 
         if ($mine -eq '1') {
             $previousEap = $ErrorActionPreference

@@ -118,6 +118,22 @@ finally {
 }
 if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
 
+# ⛔ Q-222 (аудит): без цієї позначки прибирання нижче видаляло б БУДЬ-ЯКУ
+# базу, названу в `-Database`, — включно з чиєюсь справжньою dev-базою
+# (`setup-dev-db.ps1` так само обслуговує персистентні бази розробників,
+# не лише одноразові). Той самий сторож, що вже в `e2e-stand.ps1`/
+# `br07-load-test.ps1`.
+$previousEapTag = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & sqlcmd -S $Server -E -C -b -d $Database `
+        -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_Smoke_Temp', @value = 1;" | Out-Null
+}
+finally {
+    $ErrorActionPreference = $previousEapTag
+}
+if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
+
 $connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
 $log = Join-Path $root 'artifacts/smoke.api.log'
 
@@ -387,18 +403,42 @@ try {
 finally {
     if ($api -and -not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
 
-    $previousEap = $ErrorActionPreference
+    # ⛔ Q-222 (аудит): видаляється ЛИШЕ база з власною позначкою
+    # (Ecr_Smoke_Temp, вище) — без цієї умови скрипт знищував би будь-що,
+    # назване в `-Database`. Два простих запити замість одного складеного:
+    # питання «чи існує» — до `master`, «чи моя» — до самої бази.
+    $previousEapExists = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & sqlcmd -S $Server -E -C -b -Q @"
-IF DB_ID('$Database') IS NOT NULL
-BEGIN
-    ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-    DROP DATABASE [$Database];
-END;
-"@ | Out-Null
+        $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;") `
+            | Select-Object -Last 1
     }
     finally {
-        $ErrorActionPreference = $previousEap
+        $ErrorActionPreference = $previousEapExists
+    }
+
+    if ($exists -eq '1') {
+        $previousEapMine = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $mine = (& sqlcmd -S $Server -E -C -b -h -1 -W -d $Database `
+                -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.extended_properties WHERE class = 0 AND name = N'Ecr_Smoke_Temp';") `
+                | Select-Object -Last 1
+        }
+        finally {
+            $ErrorActionPreference = $previousEapMine
+        }
+
+        if ($mine -eq '1') {
+            $previousEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & sqlcmd -S $Server -E -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
+            }
+            finally {
+                $ErrorActionPreference = $previousEap
+            }
+        }
     }
 }

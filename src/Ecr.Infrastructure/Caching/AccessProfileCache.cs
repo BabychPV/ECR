@@ -103,6 +103,12 @@ public sealed class AccessProfileCache(IMemoryCache memory)
     /// адміністратором і симуляція — ні. Спільний ключ віддав би одному з них
     /// профіль другого.
     /// </remarks>
-    public static string Key(int userId, string securityStamp, string groupsFingerprint = "")
+    // ⛔ Q-222 (аудит): без параметра за замовчуванням — коментар вище прямо
+    // каже "ОБОВ'ЯЗКОВО" (P-02, той самий інваріант, що Q-187 уже виправляв
+    // як безпековий дефект), а необов'язковий параметр дозволяв БУДЬ-ЯКОМУ
+    // майбутньому виклику мовчки його пропустити й отримати чужий профіль із
+    // кешу. Усі три чинні виклики й так передають його явно — це нічого не
+    // ламає, лише закриває шлях для нового виклику, що забув.
+    public static string Key(int userId, string securityStamp, string groupsFingerprint)
         => $"access:{userId}:{securityStamp}:{groupsFingerprint}";
 }
