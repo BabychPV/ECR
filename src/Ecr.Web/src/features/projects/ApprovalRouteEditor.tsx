@@ -122,7 +122,16 @@ export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.E
           <Button variant="default" onClick={() => setOpened(false)}>
             {t('common.cancel')}
           </Button>
-          <Button loading={save.isPending} onClick={() => save.mutate()}>
+          {/* ⛔ Заблоковано, поки `route` не підтвердив саме поточний
+              маршрут: PUT тут — повна заміна (порожній `roleIds` знімає
+              весь маршрут), і невдалий запит лишає `steps` порожнім — без
+              цього збереження мовчки стерло б наявний маршрут після
+              звичайного збою мережі. */}
+          <Button
+            loading={save.isPending}
+            disabled={route.isPending || Boolean(route.error)}
+            onClick={() => save.mutate()}
+          >
             {t('common.save')}
           </Button>
         </Group>

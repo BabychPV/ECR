@@ -113,7 +113,16 @@ export function UserAccessEditor({
         <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
         </Button>
-        <Button loading={save.isPending} onClick={() => save.mutate()}>
+        {/* ⛔ Заблоковано, поки `assigned` не підтвердив саме поточні ролі
+            користувача: PUT тут — повна заміна (`roleCodes: []` знімає
+            ВСІ ролі), і невдалий запит лишає `selected` порожнім — без
+            цього збереження мовчки забрало б усі права після звичайного
+            збою мережі. */}
+        <Button
+          loading={save.isPending}
+          disabled={assigned.isPending || Boolean(assigned.error)}
+          onClick={() => save.mutate()}
+        >
           {t('common.save')}
         </Button>
       </Group>

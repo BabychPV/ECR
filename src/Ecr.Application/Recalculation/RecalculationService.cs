@@ -287,7 +287,9 @@ public sealed class RecalculationService(
         // незалежно від того, чи існує сама конверсія (директива №09 §6.5, `S-22`).
         var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
         var context = new SliceEvaluationContext(
-            snapshot, values, EmptyHeaders, PeriodOf(periodKey), catalogue, rowIdsByTable);
+            snapshot, values, EmptyHeaders,
+            await PeriodOf(instance.DocumentId, periodKey, ct).ConfigureAwait(false),
+            catalogue, rowIdsByTable);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
@@ -532,19 +534,40 @@ public sealed class RecalculationService(
 
     /// <summary>Календарний контекст періоду.</summary>
     /// <remarks>
-    /// ⚠ Межі періоду тут не резолвляться: формули шаблону, які їх читають,
-    /// належать до крос-періодних і в каскад не потрапляють. Підставити
-    /// «сьогодні» означало б зробити результат залежним від моменту
-    /// перерахунку (<c>ФВ-1.12</c>).
+    /// ⚠ Межі беруться з реальних меж періоду документа
+    /// (<see cref="IPeriodStore.FindPeriodBoundsAsync"/>), а НЕ виводяться
+    /// арифметикою з <see cref="PeriodKey"/>: попередня версія цього методу
+    /// читала <c>Sequence</c> як номер МІСЯЦЯ (`Math.Clamp(..., 1, 12)`) для
+    /// будь-якого <see cref="Domain.Enums.PeriodKind"/> — для квартального чи
+    /// річного проєкту це підставляло чужі межі (28 днів замість 91/365) у
+    /// <c>[Period].Days/.Hours/.Seconds</c>, якими шаблонні формули діляться
+    /// напряму (D-78, D-112 — той самий клас дефекту, якого
+    /// <c>Ecr.Calculations.GenericCalculationModule.PeriodAsync</c> у
+    /// сусідньому проєкті явно уникає тим самим способом).
+    ///
+    /// «Сьогодні» тут так само не підставляється: формули шаблону, які
+    /// читають межі періоду, належать до крос-періодних і в каскад не
+    /// потрапляють, і результат не повинен залежати від моменту перерахунку
+    /// (<c>ФВ-1.12</c>).
     /// </remarks>
-    private static Ecr.Expressions.PeriodContext PeriodOf(PeriodKey periodKey)
-        => new(
-            new DateOnly(periodKey.Year, Math.Clamp(periodKey.Sequence, 1, 12), 1),
-            new DateOnly(periodKey.Year, Math.Clamp(periodKey.Sequence, 1, 12),
-                DateTime.DaysInMonth(periodKey.Year, Math.Clamp(periodKey.Sequence, 1, 12))),
+    private async Task<Ecr.Expressions.PeriodContext> PeriodOf(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var bounds = await periods
+            .FindPeriodBoundsAsync(documentId, periodKey.Value, ct)
+            .ConfigureAwait(false)
+            ?? throw new Domain.Abstractions.DomainException(
+                "ECR-PRD-0404",
+                $"Періоду {periodKey.Value} для документа {documentId} не існує: "
+                + "календарний контекст обчислити нема з чого.");
+
+        return new Ecr.Expressions.PeriodContext(
+            bounds.PeriodStart,
+            bounds.PeriodEnd,
             Domain.Enums.CalendarMode.Actual,
             periodKey.Year,
             (byte)periodKey.Sequence);
+    }
 
     private static readonly Dictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> EmptyHeaders =
         new(StringComparer.Ordinal);

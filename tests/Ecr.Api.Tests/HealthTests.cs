@@ -1,6 +1,12 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Enums;
+using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -24,13 +30,15 @@ public sealed class HealthTests(SqlServerFixture sql)
     /// </remarks>
     private static readonly string[] ExpectedChecks = ["db", "jobs", "sources"];
 
+    private const string Password = "Api-Health-Probe-2026!";
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Health_db_повідомляє_режим_редакції()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = app.CreateClient();
+        using var client = await SignedInAsync(app);
 
         var data = await ReadDbDataAsync(client);
 
@@ -52,7 +60,7 @@ public sealed class HealthTests(SqlServerFixture sql)
     public async Task Health_db_повідомляє_стан_RCSI()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = app.CreateClient();
+        using var client = await SignedInAsync(app);
 
         var data = await ReadDbDataAsync(client);
 
@@ -70,7 +78,7 @@ public sealed class HealthTests(SqlServerFixture sql)
     public async Task Health_db_повідомляє_запас_партицій()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = app.CreateClient();
+        using var client = await SignedInAsync(app);
 
         var data = await ReadDbDataAsync(client);
 
@@ -82,6 +90,51 @@ public sealed class HealthTests(SqlServerFixture sql)
         Assert.Contains(
             filegroups.EnumerateArray().Select(x => x.GetString()),
             fg => string.Equals(fg, "DATA_HOT", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Health_db_без_сеансу_дає_401()
+    {
+        // ⛔ Q-221: подробиці БД (редакція, RCSI, файлові групи, запас
+        // партицій) — не для будь-кого, хто дістанеться порту.
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/db", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Health_ready_не_дублює_подробиці_БД_анонімно()
+    {
+        // ⛔ Q-221: DatabaseHealthCheck зареєстрований з тегами ["db", "ready"]
+        // — той самий екземпляр, ті самі Data, потрапляє і в /health/db
+        // (тепер під авторизацією), і в навмисно анонімний /health/ready.
+        // Авторизація на /health/db нічого не закриває, якщо ready просто
+        // копіює ту саму деталізацію без гейту — цей тест ловить САМЕ це:
+        // не "чи є взагалі якісь дані", а "чи лишились чутливі дані там, де
+        // авторизації немає".
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+        var report = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        var dbCheck = report.GetProperty("checks")
+            .EnumerateArray()
+            .Single(c => string.Equals(c.GetProperty("name").GetString(), "db", StringComparison.Ordinal));
+
+        // Статус лишається справжнім — moніторинг має бачити реальний стан.
+        Assert.False(string.IsNullOrWhiteSpace(dbCheck.GetProperty("status").GetString()));
+
+        // А подробиці — порожні: саме вони перед цим фіксом витікали без
+        // авторизації через цей самий ендпоінт.
+        Assert.Empty(dbCheck.GetProperty("data").EnumerateObject());
     }
 
     [Fact]
@@ -222,6 +275,35 @@ public sealed class HealthTests(SqlServerFixture sql)
         Assert.Equal(ExpectedChecks, names);
         Assert.Equal("Healthy", report.GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    /// <summary>Клієнт із чинним сеансом локального користувача (/health/db вимагає авторизації, Q-221).</summary>
+    private async Task<HttpClient> SignedInAsync(EcrApiFactory app)
+    {
+        var name = $"health_{Guid.NewGuid():N}"[..20];
+
+        var options = new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .Options;
+
+        await using (var db = new EcrDbContext(options))
+        {
+            var user = new User(name, name, AuthProvider.Local);
+            user.SetPassword(new PasswordHasher().Hash(Password));
+
+            db.Users.Add(user);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        var client = app.CreateClient();
+
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = Password }).ConfigureAwait(false);
+
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        return client;
     }
 
     private static async Task<JsonElement> ReadDbDataAsync(HttpClient client)

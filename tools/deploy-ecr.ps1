@@ -530,6 +530,21 @@ elseif ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\
     Write-Host "Рядок підключення записано." -ForegroundColor Green
 }
 
+# ⛔ Q-221: без цього Kestrel слухає лише вбудований дефолт ASP.NET Core —
+# http://localhost:$AppPort — тобто ЛИШЕ loopback. Інсталятор відкриває
+# правило брандмауера на $AppPort (Package.wxs, APP_PORT), а
+# 11-install-guide.md §3 каже відкрити http://<сервер>:$AppPort/ З ІНШОЇ
+# машини — без цього запису порт відкритий, а слухати його нікому. Той
+# самий канал, що ECR_ConnectionStrings__Ecr (реєстр служби), і той самий
+# принцип: ASPNETCORE_URLS — не секрет, ASP.NET Core читає його як
+# стандартну змінну оточення без жодного коду в Program.cs.
+if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+        'записати ASPNETCORE_URLS')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ASPNETCORE_URLS' `
+        -Value "http://+:$AppPort"
+    Write-Host "ASPNETCORE_URLS записано (http://+:$AppPort) — служба слухає всі інтерфейси, не лише localhost." -ForegroundColor Green
+}
+
 if ($BootstrapPassword) {
     # ⚠ Local System — окремий випадок: обліковий запис комп'ютера немає
     # сенсу писати як ACL-принципал так само, як доменний, бо служба під

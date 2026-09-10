@@ -19,7 +19,8 @@ public sealed class CalculationOrchestrator(
     MethodologyResolver resolver,
     IEnumerable<ICalculationModule> modules,
     CalculationInputBuilder inputBuilder,
-    CalculationOutputWriter outputWriter) : ICalculationRunner
+    CalculationOutputWriter outputWriter,
+    IPeriodStore periods) : ICalculationRunner
 {
     /// <summary>
     /// Скільки методологій одного пакета виконувати одночасно.
@@ -56,7 +57,7 @@ public sealed class CalculationOrchestrator(
             return profile;
         }
 
-        var onDate = PeriodDate(periodKey);
+        var onDate = await PeriodDateAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
         // 1. Версія методології — за ДАТОЮ ПЕРІОДУ, не за «поточною» (ФВ-9.3).
         var resolved = new List<ResolvedBinding>(bindings.Count);
@@ -168,13 +169,30 @@ public sealed class CalculationOrchestrator(
     }
 
     /// <summary>Останній день періоду — дата, на яку резолвиться версія.</summary>
-    private static DateOnly PeriodDate(PeriodKey periodKey)
+    /// <remarks>
+    /// ⛔ Межі беруться з реальних меж періоду документа, а НЕ виводяться
+    /// арифметикою з <c>PeriodKey</c>. <c>PeriodKey = Year*100 + Sequence</c>
+    /// (R-A6), і для квартального/річного проєкту <c>Sequence</c> — це номер
+    /// кварталу/року, не місяць: попередня версія цього методу читала
+    /// <c>Sequence % 100</c> як номер місяця (`Math.Clamp(..., 1, 12)`) для
+    /// БУДЬ-ЯКОГО <c>PeriodKind</c> — для кварталу 2 це резолвило версію
+    /// методології на 28 лютого замість справжнього кінця кварталу (30/31
+    /// червня), без жодної помилки, що це впіймала б (D-112, той самий клас
+    /// дефекту, якого <see cref="GenericCalculationModule.PeriodAsync"/> у
+    /// цьому ж проєкті явно уникає тим самим способом — через реальні межі
+    /// періоду, а не арифметику ключа).
+    /// </remarks>
+    private async Task<DateOnly> PeriodDateAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
-        // PeriodKey = Year*100 + Sequence (R-A6).
-        var year = periodKey.Value / 100;
-        var sequence = Math.Clamp(periodKey.Value % 100, 1, 12);
+        var bounds = await periods
+            .FindPeriodBoundsAsync(documentId, periodKey.Value, ct)
+            .ConfigureAwait(false)
+            ?? throw new Domain.Abstractions.DomainException(
+                "ECR-PRD-0404",
+                $"Періоду {periodKey.Value} для документа {documentId} не існує: "
+                + "дату резолвінгу методології обчислити нема з чого.");
 
-        return new DateOnly(year, sequence, DateTime.DaysInMonth(year, sequence));
+        return bounds.PeriodEnd;
     }
 
     /// <summary>Прив'язка з уже підібраною версією.</summary>
