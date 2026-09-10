@@ -193,6 +193,160 @@ public sealed class CascadeRecalculationTests
         await _cells.DidNotReceive().ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Предикатна_формула_рахує_суму_рядків_що_задовольняють_умову()
+    {
+        // ⛔ Директива №11, T12 (`#26`). До цієї правки формула з предикатом
+        // динамічного діапазону виключалася з каскаду ЯВНО, а не через
+        // якийсь дефект: обчислити її не було чим — єдина тодішня
+        // реалізація (`SliceEvaluationContext.GetCellsByPredicate`) повертала
+        // `#REF` безумовно. Правка комірки в динамічній таблиці НЕ давала
+        // жодного нового числа в підсумку — той самий клас мовчазної
+        // відмови, що й `A7-63`, лише вужчий.
+        var s = ArrangePredicateScenario();
+
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(Period, s.Row1Id, s.AmountId));
+
+        var written = await Service()
+            .RecalculateAsync(s.ItemsInstance, dirty, CancellationToken.None);
+
+        Assert.Equal(1, written);
+
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(s.TotalId, upsert.Address.ColumnDefId);
+
+        // 100 (r1, W-01) + 25 (r3, W-01) — r2 (W-02, 500) не задовольняє умову.
+        Assert.Equal(125m, upsert.Value.ValueNumeric);
+        Assert.True(upsert.Value.IsCalculated);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Предикат_без_жодного_відповідного_рядка_дає_нуль_а_не_REF()
+    {
+        // ⚠ Порожня множина — не помилка (02b §6.1): документ, де жоден
+        // рядок динамічної таблиці не задовольняє умову, — нормальний
+        // документ. `SUM` над порожньою групою дає 0, а не `#REF` і не
+        // пропуск запису.
+        var s = ArrangePredicateScenario(row1WasteType: "W-02", row3WasteType: "W-02");
+
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(Period, s.Row1Id, s.AmountId));
+
+        var written = await Service()
+            .RecalculateAsync(s.ItemsInstance, dirty, CancellationToken.None);
+
+        Assert.Equal(1, written);
+        Assert.Equal(0m, Assert.Single(Applied()).Value.ValueNumeric);
+    }
+
+    /// <summary>Ідентифікатори, зібрані <see cref="ArrangePredicateScenario"/>.</summary>
+    private sealed record PredicateScenario(
+        long ItemsInstance, int ItemsTableId, int WasteTypeId, int AmountId, long Row1Id,
+        long SummaryInstance, int TotalId);
+
+    /// <summary>
+    /// Динамічна таблиця <c>Items</c> (три рядки: два <c>W-01</c>, один
+    /// <c>W-02</c>) і фіксована <c>Summary</c> з формулою-підсумком
+    /// <c>SUM([Items].[WHERE [WasteType] = 'W-01'].[Amount])</c> — той самий
+    /// вираз, яким директива й тест рушія (`DynamicPredicateTests`)
+    /// ілюструють предикат. Обидві таблиці — на одному аркуші: посилання
+    /// між ними синхронне, не крос-аркушне (`IsCrossSheet` тут ні до чого).
+    /// </summary>
+    private PredicateScenario ArrangePredicateScenario(
+        string row1WasteType = "W-01", string row3WasteType = "W-01")
+    {
+        const long itemsInstance = 510;
+        const long summaryInstance = 511;
+        const long row1Id = 2001;
+        const long row2Id = 2002;
+        const long row3Id = 2003;
+        const long summaryRowId = 3001;
+
+        var builder = new TemplateBuilder { TemplateVersionId = Version };
+        var sheet = builder.Sheet("Waste");
+
+        var items = builder.Table(sheet, "Items", TableRowMode.Dynamic);
+        var wasteType = builder.Column(items, "WasteType", CellDataType.Lookup);
+        var amount = builder.Column(items, "Amount");
+
+        var summary = builder.Table(sheet, "Summary");
+        builder.Row(summary, "totals", 1);
+        var total = builder.Column(summary, "TotalW01");
+
+        var formula = new FormulaDef(
+            summary.Id, FormulaScope.Column,
+            "SUM([Items].[WHERE [WasteType] = 'W-01'].[Amount])", ExpressionDialect.Template);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(formula, 200);
+        typeof(FormulaDef).GetProperty(nameof(FormulaDef.ColumnDefId))!.SetValue(formula, total.Id);
+        summary.AddFormula(formula);
+
+        var snapshot = builder.Build();
+        _metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(snapshot);
+
+        _rows.ResolveTableInstanceAsync(itemsInstance, Arg.Any<CancellationToken>())
+            .Returns(new TableInstanceRef(itemsInstance, DocumentId, items.Id, Version, Period.Value));
+
+        _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new TableInstanceRef(itemsInstance, DocumentId, items.Id, Version, Period.Value),
+                new TableInstanceRef(summaryInstance, DocumentId, summary.Id, Version, Period.Value),
+            ]);
+
+        _rows.GetRowIdsBatchAsync(
+                Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [itemsInstance] = new Dictionary<string, long>
+                {
+                    ["r1"] = row1Id, ["r2"] = row2Id, ["r3"] = row3Id,
+                },
+                [summaryInstance] = new Dictionary<string, long> { ["totals"] = summaryRowId },
+            });
+
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [itemsInstance] =
+                [
+                    new CellRecord(
+                        new CellAddress(Period, row1Id, wasteType.Id), items.Id,
+                        new CellValueData { ValueString = row1WasteType }),
+                    new CellRecord(
+                        new CellAddress(Period, row1Id, amount.Id), items.Id,
+                        new CellValueData { ValueNumeric = 100m }),
+                    new CellRecord(
+                        new CellAddress(Period, row2Id, wasteType.Id), items.Id,
+                        new CellValueData { ValueString = "W-02" }),
+                    new CellRecord(
+                        new CellAddress(Period, row2Id, amount.Id), items.Id,
+                        new CellValueData { ValueNumeric = 500m }),
+                    new CellRecord(
+                        new CellAddress(Period, row3Id, wasteType.Id), items.Id,
+                        new CellValueData { ValueString = row3WasteType }),
+                    new CellRecord(
+                        new CellAddress(Period, row3Id, amount.Id), items.Id,
+                        new CellValueData { ValueNumeric = 25m }),
+                ],
+                [summaryInstance] = [],
+            });
+
+        // ⚠ RowKey = null: залежність без конкретного рядка — саме так граф
+        // кодує предикат динамічного діапазону (`RecalculationPlanBuilder.
+        // AddCellEdge` трактує це як «залежить від УСІХ рядків таблиці»).
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns(
+        [
+            FormulaDependency.ForFormula(
+                formula.Id, dependsOnKind: 0, items.Id, rowKey: null, amount.Id,
+                filterJson: "{\"where\":\"[WasteType] = 'W-01'\"}", periodOffset: null, sortOrder: 0),
+        ]);
+
+        return new PredicateScenario(
+            itemsInstance, items.Id, wasteType.Id, amount.Id, row1Id, summaryInstance, total.Id);
+    }
+
     /// <summary>Змінена комірка першого рядка в заданій колонці.</summary>
     private static DirtySet Dirty(int columnDefId)
     {
