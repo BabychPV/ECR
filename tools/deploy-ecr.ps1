@@ -232,11 +232,25 @@ function Invoke-NativeStep {
 }
 
 $root      = Split-Path -Parent $PSScriptRoot
-$sqlDir    = Join-Path $root 'src\Ecr.Infrastructure\Persistence\Sql'
 $artifacts = Join-Path $root 'artifacts'
-$migration = Join-Path $artifacts 'migration.sql'
 $buildMsi  = Join-Path $root 'tools\build-msi.ps1'
 $configPath = Join-Path $env:ProgramData 'ECR\config\appsettings.Production.json'
+
+# ⛔ Q-219: два джерела схеми. `tools/build-installer.ps1` кладе готові
+# `sql\` і `migration.sql` ПОРУЧ із цим самим файлом — так улаштований
+# самодостатній `Ecr-Setup-*.exe` (payload розпаковується в один каталог
+# із deploy-ecr.ps1, `IncludeAllContentForSelfExtract`). Якщо їх нема —
+# це прогін із дерева репозиторію (розробка/CI/`-MsiPath` напряму), і
+# джерело — `src/Ecr.Infrastructure`, як і раніше; тоді потрібні
+# `dotnet-ef` і .NET SDK на цій самій машині. Пакований варіант — єдиний,
+# що годиться для дійсно чистого сервера (жодного SDK, жодного клону
+# репозиторію) — саме це й було метою Q-219.
+$packagedSqlDir     = Join-Path $PSScriptRoot 'sql'
+$packagedMigration  = Join-Path $PSScriptRoot 'migration.sql'
+$isPackagedSchema   = (Test-Path $packagedSqlDir) -and (Test-Path $packagedMigration)
+
+$sqlDir    = if ($isPackagedSchema) { $packagedSqlDir } else { Join-Path $root 'src\Ecr.Infrastructure\Persistence\Sql' }
+$migration = if ($isPackagedSchema) { $packagedMigration } else { Join-Path $artifacts 'migration.sql' }
 
 function Write-Step {
     param([string] $Text)
@@ -425,9 +439,11 @@ try {
     else {
         Write-Step "Крок 2/7: схема ($Database на $SqlInstance)"
 
-        New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-
-        if ($PSCmdlet.ShouldProcess($migration, 'dotnet ef migrations script --idempotent')) {
+        if ($isPackagedSchema) {
+            Write-Host "  migration.sql уже в пакеті — dotnet ef не викликається (немає SDK на чистому сервері)." -ForegroundColor DarkGray
+        }
+        elseif ($PSCmdlet.ShouldProcess($migration, 'dotnet ef migrations script --idempotent')) {
+            New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
             Invoke-NativeStep "dotnet ef migrations script" {
                 dotnet ef migrations script --idempotent `
                     --project (Join-Path $root 'src\Ecr.Infrastructure') `
