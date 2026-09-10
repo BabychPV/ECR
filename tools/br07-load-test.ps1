@@ -170,7 +170,18 @@ function Show-Sql {
 function Get-SqlScalar {
     param([string] $Db, [string] $Query)
 
-    $value = & sqlcmd -S $Server -E -C -b -I -h -1 -W -d $Db -Q "SET NOCOUNT ON; $Query"
+    # ⛔ Q-222 (аудит): на відміну від Invoke-Sql/Show-Sql поруч, цей виклик
+    # був без тимчасового послаблення EAP — той самий Q-217 клас, і саме
+    # тут викликається першим (перевірка редакції SQL Server нижче), тобто
+    # падав би на найпершому ж кроці.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $value = & sqlcmd -S $Server -E -C -b -I -h -1 -W -d $Db -Q "SET NOCOUNT ON; $Query"
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
     if ($LASTEXITCODE -ne 0) { throw "sqlcmd повернув $LASTEXITCODE на $Query" }
 
     return ($value | Where-Object { $_ -ne '' } | Select-Object -First 1)
@@ -278,6 +289,18 @@ EXEC sys.sp_addextendedproperty @name = N'Ecr_Br07_Temp', @value = 1;
         '09-seed.sql'
         '06-rcsi.sql'
     )
+
+    # ⛔ Q-222 (аудит): той самий сторож, що в verify-sql-scripts.ps1/
+    # setup-dev-db.ps1 — без нього новий файл у дереві мовчки лишається поза
+    # заміром, і побачити це можна лише порівнявши руками. Саме так одного
+    # разу пропустили 06-rcsi.sql (перелік писався руками).
+    # ⚠ 14-agent-jobs.sql — єдиний легальний виняток: чіпає msdb, а не базу
+    # застосунку, і виконується DBA один раз, а не на кожен замір.
+    $onDisk = Get-ChildItem -Path $sql -Filter '*.sql' | Select-Object -ExpandProperty Name
+    $missed = $onDisk | Where-Object { $_ -notin $scripts -and $_ -ne '14-agent-jobs.sql' }
+    if ($missed) {
+        throw "Скрипти є в дереві, але не виконуються: $($missed -join ', ')"
+    }
 
     foreach ($name in $scripts) {
         if ($name -eq '<migration>') {

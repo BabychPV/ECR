@@ -47,8 +47,8 @@ public sealed class AccessProfileCacheTests : IDisposable
 
         // Старий запис нікуди не подівся — він просто більше не адресується.
         // Саме тому явна інвалідація не потрібна: її роль виконує ключ.
-        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1"), out _));
-        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s2"), out _));
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
+        Assert.True(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s2", ""), out _));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -90,7 +90,7 @@ public sealed class AccessProfileCacheTests : IDisposable
         Assert.True(first.IsSimulation);
         Assert.True(second.IsSimulation);
         Assert.Equal(2, builds);
-        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1"), out _));
+        Assert.False(_memory.TryGetValue(AccessProfileCache.Key(UserId, "s1", ""), out _));
     }
 
     /// <inheritdoc />
@@ -109,7 +109,7 @@ public sealed class AccessProfileCacheTests : IDisposable
         var profile = builder.Build();
         return Task.FromResult(new AccessProfile
         {
-            CacheKey = AccessProfileCache.Key(UserId, stamp),
+            CacheKey = AccessProfileCache.Key(UserId, stamp, ""),
             UserId = profile.UserId,
             SecurityStamp = stamp,
             Permissions = profile.Permissions,

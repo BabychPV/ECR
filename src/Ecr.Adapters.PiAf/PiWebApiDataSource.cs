@@ -48,7 +48,11 @@ public sealed class PiWebApiDataSource(
     {
         var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
 
-        var elements = await GetAsync(
+        // ⛔ Q-222 (аудит): `using`, а не голий `.Dispose()` наприкінці —
+        // виняток із `EnumerateArray()`/`Text(...)` лишав би `JsonDocument`
+        // (некерована пам'ять) недиспозженим, на відміну від `ReadAsync` у
+        // цьому самому класі, де той самий патерн уже під `using`.
+        using var elements = await GetAsync(
             source.Endpoint,
             $"assetdatabases/{Uri.EscapeDataString(source.Catalog ?? string.Empty)}/elements"
             + "?searchFullHierarchy=false",
@@ -70,7 +74,6 @@ public sealed class PiWebApiDataSource(
             }
         }
 
-        elements.Dispose();
         return result;
     }
 

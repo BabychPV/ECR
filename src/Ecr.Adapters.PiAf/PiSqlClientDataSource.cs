@@ -230,15 +230,19 @@ public sealed class PiSqlClientDataSource(
 
         var connection = new OdbcConnection(builder.ConnectionString);
 
+        // ⛔ Q-222 (аудит): раніше диспозилось лише в `catch (OdbcException)`
+        // — будь-яка ІНША помилка `OpenAsync` (скасування токена, таймаут,
+        // щось неочікуване) лишала з'єднання відкритим назавжди. `finally`
+        // із прапорцем ловить УСІ шляхи, не лише названий тип винятку.
+        var opened = false;
         try
         {
             await connection.OpenAsync(ct).ConfigureAwait(false);
+            opened = true;
             return connection;
         }
         catch (OdbcException ex)
         {
-            await connection.DisposeAsync().ConfigureAwait(false);
-
             // ⛔ Відмова в автентифікації відділяється від недоступності
             // (`H-20`): драйвер повідомляє її SQLSTATE 28000 («invalid
             // authorization specification»). Без цього розділення неправильний
@@ -256,6 +260,13 @@ public sealed class PiSqlClientDataSource(
                 SourceUnavailable,
                 $"PI SQL Client не з'єднується з {source.Code}: {ex.Message}",
                 new Dictionary<string, object?> { ["dataSource"] = source.Code });
+        }
+        finally
+        {
+            if (!opened)
+            {
+                await connection.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 
