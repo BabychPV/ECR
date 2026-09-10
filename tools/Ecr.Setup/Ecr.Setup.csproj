@@ -9,16 +9,6 @@
     <AssemblyName>EcrSetup</AssemblyName>
 
     <!--
-      Репозиторний Directory.Packages.props вмикає централізоване керування
-      версіями пакетів (CPM) для всього дерева. Цей проєкт навмисно поза
-      Ecr.sln (Windows-only GUI, як і installer/Ecr.Installer поряд) і має
-      рівно одну пряму залежність — простіше й безпечніше для сусідніх
-      завдань тримати її версію тут-таки, ніж дописувати спільний
-      Directory.Packages.props заради одного рядка.
-    -->
-    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
-
-    <!--
       CA1001: кожен крок майстра тримає власні WinForms-контроли (TextBox,
       RadioButton тощо) як приватні поля — це IDisposable, і аналізатор
       хоче, щоб IWizardStep-реалізації самі стали IDisposable. Не варто:
@@ -33,7 +23,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.5.0" />
+    <!-- Версія — централізовано, Directory.Packages.props (LicenseComplianceTests
+         звіряє, що жоден csproj не оголошує версію сам і не тягне пакет
+         поза цим реєстром). -->
+    <PackageReference Include="Microsoft.PowerShell.SDK" />
   </ItemGroup>
 
 </Project>
