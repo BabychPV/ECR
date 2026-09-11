@@ -142,20 +142,36 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TemplateVersionSummary>> ListVersionsAsync(
+    /// <remarks>
+    /// ⛔ Q-225: раніше `page.Cursor` НІКОЛИ не читався — лише `Take(page.
+    /// Limit)`, тобто версія шаблону за 50-ту (дефолтний ліміт) була
+    /// назавжди невидима через цей метод, без жодної помилки. Той самий
+    /// патерн курсорної пагінації, що вже в сусідньому `ListTemplatesAsync`
+    /// цього файлу: на один рядок більше за сторінку — виявити, чи є ще,
+    /// без окремого `COUNT` по всій таблиці.
+    /// </remarks>
+    public async Task<PagedResult<TemplateVersionSummary>> ListVersionsAsync(
         int templateId, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        return await db.TemplateVersions
+        var after = Cursor.Decode(page.Cursor);
+
+        var rows = await db.TemplateVersions
             .AsNoTracking()
-            .Where(v => v.TemplateId == templateId)
+            .Where(v => v.TemplateId == templateId && v.Id > after)
             .OrderBy(v => v.Id)
-            .Take(page.Limit)
+            .Take(page.Limit + 1)
             .Select(v => new TemplateVersionSummary(
                 v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        var hasMore = rows.Count > page.Limit;
+        var items = rows.Take(page.Limit).ToList();
+
+        return new PagedResult<TemplateVersionSummary>(
+            items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
     }
 
     /// <inheritdoc />

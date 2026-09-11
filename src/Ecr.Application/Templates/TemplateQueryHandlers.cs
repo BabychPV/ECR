@@ -89,11 +89,11 @@ public sealed class CreateTemplateHandler(
 public sealed class ListTemplateVersionsHandler(
     ITemplateVersionStore templates, IAccessDecisionService access, ICurrentUser currentUser)
 {
-    /// <summary>Повертає версії шаблону.</summary>
+    /// <summary>Повертає сторінку версій шаблону.</summary>
     /// <param name="templateId">Шаблон.</param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<IReadOnlyList<TemplateVersionSummary>> HandleAsync(
+    public async Task<PagedResult<TemplateVersionSummary>> HandleAsync(
         int templateId, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
@@ -101,6 +101,15 @@ public sealed class ListTemplateVersionsHandler(
         await ListTemplatesHandler
             .RequireAsync(access, currentUser, ListTemplatesHandler.Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Q-225: та сама перевірка, що вже в ListTemplatesHandler поруч —
+        // раніше тут її не було взагалі, і запит з абсурдним лімітом просто
+        // мовчки обрізався б до нього, а не відхилявся зрозумілою помилкою.
+        if (!page.IsValid)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+        }
 
         return await templates.ListVersionsAsync(templateId, page, ct).ConfigureAwait(false);
     }

@@ -245,31 +245,59 @@ Docker, не поведінка за замовчуванням (команда 
 | Змінна | Приклад | Навіщо |
 |---|---|---|
 | `ECR_ConnectionStrings__Ecr` | `Server=localhost;Database=Ecr;Trusted_Connection=True;TrustServerCertificate=True` | основна БД |
-| `ECR_Database__EditionMode` ⚠ | `Auto` \| `Standard` \| `Enterprise` | АРХ-7 |
+| `ECR_Database__EditionMode` | `Auto` \| `Standard` \| `Enterprise` | АРХ-7. Прод — завжди `Standard` явно (Developer/Evaluation зовні невідрізнювані від Enterprise, `SqlCapabilitiesProbe`) |
 | `ECR_Schema__StartupMode` | `Validate` (прод) \| `Migrate` (dev/test) | `B01` §6.3 |
 | `ECR_Auth__CookieName` | `ecr.auth` | |
 | `ECR_Auth__SlidingHours` | `8` | |
-| `ECR_Jobs__Provider` ⚠ | `Quartz` | реалізація порту |
-| `ECR_Jobs__WorkerCount` ⚠ | `4` | |
-| `ECR_Cache__DistributedProvider` ⚠ | `SqlServer` | без Redis |
-| `ECR_ExternalSources__PiAf__SecretName` ⚠ | `pi-af-service-account` | **лише ім'я секрету** |
+| `ECR_Cache__SchemaName` | `dbo` | схема таблиці розподіленого кешу (`AddDistributedSqlServerCache`) |
+| `ECR_Cache__TableName` | `Cache` | назва тієї самої таблиці — має збігатися з `13-cache-table.sql` |
+| `ECR_Secrets__<ім'я>` | `ECR_Secrets__pi-af-service-account` = `<пароль>` | секрет джерела (PI AF, SMTP, …). `<ім'я>` — значення колонки `SecretName` конкретного джерела (`ext.DataSource.SecretName`, наприклад `pi-af-service-account`) чи налаштування сповіщень, НЕ фіксований суфікс шляху — `ConfigurationSecretProvider.Find` читає `Secrets:<ім'я>` за тим самим механізмом для ВСІХ джерел, PiAf і SMTP разом (`ConfigurationSecretProvider.cs`, `SmtpNotificationSender.cs`) |
 | `ECR_Bootstrap__Password` | одноразовий пароль | **лише перший старт** (`D-115`): застосунок створює локального адміністратора з `MustChangePassword = 1`. Якщо запис уже існує — змінна ігнорується. Джерело — не сама змінна оточення (`Q-215`, `Q-222` аудит): застосунок читає й одразу видаляє одноразовий файл `%ProgramData%\ECR\config\bootstrap.secret`, куди `deploy-ecr.ps1 -BootstrapPassword` записує значення. Сам bootstrap-обліковий запис деактивується не власним входом, а коли БУДЬ-ЯКИЙ домен-користувач отримує `Security.ManageUsers` (`DisableBootstrapAdminHandler`) |
 | `ECR_TEST_SQL` | `Server=localhost\SQLEXPRESS;Integrated Security=true;TrustServerCertificate=true` | рядок підключення до **сервера** для інтеграційних тестів замість Testcontainers. ⚠ Саме рядок, а не `1`: фікстура підключається за ним, а базу створює свою |
 | `ECR_TEST_DB` | `EcrTest_Infrastructure` | перевизначає ім'я тестової бази. За замовчуванням — своє на кожну збірку тестів (`Q-055`) |
 
-> ⚠ **Позначені `⚠` рядки (Q-223, аудит, OPEN) — код НЕ читає ці змінні.**
-> `Database:EditionMode` завжди `Auto` (`StartupSequence.cs`, хардкод),
-> `Jobs:Provider`/`Jobs:WorkerCount` не читаються ніде (Quartz завжди
-> in-memory), `Cache:DistributedProvider` не читається (кеш завжди
-> SQL Server, і насправді читає незадокументовані `Cache:SchemaName`/
-> `Cache:TableName`), `ExternalSources:PiAf:SecretName` не існує як ключ
-> конфігурації взагалі (`SecretName` — колонка `ext.DataSource` у базі,
-> а фактичний секрет іде через `ECR_Secrets__<назва>`). Чи це
-> справді потрібна, але не реалізована конфігурованість (і тоді ІЗ
-> ЯКИМ значенням — факт, не судження), чи застаріла документація
-> підходу, який замінили на щось інше (як-от `Ecr_SmallFiles` — окрема,
-> вже робоча заміна для "виміряти як на Standard/Express", яку
-> `EditionMode` міг би дублювати) — не мій виклик вирішувати мовчки.
+> ✎ **Q-223 (аудит) закрито 2026-09-11 — людина доручила вирішити, а не
+> лише задокументувати.** Три знахідки, три різні долі:
+>
+> - `Database:EditionMode` був справжнім пропуском коду — ключ існував в
+>   `appsettings.json` (з іншим значенням у Development!), а
+>   `StartupSequence.cs` його ніколи не читав, завжди передаючи `Auto`.
+>   **Виправлено**: старт тепер читає цей ключ і передає його в
+>   `SqlCapabilitiesProbe.ProbeAsync`.
+> - `Cache:DistributedProvider` виявився не пропуском, а розбіжністю назв:
+>   код завжди читав `Cache:SchemaName`/`Cache:TableName`, яких у
+>   `appsettings.json` не було взагалі (там були `DistributedProvider`/
+>   `DistributedSchemaName`/`DistributedTableName` — інші імена, що
+>   ніколи не застосовувались). **Виправлено**: `appsettings.json`
+>   перейменовано на реальні ключі, зі значеннями, що вже й так діяли
+>   мовчки за замовчуванням (`dbo`/`Cache` — збігається з
+>   `13-cache-table.sql`), тобто без зміни поведінки.
+> - `Jobs:Provider`/`Jobs:WorkerCount` — підтверджено мертві (Quartz
+>   реєструється безумовно, `DependencyInjection.cs`; заміна провайдера —
+>   через порт `IBackgroundJobScheduler`, D-09, не конфігурацію).
+>   **Прибрано з `appsettings.json`.** Той самий огляд секції `Jobs`
+>   заразом показав, що вона мертва ЦІЛКОМ: `PeriodStateCron`/
+>   `ConsistencyCheckCron`/`PartitionCheckCron`/`MaxParallelRecalculation`
+>   теж ніде не читаються — `RecurringScheduleService` розкладає
+>   нічні/погодинні задачі двома захардкодженими константами
+>   (`NightlyCron`/`HourlyCron`), не per-job значеннями з конфігурації.
+>   Секцію `Jobs` прибрано з `appsettings.json` цілком, а не лише два
+>   названі в Q-223 ключі — лишати непрочитані ключі поруч із реальними
+>   вводило б в оману саме тому, чому цей запис існує.
+>
+>   **Не зроблено свідомо, і це не той самий пропуск:** реальна вимога за
+>   лаштунками цих ключів — щоб два інстанси застосунку (D-32 вимагає
+>   ≥2 за балансувальником) не виконували той самий нічний/погодинний
+>   job двічі одночасно — досі не має захисту. `RecurringScheduleService`
+>   лише РЕЄСТРУЄ розклад у Quartz (безпечно дублювати), а сам запуск
+>   job'и на кожному інстансі нічим не координований між інстансами.
+>   Патерн для фіксу вже є в цьому самому дереві —
+>   `StartupSequence.ApplySchemaModeAsync` бере `sp_getapplock` навколо
+>   міграції з тієї самої причини (два інстанси, що стартують одночасно).
+>   Перенести той самий патерн на шість job-класів — окрема, за розміром
+>   самостійна робота (потрібна семантика "не чекай — пропусти цей
+>   запуск", а не "почекай і виконай", як у міграції), і вона свідомо НЕ
+>   зроблена в цьому проході.
 >
 > **`ECR_Bootstrap__Password` не має значення за замовчуванням і не потрапляє
 > нікуди, крім пам'яті процесу**: ні в seed, ні в `appsettings`, ні в лог

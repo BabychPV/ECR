@@ -8,7 +8,7 @@ import type {
   CreateTemplateVersionRequest,
   TemplateIdResponse,
   TemplatePage,
-  TemplateVersionSummary,
+  TemplateVersionPage,
   VersionIdResponse,
 } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
@@ -49,11 +49,14 @@ export function TemplatesPage(): JSX.Element {
   // `GET /api/v1/templates/{id}/versions`. До аудиту сторінка била в
   // `/api/v1/template-versions`, якого не існує, і перелік версій був
   // порожній завжди (`A7-03`).
+  // ⛔ Q-225: ендпоінт курсорний (той самий патерн, що й `/api/v1/templates`
+  // поруч) — відповідь тепер `{items, nextCursor, totalCount}`, а не голий
+  // масив. `?limit=100` — той самий одноразовий ліміт сторінки, що й вище.
   const versionQueries = useQueries({
     queries: items.map((template) => ({
       queryKey: ['template-versions', template.id],
       queryFn: () =>
-        apiFetch<TemplateVersionSummary[]>(`/api/v1/templates/${template.id}/versions`),
+        apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
     })),
   });
 
@@ -113,7 +116,7 @@ export function TemplatesPage(): JSX.Element {
   /** Остання версія шаблону — від неї клонується наступна. */
   const latestVersionOf = (templateId: number): number | null => {
     const index = items.findIndex((template) => template.id === templateId);
-    const versions = index < 0 ? [] : (versionQueries[index]?.data ?? []);
+    const versions = index < 0 ? [] : (versionQueries[index]?.data?.items ?? []);
 
     return versions.length === 0 ? null : (versions[versions.length - 1]?.id ?? null);
   };
@@ -161,7 +164,7 @@ export function TemplatesPage(): JSX.Element {
                   <Table.Td>{template.code}</Table.Td>
                   <Table.Td>
                     <Group gap="xs">
-                      {(versionQueries[index]?.data ?? []).map((version) => (
+                      {(versionQueries[index]?.data?.items ?? []).map((version) => (
                         <Badge
                           key={version.id}
                           variant={version.status === 'Published' ? 'filled' : 'light'}

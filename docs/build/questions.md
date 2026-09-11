@@ -267,9 +267,10 @@
 | Q-220 | CONFLICT | Людина реально прогнала свіжий `Ecr-Setup-1.1.1.exe` (`Q-219`) і надіслала скріншоти двох незалежних дефектів: (1) на кроці 1 кнопка "Next" не потрапляла у видиму область вікна взагалі — лише "Cancel"/"Back"; (2) на кроці 6 `deploy-ecr.ps1` падав з `PSSecurityException: ... cannot be loaded because running scripts is disabled on this system` — майстер хостить PowerShell у своєму процесі (`Q-216`, вирішує пастку `SecureString`), але це НЕ звільняє від execution policy машини, яка діє незалежно | RESOLVED · (1) `MainForm.cs`/`InstallStep.cs`: `WrapContents = false` на всіх кнопкових/чеклистових `FlowLayoutPanel` — за замовчуванням `true`, і занижена оцінка ширини/висоти на першому проході `AutoSize` переносила другий контрол на "новий рядок", який фіксована висота батьківської `Panel` відрізала; (2) `DeployRunner.cs`: `PowerShell.Create(InitialSessionState)` з `ExecutionPolicy = Bypass` — діє лише в межах процесу `EcrSetup.exe`, не чіпає реєстр/машину/користувача, той самий принцип, що ручний `Set-ExecutionPolicy -Scope Process -Bypass` у §2.2 install-guide, лише виконаний майстром самим. Фікс (2) підтверджено РЕАЛЬНИМ прогоном: окремий пробний консольний проєкт примусово поставив `Process`-scope на `Restricted`, відтворив ІДЕНТИЧНИЙ `PSSecurityException` без фіксу, і в ТОМУ САМОМУ процесі — успішний запуск скрипта з фіксом. Фікс (1) не підтверджено власним прогоном (немає інтерактивного Windows-стенда в цій сесії) — очікує підтвердження людиною |
 | Q-221 | CONFLICT | Директива людини: повний аудит проєкту, PK2-стиль, самостійне виправлення. Шість паралельних агентів знайшли, серед іншого: (1) `CalculationOrchestrator.PeriodDate`/`RecalculationService.PeriodOf` тлумачили `PeriodKey.Sequence` як номер МІСЯЦЯ для БУДЬ-ЯКОГО `PeriodKind` — для квартальних/річних проєктів це підставляло чужі межі періоду (28 днів замість 91/365) у методологію й `[Period].Days/.Hours/.Seconds`, без жодної помилки, що це впіймала б (D-112, сусідній `GenericCalculationModule.PeriodAsync` явно уникає цього тим самим способом); (2) `/health/db` не мав `RequireAuthorization()` — і навіть якби мав, `/health/ready` (навмисно анонімний, D-139) віддає ТІ САМІ подробиці, бо `DatabaseHealthCheck` тегований і "db", і "ready", а спільний writer копіює `Data` в обидва звіти без розбору; (3) Kestrel слухає лише вбудований дефолт `http://localhost:$AppPort` — інсталятор відкриває фаєрвол на `$AppPort`, а слухати нікому, всупереч `11-install-guide.md`, що каже відкрити з іншої машини; (4) три Save-кнопки (`GrantsPanel.tsx`, `UserAccessEditor.tsx`, `ApprovalRouteEditor.tsx`) не блокувались на `isPending`/`error` джерельного запиту — перемикання ролі/користувача чи збій мережі лишали чернетку чужою чи порожньою, а збереження (усі три — ПОВНА заміна на сервері) мовчки стирало чи підміняло чужі дані | RESOLVED · (1) обидва методи тепер резолвлять межі через `IPeriodStore.FindPeriodBoundsAsync(documentId, periodKey, ct)` — реальні межі документа, не арифметика ключа; підтверджено: 529/529 `Ecr.Application.Tests` + 68/68 `Ecr.Calculations.Tests` зелені реальним прогоном (включно з `CascadeRecalculationTests`, де фікс сам виявив і зламав тестовий стаб, що раніше мовчки покладався на стару, неправильну поведінку — виправлено); (2) `.RequireAuthorization()` на `/health/db`, і новий `HealthResponse.WriteReadyAsync` з редакцією `Data` саме для checks у списку `ReadyReportRedactedChecks` (лише "db") на `/health/ready` — статус лишається справжнім, подробиці порожні; 2 нові тести (401 без сеансу, редакція на ready) + 3 існуючі оновлено на реальний логін; 68/68 `Ecr.Api.Tests` зелені реальним прогоном проти локального SQL Server; (3) `deploy-ecr.ps1` крок 4/7 тепер пише `ASPNETCORE_URLS=http://+:$AppPort` у реєстр служби (той самий канал, що й рядок підключення) — без коду в `Program.cs`, ASP.NET Core читає цю змінну як стандартну; (4) усі три кнопки тепер `disabled={джерело.isPending \|\| Boolean(джерело.error)}`; `npm run typecheck` зелений. Не підтверджено реальним прогоном: (3) — немає другої машини в мережі цієї сесії, щоб перевірити фактичну досяжність |
 | Q-222 | CONFLICT | Той самий аудит (Q-221): окремий під-агент інфраструктурного виміру знайшов ~20 зовнішніх ключів і 2 обмеження унікальності з `02a-db-schema.md`, які НІКОЛИ не потрапили в EF-конфігурації — `doc.Project` (усі 3), `doc.CellValue` (2 з 4), `wf.ApprovalState` (обидва), `sec.RoleAssignment` (унікальність — прості неунікальні індекси замість двох фільтрованих UNIQUE), `uom.Dimension`/`Unit`/`Conversion` (7 разом), `cfg.CalculationBinding`/`TableRelationDef`/`SheetGroupRule`/`PeriodAccessRuleDef`/`TemplateVersion`/`ColumnDef`/`RowDef`/`StyleDef` (по 1-3 кожен), `calc.MethodologyConstant` (унікальність відсутня зовсім) — роками жодна з цих таблиць не мала референтної цілісності на рівні бази, лише процедурну (код, що сам стежить за коректністю посилань) | RESOLVED частково · 19 з ~20 зв'язків додано (перелік — у детальному записі нижче), 2 фільтровані UNIQUE для `sec.RoleAssignment`, і `UQ_MethodologyConstant` через обчислювані стовпці (`ISNULL`, `CONVERT(..., 112)` — не голий `CAST`, реальний прогін міграції спершу впав на "non-deterministic"). Одну міграцію згенеровано (`Q222MissingForeignKeysAndConstraints`) і ПОВНІСТЮ ЗАСТОСОВАНО на реальному локальному SQL Server (не лише скомпільовано) — підтверджено прямим запитом до `sys.foreign_keys`/`sys.indexes`: усі 33 очікувані FK і 3 обмеження на місці. Після застосування нова референтна цілісність спіймала дві реальні дірки в тестових фікстурах (`CascadeRecalculationTests`, `ErrorContractTests` — обидві посилались на неіснуючі рядки константами, що працювало лише тому, що FK ще не існував) — виправлено. Повний прогін реальним SQL Server: 174/174 `Ecr.Infrastructure.Tests`, 529/529 `Ecr.Application.Tests`, 68/68 `Ecr.Api.Tests`, 68/68 `Ecr.Calculations.Tests`, 242/242 `Ecr.Domain.Tests`, 75/75 `Ecr.Architecture.Tests`. Свідомо НЕ додано: `FK_CellValue_Entry` (`ValueRegistryEntryId → dic.RegistryEntry`) — `RegistryEntry : Entity<long>` (Id конвертований у int лише для зберігання), а `CellValue.ValueRegistryEntryId` — голий `int?`; EF звіряє CLR-сумісність ДО конвертації, тож додати правильно означало б поміняти тип на `long?` у ~18 файлах поза міграціями на найгарячішому шляху системи (`doc.CellValue`, ~108 млн рядків/рік) — окрема, свідомо не зроблена в цьому проході робота, задокументована нижче |
-| Q-223 | SCOPE | Той самий аудит (Q-221): окремий під-агент docs-vs-код знайшов у `04-environment.md` §6 чотири змінні оточення (`Database:EditionMode`, `Jobs:Provider`/`WorkerCount`, `Cache:DistributedProvider`, `ExternalSources:PiAf:SecretName`), яких код НІКОЛИ не читає — `StartupSequence.cs` хардкодить `SqlEditionMode.Auto`, Quartz завжди in-memory без гілки конфігурації, кеш завжди SQL Server і читає натомість незадокументовані `Cache:SchemaName`/`Cache:TableName`, а `ExternalSources:PiAf:SecretName` не існує як ключ узагалі (`SecretName` — колонка `ext.DataSource`, реальний секрет іде через `ECR_Secrets__<назва>`) | OPEN · виправлено лише стале (`10-installer.md` §10/§11.3 — реєстровий bootstrap-пароль до Q-215, замінено на файловий; `04-environment.md` — стале "прибирають після першого входу"; `wf.ApprovalRoute` у `02a-db-schema.md`). Саме чотири `⚠`-позначені змінні НЕ виправлено мовчки в жоден бік: чи це справді потрібна, але не реалізована конфігурованість (і тоді ІЗ ЯКИМ значенням за замовчуванням), чи документація підходу, який замінили на щось інше (є конкретний натяк на друге для `EditionMode` — `Ecr_SmallFiles` extended property в `01-filegroups.sql`/`verify-sql-scripts.ps1` вже й так змушує малі файли на не-Express інстансі, можливо саме це й замінило задуманий `EditionMode=Standard`, але це не підтверджено) — факт, не судження, тому запис лишається відкритим |
+| Q-223 | SCOPE | Той самий аудит (Q-221): окремий під-агент docs-vs-код знайшов у `04-environment.md` §6 чотири змінні оточення (`Database:EditionMode`, `Jobs:Provider`/`WorkerCount`, `Cache:DistributedProvider`, `ExternalSources:PiAf:SecretName`), яких код НІКОЛИ не читає | RESOLVED · людина доручила вирішити (2026-09-11), кожна змінна отримала своє рішення: `PiAf:SecretName` — неправильна назва ключа в доці (`Q-226`); `Database:EditionMode` — реальний пропуск коду, тепер читається в `StartupSequence.cs`; `Cache:DistributedProvider` — розбіжність назв, `appsettings.json` перейменовано на реальні ключі без зміни поведінки; `Jobs:Provider`/`WorkerCount` — підтверджено мертві, прибрані (і вся секція `Jobs` виявилась мертвою, прибрана цілком). Названо прямо, не приховано: справжня вимога за `Jobs`-ключами — cross-instance захист recurring jobs (D-32) — досі не реалізована, окрема робота |
 | Q-224 | CONFLICT | Той самий аудит (Q-221): під-агент tools/installer/CI знайшов залишкові екземпляри Q-217-класу (нативний виклик під `$ErrorActionPreference = 'Stop'` без тимчасового послаблення) поза скриптами, які вже виправляв Q-220 — `e2e-stand.ps1` (Playwright + два `sqlcmd` у прибиранні, `2>$null` НЕ рятує від цього класу, перевірено реальним відтворенням), `br07-load-test.ps1` (`Get-SqlScalar`, викликається першим і впав би на найпершому кроці) — плюс застаріла `SYNOPSIS` у `verify-msi.ps1` (називала сценарії 4/6, яких там ніколи не було), відсутній сторож дрейфу списку SQL-скриптів у `br07-load-test.ps1`, відсутня позначка "своя тимчасова база" в `smoke.ps1` (видаляв БУДЬ-ЯКУ базу з `-Database`, як і `br07-load-test.ps1` колись), і застаріле посилання на `scripts/build-msi.ps1` (реально — `tools/`) у `.wixproj` | RESOLVED · усі перелічені виправлено тим самим патерном (тимчасове послаблення EAP навколо виклику, перевірка `$LASTEXITCODE` явно). `wix --version` у `build-msi.ps1`, який агент не міг перевірити емпірично (немає pwsh 7), перевірено реальним прогоном НА ЦІЙ машині — виключення НЕ кидається, фіксу не потребує (задокументовано як "перевірено чистим", не як пропуск). Синтаксис усіх змінених `.ps1` перевірено парсером |
-| Q-225 | SCOPE | Той самий аудит (Q-221): `TemplateVersionStore.ListVersionsAsync` бере `CursorRequest`, доку­ментований як "курсорна пагінація", але НІКОЛИ не читає `page.Cursor` — лише `.Take(page.Limit)` без жодного `.Where(v => v.Id > after)`. `TemplatesController.ListVersions` заодно й не приймає `cursor`/`limit` від клієнта взагалі (`new CursorRequest()` — завжди дефолтний ліміт 50). Разом: версії шаблону понад 50-ту НАЗАВЖДИ невидимі через цей ендпоінт, без жодної помилки чи ознаки, що щось відрізано | OPEN · свідомо НЕ виправлено в цьому проході. Мінімальний фікс (додати фільтр курсора в сховище) сам по собі недостатній: без "наступного курсора" у відповіді клієнт не може попросити сторінку 2 не вигадуючи власний Id (порушує задокументовану непрозорість курсора, `Cursor.cs`). Повний, послідовний фікс — той самий патерн, що вже `ListTemplatesAsync` у ТОМУ САМОМУ файлі: `PagedResult<T>` замість голого списку, `Take(page.Limit + 1)` для виявлення "чи є ще". Це змінює форму відповіді ендпоінта — контрактна зміна, що вимагає оновлення `contracts/openapi.snapshot.json` і, ймовірно, клієнтського коду у `src/Ecr.Web`, який цей ендпоінт читає. Свідомо не зроблено мовчки в межах великого аудиту — потребує окремого, зосередженого проходу з перевіркою фронтенду |
+| Q-225 | SCOPE | Той самий аудит (Q-221): `TemplateVersionStore.ListVersionsAsync` бере `CursorRequest`, доку­ментований як "курсорна пагінація", але НІКОЛИ не читає `page.Cursor` — лише `.Take(page.Limit)` без жодного `.Where(v => v.Id > after)`. `TemplatesController.ListVersions` заодно й не приймає `cursor`/`limit` від клієнта взагалі (`new CursorRequest()` — завжди дефолтний ліміт 50). Разом: версії шаблону понад 50-ту НАЗАВЖДИ невидимі через цей ендпоінт, без жодної помилки чи ознаки, що щось відрізано | RESOLVED · людина доручила довести до робочого стану (2026-09-11). `ListVersionsAsync`/`ListTemplateVersionsHandler`/`TemplatesController.ListVersions` тепер повертають `PagedResult<TemplateVersionSummary>` тим самим курсорним патерном, що й сусідній `ListTemplatesAsync`; заодно додано відсутню перевірку `page.IsValid` (сусідній `ListTemplatesHandler` мав її, цей — ні). Контрактна зміна проведена повністю: `contracts/openapi.snapshot.json` перегенеровано реальним прогоном (`ECR_UPDATE_SNAPSHOT=1`), `schema.d.ts` — `npm run api:types`, і єдиний реальний споживач (`TemplatesPage.tsx`, читав голий масив) переведено на `{items, nextCursor}`. Новий інтеграційний тест на реальному SQL Server (`TemplateVersionStoreTests`) доводить дворінкове гортання: 3 версії одного шаблону, ліміт 2 → сторінка 1 віддає 2 з непорожнім `nextCursor`, сторінка 2 за цим курсором віддає третю з `nextCursor: null` — до фіксу другий виклик мовчки повертав ту саму першу сторінку, бо курсор ігнорувався. `dotnet build`/`tsc --noEmit` чисті; повний прогін `Ecr.Api.Tests`/`Ecr.Application.Tests`/`Ecr.Infrastructure.Tests` реальним SQL Server — див. коміт |
+| Q-226 | SCOPE | Частина Q-223: `04-environment.md` документував `ECR_ExternalSources__PiAf__SecretName` як ключ конфігурації — такого ключа не існує. `PiSqlClientDataSource`/`PiWebApiDataSource` викликають `secrets.Find(source.SecretName)`, а `ConfigurationSecretProvider.Find` читає `Secrets:<ім'я>` — тобто РЕАЛЬНА змінна оточення `ECR_Secrets__<значення-стовпця-SecretName>` (наприклад `ECR_Secrets__pi-af-service-account`), той самий загальний механізм, яким користується і `SmtpNotificationSender` — не PiAf-специфічний | RESOLVED · це не пропуск коду (як інші три в Q-223), а неправильна назва ключа в документі — код і так уже правильний. `04-environment.md` §6 переписано на реальний механізм |
 | Q-227 | CONFLICT | Людина надіслала ще три скріншоти після Q-220: (1) крок 2 — кнопка "Browse..." без `AutoSize=true` (єдиний виняток серед кнопок цього дерева) не вміщала власний текст; (2) крок 4 — напис-пояснення накладався на поля "Password:"/"Confirm:", той самий клас крихкості `Dock=Fill`+`AutoSize` на `TableLayoutPanel`, що й Q-218, тут без явного `RowStyle` на рядок; (3) крок 5 (Огляд) — заголовки ListView і верх переліку виглядали обрізаними, "не всі рядки видно" | RESOLVED · (1)/(2) висока впевненість — код-верифіковано збіркою й звірено з уже робочими патернами того самого дерева (`AutoSize` на кнопках `MainForm.cs`, явні `RowStyles` в `InstallStep.cs`); (3) обґрунтована, не 100% підтверджена гіпотеза (фіксовані пікселі `MainForm.cs` не ростуть з DPI, шрифтозалежний нативний `ListView` — росте) — `ApplicationHighDpiMode=PerMonitorV2` (перша спроба через `app.manifest` провалилась на збірці, `WFO0003`) і +100px висоти вікна як захисний запас, жодне з трьох не підтверджено реальним екраном |
 
 ---
@@ -10848,8 +10849,60 @@ FK ще не існував:
 файловий) і `04-environment.md`'s "прибирають після першого входу"
 (реальний тригер — `Security.ManageUsers`, не власний вхід bootstrap).
 
-**Статус:** OPEN · чотири змінні позначені `⚠` у таблиці з прямим
-поясненням; рішення (реалізувати чи спростити документ) — не моє.
+**Оновлення (2026-09-11) — людина прямо доручила вирішити, не лише
+задокументувати:** "я доручаю це тобі ціль реальна роботоспроможність,
+кліент не має мати з цим функціоналом проблем та він має працювати".
+Три змінні, що лишались (четверта — `PiAf.SecretName` — уже закрита
+окремо в `Q-226`), розібрано по одній, кожна отримала СВОЄ рішення, а
+не одне спільне:
+
+1. **`Database:EditionMode` — реальний пропуск коду, виправлено.**
+   `StartupSequence.cs` тепер читає цей ключ (`Enum.TryParse`,
+   регістронезалежно, дефолт `Auto`) і передає в
+   `SqlCapabilitiesProbe.ProbeAsync` замість хардкоду `Auto`. Здогад
+   про дублювання `Ecr_SmallFiles` — НЕ підтвердився: той механізм
+   керує лише розміром файлів БД, `EditionMode` — ширшим набором
+   стратегій (`SupportsOnlineIndexRebuild`, `SupportsResourceGovernor`,
+   розмір батчу архівації) — різні, не дублюючі одна одну речі.
+2. **`Cache:DistributedProvider` — не пропуск, а розбіжність назв.**
+   Код завжди читав `Cache:SchemaName`/`Cache:TableName` — ключів із
+   такими іменами в `appsettings.json` не було НІКОЛИ (там були
+   `DistributedProvider`/`DistributedSchemaName`/`DistributedTableName`
+   — інші імена, що не застосовувались). Виправлено перейменуванням
+   ключів у `appsettings.json` на реальні, зі значеннями, які й так уже
+   діяли мовчки за замовчуванням (`dbo`/`Cache`, збігається з
+   `13-cache-table.sql`) — без зміни поведінки.
+3. **`Jobs:Provider`/`Jobs:WorkerCount` — підтверджено мертві,
+   прибрано.** Quartz реєструється безумовно; заміна — через порт
+   `IBackgroundJobScheduler` (D-09), не конфігурацію. Той самий огляд
+   розкрив, що ВСЯ секція `Jobs` мертва (`PeriodStateCron`/
+   `ConsistencyCheckCron`/`PartitionCheckCron`/`MaxParallelRecalculation`
+   теж ніде не читаються — `RecurringScheduleService` розкладає нічні/
+   погодинні задачі двома захардкодженими константами) — секцію
+   прибрано з `appsettings.json` цілком, а не лише два названих ключі.
+
+   **Свідомо НЕ зроблено, і назване прямо, а не приховане:** реальна
+   вимога за цими ключами — щоб два інстанси застосунку (D-32, "≥2
+   інстанси за балансувальником") не виконували той самий нічний/
+   погодинний job двічі одночасно — досі без захисту.
+   `RecurringScheduleService` лише РЕЄСТРУЄ розклад у Quartz (безпечно
+   дублювати на кожному інстансі), а сам запуск job'и ніяк не
+   координований МІЖ інстансами. Патерн для фіксу вже є в цьому дереві
+   — `StartupSequence.ApplySchemaModeAsync` бере `sp_getapplock` навколо
+   міграції з тієї самої причини. Перенести той самий патерн на шість
+   job-класів — самостійна за розміром робота (потрібна семантика "не
+   чекай — пропусти цей запуск", інша за суттю від "почекай і виконай"
+   у міграції) — і вона свідомо не зроблена в цьому проході: це не той
+   самий клас пропуску, що решта Q-223 (фантомна змінна), а справжня,
+   ще не реалізована вимога.
+
+Подробиці й перевірка кожного пункту — `docs/build/04-environment.md`
+§6 (той самий текст, не дублюю тут).
+
+**Статус:** RESOLVED (2026-09-11, було OPEN) · `dotnet build` чистий;
+повний прогін `Ecr.Api.Tests` (68/68) реальним SQL Server — зелений.
+Виняток, названий прямо, а не прихований: cross-instance захист
+recurring jobs — окрема, ще не зроблена робота (вище).
 
 ### Q-224 · CONFLICT · Той самий аудит (Q-221), 2026-09-11 · залишкові Q-217-подібні скрипти поза межами Q-220
 
@@ -10967,9 +11020,100 @@ var hasMore = rows.Count > page.Limit;
 openapi.snapshot.json`, і, ймовірно, клієнтський код у `src/Ecr.Web`,
 що читає цей ендпоінт), а не суто внутрішній рядок сховища.
 
-**Статус:** OPEN · реальний, підтверджений дефект; свідомо не
-виправлено в межах цього аудиту — вимагає окремого, зосередженого
-проходу з перевіркою й, за потреби, оновленням фронтенду.
+**Статус:** RESOLVED (2026-09-11, було OPEN) — людина прямо доручила
+довести до робочого стану: "я доручаю це тобі ціль реальна
+роботоспроможність, кліент не має мати з цим функціоналом проблем".
+
+**Що зроблено.**
+
+`ListVersionsAsync` переписано за точним патерном `ListTemplatesAsync`
+поруч:
+
+```csharp
+public async Task<PagedResult<TemplateVersionSummary>> ListVersionsAsync(
+    int templateId, CursorRequest page, CancellationToken ct)
+{
+    var after = Cursor.Decode(page.Cursor);
+    var rows = await db.TemplateVersions
+        .Where(v => v.TemplateId == templateId && v.Id > after)
+        .OrderBy(v => v.Id)
+        .Take(page.Limit + 1)
+        .Select(v => new TemplateVersionSummary(...))
+        .ToListAsync(ct);
+    var hasMore = rows.Count > page.Limit;
+    var items = rows.Take(page.Limit).ToList();
+    return new PagedResult<TemplateVersionSummary>(
+        items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
+}
+```
+
+`ITemplateVersionStore.ListVersionsAsync` і
+`ListTemplateVersionsHandler.HandleAsync` — повернений тип змінено на
+`PagedResult<TemplateVersionSummary>`; обробник заодно отримав
+перевірку `page.IsValid` (кидає `ECR-*-RequestInvalid` на лімітах поза
+межами `1..MaxLimit`) — тієї самої перевірки, яку сусідній
+`ListTemplatesHandler` уже мав, а цей — ні.
+`TemplatesController.ListVersions` тепер приймає `[FromQuery] int
+limit, [FromQuery] string? cursor` замість жодних параметрів запиту.
+
+**Контрактна зміна доведена до кінця, не лише в коді сервера:**
+
+- `contracts/openapi.snapshot.json` перегенеровано реальним прогоном
+  (`ECR_UPDATE_SNAPSHOT=1 dotnet test tests/Ecr.Api.Tests --filter
+  FullyQualifiedName~OpenApiSnapshotTests`) — відповідь ендпоінта в
+  знімку тепер `PagedResultOfTemplateVersionSummary`, з'явились
+  query-параметри `limit`/`cursor`.
+- `src/Ecr.Web/src/api/schema.d.ts` — `npm run api:types` з нового
+  знімка.
+- Єдиний реальний споживач ендпоінту, `TemplatesPage.tsx`, читав
+  `TemplateVersionSummary[]` напряму (`.length`, індексація за
+  останнім елементом для "останньої версії"). Переведено на
+  `TemplateVersionPage` (`{items, nextCursor, totalCount}`) з новим
+  типом `TemplateVersionPage` у `api/types.ts`; усі місця, що читали
+  `.data` як масив, тепер читають `.data?.items`. `npx tsc --noEmit`
+  — чисто.
+
+**Новий тест — сховище раніше не мало жодного.**
+`tests/Ecr.Infrastructure.Tests/Persistence/TemplateVersionStoreTests.cs`
+(реальний SQL Server, `[Collection("SqlServer")]`): будує один шаблон
+через `TestDocumentBuilder`, додає ще дві версії того самого шаблону
+(разом три), просить сторінку з лімітом 2 → отримує 2 елементи й
+непорожній `NextCursor`, просить другу сторінку ЦИМ курсором →
+отримує рівно третю версію з `NextCursor: null`. До фіксу другий
+виклик повертав ту саму першу сторінку мовчки (курсор ігнорувався) —
+цей тест ловить саме це.
+
+**Підтверджено реальним прогоном:** `dotnet build
+src/Ecr.Api/Ecr.Api.csproj` — 0 помилок; `npx tsc --noEmit` у
+`src/Ecr.Web` — чисто; повний прогін `Ecr.Api.Tests`,
+`Ecr.Application.Tests`, `Ecr.Infrastructure.Tests` проти локального
+SQL Server — див. підсумок коміта.
+
+### Q-226 · SCOPE · Частина Q-223, 2026-09-11 · ECR_ExternalSources__PiAf__SecretName — неправильна назва ключа, не пропуск коду
+
+**Де:** `docs/build/04-environment.md` §6.
+
+**Що знайшлося.** На відміну від трьох сусідніх пунктів Q-223, тут код
+УЖЕ правильний — документ просто називав неправильний ключ.
+`PiSqlClientDataSource.OpenAsync`/`PiWebApiDataSource` викликають
+`secrets.Find(source.SecretName)`, де `source.SecretName` — значення
+стовпця `ext.DataSource.SecretName` (наприклад `pi-af-service-account`
+— рядок даних, а не назва змінної оточення). `ConfigurationSecretProvider.
+Find` читає `configuration[$"Secrets:{secretName}"]` — тобто РЕАЛЬНА
+змінна оточення має форму `ECR_Secrets__pi-af-service-account`
+(підстановка значення стовпця в суфікс), а не буквальний рядок
+`ECR_ExternalSources__PiAf__SecretName`, якого не існує взагалі.
+
+Той самий механізм — НЕ специфічний для PiAf: `SmtpNotificationSender.
+cs` користується ним же для секрету SMTP. Документ описував один
+вигаданий, вузько-специфічний ключ там, де насправді є один спільний,
+загальний механізм.
+
+**Фікс:** `04-environment.md` §6 — рядок переписано на `ECR_Secrets__
+<ім'я>`, з поясненням, що `<ім'я>` — значення стовпця `SecretName`
+конкретного джерела, а не фіксований шлях.
+
+**Статус:** RESOLVED · доку виправлено, код змін не потребував.
 
 ### Q-227 · CONFLICT · Людина надіслала ще три скріншоти після Q-220, 2026-09-11 · замала кнопка "Browse...", напис накладається на поля пароля, не всі рядки Огляду видно
 

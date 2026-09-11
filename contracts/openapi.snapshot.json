@@ -3344,6 +3344,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfTemplateVersionSummary": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVersionSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfUserView": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -16295,6 +16328,7 @@
     },
     "/api/v1/templates/{id}/versions": {
       "get": {
+        "description": "⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,\nбез жодного способу передати `cursor` чи `limit` від клієнта. Версія\nшаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той\nсамий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, CancellationToken ct) поруч.",
         "parameters": [
           {
             "in": "path",
@@ -16305,6 +16339,21 @@
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -16312,33 +16361,24 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TemplateVersionSummary"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/PagedResultOfTemplateVersionSummary"
                 }
               },
               "text/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TemplateVersionSummary"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/PagedResultOfTemplateVersionSummary"
                 }
               },
               "text/plain": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TemplateVersionSummary"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/PagedResultOfTemplateVersionSummary"
                 }
               }
             },
             "description": "OK"
           }
         },
-        "summary": "Версії шаблону. Право `Template.View`.",
+        "summary": "Сторінка версій шаблону. Право `Template.View`.",
         "tags": [
           "Templates"
         ]
