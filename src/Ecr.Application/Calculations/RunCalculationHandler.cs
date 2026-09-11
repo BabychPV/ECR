@@ -55,7 +55,24 @@ public sealed class RunCalculationHandler(
     public async Task<string> HandleAsync(
         int projectId, int? periodKey, ClosedPeriodApproval? approval, CancellationToken ct)
     {
-        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await Security.PermissionCheck
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Q-238: те саме, чого бракувало документному перерахунку до Q-174
+        // (`RecalculateDocumentHandler`) — глобального `Calculation.Recalculate`
+        // самого по собі недостатньо, коли ціль запиту (тут — projectId) не
+        // прив'язана до викликача жодним грантом. До цього фіксу власник
+        // проєкту A з правом Calculation.Recalculate міг перерахувати ЦІЛИЙ
+        // чужий проєкт B (усі документи, увесь рік) без жодного гранта на B.
+        // Той самий рівень, що й `CanReadDocumentAsync` (`AccessDecisionService.cs`):
+        // Read досить, бо саме право на перерахунок несе окрема функціональна
+        // перевірка вище.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.");
+        }
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не запускає розрахунок.");

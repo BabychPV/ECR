@@ -694,6 +694,60 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// ⛔ Q-238 (аудит фази 3, авторизація) — той самий клас дефекту, що й
+    /// Q-174 поруч, лише на ПРОЄКТНОМУ маршруті. `RunCalculationHandler`
+    /// перевіряв лише загальне право `Calculation.Recalculate`, без гранта на
+    /// сам `projectId` — власник ЧУЖОГО проєкту не знаходив жодної перепони.
+    ///
+    /// ⚠ Період узятий явно ВІДКРИТИЙ (`Open`/`Grace`), а не перший у
+    /// переліку (`ArrangeDocumentAsync` віддає січень — типово вже закритий
+    /// на годиннику фікстури): на закритому періоді запит однаково впав би
+    /// на `ECR-CALC-4221` (422, «немає погодження») ще ДО гранта, і 4xx був
+    /// би правдою випадково — тест не довів би саме перевірку гранта. Статус
+    /// перевіряється ТОЧНИЙ (`403`), а не діапазон: `AccessDeniedException`
+    /// мапиться на 403, тоді як гейт закритого періоду дав би 422 — діапазон
+    /// не розрізнив би «спрацював грант» від «спрацював інший гейт».
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-25")]
+    public async Task Чужий_проєкт_не_перераховується()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "S25dOwner",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Calculation.Recalculate"]);
+        var stranger = await Provisioning.AdministratorAsync(
+            app, "S25dStranger", ["Calculation.Recalculate"]);
+
+        (owner, var projectId, _, _) = await DataEntryScenarios.ArrangeDocumentAsync(app, owner, "S25dOwner");
+
+        var periodsResponse = await owner.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, periodsResponse.StatusCode);
+        var periods = (await periodsResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("periods");
+        var writable = periods.EnumerateArray().FirstOrDefault(
+            p => string.Equals(p.GetProperty("state").GetString(), "Open", StringComparison.Ordinal))
+            is { ValueKind: JsonValueKind.Object } open
+            ? open
+            : periods.EnumerateArray().FirstOrDefault(
+                p => string.Equals(p.GetProperty("state").GetString(), "Grace", StringComparison.Ordinal));
+        Assert.True(writable.ValueKind == JsonValueKind.Object, $"жоден період проєкту {projectId} не приймає запису.");
+        var periodKey = writable.GetProperty("periodKey").GetInt32();
+
+        // ⛔ Доказ сценарію: `stranger` має право запускати перерахунок
+        // узагалі, але жодного гранта на проєкт `owner` — постановка в чергу
+        // перерахунку ЦІЛОГО чужого проєкту має дати 403, а не 202.
+        var recalc = await stranger.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/projects/{projectId}/recalculate", UriKind.Relative),
+            new { periodKey, approvedByUserId = (int?)null, approvalReason = (string?)null });
+
+        Assert.True(
+            recalc.StatusCode == HttpStatusCode.Forbidden,
+            $"перерахунок чужого проєкту мав дати 403, а дав {recalc.StatusCode}: {await recalc.Content.ReadAsStringAsync()}");
+    }
+
+    /// <remarks>
     /// ⛔ Q-175 (аудит фази 2, авторизація). `GetCalculationResultsHandler`
     /// перевіряв лише загальне право `Calculation.View`, без гранта на проєкт
     /// документа. Наслідок: будь-хто з цим правом бачив показники методологій

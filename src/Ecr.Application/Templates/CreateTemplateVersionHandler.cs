@@ -9,7 +9,11 @@ namespace Ecr.Application.Templates;
 
 /// <summary>Створює чернетку версії шаблону — порожню або клоном (ФВ-2.8).</summary>
 public sealed partial class CreateTemplateVersionHandler(
-    ITemplateVersionStore versions, IUnitOfWork uow, ICurrentUser currentUser, IClock clock)
+    ITemplateVersionStore versions,
+    IUnitOfWork uow,
+    ICurrentUser currentUser,
+    IClock clock,
+    Security.IAccessDecisionService access)
 {
     /// <summary>Право, без якого версію не створити.</summary>
     public const string Permission = "Template.Edit";
@@ -40,6 +44,14 @@ public sealed partial class CreateTemplateVersionHandler(
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Анонімний запит не може створювати версії шаблону.");
+
+        // ⛔ Q-238: право перевірялося лише коментарем (`Permission` — константа,
+        // яку ніхто не читав). `CloneTemplateVersionHandler` (той самий
+        // ендпоінт-сім'я, клонування замість порожньої версії) має цю перевірку
+        // (`A7-53`); порожня версія — ні. Той самий прийом.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
         if (!VersionFormat.IsMatch(versionNumber))
         {

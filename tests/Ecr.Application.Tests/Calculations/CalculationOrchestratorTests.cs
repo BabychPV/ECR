@@ -50,8 +50,17 @@ public sealed class CalculationOrchestratorTests
         // права до цього пакета — лише те, що запит автентифікований. Профіль
         // за замовчуванням несе право, якого потребує кожен наявний тест тут;
         // тест на ВІДСУТНІСТЬ права — окремий, нижче.
+        //
+        // ⛔ Q-238 (аудит фази 3, авторизація): профіль за замовчуванням тепер
+        // несе ще й грант на `Project` — `RunCalculationHandler` після цього
+        // пакета перевіряє й це (той самий клас дефекту, що й Q-174 поруч,
+        // документний перерахунок). Без гранта тут кожен наявний тест впав би
+        // на `AccessDeniedException` замість того, що він насправді доводить
+        // (закритий період, поданий зріз); тест на ВІДСУТНІСТЬ гранта —
+        // окремий, нижче.
         _access.BuildProfileAsync(Runner, Arg.Any<CancellationToken>()).Returns(Profile(
-            [RunCalculationHandler.Permission]));
+            [RunCalculationHandler.Permission],
+            new Dictionary<string, GrantLevel> { [$"{ResourceKind.Project}:{Project}"] = GrantLevel.Manage }));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -205,6 +214,25 @@ public sealed class CalculationOrchestratorTests
             Arg.Any<object?>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Без_гранта_на_проєкт_перерахунок_не_ставиться_в_чергу()
+    {
+        // ⛔ Q-238 (аудит фази 3, авторизація) — той самий клас дефекту, що й
+        // Q-174 (`RecalculateDocumentHandler`): глобальне право
+        // `Calculation.Recalculate` саме по собі не прив'язане до конкретного
+        // `projectId`. Профіль тут МАЄ право, але Grants — порожні: до фіксу
+        // це проходило б, попри те, що на сам проєкт гранта немає.
+        _access.BuildProfileAsync(Runner, Arg.Any<CancellationToken>())
+               .Returns(Profile([RunCalculationHandler.Permission]));
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync(Project, Period, approval: null, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
+        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
+            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+    }
+
     private RunCalculationHandler Handler()
         => new(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
 
@@ -212,14 +240,16 @@ public sealed class CalculationOrchestratorTests
         => _periods.GetPeriodStatesAsync(Project, Period, Arg.Any<CancellationToken>())
                    .Returns(new List<PeriodStateRef> { new(Period, state) });
 
-    /// <summary>Профіль доступу з переліком прав.</summary>
-    private static AccessProfile Profile(IReadOnlyCollection<string> permissions) => new()
+    /// <summary>Профіль доступу з переліком прав і, за потреби, грантів.</summary>
+    private static AccessProfile Profile(
+        IReadOnlyCollection<string> permissions,
+        IReadOnlyDictionary<string, GrantLevel>? grants = null) => new()
     {
         CacheKey = "p",
         UserId = Runner,
         SecurityStamp = "s",
         Permissions = new HashSet<string>(permissions, StringComparer.Ordinal),
-        Grants = new Dictionary<string, GrantLevel>(),
+        Grants = grants ?? new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(),
         RoleIds = new HashSet<int>(),
     };
