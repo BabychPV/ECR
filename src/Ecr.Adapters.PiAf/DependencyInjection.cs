@@ -23,7 +23,20 @@ public static class DependencyInjection
         // HttpClient через фабрику: власноруч створений і збережений у полі
         // клієнт тримає з'єднання після зміни DNS, і збір починає ходити на
         // адресу, якої вже немає.
-        services.AddHttpClient<PiWebApiDataSource>();
+        //
+        // ⚠ Таймаут — 30 с, а не типові 100 с (Q-250). GetAsync повторює
+        // відповідь 5xx/таймаут до трьох разів із паузами 2 с і 4 с
+        // (PiWebApiDataSource.MaxAttempts/RetryDelay): при дефолтних 100 с
+        // одна лише «напівживу» відповідь джерела (TCP приймає, тіла не
+        // віддає) розтягувала одну спробу збору до ~306 с (3×100 с + 2 с +
+        // 4 с), тримаючи воркер Quartz (пул за замовчуванням ~10) увесь цей
+        // час — а `CollectionRunner.RunAsync` іде по інтервалах і атрибутах
+        // ПОСЛІДОВНО, тож повільне джерело множило цю затримку на кожен
+        // крок наздоганяння. Немає задокументованого SLA відповіді PI Web
+        // API в цьому репозиторії — 30 с узято як практичний поріг «досить
+        // повільно, щоб не чекати», не з довідника постачальника.
+        services.AddHttpClient<PiWebApiDataSource>()
+            .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
 
         services.AddScoped<IExternalDataSource, PiWebApiDataSource>();
         services.AddScoped<IExternalDataSource, PiSqlClientDataSource>();

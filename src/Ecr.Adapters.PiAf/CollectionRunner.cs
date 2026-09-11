@@ -25,7 +25,8 @@ public sealed class CollectionRunner(
     IEnumerable<IExternalDataSource> sources,
     SourceUnitConverter unitConverter,
     CatchUpPlanner catchUp,
-    ICollectionStore store) : ICollectionRunner
+    ICollectionStore store,
+    TimeSpan? maxRunDuration = null) : ICollectionRunner
 {
     /// <summary>Стеля точок на один запит до джерела.</summary>
     /// <remarks>
@@ -34,6 +35,33 @@ public sealed class CollectionRunner(
     /// не з любові до сторінкування.
     /// </remarks>
     public const int MaxPointsPerRequest = 5_000;
+
+    /// <summary>Стеля тривалості ОДНОГО прогону збору (Q-250).</summary>
+    /// <remarks>
+    /// ⚠ П'ятнадцять хвилин — не з довідника постачальника (задокументованого
+    /// SLA відповіді PI Web API в цьому репозиторії немає), а практичний
+    /// поріг: `GetAsync` у гіршому разі — це ~96 с на одну пару
+    /// інтервал/атрибут (30-секундний таймаут HttpClient (`Q-250`,
+    /// `DependencyInjection.cs`) плюс паузи ретраю 2 с і 4 с), а
+    /// `RunAsync` іде по інтервалах наздоганяння (до 45 діб, див.
+    /// <see cref="CatchUpLookback"/>) і атрибутах ПОСЛІДОВНО — без стелі
+    /// «напівживе» джерело (відповідає, але повільно) тримало б воркер
+    /// Quartz годинами замість хвилин. П'ятнадцять хвилин дають запас на
+    /// кілька десятків повільних пар, лишаючись далеко від «годин» із
+    /// симптому.
+    /// </remarks>
+    public static TimeSpan DefaultMaxRunDuration => TimeSpan.FromMinutes(15);
+
+    /// <summary>Тривалість цього прогону: параметр конструктора або дефолт.</summary>
+    /// <remarks>
+    /// ⚠ Необов'язковий параметр конструктора, а не мутабельне статичне поле:
+    /// тести підставляють коротший ліміт, не ділячи один спільний стан між
+    /// паралельними прогонами. DI (<c>AddScoped&lt;ICollectionRunner,
+    /// CollectionRunner&gt;</c>) не знає типу <c>TimeSpan?</c> і підставляє
+    /// значення параметра за замовчуванням — це штатна поведінка вбудованого
+    /// контейнера, не обхідний прийом.
+    /// </remarks>
+    private readonly TimeSpan runDuration = maxRunDuration ?? DefaultMaxRunDuration;
 
     /// <summary>
     /// Наскільки глибоко кожен прогін заглядає назад по прогалини.
@@ -100,6 +128,16 @@ public sealed class CollectionRunner(
         // відмовляє стало.
         var reacquired = false;
 
+        // ⚠ Годинник прогону (Q-250): рахує ЛИШЕ звідси, а не з початку
+        // методу — підготовка вище (пошук сутності, мапінгів, планування)
+        // у джерело не ходить і в цей ліміт не входить. Пов'язаний із
+        // зовнішнім `ct`: скасування задачі ззовні (Quartz `Interrupt`)
+        // скасовує й watchdog теж, і catch нижче навмисно відрізняє один
+        // випадок від іншого за станом САМЕ зовнішнього токена.
+        using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        watchdog.CancelAfter(runDuration);
+        var runToken = watchdog.Token;
+
         try
         {
             foreach (var interval in work)
@@ -109,7 +147,7 @@ public sealed class CollectionRunner(
                 foreach (var path in paths)
                 {
                     var outcome = await ReadAsync(
-                        adapter, dataSource.Id, sourceEntityId, path, interval, ct).ConfigureAwait(false);
+                        adapter, dataSource.Id, sourceEntityId, path, interval, runToken).ConfigureAwait(false);
 
                     if (outcome.Unauthorized)
                     {
@@ -123,7 +161,7 @@ public sealed class CollectionRunner(
                             reacquired = true;
 
                             outcome = await ReadAsync(
-                                adapter, dataSource.Id, sourceEntityId, path, interval, ct)
+                                adapter, dataSource.Id, sourceEntityId, path, interval, runToken)
                                 .ConfigureAwait(false);
                         }
 
@@ -191,6 +229,23 @@ public sealed class CollectionRunner(
                 .ConfigureAwait(false);
 
             throw;
+        }
+        catch (OperationCanceledException) when (watchdog.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // ⚠ Це спрацював НАШ watchdog (Q-250), а не зовнішнє скасування
+            // задачі: за зовнішнього скасування `ct.IsCancellationRequested`
+            // теж було б true, і цей `when` навмисно не ловив би виняток —
+            // він пройшов би далі так само, як і до цієї зміни, а не
+            // прикидався б «Degraded» прогоном, що завершився сам.
+            //
+            // ⛔ Не rethrow. Джерело, що відповідає, але надто повільно, —
+            // це затримка (ФВ-11.3), а не збій: непрочитане нижче піде в
+            // ту саму гілку `Degraded`, що й звичайна відмова джерела, і
+            // наздоганяння забере його наступного разу без втрати даних.
+            failureCode ??= SourceUnavailable;
+            failureMessage ??=
+                $"Прогін перевищив ліміт часу {runDuration.TotalMinutes:0} хв: джерело відповідає, "
+                + "але надто повільно. Непрочитане піде в наздоганяння наступного разу.";
         }
 
         await store.WriteCoverageAsync(runId, sourceEntityId, covered, ct).ConfigureAwait(false);
