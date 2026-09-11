@@ -113,7 +113,7 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // ⛔ Q-234: матеріалізація (`MaterializeCollectedDataJob`) не пише НІ в
+        // ⛔ Q-235: матеріалізація (`MaterializeCollectedDataJob`) не пише НІ в
         // `itg.CollectionRun` (це не збір), НІ в `itg.MaintenanceRun` (вона не
         // ставиться через `ScheduleAsync`, а через `EnqueueAsync` — на кожен
         // документ+таблицю окремо). Єдиний слід її провалу — `itg.JobProgress`
@@ -208,7 +208,7 @@ public sealed class NotificationJob(
     public const string CollectionKind = "collection";
 
     /// <summary>
-    /// Вид рядка зведення для провалу перенесення в комірки (<c>Q-234</c>).
+    /// Вид рядка зведення для провалу перенесення в комірки (<c>Q-235</c>).
     /// </summary>
     /// <remarks>
     /// ⚠ Окремий від <see cref="CollectionKind"/> навмисно: збір і

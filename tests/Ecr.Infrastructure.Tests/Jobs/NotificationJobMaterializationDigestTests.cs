@@ -12,7 +12,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
-/// Q-234: провал <c>MaterializeCollectedDataJob</c> має потрапити у зведення
+/// Q-235: провал <c>MaterializeCollectedDataJob</c> має потрапити у зведення
 /// <see cref="NotificationJob"/>, а не загубитися в <c>itg.JobProgress</c>.
 /// </summary>
 /// <remarks>
@@ -45,7 +45,7 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "Q-234")]
+    [Trait("Finding", "Q-235")]
     public async Task Провалена_матеріалізація_потрапляє_у_зведення_і_чергу_сповіщень()
     {
         // ⚠ Далеко в майбутньому і ПІЗНІШЕ за час сусіднього тесту навмисно:
@@ -107,7 +107,7 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "Q-234")]
+    [Trait("Finding", "Q-235")]
     public async Task Успішна_матеріалізація_у_зведення_не_потрапляє()
     {
         var now = new DateTime(2030, 2, 20, 4, 0, 0, DateTimeKind.Utc);

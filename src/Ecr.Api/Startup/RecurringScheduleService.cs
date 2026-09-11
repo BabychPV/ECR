@@ -140,7 +140,7 @@ public sealed partial class RecurringScheduleService(
 
         foreach (var schedule in schedules)
         {
-            // ⛔ Q-234: тут мав бути порт `ICollectionJob`, а не конкретний
+            // ⛔ Q-235: тут мав бути порт `ICollectionJob`, а не конкретний
             // клас `Infrastructure.Jobs.CollectionJob`. DI реєструє задачу
             // ЛИШЕ під портом (`DependencyInjection.cs`:
             // `services.AddScoped<ICollectionJob, Jobs.CollectionJob>()`) —

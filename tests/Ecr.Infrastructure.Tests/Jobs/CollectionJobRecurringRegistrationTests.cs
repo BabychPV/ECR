@@ -12,7 +12,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
-/// Q-234: збір за розкладом (<c>ext.CollectionSchedule</c>) ставиться
+/// Q-235: збір за розкладом (<c>ext.CollectionSchedule</c>) ставиться
 /// <c>QuartzJobScheduler.ScheduleAsync&lt;TJob&gt;</c>, а виконує його
 /// <see cref="QuartzJobAdapter"/>, що резолвить задачу з контейнера за
 /// <c>typeof(TJob).FullName</c> — рядком, який `ScheduleAsync` сам і поклав у
@@ -67,7 +67,7 @@ public sealed class CollectionJobRecurringRegistrationTests(SqlServerFixture sql
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "Q-234")]
+    [Trait("Finding", "Q-235")]
     public void Резолв_за_конкретним_класом_CollectionJob_провалюється()
     {
         using var provider = BuildProviderWithProductionCollectionJobRegistration();
@@ -85,7 +85,7 @@ public sealed class CollectionJobRecurringRegistrationTests(SqlServerFixture sql
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "Q-234")]
+    [Trait("Finding", "Q-235")]
     public void Резолв_за_портом_ICollectionJob_дає_робочу_задачу()
     {
         using var provider = BuildProviderWithProductionCollectionJobRegistration();
@@ -93,7 +93,7 @@ public sealed class CollectionJobRecurringRegistrationTests(SqlServerFixture sql
 
         // Те саме, що робить `QuartzJobAdapter.Resolve` для коду задачі, який
         // `RecurringScheduleService.ScheduleAsync<ICollectionJob>` кладе в
-        // `JobDataMap` (Q-234): контейнер має віддати робочу задачу.
+        // `JobDataMap` (Q-235): контейнер має віддати робочу задачу.
         var resolved = scope.ServiceProvider.GetService(typeof(ICollectionJob));
 
         Assert.NotNull(resolved);
