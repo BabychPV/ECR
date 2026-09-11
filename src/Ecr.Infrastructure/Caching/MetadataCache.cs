@@ -16,6 +16,26 @@ namespace Ecr.Infrastructure.Caching;
 /// </remarks>
 public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetadataCache
 {
+    /// <summary>
+    /// Стеля життя запису.
+    /// </summary>
+    /// <remarks>
+    /// Так само, як у <see cref="RegistryEntryCache"/> і
+    /// <see cref="AccessProfileCache"/>: не для коректності — її тримає
+    /// ревізія в ключі (D-16), — а для пам'яті. Без стелі знімок, кешований
+    /// на ревізії, що потім лишилася осторонь поточного вікна
+    /// <c>InvalidateAsync</c> (кілька презентаційних правок поспіль без
+    /// Publish/міграції — кожна лише зсуває <c>PresentationRevision</c>, не
+    /// обов'язково викликаючи інвалідацію), живе в процесі НАЗАВЖДИ: ні TTL,
+    /// ні <c>SizeLimit</c> його не витіснять. 30 хв — довше за 15 хв
+    /// <see cref="RegistryEntryCache"/>, бо перебудова тут важча (шість
+    /// запитів на знімок структури проти одного списку записів довідника) і
+    /// сесія редагування версії шаблону триває порівнянно з користувацькою
+    /// сесією, для якої <see cref="AccessProfileCache"/> уже бере ті самі
+    /// 30 хв.
+    /// </remarks>
+    private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(30);
+
     /// <inheritdoc />
     public async Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct)
     {
@@ -50,13 +70,16 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
 
         var snapshot = await LoadAsync(templateVersionId, revision.Value, ct).ConfigureAwait(false);
 
-        // Без абсолютного терміну: запис не «протухає» — він стає недосяжним,
-        // щойно зросла ревізія. Термін тут лише витісняв би живий знімок і
-        // повертав нас до перечитування структури без жодної користі.
+        // Термін не для коректності — її й так тримає ревізія в ключі, запис
+        // не «застаріває» доти, доки він там лежить, — а для пам'яті (Q-252):
+        // без стелі знімок ревізії, що випала з вузького вікна
+        // InvalidateAsync (кілька презентаційних правок поспіль без
+        // Publish/міграції), лишався б у процесі назавжди.
         memory.Set(key, snapshot, new MemoryCacheEntryOptions
         {
             Size = 1,
             Priority = CacheItemPriority.High,
+            AbsoluteExpirationRelativeToNow = Lifetime,
         });
 
         return snapshot;
