@@ -14,7 +14,7 @@ import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
 
 /**
  * WCAG 2.1 AA на кожному маршруті (`ФВ-14.16`, `D-127`) — частина 1 із 4
- * (`Q-254`).
+ * (`Q-270`).
  *
  * ⛔ Цей файл — МЕХАНІЧНИЙ уламок колишнього єдиного
  * `accessibility.a11y.test.tsx` (24 маршрути × 2 схеми, один послідовний
