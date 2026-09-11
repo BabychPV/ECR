@@ -78,7 +78,9 @@ public sealed class ListRolesHandler(IUserStore users, IAccessDecisionService ac
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         return await users.ListRolesAsync(ct).ConfigureAwait(false);
@@ -242,7 +244,9 @@ public sealed class ReplaceUserRolesHandler(
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         ValidateValidity(roleCodes, validity);
@@ -368,7 +372,9 @@ public sealed class SetUserEmailHandler(
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
@@ -407,7 +413,9 @@ public sealed class ListUsersHandler(IUserStore users, IAccessDecisionService ac
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         return await users.ListAsync(page, utcNow, ct).ConfigureAwait(false);
@@ -595,7 +603,9 @@ public sealed class SetReceivesAlertsHandler(
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)

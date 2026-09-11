@@ -58,7 +58,9 @@ public sealed class ListDocumentsHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {permission}.",
+                new Dictionary<string, object?> { ["permission"] = permission });
         }
 
         return profile;

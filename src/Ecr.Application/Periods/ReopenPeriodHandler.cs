@@ -39,7 +39,9 @@ public sealed class ReopenPeriodHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         // ⚠ Період береться з UPDLOCK і перечитується В ТРАНЗАКЦІЇ: інакше

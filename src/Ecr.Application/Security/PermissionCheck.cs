@@ -42,7 +42,17 @@ public static class PermissionCheck
             // ⚠ У повідомленні — КОД ПРАВА, а не «недостатньо прав»: інакше
             // адміністратор не знає, що саме видати, і питання приходить до
             // розробника.
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {permission}.");
+            //
+            // ⛔ `.Message` лишається українською навмисно як сирий,
+            // непризначений для клієнта текст: `ExceptionHandlingMiddleware`
+            // будує клієнтську `Detail` з каталогу (мовою користувача) плюс
+            // код права з `Details["permission"]` нижче — так само, як уже
+            // робить для `Title`. Без цього поля код права взагалі не дійшов
+            // би до клієнта окремо від готового речення.
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403",
+                $"Потрібне право {permission}.",
+                new Dictionary<string, object?> { ["permission"] = permission });
         }
 
         return profile;

@@ -253,46 +253,59 @@ export function SecurityPage(): JSX.Element {
           onRetry={() => void roles.refetch()}
         >
           {(all) => (
-          <Table striped withTableBorder className="ecr-sticky-head ecr-sticky-first" style={{ overflowX: 'auto' }}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('security.role')}</Table.Th>
-                {permissions.map((permission) => (
-                  <Table.Th key={permission.code}>
-                    <Text size="xs">{permission.code}</Text>
-                  </Table.Th>
-                ))}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {all.map((role) => (
-                <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
-                  <Table.Td>
-                    {role.code}
-                    {role.isBuiltIn && (
-                      <Badge ml="xs" size="xs" variant="light">
-                        {t('security.builtIn')}
-                      </Badge>
-                    )}
-
-                    {/* ⚠ Небезпечні права показуються ОКРЕМО: у складені ролі
-                        вони не входять навмисно, і адміністратор має бачити
-                        різницю (ФВ-6.12, D-40). */}
-                    {role.dangerousPermissions.length > 0 && (
-                      <Badge ml="xs" size="xs" color="statusError" variant="light">
-                        {t('security.dangerous', { count: role.dangerousPermissions.length })}
-                      </Badge>
-                    )}
-                  </Table.Td>
+          // ⛔ `overflowX` тут стояв НА самій `<Table>` — без обмеження
+          // ширини в цього елемента нема чого переповнювати, і замість
+          // таблиці горизонтально прокручувалась уся сторінка разом із
+          // навігацією (виявлено реальним переглядом матриці прав, не
+          // прогоном тестів: 38 колонок прав ширші за будь-який екран).
+          // `ScrollArea` без фіксованої висоти обмежує лише ШИРИНУ —
+          // рядки таблиці й далі ростуть за змістом; перша колонка
+          // лишається прилипленою до лівого краю САМЕ ЦЬОГО контейнера
+          // (перевірено `getBoundingClientRect` після скролу, не лише
+          // оком: `position: sticky` рахує від контейнера прокрутки, а
+          // не від сторінки).
+          <ScrollArea type="auto" offsetScrollbars>
+            <Table striped withTableBorder className="ecr-sticky-head ecr-sticky-first">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>{t('security.role')}</Table.Th>
                   {permissions.map((permission) => (
-                    <Table.Td key={permission.code}>
-                      {role.permissions.includes(permission.code) ? '✓' : ''}
-                    </Table.Td>
+                    <Table.Th key={permission.code}>
+                      <Text size="xs">{permission.code}</Text>
+                    </Table.Th>
                   ))}
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+              </Table.Thead>
+              <Table.Tbody>
+                {all.map((role) => (
+                  <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
+                    <Table.Td>
+                      {role.code}
+                      {role.isBuiltIn && (
+                        <Badge ml="xs" size="xs" variant="light">
+                          {t('security.builtIn')}
+                        </Badge>
+                      )}
+
+                      {/* ⚠ Небезпечні права показуються ОКРЕМО: у складені ролі
+                          вони не входять навмисно, і адміністратор має бачити
+                          різницю (ФВ-6.12, D-40). */}
+                      {role.dangerousPermissions.length > 0 && (
+                        <Badge ml="xs" size="xs" color="statusError" variant="light">
+                          {t('security.dangerous', { count: role.dangerousPermissions.length })}
+                        </Badge>
+                      )}
+                    </Table.Td>
+                    {permissions.map((permission) => (
+                      <Table.Td key={permission.code}>
+                        {role.permissions.includes(permission.code) ? '✓' : ''}
+                      </Table.Td>
+                    ))}
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
           )}
         </AsyncBoundary>
       )}

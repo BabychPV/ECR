@@ -41,7 +41,9 @@ public sealed class GetCellChangesHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         // ⛔ Родина REQ, а не CELL: суб'єкт відмови — ПАРАМЕТР ЗАПИТУ, а не

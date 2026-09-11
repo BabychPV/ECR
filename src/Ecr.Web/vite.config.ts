@@ -23,6 +23,14 @@ export default defineConfig({
     proxy: {
       // Проксі на API, щоб cookie працювала без CORS у розробці
       '/api': { target: 'http://localhost:5080', changeOrigin: true, secure: false },
+
+      // ⛔ `/health/*` живе ПОЗА `/api/v1` навмисно (`HealthResponse.cs`):
+      // інсталятор і зовнішній моніторинг читають його за стабільною,
+      // не версійованою адресою. Без цього запису Vite віддає SPA-фолбек
+      // (`index.html`) замість JSON — сторінка `Health` показує загальну
+      // «запит не вдався» БЕЗ жодного коду, хоча бекенд відповідає 200
+      // (виявлено реальним переглядом сторінки під час аудиту).
+      '/health': { target: 'http://localhost:5080', changeOrigin: true, secure: false },
     },
   },
   test: {

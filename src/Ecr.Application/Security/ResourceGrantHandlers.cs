@@ -51,7 +51,9 @@ public sealed class ListResourceGrantsHandler(
 
         return profile.Has(Permission)
             ? userId
-            : throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            : throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
     }
 }
 
