@@ -201,11 +201,15 @@ export function SheetActions({
       return;
     }
 
+    // ⛔ Q-234: `error`, а не `message` — та сама плутанина полів, що й на
+    // `PeriodsPage`/`ExportButton`. `Message` — останній прогрес
+    // (`IJobProgress.ReportAsync`), на відмові він лишається тим, яким був
+    // до неї; причину відмови несе `Error` (`FinishAsync`, `QuartzJobAdapter.cs`).
     notifications.show({
       color: 'statusError',
-      message: recalcJob.data?.message ?? t('workflow.recalcFailed'),
+      message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
     });
-  }, [recalcJobId, outcome, recalcJob.data?.message, queryClient, documentId, periodKey]);
+  }, [recalcJobId, outcome, recalcJob.data?.error, queryClient, documentId, periodKey]);
 
   const me = session.data;
 
