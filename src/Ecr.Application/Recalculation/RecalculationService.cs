@@ -1,3 +1,4 @@
+using Ecr.Domain.Abstractions;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 
@@ -20,6 +21,8 @@ public sealed class RecalculationService(
     ITemplateVersionStore versions,
     IFormulaEngine formulaEngine,
     IUnitCatalog unitCatalog,
+    IAuditWriter audit,
+    IClock clock,
     IUnitOfWork uow)
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
@@ -242,6 +245,17 @@ public sealed class RecalculationService(
                 : new Dictionary<string, long>(StringComparer.Ordinal);
         }
 
+        // ⛔ Q-2xx (аудит фази 3, звітність): аудит записується за КЛЮЧЕМ
+        // рядка (`RowKey`), а не лише за його ідентифікатором — той самий
+        // намір, що вже закрив `PatchCellsHandler` (директива №09 `W8` п.4).
+        // Зворотна мапа будується ТУТ, з уже прочитаних `rowIdsByTable`: другий
+        // похід у базу заради того самого рядка нічого не додав би.
+        var rowKeyByRowIdByInstance = instances.ToDictionary(
+            t => t.TableInstanceId,
+            t => rowIdsByTable.TryGetValue(t.TableDefId, out var byKey)
+                ? byKey.ToDictionary(pair => pair.Value, pair => pair.Key)
+                : new Dictionary<long, string>());
+
         var plan = RecalculationPlanBuilder.Build(snapshot, dependencies, rowIdsByTable, periodKey);
 
         List<int> targets;
@@ -336,11 +350,32 @@ public sealed class RecalculationService(
             .ConfigureAwait(false);
         var isLateEdit = periodState == Domain.Enums.PeriodState.Grace;
 
+        // ⛔ Q-2xx (аудит фази 3, звітність). До цього рядка формули шаблону
+        // писалися в `doc.CellValue` ЧЕРЕЗ `cellStore.ApplyAsync` без жодного
+        // запису в `aud.CellChange` — `RecalculationService` не мав
+        // `IAuditWriter` серед залежностей узагалі. Похідне число, змінене
+        // перерахунком (правка шаблону, пізній перерахунок після виправлення
+        // формули, каскад від ручної правки), не лишало жодного сліду в
+        // журналі, хоча коментар до `SystemUserId` — двома абзацами вище —
+        // уже описував саме такий запис («означало б записати в аудит, що він
+        // власноруч ввів число, якого не вводив»): аудит малося на увазі
+        // писати, лише ніхто цього не зробив. `Origin = "Recalculation"` уже
+        // описаний у контракті `CellChangeRecord` (`UserEdit | Import |
+        // Recalculation | Migration`) — досі жоден код його не використовував.
+        var now = clock.UtcNow;
+
         // ⚠ Один запис на екземпляр: перерахунок торкається десятків комірок,
         // і окрема транзакція на кожну перетворила б фонову задачу на джерело
         // блокувань саме тоді, коли документ активно правлять.
         foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
         {
+            // ⚠ Старі значення читаються ДО запису — після `ApplyAsync` їх уже
+            // немає ніде, а саме вони й становлять половину запису аудиту
+            // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
+            var previous = await cellStore
+                .ReadCellsAsync([.. records.Select(r => r.Address)], ct)
+                .ConfigureAwait(false);
+
             await cellStore.ApplyAsync(
                 new CellChangeSet(
                     target,
@@ -349,6 +384,22 @@ public sealed class RecalculationService(
                     TouchedRowIds: [.. records.Select(u => u.Address.TableRowId).Distinct()],
                     ChangedByUserId: SystemUserId,
                     isLateEdit),
+                ct).ConfigureAwait(false);
+
+            var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(target, out var found)
+                ? found
+                : new Dictionary<long, string>();
+
+            await audit.WriteCellChangesAsync(
+                [.. records.Select(r => new CellChangeRecord(
+                    now, r.Address, instance.DocumentId,
+                    RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
+                    OldValue: Was(previous, r.Address),
+                    NewValue: Describe(r.Value),
+                    SystemUserId,
+                    Origin: "Recalculation",
+                    isLateEdit,
+                    CorrelationId: null))],
                 ct).ConfigureAwait(false);
         }
 
@@ -609,6 +660,26 @@ public sealed class RecalculationService(
                 new CellValueData { ValueString = (string)value.Value!, IsCalculated = true },
             _ => null,
         };
+
+    /// <summary>Значення комірки ДО перерахунку; <c>null</c> — комірки не було.</summary>
+    /// <remarks>
+    /// Той самий контракт, що <c>PatchCellsHandler.Was</c>: «комірки не було»
+    /// і «комірка була порожня» — різні стани (R-B4), і перший лишається
+    /// <c>null</c>, а не вигаданим порожнім рядком.
+    /// </remarks>
+    private static string? Was(
+        IReadOnlyDictionary<CellAddress, CellValueData> previous, CellAddress address)
+        => previous.TryGetValue(address, out var value) ? Describe(value) : null;
+
+    /// <summary>Текстове подання значення комірки для журналу аудиту.</summary>
+    private static string? Describe(CellValueData v)
+        => v.IsEmpty ? string.Empty
+         : v.ValueNumeric?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+           ?? v.ValueString
+           ?? v.ValueBool?.ToString()
+           ?? v.ValueDate?.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+           ?? v.ValueRegistryEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+           ?? v.ValueUnitId?.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>

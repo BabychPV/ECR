@@ -31,6 +31,7 @@ public sealed class CascadeRecalculationTests
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
 
     // ⚠ Порожній довідник за замовчуванням: тести цього класу — про КАСКАД
@@ -63,6 +64,41 @@ public sealed class CascadeRecalculationTests
         // введене людиною, і наступна правка «поверх» не мала б жодної
         // ознаки конфлікту (`R-A2`).
         Assert.True(upsert.Value.IsCalculated);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "D-70")]
+    public async Task Перерахунок_формули_пише_аудит_з_Origin_Recalculation()
+    {
+        // ⛔ Q-2xx (аудит фази 3, звітність). До фіксу `RecalculationService`
+        // не мав `IAuditWriter` серед залежностей УЗАГАЛІ: похідне число
+        // писалося в `doc.CellValue` через `cellStore.ApplyAsync` і жодного
+        // разу не потрапляло в `aud.CellChange`. Доведено мутацією: прибрати
+        // виклик `audit.WriteCellChangesAsync` у `RecalculationService` — цей
+        // тест падає, решта каскадних тестів (які дивляться лише на
+        // `cellStore.ApplyAsync`) лишаються зеленими.
+        Arrange(jan: 10m, feb: 5m);
+
+        await Service().RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        var call = _audit.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteCellChangesAsync));
+        var changes = (IReadOnlyList<CellChangeRecord>)call.GetArguments()[0]!;
+
+        var change = Assert.Single(changes);
+        Assert.Equal(_totalId, change.Address.ColumnDefId);
+        Assert.Equal("15", change.NewValue);
+
+        // ⚠ Origin документований у контракті (`UserEdit | Import |
+        // Recalculation | Migration`), але до цього фіксу жоден код його не
+        // використовував — рядок нижче тепер перший читач цього значення.
+        Assert.Equal("Recalculation", change.Origin);
+
+        // ⚠ Автор — система (SystemUserId = 0), не той, хто правив вхідну
+        // комірку: підставити людину означало б записати в аудит, що вона
+        // власноруч ввела число, якого не вводила.
+        Assert.Equal(0, change.ChangedByUserId);
     }
 
     [Fact]
@@ -369,7 +405,11 @@ public sealed class CascadeRecalculationTests
         periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
             .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
-        return new(_cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units, _uow);
+        return new(
+            _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
+            _audit,
+            new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
+            _uow);
     }
 
     /// <summary>Комірки, які служба віддала на запис.</summary>

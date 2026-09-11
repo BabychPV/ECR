@@ -25,6 +25,8 @@ public sealed class RecalculationServiceTests
                Substitute.For<ITemplateVersionStore>(),
                Substitute.For<IFormulaEngine>(),
                units,
+               Substitute.For<IAuditWriter>(),
+               new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
                Substitute.For<IUnitOfWork>());
     }
 

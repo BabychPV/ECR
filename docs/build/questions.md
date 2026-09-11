@@ -281,6 +281,7 @@
 | Q-234 | SCOPE | Аудит `src/Ecr.Web` (директива «повний аудит, PK2-стиль»): `ExportButton.tsx` не отримав фікс, заради якого власне й виник `jobFollow.ts` (`Q-156`) — опитування задачі лишалось на старій ручній копії без `job.isError`, і та сама плутанина `JobStatus.Message`/`.Error` виявилась ще в двох місцях (`PeriodsPage.tsx`, `SheetActions.tsx`) | RESOLVED · `ExportButton` переведено на `outcomeOf`/`pollInterval`; повідомлення про відмову в усіх трьох місцях тепер читає `error`, а не `message`. 329/329 `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run budget` — усі зелені; новий `ExportButton.test.tsx` (3 тести) підтверджено падінням на старому коді перед фіксом |
 | Q-235 | SCOPE | Аудит зовнішнього збору (`Ecr.Adapters.PiAf`, `CollectionJob`/`MaterializeCollectedDataJob`, `NotificationJob`) за директивою людини: `RecurringScheduleService.ScheduleAsync` ставив збір за розкладом через `ScheduleAsync<Infrastructure.Jobs.CollectionJob>` (конкретний клас), тоді як DI реєструє цю задачу ЛИШЕ під портом `ICollectionJob` (`AddScoped<ICollectionJob, Jobs.CollectionJob>()`) — `QuartzJobAdapter.Resolve` питає контейнер за `typeof(TJob).FullName` і мовчки отримує `null`, `Execute` падає РАНІШЕ, ніж встигає записати щось у `itg.JobProgress`. Наслідок: щотиковий збір за розкладом (crontab на кожну `ext.CollectionSchedule`) не відбувався ЖОДНОГО РАЗУ — ні ретраїв, ні `itg.CollectionRun`, ні рядка в зведенні `NotificationJob` (збір мовчав місяцями, а не "затримувався", ФВ-11.3). Заразом: `MaterializeCollectedDataJob` не пише ні в `itg.CollectionRun`, ні в `itg.MaintenanceRun` — провал матеріалізації лишався лише в `itg.JobProgress`, який `NotificationJob` не читав узагалі | RESOLVED · `RecurringScheduleService` тепер ставить `ScheduleAsync<ICollectionJob>` (той самий порт, яким і так іде ручний запуск "зібрати зараз"); `NotificationJob` тепер додає у зведення `itg.JobProgress`-записи `State=Failed` із кодом `IMaterializeCollectedDataJob` (новий вид рядка `MaterializationKind`). Ідемпотентність сирого збору (`UQ_RawDataPoint`), поділ збору/матеріалізації і мапінг у `doc.CellValue` (`IsCalculated=0` для зібраних даних) перевірено — без дефектів. Два нових тести реальним SQL Server: `CollectionJobRecurringRegistrationTests` (резолв DI за конкретним класом провалюється, за портом — ні) і `NotificationJobMaterializationDigestTests` (провал матеріалізації потрапляє у зведення й чергу сповіщень; успіх — ні). Повний прогін `Ecr.Infrastructure.Tests` — 184/184 реальним SQL Server; `dotnet build ECR.sln` — 0 помилок |
 | Q-236 | SCOPE | Аудит фази 3 (Excel-обмін): `ExcelImporter.PreviewAsync` резолвив версію шаблону і структуру таблиць/колонок з `map.TemplateVersionId` — поля, записаного У ФАЙЛ на момент ЕКСПОРТУ, — замість поточної версії з БД. Republish шаблону між експортом і імпортом (звичайна подія за рік звітності) робив diff порівнянням проти структури, якої вже нема: неправильний тип комірки в `Read()`, і `ApplyAsync` (той самий `PatchCellsHandler`, що завжди резолвить ПОТОЧНУ версію) міг відмовити батч лише ПІСЛЯ того, як перегляд показав користувачу, що все гаразд. Суміжно: `block.TableInstanceId` з файлу довірявся без перевірки належності документу — книга з підміненим `TableInstanceId` (той самий шаблон, чужий документ) проходила б у пакетне читання рядків/комірок ДО будь-якого рішення про доступ | RESOLVED · `PreviewAsync` тепер резолвить `TemplateVersionId` і перелік легітимних `TableInstanceId` через `IRowStore.GetTableInstancesAsync(documentId, period, ct)` — той самий принцип, що вже документований у `IRowStore.ResolveTableInstanceAsync` ("клієнт не має диктувати, за якою версією тлумачити дані"); блок книги з `TableInstanceId`/`TableDefId`, що не відповідають цьому документу за цей період, відхиляється (`ECR-IMP-0422`) ДО пакетного читання. Два нових тести (`ExcelImporterTemplateVersionTests`, NSubstitute, без SQL) доводять і фікс, і регресію: обидва падають на `NullReferenceException` при поверненні старого коду (перевірено прямим відкатом файлу й повторним прогоном) — один підтверджує, що `metadata.GetAsync` кличеться з ПОТОЧНОЮ версією, а не зі значенням з файлу, другий — що чужий `TableInstanceId` відхиляється БЕЗ читання його даних (`ReadSlicesAsync` отримує порожній список). Повний прогін реальним SQL Server: 40/40 `Ecr.Adapters.Tests`, 529/529 `Ecr.Application.Tests`, 5/5 відповідних `Ecr.Infrastructure.Tests`; `dotnet build ECR.sln` — 0 помилок |
+| Q-237 | SCOPE | Аудит фази 3 (звітність/аудит), директива людини: (1) `ReportRetentionJob`, названий у `B16` §4 і дозволений `D-71` («крім `IsSubmitted` і `IsCurrent`»), не існував УЗАГАЛІ — `BuildReportSnapshotHandler` створює новий `rpt.ReportSnapshot`/`rpt.ReportRow` на кожен виклик і ніколи не переписує старий, тож без прибирання обидві таблиці ростуть вічно; (2) `RecalculationService` (перерахунок формул шаблону, `doc.CellValue` з `IsCalculated=1`) не мав `IAuditWriter` серед залежностей УЗАГАЛІ — похідні числа писалися через `cellStore.ApplyAsync` без жодного запису в `aud.CellChange`, хоча коментар до `SystemUserId` у тому самому файлі вже описував саме такий запис в аудит, а `CellChangeRecord.Origin` документував `Recalculation` як чинне значення, яким не користувався ЖОДЕН код | RESOLVED · (1) новий `src/Ecr.Infrastructure/Jobs/ReportRetentionJob.cs`: батчами (2000, до 20 батчів на прогін) видаляє `rpt.ReportRow`, потім `rpt.ReportSnapshot` (FK не каскадний, `DeleteBehaviorTests` тримає це свідомо) де `IsCurrent=0 І Status<>Submitted`; зареєстровано нічним cron у `RecurringScheduleService` — крос-інстансний лок бере автоматично `QuartzJobAdapter` (той самий механізм, що й Q-229). Новий `ReportRetentionJobTests` — реальний прогін проти SQLEXPRESS (2 зайві зрізи + рядки зникають, поточний і поданий лишаються, `MaintenanceRun` пише підсумок); доведено мутацією (`Where(s => true)` замість справжнього фільтра — тест падає). (2) `RecalculationService` тепер приймає `IAuditWriter`/`IClock`, читає старі значення ДО запису (як `PatchCellsHandler`) і пише `aud.CellChange` з `Origin="Recalculation"`, правильним `RowKey` (зворотна мапа з уже прочитаних `rowIdsByTable`) і тим самим `IsLateEdit`, що йде в `doc.CellValue`. Новий тест `Перерахунок_формули_пише_аудит_з_Origin_Recalculation`; доведено і мутацією (виклик прибрано вручну — падає), і компілятором (первинний конструктор C# одразу дає `CS9113: Parameter 'audit' is unread`, той самий захист, що вже описаний у `SubmitSheetHandler` для `validation`, `Q-146`). Перевірено ще дві гіпотези з завдання й НЕ підтверджено як дефект: `ReportSnapshotBuilder.AggregateAsync` справді не читає `doc.CellValue` напряму й не звертається до заморожених `calc.SubmissionSnapshot` — але порожній `Draft`-зріз без прогону розрахунку є ЗАДОКУМЕНТОВАНИМ коректним станом (`D-65`: «у `rpt.*` потрапляють усі зрізи — щоб числа можна було перевірити ДО затвердження»), і чинний `ReportSnapshotBuildTests` це прямо стверджує коментарем; `Submit`/`Approve`/`Reopen` (`SubmitSheetHandler`/`ApproveSheetHandler`/`ReopenDocumentHandler`) узгоджено перевіряють документо-рівневий грант через `IAccessDecisionService` (Q-173 вже закрив цю розбіжність) і однаково пишуть у `wf.ApprovalState`/аудит — нової розбіжності між трьома обробниками не знайдено. Підтверджено реальним прогоном: `dotnet build ECR.sln` — 0 помилок; `Ecr.Application.Tests` 530/530, `Ecr.Infrastructure.Tests` 181/181 реальним локальним SQL Server |
 | Q-238 | CONFLICT | Повторний аудит фази 3 (авторизація, продовження Q-171-180): два обробники пропускали перевірку через `IAccessDecisionService` повністю або частково. `CreateTemplateVersionHandler` (порожня версія шаблону, на відміну від `CloneTemplateVersionHandler` поруч) не мав інжектованого `IAccessDecisionService` узагалі — `Permission = "Template.Edit"` існував лише як напис. `RunCalculationHandler` (перерахунок ЦІЛОГО проєкту) перевіряв лише глобальне `Calculation.Recalculate`, без гранта на сам `projectId` — той самий клас дефекту, що й Q-174 (документний перерахунок), яким його сусід уже закрито | RESOLVED · обидва обробники тепер перевіряють право через `IAccessDecisionService` (перший — додано виклик `PermissionCheck.RequireAsync`, другий — додано `profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read`, той самий поріг, що й `CanReadDocumentAsync`). Решта API-поверхні (усі контролери `src/Ecr.Api/Controllers/*.cs`, `Health/HealthResponse.cs`, `TemplatesController.ListVersions`) перевірена — реальних прогалин більше не знайдено; `/health/db` з голою `.RequireAuthorization()` (без права `System.ViewHealth`) розглянуто окремо й НЕ визнано прогалиною — це підтверджене рішення людини (Q-221), покрите власними тестами (`Health_db_повідомляє_*` заводять користувача без жодної ролі й очікують 200) |
 
 ---
@@ -12070,6 +12071,135 @@ SQL Server) — два тести:
 прогоном (SQL Server + мутаційний доказ на старому коді); повний
 наскрізний людський прогін через реальний UI імпорту — не проводився
 (поза можливостями цієї сесії).
+
+### Q-237 · SCOPE · Аудит фази 3 (звітність/аудит), директива людини, 2026-09-11 · ReportRetentionJob не існував; перерахунок формул не аудитувався
+
+**Де:** `src/Ecr.Infrastructure/Jobs/ReportRetentionJob.cs` (новий),
+`src/Ecr.Api/Startup/RecurringScheduleService.cs`,
+`src/Ecr.Infrastructure/DependencyInjection.cs`,
+`src/Ecr.Application/Recalculation/RecalculationService.cs`.
+
+**Контекст.** Завдання — цільовий аудит `Ecr.Application/Reporting`,
+`Workflow`, `Audit`, `ReportSnapshotJob` і їхніх інфраструктурних
+реалізацій, за п'ятьма прямими питаннями: (1) чи справді
+`ReportSnapshotBuilder` зливає ВСІ ТРИ джерела (`doc.CellValue`,
+`calc.CalculationResult`, заморожений знімок подання) і чи падає
+голосно, коли методологія ще не порахована; (2) чи узгоджені
+`Submit`/`Approve`/`Reopen` між собою; (3) чи щось видаляє те, що
+`D-71` забороняє видаляти, або НЕ видаляє те, що дозволено; (4) чи
+КОЖЕН писач `doc.CellValue` пише й `aud.CellChange` в тій самій
+транзакції; (5) що завгодно інше функціональне.
+
+**Знахідка 1 — `ReportRetentionJob` не існував узагалі (питання 3).**
+`B16` §4 називає задачу прямо: «Retention: останній зріз на
+(звіт × параметри) + усі з `IsSubmitted = 1`. Решту прибирає
+`ReportRetentionJob`.» `D-71` явно дозволяє це видаляти: правило
+«нічого не затирається» стосується `doc.*`/`aud.*`/
+`calc.CalculationResult`, а «похідні артефакти прибирати можна:
+зрізи `rpt.ReportSnapshot` (крім `IsSubmitted` і `IsCurrent`)». У
+коді такого файлу не було НІДЕ (`grep -rn "ReportRetentionJob" src`
+— порожньо), і `RecurringScheduleService.ScheduleAsync` його не
+ставив. Наслідок — не гіпотетичний: `BuildReportSnapshotHandler`
+створює НОВИЙ `rpt.ReportSnapshot`/`rpt.ReportRow` на кожен виклик і
+ніколи не переписує старий (навмисно, ФВ-9.17 — «зріз, роздрукований
+учора, і той самий звіт сьогодні мають лишитися різними записами»),
+тож без прибирання обидві таблиці ростуть **вічно** — на кожен звіт,
+кожен проєкт, кожен період, кожну повторну побудову чи «Перебудувати»
+в UI.
+
+**Фікс 1.** Новий `ReportRetentionJob : IBackgroundJob`: батчами
+(`BatchSize = 2000`, до `MaxBatchesPerRun = 20` за один прогін)
+знаходить зрізи `WHERE IsCurrent = 0 AND Status <> Submitted`,
+видаляє СПЕРШУ `rpt.ReportRow` (FK `FK_RepRow_Snap` —
+`DeleteBehavior.Restrict`, не каскадний; `DeleteBehaviorTests`
+тримає це свідомо для всієї системи), потім самі
+`rpt.ReportSnapshot`, і пише підсумок у `itg.MaintenanceRun` (той
+самий патерн, що `PartitionCheckJob`/`ConsistencyCheckJob`).
+Зареєстровано `services.AddScoped<Jobs.ReportRetentionJob>()` і
+поставлено нічним cron у `RecurringScheduleService.ScheduleAsync`
+поруч із рештою нічних задач — крос-інстансний захист (`Q-229`,
+`sp_getapplock` через `QuartzJobAdapter`) підключається автоматично,
+без жодної додаткової правки: `ScheduleAsync<TJob>(cron, ...)` сам
+виставляє `RecurringKey`, який адаптер розпізнає.
+
+**Знахідка 2 — перерахунок формул шаблону не писав аудит (питання
+4).** `RecalculationService.RunAsync` пише результати формул у
+`doc.CellValue` через `cellStore.ApplyAsync` — другий (після
+`PatchCellsHandler`) реальний писач `ICellStore.ApplyAsync` у всьому
+дереві. До фіксу клас не мав `IAuditWriter` серед залежностей
+УЗАГАЛІ: жодного запису в `aud.CellChange` на жодну перераховану
+комірку, ні разу. Показово, що клас уже документував намір: коментар
+до `SystemUserId` («Нуль тут не «невідомо хто», а «не людина».
+Підставити сюди того, хто правив комірку, означало б записати в
+аудит, що він власноруч ввів число, якого не вводив») говорить про
+запис в аудит як про доконаний факт — а `CellChangeRecord.Origin`
+документує `Recalculation` як одне з чотирьох чинних значень
+(`UserEdit | Import | Recalculation | Migration`), яким на практиці
+не користувався ЖОДЕН рядок коду (`grep -rn "\"Recalculation\"" src`
+— порожньо до цього фіксу). Наслідок для регулятора: похідне число,
+яке змінилося через перерахунок (правка формули шаблону, пізній
+каскад після виправлення методології, перерахунок під час `Grace`),
+не лишало жодного сліду в журналі, хоча саме такі зміни й цікавлять
+того, хто звіряє звітність (`D-70`).
+
+**Фікс 2.** `RecalculationService` тепер приймає `IAuditWriter audit`
+і `IClock clock`. Перед кожним `cellStore.ApplyAsync` (по екземпляру
+таблиці, як і раніше) старі значення читаються `cellStore
+.ReadCellsAsync` — ДО запису, той самий порядок, що
+`PatchCellsHandler.ReadPreviousValuesAsync`, — і одразу після запису
+пишеться `audit.WriteCellChangesAsync` з `Origin = "Recalculation"`,
+правильним `RowKey` (зворотна мапа `TableRowId → RowKey` будується
+ОДРАЗУ з уже прочитаних `rowIdsByTable`, без другого походу в базу)
+і тим самим `IsLateEdit`, що вже йде в `CellChangeSet` (`D-70`:
+перерахунок під час `Grace` — така сама пізня зміна, як і ручна
+правка).
+
+**Доведено мутацією й компілятором.** (1) `ReportRetentionJobTests`
+(новий, реальний SQL Server): три «зайві» зрізи + подання в іншому
+періоді + рядки на кожен; після прогону зайві зникають разом із
+рядками, поточний і поданий лишаються, `MaintenanceRun` пише
+`Succeeded`. Мутація — `Where(s => true)` замість реального фільтра —
+валить тест (видаляє й поточний, і поданий). (2) новий тест
+`Перерахунок_формули_пише_аудит_з_Origin_Recalculation` у
+`CascadeRecalculationTests`: перевіряє сам виклик
+`audit.WriteCellChangesAsync` (через `NSubstitute.ReceivedCalls`) —
+`Origin`, `NewValue`, `ChangedByUserId`. Прибрати виклик уручну — тест
+падає; а через первинний конструктор C# спроба лишити `audit`
+непрочитаним одразу дає `CS9113: Parameter 'audit' is unread` —
+компілятор ловить регрес раніше, ніж будь-який тест (той самий захист,
+що вже описаний у `SubmitSheetHandler` для параметра `validation`,
+`Q-146`).
+
+**Дві гіпотези з завдання перевірені й НЕ підтверджені як дефект.**
+Питання 1: `ReportSnapshotBuilder.AggregateAsync` справді читає лише
+`calc.CalculationResult` (приєднаний до `CalculationRun.CurrentStatus`)
+і не звертається ні до `doc.CellValue` напряму, ні до замороженого
+`calc.SubmissionSnapshot` — але порожній `Draft`-зріз, коли прогону
+розрахунку в ланцюжку ще нема, ЗАДОКУМЕНТОВАНО коректний: `D-65`
+прямо каже «у `rpt.*` потрапляють УСІ зрізи — щоб числа можна було
+перевірити ДО затвердження», і чинний `ReportSnapshotBuildTests`
+(`tests/Ecr.Infrastructure.Tests/Reporting/`) стверджує це в
+коментарі й асертах, а не мовчки покладається на «пощастило».
+Регуляторна вʼюха (`rpt.v_*`) все одно фільтрує лише
+`Approved`/`Submitted` (`ФВ-10.11`), тож порожній `Draft` регулятору
+не потрапляє. Питання 2: `SubmitSheetHandler`/`ApproveSheetHandler`/
+`ReopenDocumentHandler` перевіряють документо-рівневий грант через
+`IAccessDecisionService` узгоджено всі три (`CanSubmitAsync`/
+`CanApproveAsync`/`CanReopenAsync`) — розбіжність цього класу вже
+закрив `Q-173`; нової між трьома обробниками не знайдено.
+
+**Підтверджено:** `dotnet build ECR.sln` — 0 помилок. Реальним
+локальним SQL Server: `Ecr.Application.Tests` 530/530,
+`Ecr.Infrastructure.Tests` 181/181 (уключно з новим
+`ReportRetentionJobTests` і зміненими `RecalculationServiceTests`/
+`CascadeRecalculationTests`/`RecalculationJobTests`/
+`RecalculationJobProjectIdTests` — оновлені лише конструктором,
+логіка тестів не змінена). `dotnet test Ecr.Architecture.Tests
+--filter JournalIntegrityTests` — 4/4.
+
+**Статус:** RESOLVED · обидва фікси доведені реальним SQL Server і
+мутацією; дві додаткові гіпотези з завдання перевірені й закриті як
+«за задумом», не як дефект.
 
 ### Q-238 · CONFLICT · Повторний аудит авторизації (продовження Q-171-180), 2026-09-11 · дві прогалини `IAccessDecisionService`, недосяжна більше нічого нового
 
