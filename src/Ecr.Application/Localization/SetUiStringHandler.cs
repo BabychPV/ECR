@@ -49,7 +49,9 @@ public sealed class SetUiStringHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         var now = clock.UtcNow;

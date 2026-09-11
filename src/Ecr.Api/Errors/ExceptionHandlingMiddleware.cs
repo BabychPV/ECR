@@ -95,7 +95,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             Status = status,
             Title = await LocalizedTitleAsync(context, code).ConfigureAwait(false),
-            Detail = message,
+            Detail = await LocalizedDetailAsync(context, code, message, details).ConfigureAwait(false),
             Type = $"https://ecr.ncoc.kz/errors/{code}",
             Instance = context.Request.Path,
             ErrorCode = code,
@@ -197,6 +197,66 @@ public sealed partial class ExceptionHandlingMiddleware(
 #pragma warning restore CA1031
         {
             return code;
+        }
+    }
+
+    /// <summary>Ключ каталогу для підпису «Потрібне право» перед кодом права.</summary>
+    private const string RequiresPermissionKey = "err.ECR-AUTH-0403.requiresPermission";
+
+    /// <summary>
+    /// Клієнтська <c>Detail</c>: здебільшого — те саме `message`, яке вже
+    /// написане людською мовою прямо в обробнику. Виняток — коди, де виняток
+    /// несе СТРУКТУРОВАНУ подробицю замість готового речення (сьогодні лише
+    /// <c>ECR-AUTH-0403</c>: код права з <c>PermissionCheck</c>, не текст) —
+    /// для них речення будується тут із каталогу, тим самим механізмом, що й
+    /// <see cref="LocalizedTitleAsync"/> для заголовка.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього подробиця `ECR-AUTH-0403` доїжджала клієнту сирим
+    /// українським реченням незалежно від мови інтерфейсу користувача —
+    /// текст, написаний розробником обробника для СЕРВЕРНОГО боку, а не для
+    /// показу (виявлено реальним входом у застосунок під час аудиту, не
+    /// прогоном тестів: `Title` уже читався каталогом за `D-95`, а `Detail`
+    /// поруч — ні, і речення виходило двомовним).
+    /// </remarks>
+    private static async Task<string> LocalizedDetailAsync(
+        HttpContext context, string code, string message, IReadOnlyDictionary<string, object?>? details)
+    {
+        if (!string.Equals(code, ErrorCodes.Forbidden, StringComparison.Ordinal)
+            || details is null
+            || !details.TryGetValue("permission", out var permissionValue)
+            || permissionValue is not string permission)
+        {
+            return message;
+        }
+
+        try
+        {
+            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
+            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+
+            if (catalog is null || currentUser is null)
+            {
+                return message;
+            }
+
+            var strings = await catalog
+                .GetAsync(currentUser.Language, context.RequestAborted)
+                .ConfigureAwait(false);
+
+            var label = UiStringResolver.Resolve(strings, RequiresPermissionKey);
+
+            // Ключа немає в каталозі — краще сире (українське) речення, ніж
+            // сам ключ, конкатенований із кодом права.
+            return string.Equals(label, RequiresPermissionKey, StringComparison.Ordinal)
+                ? message
+                : $"{label} {permission}";
+        }
+#pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return message;
         }
     }
 

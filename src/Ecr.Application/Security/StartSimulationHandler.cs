@@ -46,7 +46,9 @@ public sealed class StartSimulationHandler(
         var actorProfile = await access.BuildProfileAsync(actorUserId, ct).ConfigureAwait(false);
         if (!actorProfile.Has(Permission))
         {
-            throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?> { ["permission"] = Permission });
         }
 
         // Симуляція себе безглузда і водночас небезпечна: вона дала б сеанс із

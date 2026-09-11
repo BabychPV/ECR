@@ -148,7 +148,9 @@ public sealed class GetJobStatusHandler(
             var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
             if (createdByUserId != userId)
             {
-                throw new AccessDeniedException("ECR-AUTH-0403", $"Потрібне право {Permission}.");
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                    new Dictionary<string, object?> { ["permission"] = Permission });
             }
         }
 
