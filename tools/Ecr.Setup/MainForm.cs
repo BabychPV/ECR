@@ -31,8 +31,22 @@ internal sealed class MainForm : Form
     {
         Text = "ECR Web Setup Wizard";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(680, 520);
-        Size = new Size(720, 560);
+
+        // ⛔ Q-227 (аудит/людина): +100px висоти проти попереднього
+        // 680×520/720×560 — захисний запас для Review (крок 5), де
+        // ListView показує заголовок + до 9 рядків (перевірено
+        // ReviewStep.OnShow — 8 завжди, +1 "Bootstrap administrator
+        // password" лише в First Deployment). На 96 DPI/100% арифметика
+        // й так лишає запас (~200px), але Height=32 (_stepLabel), Height=56
+        // (buttonBar) і Padding=12 (_content) — фіксовані пікселі, що НЕ
+        // ростуть із DPI, тоді як заголовок/рядки нативного ListView
+        // (шрифтозалежні) — ростуть; на реальній машині з масштабуванням
+        // 125-200% цей розрив звужує запас аж до дефіциту. Не підтверджено
+        // візуально (немає інтерактивного Windows-стенда в цій сесії) —
+        // це свідомий, безпечний запас під конкретно названу гіпотезу, а
+        // не точний розрахунок під один вимір екрана.
+        MinimumSize = new Size(680, 620);
+        Size = new Size(720, 660);
 
         _reviewStep = new ReviewStep();
         _installStep = new InstallStep();
