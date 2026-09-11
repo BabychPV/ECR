@@ -76,7 +76,37 @@ public sealed class ExcelImporter(
                 });
         }
 
-        var snapshot = await metadata.GetAsync(map.TemplateVersionId, ct).ConfigureAwait(false);
+        var period = new PeriodKey(map.PeriodKey);
+
+        // ⛔ Q-234 (аудит фази 3, Excel-обмін). ВЕРСІЯ ШАБЛОНУ РЕЗОЛВИТЬСЯ З
+        // БД за documentId/period, а НЕ береться з `map.TemplateVersionId`.
+        // Той самий принцип, що й у `IRowStore.ResolveTableInstanceAsync`
+        // («клієнт не має диктувати, за якою версією тлумачити дані») —
+        // книга .xlsx тут рівно такий самий «клієнт», як і тіло HTTP-запиту:
+        // до `A7-29`/цього фікса код довіряв полю, записаному в файл на
+        // момент ЕКСПОРТУ, і republish шаблону між експортом і імпортом
+        // (звичайна подія за рік звітності) робив ВЕСЬ diff порівнянням проти
+        // структури, якої вже нема — з мовчазним ризиком не лише хибного
+        // типу комірки (`Read` нижче бере тип з цього знімка), а й того, що
+        // `ApplyAsync` впаде на `PatchCellsHandler` (він завжди резолвить
+        // ПОТОЧНУ версію) лише на ПІВ книги, лишивши решту незастосованою без
+        // жодного натяку в перегляді.
+        //
+        // ⚠ Той самий виклик заразом дає список `TableInstanceId`, які СПРАВДІ
+        // належать цьому документу за цей період — блок книги з чужим
+        // (чи вигаданим) `TableInstanceId` інакше пішов би прямо в пакетні
+        // читання рядків/комірок нижче без жодної перевірки належності.
+        var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+
+        if (instances.Count == 0)
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Документа {documentId} за період {map.PeriodKey} не існує або він порожній.");
+        }
+
+        var validInstances = instances.ToDictionary(i => i.TableInstanceId, i => i.TableDefId);
+        var snapshot = await metadata.GetAsync(instances[0].TemplateVersionId, ct).ConfigureAwait(false);
         var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
 
         var userId = currentUser.UserId
@@ -99,6 +129,24 @@ public sealed class ExcelImporter(
 
         foreach (var block in map.Tables)
         {
+            // ⛔ Q-234: екземпляр з файлу має належати ЦЬОМУ документу за
+            // ЦЕЙ період, і його `TableDefId` — збігатися з тим, що зараз
+            // справді стоїть у БД за цим `TableInstanceId`. Без цієї
+            // перевірки книга з чужого документа (той самий шаблон, інший
+            // проєкт) могла б підмінити `TableInstanceId` і змусити код нижче
+            // прочитати рядки й комірки ЧУЖОГО екземпляра ще ДО будь-якого
+            // рішення про доступ.
+            if (!validInstances.TryGetValue(block.TableInstanceId, out var actualTableDefId)
+                || actualTableDefId != block.TableDefId)
+            {
+                rejected.Add(new ImportRejection(
+                    "—", block.TableCode, "ECR-IMP-0422",
+                    "Екземпляра таблиці з файлу немає в цьому документі за цей період: "
+                    + "структуру, ймовірно, змінено після експорту."));
+
+                continue;
+            }
+
             if (!tables.TryGetValue(block.TableDefId, out var table))
             {
                 rejected.Add(new ImportRejection(
@@ -111,7 +159,6 @@ public sealed class ExcelImporter(
             validBlocks.Add((block, table));
         }
 
-        var period = new PeriodKey(map.PeriodKey);
         var tableInstanceIds = validBlocks.ConvertAll(v => v.Block.TableInstanceId);
 
         // ⛔ Три пакетні запити на ВСЮ книгу замість трьох на КОЖНУ таблицю
