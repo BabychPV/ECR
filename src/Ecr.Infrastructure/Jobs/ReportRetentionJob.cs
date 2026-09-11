@@ -74,6 +74,28 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Q-239: див. `MaintenanceRunFailure`. Прибирання зрізів падає
+        // найімовірніше саме посеред батчів (таймаут видалення, дедлок на
+        // rpt.ReportRow) — і без цього catch прогін лишався б `Running`, а
+        // зведення `NotificationJob`, що фільтрує за `FinishedAt >= since`,
+        // не сказало б про це ні слова: rpt.* росли б далі мовчки.
+        try
+        {
+            await RunAsync(run, progress, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await MaintenanceRunFailure.RecordAsync(db, run, ex, clock.UtcNow).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Власне прибирання; прогін уже відкрито.</summary>
+    /// <param name="run">Відкритий прогін журналу обслуговування.</param>
+    /// <param name="progress">Прогрес задачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task RunAsync(MaintenanceRun run, IJobProgress progress, CancellationToken ct)
+    {
         var totalSnapshots = 0;
         var totalRows = 0;
         var batches = 0;

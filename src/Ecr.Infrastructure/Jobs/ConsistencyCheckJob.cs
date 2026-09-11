@@ -47,6 +47,28 @@ public sealed class ConsistencyCheckJob(
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Q-239: усе, що після відкриття прогону, — під catch. Без нього
+        // виняток лишав рядок `Running`/`FinishedAt = NULL` назавжди, а
+        // зведення `NotificationJob` бере збої за `FinishedAt >= since` і
+        // такий рядок не бачить узагалі: провалена нічна перевірка не
+        // доходила до людини ЖОДНИМ шляхом.
+        try
+        {
+            await RunAsync(run, progress, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await MaintenanceRunFailure.RecordAsync(db, run, ex, clock.UtcNow).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Власне перевірка; прогін уже відкрито.</summary>
+    /// <param name="run">Відкритий прогін журналу обслуговування.</param>
+    /// <param name="progress">Прогрес задачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task RunAsync(MaintenanceRun run, IJobProgress progress, CancellationToken ct)
+    {
         var issues = new List<ConsistencyIssue>();
 
         await progress.ReportAsync(10, "Осиротілі комірки", ct).ConfigureAwait(false);

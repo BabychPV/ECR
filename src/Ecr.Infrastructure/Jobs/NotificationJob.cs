@@ -64,6 +64,31 @@ public sealed class NotificationJob(
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Q-239: власний прогін зведення теж мусить закриватися при падінні.
+        // У ЧУЖЕ зведення він не потрапить ніколи (`JobCode != Code` нижче —
+        // сповіщати про себе нема кому), але рядок `Running` навічно псує
+        // `SinceAsync` сусіднім прогонам і робить журнал обслуговування
+        // неправдивим у єдиному місці, де стан задач узагалі видно.
+        try
+        {
+            await RunAsync(run, now, since, progress, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await MaintenanceRunFailure.RecordAsync(db, run, ex, clock.UtcNow).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Власне зведення й розсилка; прогін уже відкрито.</summary>
+    /// <param name="run">Відкритий прогін журналу обслуговування.</param>
+    /// <param name="now">Момент початку прогону.</param>
+    /// <param name="since">Від якого моменту брати збої.</param>
+    /// <param name="progress">Прогрес задачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task RunAsync(
+        MaintenanceRun run, DateTime now, DateTime since, IJobProgress progress, CancellationToken ct)
+    {
         await progress.ReportAsync(20, "Читання збоїв збору", ct).ConfigureAwait(false);
 
         // Ідентифікатор перетворюється на рядок ВЖЕ після вибірки: усередині
