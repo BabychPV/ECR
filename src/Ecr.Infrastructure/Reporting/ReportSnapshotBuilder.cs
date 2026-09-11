@@ -123,11 +123,33 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     /// перелік «усіх» довелося б гортати саме тоді, коли потрібен останній.
     /// </remarks>
     public async Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
-        int? projectId, int? periodKey, CancellationToken ct)
-        => await db.ReportSnapshots
+        int? projectId, int? periodKey, IReadOnlyCollection<int>? visibleProjectIds, CancellationToken ct)
+    {
+        // ⛔ Порожній перелік видимих проєктів — це «жодного», а не «усі»
+        // (Q-239). Різниця тут і є вся різниця між фільтром і його
+        // відсутністю: користувач без жодного гранта на проєкт мусить бачити
+        // порожньо, а не всю базу.
+        if (visibleProjectIds is { Count: 0 })
+        {
+            return [];
+        }
+
+        var query = db.ReportSnapshots
             .AsNoTracking()
             .Where(s => projectId == null || s.ProjectId == projectId)
-            .Where(s => periodKey == null || s.PeriodKey == periodKey)
+            .Where(s => periodKey == null || s.PeriodKey == periodKey);
+
+        if (visibleProjectIds is not null)
+        {
+            // ⚠ Матеріалізований масив, а не сам інтерфейс: EF перекладає
+            // `Contains` по параметру-колекції, і форма з `null`-перевіркою
+            // всередині виразу («visible == null || visible.Contains(…)») не
+            // транслювалася б — умова будується поза виразом.
+            var visible = visibleProjectIds as int[] ?? [.. visibleProjectIds];
+            query = query.Where(s => visible.Contains(s.ProjectId));
+        }
+
+        return await query
             .OrderByDescending(s => s.BuiltAt)
             .Take(MaxSnapshots)
             .Select(s => new ReportSnapshotSummary(
@@ -146,6 +168,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                 s.BuiltAt))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
 
     /// <summary>Стеля переліку зрізів.</summary>
     private const int MaxSnapshots = 500;

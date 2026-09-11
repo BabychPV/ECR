@@ -100,8 +100,14 @@ public sealed class ReportSnapshotSync(IReportSnapshotBuilder snapshots, IDocume
             return [];
         }
 
+        // ⚠ `visibleProjectIds: null` — і це не пропущена перевірка (Q-239).
+        // Тут немає користувача, чиї гранти можна було б спитати: клас
+        // проводить у зріз ЗМІНУ СТАНУ аркуша, яку право подавати/затверджувати
+        // вже перевірив обробник вище. Обмежити цей виклик грантами того, хто
+        // подав, означало б, що зріз проєкту лишається незамороженим просто
+        // тому, що подавач бачить не весь проєкт.
         var all = await snapshots
-            .ListAsync(projectId, periodKey.Value, ct)
+            .ListAsync(projectId, periodKey.Value, visibleProjectIds: null, ct)
             .ConfigureAwait(false);
 
         return [.. all.Where(s => s.IsCurrent && s.Status != nameof(SnapshotStatus.Submitted))];

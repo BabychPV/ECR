@@ -152,6 +152,124 @@ public sealed class OutputScenarios(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Q-239. Зріз чужого проєкту не будується і не видно в переліку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обидві половини — про ОДИН клас дефекту (той самий, що <c>Q-238</c>
+    /// закрив для перерахунку проєкту): право <c>Report.*</c> перевірялося як
+    /// глобальне, а <c>projectId</c> приходив від клієнта й не звірявся ні з
+    /// чим.
+    /// <list type="number">
+    /// <item>Побудова: <c>POST /reports/{code}/build</c> із чужим
+    /// <c>projectId</c> давала <c>202</c>, і задача доходила до
+    /// <c>SwitchCurrentAsync</c> — тобто знімала поточність із зрізу, який
+    /// власник проєкту побудував і звірив.</item>
+    /// <item>Перелік: <c>GET /reports/snapshots</c> БЕЗ <c>projectId</c>
+    /// віддавав зрізи всіх проєктів системи — з періодами, статусами,
+    /// кількістю рядків і контрольними сумами.</item>
+    /// </list>
+    /// ⚠ Третя перевірка — власник ПРОДОВЖУЄ бачити свій зріз у
+    /// нефільтрованому переліку. Без неї «стороннього не видно» доводив би і
+    /// фікс, і будь-яку помилку в ньому, яка ховає геть усе (не той префікс
+    /// ключа гранта, не той поріг рівня): порожній перелік для всіх пройшов
+    /// би обидві перші перевірки.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Finding", "Q-239")]
+    public async Task Чужий_проєкт_не_будує_зріз_і_не_видно_його_зрізів()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app,
+            "Q239o",
+            [
+                "Report.EditDefinition", "Report.BuildSnapshot", "Report.ViewRegulatory",
+                "Project.Manage", "System.ViewHealth", "Template.Edit", "Document.View",
+            ]);
+
+        var code = $"Q239{Guid.NewGuid():N}"[..16];
+
+        var createDefinition = await owner.Client.PostAsJsonAsync(
+            new Uri("/api/v1/reports", UriKind.Relative),
+            new
+            {
+                code,
+                nameL10n = new Dictionary<string, string> { ["en"] = "Q-239 report" },
+                isRegulatory = true,
+                version = "1.0",
+                columns = new[] { new { code = "Value", kind = "number" } },
+                rules = (object?)null,
+            });
+        Assert.True(
+            createDefinition.IsSuccessStatusCode,
+            $"опис звіту не заведено: {createDefinition.StatusCode}: {app.ErrorsText}");
+
+        var definition = await createDefinition.Content.ReadFromJsonAsync<JsonElement>();
+        var definitionId = definition.GetProperty("id").GetInt32();
+        var versionId = definition.GetProperty("versions")[0].GetProperty("id").GetInt32();
+
+        var publish = await owner.Client.PostAsync(
+            new Uri($"/api/v1/reports/{definitionId}/versions/{versionId}/publish", UriKind.Relative),
+            content: null);
+        Assert.True(publish.IsSuccessStatusCode, $"публікація версії: {publish.StatusCode}: {app.ErrorsText}");
+
+        var projectId = await ProjectAndPeriodScenarios.CreateProjectAsync(owner.Client, "Q239", "Asia/Almaty");
+        owner = await ProjectAndPeriodScenarios.ActivateProjectAsync(owner, projectId);
+        var periodKey = (DateTime.UtcNow.Year * 100) + 1;
+
+        // Власник будує зріз — саме він має бути поточним і саме його не
+        // повинен ні перебити, ні побачити сторонній.
+        var build = await owner.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/reports/{code}/build", UriKind.Relative),
+            new { projectId, periodKey });
+        Assert.Equal(HttpStatusCode.Accepted, build.StatusCode);
+
+        var jobId = (await build.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("jobId").GetString()!;
+        var job = await ScenarioHelpers.AwaitJobAsync(owner.Client, jobId, TimeSpan.FromSeconds(30));
+        Assert.True(
+            job.ValueKind != JsonValueKind.Undefined
+            && string.Equals(job.GetProperty("state").GetString(), "Succeeded", StringComparison.Ordinal),
+            $"побудова зрізу власником не завершилася успіхом: {job}\n{app.ErrorsText}");
+
+        // ⚠ Сторонній має ОБИДВА права звітності — і жодного гранта на проєкт
+        // власника. Саме ця пара й відрізняє функціональне право від
+        // ресурсного: без прав відмова нічого не доводила б.
+        var stranger = await Provisioning.AdministratorAsync(
+            app, "Q239s", ["Report.BuildSnapshot", "Report.ViewRegulatory", "System.ViewHealth"]);
+
+        // Половина 1: побудова зрізу чужого проєкту відхиляється — і саме
+        // `403`, а не «якесь 4xx»: `404` тут означав би, що відмовив резолв
+        // коду звіту, тобто перевірка гранта знову не спрацювала.
+        var foreignBuild = await stranger.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/reports/{code}/build", UriKind.Relative),
+            new { projectId, periodKey });
+        Assert.Equal(HttpStatusCode.Forbidden, foreignBuild.StatusCode);
+
+        // Половина 2: у нефільтрованому переліку стороннього чужих зрізів
+        // немає — ні цього, ні будь-якого іншого проєкту.
+        var strangerSees = await stranger.Client.GetFromJsonAsync<JsonElement>(
+            new Uri("/api/v1/reports/snapshots", UriKind.Relative));
+        Assert.DoesNotContain(
+            strangerSees.EnumerateArray(),
+            s => s.GetProperty("projectId").GetInt32() == projectId);
+
+        // …і явна спроба звузити перелік до чужого проєкту теж нічого не дає.
+        var strangerAsks = await stranger.Client.GetFromJsonAsync<JsonElement>(
+            new Uri($"/api/v1/reports/snapshots?projectId={projectId}", UriKind.Relative));
+        Assert.Empty(strangerAsks.EnumerateArray());
+
+        // Половина 3 (регресія): власник свій зріз у тому самому
+        // нефільтрованому переліку бачить.
+        var ownerSees = await owner.Client.GetFromJsonAsync<JsonElement>(
+            new Uri("/api/v1/reports/snapshots", UriKind.Relative));
+        Assert.Contains(
+            ownerSees.EnumerateArray(),
+            s => s.GetProperty("projectId").GetInt32() == projectId
+                 && s.GetProperty("reportVersionId").GetInt32() == versionId);
+    }
+
+    /// <summary>
     /// S-28. Експорт у книгу; подання відхиляється за наявності блокуючих
     /// помилок; погодження рецензентом.
     /// </summary>
