@@ -100,11 +100,20 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             .ConfigureAwait(false);
 
         var index = existing.ToDictionary(p => (p.SourcePath, p.Timestamp));
+
+        // Так само одним запитом на батч, не по точці: у батчі — тисячі
+        // точок, але зазвичай лічені одиниці джерела (усі точки одного
+        // джерела зазвичай в одній одиниці) — без цього кожна точка тягла б
+        // окремий SELECT до uom.Unit (N+1).
+        var unitIds = await ResolveUnitsAsync(points, ct).ConfigureAwait(false);
         var written = 0;
 
         foreach (var point in points)
         {
-            var unitId = await ResolveUnitAsync(point.SourceUnitSymbol, ct).ConfigureAwait(false);
+            var unitId = point.SourceUnitSymbol is not null
+                && unitIds.TryGetValue(point.SourceUnitSymbol, out var resolvedUnitId)
+                ? resolvedUnitId
+                : null;
 
             if (index.TryGetValue((point.SourcePath, point.Timestamp), out var stored))
             {
@@ -290,24 +299,38 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// </remarks>
     private const int GapLookbackDays = 45;
 
-    /// <summary>Одиниця джерела за її символом.</summary>
+    /// <summary>Одиниці джерела за їхніми символами — одним запитом на весь батч.</summary>
     /// <remarks>
-    /// ⚠ Нерозпізнаний символ дає <c>null</c>, а не здогадку. Одиниця, взята
+    /// ⚠ Нерозпізнаний символ не потрапляє у словник, і виклик через
+    /// <c>TryGetValue</c> дає <c>null</c>, а не здогадку. Одиниця, взята
     /// навмання, — це число, помножене невідомо на що; порожня одиниця
-    /// принаймні видима у звіті про збір (ФВ-16.12).
+    /// принаймні видима у звіті про збір (ФВ-16.12). Один запит
+    /// <c>WHERE Code IN (...)</c>, а не по запиту на точку: у типовому батчі
+    /// — лічені РІЗНІ символи одиниць (усі точки одного джерела зазвичай в
+    /// одній), тож запит на кожну точку окремо був би N+1 без жодної
+    /// причини.
     /// </remarks>
-    private async Task<int?> ResolveUnitAsync(string? symbol, CancellationToken ct)
+    private async Task<Dictionary<string, int?>> ResolveUnitsAsync(
+        IReadOnlyList<SourceDataPoint> points, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(symbol))
+        var symbols = points
+            .Where(p => !string.IsNullOrWhiteSpace(p.SourceUnitSymbol))
+            .Select(p => p.SourceUnitSymbol!)
+            .Distinct()
+            .ToList();
+
+        if (symbols.Count == 0)
         {
-            return null;
+            return [];
         }
 
-        return await db.Units
+        var units = await db.Units
             .AsNoTracking()
-            .Where(u => u.Code == symbol)
-            .Select(u => (int?)u.Id)
-            .FirstOrDefaultAsync(ct)
+            .Where(u => symbols.Contains(u.Code))
+            .Select(u => new { u.Code, u.Id })
+            .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return units.ToDictionary(u => u.Code, u => (int?)u.Id);
     }
 }
