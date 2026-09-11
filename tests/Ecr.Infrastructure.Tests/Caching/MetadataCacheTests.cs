@@ -5,6 +5,7 @@ using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Caching;
@@ -146,6 +147,48 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
         Assert.Equal(doc.RowDefIds.Count, snapshot.RowsByKey.Count);
         Assert.Equal(doc.TableDefId, table.Id);
         Assert.All(doc.ColumnDefIds, id => Assert.True(snapshot.ColumnsById.ContainsKey(id)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Знімок_витісняється_з_памʼяті_після_спливу_TTL_Q252()
+    {
+        var doc = await ArrangeAsync();
+        var clock = new ManualClock();
+        var memory = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+
+        TemplateVersionSnapshot snapshot;
+        await using (var db = CreateContext([]))
+        {
+            snapshot = await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        // Санітарна перевірка: запис справді ліг у кеш під власним ключем.
+        Assert.True(memory.TryGetValue(snapshot.CacheKey, out _));
+
+        // ⛔ Q-252: без AbsoluteExpirationRelativeToNow знімок ревізії, що
+        // випала з вузького вікна InvalidateAsync (кілька презентаційних
+        // правок без Publish/міграції), лишався б тут НАЗАВЖДИ — ні TTL, ні
+        // SizeLimit його не витіснять. 31 хв > 30-хвилинної стелі Lifetime.
+        clock.Advance(TimeSpan.FromMinutes(31));
+
+        Assert.False(memory.TryGetValue(snapshot.CacheKey, out _));
+    }
+
+    /// <summary>
+    /// Керований годинник для перевірки TTL без реального очікування:
+    /// <see cref="MemoryCache"/> звіряє строк придатності запису з
+    /// <see cref="MemoryCacheOptions.Clock"/> при кожному <c>TryGetValue</c>,
+    /// тож переведення стрілок наперед і є симуляцією спливу часу (Q-252).
+    /// </summary>
+    private sealed class ManualClock : ISystemClock
+    {
+        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+
+        public DateTimeOffset UtcNow => _now;
+
+        public void Advance(TimeSpan delta) => _now += delta;
     }
 
     private async Task<TestDocument> ArrangeAsync()
