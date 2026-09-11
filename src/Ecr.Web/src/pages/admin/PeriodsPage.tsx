@@ -288,11 +288,17 @@ export function PeriodsPage(): JSX.Element {
       return;
     }
 
+    // ⛔ Q-234: `error`, а не `message`. `JobStatus.Message` несе останній
+    // прогрес (`IJobProgress.ReportAsync`) — на відмові він лишається тим,
+    // яким був до неї (часто порожній або застаріле «Виконується»), а причину
+    // відмови несе `Error` (`FinishAsync(..., errorMessage: ex.Message, ...)`,
+    // `QuartzJobAdapter.cs`). Досі показувався порожній чи нерелевантний текст
+    // саме тоді, коли оператору найпотрібніша причина.
     notifications.show({
       color: 'statusError',
-      message: recalcJob.data?.message ?? t('workflow.recalcFailed'),
+      message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
     });
-  }, [recalcJobId, recalcOutcome, recalcJob.data?.message, queryClient]);
+  }, [recalcJobId, recalcOutcome, recalcJob.data?.error, queryClient]);
 
   const manages = can(session.data, 'Project.Manage');
   const configures = can(session.data, 'Period.Configure');
