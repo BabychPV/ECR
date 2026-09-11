@@ -148,8 +148,24 @@ public sealed partial class RecurringScheduleService(
 
         foreach (var schedule in schedules)
         {
+            // ⛔ Q-235: тут мав бути порт `ICollectionJob`, а не конкретний
+            // клас `Infrastructure.Jobs.CollectionJob`. DI реєструє задачу
+            // ЛИШЕ під портом (`DependencyInjection.cs`:
+            // `services.AddScoped<ICollectionJob, Jobs.CollectionJob>()`) —
+            // так само, як і ручний запуск «зібрати зараз»
+            // (`IntegrationHandlers.cs`: `EnqueueAsync<ICollectionJob>`).
+            // `QuartzJobAdapter.Resolve` бере код задачі з
+            // `typeof(TJob).FullName` і питає ним контейнер: конкретний клас,
+            // не зареєстрований сам собою, контейнер не віддає — `Resolve`
+            // мовчки повертає `null`, і `Execute` падає РАНІШЕ, ніж встигає
+            // хоч раз записати щось у `itg.JobProgress`. Тому щотиковий збір
+            // за розкладом (crontab на кожну `ext.CollectionSchedule`) не
+            // відбувався ЖОДНОГО разу: ні ретраїв, ні `itg.CollectionRun`, ні
+            // рядка в зведенні `NotificationJob` — збір мовчав місяцями, а не
+            // «затримувався» (ФВ-11.3 порушено найгіршим способом: тиша
+            // замість затримки).
             await scheduler
-                .ScheduleAsync<Infrastructure.Jobs.CollectionJob>(
+                .ScheduleAsync<ICollectionJob>(
                     schedule.CronExpression,
                     new Application.Integration.CollectionTask(schedule.SourceEntityId, null, null),
                     CancellationToken.None)
