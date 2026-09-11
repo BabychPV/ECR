@@ -386,6 +386,7 @@ USING (VALUES
     (N'document.export',                 N'en', N'Export to Excel', 1),
     (N'document.exportBuilding',         N'en', N'Building...', 1),
     (N'document.exportReady',            N'en', N'Download the workbook', 1),
+    (N'document.exportFailed',           N'en', N'Export failed.', 1),
     (N'document.noSheets',               N'en', N'This document has no sheets for the selected period.', 1),
     (N'grid.loading',                    N'en', N'Loading the table...', 1),
     (N'grid.loadFailed',                 N'en', N'The table could not be loaded.', 1),
