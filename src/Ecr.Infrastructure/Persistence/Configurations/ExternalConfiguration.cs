@@ -393,7 +393,14 @@ public sealed class NotificationOutboxConfiguration : IEntityTypeConfiguration<N
         builder.Property(x => x.Recipients).HasMaxLength(4000);
         builder.Property(x => x.State).HasMaxLength(20).IsRequired();
         builder.Property(x => x.Error).HasMaxLength(1000);
+        builder.Property(x => x.ClaimedAt);
+        builder.Property(x => x.ClaimToken);
 
         builder.HasIndex(x => new { x.State, x.CreatedAt }).HasDatabaseName("IX_Outbox_State");
+
+        // ⛔ Q-241: `ReclaimStaleAsync` фільтрує саме за цією парою — без
+        // окремого індексу вона сканувала б усю таблицю (`IX_Outbox_State`
+        // впорядкований за `CreatedAt`, не за `ClaimedAt`).
+        builder.HasIndex(x => new { x.State, x.ClaimedAt }).HasDatabaseName("IX_Outbox_Claim");
     }
 }

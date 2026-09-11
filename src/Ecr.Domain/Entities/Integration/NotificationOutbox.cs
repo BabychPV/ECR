@@ -51,7 +51,7 @@ public sealed class NotificationOutboxItem : Entity<long>
     public DateTime CreatedAt { get; private set; }
     public DateTime? SentAt { get; private set; }
 
-    /// <summary>«Pending», «Sent», «Failed».</summary>
+    /// <summary>«Pending», «Sending», «Sent», «Failed».</summary>
     public string State { get; private set; } = null!;
 
     /// <summary>Скільки разів пробували відправити.</summary>
@@ -59,6 +59,27 @@ public sealed class NotificationOutboxItem : Entity<long>
 
     /// <summary>Текст останньої помилки — без стеків (ФВ-6.11).</summary>
     public string? Error { get; private set; }
+
+    /// <summary>Коли рядок захопив флешер (стан <c>Sending</c>).</summary>
+    /// <remarks>
+    /// ⛔ Q-241: без цього поля захоплення нічим не відрізнялося б від
+    /// зависання — рядок, чий процес упав посеред <c>SendAsync</c>, лишався
+    /// б у стані <c>Sending</c> назавжди, і черга втратила б подію
+    /// назавжди. Вік цього поля — єдине, за чим відправник (<c>OutboxDispatcher</c>,
+    /// `Ecr.Infrastructure`) відрізняє «хтось відправляє прямо зараз» від
+    /// «відправник упав, поверни в чергу».
+    /// </remarks>
+    public DateTime? ClaimedAt { get; private set; }
+
+    /// <summary>Токен, що однозначно ідентифікує ЦЕЙ виклик захоплення.</summary>
+    /// <remarks>
+    /// ⚠ Не часова позначка: <c>datetime2(3)</c> округлює значення при
+    /// збереженні, і звіряти округлене значення з тим, що лишилося в
+    /// змінній .NET, — крихко. Унікальний <see cref="Guid"/> на кожен виклик
+    /// <c>ClaimBatchAsync</c> дає однозначний спосіб дістати ПІСЛЯ
+    /// атомарного <c>UPDATE</c> саме ті рядки, які захопив САМЕ ЦЕЙ виклик.
+    /// </remarks>
+    public Guid? ClaimToken { get; private set; }
 
     /// <summary>Фіксує успішну відправку.</summary>
     /// <param name="utcNow">Момент відправки.</param>
@@ -68,6 +89,8 @@ public sealed class NotificationOutboxItem : Entity<long>
         SentAt = utcNow;
         Error = null;
         Attempts++;
+        ClaimedAt = null;
+        ClaimToken = null;
     }
 
     /// <summary>
@@ -80,15 +103,18 @@ public sealed class NotificationOutboxItem : Entity<long>
     /// повторюється. Але й не вічно: після межі вона позначається невдалою,
     /// інакше недоступна пошта перетворює чергу на нескінченний цикл, який
     /// щогодини стукає в мертвий сервер.
+    ///
+    /// ⛔ Q-241: рядок приходить сюди захопленим (<c>State == "Sending"</c>)
+    /// — без явного повернення в <c>"Pending"</c> (коли спроб ще лишилось)
+    /// він застряг би в захопленні до спливання таймауту захоплення, хоча
+    /// процес живий і просто не зміг надіслати САМЕ ЦЮ спробу.
     /// </remarks>
     public void MarkFailed(string error, int maxAttempts)
     {
         Attempts++;
         Error = error;
-
-        if (Attempts >= maxAttempts)
-        {
-            State = "Failed";
-        }
+        State = Attempts >= maxAttempts ? "Failed" : "Pending";
+        ClaimedAt = null;
+        ClaimToken = null;
     }
 }
