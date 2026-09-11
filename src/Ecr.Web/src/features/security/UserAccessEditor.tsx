@@ -1,8 +1,9 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Alert, Button, Group, Modal, MultiSelect, TextInput } from '@mantine/core';
+import { Button, Group, Modal, MultiSelect, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { AffectedRolesResponse, RoleView, UserView } from '@/api/types';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -82,24 +83,35 @@ export function UserAccessEditor({
       onClose={onClose}
       title={`${t('security.access')} · ${user?.userName ?? ''}`}
     >
-      {/* ⛔ Порожній набір ролей — це обліковий запис, який не може нічого.
-          Сказати про це треба тут, а не залишити людину гадати, чому в неї
-          порожні екрани. */}
-      {selected.length === 0 && (
-        <Alert color="statusWarning" title={t('security.noRolesTitle')}>
-          {t('security.noRolesWarning')}
-        </Alert>
-      )}
-
-      <MultiSelect
-        mt="md"
-        label={t('security.roles')}
-        description={t('security.rolesHint')}
-        data={roles.map((r) => r.code)}
-        value={selected}
-        onChange={setSelected}
-        searchable
-      />
+      {/*
+       * ⛔ Невдалий запит ролей і справді порожній перелік раніше виглядали
+       * ОДНАКОВО: обидва малювали ту саму жовту пересторогу «ролей немає», і
+       * причину збою побачити не можна було нізвідки (`Q-254`). `AsyncBoundary`
+       * малює помилку (`ErrorAlert`, `role="alert"`) окремо від порожнього
+       * стану — той самий клас дефекту, що й `A7-04`.
+       */}
+      <AsyncBoundary<string[]>
+        isPending={user !== null && assigned.isPending}
+        error={assigned.error}
+        data={user === null ? undefined : assigned.data}
+        isEmpty={() => selected.length === 0}
+        emptyTitle={t('security.noRolesTitle')}
+        emptyHint={t('security.noRolesWarning')}
+        skeleton="form"
+        onRetry={() => void assigned.refetch()}
+      >
+        {() => (
+          <MultiSelect
+            mt="md"
+            label={t('security.roles')}
+            description={t('security.rolesHint')}
+            data={roles.map((r) => r.code)}
+            value={selected}
+            onChange={setSelected}
+            searchable
+          />
+        )}
+      </AsyncBoundary>
 
       <TextInput
         mt="sm"
