@@ -284,6 +284,7 @@
 | Q-237 | SCOPE | Аудит фази 3 (звітність/аудит), директива людини: (1) `ReportRetentionJob`, названий у `B16` §4 і дозволений `D-71` («крім `IsSubmitted` і `IsCurrent`»), не існував УЗАГАЛІ — `BuildReportSnapshotHandler` створює новий `rpt.ReportSnapshot`/`rpt.ReportRow` на кожен виклик і ніколи не переписує старий, тож без прибирання обидві таблиці ростуть вічно; (2) `RecalculationService` (перерахунок формул шаблону, `doc.CellValue` з `IsCalculated=1`) не мав `IAuditWriter` серед залежностей УЗАГАЛІ — похідні числа писалися через `cellStore.ApplyAsync` без жодного запису в `aud.CellChange`, хоча коментар до `SystemUserId` у тому самому файлі вже описував саме такий запис в аудит, а `CellChangeRecord.Origin` документував `Recalculation` як чинне значення, яким не користувався ЖОДЕН код | RESOLVED · (1) новий `src/Ecr.Infrastructure/Jobs/ReportRetentionJob.cs`: батчами (2000, до 20 батчів на прогін) видаляє `rpt.ReportRow`, потім `rpt.ReportSnapshot` (FK не каскадний, `DeleteBehaviorTests` тримає це свідомо) де `IsCurrent=0 І Status<>Submitted`; зареєстровано нічним cron у `RecurringScheduleService` — крос-інстансний лок бере автоматично `QuartzJobAdapter` (той самий механізм, що й Q-229). Новий `ReportRetentionJobTests` — реальний прогін проти SQLEXPRESS (2 зайві зрізи + рядки зникають, поточний і поданий лишаються, `MaintenanceRun` пише підсумок); доведено мутацією (`Where(s => true)` замість справжнього фільтра — тест падає). (2) `RecalculationService` тепер приймає `IAuditWriter`/`IClock`, читає старі значення ДО запису (як `PatchCellsHandler`) і пише `aud.CellChange` з `Origin="Recalculation"`, правильним `RowKey` (зворотна мапа з уже прочитаних `rowIdsByTable`) і тим самим `IsLateEdit`, що йде в `doc.CellValue`. Новий тест `Перерахунок_формули_пише_аудит_з_Origin_Recalculation`; доведено і мутацією (виклик прибрано вручну — падає), і компілятором (первинний конструктор C# одразу дає `CS9113: Parameter 'audit' is unread`, той самий захист, що вже описаний у `SubmitSheetHandler` для `validation`, `Q-146`). Перевірено ще дві гіпотези з завдання й НЕ підтверджено як дефект: `ReportSnapshotBuilder.AggregateAsync` справді не читає `doc.CellValue` напряму й не звертається до заморожених `calc.SubmissionSnapshot` — але порожній `Draft`-зріз без прогону розрахунку є ЗАДОКУМЕНТОВАНИМ коректним станом (`D-65`: «у `rpt.*` потрапляють усі зрізи — щоб числа можна було перевірити ДО затвердження»), і чинний `ReportSnapshotBuildTests` це прямо стверджує коментарем; `Submit`/`Approve`/`Reopen` (`SubmitSheetHandler`/`ApproveSheetHandler`/`ReopenDocumentHandler`) узгоджено перевіряють документо-рівневий грант через `IAccessDecisionService` (Q-173 вже закрив цю розбіжність) і однаково пишуть у `wf.ApprovalState`/аудит — нової розбіжності між трьома обробниками не знайдено. Підтверджено реальним прогоном: `dotnet build ECR.sln` — 0 помилок; `Ecr.Application.Tests` 530/530, `Ecr.Infrastructure.Tests` 181/181 реальним локальним SQL Server |
 | Q-238 | CONFLICT | Повторний аудит фази 3 (авторизація, продовження Q-171-180): два обробники пропускали перевірку через `IAccessDecisionService` повністю або частково. `CreateTemplateVersionHandler` (порожня версія шаблону, на відміну від `CloneTemplateVersionHandler` поруч) не мав інжектованого `IAccessDecisionService` узагалі — `Permission = "Template.Edit"` існував лише як напис. `RunCalculationHandler` (перерахунок ЦІЛОГО проєкту) перевіряв лише глобальне `Calculation.Recalculate`, без гранта на сам `projectId` — той самий клас дефекту, що й Q-174 (документний перерахунок), яким його сусід уже закрито | RESOLVED · обидва обробники тепер перевіряють право через `IAccessDecisionService` (перший — додано виклик `PermissionCheck.RequireAsync`, другий — додано `profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read`, той самий поріг, що й `CanReadDocumentAsync`). Решта API-поверхні (усі контролери `src/Ecr.Api/Controllers/*.cs`, `Health/HealthResponse.cs`, `TemplatesController.ListVersions`) перевірена — реальних прогалин більше не знайдено; `/health/db` з голою `.RequireAuthorization()` (без права `System.ViewHealth`) розглянуто окремо й НЕ визнано прогалиною — це підтверджене рішення людини (Q-221), покрите власними тестами (`Health_db_повідомляє_*` заводять користувача без жодної ролі й очікують 200) |
 | Q-239 | CONFLICT | Аудит фази 3 (звітність, експорт, друк) за директивою людини: обидва обробники зрізів `rpt.*` перевіряли лише ГЛОБАЛЬНЕ право звітності й не дивилися на `projectId`, який приходить від клієнта. (1) `BuildReportSnapshotHandler` (`POST /reports/{code}/build`) — дослівно той самий клас дефекту, що `Q-238` закрив у `RunCalculationHandler`, але наслідок інший і гірший за «зайвий рядок у таблиці»: побудова доходить до `SwitchCurrentAsync`, тобто сторонній ЗНІМАЄ поточність із зрізу чужого проєкту й ставить на його місце власний — регуляторна вʼюха `rpt.v_*` після цього віддає не той зріз, який власник проєкту побудував і звірив. (2) `ListReportSnapshotsHandler` (`GET /reports/snapshots`) — `projectId` був НЕОБОВʼЯЗКОВИМ фільтром на розсуд клієнта, і запит без нього віддавав зрізи ВСІХ проєктів системи: ідентифікатори проєктів, періоди, статуси подання, кількість рядків і контрольні суми вмісту, тоді як сусідній `ListDocumentsHandler` фільтрує свій перелік за грантом і сам пояснює чому. Обидва — у контролері, який `Q-238` перелічив серед «перевірених по кожному обробнику, прогалин немає» | RESOLVED · `BuildReportSnapshotHandler` тепер перевіряє `profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read` (той самий поріг і той самий прийом, що `Q-238`), причому ПЕРЕД резолвом коду звіту, щоб відмова не розкривала, які звіти існують. `ListReportSnapshotsHandler` віддає в порт перелік видимих проєктів, обчислений через `AccessProfile.LevelFor` (заборони враховані, ФВ-6.6), а `IReportSnapshotBuilder.ListAsync` фільтрує ЗАПИТОМ, а не після вибірки: у переліку стеля 500 і немає курсора, тож фільтр над уже вибраною сторінкою лишав би власника з порожнім переліком щоразу, коли 500 останніх побудов у базі належать іншим проєктам. Новий сценарний тест реальним HTTP `OutputScenarios.Чужий_проєкт_не_будує_зріз_і_не_видно_його_зрізів` доводить обидві половини й регресію (власник свій зріз у нефільтрованому переліку далі бачить); мутаційний доказ — кожну половину фіксу окремо вимкнено, тест падає обидва рази. PDF-експорт і друк перевірено окремо й НЕ визнано прогалиною: це задокументоване рішення (`D-52`, `ER-R-07`, таблиця фаз `B16` — рендеринг лишається в SSRS, експорт XLSX/PDF віднесено до фази 2), а не пропуск |
+| Q-240 | SCOPE | Аудит конвеєра сповіщень («сталася подія» → «людина про неї знає»): задача обслуговування, що впала, НЕ доходила до людини жодним шляхом. `ConsistencyCheckJob`, `PartitionCheckJob`, `ReportRetentionJob` і сам `NotificationJob` відкривають прогін у `itg.MaintenanceRun` (`Status="Running"`, `FinishedAt=NULL`) і закривали його ЛИШЕ на успішному шляху — жодного `try/catch`. Виняток лишав рядок `Running` назавжди, а зведення `NotificationJob` бере збої запитом `FinishedAt >= since && Status != "Succeeded"`, де `NULL >= since` у SQL не істина: провалена нічна перевірка не давала ані рядка у зведенні, ані події в `itg.NotificationOutbox`, ані листа. Стан `"Failed"` при цьому задокументований у `MaintenanceRun.Complete` третім можливим значенням від початку — і не писався ЖОДНИМ шляхом коду. Той самий клас, що Q-235 (частковий слід, якого інша задача не читає), але на рівень вище: там мовчала матеріалізація, тут — усе нічне обслуговування | RESOLVED · новий `src/Ecr.Infrastructure/Jobs/MaintenanceRunFailure.cs` закриває прогін станом `Failed` із причиною в `DetailsJson`; усі чотири задачі загорнуто в `try/catch (Exception ex) when (ex is not OperationCanceledException)` тим самим прийомом, що вже в `RecalculationJob` (`ChangeTracker.Clear()` перед записом — інакше зіпсована сутність валить і наступне чуже `SaveChanges`, і `QuartzJobAdapter` не встигає позначити задачу `Failed`). Скасування свідомо НЕ провал: зупинку застосунку попросили, і лист про кожне розгортання був би шумом. Заразом кодувальник JSON — `UnsafeRelaxedJsonEscaping`: цей рядок іде ТЕКСТОМ у тіло листа, і з типовим кодувальником операторові приходила б кирилиця послідовностями `\u04XX`. Два нових тести реальним SQL Server (`MaintenanceRunFailureDigestTests`) ведуть падіння РЕАЛЬНОЮ задачею через її залежність (`IOrphanScanner` кидає), а не підготовленим рядком: перший — прогін закривається `Failed`/`FinishedAt` із читабельною причиною, другий — цей провал доходить до зведення (`Degraded`) І до черги `itg.NotificationOutbox` (`maintenance.failures`, `Pending`). Мутаційний доказ: з вимкненим `RecordAsync` обидва падають, з увімкненим — обидва зелені. Перевірено й НЕ визнано дефектом: авторизація (читацької поверхні `itg.NotificationOutbox`/`itg.MaintenanceRun` немає взагалі — ні ендпоінта, ні UI; `PUT users/{id}/email` і `PUT users/{id}/alerts` обидва під `Security.ManageUsers`), `User.SetEmail` не лишає порожнього рядка, `NotificationJob` іде через `ScheduleAsync` і лок бере автоматично (Q-229). Названо, але НЕ виправлено тут: `OutboxDispatcher.FlushAsync` читає `Pending` без атомарного захоплення, тож два одночасні відправники (погодинне зведення + негайний алерт `H-20` з іншого `CollectionJob`) можуть надіслати той самий лист двічі — безпечний фікс потребує колонки віку захоплення, тобто міграції. `dotnet build ECR.sln` — 0 помилок; `Ecr.Infrastructure.Tests` 187/187 реальним локальним SQL Server |
 
 ---
 
@@ -12533,3 +12534,152 @@ JournalIntegrityTests` — 4/4.
 
 **Статус:** RESOLVED · мутаційний доказ вище, PR нижче.
 
+---
+
+### Q-240 · SCOPE · Аудит конвеєра сповіщень, 2026-09-11 · провалена задача обслуговування не доходила до людини жодним шляхом
+
+**Де:** `src/Ecr.Infrastructure/Jobs/ConsistencyCheckJob.cs`,
+`src/Ecr.Infrastructure/Jobs/PartitionCheckJob.cs`,
+`src/Ecr.Infrastructure/Jobs/ReportRetentionJob.cs`,
+`src/Ecr.Infrastructure/Jobs/NotificationJob.cs`,
+`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs` (`MaintenanceRun`).
+
+**Контекст.** Директива людини: пройти ВЕСЬ шлях сповіщення — від «щось
+сталося» до «людина про це знає»: `NotificationJob`,
+`NotificationOutboxStore`, `OutboxDispatcher`, `SmtpNotificationSender`,
+`UnconfiguredNotificationSender`, `itg.NotificationOutbox`, усі місця, що
+кладуть подію в чергу, і фронтенд, якщо він це показує.
+
+**Знахідка — прогін відкривається і не закривається при падінні.** Усі
+чотири задачі, що ведуть `itg.MaintenanceRun`, роблять те саме:
+
+```csharp
+var run = new MaintenanceRun(Code, clock.UtcNow);   // Status = "Running", FinishedAt = NULL
+db.MaintenanceRuns.Add(run);
+await db.SaveChangesAsync(ct);
+// ... робота ...
+run.Complete("Succeeded" | "Degraded", details, clock.UtcNow);
+```
+
+`try/catch` не було в жодній. Виняток — і рядок лишався `Running` з
+`FinishedAt = NULL` **назавжди**.
+
+Само по собі це ще не тиша. Тишею це робить **читач**. Зведення
+(`NotificationJob`) бере збої обслуговування так:
+
+```csharp
+.Where(r => r.FinishedAt >= since && r.Status != "Succeeded" && r.JobCode != Code)
+```
+
+`NULL >= since` у SQL — не істина. Тобто рядок провалу не проходив фільтр
+**ніколи**: провалена нічна перевірка не давала ані рядка у зведенні, ані
+події в `itg.NotificationOutbox`, ані листа. Єдиним слідом лишався
+`itg.JobProgress` зі станом `Failed`, який те саме зведення читає **лише**
+для коду матеріалізації (`Q-235`) — тобто не для цих задач.
+
+**Чому це не гіпотеза, а прогалина.** `MaintenanceRun.Complete` від самого
+початку документує `"Failed"` третім можливим значенням статусу
+(`"Succeeded"`, `"Degraded"` або `"Failed"`). Жоден шлях коду його не писав.
+Сусідній `RecalculationJob` у тому ж каталозі вже має рівно потрібний
+`catch` для свого типу прогону — тобто прийом у проєкті є, і саме до
+`itg.MaintenanceRun` його не застосували.
+
+**Ціна.** `ConsistencyCheckJob` — осиротілі комірки, порушені посилання й
+звірка контрольних сум архіву; `PartitionCheckJob` — запас партицій (його
+вичерпання зупиняє запис у базу); `ReportRetentionJob` — прибирання `rpt.*`,
+без якого таблиці ростуть вічно (`Q-237`). Провал будь-якої з них — це рівно
+той стан, про який решта конвеєра сповіщень свідомо кричить: «тиша замість
+затримки» (ІНТ-3.3). Тут була тиша.
+
+#### Закрито
+
+1. Новий `src/Ecr.Infrastructure/Jobs/MaintenanceRunFailure.cs` —
+   `RecordAsync` позначає прогін `Failed`, кладе причину (без стека,
+   ФВ-6.11, обрізану до 500 символів) у `DetailsJson` і зберігає це
+   **окремо від решти змін**: `ChangeTracker.Clear()` перед записом, той
+   самий механізм і з тієї ж причини, що вже описана в `RecalculationJob`
+   — сутність, чий запис щойно провалився, лишена в трекері, валить і
+   НАСТУПНЕ чуже `SaveChanges` (запис прогресу через `JobProgressStore` у
+   тому ж DI-скоупі), і тоді `QuartzJobAdapter` не може позначити задачу
+   `Failed`: замість одного невидимого стану вийшло б два.
+2. Усі чотири задачі загорнуто в
+   `try/catch (Exception ex) when (ex is not OperationCanceledException)`,
+   тіло винесено в приватний `RunAsync`. **Скасування свідомо не провал:**
+   зупинку застосунку попросили, і позначати її `Failed` означало б лист
+   про кожне розгортання; стан скасування вже фіксує `QuartzJobAdapter` в
+   `itg.JobProgress`.
+3. `CancellationToken.None` на записі провалу, а не токен задачі: причиною
+   падіння могло бути саме скасування, і запис, скасований тим самим
+   токеном, лишив би рядок `Running` — рівно той стан, заради якого все це
+   й пишеться.
+4. Кодувальник JSON — `UnsafeRelaxedJsonEscaping`. Цей рядок не йде в
+   HTML: `NotificationJob` вставляє його **текстом** у тіло листа, і з
+   типовим кодувальником операторові приходила б кирилиця послідовностями
+   `\u04XX` — лист, який формально надіслано і якого неможливо прочитати.
+
+#### Доказ
+
+Два нових тести реальним SQL Server —
+`tests/Ecr.Infrastructure.Tests/Jobs/MaintenanceRunFailureDigestTests.cs`.
+Падіння вноситься не в задачу, а в її залежність (`IOrphanScanner.ScanAllAsync`
+кидає), і веде його **реальний** `ConsistencyCheckJob`: перевіряється те, що
+станеться в проді, а не власноруч підготовлений рядок таблиці.
+
+1. `Падіння_задачі_закриває_прогін_станом_Failed` — виняток іде нагору (без
+   цього `QuartzJobAdapter` вважав би прогін успішним і не поставив би
+   ретрай), а прогін має `Status = "Failed"`, непорожній `FinishedAt` і
+   читабельну причину.
+2. `Провалена_задача_обслуговування_потрапляє_у_зведення_і_чергу_сповіщень`
+   — той самий провал доходить до зведення (`Degraded`, код задачі в
+   `DetailsJson`) **І** до черги `itg.NotificationOutbox`
+   (`maintenance.failures`, стан `Pending`, бо транспорт не налаштовано —
+   `P-13`).
+
+**Мутаційний доказ.** З вимкненим `RecordAsync` (ранній `return`) обидва
+тести падають — перший на `Assert.Equal("Failed", run.Status)`, другий на
+`Assert.NotNull(digest)`; з увімкненим — обидва зелені. Прогони 2033 року
+прибираються у `finally`: база спільна на `[Collection("SqlServer")]`, а
+`NotificationJob.SinceAsync` будує вікно з останнього прогону з кодом
+`notification` — лишений по собі рядок зсунув би вікно сусіднього тесту
+(`NotificationJobMaterializationDigestTests`, 2030–2031) за межі його
+власних даних.
+
+#### Перевірено й НЕ визнано дефектом
+
+- **Авторизація.** Читацької поверхні `itg.NotificationOutbox` і
+  `itg.MaintenanceRun` не існує взагалі — ні ендпоінта, ні UI, ні рядка в
+  `02-contracts.md`; отже й прогалини доступу до них немає.
+  `PUT users/{id}/email` і `PUT users/{id}/alerts` обидва під
+  `Security.ManageUsers`; три сусідні дії `JobsController` — під
+  `System.ViewHealth` (послаблення для автора власної задачі задокументоване,
+  `Q-156`).
+- **Порожня адреса.** `User.SetEmail` нормалізує порожнє й пробільне в
+  `null`, `SetReceivesAlerts(true)` без пошти кидає доменну помилку, а
+  `SetUserEmailHandler` при очищенні адреси сам знімає прапорець. Фільтр
+  `Email != null` в `OutboxDispatcher`/`NotificationJob` тому достатній.
+- **Дублювання між інстансами.** `NotificationJob` ставиться через
+  `ScheduleAsync`, тож `RecurringKey` бере `QuartzJobAdapter.Execute` і лок
+  `SqlDistributedLock` — автоматично, тим самим механізмом, що `Q-229`.
+- **Порожнє зведення й нуль адресатів** — задокументовані стани (`D-125`),
+  не дефект.
+
+#### Названо, але не виправлено тут
+
+`OutboxDispatcher.FlushAsync` читає `Pending`, відправляє і лише потім
+позначає `Sent` — без атомарного захоплення рядка. Відправників двоє й вони
+не синхронізовані між собою: погодинне зведення і негайний алерт `H-20` з
+`CollectionJob.AlertAuthenticationAsync`, причому збір ставиться ОКРЕМОЮ
+задачею на кожну `ext.CollectionSchedule`, тобто з власним `JobKey` і
+власним локом — `[DisallowConcurrentExecution]` їх не розводить. Кілька
+джерел, що одночасно відмовили в автентифікації (типово: протермінований
+обліковий запис PI AF — відмовляють УСІ разом), дають N одночасних
+`FlushAsync`, і та сама подія йде людині N разів. Безпечний фікс — це
+захоплення рядка (`Pending` → `Sending`) плюс повернення застряглих
+захоплень, а для віку захоплення в `itg.NotificationOutbox` немає колонки:
+потрібна міграція. Свідомо окремою роботою, щоб не змішувати з фіксом вище.
+
+`dotnet build ECR.sln` — 0 помилок. `dotnet test` (реальний локальний SQL
+Server): `Ecr.Infrastructure.Tests` 187/187, `Ecr.Architecture.Tests
+--filter JournalIntegrityTests` 4/4.
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR нижче.

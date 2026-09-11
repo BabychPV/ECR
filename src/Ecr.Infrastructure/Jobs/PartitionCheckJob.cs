@@ -40,6 +40,27 @@ public sealed class PartitionCheckJob(
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Q-240: див. `MaintenanceRunFailure`. Без цього catch виняток
+        // лишав прогін `Running`/`FinishedAt = NULL`, а зведення бере збої за
+        // `FinishedAt >= since` — тобто провал перевірки запасу партицій не
+        // потрапляв у зведення й ні в чий лист.
+        try
+        {
+            await RunAsync(run, progress, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await MaintenanceRunFailure.RecordAsync(db, run, ex, clock.UtcNow).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Власне перевірка; прогін уже відкрито.</summary>
+    /// <param name="run">Відкритий прогін журналу обслуговування.</param>
+    /// <param name="progress">Прогрес задачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task RunAsync(MaintenanceRun run, IJobProgress progress, CancellationToken ct)
+    {
         // ⛔ Функції партиціонування може не бути — тоді запасу не існує як
         // поняття, і мовчати про це не можна: «перевірка пройшла» на базі без
         // партицій означала б, що вичерпання диска не помітить ніхто.
