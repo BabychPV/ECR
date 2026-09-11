@@ -92,6 +92,20 @@ internal sealed class DatabaseStep : IWizardStep
             }
         }
 
+        // ⛔ Q-228: без цього виклику відсутня база виявлялася лише на кроці
+        // 6, глибоко в deploy-ecr.ps1, сирим текстом sqlcmd — після того, як
+        // користувач уже пройшов ще три кроки й запустив усе встановлення.
+        // Інсталятор базу НЕ створює (це лишається адміністратору БД,
+        // `install-guide.md` §0) — тут лише повідомляємо про це раніше й
+        // зрозуміліше, а не змінюємо, хто відповідає за створення бази.
+        if (!SqlPreflight.TryVerifyDatabaseExists(
+                _instanceBox!.Text.Trim(), _databaseBox!.Text.Trim(),
+                _windowsAuthOption!.Checked, _loginBox!.Text.Trim(), _sqlPasswordBox!.Text,
+                out error))
+        {
+            return false;
+        }
+
         return true;
     }
 
