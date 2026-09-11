@@ -241,13 +241,16 @@ public sealed class MethodologyPublishTests
         // не право на запуск: профіль тут — окремий, із правом
         // `Calculation.Recalculate`, яке спільний `Profile()` класу не несе
         // (той служить `PublishMethodologyHandler`, де це право не потрібне).
+        // Грант на сам проєкт (`Q-238`) — теж окремо: без нього перевірка в
+        // `RunCalculationHandler` відмовляла б `AccessDeniedException` ДО
+        // того, як дійде до правила ФВ-9.4, яке тут і перевіряється.
         _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {
             CacheKey = "p",
             UserId = Reviewer,
             SecurityStamp = "s",
             Permissions = new HashSet<string>(StringComparer.Ordinal) { "Calculation.Recalculate" },
-            Grants = new Dictionary<string, GrantLevel>(),
+            Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal) { ["Project:1"] = GrantLevel.Read },
             Denies = new HashSet<string>(),
             RoleIds = new HashSet<int>(),
         });
