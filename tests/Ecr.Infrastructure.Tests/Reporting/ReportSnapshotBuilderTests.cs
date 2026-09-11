@@ -1,5 +1,6 @@
 ﻿// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuilderTests.cs
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
@@ -93,13 +94,28 @@ public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
         await using var db = CreateContext();
 
         // ⛔ ReportSnapshot.ProjectId несе реальний зовнішній ключ на
-        // doc.Project (FK_Snap_Project) — на відміну від TemplateVersionId/
-        // PeriodPolicyId проєкту, які такого обмеження не мають.
+        // doc.Project (FK_Snap_Project). Project.TemplateVersionId теж має
+        // реальний FK (`FK_Project_TV` на cfg.TemplateVersion) — раніше тут
+        // стояв захардкоджений `templateVersionId: 2` без відповідного рядка
+        // в базі, і вставка Project валилася саме на цьому обмеженні
+        // (той самий дефект, що й у `ReopenRaceTests.ArrangeAsync`).
+        var tag = Guid.NewGuid().ToString("N")[..10];
+        var template = new Template(
+            EcrCode.Create($"T{tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water report template" }),
+            createdByUserId: 1, Now);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var templateVersion = new TemplateVersion(template.Id, "1.0.0.0", createdByUserId: 1, Now);
+        db.TemplateVersions.Add(templateVersion);
+        await db.SaveChangesAsync(CancellationToken.None);
+
         var project = new Project(
-            EcrCode.Create($"P{Guid.NewGuid():N}"[..12]),
+            EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Water report project" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: 2, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
         db.Projects.Add(project);
         await db.SaveChangesAsync(CancellationToken.None);
 
