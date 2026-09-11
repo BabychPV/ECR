@@ -280,6 +280,7 @@
 | Q-233 | CONFLICT | Третій реальний скріншот того самого класу дефекту (Q-218, Q-227): напис-пояснення на кроці 4 (`CredentialsStep`) знову накладався сам на себе — фікс Q-227 (явний `RowStyle(SizeType.AutoSize)` на кожен рядок) виявився недостатнім, реальний екран і далі показував нечитабельний перенесений текст над полями "Password:"/"Confirm:" | RESOLVED · корінь глибший, ніж бракуючий `RowStyle`: `AutoSize=true` + `MaximumSize` просить WinForms порахувати висоту переносу ПІД ЧАС власного проходу компонування `TableLayoutPanel`, а порядок "спершу ширина колонки, чи спершу висота рядка" саме там і плаває — той самий клас пастки, що вже документований для Q-218/Q-220, на рівень глибше. Фікс: висота переносу вимірюється САМИМ кодом (`TextRenderer.MeasureText`, той самий інструмент, яким `Label` і так малює текст, бо `UseCompatibleTextRendering` за замовчуванням `false`) при заданій ширині, і задається ЯВНО (`AutoSize=false`, `Size` заданий напряму, +4px запасу) — жодної залежності від того, коли саме `TableLayoutPanel` порахує ширину колонки. `dotnet build tools/Ecr.Setup` — 0 помилок/попереджень. Не підтверджено реальним запуском (немає інтерактивного робочого стола в цій сесії) — лише вимірювання й побудова |
 | Q-234 | SCOPE | Аудит `src/Ecr.Web` (директива «повний аудит, PK2-стиль»): `ExportButton.tsx` не отримав фікс, заради якого власне й виник `jobFollow.ts` (`Q-156`) — опитування задачі лишалось на старій ручній копії без `job.isError`, і та сама плутанина `JobStatus.Message`/`.Error` виявилась ще в двох місцях (`PeriodsPage.tsx`, `SheetActions.tsx`) | RESOLVED · `ExportButton` переведено на `outcomeOf`/`pollInterval`; повідомлення про відмову в усіх трьох місцях тепер читає `error`, а не `message`. 329/329 `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run budget` — усі зелені; новий `ExportButton.test.tsx` (3 тести) підтверджено падінням на старому коді перед фіксом |
 | Q-235 | SCOPE | Аудит зовнішнього збору (`Ecr.Adapters.PiAf`, `CollectionJob`/`MaterializeCollectedDataJob`, `NotificationJob`) за директивою людини: `RecurringScheduleService.ScheduleAsync` ставив збір за розкладом через `ScheduleAsync<Infrastructure.Jobs.CollectionJob>` (конкретний клас), тоді як DI реєструє цю задачу ЛИШЕ під портом `ICollectionJob` (`AddScoped<ICollectionJob, Jobs.CollectionJob>()`) — `QuartzJobAdapter.Resolve` питає контейнер за `typeof(TJob).FullName` і мовчки отримує `null`, `Execute` падає РАНІШЕ, ніж встигає записати щось у `itg.JobProgress`. Наслідок: щотиковий збір за розкладом (crontab на кожну `ext.CollectionSchedule`) не відбувався ЖОДНОГО РАЗУ — ні ретраїв, ні `itg.CollectionRun`, ні рядка в зведенні `NotificationJob` (збір мовчав місяцями, а не "затримувався", ФВ-11.3). Заразом: `MaterializeCollectedDataJob` не пише ні в `itg.CollectionRun`, ні в `itg.MaintenanceRun` — провал матеріалізації лишався лише в `itg.JobProgress`, який `NotificationJob` не читав узагалі | RESOLVED · `RecurringScheduleService` тепер ставить `ScheduleAsync<ICollectionJob>` (той самий порт, яким і так іде ручний запуск "зібрати зараз"); `NotificationJob` тепер додає у зведення `itg.JobProgress`-записи `State=Failed` із кодом `IMaterializeCollectedDataJob` (новий вид рядка `MaterializationKind`). Ідемпотентність сирого збору (`UQ_RawDataPoint`), поділ збору/матеріалізації і мапінг у `doc.CellValue` (`IsCalculated=0` для зібраних даних) перевірено — без дефектів. Два нових тести реальним SQL Server: `CollectionJobRecurringRegistrationTests` (резолв DI за конкретним класом провалюється, за портом — ні) і `NotificationJobMaterializationDigestTests` (провал матеріалізації потрапляє у зведення й чергу сповіщень; успіх — ні). Повний прогін `Ecr.Infrastructure.Tests` — 184/184 реальним SQL Server; `dotnet build ECR.sln` — 0 помилок |
+| Q-236 | SCOPE | Аудит фази 3 (Excel-обмін): `ExcelImporter.PreviewAsync` резолвив версію шаблону і структуру таблиць/колонок з `map.TemplateVersionId` — поля, записаного У ФАЙЛ на момент ЕКСПОРТУ, — замість поточної версії з БД. Republish шаблону між експортом і імпортом (звичайна подія за рік звітності) робив diff порівнянням проти структури, якої вже нема: неправильний тип комірки в `Read()`, і `ApplyAsync` (той самий `PatchCellsHandler`, що завжди резолвить ПОТОЧНУ версію) міг відмовити батч лише ПІСЛЯ того, як перегляд показав користувачу, що все гаразд. Суміжно: `block.TableInstanceId` з файлу довірявся без перевірки належності документу — книга з підміненим `TableInstanceId` (той самий шаблон, чужий документ) проходила б у пакетне читання рядків/комірок ДО будь-якого рішення про доступ | RESOLVED · `PreviewAsync` тепер резолвить `TemplateVersionId` і перелік легітимних `TableInstanceId` через `IRowStore.GetTableInstancesAsync(documentId, period, ct)` — той самий принцип, що вже документований у `IRowStore.ResolveTableInstanceAsync` ("клієнт не має диктувати, за якою версією тлумачити дані"); блок книги з `TableInstanceId`/`TableDefId`, що не відповідають цьому документу за цей період, відхиляється (`ECR-IMP-0422`) ДО пакетного читання. Два нових тести (`ExcelImporterTemplateVersionTests`, NSubstitute, без SQL) доводять і фікс, і регресію: обидва падають на `NullReferenceException` при поверненні старого коду (перевірено прямим відкатом файлу й повторним прогоном) — один підтверджує, що `metadata.GetAsync` кличеться з ПОТОЧНОЮ версією, а не зі значенням з файлу, другий — що чужий `TableInstanceId` відхиляється БЕЗ читання його даних (`ReadSlicesAsync` отримує порожній список). Повний прогін реальним SQL Server: 40/40 `Ecr.Adapters.Tests`, 529/529 `Ecr.Application.Tests`, 5/5 відповідних `Ecr.Infrastructure.Tests`; `dotnet build ECR.sln` — 0 помилок |
 
 ---
 
@@ -11945,3 +11946,126 @@ EnqueueMaterializationAsync`), і єдиний слід її провалу — 
 Quartz-крону (чекати на реальне спрацювання триґера за розкладом) цією
 сесією не перевірявся — перевірено те, що будь-який тик цього розкладу
 тепер РЕЗОЛЬВИТЬСЯ й виконається, а не впаде до першого рядка логування.
+
+### Q-236 · SCOPE · Аудит фази 3 (Excel-обмін), 2026-09-11 · ExcelImporter.PreviewAsync резолвив версію шаблону з файлу, а не з БД
+
+**Де:** `src/Ecr.Adapters.Excel/ExcelImporter.cs`
+(`PreviewAsync`), новий тест
+`tests/Ecr.Adapters.Tests/Excel/ExcelImporterTemplateVersionTests.cs`.
+
+**Контекст.** Завдання сесії — цільовий аудит Excel-імпорту/експорту
+(`src/Ecr.Adapters.Excel/*`, `ExcelImportJob`/`ExcelExportJob`,
+`ExcelExchangeHandlers.cs`) на дотримання тези "структура — це дані"
+(`B01-backend-blueprint.md` §3): ідентичність колонки/рядка — коди
+(`ColumnDef.Code`, `RowKey`), НІКОЛИ позиція, і той самий шлях запису
+(`PatchCellsHandler`), що й ручна правка комірки, з тим самим аудитом,
+доступом і оптимістичним блокуванням.
+
+Сам `ImportDiffBuilder`/`ExcelExporter`/`ExcelWorkbookMap` виявилися вже
+добре захищеними попередніми аудитами (Q-148, Q-165, Q-168, Q-178):
+позиція (`Number`/`Ordinal`) використовується ЛИШЕ для фізичного
+розміщення в сітці `.xlsx`, зворотне зіставлення — завжди через карту
+книги за кодом/ключем; обчислені комірки (`ColumnDef.IsCalculated`)
+відхиляються і на рівні diff (`ECR-CELL-4221`), і незалежно — на рівні
+`EditRules.CanEdit` (`ColumnIsComputed` → `EditDenyReason.CalculatedCell`)
+із ПОТОЧНИМИ метаданими; синхронний і чергований шляхи застосування
+(`ApplyImportHandler`/`ExcelImportJob`) обидва йдуть через ОДИН метод —
+`IExcelImporter.ApplyAsync` → `PatchCellsHandler.HandleAsync`, — без
+розбіжності, якої стосувався Q-148.
+
+Але один розрив лишився: `ExcelImporter.PreviewAsync` резолвило знімок
+метаданих через
+```csharp
+var snapshot = await metadata.GetAsync(map.TemplateVersionId, ct);
+```
+де `map.TemplateVersionId` — поле, записане в прихований аркуш `_ecr`
+книги ЕКСПОРТЕРОМ на момент експорту, тобто (з погляду обробника
+імпорту) значення, яке приносить КОРИСТУВАЦЬКИЙ файл — той самий статус
+довіри, що й тіло HTTP-запиту. Це суперечить принципу, прямо
+задокументованому поряд, у `IRowStore.ResolveTableInstanceAsync`
+(`IRowStore.cs`): *"Класти [TemplateVersionId] в запит не можна: клієнт
+не має диктувати, за якою версією тлумачити дані."* Кожен інший шлях
+запису/читання (`PatchCellsHandler.LoadContextAsync`,
+`GetDocumentTablesHandler`, сам `ExcelExporter.ExportAsync`) резолвить
+цю версію З БД — `TableInstanceRef.TemplateVersionId`, який завжди
+дорівнює `project.TemplateVersionId` на момент запиту (`RowStore.cs`,
+`ResolveTableInstanceAsync`).
+
+**Наслідок.** Публікація нової версії шаблону між експортом і імпортом
+(звичайна подія за рік звітності: колонку перейменували, тип змінили,
+таблицю прибрали) означала:
+1. `Read()` у `ImportDiffBuilder` брав тип комірки (`ColumnDef.DataType`)
+   зі СТАРОГО знімка — можливе неправильне тлумачення значення з файлу.
+2. Перевірка "таблиці з файлу немає в чинній версії шаблону" (рядок
+   поряд) була тавтологією: вона звіряла `block.TableDefId` зі знімком,
+   побудованим із ТОГО САМОГО `map.TemplateVersionId`, — тобто завжди
+   проходила, навіть якщо таблиця/колонка вже прибрана з ЖИВОГО шаблону.
+3. `ApplyAsync` викликає `PatchCellsHandler.HandleAsync`, який завжди
+   резолвить ПОТОЧНУ версію (`ResolveTableInstanceAsync`) — і кинув би
+   `BusinessRuleException` ("Колонки з кодом «X» немає в цій версії
+   шаблону") лише ТУТ, посеред циклу по таблицях книги, після того, як
+   перегляд уже показав користувачу diff, що виглядав застосовним.
+4. Суміжно: `block.TableInstanceId` з файлу йшов прямо в пакетні запити
+   (`GetRowIdsBatchAsync`/`GetRowVersionsBatchAsync`/`ReadSlicesAsync`)
+   БЕЗ перевірки, що цей екземпляр справді належить документу
+   `documentId`, у який іде імпорт. Оскільки `TableDefId` — це
+   ідентифікатор ОПИСУ таблиці (спільний для всіх документів на тому
+   самому шаблоні), а не екземпляра, підміна `TableInstanceId` у файлі
+   на екземпляр ІНШОГО документа (той самий шаблон) проходила б перевірку
+   `TableDefId` і читала б рядки/комірки чужого документа ще ДО будь-якого
+   рішення про доступ (`CanEditSliceAsync`, яке викликається лише ПІСЛЯ
+   пакетного читання).
+
+**Фікс.** `PreviewAsync` тепер:
+1. Резолвить `IRowStore.GetTableInstancesAsync(documentId, period, ct)`
+   — той самий порт, яким уже користується `GetDocumentTablesHandler` і
+   `ExcelExporter.ExportAsync` — і бере `TemplateVersionId` ЗВІДТИ, не з
+   карти книги.
+2. Будує з того самого виклику мапу легітимних
+   `TableInstanceId → TableDefId` цього документа за цей період і
+   звіряє з нею КОЖЕН блок книги ДО пакетного читання: розбіжність
+   (чужий/вигаданий `TableInstanceId`, або таблиця, чий `TableDefId`
+   уже не той) відхиляється як `ECR-IMP-0422` — так само, як і раніше
+   відхилялась таблиця, якої немає в чинному шаблоні, — а не читається.
+3. Порожній перелік екземплярів (документ/період ніколи не відкривали)
+   тепер явно `NotFoundException("ECR-DOC-0404", ...)` — той самий код
+   помилки, що й у `ExcelExporter.ExportAsync` для того самого випадку.
+
+Публікація нового `TemplateVersionId`, звичайно, і далі означає, що
+частина колонок/таблиць з файлу може не існувати в живому шаблоні — це
+не усунено (і не мало б: шаблон СПРАВДІ змінився), але тепер diff і
+перевірка належності будуються проти ЖИВОЇ структури, тож користувач
+бачить розбіжність одразу в перегляді (`ECR-IMP-0422`/пропущена
+колонка), а не отримує виняток посеред застосування вже підтвердженого
+diff.
+
+**Підтверджено.** `dotnet build ECR.sln` — 0 помилок. Новий тестовий
+файл (`ExcelImporterTemplateVersionTests`, повністю NSubstitute, без
+SQL Server) — два тести:
+- `Перегляд_бере_версію_шаблону_з_БД_а_не_з_книги` — книга несе
+  завідомо СТАЛЕ `TemplateVersionId = 111`, мок `IRowStore` віддає
+  ПОТОЧНЕ `222`; тест доводить `metadata.Received(1).GetAsync(222, …)`
+  і `metadata.DidNotReceive().GetAsync(111, …)`, і що diff (значення
+  999 проти порожньої поточної комірки) побудований коректно.
+- `Блок_із_чужим_TableInstanceId_відхиляється_без_читання_його_даних` —
+  книга посилається на `TableInstanceId`, якого немає серед екземплярів
+  документа; тест доводить `preview.Rejected` містить один запис
+  `ECR-IMP-0422`, і що `cellStore.ReadSlicesAsync` отримав ПОРОЖНІЙ
+  перелік ідентифікаторів (жодного читання чужих даних).
+
+Мутаційний доказ: обидва тести ПЕРЕВІРЕНО на старому коді прямим
+відкатом файлу (`git stash` лише на `ExcelImporter.cs`) — обидва
+падають на `System.NullReferenceException` у `PreviewAsync` (виклик
+`metadata.GetAsync(111, …)` повертає неналаштований `null`-знімок),
+після чого зміну повернено (`git stash pop`) і повний прогін зелений.
+
+Повний прогін реальним SQL Server (`ECR_TEST_SQL` на локальний
+інстанс): 40/40 `Ecr.Adapters.Tests`, 529/529 `Ecr.Application.Tests`,
+5/5 `Ecr.Infrastructure.Tests` (`ExportStoreTests`/`ImportPreviewStoreTests`).
+`dotnet test tests/Ecr.Architecture.Tests --filter JournalIntegrityTests`
+— 4/4, зелено.
+
+**Статус:** RESOLVED · фікс і обидва тести підтверджені реальним
+прогоном (SQL Server + мутаційний доказ на старому коді); повний
+наскрізний людський прогін через реальний UI імпорту — не проводився
+(поза можливостями цієї сесії).
