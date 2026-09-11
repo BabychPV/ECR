@@ -2,6 +2,17 @@
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
+/*
+ * ⛔ Директива паралельного аудиту (2026-09-11, Wave 0 / PR-0.2): кілька
+ * ліній роботи піднімають dotnet+vite одночасно, і фіксовані 5173/5080
+ * означали б, що друга лінія падає на "порт зайнятий" замість того, щоб
+ * просто працювати поруч. Схема: лінія k → API `508k`, Vite `517(2+k)`
+ * (лінія 1 → 5081/5173, лінія 2 → 5082/5174, ...). Порт 5080/5173
+ * лишається дефолтом — це оркестраторова власна, непараметризована лінія.
+ */
+const vitePort = Number(process.env.ECR_VITE_PORT ?? 5173);
+const apiUrl = process.env.ECR_API_URL ?? 'http://localhost:5080';
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -19,10 +30,10 @@ export default defineConfig({
     manifest: true,
   },
   server: {
-    port: 5173,
+    port: vitePort,
     proxy: {
       // Проксі на API, щоб cookie працювала без CORS у розробці
-      '/api': { target: 'http://localhost:5080', changeOrigin: true, secure: false },
+      '/api': { target: apiUrl, changeOrigin: true, secure: false },
 
       // ⛔ `/health/*` живе ПОЗА `/api/v1` навмисно (`HealthResponse.cs`):
       // інсталятор і зовнішній моніторинг читають його за стабільною,
@@ -30,7 +41,7 @@ export default defineConfig({
       // (`index.html`) замість JSON — сторінка `Health` показує загальну
       // «запит не вдався» БЕЗ жодного коду, хоча бекенд відповідає 200
       // (виявлено реальним переглядом сторінки під час аудиту).
-      '/health': { target: 'http://localhost:5080', changeOrigin: true, secure: false },
+      '/health': { target: apiUrl, changeOrigin: true, secure: false },
     },
   },
   test: {
