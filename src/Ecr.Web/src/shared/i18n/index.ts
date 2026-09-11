@@ -170,6 +170,39 @@ export function setLanguage(value: Language): void {
 }
 
 /**
+ * Лічильник поколінь запитів `loadCatalog` — за областю (`Q-255`).
+ *
+ * ⛔ Порівняння `current !== lang` наприкінці `loadCatalog` перевіряло лише
+ * «це інша мова, ніж активна зараз», а не «це відповідь на ОСТАННІЙ виклик
+ * для цієї області». Мережа не гарантує порядку відповідей: якщо користувач
+ * двічі поспіль перемикає мову (клікнув не туди, одразу виправив), і
+ * відповідь на ПЕРШИЙ (уже покинутий) виклик приходить ПІЗНІШЕ за відповідь
+ * на ДРУГИЙ (останній вибір), активна мова мовчки відкочувалась до
+ * покинутого вибору — без жодної подальшої дії користувача.
+ *
+ * ⚠ Лічильник, а не `AbortController`: `loadCatalog` викликається з кількох
+ * незалежних місць (`LoginPage`, `AppLayout`, `LanguageSwitcher`), і кожне
+ * тримало б власний контролер — тобто той самий стан довелося б дублювати.
+ * Один монотонний номер на модуль і "останній виданий для області" в мапі —
+ * рівно те, що потрібно, щоб відповісти на питання «це ще актуальний виклик?»
+ * без зв'язку між викликами.
+ */
+let requestGeneration = 0;
+const latestRequestForScope = new Map<Scope, number>();
+
+/** Видає номер цього виклику `loadCatalog` і позначає його останнім для області. */
+function beginRequest(scope: Scope): number {
+  requestGeneration += 1;
+  latestRequestForScope.set(scope, requestGeneration);
+  return requestGeneration;
+}
+
+/** Чи досі це найостанніший виданий виклик `loadCatalog` для області. */
+function isLatestRequest(scope: Scope, requestId: number): boolean {
+  return latestRequestForScope.get(scope) === requestId;
+}
+
+/**
  * Завантажує каталог.
  *
  * ⚠ Кеш у `localStorage` за ключем із ревізією: сервер віддає `ETag`, ми
@@ -179,6 +212,11 @@ export function setLanguage(value: Language): void {
  */
 export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
   const cacheKey = `${lang}:${scope}`;
+  // ⚠ Номер береться ОДРАЗУ, до будь-якого `await`: якщо після цього виклику
+  // стартує ще один `loadCatalog` для тієї ж області, він видасть собі більший
+  // номер і стане "останнім" — а цей виклик, коли б не завершився, уже
+  // побачить, що він застарів (`Q-255`).
+  const requestId = beginRequest(scope);
 
   // ⚠ Збережене підставляється ЛИШЕ якщо в пам'яті ще нічого немає. Інакше
   // кожне повторне завантаження тієї самої мови перестворювало б об'єкт і
@@ -217,7 +255,12 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
       // ⚠ Ідентичність об'єкта в `loaded` зберігається саме тому, що ми його
       // не чіпаємо: `readCached` уже поклав його на початку, а тут немає
       // жодного `set`.
-      if (current !== lang) {
+      //
+      // ⚠ `isLatestRequest`: без цієї перевірки застаріла `304`-відповідь на
+      // покинутий виклик могла б відкотити активну мову до вже покинутого
+      // вибору, якщо вона приходить пізніше за відповідь на останній виклик
+      // (`Q-255`).
+      if (current !== lang && isLatestRequest(scope, requestId)) {
         current = lang;
         bumpCatalog();
       }
@@ -251,7 +294,14 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
   // ⚠ Версія зростає лише разом зі зміною мови: усі шляхи, що змінюють ВМІСТ,
   // уже покликали `bumpCatalog` самі. Зайвий виклик тут перетворив би кожне
   // завантаження каталогу на зайвий перерендер усього дерева.
-  if (current !== lang) {
+  //
+  // ⚠ `isLatestRequest`: без цієї перевірки відповідь на ПОКИНУТИЙ виклик
+  // (користувач устиг перемкнути мову ще раз до того, як ця відповідь
+  // прийшла) могла б мовчки відкотити активну мову назад — саме дефект
+  // `Q-255`. Перевірка нічого не забороняє відповіді, що прийшла пізніше:
+  // вона забороняє лише ЗАСТОСУВАННЯ зміни `current`, якщо цей виклик уже не
+  // останній виданий для області.
+  if (current !== lang && isLatestRequest(scope, requestId)) {
     current = lang;
     bumpCatalog();
   }
