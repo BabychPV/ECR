@@ -279,6 +279,7 @@
 | Q-232 | SCOPE | Пряма директива людини (2026-09-11), після реального прогону, де кроком 3 виявилось "database missing": "додай розгортання бд в інсталятор даю дозвіл на це, цей інсталятор буде запускати людина з доступом до бд". Свідоме скасування попередньої політики (Q-228, `install-guide.md` §0, `10-installer.md` §1.3): "інсталятор і deploy-ecr.ps1 базу НЕ створюють" | RESOLVED · новий прапорець `deploy-ecr.ps1 -CreateDatabaseIfMissing` (`CREATE DATABASE ... COLLATE Latin1_General_100_CI_AS_SC` через `sp_executesql` в IF — SQL Server не дозволяє CREATE DATABASE напряму в умовному блоці того самого пакета); майстер (`DeployRunner.cs`) передає його ЗАВЖДИ. `SqlPreflight.cs` (крок 3) більше не блокує на "database missing" — це очікуваний стан, база буде створена на кроці 6. Заразом виправлено суміжний реальний дефект: `$env:SQLCMDPASSWORD` виставлявся ПІСЛЯ перевірки з'єднання, а не до — SQL-автентифікований прогін впав би на самій перевірці передумов. НЕ порушує `D-66`: сервісний обліковий запис і далі без DDL-прав, MSI і далі не торкається бази — створює лише оркестратор (`deploy-ecr.ps1`), тими самими правами, якими й так виконує 13 DDL-скриптів кроку 2/7. Документація (`install-guide.md` §0, `10-installer.md` §1.3) оновлена відповідно. `dotnet build tools/Ecr.Setup` — 0 помилок; синтаксис `deploy-ecr.ps1` перевірено парсером PowerShell; сам T-SQL-фрагмент виконано реальним `sqlcmd` проти локального SQL Server на тимчасовій базі — collation підтверджено, повторний виклик ідемпотентний |
 | Q-233 | CONFLICT | Третій реальний скріншот того самого класу дефекту (Q-218, Q-227): напис-пояснення на кроці 4 (`CredentialsStep`) знову накладався сам на себе — фікс Q-227 (явний `RowStyle(SizeType.AutoSize)` на кожен рядок) виявився недостатнім, реальний екран і далі показував нечитабельний перенесений текст над полями "Password:"/"Confirm:" | RESOLVED · корінь глибший, ніж бракуючий `RowStyle`: `AutoSize=true` + `MaximumSize` просить WinForms порахувати висоту переносу ПІД ЧАС власного проходу компонування `TableLayoutPanel`, а порядок "спершу ширина колонки, чи спершу висота рядка" саме там і плаває — той самий клас пастки, що вже документований для Q-218/Q-220, на рівень глибше. Фікс: висота переносу вимірюється САМИМ кодом (`TextRenderer.MeasureText`, той самий інструмент, яким `Label` і так малює текст, бо `UseCompatibleTextRendering` за замовчуванням `false`) при заданій ширині, і задається ЯВНО (`AutoSize=false`, `Size` заданий напряму, +4px запасу) — жодної залежності від того, коли саме `TableLayoutPanel` порахує ширину колонки. `dotnet build tools/Ecr.Setup` — 0 помилок/попереджень. Не підтверджено реальним запуском (немає інтерактивного робочого стола в цій сесії) — лише вимірювання й побудова |
 | Q-234 | SCOPE | Аудит `src/Ecr.Web` (директива «повний аудит, PK2-стиль»): `ExportButton.tsx` не отримав фікс, заради якого власне й виник `jobFollow.ts` (`Q-156`) — опитування задачі лишалось на старій ручній копії без `job.isError`, і та сама плутанина `JobStatus.Message`/`.Error` виявилась ще в двох місцях (`PeriodsPage.tsx`, `SheetActions.tsx`) | RESOLVED · `ExportButton` переведено на `outcomeOf`/`pollInterval`; повідомлення про відмову в усіх трьох місцях тепер читає `error`, а не `message`. 329/329 `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`, `npm run budget` — усі зелені; новий `ExportButton.test.tsx` (3 тести) підтверджено падінням на старому коді перед фіксом |
+| Q-235 | SCOPE | Аудит зовнішнього збору (`Ecr.Adapters.PiAf`, `CollectionJob`/`MaterializeCollectedDataJob`, `NotificationJob`) за директивою людини: `RecurringScheduleService.ScheduleAsync` ставив збір за розкладом через `ScheduleAsync<Infrastructure.Jobs.CollectionJob>` (конкретний клас), тоді як DI реєструє цю задачу ЛИШЕ під портом `ICollectionJob` (`AddScoped<ICollectionJob, Jobs.CollectionJob>()`) — `QuartzJobAdapter.Resolve` питає контейнер за `typeof(TJob).FullName` і мовчки отримує `null`, `Execute` падає РАНІШЕ, ніж встигає записати щось у `itg.JobProgress`. Наслідок: щотиковий збір за розкладом (crontab на кожну `ext.CollectionSchedule`) не відбувався ЖОДНОГО РАЗУ — ні ретраїв, ні `itg.CollectionRun`, ні рядка в зведенні `NotificationJob` (збір мовчав місяцями, а не "затримувався", ФВ-11.3). Заразом: `MaterializeCollectedDataJob` не пише ні в `itg.CollectionRun`, ні в `itg.MaintenanceRun` — провал матеріалізації лишався лише в `itg.JobProgress`, який `NotificationJob` не читав узагалі | RESOLVED · `RecurringScheduleService` тепер ставить `ScheduleAsync<ICollectionJob>` (той самий порт, яким і так іде ручний запуск "зібрати зараз"); `NotificationJob` тепер додає у зведення `itg.JobProgress`-записи `State=Failed` із кодом `IMaterializeCollectedDataJob` (новий вид рядка `MaterializationKind`). Ідемпотентність сирого збору (`UQ_RawDataPoint`), поділ збору/матеріалізації і мапінг у `doc.CellValue` (`IsCalculated=0` для зібраних даних) перевірено — без дефектів. Два нових тести реальним SQL Server: `CollectionJobRecurringRegistrationTests` (резолв DI за конкретним класом провалюється, за портом — ні) і `NotificationJobMaterializationDigestTests` (провал матеріалізації потрапляє у зведення й чергу сповіщень; успіх — ні). Повний прогін `Ecr.Infrastructure.Tests` — 184/184 реальним SQL Server; `dotnet build ECR.sln` — 0 помилок |
 | Q-238 | CONFLICT | Повторний аудит фази 3 (авторизація, продовження Q-171-180): два обробники пропускали перевірку через `IAccessDecisionService` повністю або частково. `CreateTemplateVersionHandler` (порожня версія шаблону, на відміну від `CloneTemplateVersionHandler` поруч) не мав інжектованого `IAccessDecisionService` узагалі — `Permission = "Template.Edit"` існував лише як напис. `RunCalculationHandler` (перерахунок ЦІЛОГО проєкту) перевіряв лише глобальне `Calculation.Recalculate`, без гранта на сам `projectId` — той самий клас дефекту, що й Q-174 (документний перерахунок), яким його сусід уже закрито | RESOLVED · обидва обробники тепер перевіряють право через `IAccessDecisionService` (перший — додано виклик `PermissionCheck.RequireAsync`, другий — додано `profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read`, той самий поріг, що й `CanReadDocumentAsync`). Решта API-поверхні (усі контролери `src/Ecr.Api/Controllers/*.cs`, `Health/HealthResponse.cs`, `TemplatesController.ListVersions`) перевірена — реальних прогалин більше не знайдено; `/health/db` з голою `.RequireAuthorization()` (без права `System.ViewHealth`) розглянуто окремо й НЕ визнано прогалиною — це підтверджене рішення людини (Q-221), покрите власними тестами (`Health_db_повідомляє_*` заводять користувача без жодної ролі й очікують 200) |
 
 ---
@@ -11832,6 +11833,119 @@ const building = jobId !== null && !done && job.data?.state !== 'Failed';
 
 **Статус:** RESOLVED · код, тести, збірка перевірені; візуальне
 підтвердження в реальному браузері — ні (обмеження середовища сесії).
+
+### Q-235 · SCOPE · Аудит зовнішнього збору (`Ecr.Adapters.PiAf`, `CollectionJob`/`MaterializeCollectedDataJob`, `NotificationJob`), 2026-09-11 · збір за розкладом не запускався ЖОДНОГО РАЗУ
+
+**Де:** `src/Ecr.Api/Startup/RecurringScheduleService.cs`,
+`src/Ecr.Infrastructure/Jobs/QuartzJobAdapter.cs`, `QuartzJobScheduler.cs`,
+`DependencyInjection.cs`, `NotificationJob.cs`.
+
+**Контекст.** Директива людини — аудит зовнішнього збору даних (два
+транспорти PI AF, `CollectionJob`/`MaterializeCollectedDataJob`,
+`NotificationJob`) на предмет ідемпотентності, коректності мапінгу,
+поведінки при частковій відмові, cross-instance безпеки (перевірити, що
+`Q-229` справді покрив і `CollectionJob`) і того, чи справжній збій збору
+реально доходить до сповіщень. Більшість перевіреного виявилося справним:
+
+- **Ідемпотентність сирого збору** (`CollectionStore.UpsertRawPointsAsync`):
+  природний ключ `UQ_RawDataPoint (DataSourceId, SourcePath, Timestamp)`,
+  upsert за наявним рядком — повторний прогін того самого діапазону не
+  дублює точок.
+- **Мапінг у комірки** (`MaterializeCollectedDataJob`): сирі точки без
+  мапінгу (`TargetRowKey IS NULL`) лишаються сирими для звірки — легальний
+  стан, не втрата; матеріалізовані комірки пишуться через ТОЙ САМИЙ
+  `PatchCellsHandler`, що й правка людини, з `IsCalculated`, який ніде не
+  виставляється у `true` для цього шляху (лишається доменним значенням за
+  замовчуванням `false`) — зібрані дані не видаються формулою.
+- **Часткова відмова**: `CollectionRunner.RunAsync` зберігає прочитане
+  навіть коли частина інтервалів/атрибутів відмовила (`Degraded`, не
+  `Failed`), і не кидає виняток — наздоганяння підбере пропущене наступним
+  прогоном; retry `QuartzJobAdapter` тут узагалі не задіяний для цього
+  класу відмов, і це навмисно.
+
+**Що насправді знайшлося (найважче).** `RecurringScheduleService.
+ScheduleAsync` ставив збір за розкладом (окремий крон на кожну
+`ext.CollectionSchedule`) через
+`scheduler.ScheduleAsync<Infrastructure.Jobs.CollectionJob>(...)` —
+**конкретний клас**. `Ecr.Infrastructure.DependencyInjection` реєструє цю
+задачу ЛИШЕ під портом:
+`services.AddScoped<ICollectionJob, Jobs.CollectionJob>();` — того самого
+порту вимагає й ручний запуск "зібрати зараз"
+(`IntegrationHandlers.cs`: `EnqueueAsync<ICollectionJob>`).
+
+`QuartzJobAdapter.Resolve` бере код задачі буквально з
+`typeof(TJob).FullName` (те, що `ScheduleAsync<TJob>` поклало в
+`JobDataMap`) і питає ним `IServiceProvider.GetService(type)`. Контейнер
+Microsoft.Extensions.DependencyInjection НЕ активує довільний
+незареєстрований конкретний клас сам по собі — він віддає екземпляр лише
+за типом, під яким сам зареєстрований (тут — `ICollectionJob`). Отже
+`GetService(typeof(Jobs.CollectionJob))` повертав `null`, `Resolve`
+мовчки віддавав `null` далі, і `QuartzJobAdapter.Execute` кидав
+`JobExecutionException("Задача «...» не зареєстрована.")` **ДО** рядка,
+який хоч раз викликає `IJobProgressStore.StartAsync` — тобто ще до того,
+як хоч щось потрапляє в `itg.JobProgress`. Виняток летів одразу з `Execute`,
+поза блоком `try/catch`, що керує ретраями (`ScheduleRetryAsync`), тож
+жодного ретраю теж не було — лише один запис у застосунковий лог
+(`LogUnknownJob`, рівень `Error`), який ніхто не читає щогодини.
+
+**Наслідок для решти шести пунктів аудиту.** Це не "збір іноді запізнюється"
+чи "ідемпотентність під питанням" — при такій розбіжності типів **жоден**
+запланований збір жодного джерела не виконувався НІКОЛИ: ні перше
+читання PI AF, ні наздоганяння прогалин, ні перемикання на secondary. Уся
+решта інфраструктури (`itg.CollectionRun`, `itg.CollectionCoverage`,
+`SqlDistributedLock` з `Q-229`) — справна й покрита тестами, але для
+розкладного шляху вона просто НІКОЛИ не викликалася: `Q-229` справді
+покрив `CollectionJob` (генерична перевірка `RecurringKey` у
+`QuartzJobAdapter.Execute` не залежить від того, яким типом задачу
+зареєстровано) — питання, чи задача взагалі СТАРТУЄ, лежало на рівень
+нижче й раніше. Ручний запуск "зібрати зараз" (`EnqueueAsync<ICollectionJob>`)
+цієї вади не мав — саме тому команда не впадала в очі: збір "працював",
+коли його запускали руками.
+
+**Суміжна прогалина сповіщень.** `NotificationJob` зводить збої з
+`itg.CollectionRun` (це збір) і `itg.MaintenanceRun` (задачі, що йдуть
+через `ScheduleAsync`). `MaterializeCollectedDataJob` не пише НІ в одну з
+них — вона ставиться через `EnqueueAsync<IMaterializeCollectedDataJob>`
+на кожну пару документ+таблиця окремо (`CollectionJob.
+EnqueueMaterializationAsync`), і єдиний слід її провалу — рядок
+`itg.JobProgress` зі станом `Failed` після вичерпання ретраїв. Тобто навіть
+якби збір і матеріалізація виконувались, провал МАТЕРІАЛІЗАЦІЇ (точки
+зібрано, у комірки не потрапили) не потрапив би у щогодинне зведення
+жодного разу — рівно та сама тиша, якої решта цієї задачі свідомо уникає
+(ІНТ-3.3).
+
+**Фікс.**
+
+1. `RecurringScheduleService.ScheduleAsync` тепер ставить
+   `scheduler.ScheduleAsync<ICollectionJob>(...)` — тим самим портом, під
+   яким задача зареєстрована і яким її й так ставить ручний запуск.
+2. `NotificationJob.ExecuteAsync` додатково читає `itg.JobProgress`
+   (`State == "Failed" && JobCode == typeof(IMaterializeCollectedDataJob).
+   FullName`) за те саме вікно `[since, now)`, і додає ці записи у
+   зведення й чергу сповіщень під новим видом рядка
+   `NotificationJob.MaterializationKind = "materialize"` — окремим від
+   `CollectionKind`, бо ціна відмови й дія людини різні (`D-118`).
+
+**Підтверджено реальним SQL Server, не моком:**
+
+- `CollectionJobRecurringRegistrationTests` — ТОЧНО той самий рядок
+  реєстрації DI, що й у продовому `DependencyInjection.cs`: резолв за
+  конкретним класом `Jobs.CollectionJob` дає `null` (пояснює причину
+  дефекту), резолв за портом `ICollectionJob` дає робочу задачу.
+- `NotificationJobMaterializationDigestTests` — провал матеріалізації
+  (реальний рядок `itg.JobProgress`, той самий шлях, яким його лишає
+  `QuartzJobAdapter.FinishAsync`) потрапляє у `itg.MaintenanceRun`
+  (`Status = Degraded`) і в `itg.NotificationOutbox`; успішна
+  матеріалізація в жоден запис зведення не потрапляє.
+- Повний прогін `Ecr.Infrastructure.Tests` — 184/184 реальним локальним
+  SQL Server; `dotnet build ECR.sln` — 0 помилок.
+
+**Статус:** RESOLVED · корінна причина (розбіжність типу реєстрації й типу
+планування) виправлена й покрита детермінованим тестом на реальній базі,
+що ловить саме цю розбіжність, а не її симптом. Наскрізний прогін самого
+Quartz-крону (чекати на реальне спрацювання триґера за розкладом) цією
+сесією не перевірявся — перевірено те, що будь-який тик цього розкладу
+тепер РЕЗОЛЬВИТЬСЯ й виконається, а не впаде до першого рядка логування.
 
 ### Q-238 · CONFLICT · Повторний аудит авторизації (продовження Q-171-180), 2026-09-11 · дві прогалини `IAccessDecisionService`, недосяжна більше нічого нового
 

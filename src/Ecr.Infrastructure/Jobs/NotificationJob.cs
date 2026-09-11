@@ -113,7 +113,24 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var items = collection.Concat(maintenance).Take(MaxDigestItems).ToList();
+        // ⛔ Q-235: матеріалізація (`MaterializeCollectedDataJob`) не пише НІ в
+        // `itg.CollectionRun` (це не збір), НІ в `itg.MaintenanceRun` (вона не
+        // ставиться через `ScheduleAsync`, а через `EnqueueAsync` — на кожен
+        // документ+таблицю окремо). Єдиний слід її провалу — `itg.JobProgress`
+        // (`QuartzJobAdapter.FinishAsync`, стан `Failed`, після вичерпання
+        // ретраїв). Без цього запиту точки зібрано, а в комірки вони не
+        // потрапили — і жодне зведення про це не сказало б ні слова: рівно та
+        // сама тиша, яку решта цієї задачі свідомо не дозволяє (ІНТ-3.3).
+        var materialization = await db.JobProgresses
+            .AsNoTracking()
+            .Where(p => p.UpdatedAt >= since && p.State == "Failed" && p.JobCode == MaterializeJobCode)
+            .OrderByDescending(p => p.UpdatedAt)
+            .Take(MaxDigestItems)
+            .Select(p => new DigestItem(MaterializationKind, p.JobId, p.State, p.Error, p.UpdatedAt))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var items = collection.Concat(maintenance).Concat(materialization).Take(MaxDigestItems).ToList();
 
         // ⛔ Нуль адресатів — не помилка, а СТАН, який має бути видно (`D-125`).
         // Мовчазна система без адресатів і мовчазна система без збоїв ззовні
@@ -189,6 +206,25 @@ public sealed class NotificationJob(
 
     /// <summary>Звичайний вид рядка про збій збору.</summary>
     public const string CollectionKind = "collection";
+
+    /// <summary>
+    /// Вид рядка зведення для провалу перенесення в комірки (<c>Q-235</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий від <see cref="CollectionKind"/> навмисно: збір і
+    /// матеріалізація — різні задачі з різною ціною відмови
+    /// (`MaterializeCollectedDataJob`, D-118) — «точки зібрано, але в комірки
+    /// не потрапили» вимагає іншої дії, ніж «джерело не віддало даних».
+    /// </remarks>
+    public const string MaterializationKind = "materialize";
+
+    /// <summary>
+    /// Код задачі матеріалізації в <c>itg.JobProgress</c> — тим самим рядком,
+    /// яким її ставить <c>CollectionJob.EnqueueMaterializationAsync</c>
+    /// (<c>jobs.EnqueueAsync&lt;IMaterializeCollectedDataJob&gt;</c>).
+    /// </summary>
+    private static readonly string MaterializeJobCode =
+        typeof(IMaterializeCollectedDataJob).FullName!;
 
     /// <summary>
     /// Вид рядка зведення за текстом відмови прогону.
