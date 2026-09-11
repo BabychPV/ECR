@@ -1,4 +1,5 @@
-﻿using Ecr.Adapters.PiAf;
+﻿using System.Diagnostics;
+using Ecr.Adapters.PiAf;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
@@ -236,6 +237,67 @@ public sealed class CollectionRunnerTests
             Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact(Timeout = 15000)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Q-250")]
+    public async Task Джерело_що_відповідає_але_надто_повільно_не_тримає_прогін_довше_ліміту()
+    {
+        // ⛔ Регресія, яку ловить цей тест: без загального watchdog-ліміту
+        // прогін чекає на `IExternalDataSource.ReadAsync`, поки той не
+        // завершиться сам, — а "напівживе" джерело (приймає з'єднання,
+        // відповіді не віддає) не завершує його НІКОЛИ. `[Fact(Timeout =
+        // 15000)]` перетворює це на `RED` за 15 с, а не на реальне
+        // зависання прогону назавжди.
+        var world = new World(maxRunDuration: TimeSpan.FromMilliseconds(200));
+
+        // Джерело "відповідає", але не завершує запит, поки не скасують
+        // токен, — так само, як реальний HttpClient чекав би на
+        // "напівживий" PI Web API до спрацювання власного таймауту.
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(callInfo => NeverAsync(callInfo.ArgAt<CancellationToken>(1)));
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // ⚠ Прогін НЕ кидає виняток: джерело, що відповідає повільно, — це
+        // затримка (ФВ-11.3), а не збій, і непрочитане йде в наздоганяння
+        // мовчки, так само, як за звичайної відмови джерела.
+        await world.Runner.RunAsync(
+            SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        stopwatch.Stop();
+
+        // Ліміт прогону — 200 мс; навіть із запасом на службові виклики це
+        // на порядки менше за секунди-хвилини, які дало б відсутність
+        // watchdog узагалі (тут — реальне "назавжди", бо `NeverAsync` не
+        // завершується сам).
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(5),
+            $"watchdog мав обірвати прогін значно швидше: минуло {stopwatch.Elapsed}.");
+
+        // Прогін завершується як "Degraded" (затримка), не "Failed" (збій) —
+        // той самий статус, що й за звичайної відмови джерела.
+        await world.Store.Received().FinishRunAsync(
+            Arg.Any<long>(), "Degraded", Arg.Any<int>(),
+            Arg.Is<string?>(m => m != null && m.Contains("ліміт", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+
+        // Покриття НЕ пишеться за інтервал, що не встиг прочитатися: дірка
+        // мусить лишитися видимою для наздоганяння.
+        await world.Store.DidNotReceive().WriteCoverageAsync(
+            Arg.Any<long>(), Arg.Any<int>(),
+            Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Count > 0), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Імітує "напівживе" джерело: відповідь ніколи не приходить сама.</summary>
+    private static async Task<CollectionResult> NeverAsync(CancellationToken ct)
+    {
+        await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+
+        // Недосяжно: `Task.Delay(Infinite, ct)` завершується лише винятком
+        // скасування — ніколи звичайним поверненням.
+        throw new InvalidOperationException("Unreachable.");
+    }
+
     private static EntityFieldMap Map(int? sourceUnitId)
     {
         var map = EntityFieldMap.ToColumn(SourceEntityId, "tag", columnDefId: 7);
@@ -247,7 +309,7 @@ public sealed class CollectionRunnerTests
     /// <summary>Мінімальне оточення збирача: сховище, джерело, довідник, годинник.</summary>
     private sealed class World
     {
-        public World(ExternalTransport transport = ExternalTransport.PiSqlClient)
+        public World(ExternalTransport transport = ExternalTransport.PiSqlClient, TimeSpan? maxRunDuration = null)
         {
             var entity = new SourceEntity(dataSourceId: 5, "STACK-1", RegistrySourceKind.External);
             entity.Describe("Димова труба", @"\\Server\Db\Stack1");
@@ -287,7 +349,8 @@ public sealed class CollectionRunnerTests
                 [Source],
                 new SourceUnitConverter(new UnitConverter(), Catalog),
                 new CatchUpPlanner(Store, new TestClock(Now)),
-                Store);
+                Store,
+                maxRunDuration);
         }
 
         public ICollectionStore Store { get; } = Substitute.For<ICollectionStore>();
