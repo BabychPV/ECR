@@ -163,6 +163,11 @@ public sealed partial class RecurringScheduleService(
 
     [LoggerMessage(
         Level = LogLevel.Information,
+        Message = "Старт: вирівнювання станів періодів пропущено — інший інстанс уже виконує його зараз.")]
+    private static partial void LogPeriodStateSkippedElsewhere(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
         Message = "Старт: постійні розклади поставлено, зокрема збору: {Count}.")]
     private static partial void LogSchedulesDone(ILogger logger, int count);
 
@@ -182,11 +187,33 @@ public sealed partial class RecurringScheduleService(
     /// ⚠ Невдача тут НЕ валить старт, на відміну від постановки розкладів.
     /// Різниця по суті: розклад, якого немає, мовчки не працює вічно; а це
     /// разове вирівнювання, яке за годину повторить сама задача.
+    ///
+    /// ⛔ Q-223 (`Jobs`-секція): виклик прямий, тобто НЕ проходить через
+    /// <see cref="Infrastructure.Jobs.QuartzJobAdapter"/> і не бере
+    /// міжінстансовий лок автоматично. Якщо кілька інстансів стартують
+    /// близько одне до одного (типово при rolling-розгортанні), кожен
+    /// намагається вирівняти ті самі періоди одночасно — той самий лок тут
+    /// узято явно, тим самим ресурсом, яким узяв би собі
+    /// <see cref="Infrastructure.Jobs.QuartzJobScheduler.ScheduleAsync{TJob}"/>
+    /// для цієї ж задачі.
     /// </remarks>
     private async Task RunPeriodStateOnceAsync(IServiceProvider provider)
     {
         try
         {
+            var connectionString = provider.GetRequiredService<EcrDbContext>().Database.GetConnectionString()
+                ?? throw new InvalidOperationException("У контексту немає рядка підключення.");
+
+            await using var distributedLock = await Infrastructure.Jobs.SqlDistributedLock
+                .TryAcquireAsync(connectionString, "Ecr.Job.PeriodStateJob:startup", CancellationToken.None)
+                .ConfigureAwait(false);
+
+            if (distributedLock is null)
+            {
+                LogPeriodStateSkippedElsewhere(logger);
+                return;
+            }
+
             var job = provider.GetRequiredService<Infrastructure.Jobs.PeriodStateJob>();
 
             await job.ExecuteAsync(null, new NullProgress(), CancellationToken.None).ConfigureAwait(false);

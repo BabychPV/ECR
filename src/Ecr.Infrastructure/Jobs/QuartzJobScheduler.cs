@@ -60,6 +60,22 @@ public sealed class QuartzJobScheduler(
     /// </remarks>
     public const string RetryAttemptKey = "ecr.retryAttempt";
 
+    /// <summary>
+    /// Ключ ознаки "поставлено через <see cref="ScheduleAsync{TJob}"/>" —
+    /// за ним <see cref="QuartzJobAdapter"/> вирішує, чи брати
+    /// міжінстансовий лок (Q-223, `Jobs`-секція).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме тут, а не прапорцем від викликача: `ScheduleAsync` — ЄДИНИЙ
+    /// метод цього класу з крон-виразом у сигнатурі, тобто єдиний, що
+    /// реєструє job окремо на КОЖНОМУ інстансі під тим самим детермінованим
+    /// ключем. `EnqueueAsync`/`EnqueueExclusiveAsync` ставлять job з
+    /// унікальним (GUID) ключем у ВЛАСНИЙ `in-memory`-планувальник
+    /// інстансу, що його викликав, — інші інстанси про неї не знають
+    /// узагалі, тож координація там не потрібна.
+    /// </remarks>
+    public const string RecurringKey = "ecr.recurring";
+
     /// <summary>Чи піднято планувальник.</summary>
     public bool IsConfigured => schedulerFactory is not null;
 
@@ -208,6 +224,7 @@ public sealed class QuartzJobScheduler(
             .WithIdentity(key)
             .UsingJobData(PayloadKey, json)
             .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
+            .UsingJobData(RecurringKey, "1")
             .Build();
 
         var trigger = TriggerBuilder.Create()

@@ -1,6 +1,8 @@
 using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Quartz;
@@ -67,6 +69,29 @@ public sealed partial class QuartzJobAdapter(
 
         var progress = provider.GetService<IJobProgressStore>();
         var clock = provider.GetRequiredService<IClock>();
+
+        // ⛔ Q-223 (`Jobs`-секція): job поставлена через ScheduleAsync (крон) —
+        // той самий детермінований ключ зареєстрований на КОЖНОМУ інстансі
+        // окремо, тож без координації N інстансів виконали б її N разів на
+        // один тик. Лок — негайна спроба, без очікування: якщо інший
+        // інстанс уже виконує цю саму job, цей тик просто пропускається, а
+        // не чекає й не дублює роботу пізніше.
+        var isRecurring = context.JobDetail.JobDataMap.ContainsKey(QuartzJobScheduler.RecurringKey)
+            && context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.RecurringKey) == "1";
+
+        await using var distributedLock = isRecurring
+            ? await SqlDistributedLock.TryAcquireAsync(
+                    provider.GetRequiredService<EcrDbContext>().Database.GetConnectionString()
+                        ?? throw new InvalidOperationException("У контексту немає рядка підключення."),
+                    $"Ecr.Job.{jobId}", context.CancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
+        if (isRecurring && distributedLock is null)
+        {
+            LogJobSkippedElsewhere(logger, jobId, typeName ?? "—");
+            return;
+        }
 
         await StartAsync(progress, jobId, typeName!, clock, context.CancellationToken).ConfigureAwait(false);
 
@@ -206,6 +231,11 @@ public sealed partial class QuartzJobAdapter(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) завершилася помилкою.")]
     private static partial void LogJobFailed(ILogger logger, string jobId, string typeName);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Задача {JobId} ({TypeName}) пропущена: інший інстанс уже виконує її зараз.")]
+    private static partial void LogJobSkippedElsewhere(ILogger logger, string jobId, string typeName);
 }
 
 /// <summary>Прогрес, що пишеться у сховище.</summary>
