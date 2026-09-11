@@ -105,6 +105,14 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.OrphanScanJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // ⛔ Q-2xx (аудит фази 3, звітність). Без цього рядка задача існувала
+        // б у коді й ніколи не виконувалася б: rpt.ReportSnapshot/ReportRow
+        // росли б вічно — на кожен звіт, кожен проєкт, кожен період, кожну
+        // повторну побудову (B16 §4, D-71).
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.ReportRetentionJob>(NightlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
