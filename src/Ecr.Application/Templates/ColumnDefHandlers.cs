@@ -112,50 +112,64 @@ public sealed class SaveColumnDefHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244 (той самий клас дефекту, що Q-243): «запис → аудит →
+        // SaveChanges» тепер ОДНИМ замиканням `IUnitOfWork.ExecuteInTransactionAsync`
+        // — коміт рівно один, наприкінці. До цієї правки проміжний
+        // `SaveChangesAsync` (потрібен лише для отримання `Id` нової колонки)
+        // комітився ОКРЕМО від запису аудиту й фінального збереження: збій між
+        // ними лишав структурну зміну без відповідного рядка в
+        // `aud.StructureChange`.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            // ⚠ Ordinal, якщо не переданий явно, — за наявними колонками:
-            // нова колонка стає ОСТАННЬОЮ в порядку показу (`SaveSheetDefHandler`).
-            var ordinal = command.Ordinal
-                ?? (table.Columns.Count == 0 ? 0 : table.Columns.Max(c => c.Ordinal) + 1);
-
-            existing = new ColumnDef(tableDefId, ecrCode, header, ordinal, command.DataType);
-            ApplyOptionalFields(existing, command);
-
-            table.AddColumn(existing);
-
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
-            // `SaveSheetDefHandler`. Аудит несе `EntityId`; у щойно доданої
-            // сутності його ще немає до `SaveChanges`.
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.Rename(header);
-            ApplyOptionalFields(existing, command);
-
-            if (command.Ordinal is { } ordinal)
+            if (existing is null)
             {
-                existing.Reorder(ordinal);
+                // ⚠ Ordinal, якщо не переданий явно, — за наявними колонками:
+                // нова колонка стає ОСТАННЬОЮ в порядку показу (`SaveSheetDefHandler`).
+                var ordinal = command.Ordinal
+                    ?? (table.Columns.Count == 0 ? 0 : table.Columns.Max(c => c.Ordinal) + 1);
+
+                existing = new ColumnDef(tableDefId, ecrCode, header, ordinal, command.DataType);
+                ApplyOptionalFields(existing, command);
+
+                table.AddColumn(existing);
+
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
+                // `SaveSheetDefHandler`. Аудит несе `EntityId`; у щойно доданої
+                // сутності його ще немає до `SaveChanges`.
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }
-        }
+            else
+            {
+                existing.Rename(header);
+                ApplyOptionalFields(existing, command);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(ColumnDef), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+                if (command.Ordinal is { } ordinal)
+                {
+                    existing.Reorder(ordinal);
+                }
+            }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(ColumnDef), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Див. коментар класу: без цього виклику `GET …/structure`,
         // прочитаний хоч раз до цієї правки, віддавав би знімок без щойно
         // доданої чи зміненої колонки, доки версію не опублікують.
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return Map(existing);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // (гілка створення або гілка зміни): аналіз nullable через межу
+        // лямбди цього не бачить, хоч потік виконання гарантує це так само,
+        // як гарантував до Q-244, коли той самий код був інлайном.
+        return Map(existing!);
     }
 
     /// <summary>Застосовує поля, спільні для створення й зміни.</summary>
@@ -339,17 +353,23 @@ public sealed class DeleteColumnDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(ColumnDef), column.Id,
-                change, "Delete",
-                SaveColumnDefHandler.Describe(column), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит писався РАНІШЕ за `SoftDelete`/`SaveChanges` без
+        // жодної спільної транзакції — збій між ними лишав журнал із записом
+        // про видалення, якого в даних не було.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(ColumnDef), column.Id,
+                    change, "Delete",
+                    SaveColumnDefHandler.Describe(column), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        column.SoftDelete(userId, clock.UtcNow);
+            column.SoftDelete(userId, clock.UtcNow);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }

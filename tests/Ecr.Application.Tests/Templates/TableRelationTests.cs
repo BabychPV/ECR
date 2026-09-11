@@ -1,5 +1,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
@@ -92,6 +93,60 @@ public sealed class TableRelationTests(SqlServerFixture sql)
         Assert.Equal("TableRelationDef", row.EntityType);
         Assert.Equal("Create", row.Operation);
         Assert.Equal(stored.Id, row.EntityId);
+    }
+
+    /// <summary>
+    /// Q-244 (той самий клас дефекту, що Q-243). Доказ мутацією: до фіксу
+    /// проміжний <c>SaveChangesAsync</c> (Create-гілка, потрібен лише щоб
+    /// отримати <c>Id</c> нового зв'язку) комітився ОКРЕМО від запису аудиту —
+    /// збій між ними лишав зв'язок у базі БЕЗ відповідного рядка
+    /// <c>aud.StructureChange</c>. Декоратор нижче кидає ОДРАЗУ після
+    /// реального запису аудиту (<c>AuditWriter.WriteStructureChangeAsync</c>) —
+    /// точка збою, симетрична до тієї, що вже доводить
+    /// <c>PatchCellsAtomicityTests</c> для Q-243.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public async Task Збій_після_запису_аудиту_не_лишає_зв_язок_напівзбереженим()
+    {
+        const string FaultMarker = "Q244_FAULT_INJECTION";
+        var version = await DraftAsync();
+
+        await using (var db = Context())
+        {
+            Profile("Template.Edit");
+
+            var handler = new SaveTableRelationHandler(
+                new Repository<TemplateVersion, int>(db),
+                new Repository<TableRelationDef, int>(db),
+                new TemplateVersionStore(db),
+                new ChangeClassifier(),
+                new ThrowingAuditWriter(new AuditWriter(db), FaultMarker),
+                new UnitOfWork(db),
+                new TestClock(Now),
+                _access,
+                _user);
+
+            var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => handler.HandleAsync(
+                    version.VersionId, version.RelationCode, Command(version), CancellationToken.None));
+            Assert.Equal(FaultMarker, thrown.Message);
+        }
+
+        // ⛔ Доказ атомарності: зв'язок НЕ повинен лишитися в базі (rollback
+        // усього блоку), і аудиту цієї зміни теж не повинно бути — обидва або
+        // разом, або жоден. До фіксу перше твердження падає: зв'язок УЖЕ
+        // закомічений (проміжний SaveChangesAsync устиг спрацювати до того, як
+        // декоратор кинув виняток).
+        await using var fresh = Context();
+        Assert.False(
+            await fresh.TableRelations.AsNoTracking()
+                .AnyAsync(r => r.SourceTableDefId == version.SourceTableDefId),
+            "Дефект Q-244: зв'язок лишився в базі, хоча запис аудиту впав і весь батч мав відкотитися повністю.");
+
+        Assert.Empty(await AuditRowsAsync(version.VersionId));
     }
 
     [Fact]
@@ -433,4 +488,27 @@ public sealed class TableRelationTests(SqlServerFixture sql)
         string SourceCode, string TargetCode, string RelationCode);
 
     private sealed record AuditRow(string EntityType, int EntityId, string Operation);
+
+    /// <summary>
+    /// Декоратор для доказу мутацією (Q-244): пише аудит РЕАЛЬНИМ
+    /// <see cref="AuditWriter"/> (SQL справді виконується, приєднуючись до
+    /// ambient-транзакції), а тоді кидає — точка збою «одразу після аудиту».
+    /// </summary>
+    private sealed class ThrowingAuditWriter(IAuditWriter inner, string faultMarker) : IAuditWriter
+    {
+        public Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct)
+            => inner.WriteCellChangesAsync(changes, ct);
+
+        public async Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct)
+        {
+            await inner.WriteStructureChangeAsync(change, ct).ConfigureAwait(false);
+            throw new InvalidOperationException(faultMarker);
+        }
+
+        public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct)
+            => inner.WriteSecurityEventAsync(evt, ct);
+
+        public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct)
+            => inner.WritePublicationEventAsync(evt, ct);
+    }
 }

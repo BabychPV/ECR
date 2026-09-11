@@ -115,59 +115,67 @@ public sealed class SaveTableDefHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці (той самий клас дефекту, що Q-243).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            // ⚠ Ordinal, якщо не переданий явно, — за наявними таблицями ЦЬОГО
-            // аркуша: нова таблиця стає останньою в порядку показу саме на
-            // ньому, а не в межах усієї версії (та сама логіка, що й
-            // `SaveSheetDefHandler` для аркушів версії).
-            var ordinal = command.Ordinal
-                ?? (sheet.Tables.Count == 0 ? 0 : sheet.Tables.Max(t => t.Ordinal) + 1);
-
-            existing = new TableDef(sheet.Id, ecrCode, name, ordinal, command.LayoutKind, command.RowMode);
-            existing.SetMaxDynamicRows(command.MaxDynamicRows);
-
-            sheet.AddTable(existing);
-
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення — той самий довід,
-            // що й у `SaveSheetDefHandler`: аудит несе `EntityId`, якого у
-            // щойно доданої сутності ще немає до `SaveChanges`.
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.Rename(name);
-            existing.SetLayout(command.LayoutKind);
-
-            // ⚠ Порядок значущий: `RowMode` міняється ПЕРЕД `MaxDynamicRows`,
-            // бо саме від фінального `RowMode` залежить, чи взагалі дозволена
-            // стеля (`SetMaxDynamicRows` кидає `ECR-TMPL-0422`, якщо ні). Якби
-            // виклики стояли навпаки, перевірка бачила б ще СТАРИЙ режим.
-            existing.SetRowMode(command.RowMode);
-            existing.SetMaxDynamicRows(command.MaxDynamicRows);
-
-            if (command.Ordinal is { } ordinal)
+            if (existing is null)
             {
-                existing.Reorder(ordinal);
+                // ⚠ Ordinal, якщо не переданий явно, — за наявними таблицями ЦЬОГО
+                // аркуша: нова таблиця стає останньою в порядку показу саме на
+                // ньому, а не в межах усієї версії (та сама логіка, що й
+                // `SaveSheetDefHandler` для аркушів версії).
+                var ordinal = command.Ordinal
+                    ?? (sheet.Tables.Count == 0 ? 0 : sheet.Tables.Max(t => t.Ordinal) + 1);
+
+                existing = new TableDef(sheet.Id, ecrCode, name, ordinal, command.LayoutKind, command.RowMode);
+                existing.SetMaxDynamicRows(command.MaxDynamicRows);
+
+                sheet.AddTable(existing);
+
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення — той самий довід,
+                // що й у `SaveSheetDefHandler`: аудит несе `EntityId`, якого у
+                // щойно доданої сутності ще немає до `SaveChanges`.
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }
-        }
+            else
+            {
+                existing.Rename(name);
+                existing.SetLayout(command.LayoutKind);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(TableDef), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+                // ⚠ Порядок значущий: `RowMode` міняється ПЕРЕД `MaxDynamicRows`,
+                // бо саме від фінального `RowMode` залежить, чи взагалі дозволена
+                // стеля (`SetMaxDynamicRows` кидає `ECR-TMPL-0422`, якщо ні). Якби
+                // виклики стояли навпаки, перевірка бачила б ще СТАРИЙ режим.
+                existing.SetRowMode(command.RowMode);
+                existing.SetMaxDynamicRows(command.MaxDynamicRows);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                if (command.Ordinal is { } ordinal)
+                {
+                    existing.Reorder(ordinal);
+                }
+            }
+
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(TableDef), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Див. коментар класу: без цього виклику `GET …/structure`,
         // прочитаний хоч раз до цієї правки, віддавав би знімок без щойно
         // доданої чи зміненої таблиці, доки версію не опублікують.
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return Map(existing);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // — той самий довід, що в `SaveColumnDefHandler`.
+        return Map(existing!);
     }
 
     /// <summary>Складає DTO таблиці для відповіді.</summary>
@@ -268,17 +276,21 @@ public sealed class DeleteTableDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(TableDef), table.Id,
-                change, "Delete",
-                SaveTableDefHandler.Describe(table), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(TableDef), table.Id,
+                    change, "Delete",
+                    SaveTableDefHandler.Describe(table), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        table.SoftDelete(userId, clock.UtcNow);
+            table.SoftDelete(userId, clock.UtcNow);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }

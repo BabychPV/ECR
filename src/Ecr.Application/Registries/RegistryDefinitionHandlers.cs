@@ -304,25 +304,32 @@ public sealed class SaveRegistryDefinitionHandler(
         // там, де змін найбільше.
         var after = Snapshot(definition, applied);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                ChangedAt: clock.UtcNow,
+        // ⛔ Q-244: аудит і `SaveChanges` тепер одна транзакція — до цієї
+        // правки аудит писався сирим SQL без жодної відкритої транзакції, і
+        // збій між ним і `SaveChangesAsync` лишав журнал і опис довідника
+        // розсинхронізованими.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
 
-                // Довідник не належить версії шаблону: він один на всі проєкти
-                // і всі версії.
-                TemplateVersionId: 0,
-                EntityType: "cfg.RegistryDef",
-                EntityId: definition.Id,
-                ChangeClass: ChangeClass.Guarded,
-                Operation: "SaveDefinition",
-                OldJson: before,
-                NewJson: after,
-                ChangeReason: dto.Reason,
-                ChangedByUserId: userId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+                    // Довідник не належить версії шаблону: він один на всі проєкти
+                    // і всі версії.
+                    TemplateVersionId: 0,
+                    EntityType: "cfg.RegistryDef",
+                    EntityId: definition.Id,
+                    ChangeClass: ChangeClass.Guarded,
+                    Operation: "SaveDefinition",
+                    OldJson: before,
+                    NewJson: after,
+                    ChangeReason: dto.Reason,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return definition.DefinitionVersion;
     }
