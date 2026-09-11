@@ -47,7 +47,7 @@ public sealed class ConsistencyCheckJob(
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ⛔ Q-239: усе, що після відкриття прогону, — під catch. Без нього
+        // ⛔ Q-240: усе, що після відкриття прогону, — під catch. Без нього
         // виняток лишав рядок `Running`/`FinishedAt = NULL` назавжди, а
         // зведення `NotificationJob` бере збої за `FinishedAt >= since` і
         // такий рядок не бачить узагалі: провалена нічна перевірка не

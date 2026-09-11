@@ -40,7 +40,7 @@ public sealed class PartitionCheckJob(
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ⛔ Q-239: див. `MaintenanceRunFailure`. Без цього catch виняток
+        // ⛔ Q-240: див. `MaintenanceRunFailure`. Без цього catch виняток
         // лишав прогін `Running`/`FinishedAt = NULL`, а зведення бере збої за
         // `FinishedAt >= since` — тобто провал перевірки запасу партицій не
         // потрапляв у зведення й ні в чий лист.

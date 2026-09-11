@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// Закриває прогін у <c>itg.MaintenanceRun</c>, коли задача впала (<c>Q-239</c>).
+/// Закриває прогін у <c>itg.MaintenanceRun</c>, коли задача впала (<c>Q-240</c>).
 /// </summary>
 /// <remarks>
 /// ⛔ Задача відкривала прогін (<c>Status = "Running"</c>, <c>FinishedAt = NULL</c>)

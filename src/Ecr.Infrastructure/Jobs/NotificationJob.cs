@@ -64,7 +64,7 @@ public sealed class NotificationJob(
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ⛔ Q-239: власний прогін зведення теж мусить закриватися при падінні.
+        // ⛔ Q-240: власний прогін зведення теж мусить закриватися при падінні.
         // У ЧУЖЕ зведення він не потрапить ніколи (`JobCode != Code` нижче —
         // сповіщати про себе нема кому), але рядок `Running` навічно псує
         // `SinceAsync` сусіднім прогонам і робить журнал обслуговування

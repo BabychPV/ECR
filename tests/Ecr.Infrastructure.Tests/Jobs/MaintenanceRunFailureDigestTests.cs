@@ -11,7 +11,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
-/// Q-239: задача обслуговування, що впала, мусить ЗАКРИТИ свій прогін — інакше
+/// Q-240: задача обслуговування, що впала, мусить ЗАКРИТИ свій прогін — інакше
 /// її провал не бачить ніхто.
 /// </summary>
 /// <remarks>
@@ -52,7 +52,7 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "Q-239")]
+    [Trait("Finding", "Q-240")]
     public async Task Падіння_задачі_закриває_прогін_станом_Failed()
     {
         var now = new DateTime(2033, 5, 5, 5, 0, 0, DateTimeKind.Utc);
@@ -104,7 +104,7 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "Q-239")]
+    [Trait("Finding", "Q-240")]
     public async Task Провалена_задача_обслуговування_потрапляє_у_зведення_і_чергу_сповіщень()
     {
         var now = new DateTime(2033, 6, 6, 6, 0, 0, DateTimeKind.Utc);

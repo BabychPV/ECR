@@ -74,7 +74,7 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ⛔ Q-239: див. `MaintenanceRunFailure`. Прибирання зрізів падає
+        // ⛔ Q-240: див. `MaintenanceRunFailure`. Прибирання зрізів падає
         // найімовірніше саме посеред батчів (таймаут видалення, дедлок на
         // rpt.ReportRow) — і без цього catch прогін лишався б `Running`, а
         // зведення `NotificationJob`, що фільтрує за `FinishedAt >= since`,
