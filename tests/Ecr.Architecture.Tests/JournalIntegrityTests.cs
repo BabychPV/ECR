@@ -5,94 +5,159 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// Зведення журналів має збігатися з тілами записів (<c>H-12</c>).
+/// Кожен запис журналу (`docs/build/questions/Q-N.md`) несе id/статус/доказ,
+/// а генерований індекс (`docs/build/questions.md`) відповідає папці (`H-12`).
 /// </summary>
 /// <remarks>
-/// ⛔ Третій випадок того самого класу за один пакет, і тому він закривається
-/// машиною, а не обіцянкою:
+/// ⛔ До 2026-09-11 журнал був ОДНИМ файлом: рядок зведення й тіло запису
+/// правились окремо, і вже тричі за один пакет розходилися мовчки (каталог
+/// помилок, статуси п'яти записів, три числа кодів у трьох місцях). Ліки
+/// тоді — сторож, що звіряє зведення з тілами в ТОМУ САМОМУ файлі.
 ///
-/// <list type="number">
-/// <item><description>каталог помилок розійшовся у три боки — контракт 48,
-/// код 44, кидається 55 (<c>H-5</c>);</description></item>
-/// <item><description>зведення <c>questions.md</c> позначало п'ять записів
-/// не тим статусом, що їхні тіла, і не мало <c>Q-063</c>
-/// взагалі;</description></item>
-/// <item><description><c>problems.md</c> називав три різні числа кодів у
-/// трьох місцях.</description></item>
-/// </list>
-///
-/// ⚠ Причина щоразу одна: **зведену таблицю правлять окремо від запису**, і
-/// вона розходиться мовчки. Ліки теж одні — зведення має обчислюватися, а
-/// доки воно ведеться руками, за ним має стежити сторож.
+/// ⛔ Директива паралельного аудиту (2026-09-11) додала ДРУГУ причину
+/// розходження: спільний файл — це спільна точка конфлікту git-мержу для
+/// БУДЬ-ЯКИХ двох паралельних задач, незалежно від того, наскільки акуратно
+/// кожна з них веде свій запис. Рішення — один запис, один файл
+/// (`docs/build/questions/Q-N.md`), а `questions.md` стає ГЕНЕРОВАНИМ
+/// індексом (`tools/journal/regen-index.ps1`). Сторож тепер звіряє те саме
+/// узгодження, але між частинами ОДНОГО файлу запису (frontmatter проти
+/// останнього `**Статус:**` у тілі) і між папкою та індексом (а не між
+/// рядком і тілом того самого файлу, як було).
 /// </remarks>
 public sealed partial class JournalIntegrityTests
 {
-    /// <summary>Заголовок запису: <c>### Q-042 · CONFLICT · …</c>.</summary>
-    [GeneratedRegex(@"^### (Q-\d{3})\b", RegexOptions.Multiline)]
-    private static partial Regex EntryHeading();
+    /// <summary>Ідентифікатор запису: <c>Q-042</c>, <c>Q-1234</c> — три й більше цифр.</summary>
+    /// <remarks>
+    /// ⚠ `\d{3,}`, а не рівно `\d{3}`: стара межа мовчки зламалася б на
+    /// `Q-1000`. Наскрізна нумерація (`Правило 3`) не обіцяє спинитися на
+    /// трьох цифрах.
+    /// </remarks>
+    [GeneratedRegex(@"^Q-\d{3,}$")]
+    private static partial Regex QuestionId();
 
-    /// <summary>Рядок статусу в тілі запису.</summary>
+    /// <summary>YAML-подібний frontmatter на початку файлу запису.</summary>
+    [GeneratedRegex(@"\A---\s*\n(.*?)\n---\s*\n", RegexOptions.Singleline)]
+    private static partial Regex Frontmatter();
+
+    /// <summary>Один рядок frontmatter: <c>ключ: значення</c>.</summary>
+    [GeneratedRegex(@"^(\w+):\s*(.*)$", RegexOptions.Multiline)]
+    private static partial Regex FrontmatterLine();
+
+    /// <summary>Рядок статусу в тілі запису (`## Деталі` і глибше).</summary>
     [GeneratedRegex(@"^\*\*Статус:\*\*\s*(OPEN|RESOLVED)\b", RegexOptions.Multiline)]
-    private static partial Regex EntryStatus();
+    private static partial Regex BodyStatus();
 
-    /// <summary>Рядок зведеної таблиці.</summary>
-    [GeneratedRegex(@"^\|\s*\**\s*(Q-\d{3})\s*\**\s*\|(.*)\|\s*$", RegexOptions.Multiline)]
-    private static partial Regex SummaryRow();
+    /// <summary>Розділ другого рівня: <c>## Назва</c> до наступного <c>## </c> або кінця файлу.</summary>
+    [GeneratedRegex(@"^## (.+?)\s*\n(.*?)(?=\n## |\z)", RegexOptions.Multiline | RegexOptions.Singleline)]
+    private static partial Regex Section();
+
+    /// <summary>Рядок зведеної таблиці в індексі: <c>| Q-NNN | ... |</c>.</summary>
+    [GeneratedRegex(@"^\|\s*\**\s*(Q-\d{3,})\s*\**\s*\|", RegexOptions.Multiline)]
+    private static partial Regex IndexRow();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Статус_у_зведенні_збігається_зі_статусом_у_тілі_запису()
+    public void Кожен_запис_має_коректний_frontmatter_і_доказ()
     {
-        var text = Journal();
-        var summary = SummaryStatuses(text);
-        var bodies = BodyStatuses(text);
+        var failures = new List<string>();
 
-        // ⛔ Порівнюються лише ті записи, що є в обох місцях: відсутність у
-        // таблиці ловить окремий сторож нижче, і зливати дві причини в одне
-        // падіння означало б показувати другу замість першої.
-        var drifted = bodies
-            .Where(pair => summary.TryGetValue(pair.Key, out var declared)
-                           && declared != pair.Value)
-            .Select(pair => $"{pair.Key}: тіло каже {pair.Value}, зведення — {summary[pair.Key]}")
-            .OrderBy(line => line, StringComparer.Ordinal)
-            .ToList();
+        foreach (var file in QuestionFiles())
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            var text = File.ReadAllText(file);
 
-        Assert.Empty(drifted);
+            var frontmatterMatch = Frontmatter().Match(text);
+            if (!frontmatterMatch.Success)
+            {
+                failures.Add($"{name}: немає frontmatter (--- ... --- на початку файлу).");
+                continue;
+            }
+
+            var fields = FrontmatterLine().Matches(frontmatterMatch.Groups[1].Value)
+                .ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value.Trim(), StringComparer.Ordinal);
+
+            if (!fields.TryGetValue("id", out var id) || !QuestionId().IsMatch(id))
+            {
+                failures.Add($"{name}: frontmatter 'id' відсутній або не має форми Q-NNN.");
+            }
+            else if (!string.Equals(id, name, StringComparison.Ordinal))
+            {
+                failures.Add($"{name}: ім'я файлу не збігається з frontmatter id ('{id}').");
+            }
+
+            if (!fields.TryGetValue("type", out var type) || string.IsNullOrWhiteSpace(type))
+            {
+                failures.Add($"{name}: frontmatter 'type' відсутній.");
+            }
+
+            if (!fields.TryGetValue("status", out var frontStatus)
+                || frontStatus is not ("OPEN" or "RESOLVED"))
+            {
+                failures.Add($"{name}: frontmatter 'status' відсутній або не OPEN/RESOLVED.");
+                continue;
+            }
+
+            // ⛔ "Доказ" — це не порожня секція "Деталі" (сама лише назва
+            // проблеми без пояснення, як її закрито, нікому не допоможе), і
+            // останній рядок `**Статус:**` у тілі, що узгоджений із
+            // frontmatter — так само, як раніше звірялися зведення й тіло в
+            // одному файлі.
+            var detailsMatch = Section().Matches(text)
+                .FirstOrDefault(m => string.Equals(m.Groups[1].Value.Trim(), "Деталі", StringComparison.Ordinal));
+
+            if (detailsMatch is null || string.IsNullOrWhiteSpace(detailsMatch.Groups[2].Value))
+            {
+                failures.Add($"{name}: секція '## Деталі' відсутня або порожня — немає доказу.");
+                continue;
+            }
+
+            var bodyStatusMatches = BodyStatus().Matches(detailsMatch.Groups[2].Value);
+            if (bodyStatusMatches.Count == 0)
+            {
+                failures.Add($"{name}: у '## Деталі' немає рядка '**Статус:**'.");
+                continue;
+            }
+
+            // Береться ОСТАННІЙ — той самий інваріант, що й у старому
+            // сторожі: запис міг спершу нести OPEN, а RESOLVED дописали
+            // нижче після вирішення.
+            var lastBodyStatus = bodyStatusMatches[^1].Groups[1].Value;
+            if (lastBodyStatus != frontStatus)
+            {
+                failures.Add(
+                    $"{name}: frontmatter status='{frontStatus}', а останній '**Статус:**' у тілі — '{lastBodyStatus}'.");
+            }
+        }
+
+        Assert.Empty(failures);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Кожен_запис_журналу_є_у_зведенні()
+    public void Кожен_файл_запису_є_в_індексі()
     {
-        // ⚠ Запис, якого немає в таблиці, гірший за запис із неправильним
-        // статусом: перший читач не побачить узагалі. Саме так `Q-063` —
-        // єдине відкрите питання журналу — не потрапляв у жоден перелік.
-        var text = Journal();
-        var summary = SummaryStatuses(text);
+        var folderIds = QuestionFiles().Select(f => Path.GetFileNameWithoutExtension(f)).ToHashSet(StringComparer.Ordinal);
+        var indexIds = IndexIds();
 
-        var missing = BodyStatuses(text).Keys
-            .Where(id => !summary.ContainsKey(id))
-            .OrderBy(id => id, StringComparer.Ordinal)
-            .ToList();
-
-        Assert.Empty(missing);
+        var missing = folderIds.Except(indexIds).OrderBy(id => id, StringComparer.Ordinal).ToList();
+        Assert.True(
+            missing.Count == 0,
+            $"Файл(и) є в docs/build/questions/, але немає в індексі (запусти tools/journal/regen-index.ps1): "
+            + string.Join(", ", missing));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void У_зведенні_немає_записів_яких_не_існує()
+    public void В_індексі_немає_записів_яких_нема_у_папці()
     {
-        // ⚠ Зворотний напрям, і він не менш важливий: рядок про запис, якого
-        // немає, обіцяє читачеві історію, за якою нікуди піти.
-        var text = Journal();
-        var bodies = BodyStatuses(text);
+        var folderIds = QuestionFiles().Select(f => Path.GetFileNameWithoutExtension(f)).ToHashSet(StringComparer.Ordinal);
+        var indexIds = IndexIds();
 
-        var phantom = SummaryStatuses(text).Keys
-            .Where(id => !bodies.ContainsKey(id))
-            .OrderBy(id => id, StringComparer.Ordinal)
-            .ToList();
-
-        Assert.Empty(phantom);
+        var phantom = indexIds.Except(folderIds).OrderBy(id => id, StringComparer.Ordinal).ToList();
+        Assert.True(
+            phantom.Count == 0,
+            $"Індекс містить запис(и), яких немає в docs/build/questions/ (індекс застарів): "
+            + string.Join(", ", phantom));
     }
 
     [Fact]
@@ -117,6 +182,18 @@ public sealed partial class JournalIntegrityTests
             stated);
     }
 
+    /// <summary>Усі файли записів журналу.</summary>
+    private static IEnumerable<string> QuestionFiles()
+        => Directory.EnumerateFiles(
+            Path.Combine(RepositoryRoot(), "docs", "build", "questions"), "Q-*.md");
+
+    /// <summary>Ідентифікатори, оголошені в генерованому індексі.</summary>
+    private static HashSet<string> IndexIds()
+    {
+        var text = File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "build", "questions.md"));
+        return IndexRow().Matches(text).Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+    }
+
     /// <summary>Числа з рядка «Стан на дату» плану.</summary>
     /// <remarks>
     /// ⚠ Рядок читається цілком і зводиться до чотирьох чисел, а не
@@ -138,60 +215,6 @@ public sealed partial class JournalIntegrityTests
     [GeneratedRegex(
         @"\|\s*Вимог ТЗ \(листових\)\s*\|\s*(\d+)\s*·\s*покрито\s*(\d+)\s*·\s*звільнено\s*(\d+)\s*·\s*\**непокрито\s*(\d+)\**\s*\|")]
     private static partial Regex PlanCensusRow();
-
-    /// <summary>Текст журналу питань.</summary>
-    private static string Journal()
-        => File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "build", "questions.md"));
-
-    /// <summary>Статуси, оголошені у зведеній таблиці.</summary>
-    private static Dictionary<string, string> SummaryStatuses(string text)
-    {
-        var start = text.IndexOf("## Зведення", StringComparison.Ordinal);
-        var end = text.IndexOf("## Записи", StringComparison.Ordinal);
-
-        Assert.True(start >= 0 && end > start, "У журналі немає розділів «Зведення» і «Записи».");
-
-        var table = text[start..end];
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-
-        foreach (Match row in SummaryRow().Matches(table))
-        {
-            // ⚠ Статус — в ОСТАННІЙ колонці, і читається він як слово, а не як
-            // підрядок: «RESOLVED · рішення людини» і «OPEN — потрібне
-            // підтвердження» мають дати те саме, що голі `RESOLVED` і `OPEN`.
-            var cells = row.Groups[2].Value.Split('|');
-            var status = cells.Length > 0 ? cells[^1] : string.Empty;
-
-            result[row.Groups[1].Value] =
-                status.Contains("OPEN", StringComparison.Ordinal) ? "OPEN" : "RESOLVED";
-        }
-
-        return result;
-    }
-
-    /// <summary>Статуси, оголошені в тілах записів.</summary>
-    private static Dictionary<string, string> BodyStatuses(string text)
-    {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        var headings = EntryHeading().Matches(text);
-
-        for (var i = 0; i < headings.Count; i++)
-        {
-            var from = headings[i].Index;
-            var to = i + 1 < headings.Count ? headings[i + 1].Index : text.Length;
-
-            // ⛔ Береться ОСТАННІЙ статус запису, а не перший: `Q-042` свого
-            // часу ніс два рядки — `RESOLVED`, а нижче `OPEN`, — і саме
-            // останній був чинним. Перший дав би протилежну відповідь.
-            var statuses = EntryStatus().Matches(text[from..to]);
-            if (statuses.Count > 0)
-            {
-                result[headings[i].Groups[1].Value] = statuses[^1].Groups[1].Value;
-            }
-        }
-
-        return result;
-    }
 
     /// <summary>Корінь репозиторію — від каталогу збірки вгору до `docs`.</summary>
     private static string RepositoryRoot()
