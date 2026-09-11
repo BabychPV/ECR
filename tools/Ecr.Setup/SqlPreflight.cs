@@ -55,6 +55,7 @@ internal static class SqlPreflight
         psi.ArgumentList.Add(sqlInstance);
         psi.ArgumentList.Add("-C");
         psi.ArgumentList.Add("-b");
+        psi.ArgumentList.Add("-I");
         psi.ArgumentList.Add("-l");
         psi.ArgumentList.Add(timeoutText);
 
@@ -108,12 +109,15 @@ internal static class SqlPreflight
             if (process.ExitCode != 0)
             {
                 var stderr = stderrTask.GetAwaiter().GetResult();
+                var stdout = stdoutTask.GetAwaiter().GetResult();
+
                 error = stderr.Contains("database missing", StringComparison.OrdinalIgnoreCase)
                     ? $"Базу '{database}' не знайдено на '{sqlInstance}'. Інсталятор і deploy-ecr.ps1 " +
                       "базу НЕ створюють (install-guide.md §0) — попросіть адміністратора БД спершу " +
                       "створити порожню базу з цим іменем."
                     : $"Не вдалося підключитися до '{sqlInstance}'. Перевірте назву інстансу, " +
-                      $"автентифікацію й мережевий доступ.\n\n{stderr.Trim()}";
+                      "автентифікацію й мережевий доступ.\n\n" +
+                      DiagnosticTail(process.ExitCode, stdout, stderr);
                 return false;
             }
 
@@ -122,6 +126,42 @@ internal static class SqlPreflight
 
         error = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Складає діагностичний хвіст повідомлення: код виходу завжди, обидва
+    /// потоки — якщо в них щось є.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Реальний прогін людиною (день фіксу Q-228): помилка з'єднання
+    /// показала ЛИШЕ загальний текст, без жодного діагностичного рядка —
+    /// це трапляється, коли причина відмови потрапляє в STDOUT, а не в
+    /// STDERR (залежить від версії/драйвера sqlcmd), а попередня версія
+    /// цього класу читала для показу тільки STDERR. Код виходу тепер
+    /// видно завжди, навіть якщо обидва потоки порожні — це вже само собою
+    /// діагностика ("процес вийшов без жодного тексту"), а не порожнеча.
+    /// </remarks>
+    private static string DiagnosticTail(int exitCode, string stdout, string stderr)
+    {
+        var lines = new List<string> { $"Код виходу sqlcmd: {exitCode.ToString(CultureInfo.InvariantCulture)}." };
+
+        if (!string.IsNullOrWhiteSpace(stderr))
+        {
+            lines.Add(stderr.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(stdout))
+        {
+            lines.Add(stdout.Trim());
+        }
+
+        if (lines.Count == 1)
+        {
+            lines.Add("sqlcmd не вивів жодного тексту помилки — можливо, процес завершився " +
+                      "до підключення (антивірус/брандмауер, відсутній драйвер) чи мовчки обірвав з'єднання.");
+        }
+
+        return string.Join("\n\n", lines);
     }
 
     private static void TryKill(Process process)
