@@ -17,7 +17,7 @@ using Xunit;
 namespace Ecr.Adapters.Tests.Excel;
 
 /// <summary>
-/// Q-234 (аудит фази 3, Excel-обмін): <c>ExcelImporter.PreviewAsync</c> має
+/// Q-236 (аудит фази 3, Excel-обмін): <c>ExcelImporter.PreviewAsync</c> має
 /// резолвити версію шаблону і належність <c>TableInstanceId</c> з БД за
 /// <c>documentId</c>/періодом — так само, як <c>IRowStore.ResolveTableInstanceAsync</c>
 /// робить це для звичайного PATCH, — а не довіряти значенням, записаним у
@@ -162,7 +162,7 @@ public sealed class ExcelImporterTemplateVersionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Finding", "Q-234")]
+    [Trait("Finding", "Q-236")]
     public async Task Перегляд_бере_версію_шаблону_з_БД_а_не_з_книги()
     {
         using var workbook = BuildWorkbook(CurrentTableInstanceId);
@@ -187,7 +187,7 @@ public sealed class ExcelImporterTemplateVersionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Finding", "Q-234")]
+    [Trait("Finding", "Q-236")]
     public async Task Блок_із_чужим_TableInstanceId_відхиляється_без_читання_його_даних()
     {
         const long foreignTableInstanceId = 777;

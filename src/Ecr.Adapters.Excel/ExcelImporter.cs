@@ -78,7 +78,7 @@ public sealed class ExcelImporter(
 
         var period = new PeriodKey(map.PeriodKey);
 
-        // ⛔ Q-234 (аудит фази 3, Excel-обмін). ВЕРСІЯ ШАБЛОНУ РЕЗОЛВИТЬСЯ З
+        // ⛔ Q-236 (аудит фази 3, Excel-обмін). ВЕРСІЯ ШАБЛОНУ РЕЗОЛВИТЬСЯ З
         // БД за documentId/period, а НЕ береться з `map.TemplateVersionId`.
         // Той самий принцип, що й у `IRowStore.ResolveTableInstanceAsync`
         // («клієнт не має диктувати, за якою версією тлумачити дані») —
@@ -129,7 +129,7 @@ public sealed class ExcelImporter(
 
         foreach (var block in map.Tables)
         {
-            // ⛔ Q-234: екземпляр з файлу має належати ЦЬОМУ документу за
+            // ⛔ Q-236: екземпляр з файлу має належати ЦЬОМУ документу за
             // ЦЕЙ період, і його `TableDefId` — збігатися з тим, що зараз
             // справді стоїть у БД за цим `TableInstanceId`. Без цієї
             // перевірки книга з чужого документа (той самий шаблон, інший
