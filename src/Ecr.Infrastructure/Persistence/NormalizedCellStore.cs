@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -214,6 +215,19 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Q-243. Раніше цей метод ЗАВЖДИ відкривав і комітив ВЛАСНУ
+    /// транзакцію — навіть коли викликач (<c>PatchCellsHandler.PersistChangesAsync</c>)
+    /// уже тримав ширшу транзакцію через <c>IUnitOfWork.BeginTransactionAsync</c>.
+    /// Комірки комітились одразу, до того як «дотик» рядків, «дотик»
+    /// документа й запис аудиту навіть почали виконуватись — збій між ними
+    /// лишав змінені дані БЕЗ відповідного рядка аудиту. Тепер: якщо на
+    /// <c>db</c> уже відкрита транзакція (ambient, <c>CurrentTransaction</c>),
+    /// приєднуємось до НЕЇ і не комітимо — коміт/відкат належить тому, хто
+    /// відкрив; якщо ні (виклик поза Q-243, наприклад
+    /// <c>RecalculationService</c>, який власної транзакції не відкриває) —
+    /// поведінка та сама, що й раніше: коротка власна транзакція, свій коміт.
+    /// </remarks>
     public async Task ApplyAsync(CellChangeSet changes, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
@@ -222,6 +236,16 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         if (connection.State != ConnectionState.Open)
         {
             await connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        var ambient = db.Database.CurrentTransaction;
+        if (ambient is not null)
+        {
+            var joined = (SqlTransaction)ambient.GetDbTransaction();
+            await DeleteAsync(connection, joined, changes.Deletes, ct).ConfigureAwait(false);
+            await UpsertAsync(connection, joined, changes.Upserts, ct).ConfigureAwait(false);
+            await TouchRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
+            return;
         }
 
         // ⚠ Транзакція коротка навмисно. Під RCSI кожна відкрита транзакція

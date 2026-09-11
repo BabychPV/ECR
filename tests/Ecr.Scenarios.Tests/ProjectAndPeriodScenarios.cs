@@ -126,6 +126,98 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
             p => p.GetProperty("id").GetInt32() == projectId);
     }
 
+    /// <remarks>
+    /// ⛔ Q-246 (аудит хвилі 3, авторизація) — той самий клас дефекту, що й
+    /// Q-179/Q-238 поруч, на КАЛЕНДАРНОМУ маршруті. `GetPeriodCalendarHandler`
+    /// і `BuildPeriodCalendarHandler` перевіряли лише загальне `Document.View`,
+    /// без гранта на сам <c>projectId</c> — будь-хто з широко виданим
+    /// `Document.View` (право «працює з документами взагалі», не «бачить
+    /// кожен проєкт» — саме тому `S-12` поруч перевіряє фільтрацію переліку
+    /// проєктів за грантом) бачив повний календар ЧУЖОГО проєкту: дати
+    /// відкриття/закриття, пільговий строк, <c>reopenedUntil</c>, id поточного
+    /// періоду. `BuildPeriodCalendarHandler` при цьому ще й ПИШЕ нові
+    /// `cfg.Period`, тобто це не лише витік читання, а несанкціонований
+    /// запис у проєкт, якого викликач не бачить навіть у власному
+    /// <c>/api/v1/projects</c>.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-12")]
+    public async Task Сторонній_без_гранта_не_бачить_календар_проєкту()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "Q246aOwner", ["Project.Manage", "Document.View", "Template.Edit"]);
+        var projectId = await CreateProjectAsync(owner.Client, "Q246a", "Asia/Almaty");
+
+        var stranger = await Provisioning.AdministratorAsync(app, "Q246aStranger", ["Document.View"]);
+
+        // ⛔ Доказ сценарію: `stranger` має `Document.View` узагалі, але
+        // жодного гранта на проєкт `owner` — календар чужого проєкту має
+        // дати 403, а не 200 (і не запис у cfg.Period чужого проєкту).
+        var strangerCalendar = await stranger.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.Forbidden, strangerCalendar.StatusCode);
+        var strangerBody = await strangerCalendar.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-AUTH-0403", strangerBody.GetProperty("errorCode").GetString());
+
+        // Легітимний власник (грант Manage видано самим створенням проєкту,
+        // `Q-179`) і далі бачить свій календар — фікс не ламає позитивний
+        // випадок.
+        var ownerCalendar = await owner.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, ownerCalendar.StatusCode);
+    }
+
+    /// <remarks>
+    /// ⛔ Q-246 (аудит хвилі 3, авторизація). `SetCurrentPeriodHandler`
+    /// перевіряв лише загальне <c>Period.Configure</c> (через хибний
+    /// помічник <c>Templates.ListTemplatesHandler.RequireAsync</c>, який і не
+    /// повертає профіль), без гранта на сам <c>projectId</c> — будь-хто з цим
+    /// правом (плавно видаваним «координатору періодів», не власнику
+    /// конкретного проєкту) міг закріпити чи відкріпити поточний період
+    /// БУДЬ-ЯКОГО чужого проєкту, пишучи в <c>Project.CurrentPeriodId</c> і в
+    /// структурний журнал аудиту під власним ім'ям.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-12")]
+    public async Task Сторонній_без_гранта_не_фіксує_поточний_період()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(
+            app, "Q246bOwner",
+            ["Project.Manage", "Document.View", "Template.Edit", "Period.Configure"]);
+        var projectId = await CreateProjectAsync(owner.Client, "Q246b", "Asia/Almaty");
+        owner = await ActivateProjectAsync(owner, projectId);
+
+        var calendar = await owner.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, calendar.StatusCode);
+        var periodId = (await calendar.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("periods").EnumerateArray().First().GetProperty("id").GetInt32();
+
+        var stranger = await Provisioning.AdministratorAsync(app, "Q246bStranger", ["Period.Configure"]);
+
+        // ⛔ Доказ сценарію: `stranger` має `Period.Configure` узагалі, але
+        // жодного гранта на проєкт `owner` — фіксація чужого поточного
+        // періоду має дати 403, а не 204.
+        var strangerPin = await stranger.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/projects/{projectId}/current-period", UriKind.Relative),
+            new { pinnedPeriodId = periodId, reason = "Q-246 stranger probe" });
+        Assert.Equal(HttpStatusCode.Forbidden, strangerPin.StatusCode);
+        var strangerBody = await strangerPin.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-AUTH-0403", strangerBody.GetProperty("errorCode").GetString());
+
+        // Легітимний власник (грант Manage видано самим створенням проєкту)
+        // і далі фіксує поточний період свого проєкту — фікс не ламає
+        // позитивний випадок.
+        var ownerPin = await owner.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/projects/{projectId}/current-period", UriKind.Relative),
+            new { pinnedPeriodId = periodId, reason = "Q-246 owner control" });
+        Assert.Equal(HttpStatusCode.NoContent, ownerPin.StatusCode);
+    }
+
     /// <summary>
     /// Творець одразу активує ВЛАСНИЙ щойно створений проєкт, без стороннього
     /// гранта.

@@ -1,4 +1,5 @@
 ﻿// tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
@@ -179,11 +180,30 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
     {
         await using var db = CreateContext();
 
+        var tag = Guid.NewGuid().ToString("N")[..10];
+
+        // ⛔ `cfg.TemplateVersion` — реальна таблиця з `FK_Project_TV`: seed
+        // (`09-seed.sql`) її не наповнює, тож захардкоджений
+        // `templateVersionId: 2` без рядка в базі валив усі три тести цього
+        // файлу на FK при `SaveChangesAsync` (ArrangeAsync). Патерн той самий,
+        // що й у `ValidateExpressionTests.ArrangeAsync`: спершу Template,
+        // потім TemplateVersion — і лише тоді Id іде в Project.
+        var template = new Template(
+            EcrCode.Create($"T{tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Race template" }),
+            createdByUserId: 1, Now);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var templateVersion = new TemplateVersion(template.Id, "1.0.0.0", createdByUserId: 1, Now);
+        db.TemplateVersions.Add(templateVersion);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
         var project = new Project(
-            EcrCode.Create($"P{Guid.NewGuid():N}"[..12]),
+            EcrCode.Create($"P{tag}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Race" }),
             new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-            templateVersionId: 2, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
+            templateVersionId: templateVersion.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Almaty");
 
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);

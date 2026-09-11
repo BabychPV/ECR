@@ -2,6 +2,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Periods.Dto;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Periods;
@@ -26,7 +27,7 @@ public sealed class GetPeriodCalendarHandler(
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
@@ -35,6 +36,20 @@ public sealed class GetPeriodCalendarHandler(
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException(
                           ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
+
+        // ⛔ Q-246: `Document.View` — глобальне право «працює з документами
+        // взагалі», не «бачить кожен проєкт» (саме тому `ListProjectsHandler`
+        // фільтрує перелік проєктів за грантом). Без цієї перевірки будь-хто
+        // з `Document.View` бачив повний календар ЧУЖОГО проєкту — відкриття,
+        // закриття, пільговий строк, `reopenedUntil`, id поточного періоду.
+        // Той самий патерн, що й `ActivateProjectHandler`/`RunCalculationHandler`
+        // (Q-179): грант на КОНКРЕТНИЙ проєкт, перевірений ПІСЛЯ existence-check
+        // (інакше запит на неіснуючий проєкт завжди повертав би 403 замість 404).
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.");
+        }
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
 

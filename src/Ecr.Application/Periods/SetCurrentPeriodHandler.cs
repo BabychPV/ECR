@@ -36,7 +36,7 @@ public sealed class SetCurrentPeriodHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task HandleAsync(int projectId, int? pinnedPeriodId, string? reason, CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -49,6 +49,20 @@ public sealed class SetCurrentPeriodHandler(
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException(
                           ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
+
+        // ⛔ Q-246: `Period.Configure` — глобальне право «координатор періодів»,
+        // не грант на КОЖЕН проєкт. Без цієї перевірки будь-хто з цим правом
+        // міг закріпити/відкріпити поточний період БУДЬ-ЯКОГО чужого проєкту —
+        // запис у `Project.CurrentPeriodId`/`CurrentPeriodMode` і в
+        // структурний журнал аудиту під власним ім'ям. Рівень `Manage`, той
+        // самий, що вимагають `Activate`/`Archive`/`ChangeTimeZone` для того ж
+        // `Project` (`ProjectQueryHandlers.cs`), — бо це так само структурна
+        // зміна проєкту, не читання.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+        }
 
         var now = clock.UtcNow;
         var before = project.CurrentPeriodId;
