@@ -47,11 +47,35 @@ internal sealed class CredentialsStep : IWizardStep
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
+        // ⛔ Q-233 (реальний прогін людиною, ще раз): фікс Q-227
+        // (RowStyle(AutoSize) на кожен рядок) виявився НЕДОСТАТНІМ — текст
+        // і далі накладався сам на себе на реальному екрані. Причина
+        // глибша, ніж бракуючий RowStyle: `AutoSize=true` + `MaximumSize`
+        // просить WinForms порахувати висоту переносу ПІД ЧАС власного
+        // проходу компонування `TableLayoutPanel` — а порядок "спершу
+        // ширина колонки, чи спершу висота рядка" саме там і плаває
+        // (той самий клас пастки, що вже документований для Q-218/Q-220,
+        // просто на рівень глибше). Фікс — виміряти висоту переносу
+        // САМИМ, тим самим інструментом, яким Label і так малює текст
+        // (`TextRenderer`, GDI — Label.UseCompatibleTextRendering за
+        // замовчуванням `false`), і задати розмір ЯВНО: жодної залежності
+        // від того, коли саме TableLayoutPanel порахує ширину колонки.
+        const int explanationWidth = 520;
+        const string explanationText =
+            "This password is needed only for the first sign-in — the system will immediately ask to change it.";
+        var measured = TextRenderer.MeasureText(
+            explanationText, Control.DefaultFont, new Size(explanationWidth, int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+
         var explanation = new Label
         {
-            Text = "This password is needed only for the first sign-in — the system will immediately ask to change it.",
-            AutoSize = true,
-            MaximumSize = new Size(520, 0),
+            Text = explanationText,
+            AutoSize = false,
+            // +4px: невеликий запас понад точний вимір — той самий текст,
+            // намальований Label, а не TextRenderer напряму, має трохи
+            // власного внутрішнього відступу; кілька зайвих пікселів
+            // порожнечі внизу нешкідливі, а недобір знову дав би обрізання.
+            Size = new Size(explanationWidth, measured.Height + 4),
             Margin = new Padding(4, 4, 4, 12),
         };
         root.Controls.Add(explanation, 0, 0);
