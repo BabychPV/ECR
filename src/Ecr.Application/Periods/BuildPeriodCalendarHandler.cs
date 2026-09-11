@@ -2,6 +2,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Domain.Services;
 
@@ -24,7 +25,7 @@ public sealed class BuildPeriodCalendarHandler(
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
@@ -36,6 +37,19 @@ public sealed class BuildPeriodCalendarHandler(
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException(
                           ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
+
+        // ⛔ Q-246: цей обробник не лише ЧИТАЄ — він ПИШЕ нові рядки `cfg.Period`
+        // (нижче, `periods.AddRange` + `SaveChangesAsync`). Без цієї перевірки
+        // будь-хто з глобальним `Document.View` міг ініціювати запис у чужий
+        // проєкт, якого немає навіть у його власному списку `/api/v1/projects`
+        // (`ListProjectsHandler` фільтрує саме за цим грантом). Той самий
+        // патерн, що й `ActivateProjectHandler`/`RunCalculationHandler` (Q-179):
+        // перевірка ПІСЛЯ existence-check, щоб відсутній проєкт лишався 404.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.");
+        }
 
         var policy = await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false);
 
