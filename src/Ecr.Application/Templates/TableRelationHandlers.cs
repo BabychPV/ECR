@@ -182,47 +182,55 @@ public sealed class SaveTableRelationHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці (той самий клас дефекту, що Q-243).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            existing = new TableRelationDef(
-                EcrCode.Create(code),
-                request.SourceTableDefId,
-                request.TargetTableDefId,
-                request.RelationKind,
-                request.MatchJson);
+            if (existing is null)
+            {
+                existing = new TableRelationDef(
+                    EcrCode.Create(code),
+                    request.SourceTableDefId,
+                    request.TargetTableDefId,
+                    request.RelationKind,
+                    request.MatchJson);
 
-            existing.Update(
-                request.SourceTableDefId, request.TargetTableDefId, request.RelationKind,
-                request.MatchJson, request.MapJson, request.OnSourceChange, request.IsActive);
+                existing.Update(
+                    request.SourceTableDefId, request.TargetTableDefId, request.RelationKind,
+                    request.MatchJson, request.MapJson, request.OnSourceChange, request.IsActive);
 
-            relations.Add(existing);
+                relations.Add(existing);
 
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення. Аудит іде окремим
-            // `INSERT` і несе `EntityId`; у щойно доданої сутності його ще
-            // немає — база призначає його на `SaveChanges`. Без цього рядка
-            // журнал структурних змін заповнювався б нулями, тобто ставав би
-            // непридатним рівно для того питання, заради якого існує: «що
-            // сталося з ЦИМ зв'язком».
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.Update(
-                request.SourceTableDefId, request.TargetTableDefId, request.RelationKind,
-                request.MatchJson, request.MapJson, request.OnSourceChange, request.IsActive);
-        }
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення. Аудит іде окремим
+                // `INSERT` і несе `EntityId`; у щойно доданої сутності його ще
+                // немає — база призначає його на `SaveChanges`. Без цього рядка
+                // журнал структурних змін заповнювався б нулями, тобто ставав би
+                // непридатним рівно для того питання, заради якого існує: «що
+                // сталося з ЦИМ зв'язком».
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+            else
+            {
+                existing.Update(
+                    request.SourceTableDefId, request.TargetTableDefId, request.RelationKind,
+                    request.MatchJson, request.MapJson, request.OnSourceChange, request.IsActive);
+            }
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(TableRelationDef), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(TableRelationDef), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
-        return TableRelationMapper.Map(existing, tableCodes);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // — той самий довід, що в `SaveColumnDefHandler`.
+        return TableRelationMapper.Map(existing!, tableCodes);
     }
 
     /// <summary>Перевіряє, що таблиця належить саме цій версії.</summary>
@@ -359,16 +367,20 @@ public sealed class DeleteTableRelationHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(TableRelationDef), relation.Id,
-                change, "Delete",
-                SaveTableRelationHandler.Describe(relation), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і видалення/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(TableRelationDef), relation.Id,
+                    change, "Delete",
+                    SaveTableRelationHandler.Describe(relation), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        relations.Remove(relation);
+            relations.Remove(relation);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }

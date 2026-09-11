@@ -2,6 +2,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -129,6 +130,11 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     /// його комірки можна завантажити одним проходом, без другого кроку з
     /// <c>OUTPUT</c>, який на таблиці з тригером недоступний.
     /// </remarks>
+    /// <exception cref="BusinessRuleException">
+    /// Ключ рядка вже існує (<c>ECR-ROW-0409</c>) — той самий код, що й у
+    /// перевірці «до запису», перетворений із конфлікту БАЗИ (див. коментар
+    /// <see cref="IsRowKeyConflict"/>).
+    /// </exception>
     public async Task<long> CreateRowAsync(
         long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct)
     {
@@ -139,11 +145,24 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
         var row = new TableRow(periodKey, id, tableInstanceId, rowKey, ordinal, clock.UtcNow);
 
         db.TableRows.Add(row);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (IsRowKeyConflict(ex))
+        {
+            throw DuplicateRowKeyException([rowKey.Value]);
+        }
+
         return id;
     }
 
     /// <inheritdoc />
+    /// <exception cref="BusinessRuleException">
+    /// Хоч би один ключ уже існує (<c>ECR-ROW-0409</c>) — див.
+    /// <see cref="CreateRowAsync"/>.
+    /// </exception>
     public async Task<IReadOnlyList<long>> CreateRowsAsync(
         long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct)
     {
@@ -163,9 +182,57 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             db.TableRows.Add(new TableRow(periodKey, id, tableInstanceId, rowKeys[i], ordinal, utcNow));
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (IsRowKeyConflict(ex))
+        {
+            throw DuplicateRowKeyException([.. rowKeys.Select(k => k.Value)]);
+        }
+
         return ids;
     }
+
+    /// <summary>
+    /// Q-245. Конфлікт <c>UQ_TableRow_Key</c> — той самий клас дефекту, що
+    /// вже виправлений як Q-241 (TOCTOU без атомарності): і
+    /// <c>CreateRowHandler</c>, і <c>PatchCellsHandler.EnforceRowCreationRules</c>
+    /// перевіряють дублікат ключа проти знімка, прочитаного на ПОЧАТКУ
+    /// обробки запиту, а не проти стану бази в момент запису. Індекс
+    /// <c>UQ_TableRow_Key</c> реально не пускає дублікат у дані — але без
+    /// цього перехоплення другий із двох одночасних запитів на ТОЙ САМИЙ
+    /// ключ падав необробленим <c>DbUpdateException</c> аж до
+    /// <c>ExceptionHandlingMiddleware</c>, де немає гілки ні на
+    /// <c>DbUpdateException</c>, ні на <c>SqlException</c> — і отримував
+    /// голий <c>500</c> замість того самого чистого <c>409 ECR-ROW-0409</c>,
+    /// який та сама перевірка вже дає в нераситовому випадку.
+    /// </summary>
+    /// <remarks>
+    /// 2601 — «Cannot insert duplicate key row... with unique index»; 2627 —
+    /// «Violation of UNIQUE KEY constraint». SQL Server розрізняє їх залежно
+    /// від того, чи індекс сам є обмеженням (`CONSTRAINT`) — тут це звичайний
+    /// унікальний індекс (2601), але 2627 перевіряється теж: обидва коди
+    /// означають РІВНО те саме «дублікат ключа», і залежність від
+    /// внутрішньої деталі СУБД (яким саме шляхом СУБД оголосила порушення)
+    /// зробила б перевірку крихкою до версії сервера.
+    /// </remarks>
+    private static bool IsRowKeyConflict(DbUpdateException ex)
+        => ex.InnerException is SqlException { Number: 2601 or 2627 };
+
+    private static BusinessRuleException DuplicateRowKeyException(IReadOnlyList<string> rowKeys)
+        => new(
+            "ECR-ROW-0409",
+            rowKeys.Count == 1
+                ? $"Рядок із ключем {rowKeys[0]} у цій таблиці вже існує."
+                // ⚠ «Принаймні один», не «усі»: конфлікт бази називає лише те,
+                // що ЯКИЙСЬ ключ із батчу зайнятий — SaveChanges падає одним
+                // винятком на весь батч, і без додаткового запиту неможливо
+                // сказати, котрий саме (а зайвий запит під час обробки збою
+                // конкурентного запису — саме те зайве ускладнення, якого
+                // це виправлення уникає).
+                : $"Принаймні один ключ уже існує серед: {string.Join(", ", rowKeys)}.",
+            new Dictionary<string, object?> { ["rowKeys"] = rowKeys });
 
     /// <inheritdoc />
     /// <remarks>

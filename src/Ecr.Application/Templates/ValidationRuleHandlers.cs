@@ -103,38 +103,44 @@ public sealed class SaveValidationRuleHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці (той самий клас дефекту, що Q-243).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            existing = new ValidationRule(
-                tableDefId, ecrCode, command.Severity, command.Scope, command.Expression, message,
-                command.ColumnDefId);
-            existing.Update(
-                command.Severity, command.Scope, command.Expression, message, command.ColumnDefId,
-                command.IsActive);
+            if (existing is null)
+            {
+                existing = new ValidationRule(
+                    tableDefId, ecrCode, command.Severity, command.Scope, command.Expression, message,
+                    command.ColumnDefId);
+                existing.Update(
+                    command.Severity, command.Scope, command.Expression, message, command.ColumnDefId,
+                    command.IsActive);
 
-            table.AddValidationRule(existing);
+                table.AddValidationRule(existing);
 
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення — щойно доданій
-            // сутності ще бракує Id до SaveChanges (той самий привід, що в
-            // SaveSheetDefHandler).
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.Update(
-                command.Severity, command.Scope, command.Expression, message, command.ColumnDefId,
-                command.IsActive);
-        }
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення — щойно доданій
+                // сутності ще бракує Id до SaveChanges (той самий привід, що в
+                // SaveSheetDefHandler).
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+            else
+            {
+                existing.Update(
+                    command.Severity, command.Scope, command.Expression, message, command.ColumnDefId,
+                    command.IsActive);
+            }
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(ValidationRule), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(ValidationRule), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Без цього виклику GET-и, що читають правила валідації з
         // кешованого знімка (ValidateDocumentHandler), лишалися б зі старим
@@ -142,7 +148,9 @@ public sealed class SaveValidationRuleHandler(
         // SaveSheetDefHandler.
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return Map(existing);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // — той самий довід, що в `SaveColumnDefHandler`.
+        return Map(existing!);
     }
 
     /// <summary>Складає DTO правила для відповіді.</summary>
@@ -259,24 +267,28 @@ public sealed class DeleteValidationRuleHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(ValidationRule), rule.Id,
-                change, "Delete",
-                SaveValidationRuleHandler.Describe(rule), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і видалення/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(ValidationRule), rule.Id,
+                    change, "Delete",
+                    SaveValidationRuleHandler.Describe(rule), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        // ⛔ Видаляється через IRepository<ValidationRule,int>, а НЕ через
-        // TableDef: у сутності немає (і не заводимо заради самого лише
-        // видалення) методу «прибрати з батьківської навігації» — TableDef
-        // поза SCOPE цього зрізу (W5.4). EF позначає рядок на видалення за
-        // самим трекованим екземпляром `rule`, незалежно від того, чи
-        // прибрали його зі списку `TableDef.ValidationRules` — той самий
-        // прийом, що й `DeleteTableRelationHandler.relations.Remove(...)`.
-        validationRules.Remove(rule);
+            // ⛔ Видаляється через IRepository<ValidationRule,int>, а НЕ через
+            // TableDef: у сутності немає (і не заводимо заради самого лише
+            // видалення) методу «прибрати з батьківської навігації» — TableDef
+            // поза SCOPE цього зрізу (W5.4). EF позначає рядок на видалення за
+            // самим трекованим екземпляром `rule`, незалежно від того, чи
+            // прибрали його зі списку `TableDef.ValidationRules` — той самий
+            // прийом, що й `DeleteTableRelationHandler.relations.Remove(...)`.
+            validationRules.Remove(rule);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }

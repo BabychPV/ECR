@@ -209,30 +209,39 @@ public sealed class SwitchRegistrySourceHandler(
             return 0;
         }
 
-        // ⛔ ОДИН запис аудиту на весь набір, а не по запису на довідник.
+        // ⛔ Q-244: аудит і фінальне збереження — одна транзакція
+        // (`ExecuteInTransactionAsync`), а не просто «одне збереження»:
+        // коментар класу вище стверджував «однією транзакцією» до цієї
+        // правки, хоч аудит писався сирим SQL БЕЗ жодної відкритої
+        // транзакції, а `SaveChangesAsync` комітив окремо.
+        //
+        // ⚠ ОДИН запис аудиту на весь набір, а не по запису на довідник.
         // Три записи поруч у журналі не відрізняються від трьох випадкових
         // перемикань, зроблених того ж дня, — а саме зв'язок між ними і є тим
         // єдиним, заради чого була б потрібна сутність «група».
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                ChangedAt: clock.UtcNow,
-                TemplateVersionId: 0,
-                EntityType: "cfg.RegistryDef",
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+                    TemplateVersionId: 0,
+                    EntityType: "cfg.RegistryDef",
 
-                // Набір не має одного ідентифікатора; коди — у JSON нижче.
-                EntityId: 0,
-                ChangeClass: ChangeClass.Guarded,
-                Operation: "SwitchSourceSet",
-                OldJson: JsonSerializer.Serialize(new { registries = changed }),
-                NewJson: JsonSerializer.Serialize(
-                    new { sourceKind = kind.ToString(), registryCodes }),
-                ChangeReason: reason,
-                ChangedByUserId: userId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+                    // Набір не має одного ідентифікатора; коди — у JSON нижче.
+                    EntityId: 0,
+                    ChangeClass: ChangeClass.Guarded,
+                    Operation: "SwitchSourceSet",
+                    OldJson: JsonSerializer.Serialize(new { registries = changed }),
+                    NewJson: JsonSerializer.Serialize(
+                        new { sourceKind = kind.ToString(), registryCodes }),
+                    ChangeReason: reason,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
 
-        // ⛔ Одне збереження на весь набір: або перемкнулися всі, або жоден.
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            // ⛔ Одне збереження на весь набір: або перемкнулися всі, або жоден.
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return changed.Count;
     }
