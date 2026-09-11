@@ -138,8 +138,23 @@ app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль 
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapOpenApi();
-app.MapScalarApiReference();
+
+// ⛔ Q-247: без цієї перевірки схема OpenAPI (усі маршрути, усі DTO —
+// включно з полями на кшталт CreateUserRequest.InitialPassword) і
+// Scalar-переглядач були доступні АНОНІМНО на будь-якому майданчику,
+// не лише в розробці — розвідка поверхні атаки без жодного тертя. На
+// відміну від /health/db (Q-221), живий перегляд схеми для вже
+// автентифікованих людей у проді не має практичної цінності — тому тут
+// не .RequireAuthorization(), а гейт середовища: той самий підхід, який
+// типово має шаблон ASP.NET (Swagger/Scalar — інструмент розробника, не
+// проду), і найпростіший спосіб узагалі прибрати цю поверхню там, де
+// вона не потрібна.
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference();
+}
+
 // /health/live — лише «процес живий». Жодної перевірки: будь-яке звернення
 // до БД тут перетворило б перезапуск процесу на наслідок проблем із базою.
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });

@@ -90,28 +90,39 @@ public sealed class CloneProjectHandler(
             source.YearGraceOffsetDays,
             source.CustomPeriodCount);
 
-        // ⚠ Періоди НЕ копіюються: їх будує PeriodCalendar за датами нового
-        // проєкту. Скопійовані, вони принесли б із собою стани і межі старого
-        // року — включно з Closed, який зробив би новий проєкт мертвим.
-        await periods.AddProjectAsync(clone, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ Q-244 (той самий клас дефекту, що Q-243): два `SaveChangesAsync`
+        // із записом аудиту МІЖ ними комітилися ОКРЕМО одне від одного —
+        // перший, щоб отримати `clone.Id` для аудиту, другий — після аудиту.
+        // Збій між будь-якими двома кроками лишав або проєкт без аудиту про
+        // його створення, або (якби порядок був зворотний) аудит про клон,
+        // якого в даних немає. Тепер усе троє — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⚠ Періоди НЕ копіюються: їх будує PeriodCalendar за датами нового
+            // проєкту. Скопійовані, вони принесли б із собою стани і межі старого
+            // року — включно з Closed, який зробив би новий проєкт мертвим.
+            await periods.AddProjectAsync(clone, innerCt).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow,
-                TemplateVersionId: clone.TemplateVersionId,
-                EntityType: "Project",
-                EntityId: clone.Id,
-                ChangeClass: ChangeClass.Safe,
-                Operation: "Clone",
-                OldJson: JsonSerializer.Serialize(new { sourceProjectId, code = source.Code }),
-                NewJson: JsonSerializer.Serialize(new { projectId = clone.Id, code = clone.Code }),
-                ChangeReason: $"Клон проєкту {source.Code}",
-                ChangedByUserId: userId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow,
+                    TemplateVersionId: clone.TemplateVersionId,
+                    EntityType: "Project",
+                    EntityId: clone.Id,
+                    ChangeClass: ChangeClass.Safe,
+                    Operation: "Clone",
+                    OldJson: JsonSerializer.Serialize(new { sourceProjectId, code = source.Code }),
+                    NewJson: JsonSerializer.Serialize(new { projectId = clone.Id, code = clone.Code }),
+                    ChangeReason: $"Клон проєкту {source.Code}",
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
         return clone.Id;
     }
 }

@@ -103,55 +103,63 @@ public sealed class SaveSheetDefHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці (той самий клас дефекту, що Q-243).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            // ⚠ Ordinal, якщо не переданий явно, — за наявними аркушами: новий
-            // аркуш стає ОСТАННІМ у порядку показу, а не вставляється навмання
-            // всередину.
-            var ordinal = command.Ordinal
-                ?? (version.Sheets.Count == 0 ? 0 : version.Sheets.Max(s => s.Ordinal) + 1);
-
-            existing = new SheetDef(templateVersionId, ecrCode, name, ordinal);
-            existing.SetGroup(command.SheetGroup);
-            existing.SetMandatory(command.IsMandatory);
-            existing.SetVisible(command.IsVisible);
-
-            version.AddSheet(existing);
-
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
-            // `SaveTableRelationHandler`. Аудит несе `EntityId`; у щойно
-            // доданої сутності його ще немає до `SaveChanges`.
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.Rename(name);
-            existing.SetGroup(command.SheetGroup);
-            existing.SetMandatory(command.IsMandatory);
-            existing.SetVisible(command.IsVisible);
-
-            if (command.Ordinal is { } ordinal)
+            if (existing is null)
             {
-                existing.Reorder(ordinal);
+                // ⚠ Ordinal, якщо не переданий явно, — за наявними аркушами: новий
+                // аркуш стає ОСТАННІМ у порядку показу, а не вставляється навмання
+                // всередину.
+                var ordinal = command.Ordinal
+                    ?? (version.Sheets.Count == 0 ? 0 : version.Sheets.Max(s => s.Ordinal) + 1);
+
+                existing = new SheetDef(templateVersionId, ecrCode, name, ordinal);
+                existing.SetGroup(command.SheetGroup);
+                existing.SetMandatory(command.IsMandatory);
+                existing.SetVisible(command.IsVisible);
+
+                version.AddSheet(existing);
+
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
+                // `SaveTableRelationHandler`. Аудит несе `EntityId`; у щойно
+                // доданої сутності його ще немає до `SaveChanges`.
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }
-        }
+            else
+            {
+                existing.Rename(name);
+                existing.SetGroup(command.SheetGroup);
+                existing.SetMandatory(command.IsMandatory);
+                existing.SetVisible(command.IsVisible);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(SheetDef), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+                if (command.Ordinal is { } ordinal)
+                {
+                    existing.Reorder(ordinal);
+                }
+            }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(SheetDef), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Див. коментар класу: без цього виклику `GET …/structure`,
         // прочитаний хоч раз до цієї правки, віддавав би знімок без щойно
         // доданого чи зміненого аркуша, доки версію не опублікують.
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return Map(existing);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // — той самий довід, що в `SaveColumnDefHandler`.
+        return Map(existing!);
     }
 
     /// <summary>Складає DTO аркуша для відповіді.</summary>
@@ -243,17 +251,21 @@ public sealed class DeleteSheetDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(SheetDef), sheet.Id,
-                change, "Delete",
-                SaveSheetDefHandler.Describe(sheet), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(SheetDef), sheet.Id,
+                    change, "Delete",
+                    SaveSheetDefHandler.Describe(sheet), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        sheet.SoftDelete(userId, clock.UtcNow);
+            sheet.SoftDelete(userId, clock.UtcNow);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }

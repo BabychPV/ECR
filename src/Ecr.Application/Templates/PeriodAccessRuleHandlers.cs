@@ -217,19 +217,26 @@ public sealed class CreatePeriodAccessRuleHandler(
 
         rules.Add(rule);
 
-        // ⛔ Запис ПЕРЕД аудитом — щойно доданій сутності ще бракує Id до
-        // SaveChanges (той самий привід, що в SaveSheetDefHandler).
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці. Проміжний `SaveChangesAsync` (лише щоб отримати `Id`
+        // нового правила) до цієї правки комітився ОКРЕМО від аудиту.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⛔ Запис ПЕРЕД аудитом — щойно доданій сутності ще бракує Id до
+            // SaveChanges (той самий привід, що в SaveSheetDefHandler).
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
-                classifier.ClassifyAddition(nameof(PeriodAccessRuleDef)), "Create",
-                OldJson: null, PeriodAccessRuleMapper.Describe(rule), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
+                    classifier.ClassifyAddition(nameof(PeriodAccessRuleDef)), "Create",
+                    OldJson: null, PeriodAccessRuleMapper.Describe(rule), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return PeriodAccessRuleMapper.Map(rule);
     }
@@ -361,15 +368,19 @@ public sealed class SavePeriodAccessRuleHandler(
         rule.ForSheet(command.SheetDefId).ForTable(command.TableDefId)
             .ForRole(command.RoleId).ForRows(command.RowKind);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
-                change, "Update",
-                oldJson, PeriodAccessRuleMapper.Describe(rule), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і `SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
+                    change, "Update",
+                    oldJson, PeriodAccessRuleMapper.Describe(rule), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return PeriodAccessRuleMapper.Map(rule);
     }
@@ -440,16 +451,20 @@ public sealed class DeletePeriodAccessRuleHandler(
         SaveTableRelationHandler.RejectBreaking(
             change, ruleId.ToString(System.Globalization.CultureInfo.InvariantCulture), hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
-                change, "Delete",
-                PeriodAccessRuleMapper.Describe(rule), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і видалення/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(PeriodAccessRuleDef), rule.Id,
+                    change, "Delete",
+                    PeriodAccessRuleMapper.Describe(rule), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        rules.Remove(rule);
+            rules.Remove(rule);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }
