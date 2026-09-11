@@ -282,6 +282,7 @@
 | Q-235 | SCOPE | Аудит зовнішнього збору (`Ecr.Adapters.PiAf`, `CollectionJob`/`MaterializeCollectedDataJob`, `NotificationJob`) за директивою людини: `RecurringScheduleService.ScheduleAsync` ставив збір за розкладом через `ScheduleAsync<Infrastructure.Jobs.CollectionJob>` (конкретний клас), тоді як DI реєструє цю задачу ЛИШЕ під портом `ICollectionJob` (`AddScoped<ICollectionJob, Jobs.CollectionJob>()`) — `QuartzJobAdapter.Resolve` питає контейнер за `typeof(TJob).FullName` і мовчки отримує `null`, `Execute` падає РАНІШЕ, ніж встигає записати щось у `itg.JobProgress`. Наслідок: щотиковий збір за розкладом (crontab на кожну `ext.CollectionSchedule`) не відбувався ЖОДНОГО РАЗУ — ні ретраїв, ні `itg.CollectionRun`, ні рядка в зведенні `NotificationJob` (збір мовчав місяцями, а не "затримувався", ФВ-11.3). Заразом: `MaterializeCollectedDataJob` не пише ні в `itg.CollectionRun`, ні в `itg.MaintenanceRun` — провал матеріалізації лишався лише в `itg.JobProgress`, який `NotificationJob` не читав узагалі | RESOLVED · `RecurringScheduleService` тепер ставить `ScheduleAsync<ICollectionJob>` (той самий порт, яким і так іде ручний запуск "зібрати зараз"); `NotificationJob` тепер додає у зведення `itg.JobProgress`-записи `State=Failed` із кодом `IMaterializeCollectedDataJob` (новий вид рядка `MaterializationKind`). Ідемпотентність сирого збору (`UQ_RawDataPoint`), поділ збору/матеріалізації і мапінг у `doc.CellValue` (`IsCalculated=0` для зібраних даних) перевірено — без дефектів. Два нових тести реальним SQL Server: `CollectionJobRecurringRegistrationTests` (резолв DI за конкретним класом провалюється, за портом — ні) і `NotificationJobMaterializationDigestTests` (провал матеріалізації потрапляє у зведення й чергу сповіщень; успіх — ні). Повний прогін `Ecr.Infrastructure.Tests` — 184/184 реальним SQL Server; `dotnet build ECR.sln` — 0 помилок |
 | Q-236 | SCOPE | Аудит фази 3 (Excel-обмін): `ExcelImporter.PreviewAsync` резолвив версію шаблону і структуру таблиць/колонок з `map.TemplateVersionId` — поля, записаного У ФАЙЛ на момент ЕКСПОРТУ, — замість поточної версії з БД. Republish шаблону між експортом і імпортом (звичайна подія за рік звітності) робив diff порівнянням проти структури, якої вже нема: неправильний тип комірки в `Read()`, і `ApplyAsync` (той самий `PatchCellsHandler`, що завжди резолвить ПОТОЧНУ версію) міг відмовити батч лише ПІСЛЯ того, як перегляд показав користувачу, що все гаразд. Суміжно: `block.TableInstanceId` з файлу довірявся без перевірки належності документу — книга з підміненим `TableInstanceId` (той самий шаблон, чужий документ) проходила б у пакетне читання рядків/комірок ДО будь-якого рішення про доступ | RESOLVED · `PreviewAsync` тепер резолвить `TemplateVersionId` і перелік легітимних `TableInstanceId` через `IRowStore.GetTableInstancesAsync(documentId, period, ct)` — той самий принцип, що вже документований у `IRowStore.ResolveTableInstanceAsync` ("клієнт не має диктувати, за якою версією тлумачити дані"); блок книги з `TableInstanceId`/`TableDefId`, що не відповідають цьому документу за цей період, відхиляється (`ECR-IMP-0422`) ДО пакетного читання. Два нових тести (`ExcelImporterTemplateVersionTests`, NSubstitute, без SQL) доводять і фікс, і регресію: обидва падають на `NullReferenceException` при поверненні старого коду (перевірено прямим відкатом файлу й повторним прогоном) — один підтверджує, що `metadata.GetAsync` кличеться з ПОТОЧНОЮ версією, а не зі значенням з файлу, другий — що чужий `TableInstanceId` відхиляється БЕЗ читання його даних (`ReadSlicesAsync` отримує порожній список). Повний прогін реальним SQL Server: 40/40 `Ecr.Adapters.Tests`, 529/529 `Ecr.Application.Tests`, 5/5 відповідних `Ecr.Infrastructure.Tests`; `dotnet build ECR.sln` — 0 помилок |
 | Q-237 | SCOPE | Аудит фази 3 (звітність/аудит), директива людини: (1) `ReportRetentionJob`, названий у `B16` §4 і дозволений `D-71` («крім `IsSubmitted` і `IsCurrent`»), не існував УЗАГАЛІ — `BuildReportSnapshotHandler` створює новий `rpt.ReportSnapshot`/`rpt.ReportRow` на кожен виклик і ніколи не переписує старий, тож без прибирання обидві таблиці ростуть вічно; (2) `RecalculationService` (перерахунок формул шаблону, `doc.CellValue` з `IsCalculated=1`) не мав `IAuditWriter` серед залежностей УЗАГАЛІ — похідні числа писалися через `cellStore.ApplyAsync` без жодного запису в `aud.CellChange`, хоча коментар до `SystemUserId` у тому самому файлі вже описував саме такий запис в аудит, а `CellChangeRecord.Origin` документував `Recalculation` як чинне значення, яким не користувався ЖОДЕН код | RESOLVED · (1) новий `src/Ecr.Infrastructure/Jobs/ReportRetentionJob.cs`: батчами (2000, до 20 батчів на прогін) видаляє `rpt.ReportRow`, потім `rpt.ReportSnapshot` (FK не каскадний, `DeleteBehaviorTests` тримає це свідомо) де `IsCurrent=0 І Status<>Submitted`; зареєстровано нічним cron у `RecurringScheduleService` — крос-інстансний лок бере автоматично `QuartzJobAdapter` (той самий механізм, що й Q-229). Новий `ReportRetentionJobTests` — реальний прогін проти SQLEXPRESS (2 зайві зрізи + рядки зникають, поточний і поданий лишаються, `MaintenanceRun` пише підсумок); доведено мутацією (`Where(s => true)` замість справжнього фільтра — тест падає). (2) `RecalculationService` тепер приймає `IAuditWriter`/`IClock`, читає старі значення ДО запису (як `PatchCellsHandler`) і пише `aud.CellChange` з `Origin="Recalculation"`, правильним `RowKey` (зворотна мапа з уже прочитаних `rowIdsByTable`) і тим самим `IsLateEdit`, що йде в `doc.CellValue`. Новий тест `Перерахунок_формули_пише_аудит_з_Origin_Recalculation`; доведено і мутацією (виклик прибрано вручну — падає), і компілятором (первинний конструктор C# одразу дає `CS9113: Parameter 'audit' is unread`, той самий захист, що вже описаний у `SubmitSheetHandler` для `validation`, `Q-146`). Перевірено ще дві гіпотези з завдання й НЕ підтверджено як дефект: `ReportSnapshotBuilder.AggregateAsync` справді не читає `doc.CellValue` напряму й не звертається до заморожених `calc.SubmissionSnapshot` — але порожній `Draft`-зріз без прогону розрахунку є ЗАДОКУМЕНТОВАНИМ коректним станом (`D-65`: «у `rpt.*` потрапляють усі зрізи — щоб числа можна було перевірити ДО затвердження»), і чинний `ReportSnapshotBuildTests` це прямо стверджує коментарем; `Submit`/`Approve`/`Reopen` (`SubmitSheetHandler`/`ApproveSheetHandler`/`ReopenDocumentHandler`) узгоджено перевіряють документо-рівневий грант через `IAccessDecisionService` (Q-173 вже закрив цю розбіжність) і однаково пишуть у `wf.ApprovalState`/аудит — нової розбіжності між трьома обробниками не знайдено. Підтверджено реальним прогоном: `dotnet build ECR.sln` — 0 помилок; `Ecr.Application.Tests` 530/530, `Ecr.Infrastructure.Tests` 181/181 реальним локальним SQL Server |
+| Q-238 | CONFLICT | Повторний аудит фази 3 (авторизація, продовження Q-171-180): два обробники пропускали перевірку через `IAccessDecisionService` повністю або частково. `CreateTemplateVersionHandler` (порожня версія шаблону, на відміну від `CloneTemplateVersionHandler` поруч) не мав інжектованого `IAccessDecisionService` узагалі — `Permission = "Template.Edit"` існував лише як напис. `RunCalculationHandler` (перерахунок ЦІЛОГО проєкту) перевіряв лише глобальне `Calculation.Recalculate`, без гранта на сам `projectId` — той самий клас дефекту, що й Q-174 (документний перерахунок), яким його сусід уже закрито | RESOLVED · обидва обробники тепер перевіряють право через `IAccessDecisionService` (перший — додано виклик `PermissionCheck.RequireAsync`, другий — додано `profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read`, той самий поріг, що й `CanReadDocumentAsync`). Решта API-поверхні (усі контролери `src/Ecr.Api/Controllers/*.cs`, `Health/HealthResponse.cs`, `TemplatesController.ListVersions`) перевірена — реальних прогалин більше не знайдено; `/health/db` з голою `.RequireAuthorization()` (без права `System.ViewHealth`) розглянуто окремо й НЕ визнано прогалиною — це підтверджене рішення людини (Q-221), покрите власними тестами (`Health_db_повідомляє_*` заводять користувача без жодної ролі й очікують 200) |
 
 ---
 
@@ -12199,3 +12200,151 @@ SQL Server) — два тести:
 **Статус:** RESOLVED · обидва фікси доведені реальним SQL Server і
 мутацією; дві додаткові гіпотези з завдання перевірені й закриті як
 «за задумом», не як дефект.
+
+### Q-238 · CONFLICT · Повторний аудит авторизації (продовження Q-171-180), 2026-09-11 · дві прогалини `IAccessDecisionService`, недосяжна більше нічого нового
+
+**Де:** `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs`,
+`src/Ecr.Application/Calculations/RunCalculationHandler.cs`.
+
+**Контекст.** Пряма директива людини: повний аудит авторизаційної
+консистентності всієї поверхні API — чи є ще прогалини класу Q-171/Q-176
+(`IAccessDecisionService` пропущено або перевіряє не той ресурс), яких не
+знайшов аудит фази 2, і чи не з'явилося нових у роботі цієї сесії
+(Q-216..Q-233, зокрема `TemplatesController.ListVersions` — Q-225,
+`Health/HealthResponse.cs` — Q-221, recurring jobs — Q-229, `SqlPreflight` /
+DB-auto-create — Q-232). Перевірено кожен `[Http*]`-метод у
+`src/Ecr.Api/Controllers/*.cs` (13 контролерів) і обробник, якому він
+делегує рішення.
+
+**Знахідка 1 — `CreateTemplateVersionHandler`: перевірки права не було
+взагалі.** `TemplatesController.CreateVersion` (`POST
+/templates/{id}/versions`, порожня версія — без клону) делегує сюди.
+Конструктор не мав інжектованого `IAccessDecisionService`; константа
+`public const string Permission = "Template.Edit";` існувала лише як
+напис у коментарі, який ніхто не читав, — рівно той клас дефекту, що
+власний docstring `PermissionCheck.cs` описує напряму: «хто не вибрав
+жодного [способу перевірки], не перевіряв узагалі, і жоден сторож цього
+не бачив». Сусідній `CloneTemplateVersionHandler` (той самий
+ендпоінт-сім'я, версія КЛОНОМ) має цю перевірку ще з `A7-53` — власний
+коментар обробника прямо каже «до цього ендпоінт мав лише `[Authorize]`,
+тобто оголошене контрактом право не перевіряв ніхто» про СЕБЕ, але
+порожня версія лишилася осторонь того самого фіксу.
+
+**Атака:** будь-який автентифікований користувач, без жодного права,
+міг завести нову чернетку версії довільного шаблону (`POST
+/templates/{id}/versions` без `Template.Edit`).
+
+**Знахідка 2 — `RunCalculationHandler`: перевірка була, але лише
+функціональна, без гранта на ресурс.** `ProjectsController.Recalculate`
+(`POST /projects/{id}/recalculate`, перерахунок УСЬОГО проєкту — маршрут,
+який сама ж ця сесія підключила в Q-151/Q-162) перевіряв лише глобальне
+`Calculation.Recalculate` через `PermissionCheck.RequireAsync` — без
+`profile.LevelFor(ResourceKind.Project, projectId)`. Це той самий клас
+дефекту, що Q-174 закрив для документного перерахунку
+(`RecalculateDocumentHandler`) тим самим прийомом (`access.CanReadDocumentAsync`)
+— лише сусідній, ПРОЄКТНИЙ маршрут лишився неперевіреним, і наслідок тут
+серйозніший: перезаписуються обчислені значення ВСІХ документів проєкту
+за (потенційно) увесь рік, а не одного документа.
+
+**Атака:** користувач A з `Calculation.Recalculate` (виданим під власний
+проєкт) викликає `POST /projects/{чужий_projectId}/recalculate` — задача
+ставиться в чергу і перезаписує обчислені значення чужого проєкту, без
+жодного гранта на нього.
+
+#### Закрито
+
+1. `CreateTemplateVersionHandler` — додано параметр конструктора
+   `Security.IAccessDecisionService access` і виклик
+   `Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct)`
+   на самому початку `HandleAsync`, тим самим прийомом, що вже в
+   `CloneTemplateVersionHandler`. DI — `services.AddScoped<T>()` з
+   автоматичним резолвом конструктора (`src/Ecr.Application/DependencyInjection.cs`),
+   змін реєстрації не знадобилось.
+2. `RunCalculationHandler` — після `PermissionCheck.RequireAsync` додано
+   `if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read) throw new AccessDeniedException("ECR-AUTH-0403", ...)`
+   — той самий поріг (`Read`), що й `AccessDecisionService.CanReadDocumentAsync`
+   (`src/Ecr.Infrastructure/Security/AccessDecisionService.cs:247`): само
+   право на перерахунок несе окрему функціональну перевірку, грант лише
+   звужує «для ЯКОГО проєкту».
+
+**Доведено тестами (реальний HTTP, `Ecr.Scenarios.Tests`):**
+- `StructureScenarios.Створення_версії_без_Template_Edit_відхиляється` —
+  `stranger` без жодного права отримує 4xx на `POST
+  /templates/{id}/versions`, а не `201 Created`.
+- `CalculationScenarios.Чужий_проєкт_не_перераховується` — `stranger` із
+  `Calculation.Recalculate`, але без гранта на проєкт `owner`, отримує
+  `403` на `POST /projects/{чужий}/recalculate`, а не `202 Accepted`.
+  Період узятий явно ВІДКРИТИЙ (`Open`/`Grace`), а не перший у переліку
+  (типово вже закритий на годиннику фікстури): на закритому періоді
+  запит упав би на `ECR-CALC-4221` (422) ще ДО гранта, і генеричний «4xx»
+  пройшов би з невірної причини — статус перевіряється точний (`403`).
+
+**Доказ мутацією (обидва фікси, реальний прогін):** тимчасово
+закоментував кожен новий виклик перевірки окремо — обидва нові сценарні
+тести впали (перший: `Created` замість очікуваного 4xx; другий:
+`Forbidden` очікувався, тест `Failed`); відновлення кожного окремо —
+знову зелено.
+
+**Регресія, знайдена й виправлена цим самим фіксом:** `RunCalculationHandler`
+уже мав власні юніт-тести (`Ecr.Application.Tests/Calculations/CalculationOrchestratorTests.cs`)
+з профілем-заглушкою (`Substitute.For<IAccessDecisionService>()`), у якого
+`Grants` завжди був порожнім словником — двом наявним тестам
+(`Закритий_період_не_перераховується_автоматично`,
+`Поданий_зріз_не_перераховується_взагалі`) новий грант-гейт заважав би
+дійти до того, що вони насправді доводять (`ECR-CALC-4221`), падаючи
+натомість на `ECR-AUTH-0403`. Виправлено додаванням гранта на `Project`
+у профіль за замовчуванням (`Profile(...)` — новий необов'язковий
+параметр `grants`); додано окремий новий тест
+`Без_гранта_на_проєкт_перерахунок_не_ставиться_в_чергу` для юніт-рівня,
+дзеркально до сценарного.
+
+⚠ **Другий екземпляр ТІЄЇ САМОЇ регресії, пропущений первинним фіксом і
+знайдений лише CI-гейтом `test` на PR** (не цією сесією заздалегідь — я
+прогнав `Ecr.Application.Tests`, `Ecr.Infrastructure.Tests`,
+`Ecr.Adapters.Tests`, `Ecr.Scenarios.Tests` перед пушем, але не
+`Ecr.Calculations.Tests`, окремий тестовий проєкт із власним
+конструктором `RunCalculationHandler`): `MethodologyPublishTests.
+Перерахунок_закритого_періоду_потребує_окремого_погодження`
+(`tests/Ecr.Calculations.Tests/MethodologyPublishTests.cs`) будує ще один,
+третій, окремий профіль-заглушку з порожніми `Grants` — той самий патерн,
+що вже виправлено у двох місцях вище, лишився невиправленим у третьому,
+бо це інший тестовий проєкт, який жоден grep за назвою класу-обробника в
+`Ecr.Application.Tests` не знайшов би. Виправлено ідентично: доданий
+`Grants = { ["Project:1"] = GrantLevel.Read }` у профіль цього тесту.
+`dotnet test tests/Ecr.Calculations.Tests` — 68/68. **Урок для процесу:**
+перед пушем фіксу, що змінює перевірку прав у спільному обробнику, `grep
+-rn "new <ім'я обробника>("` по ВСІХ `tests/*/`, а не лише по проєкту,
+де лежить "очевидний" тест — обробник може конструюватися напряму (як
+тут), в обхід DI, у будь-якому тестовому проєкті.
+
+**Перевірено і НЕ визнано прогалиною:** `/health/db`
+(`src/Ecr.Api/Program.cs`, `HealthResponse.cs`) захищений лише
+`.RequireAuthorization()` — без права `System.ViewHealth`, яке має
+аналогічний за призначенням `JobsController` для стану системи. Спершу
+це виглядало тим самим класом дефекту — тимчасово написав і навіть
+підключив middleware з перевіркою права, — але це ВЖЕ підтверджене
+рішення людини (Q-221: «подробиці БД — не для будь-кого, хто дістанеться
+порту», фікс — саме автентифікація, не право), і власні тести
+(`Ecr.Api.Tests/HealthTests.cs`, `Health_db_повідомляє_*`) заводять
+користувача БЕЗ жодної ролі й очікують `200`. Мій чорновий middleware
+зламав би ці три тести — відкат: посилення тут означало б переграти
+явне рішення людини без нової директиви, а не закрити мовчазну
+прогалину. Рядок лишається як задокументована перевірка, не фікс.
+
+Решта поверхні (`RegistriesController`, `ReportsController`,
+`SourcesController`, `MethodologiesController` — увесь конфігуратор
+версій і формул, `SecurityController`, `ProjectsController`,
+`AuditController`, `JobsController`, `PeriodsController`,
+`ExpressionsController`, `UnitsController`, `UiStringsController`,
+`AuthController`, `CellsController`, `DocumentsController`) перевірена
+по кожному обробнику — усюди перевірка є, і там, де ресурс належить
+проєкту чи документу (не глобальний адміністративний), вона перевіряє
+саме цей конкретний ресурс, а не лише функціональне право.
+
+`dotnet build Ecr.sln` — 0 помилок. `dotnet test` (реальний прогін проти
+локального SQL Server): `Ecr.Api.Tests` 68/68, `Ecr.Application.Tests`
+530/530, `Ecr.Scenarios.Tests` 49/49, `Ecr.Architecture.Tests
+--filter JournalIntegrityTests` 4/4.
+
+**Статус:** RESOLVED · мутаційний доказ вище, PR нижче.
+

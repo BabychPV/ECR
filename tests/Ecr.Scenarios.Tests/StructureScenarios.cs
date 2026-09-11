@@ -60,6 +60,46 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.OK, structure.StatusCode);
     }
 
+    /// <remarks>
+    /// ⛔ Q-238 (аудит фази 3, авторизація). `CreateTemplateVersionHandler`
+    /// (порожня версія — БЕЗ клону, на відміну від `CloneTemplateVersionHandler`
+    /// поруч, який право перевіряв ще з `A7-53`) не мав ІНЖЕКТОВАНОГО
+    /// `IAccessDecisionService` узагалі: константа <c>Permission =
+    /// "Template.Edit"</c> існувала лише як напис у коді, який ніхто не читав.
+    /// Будь-який автентифікований користувач без жодного права міг завести
+    /// версію шаблону.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-03")]
+    public async Task Створення_версії_без_Template_Edit_відхиляється()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(
+            app, "S03b", ["Template.View", "Template.Edit"]);
+        var stranger = await Provisioning.AdministratorAsync(app, "S03bStranger", []);
+
+        var templateCode = $"S03b_{Guid.NewGuid():N}"[..20];
+        var createTemplate = await admin.Client.PostAsJsonAsync(
+            new Uri("/api/v1/templates", UriKind.Relative),
+            new { code = templateCode, nameL10n = new Dictionary<string, string> { ["en"] = "S-03b template" } });
+        Assert.Equal(HttpStatusCode.Created, createTemplate.StatusCode);
+
+        var templateId = (await createTemplate.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("templateId").GetInt32();
+
+        // ⛔ Доказ сценарію: `stranger` не має ЖОДНОГО права — до фіксу цей
+        // запит проходив кодом 201, бо перевірки не було де впасти.
+        var createVersion = await stranger.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/templates/{templateId}/versions", UriKind.Relative),
+            new { versionNumber = "1.0.0.0", cloneFromVersionId = (int?)null });
+
+        Assert.True(
+            (int)createVersion.StatusCode is >= 400 and < 500,
+            $"створення версії без Template.Edit мало дати 4xx, а дало {createVersion.StatusCode}: "
+            + $"{await createVersion.Content.ReadAsStringAsync()}");
+    }
+
     /// <summary>
     /// S-04. Аркуш і таблиця — через API (колонки, рядки лишаються S-05..S-07,
     /// коли `W5.2` додасть свої маршрути).
