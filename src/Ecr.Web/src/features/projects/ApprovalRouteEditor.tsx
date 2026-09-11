@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Group, Modal, Select, Stack, Text } from '@mantin
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { AffectedStepsResponse, ApprovalRouteDto, RoleView } from '@/api/types';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -79,30 +80,44 @@ export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.E
           {t('workflow.routeEmptyHint')}
         </Alert>
 
-        <Stack gap="xs" mt="md">
-          {steps.map((roleId, index) => (
-            // Порядок кроків і є маршрутом, тож ключ — позиція: та сама роль
-            // може законно стояти на двох різних кроках.
-            <Group key={`${index}:${roleId}`} gap="xs">
-              <Badge variant="light">{index + 1}</Badge>
-              <Text style={{ flex: 1 }}>{roleName(roleId)}</Text>
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="statusError"
-                onClick={() => setSteps(steps.filter((_, i) => i !== index))}
-              >
-                {t('common.delete')}
-              </Button>
-            </Group>
-          ))}
-
-          {steps.length === 0 && (
-            <Text size="sm" c="dimmed">
-              {t('workflow.routeNone')}
-            </Text>
+        {/*
+         * ⛔ Невдалий запит маршруту чи ролей раніше виглядав ТОЧНІСІНЬКО як
+         * порожній маршрут: обидва — порожній `Stack` із тим самим текстом
+         * «кроків немає», і причину не було звідки взяти (`Q-254`, той самий
+         * клас дефекту, що й `A7-04`). `AsyncBoundary` малює помилку окремо.
+         */}
+        <AsyncBoundary<ApprovalRouteDto>
+          isPending={opened && (route.isPending || roles.isPending)}
+          error={route.error ?? roles.error}
+          data={opened ? route.data : undefined}
+          isEmpty={() => steps.length === 0}
+          emptyTitle={t('workflow.routeNone')}
+          onRetry={() => {
+            void route.refetch();
+            void roles.refetch();
+          }}
+        >
+          {() => (
+            <Stack gap="xs" mt="md">
+              {steps.map((roleId, index) => (
+                // Порядок кроків і є маршрутом, тож ключ — позиція: та сама
+                // роль може законно стояти на двох різних кроках.
+                <Group key={`${index}:${roleId}`} gap="xs">
+                  <Badge variant="light">{index + 1}</Badge>
+                  <Text style={{ flex: 1 }}>{roleName(roleId)}</Text>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="statusError"
+                    onClick={() => setSteps(steps.filter((_, i) => i !== index))}
+                  >
+                    {t('common.delete')}
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
           )}
-        </Stack>
+        </AsyncBoundary>
 
         <Select
           mt="md"
