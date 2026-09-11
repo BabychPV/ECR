@@ -12,4 +12,12 @@
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
     </application>
   </compatibility>
+  <!--
+    Q-227: DPI-обізнаність НЕ додається сюди навмисно — сучасний SDK-стиль
+    WinForms (net10.0-windows, ApplicationConfiguration.Initialize()) сам
+    забороняє це компілятором (WFO0003: "Remove high DPI settings from
+    app.manifest... configure via Application.SetHighDpiMode API or
+    'ApplicationHighDpiMode' project property") і вимагає натомість
+    <ApplicationHighDpiMode> в Ecr.Setup.csproj — див. коментар там.
+  -->
 </assembly>
