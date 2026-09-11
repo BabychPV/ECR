@@ -49,13 +49,71 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ З <c>EnableRetryOnFailure</c> транзакцію треба виконувати цілком
-    /// усередині <c>ExecutionStrategy</c>, інакше повтор розірве її посередині.
-    /// Тому тут транзакція відкривається напряму, а стратегію повторів має
-    /// застосовувати виклик — обгортаючи ВЕСЬ блок роботи.
+    /// ⚠ Q-243. <c>EnableRetryOnFailure</c> увімкнено на реальному
+    /// DbContext (`DependencyInjection.cs`), і EF Core забороняє ручний
+    /// <c>Database.BeginTransactionAsync</c> ПОЗА <c>ExecuteAsync</c>
+    /// стратегії повторів — кидає <c>InvalidOperationException</c> одразу
+    /// на виклику (точно той самий прийом, що вже рятує
+    /// <c>UserStore.CreateRoleAsync</c> від тієї ж помилки). До цього рядка
+    /// порт ніхто не викликав, тому дефект був живий, але не спостережний:
+    /// перший-таки виклик у проді впав би на самому <c>BeginTransaction</c>.
+    ///
+    /// ⚠ Стратегія тут обгортає ЛИШЕ сам <c>BeginTransactionAsync</c>, не
+    /// решту блоку роботи виклику: подальші кроки (кілька збережень,
+    /// сторонні виклики портів) виконуються ПОЗА цим <c>ExecuteAsync</c>, і
+    /// це свідомо — ретрай усього блоку тут неможливий без зміни контракту
+    /// порту (він розділяє «відкрити» і «зробити роботу» на різні виклики,
+    /// на відміну від <c>UserStore</c>, де все одним замиканням). Наслідок:
+    /// транзієнтний збій ПІСЛЯ відкриття не ретраїться автоматично — весь
+    /// виклик просто впаде, а <c>TransactionScope.DisposeAsync</c> відкотить
+    /// незакомічене. Це не регресія: до цієї правки виклику не було взагалі.
     /// </remarks>
     public async Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken ct)
-        => new TransactionScope(await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false));
+    {
+        var strategy = db.Database.CreateExecutionStrategy();
+        var transaction = await strategy
+            .ExecuteAsync(() => db.Database.BeginTransactionAsync(ct))
+            .ConfigureAwait(false);
+        return new TransactionScope(transaction);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Q-243. На відміну від <see cref="BeginTransactionAsync"/> (де
+    /// стратегія обгортає ЛИШЕ сам <c>BeginTransaction</c>), тут стратегія
+    /// обгортає ВЕСЬ блок: відкриття, <paramref name="operation"/> і коміт —
+    /// одним замиканням, точно як уже робить <c>UserStore.CreateRoleAsync</c>.
+    /// Без цього перший-таки EF-виклик (<c>ExecuteUpdateAsync</c>,
+    /// <c>SaveChangesAsync</c>) усередині <paramref name="operation"/> кидає
+    /// <c>InvalidOperationException</c> проти реального DbContext з
+    /// <c>EnableRetryOnFailure</c> — виміряно прогоном
+    /// <c>Ecr.Scenarios.Tests</c> проти реально піднятого <c>Ecr.Api</c>
+    /// (перший варіант фіксу з окремими Begin/Commit впав РІВНО на цьому).
+    ///
+    /// ⛔ Якщо транзакція вже відкрита ЗОВНІ (вкладений виклик у межах
+    /// ширшого блоку) — просто виконуємо: другий <c>BeginTransaction</c> на
+    /// тому самому <c>DbContext</c> SQL Server не підтримує (`Вкладені
+    /// транзакції заборонені`, <c>UnitOfWorkTests</c>), і коміт/відкат тоді
+    /// належить ЗОВНІШНЬОМУ виклику.
+    /// </remarks>
+    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        if (db.Database.CurrentTransaction is not null)
+        {
+            await operation(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+            await operation(ct).ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Обгортка, чий <c>DisposeAsync</c> відкочує незакомічену транзакцію.

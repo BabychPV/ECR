@@ -482,10 +482,52 @@ public sealed class PatchCellsHandler(
     }
 
     /// <summary>
-    /// Одна транзакція: значення, «дотик» рядків і аудит. Аудит поза
-    /// транзакцією дав би журнал, у якому є зміни, яких у даних немає.
+    /// Одна транзакція: значення, «дотик» рядків, «дотик» документа й аудит.
+    /// Аудит поза транзакцією дав би журнал, у якому є зміни, яких у даних
+    /// немає.
     /// </summary>
-    private async Task PersistChangesAsync(
+    /// <remarks>
+    /// ⛔ Q-243 (критичний, аудит цілісності). До цієї правки коментар вище
+    /// був НЕПРАВДОЮ: чотири кроки нижче були чотирма незалежними,
+    /// самостійно закомміченими одиницями — <c>cellStore.ApplyAsync</c> сам
+    /// відкривав і комітив ВЛАСНУ <c>SqlTransaction</c> (`NormalizedCellStore`),
+    /// <c>rowStore.TouchRowsAsync</c> ішов окремим автокомітним
+    /// <c>ExecuteUpdateAsync</c>, <c>audit.WriteCellChangesAsync</c> писав
+    /// сирим <c>SqlCommand</c> без жодної відкритої транзакції (порт
+    /// <c>IUnitOfWork.BeginTransactionAsync</c> існував, але його не
+    /// викликав НІХТО в `Ecr.Application` — підтверджено пошуком по
+    /// репозиторію), і лише «дотик» документа комітився разом із
+    /// <c>uow.SaveChangesAsync</c> наприкінці. Збій/розрив з'єднання/скасування
+    /// між будь-якими двома кроками лишав дані змінені БЕЗ відповідного рядка
+    /// аудиту (або «дотик» без аудиту, або аудит без «дотику» документа) —
+    /// реальна діра в системі, чиє призначення — звітність, придатна для
+    /// перевірки регулятором.
+    ///
+    /// ⚠ Фікс: увесь блок — одним викликом <c>IUnitOfWork.ExecuteInTransactionAsync</c>,
+    /// коміт — ОДИН, наприкінці, після успіху всього замикання.
+    /// <c>NormalizedCellStore.ApplyAsync</c> тепер приєднується до цієї
+    /// ambient-транзакції замість відкриття власної (Q-243);
+    /// <c>RowStore.TouchRowsAsync</c> (`ExecuteUpdateAsync`) і
+    /// <c>DocumentStore.TouchAsync</c> (трекнута зміна, комітиться разом із
+    /// <c>uow.SaveChangesAsync</c>) автоматично приєднуються до тієї самої
+    /// транзакції — обидва йдуть через ТОЙ САМИЙ <c>EcrDbContext</c>, що й
+    /// <c>uow</c> (один DI-скоуп на запит). <c>AuditWriter.CreateCommand</c>
+    /// уже вмів приєднатися до відкритої транзакції — йому просто нізвідки
+    /// було її взяти.
+    ///
+    /// ⛔ Перша спроба фіксу (окремі виклики
+    /// <c>IUnitOfWork.BeginTransactionAsync</c>/<c>CommitAsync</c> навколо
+    /// цих самих кроків, БЕЗ обгортки в одне замикання) впала на реальному
+    /// DbContext (<c>EnableRetryOnFailure</c>): <c>RowStore.TouchRowsAsync</c>
+    /// (`ExecuteUpdateAsync`) кидав <c>InvalidOperationException</c> — EF
+    /// Core вимагає, щоб уся транзакція (Begin + робота + Commit) йшла
+    /// ОДНИМ замиканням усередині <c>CreateExecutionStrategy().ExecuteAsync</c>.
+    /// Юніт-тести цього не ловили (їхній <c>EcrDbContext</c> ретраю не має);
+    /// зловив реальний прогін <c>Ecr.Scenarios.Tests</c> проти піднятого
+    /// <c>Ecr.Api</c>. Звідси <c>ExecuteInTransactionAsync</c> замість пари
+    /// Begin/Commit — див. коментар порту в <c>IUnitOfWork.cs</c>.
+    /// </remarks>
+    private Task PersistChangesAsync(
         PatchCellsRequest request,
         RequestContext context,
         CellChangeLists changes,
@@ -493,27 +535,28 @@ public sealed class PatchCellsHandler(
         bool isLateEdit,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         CancellationToken ct)
-    {
-        await cellStore.ApplyAsync(
-            new CellChangeSet(request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched, context.UserId, isLateEdit),
-            ct).ConfigureAwait(false);
+        => uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await cellStore.ApplyAsync(
+                new CellChangeSet(request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched, context.UserId, isLateEdit),
+                innerCt).ConfigureAwait(false);
 
-        await rowStore.TouchRowsAsync(changes.Touched, now, ct).ConfigureAwait(false);
+            await rowStore.TouchRowsAsync(changes.Touched, now, innerCt).ConfigureAwait(false);
 
-        // ⛔ Документ теж «торкається» (`H-23d`). До цього рядка `ModifiedAt` і
-        // `ModifiedByUserId` документа назавжди лишалися моментом створення:
-        // рядки оновлювалися, аудит писався, а перелік документів показував
-        // дату, якої зміни не мали. Колонка, що показує неправду, знецінює й
-        // сусідні — правдиві.
-        //
-        // ⚠ Тією ж транзакцією, що й значення: дата зміни без самої зміни
-        // гірша за відсутність дати.
-        await documents.TouchAsync(context.Instance.DocumentId, context.UserId, now, ct).ConfigureAwait(false);
+            // ⛔ Документ теж «торкається» (`H-23d`). До цього рядка `ModifiedAt` і
+            // `ModifiedByUserId` документа назавжди лишалися моментом створення:
+            // рядки оновлювалися, аудит писався, а перелік документів показував
+            // дату, якої зміни не мали. Колонка, що показує неправду, знецінює й
+            // сусідні — правдиві.
+            //
+            // ⚠ Тією ж транзакцією, що й значення: дата зміни без самої зміни
+            // гірша за відсутність дати.
+            await documents.TouchAsync(context.Instance.DocumentId, context.UserId, now, innerCt).ConfigureAwait(false);
 
-        await WriteAuditAsync(request, context, changes, now, isLateEdit, previous, ct).ConfigureAwait(false);
+            await WriteAuditAsync(request, context, changes, now, isLateEdit, previous, innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct);
 
     /// <summary>Записує аудит батчу — усередині тієї ж транзакції, ДО коміту.</summary>
     private async Task WriteAuditAsync(
