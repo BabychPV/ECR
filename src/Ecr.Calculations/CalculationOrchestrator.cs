@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecr.Calculations;
 
@@ -17,10 +18,8 @@ namespace Ecr.Calculations;
 /// </remarks>
 public sealed class CalculationOrchestrator(
     MethodologyResolver resolver,
-    IEnumerable<ICalculationModule> modules,
-    CalculationInputBuilder inputBuilder,
-    CalculationOutputWriter outputWriter,
-    IPeriodStore periods) : ICalculationRunner
+    IPeriodStore periods,
+    IServiceScopeFactory scopeFactory) : ICalculationRunner
 {
     /// <summary>
     /// Скільки методологій одного пакета виконувати одночасно.
@@ -95,9 +94,29 @@ public sealed class CalculationOrchestrator(
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism, CancellationToken = ct },
                 async (versionId, token) =>
                 {
+                    // 3a. ⛔ Q-249: `MethodologyResolver`/`CalculationInputBuilder`/
+                    //     `CalculationOutputWriter`/`ICalculationModule` — Scoped
+                    //     і зрештою обгортають один `EcrDbContext`, який НЕ є
+                    //     потокобезпечним. Використання полів оркестратора (з
+                    //     батьківського scope запиту) напряму тут означало б, що
+                    //     всі паралельні гілки пакета б'ють у той самий
+                    //     DbContext одночасно — саме на цьому сценарії
+                    //     (≥2 незалежні гілки) падало
+                    //     `InvalidOperationException: A second operation
+                    //     started on this context before a previous operation
+                    //     completed`. Власний scope на гілку → власний
+                    //     DbContext на гілку, а паралелізм пакета (заради
+                    //     бюджету 10 хв, ПРД-13) лишається як є.
+                    using var scope = scopeFactory.CreateScope();
+                    var scopedResolver = scope.ServiceProvider.GetRequiredService<MethodologyResolver>();
+                    var scopedInputBuilder = scope.ServiceProvider.GetRequiredService<CalculationInputBuilder>();
+                    var scopedOutputWriter = scope.ServiceProvider.GetRequiredService<CalculationOutputWriter>();
+                    var scopedModules = scope.ServiceProvider.GetRequiredService<IEnumerable<ICalculationModule>>();
+
                     foreach (var binding in byVersion[versionId])
                     {
                         var stat = await ExecuteAsync(
+                            scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
                             calculationRunId, documentId, periodKey, binding, token).ConfigureAwait(false);
 
                         measured.Add(stat);
@@ -120,14 +139,26 @@ public sealed class CalculationOrchestrator(
     }
 
     /// <summary>Виконує одну прив'язку і повертає її внесок у профіль.</summary>
-    private async Task<(string Module, TimeSpan Elapsed, int Rows)> ExecuteAsync(
+    /// <remarks>
+    /// Приймає <paramref name="scopedResolver"/>/<paramref name="scopedModules"/>/
+    /// <paramref name="scopedInputBuilder"/>/<paramref name="scopedOutputWriter"/>
+    /// явними параметрами, а не полями оркестратора: метод викликається
+    /// всередині паралельної гілки пакета (`Parallel.ForEachAsync`), і кожна
+    /// гілка мусить отримати екземпляри зі СВОГО DI-scope (Q-249) — інакше
+    /// кілька гілок паралельно б'ють у той самий Scoped `EcrDbContext`.
+    /// </remarks>
+    private static async Task<(string Module, TimeSpan Elapsed, int Rows)> ExecuteAsync(
+        MethodologyResolver scopedResolver,
+        IEnumerable<ICalculationModule> scopedModules,
+        CalculationInputBuilder scopedInputBuilder,
+        CalculationOutputWriter scopedOutputWriter,
         long calculationRunId,
         long documentId,
         PeriodKey periodKey,
         ResolvedBinding binding,
         CancellationToken ct)
     {
-        var module = modules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
+        var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
         if (module is null)
         {
             // ⛔ Немає модуля, здатного виконати рівень методології — це
@@ -140,12 +171,12 @@ public sealed class CalculationOrchestrator(
                 + $"рівня {binding.Descriptor.Level}.");
         }
 
-        var rowKeys = await resolver
+        var rowKeys = await scopedResolver
             .MatchRowsAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
             .ConfigureAwait(false);
 
         // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
-        var inputs = await inputBuilder
+        var inputs = await scopedInputBuilder
             .BuildAsync(binding.TableInstanceId, rowKeys, periodKey, binding.Descriptor, ct)
             .ConfigureAwait(false);
 
@@ -161,7 +192,7 @@ public sealed class CalculationOrchestrator(
 
         stopwatch.Stop();
 
-        await outputWriter
+        await scopedOutputWriter
             .WriteAsync(calculationRunId, outputs, binding.Descriptor.TraceLevel, ct)
             .ConfigureAwait(false);
 
