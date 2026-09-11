@@ -22,6 +22,17 @@ import type { MonacoModule } from './monaco';
 /** Затримка перед перевіркою на сервері, мс. */
 const ValidateDelay = 400;
 
+/**
+ * Чи це відмова через `AbortController.abort()`, а не справжня помилка.
+ *
+ * ⚠ `fetch` кидає `DOMException` з `name === 'AbortError'` (стандарт
+ * `AbortSignal`); `apiFetch` (`api/client.ts`) нічого тут не перехоплює й не
+ * підміняє — відмова доходить до викликача як є.
+ */
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 /** Властивості редактора. */
 export interface ExpressionEditorProps {
   /** Текст виразу. */
@@ -161,23 +172,46 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   useEffect(() => {
     if (!ready) return;
 
+    const controller = new AbortController();
+
     // ⚠ Затримка, а не запит на кожен натиск: перевірка ходить на сервер, і
     // без неї кожна літера довгої формули коштувала б окремого звернення.
     const timer = globalThis.setTimeout(() => {
       void (async () => {
-        const result = await validateExpression(value, dialect, placement ?? {});
-        const monaco = api.current;
-        const model = editor.current?.getModel();
+        try {
+          const result = await validateExpression(value, dialect, placement ?? {}, controller.signal);
 
-        if (monaco !== null && model !== null && model !== undefined) {
-          monaco.showDiagnostics(model, result.diagnostics);
+          // ⛔ Без цієї перевірки старіша відповідь (сервер повільніший саме
+          // на ній) могла прийти ПІСЛЯ новішої і мовчки переписати
+          // підкреслення та `onValidated` застарілим результатом — щойно
+          // введений текст показував би висновок про текст, який користувач
+          // уже змінив. `AbortController` тут — не оптимізація мережі, а
+          // єдиний спосіб дізнатися, що саме ЦЕЙ запит більше нікому не
+          // потрібен.
+          if (controller.signal.aborted) return;
+
+          const monaco = api.current;
+          const model = editor.current?.getModel();
+
+          if (monaco !== null && model !== null && model !== undefined) {
+            monaco.showDiagnostics(model, result.diagnostics);
+          }
+
+          onValidated?.(result);
+        } catch (error) {
+          // ⚠ Скасований запит — не помилка перевірки, а очікуваний наслідок
+          // того, що текст змінився знову: користувача нема чим повідомляти.
+          if (isAbortError(error)) return;
+
+          throw error;
         }
-
-        onValidated?.(result);
       })();
     }, ValidateDelay);
 
-    return () => globalThis.clearTimeout(timer);
+    return () => {
+      globalThis.clearTimeout(timer);
+      controller.abort();
+    };
 
     // ⚠ `onValidated` навмисно поза переліком: викликач найчастіше передає
     // стрілку, і залежність від неї перезапускала б перевірку на кожен
