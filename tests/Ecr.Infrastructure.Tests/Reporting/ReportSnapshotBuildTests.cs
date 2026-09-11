@@ -74,7 +74,7 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
         Assert.True(snapshotId > 0);
 
         var list = await builder.ListAsync(
-            document.ProjectId, document.PeriodKey.Value, CancellationToken.None);
+            document.ProjectId, document.PeriodKey.Value, visibleProjectIds: null, CancellationToken.None);
 
         var made = Assert.Single(list, s => s.Id == snapshotId);
 

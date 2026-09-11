@@ -34,7 +34,7 @@ public sealed class ReportSnapshotSyncTests
     {
         _documents.FindProjectIdAsync(Document, Arg.Any<CancellationToken>()).Returns(Project);
 
-        _snapshots.ListAsync(Project, Period, Arg.Any<CancellationToken>())
+        _snapshots.ListAsync(Project, Period, null, Arg.Any<CancellationToken>())
             .Returns([Summary(nameof(SnapshotStatus.Draft), isCurrent: true)]);
     }
 
@@ -115,7 +115,7 @@ public sealed class ReportSnapshotSyncTests
         // ⚠ Інакше кожна наступна зміна стану аркуша била б у доменну відмову
         // «зріз іммутабельний» — тобто нормальний хід подій виглядав би як
         // помилка, і його навчилися б гасити.
-        _snapshots.ListAsync(Project, Period, Arg.Any<CancellationToken>())
+        _snapshots.ListAsync(Project, Period, null, Arg.Any<CancellationToken>())
             .Returns([Summary(nameof(SnapshotStatus.Submitted), isCurrent: true)]);
 
         await Sync().RefreshAsync(Document, new PeriodKey(Period), CancellationToken.None);

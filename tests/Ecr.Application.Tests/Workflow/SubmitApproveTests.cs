@@ -248,7 +248,7 @@ public sealed class SubmitApproveTests
         // звітом одного дня перебудується з іншими числами (ФВ-9.17).
         _documents.FindProjectIdAsync(Document, Arg.Any<CancellationToken>()).Returns(3);
 
-        _reportSnapshots.ListAsync(3, Period, Arg.Any<CancellationToken>())
+        _reportSnapshots.ListAsync(3, Period, null, Arg.Any<CancellationToken>())
             .Returns([
                 new ReportSnapshotSummary(
                     55, ReportVersionId: 1, ProjectId: 3, PeriodKey: Period,

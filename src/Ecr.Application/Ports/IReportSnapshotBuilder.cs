@@ -25,15 +25,29 @@ public interface IReportSnapshotBuilder
     /// <summary>Перелік побудованих зрізів.</summary>
     /// <param name="projectId">Проєкт; <c>null</c> — усі.</param>
     /// <param name="periodKey">Період; <c>null</c> — усі.</param>
+    /// <param name="visibleProjectIds">
+    /// Проєкти, які вільно бачити тому, хто питає; <c>null</c> — без обмеження
+    /// (системний виклик, не запит користувача). Порожній перелік означає
+    /// «жодного», а не «усі».
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⚠ У перелік входять час побудови й контрольна сума. Споживач зрізу —
     /// SSRS і людина, яка звіряє звіт, — має бачити, <b>на яких даних</b> його
     /// побудовано: два зрізи однієї версії за один період відрізняються лише
     /// цим, і без обох полів вибрати правильний неможливо.
+    /// <para>
+    /// ⛔ Q-239. Фільтр за грантами стоїть саме ТУТ, у запиті, а не в
+    /// обробнику над уже вибраною сторінкою (як у
+    /// <c>ListDocumentsHandler</c>). Причина — стеля <c>MaxSnapshots</c> і
+    /// відсутність курсора: перелік бере 500 НАЙНОВІШИХ зрізів усієї бази, і
+    /// відсіювання чужих після вибірки лишало б користувача з порожнім
+    /// переліком щоразу, коли 500 останніх побудов належать іншим проєктам —
+    /// тобто перетворювало б фікс доступу на втрату власних даних.
+    /// </para>
     /// </remarks>
     public Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
-        int? projectId, int? periodKey, CancellationToken ct);
+        int? projectId, int? periodKey, IReadOnlyCollection<int>? visibleProjectIds, CancellationToken ct);
 }
 
 /// <summary>Зріз у переліку.</summary>
