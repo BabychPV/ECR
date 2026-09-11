@@ -131,41 +131,47 @@ public sealed class SaveFormulaDefHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці (той самий клас дефекту, що Q-243).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            existing = new FormulaDef(table.Id, scope, command.Expression, command.Dialect);
-
-            if (scope == FormulaScope.Column)
+            if (existing is null)
             {
-                existing.AssignColumn(resolvedId);
+                existing = new FormulaDef(table.Id, scope, command.Expression, command.Dialect);
+
+                if (scope == FormulaScope.Column)
+                {
+                    existing.AssignColumn(resolvedId);
+                }
+                else
+                {
+                    existing.AssignRow(resolvedId);
+                }
+
+                table.AddFormula(existing);
+
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
+                // SaveSheetDefHandler: аудит несе `EntityId`, якого в щойно
+                // доданої сутності ще немає до `SaveChanges`.
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }
             else
             {
-                existing.AssignRow(resolvedId);
+                existing.SetExpression(command.Expression);
+                existing.SetDialect(command.Dialect);
             }
 
-            table.AddFormula(existing);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(FormulaDef), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
-            // SaveSheetDefHandler: аудит несе `EntityId`, якого в щойно
-            // доданої сутності ще немає до `SaveChanges`.
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.SetExpression(command.Expression);
-            existing.SetDialect(command.Dialect);
-        }
-
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(FormulaDef), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
-
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Той самий фікс, що й у SaveSheetDefHandler: без цього виклику
         // `GET …/structure`, прочитаний хоч раз до цієї правки, віддавав би
@@ -173,7 +179,9 @@ public sealed class SaveFormulaDefHandler(
         // опублікують.
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return Map(existing);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // — той самий довід, що в `SaveColumnDefHandler`.
+        return Map(existing!);
     }
 
     /// <summary>Область формули, яку приймає цей зріз.</summary>
@@ -350,17 +358,21 @@ public sealed class DeleteFormulaDefHandler(
         SaveTableRelationHandler.RejectBreaking(
             change, $"{tableDefId}/{scope}/{target}", hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(FormulaDef), formula.Id,
-                change, "Delete",
-                SaveFormulaDefHandler.Describe(formula), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(FormulaDef), formula.Id,
+                    change, "Delete",
+                    SaveFormulaDefHandler.Describe(formula), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        formula.SoftDelete();
+            formula.SoftDelete();
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }

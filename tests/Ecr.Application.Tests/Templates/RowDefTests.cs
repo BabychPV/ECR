@@ -40,6 +40,13 @@ public sealed class RowDefTests
 
     public RowDefTests()
     {
+        // ⛔ Q-244: обробники тепер виконують запис/аудит/SaveChanges через
+        // IUnitOfWork.ExecuteInTransactionAsync(Func<CancellationToken, Task>, ...).
+        // Без цього налаштування NSubstitute ніколи не викликає передане
+        // замикання — жодна перевірка нижче не виконалась би насправді.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         var sheet = _builder.Sheet("Water");
         _table = _builder.Table(sheet, "Main", rowMode: TableRowMode.Fixed);
         _draft.AddSheet(sheet);

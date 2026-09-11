@@ -43,6 +43,13 @@ public sealed class ValidationRuleTests
 
     public ValidationRuleTests()
     {
+        // ⛔ Q-244: обробники тепер виконують запис/аудит/SaveChanges через
+        // IUnitOfWork.ExecuteInTransactionAsync(Func<CancellationToken, Task>, ...).
+        // Без цього налаштування NSubstitute ніколи не викликає передане
+        // замикання — жодна перевірка нижче не виконалась би насправді.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         var builder = new TemplateBuilder { TemplateVersionId = 1 };
         var sheet = builder.Sheet("Water");
         _table = builder.Table(sheet, "Main");

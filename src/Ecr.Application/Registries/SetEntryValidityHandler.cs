@@ -57,6 +57,15 @@ public sealed class SetEntryValidityHandler(
         var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
         definition?.BumpDataRevision();
 
+        int affected = 0;
+
+        // ⛔ Q-244 (той самий клас дефекту, що Q-243): коментар нижче
+        // стверджував «У ТІЙ САМІЙ транзакції», хоч жодної спільної
+        // транзакції не було — `scanner.RescanForEntryAsync` (`ExecuteUpdateAsync`)
+        // автокомітився окремо від аудиту (сирий SQL без відкритої
+        // транзакції) і від фінального `SaveChangesAsync`. Тепер усе троє —
+        // одним замиканням `IUnitOfWork.ExecuteInTransactionAsync`.
+        //
         // ⚠ У ТІЙ САМІЙ транзакції, що й сама зміна вікна. Інакше між двома
         // комітами існує стан, у якому запис уже нечинний, а рядки ще не
         // позначені: Submit у цю мить проходить і створює зріз, який нічна
@@ -64,24 +73,27 @@ public sealed class SetEntryValidityHandler(
         //
         // Сканер працює В ОБИДВА боки: звуження ставить ознаку, розширення —
         // знімає (ФВ-8.13a).
-        var affected = await scanner.RescanForEntryAsync(registryEntryId, ct).ConfigureAwait(false);
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            affected = await scanner.RescanForEntryAsync(registryEntryId, innerCt).ConfigureAwait(false);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                ChangedAt: clock.UtcNow,
-                TemplateVersionId: 0,
-                EntityType: "dic.RegistryEntry",
-                EntityId: checked((int)registryEntryId),
-                ChangeClass: Domain.Enums.ChangeClass.Breaking,
-                Operation: "SetValidity",
-                OldJson: Window(previousFrom, previousTo),
-                NewJson: Window(from, to),
-                ChangeReason: $"Перераховано рядків: {affected}.",
-                ChangedByUserId: userId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+                    TemplateVersionId: 0,
+                    EntityType: "dic.RegistryEntry",
+                    EntityId: checked((int)registryEntryId),
+                    ChangeClass: Domain.Enums.ChangeClass.Breaking,
+                    Operation: "SetValidity",
+                    OldJson: Window(previousFrom, previousTo),
+                    NewJson: Window(from, to),
+                    ChangeReason: $"Перераховано рядків: {affected}.",
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // Повертається масштаб наслідку, а не «ок»: той, хто звузив вікно, має
         // бачити, скільки рядків щойно заблокував.

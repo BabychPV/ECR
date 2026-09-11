@@ -102,52 +102,60 @@ public sealed class SaveRowDefHandler(
 
         var oldJson = existing is null ? null : Describe(existing);
 
-        if (existing is null)
+        // ⛔ Q-244: «запис → аудит → SaveChanges» — одним замиканням
+        // `IUnitOfWork.ExecuteInTransactionAsync`, коміт рівно один,
+        // наприкінці (той самий клас дефекту, що Q-243).
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            // ⚠ Ordinal, якщо не переданий явно, — за наявними рядками: новий
-            // рядок стає ОСТАННІМ у порядку показу (`SaveSheetDefHandler`).
-            var ordinal = command.Ordinal
-                ?? (table.Rows.Count == 0 ? 0 : table.Rows.Max(r => r.Ordinal) + 1);
-
-            existing = new RowDef(tableDefId, rowKey, ordinal, label, command.RowKind);
-            existing.SetReadOnly(command.IsReadOnly);
-            existing.SetParent(parentRowDefId);
-
-            table.AddRow(existing);
-
-            // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
-            // `SaveSheetDefHandler`. Аудит несе `EntityId`; у щойно доданої
-            // сутності його ще немає до `SaveChanges`.
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            existing.Rename(label);
-            existing.SetReadOnly(command.IsReadOnly);
-            existing.SetParent(parentRowDefId);
-
-            if (command.Ordinal is { } ordinal)
+            if (existing is null)
             {
-                existing.Reorder(ordinal);
+                // ⚠ Ordinal, якщо не переданий явно, — за наявними рядками: новий
+                // рядок стає ОСТАННІМ у порядку показу (`SaveSheetDefHandler`).
+                var ordinal = command.Ordinal
+                    ?? (table.Rows.Count == 0 ? 0 : table.Rows.Max(r => r.Ordinal) + 1);
+
+                existing = new RowDef(tableDefId, rowKey, ordinal, label, command.RowKind);
+                existing.SetReadOnly(command.IsReadOnly);
+                existing.SetParent(parentRowDefId);
+
+                table.AddRow(existing);
+
+                // ⛔ Запис ПЕРЕД аудитом, і лише для створення — так само, як
+                // `SaveSheetDefHandler`. Аудит несе `EntityId`; у щойно доданої
+                // сутності його ще немає до `SaveChanges`.
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }
-        }
+            else
+            {
+                existing.Rename(label);
+                existing.SetReadOnly(command.IsReadOnly);
+                existing.SetParent(parentRowDefId);
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(RowDef), existing.Id,
-                change, oldJson is null ? "Create" : "Update",
-                oldJson, Describe(existing), ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+                if (command.Ordinal is { } ordinal)
+                {
+                    existing.Reorder(ordinal);
+                }
+            }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(RowDef), existing.Id,
+                    change, oldJson is null ? "Create" : "Update",
+                    oldJson, Describe(existing), ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         // ⛔ Див. коментар класу: без цього виклику `GET …/structure`,
         // прочитаний хоч раз до цієї правки, віддавав би знімок без щойно
         // доданого чи зміненого рядка, доки версію не опублікують.
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
-        return Map(existing, table);
+        // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
+        // — той самий довід, що в `SaveColumnDefHandler`.
+        return Map(existing!, table);
     }
 
     /// <summary>Розв'язує ключ батьківського рядка в межах ТІЄЇ САМОЇ таблиці.</summary>
@@ -283,17 +291,21 @@ public sealed class DeleteRowDefHandler(
 
         SaveTableRelationHandler.RejectBreaking(change, code, hasDocuments, "Видалення");
 
-        await audit.WriteStructureChangeAsync(
-            new StructureChangeRecord(
-                clock.UtcNow, templateVersionId, nameof(RowDef), row.Id,
-                change, "Delete",
-                SaveRowDefHandler.Describe(row), NewJson: null, ChangeReason: null,
-                ChangedByUserId: userId, CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow, templateVersionId, nameof(RowDef), row.Id,
+                    change, "Delete",
+                    SaveRowDefHandler.Describe(row), NewJson: null, ChangeReason: null,
+                    ChangedByUserId: userId, CorrelationId: null),
+                innerCt).ConfigureAwait(false);
 
-        row.SoftDelete(userId, clock.UtcNow);
+            row.SoftDelete(userId, clock.UtcNow);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
