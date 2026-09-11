@@ -131,7 +131,15 @@ internal sealed class AccountAndNetworkStep : IWizardStep
         layout.Controls.Add(_portUpDown, 1, 0);
 
         _msiPathBox = new TextBox { Dock = DockStyle.Fill };
-        var browseButton = new Button { Text = "Browse..." };
+
+        // ⛔ Q-227 (аудит/людина): без AutoSize=true кнопка бере фіксований
+        // дефолтний розмір WinForms (~75×23px) незалежно від довжини тексту
+        // — на реальному екрані людини "Browse..." саме тому виглядав
+        // затиснутим/обрізаним, не через брак місця у вікні. Кожна інша
+        // кнопка в цьому дереві (MainForm.cs: Cancel/Back/Next) вже має
+        // AutoSize=true; ця лишалась єдиним винятком у цьому файлі —
+        // перевірено решту контролів нижче, більше пропусків нема.
+        var browseButton = new Button { Text = "Browse...", AutoSize = true };
         browseButton.Click += (_, _) => BrowseForMsi();
 
         var detected = TryDetectMsi();

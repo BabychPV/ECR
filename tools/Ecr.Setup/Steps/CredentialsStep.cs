@@ -20,12 +20,32 @@ internal sealed class CredentialsStep : IWizardStep
 
     public Control BuildView()
     {
+        // ⛔ Q-227 (аудит/людина): на реальному екрані напис-пояснення
+        // (нижче, багаторядковий через MaximumSize) НАКЛАДАВСЯ на поля
+        // "Password:"/"Confirm:". Причина — той самий клас крихкості, що
+        // й Q-218 (Dock=Fill+AutoSize на TableLayoutPanel — задокументована
+        // пастка WinForms), лише тут він проявляється як накладання рядків,
+        // а не як групування радіокнопок: без ЯВНОГО RowStyle для кожного
+        // рядка (раніше не було жодного RowStyles.Add — рахунок висоти
+        // рядків лишався на неявній поведінці TableLayoutPanel), висота під
+        // багаторядковий Label резервувалась ненадійно, і наступний рядок
+        // (fields) лягав, не дочекавшись реальної висоти попереднього.
+        // Фікс — явний RowStyle(SizeType.AutoSize) на кожен рядок і явні
+        // (колонка, рядок) в Controls.Add — ТОЧНО той підхід, що вже
+        // працює в InstallStep.BuildView (RowCount + RowStyles.Add на
+        // кожен рядок), а не нова, неперевірена ідея.
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
+            RowCount = 3,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var explanation = new Label
         {
@@ -34,7 +54,7 @@ internal sealed class CredentialsStep : IWizardStep
             MaximumSize = new Size(520, 0),
             Margin = new Padding(4, 4, 4, 12),
         };
-        root.Controls.Add(explanation);
+        root.Controls.Add(explanation, 0, 0);
 
         var fields = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -49,7 +69,7 @@ internal sealed class CredentialsStep : IWizardStep
         fields.Controls.Add(new Label { Text = "Confirm:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 1);
         fields.Controls.Add(_confirmBox, 1, 1);
 
-        root.Controls.Add(fields);
+        root.Controls.Add(fields, 0, 1);
 
         _showPasswordCheckBox = new CheckBox { Text = "Show passwords", AutoSize = true, Margin = new Padding(4, 8, 4, 0) };
         _showPasswordCheckBox.CheckedChanged += (_, _) =>
@@ -57,7 +77,7 @@ internal sealed class CredentialsStep : IWizardStep
             _passwordBox!.UseSystemPasswordChar = !_showPasswordCheckBox!.Checked;
             _confirmBox!.UseSystemPasswordChar = !_showPasswordCheckBox.Checked;
         };
-        root.Controls.Add(_showPasswordCheckBox);
+        root.Controls.Add(_showPasswordCheckBox, 0, 2);
 
         return root;
     }
