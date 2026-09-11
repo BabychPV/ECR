@@ -71,8 +71,23 @@
 
 .PARAMETER Database
     Ім'я ЦІЛЬОВОЇ бази — не тимчасової, яку скрипт міг би сам створити й
-    видалити (на відміну від verify-sql-scripts.ps1). База має існувати
-    заздалегідь, з потрібним collation (`docs/build/10-installer.md`).
+    видалити (на відміну від verify-sql-scripts.ps1). Без `-CreateDatabaseIfMissing`
+    база має існувати заздалегідь, з потрібним collation
+    (`docs/build/10-installer.md`); з прапорцем — скрипт створить її сам,
+    тим самим collation (`Latin1_General_100_CI_AS_SC`, `02a-db-schema.md` §1.0).
+
+.PARAMETER CreateDatabaseIfMissing
+    Директива людини (2026-09-11): якщо `-Database` не існує на цільовому
+    інстансі — створити її самому (`CREATE DATABASE ... COLLATE
+    Latin1_General_100_CI_AS_SC`), а не вимагати, щоб адміністратор БД
+    зробив це заздалегідь. Використовує ТІ САМІ облікові дані, під якими й
+    так виконується крок схеми (`-SqlLogin`/інтегровані), — не нові права:
+    той, хто запускає цей скрипт (чи майстер, що його хостить), має мати
+    право `CREATE DATABASE` на інстансі. Не змінює `D-66`/`10-installer.md`
+    §1.3: обліковий запис ЗАСТОСУНКУ (`-ServiceAccount`) і далі без
+    DDL-прав, MSI і далі не торкається бази — це стосується лише
+    ОРКЕСТРАТОРА, керованого людиною з доступом до БД. Без прапорця —
+    попередня поведінка: відсутня база зупиняє скрипт з поясненням.
 
 .PARAMETER ServiceAccount
     `DOMAIN\ecr-svc$` (gMSA, рекомендовано — без пароля) або `DOMAIN\user`.
@@ -198,7 +213,8 @@ param(
     [string] $MsiPath,
     [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [switch] $SkipSchema,
-    [switch] $FirstDeployment
+    [switch] $FirstDeployment,
+    [switch] $CreateDatabaseIfMissing
 )
 
 $ErrorActionPreference = 'Stop'
@@ -424,13 +440,39 @@ function Invoke-DeploySql {
     }
 }
 
-# Перевірка з'єднання — читає, нічого не змінює, але й вона під ShouldProcess:
-# контракт -WhatIf каже прямо «жодного sqlcmd», без винятків для читання.
-Invoke-DeploySql -TargetDb 'master' -Query 'SELECT 1;'
-Invoke-DeploySql -TargetDb 'master' -Query "IF DB_ID('$Database') IS NULL RAISERROR('database missing', 16, 1);"
-
 try {
+    # ⛔ Q-232: пароль виставляється ПЕРЕД першим-ліпшим викликом sqlcmd,
+    # не після. Перевірка з'єднання нижче так само потребує автентифікації,
+    # коли задано -SqlLogin, — раніше пароль з'являвся аж на кроці схеми, і
+    # ця сама перевірка при SQL-автентифікації впала б без нього.
     if ($SqlPassword) { $env:SQLCMDPASSWORD = ConvertFrom-SecureStringPlain $SqlPassword }
+
+    # Перевірка з'єднання — читає, нічого не змінює, але й вона під ShouldProcess:
+    # контракт -WhatIf каже прямо «жодного sqlcmd», без винятків для читання.
+    Invoke-DeploySql -TargetDb 'master' -Query 'SELECT 1;'
+
+    if ($CreateDatabaseIfMissing) {
+        # ⛔ Q-232 (директива людини, 2026-09-11): раніше відсутня база
+        # ЗАВЖДИ зупиняла скрипт — адміністратор БД мав створити її
+        # заздалегідь (`docs/build/11-install-guide.md` §0). Людина, що
+        # запускає інсталятор, прямо дозволила автоматичне створення для
+        # випадку, коли вона сама має право CREATE DATABASE. `sp_executesql`
+        # — CREATE DATABASE не можна умовно виконати в тому самому пакеті,
+        # що й IF (обмеження SQL Server), тому він — окремий динамічний
+        # пакет усередині IF. Collation фіксовано тут же (02a §1.0) — не
+        # лишається на волю дефолту інстансу; 01-filegroups.sql далі лише
+        # ПЕРЕВІРЯЄ його, не задає.
+        Invoke-DeploySql -TargetDb 'master' -Query @"
+IF DB_ID('$Database') IS NULL
+BEGIN
+    DECLARE @sql nvarchar(max) = N'CREATE DATABASE ' + QUOTENAME(N'$Database') + N' COLLATE Latin1_General_100_CI_AS_SC;';
+    EXEC sp_executesql @sql;
+END
+"@
+    }
+    else {
+        Invoke-DeploySql -TargetDb 'master' -Query "IF DB_ID('$Database') IS NULL RAISERROR('database missing', 16, 1);"
+    }
 
     # ---------------------------------------------------------------------
     if ($SkipSchema) {

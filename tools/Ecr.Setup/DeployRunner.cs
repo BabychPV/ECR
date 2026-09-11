@@ -44,7 +44,13 @@ internal sealed class DeployRunner
             .AddParameter("Database", state.Database)
             .AddParameter("MsiPath", state.MsiPath)
             .AddParameter("AppPort", state.Port)
-            .AddParameter("ConnectionString", BuildConnectionString(state));
+            .AddParameter("ConnectionString", BuildConnectionString(state))
+            // ⛔ Q-232: директива людини (2026-09-11) — майстер запускає
+            // людина з доступом до бази, тож він завжди дозволяє
+            // deploy-ecr.ps1 створити цільову базу самому, якщо її ще
+            // немає, замість вимагати окремого кроку адміністратора БД
+            // заздалегідь (`docs/build/11-install-guide.md` §0, оновлено).
+            .AddParameter("CreateDatabaseIfMissing");
 
         if (state.Mode == WizardMode.FirstDeployment)
         {
