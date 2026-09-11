@@ -5,23 +5,24 @@ using System.Globalization;
 namespace Ecr.Setup;
 
 /// <summary>
-/// Перевіряє, чи існує цільова база даних, ДО того як користувач дійде до
-/// кроку 6 (Installation).
+/// Перевіряє, чи ДОСЯЖНИЙ цільовий SQL Server, ДО того як користувач
+/// дійде до кроку 6 (Installation).
 /// </summary>
 /// <remarks>
 /// ⛔ Q-228: реальний прогін людиною — майстер довів до кроку 6, запустив
 /// deploy-ecr.ps1, і той упав на "Крок 1/7: передумови" з сирим текстом
-/// sqlcmd ("database missing"). Причина не в deploy-ecr.ps1: інсталятор і
-/// скрипт СВІДОМО не створюють базу (`docs/build/11-install-guide.md` §0,
-/// `10-installer.md` §1.3) — це лишається адміністратору БД. Дефект був у
-/// тому, що ніщо в майстрі не перевіряло цю передумову раніше кроку 6:
-/// користувач вводить SqlInstance/Database на кроці 3 (<see
-/// cref="Steps.DatabaseStep"/>), а дізнається про відсутню базу лише після
-/// ще трьох кроків і повного запуску встановлення.
+/// sqlcmd. Ніщо в майстрі не перевіряло сервер раніше кроку 6: користувач
+/// вводить SqlInstance/Database на кроці 3 (<see
+/// cref="Steps.DatabaseStep"/>), а дізнається про недосяжний сервер лише
+/// після ще трьох кроків і повного запуску встановлення.
 ///
-/// Не змінює політику ("хто створює базу") — лише переносить МОМЕНТ, коли
-/// про порушену передумову стає відомо, туди, де її ввели, з людським
-/// текстом замість коду виходу sqlcmd.
+/// ⛔ Q-232: відсутність цільової бази більше НЕ зупиняє цю перевірку —
+/// директива людини (2026-09-11) дозволила `deploy-ecr.ps1
+/// -CreateDatabaseIfMissing` створювати базу самому на кроці 6 (майстер
+/// завжди передає цей прапорець, <see cref="DeployRunner"/>), тож
+/// відсутня база на кроці 3 — це очікуваний, підтримуваний стан, а не
+/// підстава зупиняти майстра. Ця перевірка й далі підтверджує лише те, що
+/// сервер узагалі ДОСЯЖНИЙ під заданими обліковими даними.
 /// </remarks>
 internal static class SqlPreflight
 {
@@ -111,23 +112,27 @@ internal static class SqlPreflight
                 var stderr = stderrTask.GetAwaiter().GetResult();
                 var stdout = stdoutTask.GetAwaiter().GetResult();
 
-                // ⛔ Q-231: реальний прогін людиною показав "database missing"
-                // у STDOUT (RAISERROR цього sqlcmd/драйвера пише туди, не в
-                // STDERR) — перевірка лише stderr пропускала точно той
-                // випадок, для якого існує дружнє повідомлення нижче, і
-                // людина бачила загальний текст "не вдалося підключитися"
-                // замість "попросіть адміністратора створити базу".
+                // ⛔ Q-231: "database missing" на деяких машинах опиняється в
+                // STDOUT, не в STDERR — перевіряємо обидва потоки.
+                //
+                // ⛔ Q-232: і це більше НЕ помилка тут узагалі — директива
+                // людини (2026-09-11) дозволила deploy-ecr.ps1
+                // -CreateDatabaseIfMissing створити базу самому на кроці 6
+                // (майстер передає цей прапорець завжди, DeployRunner.cs).
+                // Відсутня база на кроці 3 — очікуваний, підтримуваний стан.
                 var hasDatabaseMissing =
                     stderr.Contains("database missing", StringComparison.OrdinalIgnoreCase)
                     || stdout.Contains("database missing", StringComparison.OrdinalIgnoreCase);
 
-                error = hasDatabaseMissing
-                    ? $"Базу '{database}' не знайдено на '{sqlInstance}'. Інсталятор і deploy-ecr.ps1 " +
-                      "базу НЕ створюють (install-guide.md §0) — попросіть адміністратора БД спершу " +
-                      "створити порожню базу з цим іменем."
-                    : $"Не вдалося підключитися до '{sqlInstance}'. Перевірте назву інстансу, " +
-                      "автентифікацію й мережевий доступ.\n\n" +
-                      DiagnosticTail(process.ExitCode, stdout, stderr);
+                if (hasDatabaseMissing)
+                {
+                    error = string.Empty;
+                    return true;
+                }
+
+                error = $"Не вдалося підключитися до '{sqlInstance}'. Перевірте назву інстансу, " +
+                        "автентифікацію й мережевий доступ.\n\n" +
+                        DiagnosticTail(process.ExitCode, stdout, stderr);
                 return false;
             }
 
