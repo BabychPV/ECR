@@ -87,6 +87,19 @@ public sealed class PatchCellsTests
                    Arg.Any<AccessProfile>(), TableInstance,
                    Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
                .Returns(call => NewRows(call.ArgAt<IReadOnlyCollection<string>>(2), EditDecision.Allow(), EditDecision.Allow()));
+
+        // ⛔ Q-243: PersistChangesAsync тепер виконує весь блок через
+        // IUnitOfWork.ExecuteInTransactionAsync(Func<CancellationToken, Task>, ...).
+        // Без цього налаштування NSubstitute повертає typed-default
+        // (Task.CompletedTask) і НІКОЛИ не викликає передане замикання — тобто
+        // жодна з перевірок нижче (cellStore.ApplyAsync, аудит, SaveChanges)
+        // не виконалась би НАСПРАВДІ, і тести мовчки перестали б щось
+        // доводити. Тут — виклик замикання НАПРАВДУ, тим самим ct, що йому
+        // передали (те, що атомарність/rollback дотримані на РЕАЛЬНому
+        // DbContext — доводить `PatchCellsAtomicityTests` в
+        // Ecr.Infrastructure.Tests проти реального SQL Server, не тут).
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
     }
 
     private static void SetId(ColumnDef column, int id)
