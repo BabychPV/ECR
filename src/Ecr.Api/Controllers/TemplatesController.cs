@@ -42,11 +42,19 @@ public sealed class TemplatesController(
         return Created($"/api/v1/templates/{templateId}", new Contracts.TemplateIdResponse(templateId));
     }
 
-    /// <summary>Версії шаблону. Право <c>Template.View</c>.</summary>
+    /// <summary>Сторінка версій шаблону. Право <c>Template.View</c>.</summary>
+    /// <remarks>
+    /// ⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,
+    /// без жодного способу передати `cursor` чи `limit` від клієнта. Версія
+    /// шаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той
+    /// самий патерн, що вже в <see cref="List"/> поруч.
+    /// </remarks>
     [HttpGet("{id:int}/versions")]
-    [ProducesResponseType<IReadOnlyList<Ecr.Application.Ports.TemplateVersionSummary>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListVersions(int id, CancellationToken ct)
-        => Ok(await listVersions.HandleAsync(id, new CursorRequest(), ct).ConfigureAwait(false));
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.TemplateVersionSummary>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListVersions(
+        int id, [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
+        => Ok(await listVersions.HandleAsync(id, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
+            .ConfigureAwait(false));
 
     /// <summary>Створює версію шаблону. Право <c>Template.Edit</c>.</summary>
     /// <remarks><c>CloneFromVersionId</c> задає клонування замість порожньої версії.</remarks>

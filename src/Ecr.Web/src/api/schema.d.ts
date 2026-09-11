@@ -6731,10 +6731,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Версії шаблону. Право `Template.View`. */
+        /**
+         * Сторінка версій шаблону. Право `Template.View`.
+         * @description ⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,
+         *     без жодного способу передати `cursor` чи `limit` від клієнта. Версія
+         *     шаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той
+         *     самий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, CancellationToken ct) поруч.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    limit?: number;
+                    cursor?: string;
+                };
                 header?: never;
                 path: {
                     id: number;
@@ -6749,9 +6758,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["TemplateVersionSummary"][];
-                        "text/json": components["schemas"]["TemplateVersionSummary"][];
-                        "text/plain": components["schemas"]["TemplateVersionSummary"][];
+                        "application/json": components["schemas"]["PagedResultOfTemplateVersionSummary"];
+                        "text/json": components["schemas"]["PagedResultOfTemplateVersionSummary"];
+                        "text/plain": components["schemas"]["PagedResultOfTemplateVersionSummary"];
                     };
                 };
             };
@@ -8929,6 +8938,19 @@ export interface components {
         PagedResultOfTemplateSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["TemplateSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfTemplateVersionSummary: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["TemplateVersionSummary"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**

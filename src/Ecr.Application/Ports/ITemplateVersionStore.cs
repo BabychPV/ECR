@@ -95,7 +95,7 @@ public interface ITemplateVersionStore
         int sourceVersionId, string newVersion, int userId, DateTime utcNow, CancellationToken ct);
 
     /// <summary>Версії шаблону зі станом і ревізією.</summary>
-    public Task<IReadOnlyList<TemplateVersionSummary>> ListVersionsAsync(
+    public Task<Common.PagedResult<TemplateVersionSummary>> ListVersionsAsync(
         int templateId, Common.CursorRequest page, CancellationToken ct);
 
     /// <summary>Створює шаблон і повертає його ідентифікатор.</summary>

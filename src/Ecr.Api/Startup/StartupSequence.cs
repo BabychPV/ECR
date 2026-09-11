@@ -102,7 +102,19 @@ public static partial class StartupSequence
         {
             var connectionString = db.Database.GetConnectionString()
                 ?? throw new InvalidOperationException("У контексту немає рядка підключення.");
-            await probe.ProbeAsync(connectionString, Domain.Enums.SqlEditionMode.Auto, CancellationToken.None)
+
+            // ⛔ Q-223: раніше тут БУВ хардкод `SqlEditionMode.Auto` — ключ
+            // `Database:EditionMode` існував у appsettings.json (з іншим
+            // значенням у Development!) і НІКОЛИ не читався. Developer/
+            // Evaluation повідомляють EngineEdition = 3 й зовні невідрізнювані
+            // від Enterprise (`SqlCapabilitiesProbe`), тож у проді режим
+            // мусить бути заданий явно, а не вгаданий автовизначенням.
+            var configuredMode = Enum.TryParse<Domain.Enums.SqlEditionMode>(
+                app.Configuration["Database:EditionMode"], ignoreCase: true, out var parsed)
+                ? parsed
+                : Domain.Enums.SqlEditionMode.Auto;
+
+            await probe.ProbeAsync(connectionString, configuredMode, CancellationToken.None)
                 .ConfigureAwait(false);
 
             LogSqlMode(logger, probe.EditionName, probe.EffectiveMode, probe.IsReadCommittedSnapshotOn);

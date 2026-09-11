@@ -122,6 +122,9 @@ export type TemplatePage = Schemas['PagedResultOfTemplateSummary'];
 /** Версія шаблону в переліку. */
 export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 
+/** Сторінка версій шаблону. */
+export type TemplateVersionPage = Schemas['PagedResultOfTemplateVersionSummary'];
+
 /** Структура версії шаблону: аркуші, таблиці, колонки. */
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
 export type PeriodPolicyDto = Schemas['PeriodPolicyDto'];
