@@ -111,7 +111,17 @@ internal static class SqlPreflight
                 var stderr = stderrTask.GetAwaiter().GetResult();
                 var stdout = stdoutTask.GetAwaiter().GetResult();
 
-                error = stderr.Contains("database missing", StringComparison.OrdinalIgnoreCase)
+                // ⛔ Q-231: реальний прогін людиною показав "database missing"
+                // у STDOUT (RAISERROR цього sqlcmd/драйвера пише туди, не в
+                // STDERR) — перевірка лише stderr пропускала точно той
+                // випадок, для якого існує дружнє повідомлення нижче, і
+                // людина бачила загальний текст "не вдалося підключитися"
+                // замість "попросіть адміністратора створити базу".
+                var hasDatabaseMissing =
+                    stderr.Contains("database missing", StringComparison.OrdinalIgnoreCase)
+                    || stdout.Contains("database missing", StringComparison.OrdinalIgnoreCase);
+
+                error = hasDatabaseMissing
                     ? $"Базу '{database}' не знайдено на '{sqlInstance}'. Інсталятор і deploy-ecr.ps1 " +
                       "базу НЕ створюють (install-guide.md §0) — попросіть адміністратора БД спершу " +
                       "створити порожню базу з цим іменем."
