@@ -26,6 +26,22 @@ public sealed class PiSqlClientDataSource(
     /// </remarks>
     public const int MaxCatalogRows = 20_000;
 
+    /// <summary>Скільки разів повторювати операцію, яка відмовила транзитивно.</summary>
+    /// <remarks>
+    /// ⛔ Q-251 (аудит): раніше цього поля не було зовсім — ні відкриття
+    /// з'єднання, ні читання не повторювались жодного разу, на відміну від
+    /// сусіднього <see cref="PiWebApiDataSource"/>, де саме це правило вже
+    /// діяло (`MaxAttempts`). Розбіжність не пояснювалась жодним коментарем
+    /// поряд, хоча решта файлу пояснює кожне архітектурне рішення — це був
+    /// недогляд, а не свідомий вибір. Значення взято тим самим, що й там: три
+    /// спроби, не «поки не вийде» — джерело, яке лежить, від наполегливості
+    /// не піднімається.
+    /// </remarks>
+    public const int MaxAttempts = 3;
+
+    /// <summary>Базова затримка між спробами; далі подвоюється (як у <see cref="PiWebApiDataSource"/>).</summary>
+    public static TimeSpan RetryDelay => TimeSpan.FromSeconds(2);
+
     private const string SourceUnavailable = "ECR-INT-0503";
 
     /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
@@ -156,9 +172,12 @@ public sealed class PiSqlClientDataSource(
 
         var points = new List<SourceDataPoint>();
 
-        using var reader = await command
-            .ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct)
-            .ConfigureAwait(false);
+        // ⛔ Q-251: те саме читання, що йшло без жодного повтору — разовий
+        // таймаут RTQP під навантаженням одразу провалював увесь інтервал.
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
 
         while (points.Count < request.MaxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -237,7 +256,15 @@ public sealed class PiSqlClientDataSource(
         var opened = false;
         try
         {
-            await connection.OpenAsync(ct).ConfigureAwait(false);
+            // ⛔ Q-251: відкриття тепер ретраїться (`RetryAsync`) — коротка
+            // мережева негода ODBC чи разовий таймаут RTQP більше не
+            // провалює весь інтервал з першої ж спроби. Відмова в
+            // автентифікації (SQLSTATE 28000) лишається НЕ транзитивною:
+            // `IsTransientOdbcFailure` навмисно повертає для неї `false`.
+            await RetryAsync(
+                async () => { await connection.OpenAsync(ct).ConfigureAwait(false); return true; },
+                IsTransientOdbcFailure,
+                ct).ConfigureAwait(false);
             opened = true;
             return connection;
         }
@@ -293,6 +320,54 @@ public sealed class PiSqlClientDataSource(
         return false;
     }
 
+    /// <summary>Чи можна повторити цю відмову ODBC — усе, крім автентифікації.</summary>
+    /// <remarks>
+    /// ⛔ Q-251: відмова в автентифікації — не транзитивна (`H-20`-подібна
+    /// логіка): той самий пароль дасть ту саму відповідь, а повтор лише
+    /// подовжить збір на час усіх спроб замість негайного сигналу, що
+    /// облікові дані джерела треба поправити.
+    /// </remarks>
+    private static bool IsTransientOdbcFailure(Exception ex)
+        => ex is OdbcException odbc && !IsAuthenticationFailure(odbc);
+
+    /// <summary>
+    /// Повторює операцію з експоненційною затримкою — той самий цикл, що й
+    /// <c>PiWebApiDataSource.GetAsync</c>, тут узагальнений: точок виклику
+    /// дві (відкриття з'єднання й читання), а не одна.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Публічний і узагальнений навмисно (`Q-251`): живого PI SQL Client
+    /// у контурі розробки немає, а <see cref="OdbcException"/> ззовні збірки
+    /// не сконструюєш — обидва конструктори в System.Data.Odbc внутрішні.
+    /// Це єдиний спосіб перевірити сам цикл повторів напряму — підставним
+    /// <paramref name="operation"/> і <paramref name="isTransient"/>, — так
+    /// само, як <c>PiWebApiDataSource</c> не потребує живого PI Web API для
+    /// перевірки свого ретраю, бо там підміняється транспорт HTTP.
+    /// </remarks>
+    /// <param name="operation">Операція, яку повторюємо.</param>
+    /// <param name="isTransient">Чи варто повторювати саме цей виняток.</param>
+    /// <param name="ct">Скасування: під час очікування між спробами теж діє.</param>
+    public static async Task<T> RetryAsync<T>(
+        Func<Task<T>> operation, Func<Exception, bool> isTransient, CancellationToken ct)
+    {
+        var delay = RetryDelay;
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await operation().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt < MaxAttempts && !ct.IsCancellationRequested && isTransient(ex))
+            {
+                // Транзитивна відмова — впаде в затримку й повтор нижче.
+            }
+
+            await Task.Delay(delay, ct).ConfigureAwait(false);
+            delay += delay;
+        }
+    }
+
     /// <summary>Запит із конфігурації або типовий.</summary>
     private string Query(string key, string fallback)
     {
@@ -309,9 +384,13 @@ public sealed class PiSqlClientDataSource(
         command.CommandText = Query(TemplateQueryKey, DefaultTemplateQuery);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
 
-        using var reader = await command
-            .ExecuteReaderAsync(CommandBehavior.SingleRow, ct)
-            .ConfigureAwait(false);
+        // ⛔ Q-251: цей виклик — частина шляху `ReadAsync` (єдиний викликач
+        // нижче), тож повторюється тим самим правилом, а не лишається дірою
+        // всередині щойно виправленого методу.
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
 
         return await reader.ReadAsync(ct).ConfigureAwait(false) ? reader["Template"] as string : null;
     }
