@@ -42,6 +42,22 @@ import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
+ * Аргументи для кнопки-тумблера видимості пароля (`Q-260`).
+ *
+ * ⛔ Mantine ставить на цю кнопку `aria-hidden="true"` і `tabIndex={-1}` за
+ * замовчуванням, доки `visibilityToggleButtonProps` цього не перекриє
+ * (`PasswordInput.mjs`) — сама наявність об'єкта вже знімає `aria-hidden`, а
+ * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
+ * для миші: клавіатура й читалка його не бачили взагалі.
+ *
+ * ⚠ Напис — ЛІТЕРАЛ, не `t()`: рядки цього застосунку йдуть із серверного
+ * каталогу (`09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський.
+ * Ключа під цей напис там ще немає; голий `t()` без рядка в каталозі показав
+ * би читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
+ */
+const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/**
  * Адміністрування безпеки: ролі, матриця прав, користувачі.
  *
  * ⚠ Матриця показує **оголошені** права ролей. Ефективні права конкретного
@@ -555,6 +571,7 @@ export function SecurityPage(): JSX.Element {
               description={t('security.oneTimePasswordHint')}
               value={oneTimePassword}
               onChange={(event) => setOneTimePassword(event.currentTarget.value)}
+              visibilityToggleButtonProps={passwordToggleProps}
             />
             <Text size="xs" c="dimmed" mt="xs">
               {t('security.localHint')}
