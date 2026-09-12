@@ -1,0 +1,33 @@
+/*
+ * Фейд контейнера маршруту (`PR nav-arch #7`, директива B6/D).
+ *
+ * ⛔ Жодного числа тут. Тривалість і крива приходять інлайн-стилем
+ * (`--ecr-route-motion-duration`/`--ecr-route-motion-easing`,
+ * `useRouteTransitionFocus.ts`) із `motionTokens.ts` — єдиного місця, де ці
+ * значення оголошені (`theme.other.motionBase`/`motionEasing`). Цей файл
+ * описує лише ФОРМУ переходу (що саме анімується), не ЯК ДОВГО.
+ *
+ * ⚠ `prefers-reduced-motion` тут НЕ повторюється: `motion.css` (`ФВ-14.28`)
+ * уже гасить `animation-duration` до `0.01ms` глобально для будь-якого
+ * елемента — цей клас підпорядкований тому самому правилу. Друга,
+ * незалежна перевірка стоїть у JS (`useRouteTransitionFocus.ts`,
+ * `matchMedia`) і не ДОДАЄ клас нижче взагалі, коли рух вимкнено — два
+ * незалежних гальма на один і той самий випадок, не два різних.
+ */
+.ecr-route-transition--enter {
+  animation-name: ecr-route-fade-in;
+  animation-duration: var(--ecr-route-motion-duration);
+  animation-timing-function: var(--ecr-route-motion-easing);
+}
+
+@keyframes ecr-route-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
