@@ -157,6 +157,16 @@ $env:ECR_ConnectionStrings__Ecr = $connection
 $env:ECR_Bootstrap__Password = $bootstrapPassword
 $env:ASPNETCORE_URLS = $base
 
+# ⛔ Q-259 (аудит): без цього рядка `-Port` вимикав лише бекенд — Vite
+# (`vite.config.ts`) далі проксіював `/api` на зашитий `http://localhost:5080`
+# незалежно від `$base`. Ізольований лабораторний прогін (свій `-Database` й
+# свій `-Port`, щоб не заважати паралельним лініям) із портом, відмінним від
+# 5080, падав на самому першому екрані — `ECONNREFUSED` у проксі, а не
+# дефект застосунку. `npm run dev`, який запускає Playwright у
+# `webServer.command` (`playwright.config.ts`), успадковує середовище цього
+# процесу, тому досить виставити змінну тут, ДО кроку 10.
+$env:ECR_API_URL = $base
+
 # ⛔ Cookie автентифікації типово `Secure` і по HTTP не надсилається — вхід
 # проходив би, а наступний виклик отримував 401. Змінна діє лише на цей
 # тимчасовий процес.

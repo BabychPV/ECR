@@ -122,7 +122,52 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
       await page.keyboard.press('Enter');
     }
 
-    // ── 9. Вихід ─────────────────────────────────────────────────────────
+    // ── 9. Подання ───────────────────────────────────────────────────────
+    // ⛔ Q-259 (аудит): до цього рядка прохід перевіряв «вставити, зберегти,
+    // за наявності — перевірити» і одразу переходив до виходу — жодна з двох
+    // кнопок робочого процесу (`SheetActions.tsx`), заради яких компонент і
+    // зʼявився (`A7-39`), не отримувала жодного натискання з клавіатури.
+    // Тести API й Application (`Ecr.Scenarios.Tests`,
+    // `Ecr.Application.Tests/Workflow`) доводять, що ендпоінти
+    // `submit`/`approve` працюють; жоден тест не доводив, що до них веде
+    // КНОПКА в браузері й що екран показує результат.
+    const submit = page.getByRole('button', { name: /Submit|Подати/i }).first();
+    await expect(submit, 'у шапці немає кнопки подання').toBeVisible({ timeout: 10_000 });
+
+    await expectFocusRing(page, submit, 'кнопка подання');
+    await page.keyboard.press('Enter');
+
+    // ⚠ Стан читається з бейджа активної вкладки (`DocumentPage.tsx`,
+    // `document.sheetStates`), а не з тосту: тост каже, що запит пройшов,
+    // бейдж — що інтерфейс показує РЕЗУЛЬТАТ. Значення в бейджі — сирий
+    // рядок стану сервера (`SheetState` з `transitions.ts`), не переклад,
+    // тому очікуємо саме `Submitted`, а не рядок каталогу.
+    const activeTab = page.getByRole('tab', { selected: true });
+    await expect(activeTab, 'аркуш не перейшов у Submitted').toContainText('Submitted', {
+      timeout: 15_000,
+    });
+
+    // ── 10. Затвердження ─────────────────────────────────────────────────
+    // ⛔ Другий обліковий запис із правом затвердження тут НЕ ЗНАДОБИВСЯ:
+    // `tools/e2e-stand.ps1` видає гранти НА ПРОЄКТ (`GrantLevel`,
+    // `EditRules.Effective`), і `e2e-admin` (єдиний обліковий запис цього
+    // проходу) уже має `Manage` — а `Manage` (5) ⩾ `Approve` (4), тож той
+    // самий грант, який щойно дозволив подання (`Submit`, 3), дозволяє й
+    // затвердження. Заводити другий вхід означало б перевіряти сценарій, який
+    // стенд не видає. Якби `e2e-admin` мав лише `Write`/`Submit`, довелося б
+    // або додати роль у `e2e-stand.ps1` (поза цією карткою), або зупинитися
+    // й повідомити — жодне з двох тут не знадобилося.
+    const approve = page.getByRole('button', { name: /Approve|Затвердити/i }).first();
+    await expect(approve, 'у шапці немає кнопки затвердження').toBeVisible({ timeout: 10_000 });
+
+    await expectFocusRing(page, approve, 'кнопка затвердження');
+    await page.keyboard.press('Enter');
+
+    await expect(activeTab, 'аркуш не перейшов у Approved').toContainText('Approved', {
+      timeout: 15_000,
+    });
+
+    // ── 11. Вихід ────────────────────────────────────────────────────────
     // ⛔ Вихід — теж частина проходу. До аудиту (`A7-35`) елемента виходу не
     // існувало взагалі: увійти було можна, вийти — ні.
     const menu = page.getByRole('button', { name: /e2e-admin/i }).first();
