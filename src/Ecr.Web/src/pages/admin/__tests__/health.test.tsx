@@ -101,4 +101,56 @@ describe('Дашборд здоров’я', () => {
     expect(await screen.findByText('⟦health.noChecks⟧')).toBeDefined();
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  /**
+   * Стан `partial` (директива B3, `PR nav-arch #6`) — сторінка з кількома
+   * НЕЗАЛЕЖНИМИ запитами показує ЧАСТИНУ даних, поки решта ще вантажиться чи
+   * відмовила, а не гасить усю сторінку через одну секцію.
+   *
+   * ⛔ `HealthPage` монтує ДВІ окремі `<AsyncBoundary>` (`ready`/`db`) — саме
+   * ця композиція, а не нове поле однієї межі, і є реалізацією `partial`
+   * (див. коментар `AsyncBoundary.tsx`). Тест доводить це не оглядом коду, а
+   * РІЗНИМИ відповідями на ДВА різні шляхи одночасно.
+   */
+  it('ФВ-B3 partial: /health/ready відмовляє, /health/db тим часом показує дані — обидві секції видно НЕЗАЛЕЖНО', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/health/ready')) {
+          return new Response(
+            JSON.stringify({
+              title: 'Недоступно',
+              status: 503,
+              errorCode: 'ECR-SYS-0503',
+              correlationId: 'cid-partial-1',
+            }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (url.includes('/health/db')) {
+          return new Response(JSON.stringify(sample), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify(null), { status: 200 });
+      }),
+    );
+
+    show();
+
+    // ⛔ Головне твердження: ОБИДВІ секції видно ОДНОЧАСНО, кожна у СВОЄМУ
+    // стані. Якби одна межа помилково гасила сусідню (спільний стан замість
+    // двох незалежних `<AsyncBoundary>`), «effectiveMode» нижче не
+    // з'явився б поруч із помилкою зверху.
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.map((a) => a.textContent).join(' ')).toContain('ECR-SYS-0503');
+
+    expect(await screen.findAllByText('effectiveMode')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Enterprise')).not.toHaveLength(0);
+  });
 });

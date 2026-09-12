@@ -91,6 +91,24 @@ export interface RouteHandle {
    *  залежить від форми рендера — заміна бібліотеки рендера не чіпає цей файл. */
   icon?: string;
 
+  /**
+   * Форма скелета `<Suspense>` МАРШРУТУ на час підвантаження чанка (`PR
+   * nav-arch #6`, директива B3/C1: «skeleton у формі майбутнього layout'а»).
+   *
+   * ⛔ Не той самий тип, що `AsyncBoundary.SkeletonShape` (`shared/ui`) —
+   * навмисно ОКРЕМИЙ союз, хоч і з двома спільними іменами: цей описує форму
+   * ВСІЄЇ сторінки ще до того, як її код завантажився (заголовок + що під
+   * ним), той — форму ОДНОГО запиту вже змонтованої сторінки. Об'єднати їх
+   * означало б, що зміна вигляду одного стану вимагає узгодження двох
+   * непов'язаних меж очікування.
+   *
+   * ⚠ Без поля (більшість записів) — маршрут отримує ЗАГАЛЬНИЙ скелет
+   * (`AppLayout.tsx`, `GenericRouteSkeleton`), той самий, що existed до цієї
+   * картки: відсутність поля — не регрес, а свідома межа картки (директива
+   * просить представницьку вибірку маршрутів, не всі ~23).
+   */
+  skeletonShape?: 'table' | 'form' | 'dashboard';
+
   /** Breadcrumb-специфічні налаштування (`PR nav-arch #3`). Без цього поля
    *  крихта — просто статичний `t(labelKey)`, без резолву й без ін'єкції
    *  логічних предків. */
@@ -124,7 +142,10 @@ export const routes = {
   home: {
     id: 'home',
     path: '/',
-    handle: { labelKey: 'nav.documents', icon: 'documents' },
+    // ⚠ `skeletonShape: 'table'` (`PR nav-arch #6`) — перший маршрут, який
+    // бачить КОЖЕН користувач після входу: перелік документів, форма
+    // «заголовок + рядки» найпоказовіша саме тут.
+    handle: { labelKey: 'nav.documents', icon: 'documents', skeletonShape: 'table' },
     showInNav: true,
   },
   changePassword: {
@@ -163,6 +184,11 @@ export const routes = {
     handle: {
       labelKey: 'version.title',
       crumb: { resolveParam: 'versionId', resolveWith: 'templateVersionLabel' },
+      // ⚠ `skeletonShape: 'form'` (`PR nav-arch #6`) — найглибший (3 рівні)
+      // представницький маршрут: сама сторінка вже позначає власний
+      // `AsyncBoundary` як `skeleton="form"` (структура версії — аркуші й
+      // таблиці, не однорідний перелік рядків).
+      skeletonShape: 'form',
     },
   },
   adminTemplateVersionRelations: {
@@ -220,7 +246,16 @@ export const routes = {
   adminSecurity: {
     id: 'admin-security',
     path: '/admin/security',
-    handle: { labelKey: 'nav.security', permission: 'Security.ManageRoles', icon: 'security' },
+    // ⚠ `skeletonShape: 'table'` (`PR nav-arch #6`) — представник маршруту
+    // ЗА ПРАВОМ (контраст із `home`/`myGroups` нижче, доступними всім):
+    // вкладки `SecurityPage` (ролі/гранти/користувачі) усі рендерять
+    // таблицю під заголовком одразу після переходу.
+    handle: {
+      labelKey: 'nav.security',
+      permission: 'Security.ManageRoles',
+      icon: 'security',
+      skeletonShape: 'table',
+    },
     showInNav: true,
   },
   adminPeriods: {
@@ -271,7 +306,16 @@ export const routes = {
   adminHealth: {
     id: 'admin-health',
     path: '/admin/health',
-    handle: { labelKey: 'nav.health', permission: 'System.ViewHealth', icon: 'health' },
+    // ⚠ `skeletonShape: 'dashboard'` (`PR nav-arch #6`) — єдиний маршрут
+    // застосунку, що показує сітку карток (`SimpleGrid`), а не таблицю чи
+    // форму: саме тут стався `A7-04` (порожній дашборд ≠ здорова система),
+    // тож представницький вибір для цього PR навмисно включає його.
+    handle: {
+      labelKey: 'nav.health',
+      permission: 'System.ViewHealth',
+      icon: 'health',
+      skeletonShape: 'dashboard',
+    },
     showInNav: true,
   },
 
@@ -282,7 +326,10 @@ export const routes = {
   myGroups: {
     id: 'my-groups',
     path: '/my-groups',
-    handle: { labelKey: 'nav.myGroups', icon: 'myGroups' },
+    // ⚠ `skeletonShape: 'table'` (`PR nav-arch #6`) — представник маршруту
+    // БЕЗ права (контраст із `adminSecurity` вище): доступний усім, і саме
+    // тому вибірка мала включати хоч один такий маршрут.
+    handle: { labelKey: 'nav.myGroups', icon: 'myGroups', skeletonShape: 'table' },
     showInNav: true,
   },
 

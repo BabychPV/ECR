@@ -15,14 +15,15 @@ import {
   Loader,
   ScrollArea,
   Skeleton,
+  SimpleGrid,
   Stack,
   Text,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
-import { Breadcrumbs } from './Breadcrumbs';
+import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
+import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
-import { navRoutes } from './routes';
+import { navRoutes, type RouteHandle } from './routes';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
@@ -332,14 +333,127 @@ export function AppLayout(): JSX.Element {
 }
 
 /**
- * Заглушка на час завантаження чанка маршруту.
+ * Заглушка на час завантаження чанка маршруту (`PR nav-arch #6`, розділи
+ * B3/C1 директиви: «skeleton у формі майбутнього layout'а», не один
+ * загальний вигляд на всі ~23 маршрути).
+ *
+ * ⚠ Форма читається з `handle.skeletonShape` НАЙГЛИБШОГО матчу поточної
+ * адреси (`useMatches()`), а не переданого пропа: той самий прийом, що вже
+ * несуть `<Breadcrumbs/>` і `<ScrollRestoration/>` поруч (`PR #2`/`#3`) — під
+ * час підвантаження чанка `useMatches()` вже знає, ЯКИЙ маршрут зіставлено
+ * (зіставлення за шаблоном шляху не чекає на компонент), тож форму можна
+ * визначити ще до того, як сама сторінка домонтується.
+ *
+ * ⚠ Записи БЕЗ `skeletonShape` (більшість реєстру — картка свідомо охопила
+ * представницьку вибірку, не всі маршрути, `Q-282`) отримують той самий
+ * ЗАГАЛЬНИЙ скелет (`GenericRouteSkeleton`), що існував до цієї картки:
+ * відсутність поля — не регрес.
+ */
+function RouteFallback(): JSX.Element {
+  const matches = useMatches();
+  const shape = deepestSkeletonShape(matches);
+
+  if (shape === 'table') return <TableRouteSkeleton />;
+  if (shape === 'form') return <FormRouteSkeleton />;
+  if (shape === 'dashboard') return <DashboardRouteSkeleton />;
+
+  return <GenericRouteSkeleton />;
+}
+
+/**
+ * Форма скелета найглибшого матчу, що її оголосив (перший знайдений, рахуючи
+ * від листа до кореня): той самий порядок пошуку, що логічно веде
+ * breadcrumbs-резолвер — найближчий до листа запис реєстру описує сторінку
+ * точніше за проміжний layout (`AdminLayout`/`TemplateVersionLayout` не
+ * несуть власного `handle.skeletonShape` — голий `Outlet`, нічого показувати).
+ */
+function deepestSkeletonShape(
+  matches: ReturnType<typeof useMatches>,
+): RouteHandle['skeletonShape'] {
+  for (let index = matches.length - 1; index >= 0; index -= 1) {
+    const handle = matches[index]?.handle;
+    if (isRouteHandle(handle) && handle.skeletonShape !== undefined) {
+      return handle.skeletonShape;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Скелет-«заголовок + перелік» — найпоширеніша форма застосунку (`home`,
+ * `myGroups`, `adminSecurity`): рядок заголовка й дій (`PageHeader.tsx`:
+ * `Group justify="space-between"`), під ним — рядки таблиці.
+ */
+function TableRouteSkeleton(): JSX.Element {
+  return (
+    <Stack gap="xs" aria-busy="true" data-testid="route-skeleton-table">
+      <Group justify="space-between" mb="xs">
+        <Skeleton height={28} width="30%" radius="sm" />
+        <Skeleton height={28} width={96} radius="sm" />
+      </Group>
+      <Skeleton height={24} radius="sm" />
+      {Array.from({ length: 6 }, (_, index) => (
+        <Skeleton key={index} height={20} radius="sm" />
+      ))}
+    </Stack>
+  );
+}
+
+/**
+ * Скелет-«форма/деталь» (`adminTemplateVersion`): заголовок і кілька
+ * товщих блоків замість тонких рядків таблиці — наближено до розгорнутих
+ * секцій (`Accordion`) `TemplateVersionPage`, чия власна `AsyncBoundary`
+ * теж позначена `skeleton="form"`.
+ */
+function FormRouteSkeleton(): JSX.Element {
+  return (
+    <Stack gap="sm" aria-busy="true" data-testid="route-skeleton-form">
+      <Group justify="space-between" mb="xs">
+        <Skeleton height={28} width="30%" radius="sm" />
+        <Skeleton height={28} width={160} radius="sm" />
+      </Group>
+      {Array.from({ length: 3 }, (_, index) => (
+        <Skeleton key={index} height={64} radius="sm" />
+      ))}
+    </Stack>
+  );
+}
+
+/**
+ * Скелет-«дашборд» (`adminHealth`): сітка карток, не таблиця — єдиний
+ * маршрут застосунку такої форми (`SimpleGrid`, `HealthPage.tsx`), і саме
+ * тому представницька вибірка цієї картки включає його окремо.
+ */
+function DashboardRouteSkeleton(): JSX.Element {
+  return (
+    <Stack gap="md" aria-busy="true" data-testid="route-skeleton-dashboard">
+      <Group justify="space-between" mb="xs">
+        <Skeleton height={28} width="30%" radius="sm" />
+        <Skeleton height={22} width={72} radius="xl" />
+      </Group>
+      <SimpleGrid cols={{ base: 1, md: 3 }}>
+        {Array.from({ length: 3 }, (_, index) => (
+          <Skeleton key={index} height={72} radius="sm" />
+        ))}
+      </SimpleGrid>
+      <Skeleton height={20} width="20%" radius="sm" />
+      <Skeleton height={96} radius="sm" />
+    </Stack>
+  );
+}
+
+/**
+ * Загальний скелет — незмінний вигляд, що існував до цієї картки
+ * (`Q-281`): заголовок і три смуги, для КОЖНОГО маршруту без явного
+ * `handle.skeletonShape`.
  *
  * ⚠ Скелет, а не спінер (`ФВ-14.25`): майже кожен екран системи — це заголовок
  * і таблиця під ним, і показати саме цю форму чесніше, ніж крутити коло.
  */
-function RouteFallback(): JSX.Element {
+function GenericRouteSkeleton(): JSX.Element {
   return (
-    <Stack gap="xs" aria-busy="true">
+    <Stack gap="xs" aria-busy="true" data-testid="route-skeleton-generic">
       <Skeleton height={28} width="30%" radius="sm" />
       <Skeleton height={24} radius="sm" />
       <Skeleton height={24} radius="sm" />
