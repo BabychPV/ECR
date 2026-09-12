@@ -80,7 +80,15 @@ export function AccessDiagnosticsPanel({
                     <Table.Td>
                       {/* ⚠ Слово, а не колір: «збіглося» і «ні» мусять
                           читатися тим, хто не бачить кольору (`ФВ-14.16`). */}
-                      <Badge color={group.matched ? 'green' : 'gray'} variant="light">
+                      {/* ⛔ Q-272: голий `color="green"` — той самий дефект
+                          класу T7-02/T7-03 (Q-262), лишений поза межею тієї
+                          картки. `variant="light"` на темі з `primaryShade:
+                          { light: 6, dark: 5 }` бере текст/тло з дефолтної
+                          Mantine-шкали `green` (індекс 6), а не з підібраної
+                          — і давав 2.175:1 у світлій темі (нижче AA
+                          text=4.5:1); `gray` — нейтраль, не статус, тому не
+                          займано. */}
+                      <Badge color={group.matched ? 'statusSuccess' : 'gray'} variant="light">
                         {group.matched ? t('myGroups.yes') : t('myGroups.no')}
                       </Badge>
                     </Table.Td>
