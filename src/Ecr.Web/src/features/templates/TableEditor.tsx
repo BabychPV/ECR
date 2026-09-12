@@ -104,7 +104,7 @@ export function TableEditor({
         }
       />
 
-      {blocker !== null && <Alert color="yellow">{blockerLabel(blocker)}</Alert>}
+      {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}
 
       <Group>
         <Button variant="default" onClick={onCancel}>

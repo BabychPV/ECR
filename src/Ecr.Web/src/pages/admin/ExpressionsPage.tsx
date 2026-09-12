@@ -204,7 +204,7 @@ function Findings({ result }: { readonly result: ExpressionValidationDto | null 
         <Stack gap="xs">
           <Group gap="xs">
             {value.diagnostics.length === 0 ? (
-              <Badge color="green">{t('expressions.noFindings')}</Badge>
+              <Badge color="statusSuccess">{t('expressions.noFindings')}</Badge>
             ) : (
               <Badge color="statusError">
                 {t('expressions.findings', { count: value.diagnostics.length })}
@@ -232,7 +232,7 @@ function Findings({ result }: { readonly result: ExpressionValidationDto | null 
           )}
 
           {value.skippedChecks.length > 0 && (
-            <Alert color="yellow" title={t('expressions.skippedTitle')}>
+            <Alert color="statusWarning" title={t('expressions.skippedTitle')}>
               {value.skippedChecks.map((check) => t(`expressions.check.${check}`)).join('; ')}
             </Alert>
           )}

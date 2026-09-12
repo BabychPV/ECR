@@ -41,7 +41,7 @@ export function AccessDiagnosticsPanel({
        * породив би власну.
        */}
       {!view.groupsFromTicket && (
-        <Alert color="blue" title={t('myGroups.notMineTitle')}>
+        <Alert color="statusWarning" title={t('myGroups.notMineTitle')}>
           {t('myGroups.notMineHint')}
         </Alert>
       )}

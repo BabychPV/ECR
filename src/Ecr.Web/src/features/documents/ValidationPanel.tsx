@@ -39,7 +39,7 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
 
   if (messages.length === 0) {
     return (
-      <Alert color="green" variant="light" title={t('document.validationClean')}>
+      <Alert color="statusSuccess" variant="light" title={t('document.validationClean')}>
         {t('document.validationCleanHint')}
       </Alert>
     );
