@@ -20,7 +20,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { navRoutes } from './routes';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
@@ -191,98 +191,123 @@ export function AppLayout(): JSX.Element {
   }
 
   return (
-    <AppShell
-      header={{ height: 56 }}
-      navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !opened } }}
-      padding="md"
-    >
+    <>
       {/*
-       * ПЕРШИЙ фокусований елемент на сторінці (Q-263) — раніше за Burger,
-       * бейдж симуляції й пункти навігації нижче. Порядок у розмітці тут —
-       * це і є порядок `Tab`, тож переставляти цей блок нижче за
-       * `AppShell.Header`/`AppShell.Navbar` означало б повернути дефект.
+       * Відновлення позиції скролу (`PR nav-arch #2`).
+       *
+       * ⚠ Один екземпляр на весь застосунок, на КОРЕНЕВОМУ layout-маршруті
+       * (`AppLayout` — елемент `path: '/'` у `router.tsx`), а не на кожному
+       * вкладеному рівні: `ScrollRestoration` сам стежить за ВСІМА змінами
+       * локації через контекст роутера, і другий екземпляр глибше в дереві
+       * (`AdminLayout`, `TemplateVersionLayout`) не додав би нової поведінки
+       * — лише повторно підписався б на той самий стан. `RouterProvider`
+       * (`App.tsx`) сам по собі НЕ layout-маршрут (не рендерить `Outlet`),
+       * тому компонент не може стояти там: йому потрібен контекст усередині
+       * дерева маршрутів, а `AppLayout` — єдиний батько, що завжди
+       * змонтований для будь-якого автентифікованого маршруту застосунку
+       * (`/login` — виняток, поза цим деревом, і не має довгих списків для
+       * відновлення).
+       *
+       * ⛔ Не всередині `<Suspense>` навколо `<Outlet/>` нижче: інакше під
+       * час підвантаження чанка нового маршруту компонент на мить
+       * розмонтовувався б разом із дочірнім деревом і саме в цю мить
+       * пропускав би подію зміни локації, яку мав відновити.
        */}
-      <SkipToContentLink />
+      <ScrollRestoration />
 
-      {/* Одна область оголошень на весь застосунок (ФВ-14.19). */}
-      <RouteAnnouncer />
+      <AppShell
+        header={{ height: 56 }}
+        navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+        padding="md"
+      >
+        {/*
+         * ПЕРШИЙ фокусований елемент на сторінці (Q-263) — раніше за Burger,
+         * бейдж симуляції й пункти навігації нижче. Порядок у розмітці тут —
+         * це і є порядок `Tab`, тож переставляти цей блок нижче за
+         * `AppShell.Header`/`AppShell.Navbar` означало б повернути дефект.
+         */}
+        <SkipToContentLink />
 
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="sm">
-            <Burger
-              opened={opened}
-              onClick={toggle}
-              hiddenFrom="sm"
-              size="sm"
-              aria-label={t('nav.menu')}
-            />
-            <Text fw={700}>ECR</Text>
-          </Group>
+        {/* Одна область оголошень на весь застосунок (ФВ-14.19). */}
+        <RouteAnnouncer />
 
-          <Group gap="xs">
-            {/* ⚠ Сеанс симуляції видно ЗАВЖДИ і помітно: адміністратор, який
-                забув, що дивиться чужими правами, ухвалює рішення про чужий
-                доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
-            {me.isSimulation && (
-              <>
-                <Badge color="statusWarning" variant="filled">
-                  {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
-                </Badge>
-
-                {/* ⛔ Вихід стоїть ПОРУЧ із баджем. Саме тут користувач
-                    помічає, що дивиться чужими правами, і саме тут має
-                    бути вихід: інакше єдиним способом завершити сеанс
-                    лишався б вихід із системи. */}
-                <EndSimulationButton />
-              </>
-            )}
-            <UserMenu userName={me.userName ?? '—'} />
-          </Group>
-        </Group>
-      </AppShell.Header>
-
-      <AppShell.Navbar p="xs">
-        <ScrollArea>
-          {navRoutes
-            .filter((route) => route.handle.permission === undefined || can(me, route.handle.permission))
-            .map((route) => (
-              // ⚠ Пункт показується, лише якщо право є: користувач не має
-              // тиснути те, що все одно дасть 403.
-              <NavLink
-                key={route.path}
-                component={Link}
-                to={route.path}
-                label={t(route.handle.labelKey)}
-                active={location.pathname === route.path}
+        <AppShell.Header>
+          <Group h="100%" px="md" justify="space-between">
+            <Group gap="sm">
+              <Burger
+                opened={opened}
+                onClick={toggle}
+                hiddenFrom="sm"
+                size="sm"
+                aria-label={t('nav.menu')}
               />
-            ))}
-        </ScrollArea>
-      </AppShell.Navbar>
+              <Text fw={700}>ECR</Text>
+            </Group>
 
-      <AppShell.Main id={MainContentId} tabIndex={-1}>
-        {/*
-         * `tabIndex={-1}` існує ЛИШЕ заради «Пропустити навігацію» вище
-         * (Q-263): `<main>` сам по собі не фокусується, і без цього
-         * активація посилання переносила б лише скрол/URL-хеш, а фокус
-         * лишався б на самому посиланні.
-         */}
-        {/*
-         * ⚠ Власна межа очікування, а не запасна. Без неї застосунок НЕ
-         * падає — `RouterProvider` має власну, — але її запасним вмістом є
-         * порожнеча: при завантаженні чанка маршруту область змісту просто
-         * зникає. Перевірено прибиранням цієї межі: сторінка рендериться, і
-         * саме тому дефект такого роду не помітили б у тесті.
-         *
-         * ⚠ Межа стоїть НАВКОЛО `<Outlet/>`, а не навколо всього застосунку:
-         * інакше кожен перехід гасив би шапку й навігацію разом зі змістом, і
-         * екран блимав би цілком там, де змінюється сама лише середина.
-         */}
-        <Suspense fallback={<RouteFallback />}>
-          <Outlet />
-        </Suspense>
-      </AppShell.Main>
-    </AppShell>
+            <Group gap="xs">
+              {/* ⚠ Сеанс симуляції видно ЗАВЖДИ і помітно: адміністратор, який
+                  забув, що дивиться чужими правами, ухвалює рішення про чужий
+                  доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
+              {me.isSimulation && (
+                <>
+                  <Badge color="statusWarning" variant="filled">
+                    {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
+                  </Badge>
+
+                  {/* ⛔ Вихід стоїть ПОРУЧ із баджем. Саме тут користувач
+                      помічає, що дивиться чужими правами, і саме тут має
+                      бути вихід: інакше єдиним способом завершити сеанс
+                      лишався б вихід із системи. */}
+                  <EndSimulationButton />
+                </>
+              )}
+              <UserMenu userName={me.userName ?? '—'} />
+            </Group>
+          </Group>
+        </AppShell.Header>
+
+        <AppShell.Navbar p="xs">
+          <ScrollArea>
+            {navRoutes
+              .filter((route) => route.handle.permission === undefined || can(me, route.handle.permission))
+              .map((route) => (
+                // ⚠ Пункт показується, лише якщо право є: користувач не має
+                // тиснути те, що все одно дасть 403.
+                <NavLink
+                  key={route.path}
+                  component={Link}
+                  to={route.path}
+                  label={t(route.handle.labelKey)}
+                  active={location.pathname === route.path}
+                />
+              ))}
+          </ScrollArea>
+        </AppShell.Navbar>
+
+        <AppShell.Main id={MainContentId} tabIndex={-1}>
+          {/*
+           * `tabIndex={-1}` існує ЛИШЕ заради «Пропустити навігацію» вище
+           * (Q-263): `<main>` сам по собі не фокусується, і без цього
+           * активація посилання переносила б лише скрол/URL-хеш, а фокус
+           * лишався б на самому посиланні.
+           */}
+          {/*
+           * ⚠ Власна межа очікування, а не запасна. Без неї застосунок НЕ
+           * падає — `RouterProvider` має власну, — але її запасним вмістом є
+           * порожнеча: при завантаженні чанка маршруту область змісту просто
+           * зникає. Перевірено прибиранням цієї межі: сторінка рендериться, і
+           * саме тому дефект такого роду не помітили б у тесті.
+           *
+           * ⚠ Межа стоїть НАВКОЛО `<Outlet/>`, а не навколо всього застосунку:
+           * інакше кожен перехід гасив би шапку й навігацію разом зі змістом, і
+           * екран блимав би цілком там, де змінюється сама лише середина.
+           */}
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
+        </AppShell.Main>
+      </AppShell>
+    </>
   );
 }
 
