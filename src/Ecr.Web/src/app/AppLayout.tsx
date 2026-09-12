@@ -22,6 +22,7 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { Breadcrumbs } from './Breadcrumbs';
+import { NavIcon } from './navIcons';
 import { navRoutes } from './routes';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
@@ -274,11 +275,16 @@ export function AppLayout(): JSX.Element {
               .map((route) => (
                 // ⚠ Пункт показується, лише якщо право є: користувач не має
                 // тиснути те, що все одно дасть 403.
+                // ⚠ `leftSection` — слот Mantine `NavLink` саме для цього
+                // (не власне позиціювання поруч із `label`): іконка
+                // `aria-hidden` (`navIcons.tsx`), лейбл лишається єдиним
+                // доступним ім'ям пункту.
                 <NavLink
                   key={route.path}
                   component={Link}
                   to={route.path}
                   label={t(route.handle.labelKey)}
+                  leftSection={<NavIcon name={route.handle.icon} />}
                   active={location.pathname === route.path}
                 />
               ))}
