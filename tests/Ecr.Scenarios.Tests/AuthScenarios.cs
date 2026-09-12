@@ -69,9 +69,21 @@ public sealed class AuthScenarios(SqlServerFixture sql)
     /// <remarks>
     /// ⚠ Статична перевірка файл-проти-файла (директива §6.1): звіряє
     /// перелік прав, якими гейтовані пункти меню
-    /// (<c>src/Ecr.Web/src/app/AppLayout.tsx</c>), з переліком прав у
+    /// (<c>src/Ecr.Web/src/app/routes.ts</c>), з переліком прав у
     /// seed (<c>src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql</c>).
     /// Це читання файлів, а не бізнес-логіка — дозволено директивою явно.
+    ///
+    /// ⛔ Джерело — <c>routes.ts</c>, а НЕ <c>AppLayout.tsx</c> (навігаційна
+    /// архітектура, PR 1/8, Q-276). До цієї картки навбар тримав власний
+    /// масив `Items` із рядковими `permission: '...'` прямо в
+    /// `AppLayout.tsx` — сценарій читав саме той текст. Тепер навбар
+    /// (`navRoutes`) і типізований реєстр маршрутів — одне джерело, і
+    /// рядковий літерал `permission: '...'` живе РІВНО в `routes.ts`
+    /// (`handle.permission`). Читати й далі `AppLayout.tsx` означало б, що
+    /// цей сценарій мовчки осліп би (порожній `menuPermissions`, звідси і
+    /// `Assert.NotEmpty` нижче) з тим самим PR, який прибрав звідти
+    /// рядкові літерали, — рівно той відмовний режим, від якого застерігає
+    /// коментар до `Assert.NotEmpty`.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -79,7 +91,7 @@ public sealed class AuthScenarios(SqlServerFixture sql)
     public void Кожне_право_яким_гейтоване_меню_існує_в_seed()
     {
         var root = RepoRoot();
-        var layoutPath = Path.Combine(root, "src", "Ecr.Web", "src", "app", "AppLayout.tsx");
+        var layoutPath = Path.Combine(root, "src", "Ecr.Web", "src", "app", "routes.ts");
         var seedPath = Path.Combine(root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql");
 
         Assert.True(File.Exists(layoutPath), $"Не знайдено {layoutPath}");

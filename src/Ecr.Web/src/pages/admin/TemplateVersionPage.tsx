@@ -14,6 +14,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   CloneVersionRequest,
   DeprecateVersionRequest,
@@ -153,7 +154,7 @@ export function TemplateVersionPage(): JSX.Element {
   );
 
   const structure = useQuery({
-    queryKey: ['template-version', id],
+    queryKey: queryKeys.templates.version(id),
     queryFn: () => apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${id}/structure`),
   });
 
@@ -174,7 +175,7 @@ export function TemplateVersionPage(): JSX.Element {
         body: JSON.stringify({ reason } satisfies PublishVersionRequest),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setPublishing(false);
       showDone(t('version.published'));
     },
@@ -202,7 +203,7 @@ export function TemplateVersionPage(): JSX.Element {
         body: JSON.stringify({ newVersion: newVersion.trim() } satisfies CloneVersionRequest),
       }),
     onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['template-versions'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() });
       setCloning(false);
       setNewVersion('');
       showDone(t('version.cloned'));
@@ -232,7 +233,7 @@ export function TemplateVersionPage(): JSX.Element {
         body: JSON.stringify({ reason } satisfies DeprecateVersionRequest),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-versions'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() });
       setDeprecating(false);
       showDone(t('version.deprecated'));
     },
@@ -246,7 +247,7 @@ export function TemplateVersionPage(): JSX.Element {
   const saveSheetMutation = useMutation({
     mutationFn: (draft: SheetDraft) => saveSheet(id, draft),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setSheetDraft(null);
       showDone(t('sheets.saved'));
     },
@@ -257,7 +258,7 @@ export function TemplateVersionPage(): JSX.Element {
   const deleteSheetMutation = useMutation({
     mutationFn: (code: string) => deleteSheet(id, code),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       showDone(t('sheets.deleted'));
     },
     onError: showApiError,
@@ -271,7 +272,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: (args: { sheetCode: string; draft: TableDraft }) =>
       saveTable(id, args.sheetCode, args.draft),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setTableDraft(null);
       showDone(t('tableDef.saved'));
     },
@@ -283,7 +284,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: (args: { sheetCode: string; code: string }) =>
       deleteTable(id, args.sheetCode, args.code),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       showDone(t('tableDef.deleted'));
     },
     onError: showApiError,
@@ -301,7 +302,7 @@ export function TemplateVersionPage(): JSX.Element {
       // наступне відкриття форми правки цієї-таки колонки знову побачило б
       // лише бідний `TemplateColumnDto` зі структури.
       setSavedColumns((prev) => ({ ...prev, [`${String(variables.tableId)}:${result.code}`]: result }));
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setColumnEdit(null);
       showDone(t('columns.saved'));
     },
@@ -312,7 +313,7 @@ export function TemplateVersionPage(): JSX.Element {
   const deleteColumnMutation = useMutation({
     mutationFn: ({ tableId, code }: { tableId: number; code: string }) => deleteColumn(id, tableId, code),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       showDone(t('columns.deleted'));
     },
     onError: showApiError,
@@ -326,7 +327,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: ({ tableId, draft }: { tableId: number; draft: RowDraft }) => saveRow(id, tableId, draft),
     onSuccess: async (result, variables) => {
       setSavedRows((prev) => ({ ...prev, [`${String(variables.tableId)}:${result.rowKey}`]: result }));
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setRowEdit(null);
       showDone(t('rows.saved'));
     },
@@ -337,7 +338,7 @@ export function TemplateVersionPage(): JSX.Element {
   const deleteRowMutation = useMutation({
     mutationFn: ({ tableId, rowKey }: { tableId: number; rowKey: string }) => deleteRow(id, tableId, rowKey),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       showDone(t('rows.deleted'));
     },
     onError: showApiError,
@@ -358,7 +359,7 @@ export function TemplateVersionPage(): JSX.Element {
   const saveFormulaMutation = useMutation({
     mutationFn: (draft: FormulaDraft) => saveFormula(id, draft),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setFormulaDraft(null);
       showDone(t('formulas.saved'));
     },
@@ -374,7 +375,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: ({ tableId, draft }: { tableId: number; draft: ValidationRuleDraft }) =>
       saveValidationRule(id, tableId, draft),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setValidationRuleTable(null);
       showDone(t('validationRules.saved'));
     },
@@ -386,7 +387,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: ({ tableId, code }: { tableId: number; code: string }) =>
       deleteValidationRule(id, tableId, code),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setDeleteRuleCode('');
       showDone(t('validationRules.deleted'));
     },
@@ -402,7 +403,7 @@ export function TemplateVersionPage(): JSX.Element {
   const createPeriodRuleMutation = useMutation({
     mutationFn: (draft: CreatePeriodAccessRuleDraft) => createPeriodAccessRule(id, draft),
     onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: ['template-version', id] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setCreatePeriodDraft(emptyPeriodAccessRuleDraft());
 
       // ⚠ Щойно створене правило одразу підставляється у форму «правка за

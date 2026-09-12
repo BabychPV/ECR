@@ -3,6 +3,7 @@ import { Badge, Button, Checkbox, Group, Modal, Select, Stack, Table, Text, Text
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
 import { createRegistry } from '@/features/registries/api';
 import {
@@ -44,7 +45,7 @@ export function RegistriesPage(): JSX.Element {
   const [newIsTemporal, setNewIsTemporal] = useState(false);
 
   const registries = useQuery({
-    queryKey: ['registries'],
+    queryKey: queryKeys.registries.list(),
     queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
   });
 
@@ -56,7 +57,7 @@ export function RegistriesPage(): JSX.Element {
         isTemporal: newIsTemporal,
       }),
     onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: ['registries'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.list() });
       setCreating(false);
       setNewCode('');
       setNewName('');
@@ -68,7 +69,7 @@ export function RegistriesPage(): JSX.Element {
   });
 
   const entries = useQuery({
-    queryKey: ['registry-entries', code],
+    queryKey: queryKeys.registries.entries(code ?? ''),
     queryFn: () =>
       apiFetch<RegistryEntryDto[]>(
         `/api/v1/registries/${encodeURIComponent(code ?? '')}/entries`,

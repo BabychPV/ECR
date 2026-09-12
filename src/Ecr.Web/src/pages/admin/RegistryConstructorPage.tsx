@@ -3,6 +3,7 @@ import { Badge, Button, Group, Tabs, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   RegistryDefinitionDto,
   RegistryDefinitionVersionResponse,
@@ -53,7 +54,7 @@ export function RegistryConstructorPage(): JSX.Element {
   const [reason, setReason] = useState('');
 
   const definition = useQuery({
-    queryKey: ['registry-definition', code],
+    queryKey: queryKeys.registries.definition(code),
     queryFn: () =>
       apiFetch<RegistryDefinitionDto>(
         `/api/v1/registries/${encodeURIComponent(code)}/definition`,
@@ -70,7 +71,7 @@ export function RegistryConstructorPage(): JSX.Element {
   });
 
   const history = useQuery({
-    queryKey: ['registry-history', code],
+    queryKey: queryKeys.registries.history(code),
     queryFn: () =>
       apiFetch<RegistryHistoryEntryDto[]>(
         `/api/v1/registries/${encodeURIComponent(code)}/history`,
@@ -101,8 +102,8 @@ export function RegistryConstructorPage(): JSX.Element {
         },
       ),
     onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['registry-definition', code] });
-      await queryClient.invalidateQueries({ queryKey: ['registry-history', code] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.history(code) });
       setReason('');
       showDone(t('registries.definitionSaved', { version: result.definitionVersion }));
     },

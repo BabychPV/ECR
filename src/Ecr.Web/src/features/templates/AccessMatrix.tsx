@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, Table, Text, Tooltip } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { AccessMatrixCellDto, AccessMatrixDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -23,7 +24,7 @@ export function AccessMatrix({ templateVersionId }: { templateVersionId: number 
   const [opened, setOpened] = useState(false);
 
   const matrix = useQuery({
-    queryKey: ['access-matrix', templateVersionId],
+    queryKey: queryKeys.templates.accessMatrix(templateVersionId),
     queryFn: () =>
       apiFetch<AccessMatrixDto>(`/api/v1/template-versions/${templateVersionId}/access-matrix`),
     enabled: opened,

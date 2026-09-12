@@ -2,6 +2,7 @@
 import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './AppLayout';
+import { childPath, routes } from './routes';
 
 /**
  * Маршрути застосунку.
@@ -168,31 +169,108 @@ export const router = createBrowserRouter([
     path: '/',
     element: <AppLayout />,
     children: [
-      { index: true, element: <DocumentsPage /> },
-      { path: 'change-password', element: <ChangePasswordPage /> },
-      { path: 'my-groups', element: <MyGroupsPage /> },
-      { path: 'documents/:id', element: <DocumentPage /> },
-      { path: 'admin/templates', element: <TemplatesPage /> },
-      { path: 'admin/templates/:id/versions/:versionId', element: <TemplateVersionPage /> },
+      // ⚠ Шлях і `handle` кожного маршруту нижче беруться з реєстру
+      // (`./routes`) — єдиного місця, де ці рядки набираються руками.
+      // `index: true` — виняток: домашній маршрут не має власного сегмента,
+      // тож `routes.home.path` ('/') тут не застосовний як `path`.
+      { index: true, element: <DocumentsPage />, handle: routes.home.handle },
       {
-        path: 'admin/templates/:id/versions/:versionId/relations',
-        element: <TableRelationsPage />,
+        path: childPath(routes.changePassword),
+        element: <ChangePasswordPage />,
+        handle: routes.changePassword.handle,
       },
-      { path: 'admin/registries', element: <RegistriesPage /> },
-      { path: 'admin/registries/:code/definition', element: <RegistryConstructorPage /> },
-      { path: 'admin/methodologies', element: <MethodologiesPage /> },
-      { path: 'admin/methodologies/:id/versions', element: <MethodologyVersionsPage /> },
-      { path: 'admin/expressions', element: <ExpressionsPage /> },
-      { path: 'admin/security', element: <SecurityPage /> },
-      { path: 'admin/periods', element: <PeriodsPage /> },
-      { path: 'admin/sources', element: <SourcesPage /> },
-      { path: 'admin/mapping', element: <MappingPreviewPage /> },
-      { path: 'admin/jobs', element: <JobsPage /> },
-      { path: 'admin/snapshots', element: <SnapshotsPage /> },
-      { path: 'admin/audit', element: <AuditPage /> },
-      { path: 'admin/units', element: <UnitsPage /> },
-      { path: 'admin/ui-strings', element: <UiStringsPage /> },
-      { path: 'admin/health', element: <HealthPage /> },
+      { path: childPath(routes.myGroups), element: <MyGroupsPage />, handle: routes.myGroups.handle },
+      {
+        path: childPath(routes.documentDetail),
+        element: <DocumentPage />,
+        handle: routes.documentDetail.handle,
+      },
+      {
+        path: childPath(routes.adminTemplates),
+        element: <TemplatesPage />,
+        handle: routes.adminTemplates.handle,
+      },
+      {
+        path: childPath(routes.adminTemplateVersion),
+        element: <TemplateVersionPage />,
+        handle: routes.adminTemplateVersion.handle,
+      },
+      {
+        path: childPath(routes.adminTemplateVersionRelations),
+        element: <TableRelationsPage />,
+        handle: routes.adminTemplateVersionRelations.handle,
+      },
+      {
+        path: childPath(routes.adminRegistries),
+        element: <RegistriesPage />,
+        handle: routes.adminRegistries.handle,
+      },
+      {
+        path: childPath(routes.adminRegistryDefinition),
+        element: <RegistryConstructorPage />,
+        handle: routes.adminRegistryDefinition.handle,
+      },
+      {
+        path: childPath(routes.adminMethodologies),
+        element: <MethodologiesPage />,
+        handle: routes.adminMethodologies.handle,
+      },
+      {
+        path: childPath(routes.adminMethodologyVersions),
+        element: <MethodologyVersionsPage />,
+        handle: routes.adminMethodologyVersions.handle,
+      },
+      {
+        path: childPath(routes.adminExpressions),
+        element: <ExpressionsPage />,
+        handle: routes.adminExpressions.handle,
+      },
+      {
+        path: childPath(routes.adminSecurity),
+        element: <SecurityPage />,
+        handle: routes.adminSecurity.handle,
+      },
+      {
+        path: childPath(routes.adminPeriods),
+        element: <PeriodsPage />,
+        handle: routes.adminPeriods.handle,
+      },
+      {
+        path: childPath(routes.adminSources),
+        element: <SourcesPage />,
+        handle: routes.adminSources.handle,
+      },
+      {
+        path: childPath(routes.adminMapping),
+        element: <MappingPreviewPage />,
+        handle: routes.adminMapping.handle,
+      },
+      { path: childPath(routes.adminJobs), element: <JobsPage />, handle: routes.adminJobs.handle },
+      {
+        path: childPath(routes.adminSnapshots),
+        element: <SnapshotsPage />,
+        handle: routes.adminSnapshots.handle,
+      },
+      {
+        path: childPath(routes.adminAudit),
+        element: <AuditPage />,
+        handle: routes.adminAudit.handle,
+      },
+      {
+        path: childPath(routes.adminUnits),
+        element: <UnitsPage />,
+        handle: routes.adminUnits.handle,
+      },
+      {
+        path: childPath(routes.adminUiStrings),
+        element: <UiStringsPage />,
+        handle: routes.adminUiStrings.handle,
+      },
+      {
+        path: childPath(routes.adminHealth),
+        element: <HealthPage />,
+        handle: routes.adminHealth.handle,
+      },
     ],
   },
 ]);

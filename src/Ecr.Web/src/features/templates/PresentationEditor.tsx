@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, Modal, NumberInput, Switch, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { PresentationRevisionResponse, TemplateColumnDto } from '@/api/types';
 import { LocalizedInput, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -67,7 +68,9 @@ export function PresentationEditor({
     onSuccess: async (result) => {
       // ⚠ Нова ревізія — це новий ключ кешу `v{id}:r{rev}`. Перечитуємо
       // структуру: без цього екран показував би стару, а сервер віддавав нову.
-      await queryClient.invalidateQueries({ queryKey: ['template-version', templateVersionId] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.templates.version(templateVersionId),
+      });
 
       onClose();
       showDone(t('version.patched', { revision: result.presentationRevision }));

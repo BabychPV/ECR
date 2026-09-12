@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Group, Paper, Stack, Table, Text } from '@mantine
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { TableRelationDto, TemplateStructureDto } from '@/api/types';
 import {
   deleteTableRelation,
@@ -58,7 +59,7 @@ export function TableRelationsPage(): JSX.Element {
   });
 
   const structure = useQuery({
-    queryKey: ['template-version', versionId],
+    queryKey: queryKeys.templates.version(versionId),
     queryFn: () =>
       apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${String(versionId)}/structure`),
     enabled: known,

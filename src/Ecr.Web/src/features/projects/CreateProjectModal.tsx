@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   CreateProjectRequest,
   PeriodPolicyDto,
@@ -156,7 +157,7 @@ export function CreateProjectModal({
   const [customPeriodCount, setCustomPeriodCount] = useState<number | null>(null);
 
   const templates = useQuery({
-    queryKey: ['templates'],
+    queryKey: queryKeys.templates.list(),
     queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
     enabled: opened,
   });
@@ -170,7 +171,7 @@ export function CreateProjectModal({
   // (`TemplateVersionPage`, `?limit=100`, `.data?.items`) — той самий взірець.
   const versionQueries = useQueries({
     queries: (templates.data?.items ?? []).map((template) => ({
-      queryKey: ['template-versions', template.id],
+      queryKey: queryKeys.templates.versionsOf(template.id),
       queryFn: () =>
         apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
       enabled: opened,

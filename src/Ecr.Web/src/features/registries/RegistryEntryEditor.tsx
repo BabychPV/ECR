@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   AffectedRowsResponse,
   RegistryDefDto,
@@ -78,7 +79,7 @@ export function RegistryEntryEditor({
         },
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['registry-entries', registry.code] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registry.code) });
       onClose();
       showDone(entry === null ? t('registries.entryCreated') : t('registries.entrySaved'));
     },
@@ -184,7 +185,7 @@ export function ValidityEditor({
         },
       ),
     onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['registry-entries', registryCode] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registryCode) });
       onClose();
       showDone(t('registries.validitySaved', { count: result.affectedRows }));
     },

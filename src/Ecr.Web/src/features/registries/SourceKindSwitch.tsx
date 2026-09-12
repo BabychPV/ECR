@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Alert, Button, Checkbox, Group, Modal, Select, Stack, Textarea } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { AffectedRowsResponse, RegistryDefDto, RegistrySourceKind } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -34,7 +35,7 @@ export function SourceKindSwitch({ registries }: { registries: RegistryDefDto[] 
         body: JSON.stringify({ registryCodes: codes, sourceKind: kind, reason: reason.trim() }),
       }),
     onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['registries'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.list() });
       setOpened(false);
       setCodes([]);
       setReason('');

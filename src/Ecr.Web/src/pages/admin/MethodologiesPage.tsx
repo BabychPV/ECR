@@ -17,6 +17,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   MethodologyDto,
   MethodologyKind,
@@ -79,7 +80,7 @@ export function MethodologiesPage(): JSX.Element {
   const [simulationResult, setSimulationResult] = useState<SimulationResultDto | null>(null);
 
   const methodologies = useQuery({
-    queryKey: ['methodologies'],
+    queryKey: queryKeys.methodologies.list(),
     queryFn: () => apiFetch<MethodologyDto[]>('/api/v1/methodologies'),
   });
 
@@ -92,7 +93,7 @@ export function MethodologiesPage(): JSX.Element {
         group: group.trim() === '' ? null : group,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodologies'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.list() });
       setCreating(false);
       setCode('');
       setName('');
@@ -115,7 +116,7 @@ export function MethodologiesPage(): JSX.Element {
         } satisfies PublishMethodologyRequest),
       }),
     onSuccess: async (published) => {
-      await queryClient.invalidateQueries({ queryKey: ['methodologies'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.list() });
       setPublishing(null);
       setReason('');
       setEffectiveFrom('');
