@@ -1,11 +1,12 @@
 import { useState, type JSX } from 'react';
-import { Button, Card, Center, PasswordInput, Stack, Text, Title } from '@mantine/core';
+import { Button, Card, Center, PasswordInput, Stack, Text } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { ChangePasswordRequest } from '@/api/types';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
 
 /**
@@ -14,6 +15,15 @@ import { t } from '@/shared/i18n';
  * ⛔ Доки стоїть `MustChangePassword`, це єдиний доступний екран (ФВ-6.18):
  * тимчасовий пароль знає той, хто його видав, і робота під ним не є роботою
  * названого користувача.
+ *
+ * ⛔ `PageHeader`, а не голий `Title` (`Q-261`). Ця сторінка — ЄДИНИЙ виняток
+ * усередині `AppLayout`, що обходив спільний заголовок: усі інші екрани
+ * переносять фокус на заголовок і оголошують назву маршруту через
+ * `RouteAnnouncer` при монтуванні (`shared/ui/PageHeader.tsx`, `ФВ-14.19`).
+ * Саме тут це найбільш болюча відсутність — на цей екран потрапляють
+ * майже виключно ПРИМУСОВИМ редиректом (`me.mustChangePassword`), тобто
+ * користувач читалки опиняється на новому екрані без жодного пояснення,
+ * чому раптом зник той, на якому він щойно був.
  */
 
 /**
@@ -71,9 +81,7 @@ export function ChangePasswordPage(): JSX.Element {
   return (
     <Center>
       <Card withBorder w={420} p="lg">
-        <Title order={4} mb="md">
-          {t('password.title')}
-        </Title>
+        <PageHeader title={t('password.title')} />
 
         <Stack gap="sm">
           <PasswordInput
