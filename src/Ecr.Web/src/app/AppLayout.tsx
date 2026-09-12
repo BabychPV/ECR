@@ -1,4 +1,11 @@
-﻿import { Suspense, useEffect, type JSX } from 'react';
+﻿import {
+  Suspense,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type JSX,
+  type MouseEvent,
+} from 'react';
 import {
   AppShell,
   Badge,
@@ -20,6 +27,109 @@ import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UserMenu } from '@/shared/ui/UserMenu';
+
+/**
+ * Ідентифікатор основного вмісту — ціль для «Пропустити навігацію» нижче.
+ *
+ * ⚠ `tabIndex={-1}` на самому `<AppShell.Main>` (не лише `id`): `<main>` не
+ * фокусується від природи, і без цього активація посилання переносить курсор
+ * лише у прокрутку/URL (`#main-content`), а фокус лишається на самому
+ * посиланні — читалка й далі оголошувала б навігацію.
+ */
+const MainContentId = 'main-content';
+
+/**
+ * «Пропустити навігацію» (`WCAG 2.4.1 Bypass Blocks`, Q-263).
+ *
+ * ⛔ Не рятує лише те, що `axe`-правило `bypass` не входило в `runOnly`
+ * (`src/test/a11y.ts`) — воно й не бачило проблему, тому що виправлення тоді
+ * не існувало: сам гейт правило не пише, лише перевіряє. Причина дефекту —
+ * `AppShell.Navbar` рендерить до 15 пунктів навігації в DOM РАНІШЕ за
+ * `AppShell.Main`, і клавіатурним користувачем без читалки (моторні
+ * порушення, `Tab` — єдиний спосіб пересуватись) немає як це оминути:
+ * читалка вже проходить повз нав через орієнтир `<main>` (`D`/`R` у
+ * NVDA/JAWS), а `Tab` — ні.
+ *
+ * ⚠ Прихована технікою `clip`/`position: absolute` (той самий підхід, що й
+ * `@mantine/core` `VisuallyHidden` — див. `VisuallyHidden.css` пакета), а не
+ * `display: none`: остання забирає елемент із дерева фокусу цілком, і
+ * посилання взагалі не отримало б фокус клавіатурою. Видиме лише в фокусі —
+ * інакше воно виглядало б як зайвий текст перед шапкою для тих, хто його не
+ * потребує.
+ *
+ * ⛔ Текст — не через `t()`. Каталог рядків живе в
+ * `Ecr.Infrastructure/Persistence/Sql/09-seed.sql`, а ця картка (Q-263,
+ * директива Хвилі 3) навмисно обмежена двома файлами
+ * (`AppLayout.tsx`, `test/a11y.ts`) саме для паралельної ізоляції ліній —
+ * файл сідів чіпають одразу кілька ліній, і зайва правка тут була б зайвим
+ * ризиком конфлікту поза межами картки. Судження зафіксоване тут одним
+ * рядком (`CLAUDE.md`): англійський літерал лишається доти, доки окрема
+ * картка не заведе ключ у каталозі.
+ */
+function SkipToContentLink(): JSX.Element {
+  const [isFocused, setIsFocused] = useState(false);
+
+  // Та сама техніка приховування, що й `@mantine/core` `VisuallyHidden`
+  // (стиль пакета `styles/VisuallyHidden.css`) — лише додано видимий стан
+  // на фокус, якого в самому `VisuallyHidden` немає.
+  const hiddenStyle: CSSProperties = {
+    border: 0,
+    clip: 'rect(0 0 0 0)',
+    height: 1,
+    width: 1,
+    margin: -1,
+    overflow: 'hidden',
+    padding: 0,
+    position: 'absolute',
+    whiteSpace: 'nowrap',
+  };
+
+  const visibleStyle: CSSProperties = {
+    position: 'fixed',
+    top: 8,
+    left: 8,
+    zIndex: 1000,
+    padding: '8px 16px',
+    background: 'var(--mantine-color-body)',
+    color: 'var(--mantine-color-text)',
+    border: '2px solid var(--mantine-color-brand-6)',
+    borderRadius: 4,
+    textDecoration: 'none',
+    clip: 'auto',
+    height: 'auto',
+    width: 'auto',
+    margin: 0,
+    overflow: 'visible',
+    whiteSpace: 'normal',
+  };
+
+  // ⚠ Клік/`Enter` переносить фокус ЯВНО (`main.focus()`), а не покладається
+  // лише на природну навігацію браузера за фрагментом URL: остання рухає
+  // фокус у ціль надійно не в кожному браузері (і не в jsdom, де побудований
+  // мутаційний тест), а без фокуса на `<main>` посилання саме й не виконує
+  // свою обіцянку — стрічка адреси зміниться, курсор читання лишиться на
+  // місці.
+  const handleActivate = (event: MouseEvent<HTMLAnchorElement>): void => {
+    const main = document.getElementById(MainContentId);
+    if (main === null) return;
+
+    event.preventDefault();
+    main.focus();
+    window.location.hash = MainContentId;
+  };
+
+  return (
+    <a
+      href={`#${MainContentId}`}
+      onClick={handleActivate}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      style={isFocused ? visibleStyle : hiddenStyle}
+    >
+      Skip to main content
+    </a>
+  );
+}
 
 /** Пункт навігації разом із правом, яке його відкриває. */
 interface NavItem {
@@ -117,6 +227,14 @@ export function AppLayout(): JSX.Element {
       navbar={{ width: 260, breakpoint: 'sm', collapsed: { mobile: !opened } }}
       padding="md"
     >
+      {/*
+       * ПЕРШИЙ фокусований елемент на сторінці (Q-263) — раніше за Burger,
+       * бейдж симуляції й пункти навігації нижче. Порядок у розмітці тут —
+       * це і є порядок `Tab`, тож переставляти цей блок нижче за
+       * `AppShell.Header`/`AppShell.Navbar` означало б повернути дефект.
+       */}
+      <SkipToContentLink />
+
       {/* Одна область оголошень на весь застосунок (ФВ-14.19). */}
       <RouteAnnouncer />
 
@@ -173,7 +291,13 @@ export function AppLayout(): JSX.Element {
         </ScrollArea>
       </AppShell.Navbar>
 
-      <AppShell.Main>
+      <AppShell.Main id={MainContentId} tabIndex={-1}>
+        {/*
+         * `tabIndex={-1}` існує ЛИШЕ заради «Пропустити навігацію» вище
+         * (Q-263): `<main>` сам по собі не фокусується, і без цього
+         * активація посилання переносила б лише скрол/URL-хеш, а фокус
+         * лишався б на самому посиланні.
+         */}
         {/*
          * ⚠ Власна межа очікування, а не запасна. Без неї застосунок НЕ
          * падає — `RouterProvider` має власну, — але її запасним вмістом є
