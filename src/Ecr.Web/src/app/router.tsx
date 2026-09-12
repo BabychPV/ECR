@@ -1,8 +1,10 @@
 ﻿import { Suspense, createElement, lazy, type JSX } from 'react';
 import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter } from 'react-router-dom';
+import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
-import { childPath, routes } from './routes';
+import { TemplateVersionLayout } from './TemplateVersionLayout';
+import { childPath, relativePath, routes } from './routes';
 
 /**
  * Маршрути застосунку.
@@ -185,91 +187,137 @@ export const router = createBrowserRouter([
         element: <DocumentPage />,
         handle: routes.documentDetail.handle,
       },
+
+      /**
+       * Секція `/admin/*` — проміжний layout-маршрут (`PR nav-arch #2`,
+       * директива: «мінімум `/admin/*`»). Усе, що раніше було 17 прямими
+       * дітьми `AppLayout` під префіксом `admin/`, тепер — діти ЦЬОГО
+       * `<Route>`: `AdminLayout` монтує `<Outlet/>` між `AppLayout` і кожною
+       * адмінською сторінкою, і саме тут природно стане рольовий гард
+       * секції (`PR #4`) чи заголовок/breadcrumbs секції (`PR #3`), не
+       * розкидані по кожній сторінці окремо.
+       *
+       * ⚠ `path: 'admin'` тут — ЄДИНЕ місце, де сегмент `admin` набирається
+       * руками: усі шляхи нижче — `relativePath(routes.X, 'admin')`, тобто
+       * похідні від АБСОЛЮТНИХ шляхів реєстру (`routes.ts`), а не другий
+       * незалежний рядковий літерал.
+       */
       {
-        path: childPath(routes.adminTemplates),
-        element: <TemplatesPage />,
-        handle: routes.adminTemplates.handle,
-      },
-      {
-        path: childPath(routes.adminTemplateVersion),
-        element: <TemplateVersionPage />,
-        handle: routes.adminTemplateVersion.handle,
-      },
-      {
-        path: childPath(routes.adminTemplateVersionRelations),
-        element: <TableRelationsPage />,
-        handle: routes.adminTemplateVersionRelations.handle,
-      },
-      {
-        path: childPath(routes.adminRegistries),
-        element: <RegistriesPage />,
-        handle: routes.adminRegistries.handle,
-      },
-      {
-        path: childPath(routes.adminRegistryDefinition),
-        element: <RegistryConstructorPage />,
-        handle: routes.adminRegistryDefinition.handle,
-      },
-      {
-        path: childPath(routes.adminMethodologies),
-        element: <MethodologiesPage />,
-        handle: routes.adminMethodologies.handle,
-      },
-      {
-        path: childPath(routes.adminMethodologyVersions),
-        element: <MethodologyVersionsPage />,
-        handle: routes.adminMethodologyVersions.handle,
-      },
-      {
-        path: childPath(routes.adminExpressions),
-        element: <ExpressionsPage />,
-        handle: routes.adminExpressions.handle,
-      },
-      {
-        path: childPath(routes.adminSecurity),
-        element: <SecurityPage />,
-        handle: routes.adminSecurity.handle,
-      },
-      {
-        path: childPath(routes.adminPeriods),
-        element: <PeriodsPage />,
-        handle: routes.adminPeriods.handle,
-      },
-      {
-        path: childPath(routes.adminSources),
-        element: <SourcesPage />,
-        handle: routes.adminSources.handle,
-      },
-      {
-        path: childPath(routes.adminMapping),
-        element: <MappingPreviewPage />,
-        handle: routes.adminMapping.handle,
-      },
-      { path: childPath(routes.adminJobs), element: <JobsPage />, handle: routes.adminJobs.handle },
-      {
-        path: childPath(routes.adminSnapshots),
-        element: <SnapshotsPage />,
-        handle: routes.adminSnapshots.handle,
-      },
-      {
-        path: childPath(routes.adminAudit),
-        element: <AuditPage />,
-        handle: routes.adminAudit.handle,
-      },
-      {
-        path: childPath(routes.adminUnits),
-        element: <UnitsPage />,
-        handle: routes.adminUnits.handle,
-      },
-      {
-        path: childPath(routes.adminUiStrings),
-        element: <UiStringsPage />,
-        handle: routes.adminUiStrings.handle,
-      },
-      {
-        path: childPath(routes.adminHealth),
-        element: <HealthPage />,
-        handle: routes.adminHealth.handle,
+        path: 'admin',
+        element: <AdminLayout />,
+        children: [
+          {
+            path: relativePath(routes.adminTemplates, 'admin'),
+            element: <TemplatesPage />,
+            handle: routes.adminTemplates.handle,
+          },
+
+          /**
+           * Секція `admin/templates/:id/*` — другий кандидат на власний
+           * layout, названий директивою прямо («`templates/:id/*` як секція
+           * з власними вкладками версій/зв'язків»): `TemplateVersionPage` і
+           * `TableRelationsPage` належать одному шаблону/версії
+           * (спільні `:id`/`:versionId`).
+           *
+           * ⚠ `path: 'templates/:id'` — синтетичний вузол вкладеності, не
+           * запис реєстру: у `routes.ts` немає сторінки на самому
+           * `/admin/templates/:id` (без `/versions/:versionId`) — цей
+           * рівень існує лише для того, щоб два дочірні маршрути ділили
+           * один `<Outlet/>` і один параметр `:id`.
+           */
+          {
+            path: 'templates/:id',
+            element: <TemplateVersionLayout />,
+            children: [
+              {
+                path: relativePath(routes.adminTemplateVersion, 'admin/templates/:id'),
+                element: <TemplateVersionPage />,
+                handle: routes.adminTemplateVersion.handle,
+              },
+              {
+                path: relativePath(routes.adminTemplateVersionRelations, 'admin/templates/:id'),
+                element: <TableRelationsPage />,
+                handle: routes.adminTemplateVersionRelations.handle,
+              },
+            ],
+          },
+
+          {
+            path: relativePath(routes.adminRegistries, 'admin'),
+            element: <RegistriesPage />,
+            handle: routes.adminRegistries.handle,
+          },
+          {
+            path: relativePath(routes.adminRegistryDefinition, 'admin'),
+            element: <RegistryConstructorPage />,
+            handle: routes.adminRegistryDefinition.handle,
+          },
+          {
+            path: relativePath(routes.adminMethodologies, 'admin'),
+            element: <MethodologiesPage />,
+            handle: routes.adminMethodologies.handle,
+          },
+          {
+            path: relativePath(routes.adminMethodologyVersions, 'admin'),
+            element: <MethodologyVersionsPage />,
+            handle: routes.adminMethodologyVersions.handle,
+          },
+          {
+            path: relativePath(routes.adminExpressions, 'admin'),
+            element: <ExpressionsPage />,
+            handle: routes.adminExpressions.handle,
+          },
+          {
+            path: relativePath(routes.adminSecurity, 'admin'),
+            element: <SecurityPage />,
+            handle: routes.adminSecurity.handle,
+          },
+          {
+            path: relativePath(routes.adminPeriods, 'admin'),
+            element: <PeriodsPage />,
+            handle: routes.adminPeriods.handle,
+          },
+          {
+            path: relativePath(routes.adminSources, 'admin'),
+            element: <SourcesPage />,
+            handle: routes.adminSources.handle,
+          },
+          {
+            path: relativePath(routes.adminMapping, 'admin'),
+            element: <MappingPreviewPage />,
+            handle: routes.adminMapping.handle,
+          },
+          {
+            path: relativePath(routes.adminJobs, 'admin'),
+            element: <JobsPage />,
+            handle: routes.adminJobs.handle,
+          },
+          {
+            path: relativePath(routes.adminSnapshots, 'admin'),
+            element: <SnapshotsPage />,
+            handle: routes.adminSnapshots.handle,
+          },
+          {
+            path: relativePath(routes.adminAudit, 'admin'),
+            element: <AuditPage />,
+            handle: routes.adminAudit.handle,
+          },
+          {
+            path: relativePath(routes.adminUnits, 'admin'),
+            element: <UnitsPage />,
+            handle: routes.adminUnits.handle,
+          },
+          {
+            path: relativePath(routes.adminUiStrings, 'admin'),
+            element: <UiStringsPage />,
+            handle: routes.adminUiStrings.handle,
+          },
+          {
+            path: relativePath(routes.adminHealth, 'admin'),
+            element: <HealthPage />,
+            handle: routes.adminHealth.handle,
+          },
+        ],
       },
     ],
   },
