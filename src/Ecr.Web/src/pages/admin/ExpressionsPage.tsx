@@ -7,7 +7,7 @@ import type {
   ExpressionValidationDto,
   MethodologyDto,
   TemplatePage,
-  TemplateVersionSummary,
+  TemplateVersionPage,
 } from '@/api/types';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
 import { TestCaseRunner } from '@/features/expressions/TestCaseRunner';
@@ -50,10 +50,20 @@ export function ExpressionsPage(): JSX.Element {
 
   const firstTemplateId = templates.data?.items[0]?.id;
 
+  // ⛔ Q-275: `GET /api/v1/templates/{id}/versions` — курсорний ендпоінт
+  // (Q-225), відповідь `{items, nextCursor, totalCount}`, а НЕ голий масив.
+  // Тут стояв тип `TemplateVersionSummary[]`, тож `.data` при пагінованій
+  // відповіді був ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і виклик
+  // `.map` нижче падав `TypeError` на кожному відкритті вкладки «Вираз
+  // шаблону» (той самий дефект, що Q-274 в `CreateProjectModal.tsx`).
+  // Взірець — `TemplatesPage.tsx`/`CreateProjectModal.tsx`: `TemplateVersionPage`,
+  // `?limit=100`, `.data?.items`.
   const versions = useQuery({
     queryKey: ['template-versions', firstTemplateId],
     queryFn: () =>
-      apiFetch<TemplateVersionSummary[]>(`/api/v1/templates/${String(firstTemplateId)}/versions`),
+      apiFetch<TemplateVersionPage>(
+        `/api/v1/templates/${String(firstTemplateId)}/versions?limit=100`,
+      ),
     enabled: firstTemplateId !== undefined,
   });
 
@@ -114,7 +124,7 @@ export function ExpressionsPage(): JSX.Element {
             miw={260}
             clearable
             value={templateVersionId}
-            data={(versions.data ?? []).map((v) => ({
+            data={(versions.data?.items ?? []).map((v) => ({
               value: String(v.id),
               label: `${v.version} · ${v.status}`,
             }))}
