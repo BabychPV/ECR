@@ -9,7 +9,7 @@ import type {
   PagedProjects,
   TemplatePage,
   TemplateStructureDto,
-  TemplateVersionSummary,
+  TemplateVersionPage,
 } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -60,18 +60,26 @@ export function CreateDocumentModal({
 
   // ⚠ Версії читаються по кожному шаблону: маршрут контракту —
   // `GET /templates/{id}/versions`, окремого «усі версії» немає і не треба.
+  //
+  // ⛔ Q-275: той самий ендпоінт — курсорний (Q-225), відповідь
+  // `{items, nextCursor, totalCount}`, а НЕ голий масив. Тут стояв тип
+  // `TemplateVersionSummary[]`, тож `.data` при пагінованій відповіді був
+  // ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і `.filter` нижче падав
+  // на кожному відкритті «Новий документ» (той самий дефект, що Q-274 в
+  // `CreateProjectModal.tsx`). Взірець — `TemplatesPage.tsx`/`CreateProjectModal.tsx`:
+  // `TemplateVersionPage`, `?limit=100`, `.data?.items`.
   const versionQueries = useQueries({
     queries: templateItems.map((template) => ({
       queryKey: ['template-versions', template.id],
       queryFn: () =>
-        apiFetch<TemplateVersionSummary[]>(`/api/v1/templates/${template.id}/versions`),
+        apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
       enabled: opened,
     })),
   });
 
   /** Опубліковані версії всіх шаблонів, підписані кодом шаблону. */
   const publishedVersions = templateItems.flatMap((template, index) =>
-    (versionQueries[index]?.data ?? [])
+    (versionQueries[index]?.data?.items ?? [])
       .filter((version) => version.status === 'Published')
       .map((version) => ({
         value: String(version.id),
