@@ -24,12 +24,16 @@ import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 're
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
 import { navRoutes, type RouteHandle } from './routes';
+import { routeTransitionClassName } from './motionTokens';
+import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UserMenu } from '@/shared/ui/UserMenu';
+
+import './routeTransition.css';
 
 /**
  * Ідентифікатор основного вмісту — ціль для «Пропустити навігацію» нижче.
@@ -154,6 +158,18 @@ export function AppLayout(): JSX.Element {
   const [opened, { toggle }] = useDisclosure();
   const session = useSession();
   const location = useLocation();
+
+  /*
+   * Побічні ефекти зміни маршруту (`PR nav-arch #7`): `document.title`,
+   * резервний фокус на `<main>`, CSS-перехід контейнера `<Outlet/>`.
+   *
+   * ⛔ Викликається БЕЗУМОВНО, до обох ранніх `return` нижче (правила
+   * хуків) — навіть коли сесія ще вантажиться чи помилка (нижче), сам гак
+   * не звертається до `me`/`session.data`, лише до `useMatches()`/
+   * `useLocation()`/`useQueryClient()`, тож викликати його для «порожнього»
+   * проміжного рендера безпечно.
+   */
+  const transitionRef = useRouteTransitionFocus(MainContentId);
 
   // Перемальовує каркас і сторінку, коли приватний каталог доїхав.
   useCatalog();
@@ -323,9 +339,26 @@ export function AppLayout(): JSX.Element {
            */}
           <Breadcrumbs />
 
-          <Suspense fallback={<RouteFallback />}>
-            <Outlet />
-          </Suspense>
+          {/*
+           * Контейнер переходу (`PR nav-arch #7`, директива B6/D) — ВСЕРЕДИНІ
+           * межі очікування вище нема сенсу: анімується лише зміна МАРШРУТУ
+           * (`useRouteTransitionFocus`, ключ — `location.pathname`), а
+           * `Breadcrumbs`/`ScrollRestoration` навмисно лишаються поза цим
+           * div (той самий аргумент, що й для меж очікування вище — інакше
+           * кожен перехід чіпав би те, що не повинен).
+           *
+           * ⚠ Клас-«вмикач» (`ecr-route-transition--enter`) додається й
+           * знімається САМИМ гаком через `ref`, не пропом: React не
+           * перемальовує розмітку заради самої лише анімації, а
+           * `classList`/`style.setProperty` тут — навмисний вихід за межі
+           * React, той самий клас прийомів, що й `applyDensity()`
+           * (`shared/theme/preferences.ts`).
+           */}
+          <div ref={transitionRef} className={routeTransitionClassName}>
+            <Suspense fallback={<RouteFallback />}>
+              <Outlet />
+            </Suspense>
+          </div>
         </AppShell.Main>
       </AppShell>
     </>

@@ -5,6 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
 import { theme } from '../theme';
 import { router } from '@/app/router';
+import { routeMotionDurationMs, routeMotionEasing } from '@/app/motionTokens';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { MantineProvider } from '@mantine/core';
@@ -58,17 +59,40 @@ describe('Рух (ФВ-14.27, ФВ-14.28)', () => {
     expect(Number.parseInt(other.motionFast, 10)).toBeLessThanOrEqual(150);
   });
 
-  it('переходів між сторінками немає в жодному стані', () => {
-    // ⛔ Маршрут змінюється МИТТЄВО. Перевіряється джерело роутера, а не
-    // поведінка: анімація переходу — це те, що додають одним рядком, і
-    // помітити її в тесті поведінки можна лише випадково.
-    expect(routerSource).not.toContain('Transition');
-    expect(routerSource).not.toContain('motion');
-    expect(routerSource).not.toContain('animate');
+  it(
+    'перехід між маршрутами — токенізований фейд ≤150мс, не «переходів немає» ' +
+      '(ФВ-14.27 переглянуто директивою навігаційної архітектури, PR nav-arch #7)',
+    () => {
+      // ⚠ Цей запис РАНІШЕ забороняв анімацію переходу взагалі («переходів
+      // між сторінками немає в жодному стані»). Директива навігаційної
+      // архітектури (`ECR_navigation_architecture_prompt_v2.md`, розділ
+      // B6/D) прямо вимагає анімований перехід між маршрутами — явне,
+      // новіше рішення людини, що замовила саме цю директиву, свідомо
+      // ПЕРЕГЛЯДАЄ це обмеження ФВ-14.27, а не порушує його: перехід
+      // додано в ТОМУ САМОМУ бюджеті (≤150мс), який ФВ-14.27 встановила
+      // для будь-якого іншого руху застосунку (`Modal`/`Drawer`/`Tooltip`
+      // нижче) — оператор і далі не чекає довше за поріг, який ФВ-14.27
+      // назвала прийнятним.
+      //
+      // Механізм і далі живе ПОЗА деревом маршрутів (`AppLayout.tsx`,
+      // `motionTokens.ts`, `routeTransition.css`, `PR nav-arch #7`), не в
+      // `router.tsx` — ця половина перевірки лишається чинною без зміни.
+      expect(routerSource).not.toContain('Transition');
+      expect(routerSource).not.toContain('motion');
+      expect(routerSource).not.toContain('animate');
+      expect(router.routes.length).toBeGreaterThan(0);
 
-    // А самі маршрути існують — інакше перевірка вище нічого не значить.
-    expect(router.routes.length).toBeGreaterThan(0);
-  });
+      // ⛔ `motionTokens.ts` НЕ оголошує власне число — воно й далі читається
+      // з `theme.other.motionBase`/`motionEasing` (єдине джерело). Перевірка
+      // — не текстова, а поведінкова: якщо тему змінять, а `motionTokens.ts`
+      // забудуть підтягнути (чи навпаки, він отримає власний хардкод), це
+      // рівність нижче й зловить.
+      const other = theme.other as { motionBase: string; motionEasing: string };
+      expect(routeMotionDurationMs).toBe(Number.parseInt(other.motionBase, 10));
+      expect(routeMotionDurationMs).toBeLessThanOrEqual(150);
+      expect(routeMotionEasing).toBe(other.motionEasing);
+    },
+  );
 
   it('ФВ-14.19: кільце фокуса не ховається: outline: none без заміни немає', () => {
     // `ФВ-14.19`. Користувач клавіатури без кільця не знає, де він.

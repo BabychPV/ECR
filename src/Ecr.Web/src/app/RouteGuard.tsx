@@ -1,8 +1,9 @@
-import type { JSX, ReactNode } from 'react';
+import { useEffect, useRef, type JSX, type ReactNode } from 'react';
 import { Anchor, Center, Code, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
+import { announceRoute } from '@/shared/ui/RouteAnnouncer';
 import type { RouteHandle } from './routes';
 
 /**
@@ -24,12 +25,46 @@ import type { RouteHandle } from './routes';
  * причину прямо (яке саме право потрібне) й лишає адресу в рядку — той самий
  * принцип, що вже діє для порожніх станів (`H-21`, `MyGroupsPage.tsx`):
  * пояснення краще за мовчазну відсутність.
+ *
+ * ⚠ Фокус на заголовку й оголошення `aria-live` (`PR nav-arch #7`) — той
+ * самий прийом, що й `PageHeader.tsx` (`Q-261`, `ФВ-14.19`), навмисно
+ * ІНЛАЙН тут, а не через сам компонент `PageHeader`: розмітка відмови
+ * центрована (`Center`/`Stack align="center"`), а `PageHeader` несе власну
+ * розкладку (`Group justify="space-between"`, дії праворуч) — підміняти
+ * layout заради самої лише поведінки означало б непов'язану візуальну
+ * регресію поза межами цієї картки. Це ЄДИНА сторінка застосунку, змонтована
+ * всередині `AppLayout`, що досі обходила `PageHeader` (перевірено грепом
+ * перед цією карткою: усі 24 листові маршрути `routes.ts` уже використовують
+ * `PageHeader`) — без цього фіксу перехід на заборонений маршрут лишав би
+ * користувача клавіатури на старому пункті навбару й без жодного оголошення,
+ * чому екран щойно змінився.
  */
 export function AccessDeniedPage({ permission }: { permission: string }): JSX.Element {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focused = useRef(false);
+  const title = t('err.ECR-AUTH-0403');
+
+  useEffect(() => {
+    // ⛔ Рівно ОДИН раз за монтування — той самий інваріант, що й
+    // `PageHeader.tsx`: сторінка відмови не отримує оновлень заголовка після
+    // монтування, тож ref-прапорець тут суто про послідовність із джерелом
+    // прийому, не про захист від реального повторного виклику.
+    if (focused.current) return;
+
+    focused.current = true;
+    heading.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    announceRoute(title);
+  }, [title]);
+
   return (
     <Center py="xl">
       <Stack gap="xs" align="center" maw={420} role="alert">
-        <Title order={2}>{t('err.ECR-AUTH-0403')}</Title>
+        <Title order={2} ref={heading} tabIndex={-1}>
+          {title}
+        </Title>
 
         <Text size="sm" c="dimmed" ta="center">
           {t('err.ECR-AUTH-0403.requiresPermission')} <Code>{permission}</Code>
