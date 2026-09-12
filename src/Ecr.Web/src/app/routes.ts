@@ -85,11 +85,10 @@ export interface RouteHandle {
   /** Право (`sec.Permission.Code`), потрібне для показу пункту; без нього — доступно всім. */
   permission?: string;
 
-  /** Ключ іконки навбару. Не використовується жодним компонентом ще — навбар
-   *  сьогодні не малює іконок узагалі, і додавати бібліотеку іконок заради
-   *  порожнього поля тут означало б нову залежність без візуального ефекту.
-   *  Поле лишається типізованим, щоб PR, який додасть іконки, не чіпав форму
-   *  запису — лише саму бібліотеку рендера. */
+  /** Ключ іконки навбару (`navIcons`, `src/app/navIcons.tsx`) — резолвиться в
+   *  компонент inline SVG на споживачі (`AppLayout.tsx`, `NavLink leftSection`).
+   *  Рядковий ключ, не сама іконка чи компонент: реєстр маршрутів і далі не
+   *  залежить від форми рендера — заміна бібліотеки рендера не чіпає цей файл. */
   icon?: string;
 
   /** Breadcrumb-специфічні налаштування (`PR nav-arch #3`). Без цього поля
@@ -125,7 +124,7 @@ export const routes = {
   home: {
     id: 'home',
     path: '/',
-    handle: { labelKey: 'nav.documents' },
+    handle: { labelKey: 'nav.documents', icon: 'documents' },
     showInNav: true,
   },
   changePassword: {
@@ -136,7 +135,7 @@ export const routes = {
   adminTemplates: {
     id: 'admin-templates',
     path: '/admin/templates',
-    handle: { labelKey: 'nav.templates', permission: 'Template.Edit' },
+    handle: { labelKey: 'nav.templates', permission: 'Template.Edit', icon: 'templates' },
     showInNav: true,
   },
   // ⚠ Синтетичний вузол вкладеності (`PR #2`, `TemplateVersionLayout`) —
@@ -180,7 +179,7 @@ export const routes = {
   adminRegistries: {
     id: 'admin-registries',
     path: '/admin/registries',
-    handle: { labelKey: 'nav.registries', permission: 'Registry.View' },
+    handle: { labelKey: 'nav.registries', permission: 'Registry.View', icon: 'registries' },
     showInNav: true,
   },
   adminRegistryDefinition: {
@@ -198,7 +197,7 @@ export const routes = {
   adminMethodologies: {
     id: 'admin-methodologies',
     path: '/admin/methodologies',
-    handle: { labelKey: 'nav.methodologies', permission: 'Calculation.View' },
+    handle: { labelKey: 'nav.methodologies', permission: 'Calculation.View', icon: 'methodologies' },
     showInNav: true,
   },
   adminMethodologyVersions: {
@@ -209,19 +208,19 @@ export const routes = {
   adminExpressions: {
     id: 'admin-expressions',
     path: '/admin/expressions',
-    handle: { labelKey: 'nav.expressions', permission: 'Calculation.View' },
+    handle: { labelKey: 'nav.expressions', permission: 'Calculation.View', icon: 'expressions' },
     showInNav: true,
   },
   adminUnits: {
     id: 'admin-units',
     path: '/admin/units',
-    handle: { labelKey: 'nav.units', permission: 'Calculation.View' },
+    handle: { labelKey: 'nav.units', permission: 'Calculation.View', icon: 'units' },
     showInNav: true,
   },
   adminSecurity: {
     id: 'admin-security',
     path: '/admin/security',
-    handle: { labelKey: 'nav.security', permission: 'Security.ManageRoles' },
+    handle: { labelKey: 'nav.security', permission: 'Security.ManageRoles', icon: 'security' },
     showInNav: true,
   },
   adminPeriods: {
@@ -230,49 +229,49 @@ export const routes = {
     // ⛔ Було `Period.Manage` — права з такою назвою немає в каталозі
     // (`sec.Permission`), той самий факт, що й у старому `AppLayout.tsx`
     // (директива №09 `S-02`) — перенесено без зміни значення.
-    handle: { labelKey: 'nav.periods', permission: 'Period.Configure' },
+    handle: { labelKey: 'nav.periods', permission: 'Period.Configure', icon: 'periods' },
     showInNav: true,
   },
   adminSources: {
     id: 'admin-sources',
     path: '/admin/sources',
-    handle: { labelKey: 'nav.sources', permission: 'Integration.Manage' },
+    handle: { labelKey: 'nav.sources', permission: 'Integration.Manage', icon: 'sources' },
     showInNav: true,
   },
   adminMapping: {
     id: 'admin-mapping',
     path: '/admin/mapping',
-    handle: { labelKey: 'nav.mapping', permission: 'Integration.Manage' },
+    handle: { labelKey: 'nav.mapping', permission: 'Integration.Manage', icon: 'mapping' },
     showInNav: true,
   },
   adminJobs: {
     id: 'admin-jobs',
     path: '/admin/jobs',
-    handle: { labelKey: 'nav.jobs', permission: 'System.ViewHealth' },
+    handle: { labelKey: 'nav.jobs', permission: 'System.ViewHealth', icon: 'jobs' },
     showInNav: true,
   },
   adminSnapshots: {
     id: 'admin-snapshots',
     path: '/admin/snapshots',
-    handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory' },
+    handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots' },
     showInNav: true,
   },
   adminAudit: {
     id: 'admin-audit',
     path: '/admin/audit',
-    handle: { labelKey: 'nav.audit', permission: 'Security.ViewAudit' },
+    handle: { labelKey: 'nav.audit', permission: 'Security.ViewAudit', icon: 'audit' },
     showInNav: true,
   },
   adminUiStrings: {
     id: 'admin-ui-strings',
     path: '/admin/ui-strings',
-    handle: { labelKey: 'nav.uiStrings', permission: 'System.ManageLocalization' },
+    handle: { labelKey: 'nav.uiStrings', permission: 'System.ManageLocalization', icon: 'uiStrings' },
     showInNav: true,
   },
   adminHealth: {
     id: 'admin-health',
     path: '/admin/health',
-    handle: { labelKey: 'nav.health', permission: 'System.ViewHealth' },
+    handle: { labelKey: 'nav.health', permission: 'System.ViewHealth', icon: 'health' },
     showInNav: true,
   },
 
@@ -283,7 +282,7 @@ export const routes = {
   myGroups: {
     id: 'my-groups',
     path: '/my-groups',
-    handle: { labelKey: 'nav.myGroups' },
+    handle: { labelKey: 'nav.myGroups', icon: 'myGroups' },
     showInNav: true,
   },
 
