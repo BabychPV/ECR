@@ -3,8 +3,9 @@ import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
+import { RouteGuard } from './RouteGuard';
 import { TemplateVersionLayout } from './TemplateVersionLayout';
-import { childPath, relativePath, routes } from './routes';
+import { childPath, relativePath, routes, type RouteHandle } from './routes';
 
 /**
  * Маршрути застосунку.
@@ -147,6 +148,21 @@ function Chunk({ children }: { children: JSX.Element }): JSX.Element {
  * ⚠ Поза AppLayout: інакше вона потребувала б входу і була б недоступна саме
  * тоді, коли потрібна, — при налаштуванні вигляду на чистій машині.
  */
+/**
+ * Обгортає елемент маршруту рольовим гардом (`PR nav-arch #4`, `Q-279`).
+ *
+ * ⚠ Викликається ДЛЯ КОЖНОГО дочірнього маршруту `AppLayout` нижче, не лише
+ * для записів із `handle.permission` — `RouteGuard` сам пропускає рендер
+ * наскрізь, коли права в записі немає (`RouteGuard.tsx`). Один виклик на
+ * кожен `element:` — це навмисно ОДНА форма для всього дерева: розрізняти
+ * «цей маршрут обгорнутий, а той ні» на око за 20 записами реєстру — це і є
+ * той клас неоднорідності, якому реєстр (`Q-276`) заважає для шляхів і
+ * лейблів, а `guarded()` — для гарда.
+ */
+function guarded(handle: RouteHandle, element: JSX.Element): JSX.Element {
+  return <RouteGuard handle={handle}>{element}</RouteGuard>;
+}
+
 const devRoutes = import.meta.env.DEV
   ? [
       {
@@ -175,16 +191,20 @@ export const router = createBrowserRouter([
       // (`./routes`) — єдиного місця, де ці рядки набираються руками.
       // `index: true` — виняток: домашній маршрут не має власного сегмента,
       // тож `routes.home.path` ('/') тут не застосовний як `path`.
-      { index: true, element: <DocumentsPage />, handle: routes.home.handle },
+      { index: true, element: guarded(routes.home.handle, <DocumentsPage />), handle: routes.home.handle },
       {
         path: childPath(routes.changePassword),
-        element: <ChangePasswordPage />,
+        element: guarded(routes.changePassword.handle, <ChangePasswordPage />),
         handle: routes.changePassword.handle,
       },
-      { path: childPath(routes.myGroups), element: <MyGroupsPage />, handle: routes.myGroups.handle },
+      {
+        path: childPath(routes.myGroups),
+        element: guarded(routes.myGroups.handle, <MyGroupsPage />),
+        handle: routes.myGroups.handle,
+      },
       {
         path: childPath(routes.documentDetail),
-        element: <DocumentPage />,
+        element: guarded(routes.documentDetail.handle, <DocumentPage />),
         handle: routes.documentDetail.handle,
       },
 
@@ -193,9 +213,15 @@ export const router = createBrowserRouter([
        * директива: «мінімум `/admin/*`»). Усе, що раніше було 17 прямими
        * дітьми `AppLayout` під префіксом `admin/`, тепер — діти ЦЬОГО
        * `<Route>`: `AdminLayout` монтує `<Outlet/>` між `AppLayout` і кожною
-       * адмінською сторінкою, і саме тут природно стане рольовий гард
-       * секції (`PR #4`) чи заголовок/breadcrumbs секції (`PR #3`), не
-       * розкидані по кожній сторінці окремо.
+       * адмінською сторінкою.
+       *
+       * ⚠ Рольовий гард (`PR nav-arch #4`, `Q-279`) НЕ стоїть на самому
+       * `AdminLayout` — 17 сторінок секції вимагають 17 РІЗНИХ прав
+       * (`Template.Edit`, `Registry.View`, `Security.ManageRoles`…), тож
+       * один гард на рівні секції або пропускав би зайве, або забороняв би
+       * забагато. Гард (`guarded()`, `RouteGuard.tsx`) обгортає кожен ЛИСТ
+       * окремо, читаючи його ВЛАСНИЙ `handle.permission` з реєстру —
+       * `AdminLayout` лишається тим самим голим `Outlet`, яким і був.
        *
        * ⚠ `path: 'admin'` тут — ЄДИНЕ місце, де сегмент `admin` набирається
        * руками: усі шляхи нижче — `relativePath(routes.X, 'admin')`, тобто
@@ -208,7 +234,7 @@ export const router = createBrowserRouter([
         children: [
           {
             path: relativePath(routes.adminTemplates, 'admin'),
-            element: <TemplatesPage />,
+            element: guarded(routes.adminTemplates.handle, <TemplatesPage />),
             handle: routes.adminTemplates.handle,
           },
 
@@ -227,7 +253,7 @@ export const router = createBrowserRouter([
            */
           {
             path: 'templates/:id',
-            element: <TemplateVersionLayout />,
+            element: guarded(routes.adminTemplateSection.handle, <TemplateVersionLayout />),
             // ⚠ `handle` цього синтетичного вузла живе в `routes.ts`
             // (`routes.adminTemplateSection`), не тут — той самий інваріант,
             // що й для листових маршрутів нижче (`PR nav-arch #3`,
@@ -236,12 +262,12 @@ export const router = createBrowserRouter([
             children: [
               {
                 path: relativePath(routes.adminTemplateVersion, 'admin/templates/:id'),
-                element: <TemplateVersionPage />,
+                element: guarded(routes.adminTemplateVersion.handle, <TemplateVersionPage />),
                 handle: routes.adminTemplateVersion.handle,
               },
               {
                 path: relativePath(routes.adminTemplateVersionRelations, 'admin/templates/:id'),
-                element: <TableRelationsPage />,
+                element: guarded(routes.adminTemplateVersionRelations.handle, <TableRelationsPage />),
                 handle: routes.adminTemplateVersionRelations.handle,
               },
             ],
@@ -249,77 +275,77 @@ export const router = createBrowserRouter([
 
           {
             path: relativePath(routes.adminRegistries, 'admin'),
-            element: <RegistriesPage />,
+            element: guarded(routes.adminRegistries.handle, <RegistriesPage />),
             handle: routes.adminRegistries.handle,
           },
           {
             path: relativePath(routes.adminRegistryDefinition, 'admin'),
-            element: <RegistryConstructorPage />,
+            element: guarded(routes.adminRegistryDefinition.handle, <RegistryConstructorPage />),
             handle: routes.adminRegistryDefinition.handle,
           },
           {
             path: relativePath(routes.adminMethodologies, 'admin'),
-            element: <MethodologiesPage />,
+            element: guarded(routes.adminMethodologies.handle, <MethodologiesPage />),
             handle: routes.adminMethodologies.handle,
           },
           {
             path: relativePath(routes.adminMethodologyVersions, 'admin'),
-            element: <MethodologyVersionsPage />,
+            element: guarded(routes.adminMethodologyVersions.handle, <MethodologyVersionsPage />),
             handle: routes.adminMethodologyVersions.handle,
           },
           {
             path: relativePath(routes.adminExpressions, 'admin'),
-            element: <ExpressionsPage />,
+            element: guarded(routes.adminExpressions.handle, <ExpressionsPage />),
             handle: routes.adminExpressions.handle,
           },
           {
             path: relativePath(routes.adminSecurity, 'admin'),
-            element: <SecurityPage />,
+            element: guarded(routes.adminSecurity.handle, <SecurityPage />),
             handle: routes.adminSecurity.handle,
           },
           {
             path: relativePath(routes.adminPeriods, 'admin'),
-            element: <PeriodsPage />,
+            element: guarded(routes.adminPeriods.handle, <PeriodsPage />),
             handle: routes.adminPeriods.handle,
           },
           {
             path: relativePath(routes.adminSources, 'admin'),
-            element: <SourcesPage />,
+            element: guarded(routes.adminSources.handle, <SourcesPage />),
             handle: routes.adminSources.handle,
           },
           {
             path: relativePath(routes.adminMapping, 'admin'),
-            element: <MappingPreviewPage />,
+            element: guarded(routes.adminMapping.handle, <MappingPreviewPage />),
             handle: routes.adminMapping.handle,
           },
           {
             path: relativePath(routes.adminJobs, 'admin'),
-            element: <JobsPage />,
+            element: guarded(routes.adminJobs.handle, <JobsPage />),
             handle: routes.adminJobs.handle,
           },
           {
             path: relativePath(routes.adminSnapshots, 'admin'),
-            element: <SnapshotsPage />,
+            element: guarded(routes.adminSnapshots.handle, <SnapshotsPage />),
             handle: routes.adminSnapshots.handle,
           },
           {
             path: relativePath(routes.adminAudit, 'admin'),
-            element: <AuditPage />,
+            element: guarded(routes.adminAudit.handle, <AuditPage />),
             handle: routes.adminAudit.handle,
           },
           {
             path: relativePath(routes.adminUnits, 'admin'),
-            element: <UnitsPage />,
+            element: guarded(routes.adminUnits.handle, <UnitsPage />),
             handle: routes.adminUnits.handle,
           },
           {
             path: relativePath(routes.adminUiStrings, 'admin'),
-            element: <UiStringsPage />,
+            element: guarded(routes.adminUiStrings.handle, <UiStringsPage />),
             handle: routes.adminUiStrings.handle,
           },
           {
             path: relativePath(routes.adminHealth, 'admin'),
-            element: <HealthPage />,
+            element: guarded(routes.adminHealth.handle, <HealthPage />),
             handle: routes.adminHealth.handle,
           },
         ],
