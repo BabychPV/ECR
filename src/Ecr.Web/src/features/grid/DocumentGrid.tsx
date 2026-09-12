@@ -614,12 +614,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * (`W4.2`) для нечіпаних кольорів Mantine.
          */}
         {(saveStatus === 'saving' || saveStatus === 'saved') && (
-          <Text size="xs" c="dimmed" data-save-status={saveStatus}>
+          <Text size="xs" c="dimmed" role="status" aria-live="polite" data-save-status={saveStatus}>
             {t(saveStatus === 'saving' ? 'grid.saving' : 'grid.saved')}
           </Text>
         )}
         {saveStatus === 'error' && (
-          <Badge color="statusError" variant="light" data-save-status="error">
+          <Badge color="statusError" variant="light" role="alert" data-save-status="error">
             {t('grid.saveError')}
           </Badge>
         )}
