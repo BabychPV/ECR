@@ -47,8 +47,18 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
             CancellationToken.None);
 
         Assert.Equal(2, page.Items.Count);
-        var sheetKey = doc1.SheetDefId.ToString(CultureInfo.InvariantCulture);
-        Assert.All(page.Items, d => Assert.True(d.SheetStates.ContainsKey(sheetKey)));
+
+        // ⛔ Q-271: ключ словника — КОД аркуша (`SheetDef.Code`), а не
+        // числовий `SheetDefId.ToString()`. Контракт задокументований у
+        // `GetDocumentTablesHandler.DocumentTableDto.SheetCode` ("він же
+        // ключ у DocumentSummary.SheetStates") і саме за кодом читає
+        // фронтенд (`DocumentPage.tsx`: `sheetStates[s.code]`). Ключ за
+        // числовим ідентифікатором ніколи не збігається з кодом — це і є
+        // причина, чому бейдж статусу подання/затвердження в браузері не
+        // оновлювався НІКОЛИ, попри справжню зміну стану на сервері.
+        var numericKey = doc1.SheetDefId.ToString(CultureInfo.InvariantCulture);
+        Assert.All(page.Items, d => Assert.True(d.SheetStates.ContainsKey(doc1.SheetCode)));
+        Assert.All(page.Items, d => Assert.False(d.SheetStates.ContainsKey(numericKey)));
 
         // ⛔ Q-167: сторінка з ДВОМА документами — а запитів у базу рівно
         // ДВА (перелік документів + стан погодження ВСІЄЇ сторінки), а не

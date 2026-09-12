@@ -237,6 +237,17 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     }
 
     /// <summary>Стан аркушів за період; порожньо, якщо період не вказано.</summary>
+    /// <remarks>
+    /// ⛔ Q-271. Ключ словника — <c>SheetDef.Code</c>, а НЕ числовий
+    /// <c>SheetDefId</c>: саме так задокументовано контракт у
+    /// <c>GetDocumentTablesHandler.DocumentTableDto.SheetCode</c>
+    /// ("він же ключ у DocumentSummary.SheetStates"), і саме за кодом аркуша
+    /// читає словник фронтенд (`DocumentPage.tsx`: `sheetStates[s.code]`).
+    /// Ключ за `SheetDefId.ToString()` (число-рядок) НІКОЛИ не збігається з
+    /// кодом аркуша — пошук у фронтенді завжди промахувався, і бейдж
+    /// статусу подання/затвердження не оновлювався НІКОЛИ, попри те що сам
+    /// запит `/submit`/`/approve` спрацьовував і стан у базі мінявся.
+    /// </remarks>
     private async Task<IReadOnlyDictionary<string, string>> StatesAsync(
         long documentId, PeriodKeyFilter period, CancellationToken ct)
     {
@@ -248,13 +259,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var states = await db.ApprovalStates
             .AsNoTracking()
             .Where(a => a.DocumentId == documentId && a.PeriodKey == periodKey)
-            .Select(a => new { a.SheetDefId, a.Status })
+            .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { s.Code, a.Status })
             .Take(MaxSheets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         return states.ToDictionary(
-            s => s.SheetDefId.ToString(CultureInfo.InvariantCulture),
+            s => s.Code,
             s => s.Status.ToString(),
             StringComparer.Ordinal);
     }
@@ -277,7 +288,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var states = await db.ApprovalStates
             .AsNoTracking()
             .Where(a => documentIds.Contains(a.DocumentId) && a.PeriodKey == periodKey)
-            .Select(a => new { a.DocumentId, a.SheetDefId, a.Status })
+            .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.DocumentId, s.Code, a.Status })
             .Take(documentIds.Count * MaxSheets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -287,7 +298,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ToDictionary(
                 g => g.Key,
                 IReadOnlyDictionary<string, string> (g) => g.ToDictionary(
-                    s => s.SheetDefId.ToString(CultureInfo.InvariantCulture),
+                    s => s.Code,
                     s => s.Status.ToString(),
                     StringComparer.Ordinal));
     }
