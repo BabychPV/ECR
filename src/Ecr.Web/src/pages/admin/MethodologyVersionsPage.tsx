@@ -231,7 +231,7 @@ export function MethodologyVersionsPage(): JSX.Element {
       </AsyncBoundary>
 
       {selected !== undefined && !selected.isEditable && (
-        <Alert color="yellow" title={t('methodologies.readOnly')}>
+        <Alert color="statusWarning" title={t('methodologies.readOnly')}>
           {t('methodologies.readOnlyHint')}
         </Alert>
       )}
@@ -397,7 +397,7 @@ export function MethodologyVersionsPage(): JSX.Element {
           {/* ⛔ Пояснення стоїть у діалозі, а не в довідці: клон — це не
               «зробити копію», а єдиний спосіб змінити опубліковану версію
               (`ФВ-9.1`), і людина має розуміти, чому інакше не можна. */}
-          <Alert color="blue">{t('methodologies.cloneHint')}</Alert>
+          <Alert color="statusWarning">{t('methodologies.cloneHint')}</Alert>
 
           <TextInput
             label={t('methodologies.versionNumber')}
