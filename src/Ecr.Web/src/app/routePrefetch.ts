@@ -176,7 +176,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
  * цієї картки (`CLAUDE.md` цієї директиви), а вгадати рядковий літерал
  * СТАРОГО ключа окремо від сторінки — це і є та розбіжність написання,
  * заради якої існує сама фабрика (`queryKeys.ts`, коментар угорі файла).
- * Названо явно в Q-280, не замовчано.
+ * Названо явно в Q-281, не замовчано.
  */
 const routeDataPrefetchers: Partial<Record<string, (queryClient: QueryClient) => void>> = {
   [routes.adminTemplates.id]: (queryClient) => {
