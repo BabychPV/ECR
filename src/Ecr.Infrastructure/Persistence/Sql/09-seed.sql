@@ -653,6 +653,7 @@ USING (VALUES
     (N'security.login',                  N'en', N'Login', 1),
     (N'security.kind',                   N'en', N'Kind', 1),
     (N'security.userState',              N'en', N'State', 1),
+    (N'security.inactive',               N'en', N'inactive', 1),
     (N'security.builtIn',                N'en', N'built-in', 1),
     (N'security.dangerous',              N'en', N'{count} dangerous permission(s)', 1),
     (N'security.bootstrap',              N'en', N'bootstrap', 1),
