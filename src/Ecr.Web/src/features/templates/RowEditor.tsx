@@ -81,9 +81,9 @@ export function RowEditor({
         onChange={(event) => onChange({ ...draft, isReadOnly: event.currentTarget.checked })}
       />
 
-      {!draft.hasFullLabel && <Alert color="yellow">{t('rows.partialLabelWarning')}</Alert>}
+      {!draft.hasFullLabel && <Alert color="statusWarning">{t('rows.partialLabelWarning')}</Alert>}
 
-      {blocker !== null && <Alert color="yellow">{blockerLabel(blocker)}</Alert>}
+      {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}
 
       <Group>
         <Button variant="default" onClick={onCancel}>

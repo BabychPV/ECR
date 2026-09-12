@@ -147,10 +147,10 @@ export function ColumnEditor({
       )}
 
       {!draft.hasFullData && (
-        <Alert color="yellow">{t('columns.partialDataWarning')}</Alert>
+        <Alert color="statusWarning">{t('columns.partialDataWarning')}</Alert>
       )}
 
-      {blocker !== null && <Alert color="yellow">{blockerLabel(blocker)}</Alert>}
+      {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}
 
       <Group>
         <Button variant="default" onClick={onCancel}>

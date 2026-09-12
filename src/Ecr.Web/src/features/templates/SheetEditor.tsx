@@ -84,7 +84,7 @@ export function SheetEditor({
         onChange={(event) => onChange({ ...draft, isVisible: event.currentTarget.checked })}
       />
 
-      {blocker !== null && <Alert color="yellow">{blockerLabel(blocker)}</Alert>}
+      {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}
 
       <Group>
         <Button variant="default" onClick={onCancel}>

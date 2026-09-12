@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { AA, contrast } from '../contrast';
-import { brand, cellState, statusError, statusWarning, themeSurface } from '../theme';
+import { brand, cellState, statusError, statusSuccess, statusWarning, themeSurface } from '../theme';
 
 // ⚠ Шлях від кореня проєкту, а не від import.meta.url: під jsdom
 // він не має схеми file:, і fileURLToPath кидає виняток.
@@ -74,16 +74,21 @@ describe('Контраст токенів (ФВ-14.17)', () => {
    * значення підібрані перебором під REAL-варіанти Mantine (`filled` —
    * біла мітка на заливці; `outline` — текст/межа на тлі сторінки), в обох
    * схемах.
+   *
+   * `Q-262` додав третій: `success` — те саме, знайдене на `<Badge
+   * color="green">` (2.36:1 світла / 2.01:1 темна) і `<Alert color="green"
+   * variant="light">` (2.36:1 текст на власному тлі, світла тема).
    */
   describe.each([
     ['error', statusError],
     ['warning', statusWarning],
+    ['success', statusSuccess],
   ] as const)('статусний колір «%s» контрастний у варіантах Mantine', (name, tuple) => {
     it(`«filled» (біла мітка на заливці) — обидві схеми (${name})`, () => {
       // Індекс 6 — заливка `filled` у СВІТЛІЙ схемі (`primaryShade.light`),
       // індекс 5 — та сама заливка в ТЕМНІЙ (`primaryShade.dark`). Саме
       // індекс 5, а не 8 (Mantine-дефолт для типової теми), і саме тут
-      // стандартна `red`/`orange` провалювались.
+      // стандартна `red`/`orange`/`green` провалювались.
       expect(contrast('#ffffff', tuple[6])).toBeGreaterThanOrEqual(AA.text);
       expect(contrast('#ffffff', tuple[5])).toBeGreaterThanOrEqual(AA.text);
     });
@@ -96,6 +101,61 @@ describe('Контраст токенів (ФВ-14.17)', () => {
       expect(contrast(tuple[6], themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
       expect(contrast(tuple[1], themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
     });
+  });
+
+  /**
+   * `Q-262`: перевірка саме `<Alert variant="light">`-тексту (не лише
+   * `outline`), бо реальний фон — не суцільна сторінка, а власна 10%/15%-
+   * заливка кольору поверх неї (`getCSSColorVariables` у `@mantine/core`).
+   * Наближення до суцільного тла в тесті вище достатнє для error/warning,
+   * але саме тут і був живий дефект T7-03 — тому рахуємо композит явно.
+   */
+  it('«light» (Alert): текст «success» читається на власному тлі, обидві схеми', () => {
+    // Композитує `hex` з непрозорістю `alphaValue` поверх `bgHex` — те саме
+    // рівняння, що й `alpha()`/`rgba()` у `@mantine/core`.
+    function blend(hex: string, alphaValue: number, bgHex: string): string {
+      const parse = (h: string): [number, number, number] => {
+        const m = h.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+        if (m === null) throw new Error(`не hex-колір: ${h}`);
+        return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+      };
+      const [fr, fg, fb] = parse(hex);
+      const [br, bg, bb] = parse(bgHex);
+      const mix = (f: number, b: number) => Math.round(f * alphaValue + b * (1 - alphaValue));
+      const toHex = (v: number) => v.toString(16).padStart(2, '0');
+      return `#${toHex(mix(fr, br))}${toHex(mix(fg, bg))}${toHex(mix(fb, bb))}`;
+    }
+
+    // Світла тема: тло `light`-варіанта — alpha(tuple[6], 0.1) поверх білого
+    // тіла сторінки; текст — tuple[6] (той самий індекс, що й filled).
+    const composedLight = blend(statusSuccess[6], 0.1, '#ffffff');
+    expect(contrast(statusSuccess[6], composedLight)).toBeGreaterThanOrEqual(AA.text);
+
+    // Темна тема: тло — alpha(tuple[3], 0.15) поверх тіла `#242424`; текст —
+    // tuple[Math.max(primaryShade.dark - 5, 0)] = tuple[0] (максимально
+    // блідий відтінок, навмисно — щоб не зникнути й не сліпити на темному).
+    const composedDark = blend(statusSuccess[3], 0.15, themeSurface.dark.body);
+    expect(contrast(statusSuccess[0], composedDark)).toBeGreaterThanOrEqual(AA.text);
+  });
+
+  /**
+   * `Q-262`, мутаційний доказ: якщо `statusSuccess[5]`/`[6]` відкотити до
+   * будь-якого відтінку дефолтної Mantine-шкали `green` (де б не лежав
+   * поріг AA — на 5, 6 чи будь-де іншому), тест НИЖЧЕ мусить впасти. Просто
+   * «контраст ≥ 4.5» не ловить регрес, де хтось поверне «зелений, який
+   * виглядає як зелений» замість підібраного — тому тут перевіряється
+   * КОНКРЕТНЕ значення, а не сам факт проходження порогу.
+   */
+  it('Q-262: «success» — саме підібраний відтінок, не дефолтний Mantine `green`', () => {
+    expect(statusSuccess[5]).toBe('#1a7431');
+    expect(statusSuccess[6]).toBe('#1a7431');
+
+    // Дефолтна Mantine-шкала `green` на цих самих індексах — контроль, що
+    // цей тест справді ловить регрес: без override цей контраст провалюється.
+    const defaultMantineGreen5 = '#51cf66';
+    const defaultMantineGreen6 = '#40c057';
+    expect(contrast('#ffffff', defaultMantineGreen5)).toBeLessThan(AA.text);
+    expect(contrast('#ffffff', defaultMantineGreen6)).toBeLessThan(AA.text);
   });
 
   it('обчислення контрасту дає відомі значення', () => {

@@ -153,7 +153,7 @@ export function PeriodAccessRuleEditor({
         />
       )}
 
-      {blocker !== null && <Alert color="yellow">{createBlockerLabel(blocker)}</Alert>}
+      {blocker !== null && <Alert color="statusWarning">{createBlockerLabel(blocker)}</Alert>}
 
       <Group justify="flex-end">
         <Button disabled={disabled || blocker !== null} loading={saving} onClick={onSubmit}>

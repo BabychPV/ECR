@@ -101,7 +101,7 @@ function Verdicts({ result }: { readonly result: SimulationResultDto }): JSX.Ele
             <Table.Tr key={verdict.code}>
               <Table.Td>{verdict.code}</Table.Td>
               <Table.Td colSpan={4}>
-                <Badge color="green">{t('expressions.testsGreen')}</Badge>
+                <Badge color="statusSuccess">{t('expressions.testsGreen')}</Badge>
               </Table.Td>
             </Table.Tr>
           ) : (

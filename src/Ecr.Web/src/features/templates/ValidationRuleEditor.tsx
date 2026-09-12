@@ -102,7 +102,7 @@ export function ValidationRuleEditor({
         onChange={(event) => onChange({ ...draft, isActive: event.currentTarget.checked })}
       />
 
-      {blocker !== null && <Alert color="yellow">{blockerLabel(blocker)}</Alert>}
+      {blocker !== null && <Alert color="statusWarning">{blockerLabel(blocker)}</Alert>}
 
       <Group>
         <Button variant="default" onClick={onCancel}>

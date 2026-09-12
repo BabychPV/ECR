@@ -110,9 +110,9 @@ export function TableRelationsPage(): JSX.Element {
       {/* ⚠ Пояснення стоїть на екрані, а не в довідці: порожній перелік тут
           означає «таблиці незалежні», а не «ще не налаштували», і без цього
           рядка перший читач шукав би, чого бракує. */}
-      <Alert color="blue">{t('tables.optionalHint')}</Alert>
+      <Alert color="statusWarning">{t('tables.optionalHint')}</Alert>
 
-      {frozen && <Alert color="yellow" title={t('tables.readOnly')}>{t('tables.readOnlyHint')}</Alert>}
+      {frozen && <Alert color="statusWarning" title={t('tables.readOnly')}>{t('tables.readOnlyHint')}</Alert>}
 
       <AsyncBoundary<TableRelationDto[]>
         isPending={relations.isPending && known}
