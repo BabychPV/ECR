@@ -228,6 +228,11 @@ export const router = createBrowserRouter([
           {
             path: 'templates/:id',
             element: <TemplateVersionLayout />,
+            // ⚠ `handle` цього синтетичного вузла живе в `routes.ts`
+            // (`routes.adminTemplateSection`), не тут — той самий інваріант,
+            // що й для листових маршрутів нижче (`PR nav-arch #3`,
+            // breadcrumbs читають назву шаблону саме з цього `handle`).
+            handle: routes.adminTemplateSection.handle,
             children: [
               {
                 path: relativePath(routes.adminTemplateVersion, 'admin/templates/:id'),

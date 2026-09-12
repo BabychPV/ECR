@@ -35,6 +35,48 @@
  * контракт цього реєстру.
  */
 
+/**
+ * Налаштування breadcrumb-крихти запису (`PR nav-arch #3`).
+ *
+ * ⚠ Не кожен рівень фізичної вкладеності `router.tsx` — це той рівень, який
+ * людина хоче бачити у breadcrumbs. `admin-template-version-relations`,
+ * наприклад, — фізичний СУСІД `admin-template-version` (`PR #2` свідомо не
+ * вклав "зв'язки" під "версію" — обидва належать одному layout'у
+ * `TemplateVersionLayout`, але як два незалежні листові маршрути), тому
+ * `useMatches()` сам по собі НЕ дає ланцюжка «Шаблон / Версія / Зв'язки» —
+ * лише «Шаблон / Зв'язки». `ancestorIds` — явний спосіб сказати «встав сюди
+ * крихту ЦИХ записів реєстру перед моєю власною», не змінюючи саму
+ * вкладеність маршрутів заради breadcrumbs.
+ */
+export interface RouteCrumbConfig {
+  /**
+   * Ids інших записів цього ж реєстру, чиї крихти вставляються ПЕРЕД
+   * власною крихтою цього запису, у вказаному порядку. Кожен резолвиться
+   * (статично чи динамічно) тими самими правилами, що й звичайний матч.
+   */
+  ancestorIds?: readonly string[];
+
+  /**
+   * Ім'я параметра `useParams()` цього маршруту (`id`, `versionId`, `code`),
+   * чиє значення резолвер (`breadcrumbResolvers.ts`) перетворює на
+   * людиночитну назву замість статичного `labelKey`. Без цього поля крихта
+   * завжди статична (`t(labelKey)`).
+   */
+  resolveParam?: string;
+
+  /** Який резолвер `breadcrumbResolvers.ts` читає кеш TanStack Query для {@link resolveParam}. */
+  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName';
+
+  /**
+   * Явна ціль посилання крихти, якщо вона НЕ збігається з власним `pathname`
+   * збігу — синтетичний вузол вкладеності (`admin-template-section` нижче)
+   * не має власної сторінки (голий `/admin/templates/:id` рендерить лише
+   * порожній `Outlet`), тож крихта веде на найближчий чинний маршрут (перелік
+   * шаблонів), а не в глухий кут.
+   */
+  linkTo?: string;
+}
+
 /** Прикладна метадані маршруту, сумісна з `RouteObject.handle` React Router 7. */
 export interface RouteHandle {
   /** Ключ каталогу рядків (`shared/i18n`) — назва пункту навбару/breadcrumb. */
@@ -49,6 +91,11 @@ export interface RouteHandle {
    *  Поле лишається типізованим, щоб PR, який додасть іконки, не чіпав форму
    *  запису — лише саму бібліотеку рендера. */
   icon?: string;
+
+  /** Breadcrumb-специфічні налаштування (`PR nav-arch #3`). Без цього поля
+   *  крихта — просто статичний `t(labelKey)`, без резолву й без ін'єкції
+   *  логічних предків. */
+  crumb?: RouteCrumbConfig;
 }
 
 /** Один запис дерева маршрутів. */
@@ -92,15 +139,43 @@ export const routes = {
     handle: { labelKey: 'nav.templates', permission: 'Template.Edit' },
     showInNav: true,
   },
+  // ⚠ Синтетичний вузол вкладеності (`PR #2`, `TemplateVersionLayout`) —
+  // не окрема сторінка (голий `/admin/templates/:id` рендерить лише
+  // `Outlet`, без листа). Існує в реєстрі РІВНО заради breadcrumbs (`PR #3`):
+  // `router.tsx` передає цей `handle` самому layout-маршруту, і саме тут
+  // резолвиться людиночитна НАЗВА ШАБЛОНУ для сегмента `:id`, спільного для
+  // версії й зв'язків таблиць нижче.
+  adminTemplateSection: {
+    id: 'admin-template-section',
+    path: '/admin/templates/:id',
+    handle: {
+      labelKey: 'nav.templates',
+      crumb: {
+        ancestorIds: ['admin-templates'],
+        resolveParam: 'id',
+        resolveWith: 'templateName',
+        linkTo: '/admin/templates',
+      },
+    },
+  },
   adminTemplateVersion: {
     id: 'admin-template-version',
     path: '/admin/templates/:id/versions/:versionId',
-    handle: { labelKey: 'version.title' },
+    handle: {
+      labelKey: 'version.title',
+      crumb: { resolveParam: 'versionId', resolveWith: 'templateVersionLabel' },
+    },
   },
   adminTemplateVersionRelations: {
     id: 'admin-template-version-relations',
     path: '/admin/templates/:id/versions/:versionId/relations',
-    handle: { labelKey: 'tables.relationsTitle' },
+    // ⚠ `ancestorIds: ['admin-template-version']` — цей лист є ФІЗИЧНИМ
+    // СУСІДОМ `admin-template-version` у `router.tsx` (обидва — прямі діти
+    // `TemplateVersionLayout`), не його нащадком, тож `useMatches()` сам не
+    // дає крихти версії для цього маршруту. Без цього поля людина бачила б
+    // «Шаблон / Зв'язки» замість «Шаблон / Версія / Зв'язки» — саме той
+    // четвертий рівень, на якому директива вимагає перевірити усічення.
+    handle: { labelKey: 'tables.relationsTitle', crumb: { ancestorIds: ['admin-template-version'] } },
   },
   adminRegistries: {
     id: 'admin-registries',
@@ -111,7 +186,14 @@ export const routes = {
   adminRegistryDefinition: {
     id: 'admin-registry-definition',
     path: '/admin/registries/:code/definition',
-    handle: { labelKey: 'registries.constructor' },
+    handle: {
+      labelKey: 'registries.constructor',
+      crumb: {
+        ancestorIds: ['admin-registries'],
+        resolveParam: 'code',
+        resolveWith: 'registryName',
+      },
+    },
   },
   adminMethodologies: {
     id: 'admin-methodologies',

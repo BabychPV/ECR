@@ -21,6 +21,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
+import { Breadcrumbs } from './Breadcrumbs';
 import { navRoutes } from './routes';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
@@ -302,6 +303,18 @@ export function AppLayout(): JSX.Element {
            * інакше кожен перехід гасив би шапку й навігацію разом зі змістом, і
            * екран блимав би цілком там, де змінюється сама лише середина.
            */}
+          {/*
+           * Breadcrumbs (`PR nav-arch #3`) — ОДИН екземпляр, тут, а не в
+           * `AdminLayout`/`TemplateVersionLayout`: `useMatches()` усередині
+           * компонента сам читає ПОВНЕ дерево збігів поточної адреси (той
+           * самий аргумент, що й для `<ScrollRestoration/>` вище, `PR #2`).
+           * ПОЗА `<Suspense>` навколо `<Outlet/>` навмисно: інакше на кожному
+           * підвантаженні чанка нового маршруту крихти зникали б і з'являлися
+           * знову разом із дочірнім деревом, хоча дані для їхнього резолву
+           * (кеш TanStack Query) нікуди не зникають.
+           */}
+          <Breadcrumbs />
+
           <Suspense fallback={<RouteFallback />}>
             <Outlet />
           </Suspense>
