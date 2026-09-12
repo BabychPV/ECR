@@ -65,6 +65,16 @@ export function PeriodsPage(): JSX.Element {
   // Який період фіксуємо як поточний; `null` — діалог закритий.
   const [pinning, setPinning] = useState<number | null>(null);
 
+  // ⚠ Q-287: архівація раніше виконувалась одразу по кліку — без
+  // підтвердження, на відміну від Reopen/Pin на цій самій сторінці, які
+  // вимагають діалог. Дія незворотна (`Archived` — кінцевий стан), тому
+  // випадковий клік має ту саму ціну помилки, що й випадкове відкриття чи
+  // фіксація періоду. `boolean`, а не reason: `POST /archive` не приймає
+  // причину (на відміну від `reopen`/`current-period`), тому тут — простий
+  // діалог підтвердження, той самий патерн, що вже несуть `cloning`/
+  // `changingTimeZone` на цій сторінці, а не `ReasonModal`.
+  const [archiving, setArchiving] = useState(false);
+
   // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
   // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
   // відкриються періоди взагалі (`A7-25`).
@@ -133,6 +143,7 @@ export function PeriodsPage(): JSX.Element {
     mutationFn: (id: number) => apiFetch(`/api/v1/projects/${id}/archive`, { method: 'POST' }),
     onSuccess: async () => {
       await refresh();
+      setArchiving(false);
       showDone(t('periods.archived'));
     },
     onError: showApiError,
@@ -393,7 +404,7 @@ export function PeriodsPage(): JSX.Element {
                 variant="default"
                 color="statusError"
                 loading={archive.isPending}
-                onClick={() => archive.mutate(selected.id)}
+                onClick={() => setArchiving(true)}
               >
                 {t('periods.archive')}
               </Button>
@@ -599,6 +610,30 @@ export function PeriodsPage(): JSX.Element {
             }}
           >
             {t('periods.timezoneChange')}
+          </Button>
+        </Group>
+      </Modal>
+
+      {/* ⚠ Q-287: підтвердження перед незворотною архівацією — той самий
+          рівень захисту, що вже мають Reopen/Pin нижче (`ReasonModal`), лише
+          без поля причини: `POST /archive` його не приймає. */}
+      <Modal opened={archiving} onClose={() => setArchiving(false)} title={t('periods.archive')}>
+        <Text size="sm" mb="sm">
+          {t('periods.archiveConfirm')}
+        </Text>
+
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setArchiving(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color="statusError"
+            loading={archive.isPending}
+            onClick={() => {
+              if (selected !== undefined) archive.mutate(selected.id);
+            }}
+          >
+            {t('periods.archive')}
           </Button>
         </Group>
       </Modal>
