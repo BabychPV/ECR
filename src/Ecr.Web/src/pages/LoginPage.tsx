@@ -38,6 +38,23 @@ const CATALOG_LOAD_FAILED = new EcrApiError({
 });
 
 /**
+ * Аргументи для кнопки-тумблера видимості пароля (`Q-260`).
+ *
+ * ⛔ Mantine ставить на цю кнопку `aria-hidden="true"` і `tabIndex={-1}` за
+ * замовчуванням, доки `visibilityToggleButtonProps` цього не перекриє
+ * (`PasswordInput.mjs`) — сама наявність об'єкта вже знімає `aria-hidden`, а
+ * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
+ * для миші: клавіатура й читалка його не бачили взагалі.
+ *
+ * ⚠ Напис — ЛІТЕРАЛ, не `t()`, з тієї ж причини, що й `CATALOG_LOAD_FAILED`
+ * вище: рядки цього застосунку йдуть із серверного каталогу
+ * (`09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський. Ключа
+ * під цей напис там ще немає; голий `t()` без рядка в каталозі показав би
+ * читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
+ */
+const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/**
  * Вхід: доменний і локальний.
  *
  * ⚠ Обидва способи видають **ту саму cookie** і той самий профіль. Різні
@@ -166,6 +183,7 @@ export function LoginPage(): JSX.Element {
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
               autoComplete="current-password"
+              visibilityToggleButtonProps={passwordToggleProps}
             />
 
             <Button type="submit" variant="default" loading={busy}>

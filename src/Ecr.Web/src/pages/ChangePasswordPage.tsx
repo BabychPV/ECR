@@ -15,6 +15,25 @@ import { t } from '@/shared/i18n';
  * тимчасовий пароль знає той, хто його видав, і робота під ним не є роботою
  * названого користувача.
  */
+
+/**
+ * Аргументи для кнопки-тумблера видимості пароля (`Q-260`).
+ *
+ * ⛔ Mantine ставить на цю кнопку `aria-hidden="true"` і `tabIndex={-1}` за
+ * замовчуванням, доки `visibilityToggleButtonProps` цього не перекриє
+ * (`PasswordInput.mjs`) — сама наявність об'єкта вже знімає `aria-hidden`, а
+ * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
+ * для миші: клавіатура й читалка його не бачили взагалі.
+ *
+ * ⚠ Напис — ЛІТЕРАЛ, не `t()`. Рядки цього застосунку йдуть винятково із
+ * серверного каталогу (`GET /api/v1/ui-strings/...`, сам каталог наповнює
+ * `09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський. Ключа під
+ * цей напис там ще немає, і завести його звідси не можна: голий `t()` без
+ * рядка в каталозі показав би позначений ключ (`⟦...⟧`) читалці замість
+ * опису кнопки — рівно той дефект, від якого рятує `Missing`-позначка в
+ * `shared/i18n`.
+ */
+const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
 export function ChangePasswordPage(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -62,12 +81,14 @@ export function ChangePasswordPage(): JSX.Element {
             value={current}
             onChange={(event) => setCurrent(event.currentTarget.value)}
             autoComplete="current-password"
+            visibilityToggleButtonProps={passwordToggleProps}
           />
           <PasswordInput
             label={t('password.next')}
             value={next}
             onChange={(event) => setNext(event.currentTarget.value)}
             autoComplete="new-password"
+            visibilityToggleButtonProps={passwordToggleProps}
           />
           <PasswordInput
             label={t('password.repeat')}
@@ -75,6 +96,7 @@ export function ChangePasswordPage(): JSX.Element {
             onChange={(event) => setRepeat(event.currentTarget.value)}
             error={mismatch ? t('password.mismatch') : undefined}
             autoComplete="new-password"
+            visibilityToggleButtonProps={passwordToggleProps}
           />
 
           <Button loading={busy} disabled={mismatch || next.length === 0} onClick={() => void submit()}>
