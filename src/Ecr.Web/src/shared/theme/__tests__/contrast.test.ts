@@ -158,6 +158,55 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     expect(contrast('#ffffff', defaultMantineGreen6)).toBeLessThan(AA.text);
   });
 
+  /**
+   * `Q-272`: той самий дефект (T7-02/T7-03), лишений ПОЗА межею Q-262 —
+   * `<Badge color="green" variant="light">` («збіглося»/«ні») у
+   * `AccessDiagnosticsPanel.tsx`, рядок 83. Q-262 сам це зафіксував як
+   * НЕзаймане: «інший виклик, поза переліком файлів картки». Композит той
+   * самий, що й для `Alert` вище (`getCSSColorVariables` у `@mantine/core`
+   * — `variant="light"` без явного відтінку бере текст і тло з
+   * `tuple[primaryShade]` ОДНИМ резолвером для будь-якого компонента, не
+   * лише `Alert`), тож дефект і виправлення ідентичні.
+   */
+  it('Q-272: Badge «збіглося» в AccessDiagnosticsPanel — `statusSuccess`, не голий `green`', () => {
+    const source = readFileSync(
+      path.resolve(process.cwd(), 'src/features/security/AccessDiagnosticsPanel.tsx'),
+      'utf8',
+    );
+
+    // ⛔ Мутаційний доказ на джерело: поверни хтось голий `'green'` замість
+    // `'statusSuccess'` — цей рядок ловить регрес одразу, не чекаючи, доки
+    // хтось відкриє DevTools і виміряє контраст вручну.
+    expect(source).toMatch(/color=\{group\.matched \? 'statusSuccess' : 'gray'\}/);
+    expect(source).not.toMatch(/color=\{group\.matched \? 'green' : 'gray'\}/);
+
+    // Той самий `blend`, що й для Alert вище: перевіряє не лише присутність
+    // рядка, а й що підміна дає РЕАЛЬНЕ покращення контрасту, не косметичну
+    // зміну імені.
+    function blend(hex: string, alphaValue: number, bgHex: string): string {
+      const parse = (h: string): [number, number, number] => {
+        const m = h.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+        if (m === null) throw new Error(`не hex-колір: ${h}`);
+        return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+      };
+      const [fr, fg, fb] = parse(hex);
+      const [br, bg, bb] = parse(bgHex);
+      const mix = (f: number, b: number) => Math.round(f * alphaValue + b * (1 - alphaValue));
+      const toHex = (v: number) => v.toString(16).padStart(2, '0');
+      return `#${toHex(mix(fr, br))}${toHex(mix(fg, bg))}${toHex(mix(fb, bb))}`;
+    }
+
+    // ДО (контроль регресу): дефолтна Mantine-шкала `green`, індекс 6 —
+    // текст і тло `light`-варіанта у світлій темі. 2.175:1 — провал AA.
+    const defaultMantineGreen6 = '#40c057';
+    const beforeComposite = blend(defaultMantineGreen6, 0.1, '#ffffff');
+    expect(contrast(defaultMantineGreen6, beforeComposite)).toBeLessThan(AA.text);
+
+    // ПІСЛЯ: `statusSuccess[6]` — той самий композит, 5.075:1 — проходить.
+    const afterComposite = blend(statusSuccess[6], 0.1, '#ffffff');
+    expect(contrast(statusSuccess[6], afterComposite)).toBeGreaterThanOrEqual(AA.text);
+  });
+
   it('обчислення контрасту дає відомі значення', () => {
     // ⚠ Калібрування самої лінійки. Без нього тест перевіряв би власну
     // помилку: функція, що завжди повертає 21, зробила б усе вище зеленим.
