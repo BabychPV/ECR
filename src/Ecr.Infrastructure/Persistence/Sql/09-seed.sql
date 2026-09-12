@@ -846,6 +846,7 @@ USING (VALUES
     (N'periods.cloneHint',               N'en', N'Registries, settings and the sheet composition are copied. Data is not.', 1),
     (N'periods.cloned',                  N'en', N'The clone is ready and selected.', 1),
     (N'periods.archive',                 N'en', N'Archive', 1),
+    (N'periods.archiveConfirm',          N'en', N'The project becomes read-only. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.archived',                N'en', N'The project is archived. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.current',                 N'en', N'current', 1),
     (N'periods.pin',                     N'en', N'Make current', 1),
