@@ -21,6 +21,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { navRoutes } from './routes';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
@@ -131,52 +132,20 @@ function SkipToContentLink(): JSX.Element {
   );
 }
 
-/** Пункт навігації разом із правом, яке його відкриває. */
-interface NavItem {
-  path: string;
-  labelKey: string;
-  permission?: string;
-}
-
 /**
  * Навігація.
  *
  * ⛔ Розділу «Звіти» тут немає і не буде: звітність лишається в SSRS (D-52).
  * Пункт меню, що веде в порожнечу, — це обіцянка, якої система не виконує.
+ *
+ * ⛔ Перелік пунктів і їхній порядок раніше жили тут власним масивом
+ * (`Items`), окремо від шляхів у `router.tsx` — той самий шлях
+ * (`/admin/templates`) набирався рядковим літералом у ДВОХ місцях, і нічого
+ * не заважало їм розійтися. `navRoutes` (`./routes`, `PR nav-arch #1`) —
+ * тепер ЄДИНИЙ реєстр: `router.tsx` бере звідти `path`/`handle` для
+ * `createBrowserRouter`, навбар нижче — той самий реєстр, відфільтрований за
+ * `showInNav`. Порядок пунктів — порядок оголошення в реєстрі.
  */
-const Items: NavItem[] = [
-  { path: '/', labelKey: 'nav.documents' },
-  { path: '/admin/templates', labelKey: 'nav.templates', permission: 'Template.Edit' },
-  { path: '/admin/registries', labelKey: 'nav.registries', permission: 'Registry.View' },
-  { path: '/admin/methodologies', labelKey: 'nav.methodologies', permission: 'Calculation.View' },
-  { path: '/admin/expressions', labelKey: 'nav.expressions', permission: 'Calculation.View' },
-  { path: '/admin/units', labelKey: 'nav.units', permission: 'Calculation.View' },
-  { path: '/admin/security', labelKey: 'nav.security', permission: 'Security.ManageRoles' },
-  // ⛔ Було `Period.Manage` — права з такою назвою немає в каталозі
-  // (`sec.Permission`); seed заводить лише `Period.Configure` і
-  // `Period.Reopen`. Пункт меню не з'являвся НІКОМУ, включно з
-  // `PeriodAdministrator`, чий шаблон `Period.%` розгортається проти
-  // каталогу й теж не знаходив там нічого (директива №09 `S-02`).
-  // `Period.Configure` — базове право сторінки (`PeriodsPage.tsx:187`);
-  // саме `Reopen`-кнопка всередині додатково перевіряє `Period.Reopen`.
-  { path: '/admin/periods', labelKey: 'nav.periods', permission: 'Period.Configure' },
-  { path: '/admin/sources', labelKey: 'nav.sources', permission: 'Integration.Manage' },
-  { path: '/admin/mapping', labelKey: 'nav.mapping', permission: 'Integration.Manage' },
-  { path: '/admin/jobs', labelKey: 'nav.jobs', permission: 'System.ViewHealth' },
-  { path: '/admin/snapshots', labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory' },
-  { path: '/admin/audit', labelKey: 'nav.audit', permission: 'Security.ViewAudit' },
-  {
-    path: '/admin/ui-strings',
-    labelKey: 'nav.uiStrings',
-    permission: 'System.ManageLocalization',
-  },
-  { path: '/admin/health', labelKey: 'nav.health', permission: 'System.ViewHealth' },
-
-  // ⛔ БЕЗ права — і це не пропуск. Пункт відповідає на «чому в мене порожні
-  // екрани», тобто потрібен саме тому, у кого прав немає (`H-21`). Закрити
-  // його правом означало б показувати відповідь лише тим, хто й так знає.
-  { path: '/my-groups', labelKey: 'nav.myGroups' },
-];
 
 /** Каркас застосунку: навігація, профіль, вміст сторінки. */
 export function AppLayout(): JSX.Element {
@@ -275,19 +244,19 @@ export function AppLayout(): JSX.Element {
 
       <AppShell.Navbar p="xs">
         <ScrollArea>
-          {Items.filter((item) => item.permission === undefined || can(me, item.permission)).map(
-            (item) => (
+          {navRoutes
+            .filter((route) => route.handle.permission === undefined || can(me, route.handle.permission))
+            .map((route) => (
               // ⚠ Пункт показується, лише якщо право є: користувач не має
               // тиснути те, що все одно дасть 403.
               <NavLink
-                key={item.path}
+                key={route.path}
                 component={Link}
-                to={item.path}
-                label={t(item.labelKey)}
-                active={location.pathname === item.path}
+                to={route.path}
+                label={t(route.handle.labelKey)}
+                active={location.pathname === route.path}
               />
-            ),
-          )}
+            ))}
         </ScrollArea>
       </AppShell.Navbar>
 

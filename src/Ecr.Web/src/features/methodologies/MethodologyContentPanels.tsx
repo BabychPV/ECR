@@ -23,6 +23,7 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -109,7 +110,7 @@ export function MethodologyConstantsPanel({
   const [editing, setEditing] = useState<ConstantDraft | null>(null);
 
   const constants = useQuery({
-    queryKey: ['methodology-constants', versionId],
+    queryKey: queryKeys.methodologies.constants(versionId),
     queryFn: () => methodologyConstants(methodologyId, versionId),
   });
 
@@ -137,7 +138,7 @@ export function MethodologyConstantsPanel({
         source: draft.source === '' ? null : draft.source,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-constants', versionId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.constants(versionId) });
       setEditing(null);
       showDone(t('methodologies.constantSaved'));
     },
@@ -352,7 +353,7 @@ export function MethodologyRulesPanel({
   const [editing, setEditing] = useState<RuleDraft | null>(null);
 
   const rules = useQuery({
-    queryKey: ['methodology-rules', versionId],
+    queryKey: queryKeys.methodologies.rules(versionId),
     queryFn: () => methodologyRules(methodologyId, versionId),
   });
 
@@ -364,7 +365,7 @@ export function MethodologyRulesPanel({
         isActive: draft.isActive,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-rules', versionId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.rules(versionId) });
       setEditing(null);
       showDone(t('methodologies.ruleSaved'));
     },
@@ -517,7 +518,7 @@ export function MethodologyOutputsPanel({
   const [editing, setEditing] = useState<OutputDraft | null>(null);
 
   const outputs = useQuery({
-    queryKey: ['methodology-outputs', versionId],
+    queryKey: queryKeys.methodologies.outputs(versionId),
     queryFn: () => methodologyOutputs(methodologyId, versionId),
   });
 
@@ -534,7 +535,7 @@ export function MethodologyOutputsPanel({
         ordinal: draft.ordinal,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-outputs', versionId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.outputs(versionId) });
       setEditing(null);
       showDone(t('methodologies.outputSaved'));
     },
@@ -682,7 +683,7 @@ export function MethodologyTestsPanel({
   const [editing, setEditing] = useState<TestDraft | null>(null);
 
   const tests = useQuery({
-    queryKey: ['methodology-tests', versionId],
+    queryKey: queryKeys.methodologies.tests(versionId),
     queryFn: () => methodologyTestCases(methodologyId, versionId),
   });
 
@@ -694,7 +695,7 @@ export function MethodologyTestsPanel({
         tolerance: draft.tolerance,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-tests', versionId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.tests(versionId) });
       setEditing(null);
       showDone(t('methodologies.testSaved'));
     },
@@ -871,7 +872,7 @@ export function MethodologyBindingsPanel({
   const [editing, setEditing] = useState<BindingDraft | null>(null);
 
   const bindings = useQuery({
-    queryKey: ['calculation-bindings', methodologyId],
+    queryKey: queryKeys.methodologies.bindings(methodologyId),
     queryFn: () => calculationBindings(methodologyId),
   });
 
@@ -882,7 +883,7 @@ export function MethodologyBindingsPanel({
         isActive: draft.isActive,
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['calculation-bindings', methodologyId] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.bindings(methodologyId) });
       setEditing(null);
       showDone(t('methodologies.bindingSaved'));
     },
@@ -1058,7 +1059,9 @@ export function MethodologyModesForm({
     mutationFn: () =>
       saveMethodologyModes(methodologyId, version.id, { numericMode, calendarMode, traceLevel }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-versions', methodologyId] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.methodologies.versionsOf(methodologyId),
+      });
       showDone(t('methodologies.modesSaved'));
     },
     onError: showApiError,

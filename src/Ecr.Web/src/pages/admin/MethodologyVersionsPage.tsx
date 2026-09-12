@@ -20,6 +20,7 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
 import type { ExpressionPlacement } from '@/features/expressions/api';
 import {
@@ -90,7 +91,7 @@ export function MethodologyVersionsPage(): JSX.Element {
   const [editing, setEditing] = useState<FormulaDraft | null>(null);
 
   const versions = useQuery({
-    queryKey: ['methodology-versions', methodologyId],
+    queryKey: queryKeys.methodologies.versionsOf(methodologyId),
     queryFn: () => methodologyVersions(methodologyId),
     enabled: known,
   });
@@ -107,7 +108,7 @@ export function MethodologyVersionsPage(): JSX.Element {
   const editable = mayEditContent(selected, mayEdit);
 
   const formulas = useQuery({
-    queryKey: ['methodology-formulas', selected?.id],
+    queryKey: queryKeys.methodologies.formulas(selected?.id),
     queryFn: () => methodologyFormulas(methodologyId, selected?.id ?? 0),
     enabled: known && selected !== undefined,
   });
@@ -130,7 +131,9 @@ export function MethodologyVersionsPage(): JSX.Element {
         level,
       }),
     onSuccess: async (draft) => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-versions', methodologyId] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.methodologies.versionsOf(methodologyId),
+      });
       setSelectedId(String(draft.id));
       setCreating(false);
       setNewVersion('');
@@ -142,7 +145,7 @@ export function MethodologyVersionsPage(): JSX.Element {
   const save = useMutation({
     mutationFn: (draft: FormulaDraft) => saveMethodologyFormula(methodologyId, draft),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-formulas'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.allFormulas() });
       setEditing(null);
       showDone(t('methodologies.formulaSaved'));
     },
@@ -153,7 +156,7 @@ export function MethodologyVersionsPage(): JSX.Element {
     mutationFn: (target: { versionId: number; code: string }) =>
       deleteMethodologyFormula(methodologyId, target.versionId, target.code),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['methodology-formulas'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.allFormulas() });
       showDone(t('methodologies.formulaDeleted'));
     },
     onError: showApiError,

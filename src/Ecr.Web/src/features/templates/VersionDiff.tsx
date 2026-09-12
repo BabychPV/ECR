@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, NumberInput, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { TemplateDiffDto } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { t } from '@/shared/i18n';
@@ -27,7 +28,7 @@ export function VersionDiff({ templateVersionId }: { templateVersionId: number }
   const [otherId, setOtherId] = useState<number | null>(null);
 
   const diff = useQuery({
-    queryKey: ['template-diff', templateVersionId, otherId],
+    queryKey: queryKeys.templates.versionDiff(templateVersionId, otherId),
     queryFn: () =>
       apiFetch<TemplateDiffDto>(`/api/v1/template-versions/${templateVersionId}/diff/${otherId ?? 0}`),
     enabled: opened && otherId !== null,

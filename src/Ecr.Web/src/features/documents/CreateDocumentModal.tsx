@@ -3,6 +3,7 @@ import { Button, Checkbox, Group, Modal, Select, Stack, Text } from '@mantine/co
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   CreateDocumentRequest,
   DocumentIdResponse,
@@ -51,7 +52,7 @@ export function CreateDocumentModal({
   });
 
   const templates = useQuery({
-    queryKey: ['templates'],
+    queryKey: queryKeys.templates.list(),
     queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
     enabled: opened,
   });
@@ -70,7 +71,7 @@ export function CreateDocumentModal({
   // `TemplateVersionPage`, `?limit=100`, `.data?.items`.
   const versionQueries = useQueries({
     queries: templateItems.map((template) => ({
-      queryKey: ['template-versions', template.id],
+      queryKey: queryKeys.templates.versionsOf(template.id),
       queryFn: () =>
         apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
       enabled: opened,
@@ -88,7 +89,7 @@ export function CreateDocumentModal({
   );
 
   const structure = useQuery({
-    queryKey: ['template-version', Number(versionId)],
+    queryKey: queryKeys.templates.version(Number(versionId)),
     queryFn: () =>
       apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${versionId ?? ''}/structure`),
     enabled: opened && versionId !== null,

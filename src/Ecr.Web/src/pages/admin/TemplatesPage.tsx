@@ -3,6 +3,7 @@ import { Badge, Button, Group, Modal, Table, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   CreateTemplateRequest,
   CreateTemplateVersionRequest,
@@ -39,7 +40,7 @@ export function TemplatesPage(): JSX.Element {
   const [versionNumber, setVersionNumber] = useState('');
 
   const templates = useQuery({
-    queryKey: ['templates'],
+    queryKey: queryKeys.templates.list(),
     queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
   });
 
@@ -54,7 +55,7 @@ export function TemplatesPage(): JSX.Element {
   // масив. `?limit=100` — той самий одноразовий ліміт сторінки, що й вище.
   const versionQueries = useQueries({
     queries: items.map((template) => ({
-      queryKey: ['template-versions', template.id],
+      queryKey: queryKeys.templates.versionsOf(template.id),
       queryFn: () =>
         apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
     })),
@@ -77,7 +78,7 @@ export function TemplatesPage(): JSX.Element {
         body: JSON.stringify({ code: code.trim(), nameL10n: name } satisfies CreateTemplateRequest),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['templates'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.list() });
       setCreating(false);
       setCode('');
       setName({});
@@ -104,8 +105,10 @@ export function TemplatesPage(): JSX.Element {
         } satisfies CreateTemplateVersionRequest),
       }),
     onSuccess: async (_result, target) => {
-      await queryClient.invalidateQueries({ queryKey: ['template-versions', target.templateId] });
-      await queryClient.invalidateQueries({ queryKey: ['templates'] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.templates.versionsOf(target.templateId),
+      });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.list() });
       setVersioning(null);
       setVersionNumber('');
       showDone(t('templates.versionCreated'));

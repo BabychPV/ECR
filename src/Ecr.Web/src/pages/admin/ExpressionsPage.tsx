@@ -2,6 +2,7 @@ import { useMemo, useState, type JSX } from 'react';
 import { Alert, Badge, Group, List, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   ExpressionDialect,
   ExpressionValidationDto,
@@ -37,13 +38,13 @@ export function ExpressionsPage(): JSX.Element {
   const [result, setResult] = useState<ExpressionValidationDto | null>(null);
 
   const templates = useQuery({
-    queryKey: ['templates'],
+    queryKey: queryKeys.templates.list(),
     queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
     enabled: dialect === 'Template',
   });
 
   const methodologies = useQuery({
-    queryKey: ['methodologies'],
+    queryKey: queryKeys.methodologies.list(),
     queryFn: () => apiFetch<MethodologyDto[]>('/api/v1/methodologies'),
     enabled: dialect === 'Methodology',
   });
@@ -59,7 +60,7 @@ export function ExpressionsPage(): JSX.Element {
   // Взірець — `TemplatesPage.tsx`/`CreateProjectModal.tsx`: `TemplateVersionPage`,
   // `?limit=100`, `.data?.items`.
   const versions = useQuery({
-    queryKey: ['template-versions', firstTemplateId],
+    queryKey: queryKeys.templates.versionsOf(firstTemplateId),
     queryFn: () =>
       apiFetch<TemplateVersionPage>(
         `/api/v1/templates/${String(firstTemplateId)}/versions?limit=100`,
