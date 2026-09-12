@@ -90,6 +90,16 @@ export function MethodologyVersionsPage(): JSX.Element {
   const [level, setLevel] = useState<CalculationLevel>('Configuration');
   const [editing, setEditing] = useState<FormulaDraft | null>(null);
 
+  // ⛔ Видалення формули незворотне (`ФВ-9.15`) і досі спрацьовувало прямо з
+  // кліку — та сама помилка одним кліком, проти якої вже стоїть підтвердження
+  // в `DocumentGrid` (`AllowWithConfirmation`, `#43`) і в перемиканні джерела
+  // реєстру (`SourceKindSwitch`). Тут пояснювати ПРИЧИНУ нема чого — формула
+  // не лишає слід у журналі так, як перемикання джерела, тож досить простого
+  // так/ні, а не повної форми з причиною.
+  const [deleteTarget, setDeleteTarget] = useState<{ versionId: number; code: string } | null>(
+    null,
+  );
+
   const versions = useQuery({
     queryKey: queryKeys.methodologies.versionsOf(methodologyId),
     queryFn: () => methodologyVersions(methodologyId),
@@ -157,6 +167,7 @@ export function MethodologyVersionsPage(): JSX.Element {
       deleteMethodologyFormula(methodologyId, target.versionId, target.code),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.allFormulas() });
+      setDeleteTarget(null);
       showDone(t('methodologies.formulaDeleted'));
     },
     onError: showApiError,
@@ -333,9 +344,8 @@ export function MethodologyVersionsPage(): JSX.Element {
                               size="compact-xs"
                               variant="subtle"
                               color="statusError"
-                              loading={remove.isPending}
                               onClick={() =>
-                                remove.mutate({ versionId: selected.id, code: formula.code })
+                                setDeleteTarget({ versionId: selected.id, code: formula.code })
                               }
                             >
                               {t('methodologies.deleteFormula')}
@@ -543,6 +553,39 @@ export function MethodologyVersionsPage(): JSX.Element {
             </Button>
           </Stack>
         )}
+      </Modal>
+
+      {/*
+       * ⛔ Той самий рисунок, що й підтвердження правки поза вікном доступу в
+       * `DocumentGrid` (`ФВ-2.16`, `#43`): просте так/ні, а не `ReasonModal`
+       * — видалення формули чернетки не лишає підстави в журналі так, як
+       * публікація чи перемикання джерела реєстру, тож форма з причиною тут
+       * питала б про те, чого нікуди не пише. Закриття без кнопки (хрестик,
+       * `Esc`, клік поза) — СКАСУВАННЯ: `remove.mutate` тут не викликаний
+       * узагалі, формула лишається на місці.
+       */}
+      <Modal
+        opened={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={t('methodologies.deleteFormulaConfirmTitle')}
+      >
+        <Text size="sm" mb="md">
+          {t('methodologies.deleteFormulaConfirmText', { code: deleteTarget?.code ?? '' })}
+        </Text>
+        <Group justify="flex-end" gap="xs">
+          <Button variant="default" onClick={() => setDeleteTarget(null)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color="statusError"
+            loading={remove.isPending}
+            onClick={() => {
+              if (deleteTarget !== null) remove.mutate(deleteTarget);
+            }}
+          >
+            {t('methodologies.deleteFormulaConfirmTitle')}
+          </Button>
+        </Group>
       </Modal>
     </Stack>
   );

@@ -535,6 +535,8 @@ USING (VALUES
     (N'methodologies.addFormula',        N'en', N'Add formula', 1),
     (N'methodologies.editFormula',       N'en', N'Edit', 1),
     (N'methodologies.deleteFormula',     N'en', N'Remove', 1),
+    (N'methodologies.deleteFormulaConfirmTitle', N'en', N'Remove formula', 1),
+    (N'methodologies.deleteFormulaConfirmText', N'en', N'Remove formula {code} from this draft? This cannot be undone.', 1),
     (N'methodologies.saveFormula',       N'en', N'Save formula', 1),
     (N'methodologies.formulaSaved',      N'en', N'The formula has been saved.', 1),
     (N'methodologies.formulaDeleted',    N'en', N'The formula has been removed.', 1),
