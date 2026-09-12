@@ -297,6 +297,15 @@ export function SecurityPage(): JSX.Element {
                   <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
                     <Table.Td>
                       {role.code}
+                      {/* ⛔ `opacity={0.5}` на рядку — єдиний сигнал неактивності:
+                          непомітно при бляклому екрані, невидимо для читалки
+                          (`opacity` не входить у доступне ім'я). Бейдж дає той
+                          самий факт текстом (UX-аудит, знахідка 2/3). */}
+                      {!role.isActive && (
+                        <Badge ml="xs" size="xs" color="gray" variant="outline">
+                          {t('security.inactive')}
+                        </Badge>
+                      )}
                       {role.isBuiltIn && (
                         <Badge ml="xs" size="xs" variant="light">
                           {t('security.builtIn')}
@@ -357,7 +366,17 @@ export function SecurityPage(): JSX.Element {
             <Table.Tbody>
               {page.items.map((user) => (
                 <Table.Tr key={user.id} opacity={user.isActive ? 1 : 0.5}>
-                  <Table.Td>{user.userName}</Table.Td>
+                  <Table.Td>
+                    {user.userName}
+                    {/* ⛔ Той самий дефект, що й у таблиці ролей: `opacity={0.5}`
+                        на рядку — єдиний сигнал неактивності, невидимий читалці
+                        й непомітний на бляклому екрані (UX-аудит, знахідка 2/3). */}
+                    {!user.isActive && (
+                      <Badge ml="xs" size="xs" color="gray" variant="outline">
+                        {t('security.inactive')}
+                      </Badge>
+                    )}
+                  </Table.Td>
                   <Table.Td>{user.displayName}</Table.Td>
                   <Table.Td>
                     {/* Локальний і доменний вхід дають ту саму сесію; різниця
