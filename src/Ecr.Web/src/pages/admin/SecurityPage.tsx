@@ -349,9 +349,9 @@ export function SecurityPage(): JSX.Element {
                 <Table.Th>{t('security.login')}</Table.Th>
                 <Table.Th>{t('security.name')}</Table.Th>
                 <Table.Th>{t('security.kind')}</Table.Th>
-                <Table.Th>{t('security.userState')}</Table.Th>
+                <Table.Th>{t('security.access')}</Table.Th>
                 <Table.Th>{t('security.alerts')}</Table.Th>
-                <Table.Th />
+                <Table.Th>{t('security.userState')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
