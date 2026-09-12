@@ -207,6 +207,82 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     expect(contrast(statusSuccess[6], afterComposite)).toBeGreaterThanOrEqual(AA.text);
   });
 
+  /**
+   * `Q-285`: той самий дефект (T7-02/T7-03), ще чотири виклики, лишені поза
+   * межею `Q-262`/`Q-272` — `badgeColor()` у `HealthPage.tsx` (стан
+   * `Healthy`), `stateColor()` у `JobsPage.tsx` (стан `Succeeded`) і
+   * `PeriodsPage.tsx` (стан `Open`), і `showDone()` у `notify.ts` — СПІЛЬНИЙ
+   * тост успіху, що показується з кожного екрана застосунку (роль створена,
+   * користувач створений, доступи збережено...). Метод — той самий: перевірка
+   * джерела (регрес не зникне непоміченим) плюс перевірка, що заміна дає
+   * реальне покращення контрасту, не косметичну зміну імені.
+   */
+  describe('Q-285: чотири виклики поза Q-262/Q-272 — `statusSuccess`, не голий `green`', () => {
+    it('HealthPage.badgeColor(): «Healthy» — `statusSuccess`', () => {
+      const source = readFileSync(
+        path.resolve(process.cwd(), 'src/pages/admin/HealthPage.tsx'),
+        'utf8',
+      );
+
+      expect(source).toMatch(/if \(status === 'Healthy'\) return 'statusSuccess';/);
+      expect(source).not.toMatch(/if \(status === 'Healthy'\) return 'green';/);
+    });
+
+    it('JobsPage.stateColor(): «Succeeded» — `statusSuccess`', () => {
+      const source = readFileSync(
+        path.resolve(process.cwd(), 'src/pages/admin/JobsPage.tsx'),
+        'utf8',
+      );
+
+      expect(source).toMatch(/case 'Succeeded':\s*\n\s*return 'statusSuccess';/);
+      expect(source).not.toMatch(/case 'Succeeded':\s*\n\s*return 'green';/);
+    });
+
+    it('PeriodsPage.stateColor(): «Open» — `statusSuccess`', () => {
+      const source = readFileSync(
+        path.resolve(process.cwd(), 'src/pages/admin/PeriodsPage.tsx'),
+        'utf8',
+      );
+
+      expect(source).toMatch(/case 'Open':\s*\n\s*return 'statusSuccess';/);
+      expect(source).not.toMatch(/case 'Open':\s*\n\s*return 'green';/);
+    });
+
+    /**
+     * ⛔ Найвищий важіль цієї картки: `showDone()` — ОДНА функція, викликана з
+     * кожного тосту успіху в застосунку (роль створена, користувач створений,
+     * доступи збережено, період відкрито/зафіксовано...). Виправлення тут
+     * діє на ВСІ ці місця одночасно, без правки кожного окремо.
+     */
+    it('notify.showDone(): спільний тост успіху — `statusSuccess`', () => {
+      const source = readFileSync(
+        path.resolve(process.cwd(), 'src/shared/ui/notify.ts'),
+        'utf8',
+      );
+
+      expect(source).toMatch(/notifications\.show\(\{ color: 'statusSuccess', message \}\);/);
+      expect(source).not.toMatch(/notifications\.show\(\{ color: 'green', message \}\);/);
+    });
+
+    // Той самий `blend`, що й для Q-272 вище: доводить не лише присутність
+    // рядка, а й що підміна дає РЕАЛЬНЕ покращення контрасту — усі чотири
+    // виклики використовують `filled` (Badge за замовчуванням, Notification),
+    // не `light`, тому композит — прямий текст-на-заливці, без alpha-змішування.
+    it('усі чотири виклики: `statusSuccess` filled проходить AA там, де голий `green` провалювався', () => {
+      const defaultMantineGreen5 = '#51cf66';
+      const defaultMantineGreen6 = '#40c057';
+
+      // ДО (контроль регресу): саме ці два виміряні контрасти документує
+      // `theme.ts` (2.36:1 світла / 2.01:1 темна) — обидва глибоко нижче AA.
+      expect(contrast('#ffffff', defaultMantineGreen5)).toBeLessThan(AA.text);
+      expect(contrast('#ffffff', defaultMantineGreen6)).toBeLessThan(AA.text);
+
+      // ПІСЛЯ: `statusSuccess` на тих самих індексах (`filled`, обидві теми).
+      expect(contrast('#ffffff', statusSuccess[6])).toBeGreaterThanOrEqual(AA.text);
+      expect(contrast('#ffffff', statusSuccess[5])).toBeGreaterThanOrEqual(AA.text);
+    });
+  });
+
   it('обчислення контрасту дає відомі значення', () => {
     // ⚠ Калібрування самої лінійки. Без нього тест перевіряв би власну
     // помилку: функція, що завжди повертає 21, зробила б усе вище зеленим.

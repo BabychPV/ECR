@@ -23,5 +23,5 @@ export function showApiError(error: unknown): void {
 
 /** Показує підтвердження успішної дії. */
 export function showDone(message: string): void {
-  notifications.show({ color: 'green', message });
+  notifications.show({ color: 'statusSuccess', message });
 }

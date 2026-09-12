@@ -641,7 +641,7 @@ export function PeriodsPage(): JSX.Element {
 function stateColor(state: string): string {
   switch (state) {
     case 'Open':
-      return 'green';
+      return 'statusSuccess';
     case 'Grace':
       return 'yellow';
     case 'Closed':

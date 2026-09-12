@@ -128,7 +128,7 @@ function details(report: HealthReport): Record<string, unknown> | null {
  * не дивитися на червоне.
  */
 function badgeColor(status: string): string {
-  if (status === 'Healthy') return 'green';
+  if (status === 'Healthy') return 'statusSuccess';
 
   return status === 'Degraded' ? 'statusWarning' : 'statusError';
 }
