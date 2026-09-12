@@ -13,15 +13,15 @@ import {
   Center,
   Group,
   Loader,
-  NavLink,
   ScrollArea,
   Skeleton,
   Stack,
   Text,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { Link, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { Breadcrumbs } from './Breadcrumbs';
+import { NavRouteLink } from './NavRouteLink';
 import { navRoutes } from './routes';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
@@ -273,11 +273,14 @@ export function AppLayout(): JSX.Element {
               .filter((route) => route.handle.permission === undefined || can(me, route.handle.permission))
               .map((route) => (
                 // ⚠ Пункт показується, лише якщо право є: користувач не має
-                // тиснути те, що все одно дасть 403.
-                <NavLink
+                // тиснути те, що все одно дасть 403. Той самий фільтр
+                // одночасно захищає прогрів за наміром (`PR nav-arch #5`):
+                // пункту без права тут просто НЕМА в дереві, тож немає й
+                // елемента, на який можна навести курсор/фокус, — прогрів
+                // для нього фізично не може спрацювати.
+                <NavRouteLink
                   key={route.path}
-                  component={Link}
-                  to={route.path}
+                  route={route}
                   label={t(route.handle.labelKey)}
                   active={location.pathname === route.path}
                 />
