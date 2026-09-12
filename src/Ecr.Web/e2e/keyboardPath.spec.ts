@@ -191,7 +191,12 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
 
     await page.getByLabel(/User name|Ім'я/i).fill(Operator.user);
-    await page.getByLabel(/Password|Пароль/i).fill(Operator.password);
+    // ⛔ Q-260 додав `visibilityToggleButtonProps={{ 'aria-label': 'Toggle
+    // password visibility' }}` до `PasswordInput` — доступна кнопка, але її
+    // aria-label МІСТИТЬ підрядок «password», тож `getByLabel(/Password|
+    // Пароль/i)` тепер збігається і з полем, і з кнопкою (strict-mode
+    // violation). Роль `textbox` є лише в полі — кнопка лишається `button`.
+    await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Operator.password);
     await page.keyboard.press('Enter');
     await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
