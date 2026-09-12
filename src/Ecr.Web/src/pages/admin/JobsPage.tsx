@@ -190,7 +190,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
 function stateColor(state: string): string {
   switch (state) {
     case 'Succeeded':
-      return 'green';
+      return 'statusSuccess';
     case 'Failed':
       return 'statusError';
     case 'Cancelled':
