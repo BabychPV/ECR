@@ -7,7 +7,7 @@ import type {
   PeriodPolicyDto,
   ProjectIdResponse,
   TemplatePage,
-  TemplateVersionSummary,
+  TemplateVersionPage,
 } from '@/api/types';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError } from '@/shared/ui/notify';
@@ -161,11 +161,18 @@ export function CreateProjectModal({
     enabled: opened,
   });
 
+  // ⛔ Q-274: `GET /api/v1/templates/{id}/versions` — курсорний ендпоінт
+  // (Q-225), відповідь `{items, nextCursor, totalCount}`, а не голий масив.
+  // Тут стояв тип `TemplateVersionSummary[]`, тож `.data` при пагінованій
+  // відповіді був ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і
+  // `.filter` нижче падав на кожному відкритті цієї форми (`ECR-WEB-8662`).
+  // `TemplatesPage.tsx` уже читає той самий ендпоінт правильно
+  // (`TemplateVersionPage`, `?limit=100`, `.data?.items`) — той самий взірець.
   const versionQueries = useQueries({
     queries: (templates.data?.items ?? []).map((template) => ({
       queryKey: ['template-versions', template.id],
       queryFn: () =>
-        apiFetch<TemplateVersionSummary[]>(`/api/v1/templates/${template.id}/versions`),
+        apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
       enabled: opened,
     })),
   });
@@ -178,7 +185,7 @@ export function CreateProjectModal({
 
   /** Опубліковані версії всіх шаблонів, підписані кодом шаблону. */
   const publishedVersions = (templates.data?.items ?? []).flatMap((template, index) =>
-    (versionQueries[index]?.data ?? [])
+    (versionQueries[index]?.data?.items ?? [])
       .filter((version) => version.status === 'Published')
       .map((version) => ({
         value: String(version.id),
