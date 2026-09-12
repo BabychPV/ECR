@@ -676,6 +676,7 @@ USING (VALUES
     (N'sources.lastRun',                 N'en', N'Last run', 1),
     (N'sources.gap',                     N'en', N'Gaps', 1),
     (N'sources.never',                   N'en', N'never', 1),
+    (N'sources.inactive',                N'en', N'Inactive', 1),
     (N'sources.collect',                 N'en', N'Collect', 1),
     (N'sources.queued',                  N'en', N'Collection queued as job {job}.', 1),
     (N'jobs.title',                      N'en', N'Jobs', 1),

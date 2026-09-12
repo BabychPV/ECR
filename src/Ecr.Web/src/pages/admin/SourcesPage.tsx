@@ -77,9 +77,27 @@ export function SourcesPage(): JSX.Element {
           </Table.Thead>
           <Table.Tbody>
             {all.map((source) => (
-              <Table.Tr key={source.id} opacity={source.isActive ? 1 : 0.5}>
+              <Table.Tr
+                key={source.id}
+                opacity={source.isActive ? 1 : 0.5}
+                // ⚠ `opacity` — це ЛИШЕ пікселі. Зчитувач екрана не читає
+                // прозорість, тож неактивне джерело звучало б так само, як
+                // активне — рівно те, чого ФВ-14 (доступність) забороняє:
+                // стан, видимий оком, має мати й носія для того, хто його
+                // не бачить.
+                aria-label={
+                  source.isActive
+                    ? undefined
+                    : `${source.displayName ?? source.code} — ${t('sources.inactive')}`
+                }
+              >
                 <Table.Td>
                   {source.displayName ?? source.code}
+                  {!source.isActive && (
+                    <Badge ml="xs" size="xs" variant="outline" color="gray">
+                      {t('sources.inactive')}
+                    </Badge>
+                  )}
                   <Text size="xs" c="dimmed">
                     {source.entityPath ?? source.code}
                   </Text>

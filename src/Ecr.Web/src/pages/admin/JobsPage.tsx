@@ -62,6 +62,14 @@ export function JobsPage(): JSX.Element {
           label={t('jobs.id')}
           value={input}
           onChange={(event) => setInput(event.currentTarget.value)}
+          // ⚠ Без цього Enter у полі не робив нічого — ідентифікатор задачі
+          // найчастіше приходить вставленим із чужого повідомлення
+          // («подивись, чому впало»), і природний наступний рух — Enter, не
+          // потяг миші до кнопки. Той самий обробник, що й клік «Дивитись»:
+          // одна дія, два способи її викликати, не дві копії логіки.
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') setJobId(input.trim().length === 0 ? null : input.trim());
+          }}
           miw={280}
           flex="1"
         />
