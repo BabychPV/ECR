@@ -4,6 +4,30 @@ import { createBrowserRouter } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
 import { RouteGuard } from './RouteGuard';
+import {
+  AuditPage,
+  ChangePasswordPage,
+  DocumentPage,
+  DocumentsPage,
+  ExpressionsPage,
+  HealthPage,
+  JobsPage,
+  MappingPreviewPage,
+  MethodologiesPage,
+  MethodologyVersionsPage,
+  MyGroupsPage,
+  PeriodsPage,
+  RegistriesPage,
+  RegistryConstructorPage,
+  SecurityPage,
+  SnapshotsPage,
+  SourcesPage,
+  TableRelationsPage,
+  TemplateVersionPage,
+  TemplatesPage,
+  UiStringsPage,
+  UnitsPage,
+} from './routePrefetch';
 import { TemplateVersionLayout } from './TemplateVersionLayout';
 import { childPath, relativePath, routes, type RouteHandle } from './routes';
 
@@ -15,102 +39,17 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
  * бандл означало б, що оператор, який лише заповнює таблицю, щоранку
  * завантажує редактори, яких не відкриє.
  *
+ * ⚠ Самі лінивi компоненти (`lazy(...)`) тепер визначені в `./routePrefetch`
+ * (`PR nav-arch #5`), не тут: той самий завантажувач, яким тут монтується
+ * `<TemplatesPage/>` і т. д., там-таки прогріває чанк на hover/focus навбару
+ * (`useRoutePrefetch.ts`) — одна фабрика `import()` на сторінку, а не дві
+ * незалежні (по одній на "монтування" і на "прогрів"), які могли б розійтися.
+ *
  * ⛔ Маршрутів `/reports/*` НЕМАЄ: звітність лишається в SSRS (D-52).
  * `/admin/snapshots` — не виняток із цього правила, а його межа: там
  * будують і бачать ЗРІЗ (`rpt.*`), який SSRS читає, а не сам звіт.
  */
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
-const ChangePasswordPage = lazy(async () => ({
-  default: (await import('@/pages/ChangePasswordPage')).ChangePasswordPage,
-}));
-const DocumentsPage = lazy(async () => ({
-  default: (await import('@/pages/DocumentsPage')).DocumentsPage,
-}));
-const DocumentPage = lazy(async () => ({
-  default: (await import('@/pages/DocumentPage')).DocumentPage,
-}));
-const TemplatesPage = lazy(async () => ({
-  default: (await import('@/pages/admin/TemplatesPage')).TemplatesPage,
-}));
-const TemplateVersionPage = lazy(async () => ({
-  default: (await import('@/pages/admin/TemplateVersionPage')).TemplateVersionPage,
-}));
-/**
- * ⚠ Окремий маршрут, а не вкладка в редакторі версії. Зв'язки таблиць
- * налаштовують заходом «а звідки в цій таблиці числа» (`ФВ-2.13`), і на таку
- * відповідь треба вміти дати посилання; версія при цьому лишається в адресі,
- * бо зв'язок належить саме їй.
- */
-const TableRelationsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/TableRelationsPage')).TableRelationsPage,
-}));
-const RegistriesPage = lazy(async () => ({
-  default: (await import('@/pages/admin/RegistriesPage')).RegistriesPage,
-}));
-
-/**
- * ⚠ Окремий маршрут, а не вкладка в переліку довідників (`ФВ-8.12`). Перелік
- * відповідає на «які значення можна обрати», конструктор — на «як цей довідник
- * улаштований»: різні питання, різні права і різна аудиторія. На друге треба
- * вміти дати посилання (`ФВ-14.29`).
- */
-const RegistryConstructorPage = lazy(async () => ({
-  default: (await import('@/pages/admin/RegistryConstructorPage')).RegistryConstructorPage,
-}));
-const MethodologiesPage = lazy(async () => ({
-  default: (await import('@/pages/admin/MethodologiesPage')).MethodologiesPage,
-}));
-const MethodologyVersionsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/MethodologyVersionsPage')).MethodologyVersionsPage,
-}));
-const ExpressionsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/ExpressionsPage')).ExpressionsPage,
-}));
-const SecurityPage = lazy(async () => ({
-  default: (await import('@/pages/admin/SecurityPage')).SecurityPage,
-}));
-const PeriodsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/PeriodsPage')).PeriodsPage,
-}));
-const SourcesPage = lazy(async () => ({
-  default: (await import('@/pages/admin/SourcesPage')).SourcesPage,
-}));
-
-/**
- * ⚠ Окремий маршрут, а не вкладка в `/admin/sources`. Перелік джерел
- * відповідає на «чи збирається», перегляд мапінгу — на «куди лягає»; це різні
- * питання, і на друге треба вміти дати посилання (`ФВ-14.29`).
- */
-const MappingPreviewPage = lazy(async () => ({
-  default: (await import('@/pages/admin/MappingPreviewPage')).MappingPreviewPage,
-}));
-const JobsPage = lazy(async () => ({ default: (await import('@/pages/admin/JobsPage')).JobsPage }));
-const SnapshotsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/SnapshotsPage')).SnapshotsPage,
-}));
-const AuditPage = lazy(async () => ({
-  default: (await import('@/pages/admin/AuditPage')).AuditPage,
-}));
-const UnitsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/UnitsPage')).UnitsPage,
-}));
-const UiStringsPage = lazy(async () => ({
-  default: (await import('@/pages/admin/UiStringsPage')).UiStringsPage,
-}));
-const HealthPage = lazy(async () => ({
-  default: (await import('@/pages/admin/HealthPage')).HealthPage,
-}));
-
-/**
- * ⛔ Маршрут НЕ під `/admin`: він для кожного, а не для адміністратора. Ролі
- * доменних користувачів призначаються на AD-групу (`ФВ-6.15`), і людина без
- * жодного збігу бачить порожні екрани, які не відрізняються від справної
- * системи без даних (`H-21`). Сховати цю відповідь в адміністрування означало
- * б лишити її тим, кому вона й не потрібна.
- */
-const MyGroupsPage = lazy(async () => ({
-  default: (await import('@/pages/MyGroupsPage')).MyGroupsPage,
-}));
 
 /**
  * Межа очікування для маршрутів поза каркасом.
