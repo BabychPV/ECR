@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -17,7 +18,9 @@ namespace Ecr.Api.Health;
 public sealed class DatabaseHealthCheck(
     ISqlCapabilities capabilities,
     Ecr.Infrastructure.Persistence.EcrDbContext db,
-    Ecr.Domain.Abstractions.IClock clock) : IHealthCheck
+    Ecr.Domain.Abstractions.IClock clock,
+    IUiStringCatalog catalog,
+    ICurrentUser currentUser) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -57,36 +60,69 @@ public sealed class DatabaseHealthCheck(
 
             var partitionsAhead = await PartitionsAheadAsync(cancellationToken).ConfigureAwait(false);
             data["partitionsAhead"] = partitionsAhead;
-            data["limitations"] = Limitations();
+            data["limitations"] = await LimitationsAsync(cancellationToken).ConfigureAwait(false);
 
             if (!capabilities.IsReadCommittedSnapshotOn)
             {
                 // Не Degraded, а Unhealthy: без RCSI пік останнього дня періоду
                 // впирається в блокування (D-29), і це не «трохи гірше», а
                 // непрацездатність у той єдиний день, коли система потрібна.
-                return HealthCheckResult.Unhealthy("RCSI вимкнено.", data: data);
+                var message = await Text(
+                    "health.db.rcsiDisabled", "RCSI is disabled.", null, cancellationToken)
+                    .ConfigureAwait(false);
+                return HealthCheckResult.Unhealthy(message, data: data);
             }
 
             if (missing.Count > 0)
             {
-                return HealthCheckResult.Unhealthy(
-                    "Немає файлових груп: " + string.Join(", ", missing), data: data);
+                var message = await Text(
+                    "health.db.missingFilegroups", "Missing filegroups: {names}.",
+                    Param("names", string.Join(", ", missing)), cancellationToken)
+                    .ConfigureAwait(false);
+                return HealthCheckResult.Unhealthy(message, data: data);
             }
 
             if (partitionsAhead < MinimumPartitionsAhead)
             {
-                return HealthCheckResult.Degraded(
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"Запас партицій {partitionsAhead}: менше за {MinimumPartitionsAhead}."),
-                    data: data);
+                var message = await Text(
+                    "health.db.partitionsLow", "Partitions ahead: {count} — below the minimum of {minimum}.",
+                    Params(
+                        ("count", partitionsAhead.ToString(CultureInfo.InvariantCulture)),
+                        ("minimum", MinimumPartitionsAhead.ToString(CultureInfo.InvariantCulture))),
+                    cancellationToken)
+                    .ConfigureAwait(false);
+                return HealthCheckResult.Degraded(message, data: data);
             }
 
-            return HealthCheckResult.Healthy("База доступна.", data);
+            var available = await Text("health.db.available", "Database is available.", null, cancellationToken)
+                .ConfigureAwait(false);
+            return HealthCheckResult.Healthy(available, data);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return HealthCheckResult.Unhealthy("База недоступна.", ex, data);
+            var message = await Text(
+                "health.db.unavailable", "Database is unavailable.", null, cancellationToken)
+                .ConfigureAwait(false);
+            return HealthCheckResult.Unhealthy(message, ex, data);
         }
+    }
+
+    /// <summary>Обгортка над <see cref="HealthCatalogText.ResolveAsync"/> із власними каталогом/користувачем.</summary>
+    private Task<string> Text(
+        string key, string fallback, IReadOnlyDictionary<string, string>? parameters, CancellationToken ct)
+        => HealthCatalogText.ResolveAsync(catalog, currentUser, key, fallback, parameters, ct);
+
+    private static Dictionary<string, string> Param(string name, string value) => new(1) { [name] = value };
+
+    private static Dictionary<string, string> Params(params (string Name, string Value)[] pairs)
+    {
+        var result = new Dictionary<string, string>(pairs.Length);
+        foreach (var (name, value) in pairs)
+        {
+            result[name] = value;
+        }
+
+        return result;
     }
 
     /// <summary>Скільки меж партиціонування лежить попереду поточного періоду.</summary>
@@ -109,8 +145,56 @@ public sealed class DatabaseHealthCheck(
         return ahead.Count > 0 ? ahead[0] : 0;
     }
 
-    private IReadOnlyList<string> Limitations()
-        => capabilities is Ecr.Infrastructure.Startup.SqlCapabilitiesProbe probe
-            ? probe.Limitations()
-            : [];
+    /// <summary>
+    /// Що недоступне в поточному режимі — для показу в `/health/db`
+    /// (`Q-304`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше йшло через `probe.Limitations()` — рядковий метод самого
+    /// `SqlCapabilitiesProbe` (`Ecr.Infrastructure`), готовий український
+    /// текст призначений для ЛОГУ (`StartupSequence.cs`, інший, легітимний
+    /// українськомовний споживач — залишений без змін). Той самий готовий
+    /// рядок ішов і сюди, у клієнтську відповідь — звідси й був сирий
+    /// український текст незалежно від мови інтерфейсу. `capabilities`
+    /// (`ISqlCapabilities`) уже несе прапорці напряму
+    /// (`SupportsOnlineIndexRebuild`, `SupportsResourceGovernor`,
+    /// `IsReadCommittedSnapshotOn`, `ArchiveBatchSize`) — рантайм-перевірка
+    /// типу (`is SqlCapabilitiesProbe`) взагалі не потрібна.
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> LimitationsAsync(CancellationToken ct)
+    {
+        var list = new List<string>();
+
+        if (!capabilities.SupportsOnlineIndexRebuild)
+        {
+            list.Add(await Text(
+                "health.db.limitation.onlineIndexRebuild",
+                "Online index rebuild requires a maintenance window (ONLINE = ON is not available).",
+                null, ct).ConfigureAwait(false));
+        }
+
+        if (!capabilities.SupportsResourceGovernor)
+        {
+            list.Add(await Text(
+                "health.db.limitation.resourceGovernor",
+                "Background jobs are not isolated from the interactive peak (no Resource Governor).",
+                null, ct).ConfigureAwait(false));
+        }
+
+        if (!capabilities.IsReadCommittedSnapshotOn)
+        {
+            list.Add(await Text(
+                "health.db.limitation.rcsi",
+                "RCSI is disabled: reads will block writes during the peak of the last day of the period.",
+                null, ct).ConfigureAwait(false));
+        }
+
+        list.Add(await Text(
+            "health.db.limitation.archiveBatchSize",
+            "Archive batch size: {size}.",
+            Param("size", capabilities.ArchiveBatchSize.ToString(CultureInfo.InvariantCulture)),
+            ct).ConfigureAwait(false));
+
+        return list;
+    }
 }

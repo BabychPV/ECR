@@ -12,7 +12,7 @@ namespace Ecr.Application.Localization;
 /// HTTP означає, що правило можна прогнати на кожній збірці, а не «коли
 /// дійдуть руки до інтеграційних».
 /// </remarks>
-public static class UiStringResolver
+public static partial class UiStringResolver
 {
     /// <summary>Мова, якою підмінюється відсутній переклад.</summary>
     /// <remarks>
@@ -76,6 +76,38 @@ public static class UiStringResolver
         ArgumentException.ThrowIfNullOrEmpty(errorCode);
         return Resolve(catalog, ErrorKeyPrefix + errorCode);
     }
+
+    /// <summary>
+    /// Підставляє <c>{name}</c> у шаблон значеннями з <paramref name="parameters"/>
+    /// (`Q-304`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Той самий синтаксис підстановки, що й клієнтський <c>t()</c>
+    /// (`shared/i18n/index.ts`): один формат плейсхолдера в обох місцях, де
+    /// текст каталогу підставляється зі змінними частинами — сервер (тут,
+    /// `health.*`) і клієнт (`err.*`, підписи інтерфейсу). Ключ без
+    /// підстановки в <paramref name="parameters"/> лишається як є — так само,
+    /// як клієнтський `t()` лишає невідомий `{ім'я}` непідставленим, а не
+    /// кидає виняток на кожному застарілому шаблоні каталогу.
+    /// </remarks>
+    /// <param name="template">Текст із каталогу, вже розв'язаний за ключем.</param>
+    /// <param name="parameters">Підстановки; <c>null</c> — текст лишається без змін.</param>
+    public static string Format(string template, IReadOnlyDictionary<string, string>? parameters)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+
+        if (parameters is null || parameters.Count == 0)
+        {
+            return template;
+        }
+
+        return PlaceholderPattern().Replace(
+            template,
+            match => parameters.TryGetValue(match.Groups[1].Value, out var value) ? value : match.Value);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\{(\w+)\}")]
+    private static partial System.Text.RegularExpressions.Regex PlaceholderPattern();
 
     /// <summary>
     /// <c>ETag</c> області.
