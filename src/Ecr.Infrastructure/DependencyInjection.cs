@@ -120,6 +120,7 @@ public static class DependencyInjection
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
         services.AddScoped<IUserStore, UserStore>();
+        services.AddScoped<Application.Ports.IResourceNameResolver, ResourceNameResolver>();
         services.AddScoped<ISimulationService, SimulationService>();
 
         // Каталог рядків інтерфейсу — Scoped через EcrDbContext; сам зріз
