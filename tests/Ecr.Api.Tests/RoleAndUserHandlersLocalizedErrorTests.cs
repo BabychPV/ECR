@@ -37,7 +37,7 @@ public sealed class RoleAndUserHandlersLocalizedErrorTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Finding", "Q-291")]
+    [Trait("Finding", "Q-300")]
     public async Task CreateRoleHandler_подробиця_відмови_права_каталожною_мовою()
     {
         var catalog = new FakeUiStringCatalog()
@@ -57,7 +57,7 @@ public sealed class RoleAndUserHandlersLocalizedErrorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Finding", "Q-291")]
+    [Trait("Finding", "Q-300")]
     public async Task CreateUserHandler_подробиця_відмови_права_каталожною_мовою()
     {
         var catalog = new FakeUiStringCatalog()
@@ -78,14 +78,14 @@ public sealed class RoleAndUserHandlersLocalizedErrorTests
     /// <summary>
     /// ⛔ Регресійний доказ дефекту ДО фіксу: точне відтворення СТАРОГО
     /// (двоаргументного) виклику конструктора, який лишався в
-    /// <c>CreateRoleHandler</c>/<c>CreateUserHandler</c> до Q-291. Без
+    /// <c>CreateRoleHandler</c>/<c>CreateUserHandler</c> до Q-300. Без
     /// словника <c>Details</c> <c>LocalizedDetailAsync</c> не бачить ключа
     /// <c>"permission"</c> і повертає сире українське речення, яке далі й
     /// перевіряється тут, — це і є RED, який фікс має усунути.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Finding", "Q-291")]
+    [Trait("Finding", "Q-300")]
     public async Task Без_словника_Details_подробиця_лишається_сирим_українським_реченням()
     {
         var catalog = new FakeUiStringCatalog()

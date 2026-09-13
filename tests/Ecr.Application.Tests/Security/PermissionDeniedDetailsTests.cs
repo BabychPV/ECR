@@ -53,7 +53,7 @@ public sealed class PermissionDeniedDetailsTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "Q-291")]
+    [Trait("Finding", "Q-300")]
     public async Task CreateRoleHandler_відмова_несе_Details_з_кодом_права()
     {
         var handler = new CreateRoleHandler(_users, _access, _uow, _audit, _user, _clock);
@@ -72,7 +72,7 @@ public sealed class PermissionDeniedDetailsTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "Q-291")]
+    [Trait("Finding", "Q-300")]
     public async Task CreateUserHandler_відмова_несе_Details_з_кодом_права()
     {
         var handler = new CreateUserHandler(
