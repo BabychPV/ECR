@@ -1,6 +1,6 @@
 ﻿import type { JSX } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import type { RegistryDefinitionDto, RegistryHistoryEntryDto } from '@/api/types';
 import {
@@ -13,9 +13,12 @@ import {
 import {
   RuleKinds,
   buildSaveRequest,
+  emptyField,
   emptyRule,
   isComplete,
+  isFieldComplete,
   toDraft,
+  type FieldDraft,
 } from '@/features/registries/definition';
 
 /**
@@ -145,7 +148,17 @@ describe('Конструктор довідника', () => {
     // ⛔ Ознака «ключове» саме в рядку поля: за ключовими полями звужується
     // доступ (`RoleAssignment.ScopeJson`), і пошук по всьому екрану лишався б
     // зеленим, навіть якби колонку прибрали цілком.
-    show(<RegistryFields definition={Definition} />);
+    show(
+      <RegistryFields
+        definition={Definition}
+        canEdit={false}
+        newFields={[]}
+        registryOptions={[]}
+        onAddField={vi.fn()}
+        onChangeField={vi.fn()}
+        onRemoveField={vi.fn()}
+      />,
+    );
 
     const row = screen.getByText('Number').closest('tr');
     expect(row).not.toBeNull();
@@ -155,6 +168,136 @@ describe('Конструктор довідника', () => {
     const lookup = screen.getByText('Substance').closest('tr');
     expect(within(lookup!).getByText('Lookup')).toBeDefined();
     expect(within(lookup!).getByText('5')).toBeDefined();
+  });
+
+  it('Q-lane4: кнопка «додати поле» стоїть лише коли можна редагувати опис', () => {
+    // ⛔ Це і є фікс дефекту: до нього на вкладці «Fields» не було ЖОДНОГО
+    // контролю, що додавав поле, — на відміну від сусідньої вкладки «Rules»
+    // (`registries.addRule`), у якої кнопка стоїть завжди, навіть при нулі
+    // правил. Без права `Registry.EditDefinition` кнопка не показується —
+    // так само, як «Save definition» на сторінці-контейнері.
+    const { rerender } = render(
+      <MantineProvider>
+        <RegistryFields
+          definition={Definition}
+          canEdit={false}
+          newFields={[]}
+          registryOptions={[]}
+          onAddField={vi.fn()}
+          onChangeField={vi.fn()}
+          onRemoveField={vi.fn()}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: /registries\.addField/ })).toBeNull();
+
+    rerender(
+      <MantineProvider>
+        <RegistryFields
+          definition={Definition}
+          canEdit
+          newFields={[]}
+          registryOptions={[]}
+          onAddField={vi.fn()}
+          onChangeField={vi.fn()}
+          onRemoveField={vi.fn()}
+        />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: /registries\.addField/ })).toBeDefined();
+  });
+
+  it('Q-lane4: клік на «додати поле» повідомляє сторінку — компонент не тримає власного стану чернетки', () => {
+    // ⚠ Так само, як `RegistryRules`/`onAdd`: список нових полів живе на
+    // сторінці (`RegistryConstructorPage.tsx`), а не в цьому компоненті —
+    // інакше він загубився б при перемиканні вкладок (`keepMounted={false}`).
+    const onAddField = vi.fn();
+    show(
+      <RegistryFields
+        definition={Definition}
+        canEdit
+        newFields={[]}
+        registryOptions={[]}
+        onAddField={onAddField}
+        onChangeField={vi.fn()}
+        onRemoveField={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /registries\.addField/ }));
+    expect(onAddField).toHaveBeenCalledTimes(1);
+  });
+
+  it('Q-lane4: рядок нового поля редагується — код, назва, тип і ключовість долітають у onChangeField', () => {
+    // ⛔ Мутаційна проба: якщо форма перестане передавати введене в
+    // `onChangeField`, цей тест провалиться на КОЖНОМУ полі окремо — не лише
+    // на першому натиску клавіші.
+    //
+    // ⚠ `fireEvent.change` (одна подія з готовим значенням), а не
+    // посимвольний `userEvent.type`: чернетка тут — СТАТИЧНИЙ проп (мок
+    // `onChangeField` не оновлює `newFields` назад), тож контрольований інпут
+    // після кожного натиску відкочувався б до порожнього значення і на
+    // виході лишалася б тільки остання літера.
+    const onChangeField = vi.fn();
+    const draft = emptyField();
+
+    show(
+      <RegistryFields
+        definition={Definition}
+        canEdit
+        newFields={[draft]}
+        registryOptions={[{ value: '5', label: 'Substance (SUBSTANCE)' }]}
+        onAddField={vi.fn()}
+        onChangeField={onChangeField}
+        onRemoveField={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/registries\.code/), { target: { value: 'Owner' } });
+    expect(onChangeField).toHaveBeenLastCalledWith(0, { ...draft, code: 'Owner' });
+
+    fireEvent.change(screen.getByLabelText(/registries\.name/), { target: { value: 'Owner' } });
+    expect(onChangeField).toHaveBeenLastCalledWith(0, { ...draft, name: 'Owner' });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /registries\.keyField/ }));
+    expect(onChangeField).toHaveBeenLastCalledWith(0, { ...draft, isKey: true });
+
+    // Перемикання типу на `Lookup` показує вибір цілі — а не просто змінює
+    // клітинку тексту на select без наслідків.
+    fireEvent.change(screen.getByRole('combobox', { name: /registries\.dataType/ }), {
+      target: { value: 'Lookup' },
+    });
+    expect(onChangeField).toHaveBeenLastCalledWith(0, { ...draft, dataType: 'Lookup' });
+  });
+
+  it('Q-lane4: кнопка «прибрати» стосується лише НЕЗБЕРЕЖЕНОГО чернеткового поля', () => {
+    // ⛔ Наявне поле («Number», «Substance», «Limit» — уже в `Definition.fields`)
+    // не має власної кнопки видалення взагалі: D2-202 забороняє прибирати
+    // наявне поле навіть побічно. Кнопка стоїть лише в рядку чернетки.
+    const onRemoveField = vi.fn();
+    show(
+      <RegistryFields
+        definition={Definition}
+        canEdit
+        newFields={[emptyField(), emptyField()]}
+        registryOptions={[]}
+        onAddField={vi.fn()}
+        onChangeField={vi.fn()}
+        onRemoveField={onRemoveField}
+      />,
+    );
+
+    const removeButtons = screen.getAllByRole('button', { name: /registries\.removeField/ });
+    expect(removeButtons.length).toBe(2);
+
+    fireEvent.click(removeButtons[1]!);
+    expect(onRemoveField).toHaveBeenCalledWith(1);
+
+    // Наявні поля з `Definition` не отримали кнопки видалення.
+    const savedRow = screen.getByText('Number').closest('tr');
+    expect(within(savedRow!).queryByRole('button')).toBeNull();
   });
 
   it('ФВ-8.12: показує зв\'язки — і каскад через поле, і M:N із даних', () => {
@@ -305,6 +448,7 @@ describe('Збереження опису довідника', () => {
     const request = buildSaveRequest(
       Definition,
       Definition.rules.map((rule) => toDraft(rule, 'en')),
+      [],
       '  причина  ',
       'en',
     );
@@ -328,7 +472,7 @@ describe('Збереження опису довідника', () => {
       { ...emptyRule('CrossRegistry'), code: 'SubstanceExists', expression: '[Substance]' },
     ];
 
-    const request = buildSaveRequest(Definition, rules, 'нове правило', 'en');
+    const request = buildSaveRequest(Definition, rules, [], 'нове правило', 'en');
 
     expect(request.rules.map((rule) => rule.id)).toEqual([101, 102, null]);
     expect(request.rules[2]?.ruleKind).toBe('CrossRegistry');
@@ -350,6 +494,88 @@ describe('Збереження опису довідника', () => {
         ruleKind: 'ValidityWindow',
       }),
     ).toBe(false);
+  });
+
+  it('Q-lane4: нове поле надсилається без ідентифікатора, з порядком ПІСЛЯ наявних і без обов\'язковості', () => {
+    // ⛔ Це і є фікс: до нього форма не мала звідки взяти запит на НОВЕ поле
+    // взагалі. Сервер розрізняє «нове» від «правки наявного» за `id === null`
+    // (`RegistryFieldSaveDto`) — той самий принцип, що вже стоїть для правил.
+    const draft: FieldDraft = {
+      ...emptyField('Decimal'),
+      code: 'AnnualFee',
+      name: 'Annual fee',
+      unitId: 9,
+    };
+
+    const request = buildSaveRequest(Definition, [], [draft], 'нове поле', 'en');
+
+    expect(request.fields.map((field) => field.id)).toEqual([41, 42, 44, null]);
+
+    const added = request.fields.at(-1)!;
+    expect(added.code).toBe('AnnualFee');
+    expect(added.nameL10n).toEqual({ values: { en: 'Annual fee' } });
+    expect(added.dataType).toBe('Decimal');
+
+    // Продовжує порядок наявних полів (їх три), а не починає заново з 1 —
+    // інакше нове поле посперечалося б за позицію з наявним.
+    expect(added.ordinal).toBe(4);
+
+    // ⛔ Мутаційна проба: нове поле НІКОЛИ не йде обов'язковим — сервер це й
+    // так відхилив би (`ECR-REG-0422`, наявні записи його ще не мають), і
+    // якщо колись хтось почне брати `isRequired` із чогось іншого, ніж
+    // жорстке `false`, саме це поле в цій самій перевірці й зловить регрес.
+    expect(added.isRequired).toBe(false);
+
+    expect(added.unitId).toBe(9);
+
+    // Наявні поля лишаються НЕЗМІННИМИ поруч із новим — `D2-202` не порушено.
+    expect(request.fields.slice(0, 3).map((field) => field.id)).toEqual([41, 42, 44]);
+  });
+
+  it('Q-lane4: ключовість і ціль лукапа нового поля переносяться в запит', () => {
+    const draft: FieldDraft = {
+      ...emptyField('Lookup'),
+      code: 'Substance2',
+      name: 'Second substance',
+      isKey: true,
+      lookupRegistryDefId: 5,
+    };
+
+    const request = buildSaveRequest(Definition, [], [draft], 'нове поле', 'en');
+    const added = request.fields.at(-1)!;
+
+    expect(added.isKey).toBe(true);
+    expect(added.lookupRegistryDefId).toBe(5);
+  });
+
+  it('Q-lane4: ціль лукапа не надсилається для типу, що нею не користується', () => {
+    // ⛔ Форма ховає вибір цілі для не-`Lookup` типів (див. `RegistryFields`),
+    // але якщо ціль усе одно лишилась у чернетці (перемкнули тип і назад),
+    // запит не повинен нести чужий для цього типу `lookupRegistryDefId` —
+    // сервер прочитав би це як поле-посилання, яким воно не є.
+    const draft: FieldDraft = {
+      ...emptyField('String'),
+      code: 'Note',
+      name: 'Note',
+      lookupRegistryDefId: 5,
+    };
+
+    const request = buildSaveRequest(Definition, [], [draft], 'нове поле', 'en');
+    expect(request.fields.at(-1)!.lookupRegistryDefId).toBeNull();
+  });
+
+  it('Q-lane4: нове поле без коду, без назви або лукап без цілі не готове до збереження', () => {
+    // ⛔ Мутаційна проба: кожна з трьох умов перевіряється ОКРЕМО — тест, що
+    // просто перевірив би "порожнє поле не готове", пропустив би регрес, який
+    // ламає лише ОДНУ з них (наприклад, забув перевірити ціль лукапа).
+    expect(isFieldComplete(emptyField())).toBe(false);
+    expect(isFieldComplete({ ...emptyField(), code: 'A' })).toBe(false);
+    expect(isFieldComplete({ ...emptyField(), code: 'A', name: 'A' })).toBe(true);
+
+    expect(isFieldComplete({ ...emptyField('Lookup'), code: 'A', name: 'A' })).toBe(false);
+    expect(
+      isFieldComplete({ ...emptyField('Lookup'), code: 'A', name: 'A', lookupRegistryDefId: 5 }),
+    ).toBe(true);
   });
 });
 

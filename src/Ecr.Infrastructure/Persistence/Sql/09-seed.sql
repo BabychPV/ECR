@@ -947,6 +947,13 @@ USING (VALUES
     (N'registries.required',             N'en', N'Required', 1),
     (N'registries.keyField',             N'en', N'Key', 1),
     (N'registries.lookup',               N'en', N'Looks up', 1),
+    (N'registries.unit',                 N'en', N'Unit', 1),
+    -- ⛔ Без цієї кнопки довідник, заведений через `/admin/registries`, не міг
+    -- отримати жодного поля: конструктор показував наявні поля, а додати нове
+    -- не було чим (сусідня вкладка `Rules` кнопку «Add rule» мала завжди).
+    (N'registries.addField',             N'en', N'Add field', 1),
+    (N'registries.removeField',          N'en', N'Remove', 1),
+    (N'registries.fieldIncomplete',      N'en', N'Fill code and name; a lookup field also needs its target registry.', 1),
     (N'registries.relationKind',         N'en', N'Relation', 1),
     (N'registries.target',               N'en', N'Target', 1),
     (N'registries.links',                N'en', N'Links', 1),
