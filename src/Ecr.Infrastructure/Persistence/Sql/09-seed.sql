@@ -1405,7 +1405,10 @@ USING (VALUES
     (N'periodRules.save',                N'en', N'Save rule', 1),
     (N'periodRules.saved',               N'en', N'The rule has been saved.', 1),
     (N'periodRules.delete',              N'en', N'Remove rule', 1),
-    (N'periodRules.deleted',             N'en', N'The rule has been removed.', 1)
+    (N'periodRules.deleted',             N'en', N'The rule has been removed.', 1),
+
+    (N'nav.notFound.title',              N'en', N'Page not found', 1),
+    (N'nav.notFound.hint',               N'en', N'This address does not match any screen in this system.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

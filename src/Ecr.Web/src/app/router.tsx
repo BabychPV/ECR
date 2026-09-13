@@ -3,6 +3,7 @@ import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
+import { NotFoundPage } from './NotFoundPage';
 import { RouteGuard } from './RouteGuard';
 import {
   AuditPage,
@@ -289,6 +290,16 @@ export const router = createBrowserRouter([
           },
         ],
       },
+
+      // ⛔ ОБОВ'ЯЗКОВО останній: `react-router` сортує дітей за специфічністю
+      // незалежно від порядку оголошення, тож місце в масиві тут не впливає
+      // на пріоритет зіставлення — коментар лише про порядок читання файлу.
+      // Ловить будь-яку адресу під `/`, якої немає в жодному записі вище
+      // (застаріле посилання, помилка в URL): без цього дочірнього маршруту
+      // React Router не знаходив ЖОДНОГО збігу і показував власний,
+      // розробницький дефолтний екран («Unexpected Application Error!») —
+      // знайдено живим переходом на неіснуючу адресу, не тестом.
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
 ]);
