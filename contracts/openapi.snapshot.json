@@ -7070,6 +7070,11 @@
             "description": "Код: `kg`, `t`, `m3`.",
             "type": "string"
           },
+          "dimensionCode": {
+            "default": "",
+            "description": "Код розмірності з довідника `uom.Dimension` (`kg` → `Mass`).",
+            "type": "string"
+          },
           "dimensionId": {
             "description": "Розмірність; конверсія можлива лише в її межах.",
             "format": "uint8",
