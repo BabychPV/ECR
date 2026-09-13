@@ -1,9 +1,9 @@
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom';
 import { Breadcrumbs, buildCrumbChain, type CrumbMatch } from '@/app/Breadcrumbs';
 import { queryKeys } from '@/api/queryKeys';
@@ -315,5 +315,88 @@ describe('Breadcrumbs — нуль нових HTTP-запитів (найваж�
     await screen.findByText('TPL1');
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Компонент, що монтує НОВИЙ `useQuery` для ключа, якого ще нема в кеші —
+ * саме те, що робить `RouteGuard.useSession()`, `DocumentsPage`,
+ * `CreateDocumentModal` та десятки інших екранів після навігації (Q-305).
+ *
+ * ⚠ `enabled: false`: сам факт запиту нас не цікавить (і суперечив би
+ * власній вимозі файлу «нуль нових HTTP-запитів» — тут це чужий компонент,
+ * не `Breadcrumbs`, але тест однаково не повинен нічого фетчити). Важливо
+ * лише те, що `useBaseQuery` створює `QueryObserver` через лінивий
+ * ініціалізатор `useState(() => new Observer(...))` — і це відбувається
+ * незалежно від `enabled`, синхронно під час рендера ЦЬОГО компонента.
+ */
+function MountsNewQuery(): JSX.Element {
+  useQuery({
+    queryKey: ['q-304-mount-trigger'],
+    queryFn: () => Promise.resolve('unused'),
+    enabled: false,
+  });
+  return <div data-testid="mounter" />;
+}
+
+/**
+ * `<Breadcrumbs/>` монтується одразу (як у `AppLayout`, підписка встигає
+ * активуватися через `useEffect` до першого кліку). `MountsNewQuery`
+ * з'являється ПІЗНІШЕ, за кліком — імітація навігації на сторінку з власним
+ * запитом, а не одночасного першого монтування (де підписки `Breadcrumbs`
+ * ще нема, і попередження не було б чим спровокувати).
+ */
+function ToggleHarness(): JSX.Element {
+  const [showMounter, setShowMounter] = useState(false);
+  return (
+    <div>
+      <button type="button" onClick={() => setShowMounter(true)}>
+        mount
+      </button>
+      <Breadcrumbs />
+      {showMounter && <MountsNewQuery />}
+    </div>
+  );
+}
+
+function toggleHarnessRouter() {
+  return createMemoryRouter(
+    [
+      {
+        path: '/x',
+        element: <ToggleHarness />,
+        handle: { labelKey: 'x.y' },
+      },
+    ],
+    { initialEntries: ['/x'] },
+  );
+}
+
+describe('Breadcrumbs — Q-305: «Cannot update a component while rendering a different component»', () => {
+  it('монтування нового useQuery ІНШИМ компонентом після навігації не логує React-попередження', async () => {
+    // Мутаційна перевірка (RED → GREEN): якщо `useCacheVersion` у
+    // `Breadcrumbs.tsx` повернути до синхронного `setVersion` у самому
+    // колбеку `subscribe` (прибрати `queueMicrotask`), цей тест падає —
+    // `consoleErrorSpy` фіксує виклик із текстом «Cannot update a
+    // component» рівно в момент монтування `MountsNewQuery`. З відкладенням
+    // через `queueMicrotask` — GREEN.
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const queryClient = client();
+    const user = userEvent.setup();
+
+    show(toggleHarnessRouter(), queryClient);
+
+    await user.click(screen.getByRole('button', { name: 'mount' }));
+    // Дає мікрозадачі, у яку Q-305 відкладає `setVersion`, гарантовано
+    // відпрацювати до перевірки нижче.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const updateInRenderCalls = consoleErrorSpy.mock.calls.filter(
+      ([message]) => typeof message === 'string' && message.includes('Cannot update a component'),
+    );
+    expect(updateInRenderCalls).toEqual([]);
+
+    consoleErrorSpy.mockRestore();
   });
 });

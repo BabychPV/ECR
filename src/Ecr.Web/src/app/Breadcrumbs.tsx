@@ -30,6 +30,34 @@ import { routeList, type RouteHandle } from './routes';
  * `useCacheVersion` нижче форсує перерендер на кожній зміні кешу — це
  * підписка на ПОДІЮ кешу, не запит.
  *
+ * ⚠ Q-305: `setVersion` у підписці ВІДКЛАДЕНО через `queueMicrotask`, а не
+ * викликається напряму з колбека `subscribe`. Причина — не стиль, а
+ * відтворена й підтверджена вада: `QueryCache.notify()` (`query-core`)
+ * викликає підписників СИНХРОННО всередині `notifyManager.batch()`, без
+ * будь-якого відкладення. Кожен `useQuery`, що вперше монтується для ключа,
+ * якого ще нема в кеші (перехід на будь-яку сторінку з власним запитом:
+ * `RouteGuard.useSession()`, `DocumentsPage`, `CreateDocumentModal`, …),
+ * створює `QueryObserver` через `useState(() => new Observer(...))` —
+ * ЛІНИВИЙ ІНІЦІАЛІЗАТОР, що виконується ПІД ЧАС рендера цього ж компонента
+ * (`useBaseQuery.ts`, `@tanstack/react-query`). Конструктор одразу викликає
+ * `queryCache.build()` → `add()` → синхронний `notify()` — тобто підписник
+ * `Breadcrumbs` отримує подію й викликає `setVersion` ПІД ЧАС рендера ІНШОГО
+ * компонента. React це ловить (`scheduleUpdateOnFiber`) і видає «Cannot
+ * update a component while rendering a different component» — саме
+ * попередження цієї картки, на кожному переході сторінки, що монтує новий
+ * запит.
+ *
+ * ⛔ `useSyncExternalStore` (природний перший вибір для зовнішньої підписки,
+ * той самий приём, що й `useCatalog.ts`) ПЕРЕВІРЕНО й НЕ рятує: його
+ * внутрішній `forceStoreRerender` викликає ТОЙ САМИЙ `scheduleUpdateOnFiber`,
+ * що й `dispatchSetState`, — попередження лишається (відтворено вручну
+ * live-стендом, стек показує `forceStoreRerender` замість `dispatchSetState`,
+ * результат ідентичний). Причина в тому, що попередження прив'язане не до
+ * конкретного хука, а до самого факту виклику `scheduleUpdateOnFiber` під
+ * час рендера ІНШОГО файбера — `queueMicrotask` єдиний з розглянутих
+ * варіантів, що виносить виклик ЗА межі поточного синхронного стека
+ * рендера/коміту, а не підмінює механізм оновлення.
+ *
  * ⚠ НЕ використовується поза цим файлом (свідомо). `useRouteTransitionFocus
  * .ts` (`PR nav-arch #7`) резолвить `document.title` ТИМ САМИМ
  * `buildCrumbChain` (експортовано нижче), але НЕ бере другого екземпляра
@@ -50,7 +78,26 @@ function useCacheVersion(queryClient: QueryClient): void {
   // (стабільний на весь застосунок): підписка НЕ повинна перестворюватися на
   // кожну зміну самого `version`, бо саме вона його й змінює.
   useEffect(() => {
-    return queryClient.getQueryCache().subscribe(() => setVersion((v) => v + 1));
+    // ⛔ `cancelled` — не про повторний рендер, а про те, що мікрозадача,
+    // поставлена В ЧЕРГУ до розмонтування, все одно виконається ПІСЛЯ нього
+    // (`queueMicrotask` не скасовується відпискою нижче). Без цього прапорця
+    // `setVersion` на розмонтованому компоненті — не катастрофа (React 18
+    // мовчки ігнорує таке оновлення), але й не задокументована поведінка,
+    // на яку варто покладатися.
+    let cancelled = false;
+    const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+      // Q-305: див. пояснення над компонентом — без цього відкладення
+      // `setVersion` виконується СИНХРОННО всередині `notify()`, який сам
+      // може бути викликаний під час рендера ІНШОГО компонента (будь-який
+      // `useQuery`, що вперше монтується для нового ключа кешу).
+      queueMicrotask(() => {
+        if (!cancelled) setVersion((v) => v + 1);
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [queryClient]);
 }
 
