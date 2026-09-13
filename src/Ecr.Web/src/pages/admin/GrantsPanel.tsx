@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, NumberInput, Select, Switch, Table } from '@mantine/core';
+import { Button, Group, NumberInput, Select, Switch, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
@@ -126,6 +126,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             <Table.Tr>
               <Table.Th>{t('grants.kind')}</Table.Th>
               <Table.Th>{t('grants.resource')}</Table.Th>
+              <Table.Th>{t('grants.resourceName')}</Table.Th>
               <Table.Th>{t('grants.level')}</Table.Th>
               <Table.Th>{t('grants.deny')}</Table.Th>
               <Table.Th />
@@ -149,7 +150,8 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     data={['Project', 'Sheet', 'Table', 'Column']}
                     value={grant.resourceKind}
                     onChange={(value) =>
-                      value !== null && replace(index, { ...grant, resourceKind: value as never })
+                      value !== null &&
+                      replace(index, { ...withoutResourceName(grant), resourceKind: value as never })
                     }
                   />
                 </Table.Td>
@@ -161,11 +163,33 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     value={grant.resourceId}
                     onChange={(value) =>
                       replace(index, {
-                        ...grant,
+                        ...withoutResourceName(grant),
                         resourceId: typeof value === 'number' ? value : 0,
                       })
                     }
                   />
+                </Table.Td>
+                <Table.Td>
+                  {/*
+                   * ⚠ Розв'язана назва приходить лише у ВІДПОВІДІ сервера
+                   * (Q-299) — рядок, щойно доданий кнопкою «додати» чи з
+                   * незбереженою правкою `resourceId`, її ще не має
+                   * (`resourceName === undefined`), і це НЕ помилка: назва
+                   * з'явиться після збереження й перечитання. `null` —
+                   * інша річ: сервер шукав і не знайшов (ресурс видалено чи
+                   * id хибний), і це показується явно, а не мовчки.
+                   */}
+                  {grant.resourceName === null ? (
+                    <Text size="xs" c="statusError" fs="italic">
+                      {t('grants.resourceNameUnknown')}
+                    </Text>
+                  ) : grant.resourceName === undefined ? (
+                    <Text size="xs" c="dimmed">
+                      —
+                    </Text>
+                  ) : (
+                    <Text size="xs">{grant.resourceName}</Text>
+                  )}
                 </Table.Td>
                 <Table.Td>
                   <Select
@@ -214,4 +238,17 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
   function replace(index: number, grant: ResourceGrantDto): void {
     setDraft(draft.map((item, i) => (i === index ? grant : item)));
   }
+}
+
+/**
+ * Прибирає `resourceName` з гранта перед правкою kind/id чернетки.
+ *
+ * ⚠ Не `{ ...grant, resourceName: undefined }`: поле в типі — `string | null`
+ * (не `| undefined`), і `exactOptionalPropertyTypes` відмовляє таке
+ * присвоєння на рівні типів. Це не косметика — стара розв'язана назва не
+ * має лишатись видимою під ЗМІНЕНИМ kind/id: вона більше не описує цей рядок.
+ */
+function withoutResourceName(grant: ResourceGrantDto): Omit<ResourceGrantDto, 'resourceName'> {
+  const { resourceName: _ignored, ...rest } = grant;
+  return rest;
 }

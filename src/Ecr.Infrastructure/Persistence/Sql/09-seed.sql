@@ -647,6 +647,8 @@ USING (VALUES
     (N'grants.saved',                    N'en', N'Access updated; affected sessions revalidate immediately.', 1),
     (N'grants.kind',                     N'en', N'Resource kind', 1),
     (N'grants.resource',                 N'en', N'Resource id', 1),
+    (N'grants.resourceName',             N'en', N'Resolved name', 1),
+    (N'grants.resourceNameUnknown',      N'en', N'Not found — resource deleted or the id is wrong', 1),
     (N'grants.level',                    N'en', N'Level', 1),
     (N'grants.deny',                     N'en', N'Deny', 1),
     (N'grants.remove',                   N'en', N'Remove', 1),

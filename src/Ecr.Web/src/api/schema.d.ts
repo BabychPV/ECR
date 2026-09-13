@@ -9767,6 +9767,12 @@ export interface components {
             resourceId: number;
             /** @description Вид ресурсу: `Project`, `Sheet`, `Table`, `Column`. */
             resourceKind: components["schemas"]["ResourceKind"];
+            /** @description Розв'язаний код ресурсу (`Q-299`) — лише у ВІДПОВІДІ ListResourceGrantsHandler; `null`, якщо ресурс уже видалено
+             *     або посилання «осиротіло». Поле ІГНОРУЄТЬСЯ на запис
+             *     (ReplaceResourceGrantsHandler і `IUserStore.ReplaceGrantsAsync`
+             *     читають лише перші чотири поля) — клієнту не треба вирізати його з
+             *     чернетки перед збереженням. */
+            resourceName?: null | string;
         };
         /**
          * @description Тип ресурсу, на який видається грант.
