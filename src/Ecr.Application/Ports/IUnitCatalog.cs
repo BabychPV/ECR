@@ -41,10 +41,21 @@ public sealed record UnitCatalogSnapshot(
 /// <param name="DimensionId">Розмірність; конверсія можлива лише в її межах.</param>
 /// <param name="FactorToBase">Множник переходу до базової одиниці розмірності.</param>
 /// <param name="OffsetToBase">Зсув до базової; ненульовий лише в температури.</param>
+/// <param name="DimensionCode">
+/// Код розмірності з довідника <c>uom.Dimension</c> (<c>kg</c> → <c>Mass</c>).
+/// </param>
 /// <remarks>
 /// ⚠ Множник і зсув входять у знімок, а не читаються окремо. Без них
 /// <c>CONVERT</c> у рантаймі множив би на одиницю і мовчки повертав те саме
 /// число: тонни лишалися б тоннами під виглядом кілограмів.
+///
+/// ⛔ Q-297: <c>DimensionCode</c> — за замовчуванням порожній рядок, бо
+/// більшість викликів (конверсія, обхід формул) звіряють <c>DimensionId</c> і
+/// їм людський код розмірності не потрібен. Заповнює його лише
+/// <c>UnitCatalog</c> (реальний довідник); клієнт API отримує це поле
+/// заповненим, а тест-дублери, що не задають його явно, — порожнім, і це
+/// навмисно не ламає їх.
 /// </remarks>
 public sealed record UnitRef(
-    int Id, string Code, byte DimensionId, decimal FactorToBase = 1m, decimal OffsetToBase = 0m);
+    int Id, string Code, byte DimensionId, decimal FactorToBase = 1m, decimal OffsetToBase = 0m,
+    string DimensionCode = "");

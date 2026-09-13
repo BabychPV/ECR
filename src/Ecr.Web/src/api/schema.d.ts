@@ -10744,6 +10744,11 @@ export interface components {
             /** @description Код: `kg`, `t`, `m3`. */
             code: string;
             /**
+             * @description Код розмірності з довідника `uom.Dimension` (`kg` → `Mass`).
+             * @default
+             */
+            dimensionCode: string;
+            /**
              * Format: uint8
              * @description Розмірність; конверсія можлива лише в її межах.
              */
