@@ -21,6 +21,8 @@ import {
   type PendingEdit,
 } from './useCellPatch';
 import { createDebouncer, registerUnloadFlush } from './autosave';
+import { installEnterKeyCompat } from './keyboardCompat';
+import { cellsOfSaveError } from './saveErrors';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -186,15 +188,45 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               message: m.message,
             })),
         ]);
+
+        // ⚠ Успіх ЦЬОГО патчу знімає банер і маркери лише з рядків, яких він
+        // стосувався: помилка іншого, ще не повтореного збереження, не має
+        // права мовчки зникнути через УСПІХ чужого патчу.
+        setSaveError(null);
+        setSaveErrorCells((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
       } catch (error) {
         if (error instanceof EcrApiError && error.isRequiredInputMissing) {
           setRequiredInputBlocked((prev) => [
             ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
             ...error.requiredInputCells,
           ]);
+
+          // ⚠ `ECR-CALC-0437` уже має власний, повніший `Alert` вище
+          // (`requiredInputBlocked`) — другий банер із тим самим по суті
+          // повідомленням розсіював би увагу, а не додавав інформацію.
+          setSaveError(null);
+          setSaveErrorCells((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
+        } else if (error instanceof EcrApiError) {
+          // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
+          // сервера («Колонка «C1» очікує число.» і подібні) показується як
+          // є, а не губиться в необробленому знеструмленні проміса. Саме
+          // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
+          // ABOVE», яка досі не мала на що вказувати.
+          setSaveError(error.message);
+          setSaveErrorCells((prev) => [
+            ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
+            ...cellsOfSaveError(error, edits),
+          ]);
+        } else {
+          setSaveError(String(error));
         }
 
-        throw error;
+        // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка
+        // «Зберегти», `applyHistory`, автозбереження) не чекає цей проміс і
+        // не обробляє відмову сам — усі викликають `void save(...)`. Стан
+        // вище вже показує причину користувачеві; повторний `throw` тут
+        // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
+        // симптом, який документує Stage 1), без жодного адресата.
       }
     },
     [patch, periodKey, tableInstanceId],
@@ -252,6 +284,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [requiredInputWarnings, setRequiredInputWarnings] = useState<
     readonly RequiredInputCell[]
   >([]);
+
+  // ⛔ Q-30x (High): раніше справжня причина відмови збереження (наприклад,
+  // `Колонка «C1» очікує число.`, ECR-CELL-0422) доїжджала до клієнта
+  // коректно, але ніде не показувалась — тулбар малював тільки заглушку
+  // «NOT SAVED — SEE THE ERROR ABOVE», а сам текст губився в необробленому
+  // знеструмленні проміса, яке бачить лише консоль розробника. `saveError` —
+  // ТЕКСТ сервера як є (ФВ-14.24), `saveErrorCells` — комірки, яких він
+  // стосується (`cellsOfSaveError`, `saveErrors.ts`), для маркера поверх
+  // клітинки за тим самим взірцем, що й обов'язкові вхідні колонки (Q-306).
+  //
+  // ⚠ НЕ для `ECR-CALC-0437`: та відмова вже має власний, повніший `Alert`
+  // (`requiredInputBlocked` нижче) — дублювати той самий текст у двох
+  // банерах означало б розсіювати увагу там, де причина вже названа.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveErrorCells, setSaveErrorCells] = useState<readonly RequiredInputCell[]>([]);
 
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
@@ -326,9 +373,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return { blocked, warning };
   }, [requiredInputBlocked, requiredInputWarnings]);
 
+  // ⛔ Q-30x (High): той самий взірець, що й обов'язкові вхідні колонки вище
+  // — маркер ЗА КЛЮЧЕМ комірки, що ДОДАЄТЬСЯ поверх будь-якого стану
+  // `cellStateOf`, а не змагається з ним. Заповнюється РЕАЛЬНИМИ даними з
+  // відповіді сервера (`cellsOfSaveError`, `saveErrors.ts`), не здогадом.
+  const saveErrorByCell = useMemo(() => {
+    const byCell = new Map<string, string>();
+    for (const cell of saveErrorCells) byCell.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
+
+    return byCell;
+  }, [saveErrorCells]);
+
   const columns = useMemo(
-    () => (data === undefined ? [] : gridColumns(data, readOnly, flags, widths, requiredInputByCell)),
-    [data, readOnly, flags, widths, requiredInputByCell],
+    () =>
+      data === undefined
+        ? []
+        : gridColumns(data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell),
+    [data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell],
   );
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
@@ -625,6 +686,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   /** Чи справа саме в колонках — від цього залежить, що написано в порожньому стані. */
   const noColumns = isMissingColumns(data);
 
+  // ⛔ Q-30x (Critical): нормалізація Enter для клавіатур без сучасного
+  // `KeyboardEvent.key` (`keyboardCompat.ts`) — сама причина Finding 1.
+  // Слухач на КОНТЕЙНЕРІ з `capture: true` спрацьовує РАНІШЕ за bubble-
+  // обробник RevoGrid на `<input>` редактора, тож дописує `key`, ще до
+  // того, як бібліотека встигне його прочитати і мовчки нічого не зробити.
+  //
+  // ⚠ Callback-ref, а не `useRef` + `useEffect([])`: контейнер рендериться
+  // лише в дочірній функції `AsyncBoundary`, ПІСЛЯ завантаження зрізу — ефект
+  // із порожніми залежностями спрацював би раз, до монтування вузла, і ніколи
+  // більше. Callback-ref натомість викликається рівно тоді, коли вузол
+  // з'являється чи зникає, незалежно від умовного рендеру.
+  const enterKeyCompatCleanup = useRef<(() => void) | null>(null);
+  const gridContainerRef = useCallback((node: HTMLDivElement | null) => {
+    enterKeyCompatCleanup.current?.();
+    enterKeyCompatCleanup.current = node === null ? null : installEnterKeyCompat(node);
+  }, []);
+
   return (
     /*
      * ⛔ Чотири стани і тут (`ФВ-14.21`). Раніше зріз мав два: «вантажиться» і
@@ -702,6 +780,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         )}
       </Group>
 
+      {saveError !== null && (
+        // ⛔ Q-30x (High): САМЕ СЮДИ вказує «NOT SAVED — SEE THE ERROR
+        // ABOVE» з бейджа тулбару вище — раніше під цим написом не було
+        // нічого, а справжня причина губилася в консолі. Текст — рівно той,
+        // що назвав сервер (ФВ-14.24): код розрізняє причини, текст —
+        // людині.
+        <Alert color="statusError" title={t('grid.saveError')} role="alert">
+          <Text size="sm">{saveError}</Text>
+        </Alert>
+      )}
+
       {rounded.length > 0 && (
         // ⛔ Повідомлення, а не діалог підтвердження (ФВ-9.16c). Діалог на
         // кожну вставку з Excel закривали б не читаючи — і правило «мовчки
@@ -756,18 +845,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
-      <RevoGrid
-        theme="compact"
-        range
-        resize
-        columns={columns}
-        source={rows}
-        readonly={readOnly}
-        onBeforeedit={onBeforeEdit}
-        onAfteredit={onAfterEdit}
-        onAftercolumnresize={onColumnResize}
-        style={{ height: '70vh' }}
-      />
+      <div ref={gridContainerRef} style={{ display: 'contents' }}>
+        <RevoGrid
+          theme="compact"
+          range
+          resize
+          columns={columns}
+          source={rows}
+          readonly={readOnly}
+          onBeforeedit={onBeforeEdit}
+          onAfteredit={onAfterEdit}
+          onAftercolumnresize={onColumnResize}
+          style={{ height: '70vh' }}
+        />
+      </div>
 
       <Modal
         opened={showRounded}
@@ -835,12 +926,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
  * станів, розкладені по місцю використання, розійшлися б на другому ж екрані,
  * а перевірити їх можна було б лише через DOM веб-компонента.
  */
-function gridColumns(
+export function gridColumns(
   slice: TableSliceDto,
   readOnly: boolean,
   flags: LocalCellFlags,
   widths: Record<string, number>,
   requiredInput: { blocked: ReadonlyMap<string, string>; warning: ReadonlyMap<string, string> },
+  saveErrorByCell: ReadonlyMap<string, string> = new Map(),
 ): ColumnRegular[] {
   return slice.columns.map((column) => ({
     prop: column.code,
@@ -877,19 +969,29 @@ function gridColumns(
           ? 'ecr-cell-required-input-warning'
           : null;
 
-      if (state === null && requiredInputClass === null) return {};
+      // ⛔ Q-30x (High): той самий взірець маркера, що й обов'язкові вхідні
+      // колонки вище — ДОДАЄТЬСЯ до класу стану, а не змагається з ним за
+      // пріоритет `cellStateOf`. На відміну від Block/Warn, тут завжди РІВНО
+      // одна причина на комірку (остання відповідь сервера), тому й маркер
+      // один, без варіанту blocked/warning.
+      const saveErrorMessage = saveErrorByCell.get(key) ?? null;
+      const saveErrorClass = saveErrorMessage === null ? null : 'ecr-cell-save-error';
+
+      if (state === null && requiredInputClass === null && saveErrorClass === null) return {};
 
       const decision = decide(slice, rowKey, column);
 
       // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони чи
       // незаповненого входу вже є на сервері — читалка має її почути.
-      const hint = [decision.hint, requiredInputMessage].filter((part) => !!part).join(' ');
+      const hint = [decision.hint, requiredInputMessage, saveErrorMessage]
+        .filter((part) => !!part)
+        .join(' ');
 
       return {
         // ⚠ Базовий `ecr-cell` завжди присутній, навіть коли `state === null`:
         // від нього залежить `position: relative` і резерв місця під маркер
         // (`cell-states.css`), а маркер обов'язкового входу — свій маркер.
-        class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass]
+        class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass, saveErrorClass]
           .filter((part): part is string => part !== null)
           .join(' '),
 

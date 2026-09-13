@@ -209,3 +209,29 @@
 :root[data-mantine-color-scheme='dark'] .ecr-cell-required-input-warning::before {
   color: #ffd24d;
 }
+
+/*
+ * ── помилка збереження комірки (Q-30x, High) ────────────────────────────
+ *
+ * ⚠ ДОДАТКОВИЙ маркер поверх будь-якого стану — так само, як позначка
+ * обов'язкового входу вище: останнє збереження, що торкалося цієї комірки,
+ * сервер відхилив (`ECR-CELL-0422` і подібні), і причина продубльована в
+ * `title` (`DocumentGrid.gridColumns`), а не лише кольором. Кут — верхній
+ * лівий: три інші зайняті (dirty — верхній правий трикутник, calculated —
+ * теж верхній правий, rounded — нижній правий, required-input — нижній
+ * лівий).
+ */
+.ecr-cell-save-error::before {
+  content: '×';
+  position: absolute;
+  top: 0;
+  left: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: #b3170c;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-save-error::before {
+  color: #f07369;
+}
