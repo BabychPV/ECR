@@ -1497,6 +1497,28 @@ USING (VALUES
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
      VALUES (s.[Key], s.Lang, s.Val, s.Scope, SYSUTCDATETIME());
+
+-- ⛔ Без цього нові ключі, додані СЮДИ (а не через
+-- `PUT /api/v1/ui-strings/{lang}/{key}`), лишають Revision незмінним:
+-- `SetUiStringHandler` інкрементує його сам (R-B7), а цей MERGE — ні. Клієнт
+-- із чинним ETag (`uiStrings:{lang}:{scope}:{revision}` у localStorage)
+-- отримує 304 на СТАРУ версію каталогу — свіжі рядки лежать у таблиці, але
+-- ніколи не доїжджають до екрана, доки хтось не відкриє `/admin/ui-strings`
+-- і не збереже той самий ключ вручну. Живий доказ: `methodologies.*` з
+-- директиви «обов'язкові вхідні колонки» (Q-306) — у базі є, на екрані досі
+-- `⟦methodologies.requiredInputs⟧`.
+--
+-- ⚠ Умовно, а не завжди: `SeedRunner` виконується на КОЖНОМУ старті
+-- застосунку (`02-contracts.md` §14), і безумовний інкремент означав би
+-- зайве validation-round-trip для кожного клієнта на кожному рестарті, навіть
+-- коли жодного нового рядка не додалося. `@@ROWCOUNT` після `MERGE` — це
+-- кількість щойно вставлених рядків (клаузи `WHEN MATCHED` тут немає).
+IF @@ROWCOUNT > 0
+BEGIN
+    UPDATE sys_ecr.UiStringRevision
+    SET Revision = Revision + 1, ModifiedAt = SYSUTCDATETIME()
+    WHERE Id = 1;
+END
 GO
 
 -- ── Опис звіту: одна державна форма з каталогу ФВ-10.7 ───────────────────
