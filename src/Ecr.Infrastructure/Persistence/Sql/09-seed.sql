@@ -987,6 +987,11 @@ USING (VALUES
     -- інтерфейс, бо форма не мала звідки взяти кількість.
     (N'periods.customCount',             N'en', N'Number of periods', 1),
     (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
+    -- Q-298: підказка біля недоступної кнопки «Зберегти» у формі створення
+    -- проєкту — перелік бракуючих полів замість мовчазної недоступності
+    -- кнопки без жодного пояснення (`CreateDocumentModal.tsx` має той самий
+    -- дефект і поки що без цього фіксу).
+    (N'periods.stillNeeded',             N'en', N'Still needed: {fields}', 1),
     -- T6/#37: CRUD політик періодів — до цього завести чи змінити політику
     -- можна було лише сідингом або рукою DBA.
     (N'periods.managePolicies',          N'en', N'Manage policies', 1),

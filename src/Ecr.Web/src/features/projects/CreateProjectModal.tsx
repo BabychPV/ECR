@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Select, Text, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -79,6 +79,19 @@ export function createProjectBody(form: {
   };
 }
 
+/** Поле форми створення проєкту, якого може бракувати для надсилання. */
+type MissingProjectField = 'code' | 'name' | 'timeZone' | 'version' | 'policy' | 'customPeriodCount';
+
+/** Ключ напису для кожного бракуючого поля — той самий, що й у `label` полів нижче. */
+const ProjectFieldLabelKey: Record<MissingProjectField, string> = {
+  code: 'periods.code',
+  name: 'periods.name',
+  timeZone: 'periods.timeZone',
+  version: 'periods.templateVersion',
+  policy: 'periods.policy',
+  customPeriodCount: 'periods.customCount',
+};
+
 /**
  * Чого формі бракує, щоб її можна було надіслати.
  *
@@ -90,6 +103,47 @@ export function createProjectBody(form: {
  *
  * ⚠ `timeZoneId === null` означає «не обрано». Порожній рядок сюди не
  * потрапляє: `Select` віддає або значення зі списку, або `null`.
+ *
+ * ⛔ Q-298: раніше існував лише `boolean` (`createProjectIncomplete` нижче) —
+ * кнопка ставала `disabled` без жодного пояснення, ЯКЕ саме поле ще
+ * порожнє. Перелік бракуючих полів рахується тут же, чистою функцією, без
+ * рендеру Mantine в jsdom — той самий підхід, яким варто було б колись
+ * замінити й голий `disabled={...}` у `CreateDocumentModal.tsx`.
+ */
+export function createProjectMissingFields(form: {
+  code: string;
+  name: LocalizedValue;
+  timeZoneId: string | null;
+  versionId: string | null;
+  policyId: string | null;
+  periodKind?: string;
+  customPeriodCount?: number | null;
+}): MissingProjectField[] {
+  const missing: MissingProjectField[] = [];
+
+  if (form.code.trim().length === 0) missing.push('code');
+  if (!hasAnyText(form.name)) missing.push('name');
+  if (form.timeZoneId === null) missing.push('timeZone');
+  if (form.versionId === null) missing.push('version');
+  if (form.policyId === null) missing.push('policy');
+
+  // ⛔ T6/#36: `Custom` без кількості надсилає `customPeriodCount: null`,
+  // і сервер відхиляє це як `0` поза межами `1..12` (`ECR-PRD-4224`) —
+  // краще не давати надіслати запит, який гарантовано відмовлять.
+  if (form.periodKind === 'Custom' && !(form.customPeriodCount && form.customPeriodCount > 0)) {
+    missing.push('customPeriodCount');
+  }
+
+  return missing;
+}
+
+/**
+ * Чи готова форма до надсилання.
+ *
+ * ⚠ Тонка обгортка над {@link createProjectMissingFields}: наявні виклики й
+ * тести очікують `boolean`, а компонент додатково показує САМ перелік
+ * (`missingFields` нижче) як підказку біля кнопки — дві різні обіцянки з
+ * однієї перевірки, а не дублювання логіки.
  */
 export function createProjectIncomplete(form: {
   code: string;
@@ -100,17 +154,7 @@ export function createProjectIncomplete(form: {
   periodKind?: string;
   customPeriodCount?: number | null;
 }): boolean {
-  return (
-    form.code.trim().length === 0 ||
-    !hasAnyText(form.name) ||
-    form.timeZoneId === null ||
-    form.versionId === null ||
-    form.policyId === null ||
-    // ⛔ T6/#36: `Custom` без кількості надсилає `customPeriodCount: null`,
-    // і сервер відхиляє це як `0` поза межами `1..12` (`ECR-PRD-4224`) —
-    // краще не давати надіслати запит, який гарантовано відмовлять.
-    (form.periodKind === 'Custom' && !(form.customPeriodCount && form.customPeriodCount > 0))
-  );
+  return createProjectMissingFields(form).length > 0;
 }
 
 /**
@@ -222,9 +266,16 @@ export function CreateProjectModal({
   // ⛔ Пояс у переліку обов'язкових. Без нього форму можна було надіслати
   // (браузерне значення підставлялося саме), і сервер приймав її — з чужим
   // поясом, який після відкриття першого періоду вже не змінити (`ФВ-1.1a`).
-  const incomplete = createProjectIncomplete({
+  //
+  // ⛔ Q-298: раніше тут одразу рахувався `boolean`, і кнопка ставала
+  // `disabled` без жодного пояснення, чого саме бракує (той самий пробіл
+  // UX, що й `CreateDocumentModal.tsx` до свого фіксу). Перелік бракуючих
+  // полів рахується один раз і використовується двічі: для `incomplete` і
+  // для підказки біля кнопки нижче.
+  const missingFields = createProjectMissingFields({
     code, name, timeZoneId, versionId, policyId, periodKind, customPeriodCount,
   });
+  const incomplete = missingFields.length > 0;
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('periods.create')}>
@@ -309,6 +360,20 @@ export function CreateProjectModal({
         value={policyId}
         onChange={setPolicyId}
       />
+
+      {/* ⛔ Q-298: раніше кнопка була просто `disabled` без жодного
+          пояснення, чого саме бракує: користувач бачив непрацездатну кнопку
+          і мав сам здогадатися, яке поле ще заповнити. `CreateDocumentModal.tsx`
+          має той самий дефект (`disabled={...}` без підказки) — цей фікс
+          його поки не зачіпає, лише документує ту саму форму рішення на
+          майбутнє. */}
+      {incomplete && (
+        <Text size="xs" c="dimmed" mt="sm">
+          {t('periods.stillNeeded', {
+            fields: missingFields.map((field) => t(ProjectFieldLabelKey[field])).join(', '),
+          })}
+        </Text>
+      )}
 
       <Group justify="flex-end" mt="md">
         <Button variant="default" onClick={onClose}>
