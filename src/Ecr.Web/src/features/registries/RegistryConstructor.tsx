@@ -5,6 +5,7 @@ import {
   Checkbox,
   Group,
   NativeSelect,
+  NumberInput,
   Stack,
   Table,
   Text,
@@ -15,18 +16,37 @@ import type {
   RegistryDefinitionDto,
   RegistryHistoryEntryDto,
 } from '@/api/types';
-import { RuleKinds, Severities, isComplete, type RuleDraft } from './definition';
+import {
+  EditableFieldDataTypes,
+  NumericFieldTypes,
+  RuleKinds,
+  Severities,
+  isComplete,
+  isFieldComplete,
+  type FieldDataType,
+  type FieldDraft,
+  type RuleDraft,
+} from './definition';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 
 /**
  * Поля довідника (`ФВ-8.3`, `ФВ-8.12`).
  *
- * ⛔ Поля показуються, а не правляться, і це рішення (`D2-202`). Код, тип і
- * ключовість наявного поля перетлумачують уже збережені значення: код — те,
- * чим на поле посилаються вирази і мапінг; тип — те, як читається колонка
+ * ⛔ НАЯВНІ поля показуються, а не правляться, і це рішення (`D2-202`). Код,
+ * тип і ключовість наявного поля перетлумачують уже збережені значення: код —
+ * те, чим на поле посилаються вирази і мапінг; тип — те, як читається колонка
  * `dic.RegistryValue`; ключовість входить у бізнес-ключ запису. Форма, яка
- * дає їх змінити, обіцяє те, чого сервер не робить.
+ * дає їх змінити, обіцяє те, чого сервер не робить (`SaveRegistryDefinitionHandler.ApplyFields`
+ * відхиляє розбіжність коду й типу для наявного `id` окремим повідомленням).
+ *
+ * ⚠ ДОДАВАННЯ нового поля — інша дія, і D2-202 її не забороняє: сервер уже
+ * розрізняє «нове» від «правки наявного» за `id === null`
+ * (`RegistryFieldSaveDto`), рівно як і для правил нижче. До цього фіксу
+ * інтерфейс просто не мав кнопки, що ним скористалася б — довідник, заведений
+ * через `/admin/registries`, не міг отримати жодного поля, а без ключового
+ * поля сервер відмовляє зберегти будь-яку зміну опису взагалі
+ * (`ECR-REG-0422`, «залишився б без жодного ключового поля»).
  *
  * ⚠ Ознака «ключове» показана явно: саме за ключовими полями звужується
  * доступ (`RoleAssignment.ScopeJson`), і адміністратор, який не бачить, які
@@ -34,14 +54,42 @@ import { t } from '@/shared/i18n';
  */
 export function RegistryFields({
   definition,
+  canEdit,
+  newFields,
+  registryOptions,
+  onAddField,
+  onChangeField,
+  onRemoveField,
 }: {
   readonly definition: RegistryDefinitionDto;
+  readonly canEdit: boolean;
+
+  /** Нові поля, додані в цьому сеансі — ще не збережені (`FieldDraft`). */
+  readonly newFields: readonly FieldDraft[];
+
+  /** Довідники для вибору цілі поля типу `Lookup` — код і назва. */
+  readonly registryOptions: readonly { value: string; label: string }[];
+  readonly onAddField: () => void;
+  readonly onChangeField: (index: number, field: FieldDraft) => void;
+  readonly onRemoveField: (index: number) => void;
 }): JSX.Element {
   return (
     <Stack gap="xs">
-      <Title order={2} size="h5">
-        {t('registries.tabFields')}
-      </Title>
+      <Group justify="space-between" align="center">
+        <Title order={2} size="h5">
+          {t('registries.tabFields')}
+        </Title>
+
+        {/* ⛔ Це і є фікс: до нього на всій сторінці конструктора не було
+            жодного контролю, що додавав поле, — на відміну від сусідньої
+            вкладки `RegistryRules`, у якої «Додати правило» працює навіть
+            при нулі правил. */}
+        {canEdit && (
+          <Button size="xs" variant="default" onClick={onAddField}>
+            {t('registries.addField')}
+          </Button>
+        )}
+      </Group>
 
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -52,6 +100,8 @@ export function RegistryFields({
             <Table.Th>{t('registries.required')}</Table.Th>
             <Table.Th>{t('registries.keyField')}</Table.Th>
             <Table.Th>{t('registries.lookup')}</Table.Th>
+            <Table.Th>{t('registries.unit')}</Table.Th>
+            {newFields.length > 0 && <Table.Th />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -63,10 +113,135 @@ export function RegistryFields({
               <Table.Td>{field.isRequired ? t('registries.yes') : '—'}</Table.Td>
               <Table.Td>{field.isScopeField ? t('registries.yes') : '—'}</Table.Td>
               <Table.Td>{field.lookupRegistryDefId ?? '—'}</Table.Td>
+              <Table.Td>{field.unitId ?? '—'}</Table.Td>
+              {newFields.length > 0 && <Table.Td />}
             </Table.Tr>
           ))}
+
+          {/* ⚠ Лише НОВІ поля — рядок редагований. Наявне поле в цій таблиці
+              вище лишається текстом, не інпутом: D2-202 стосується саме їх. */}
+          {newFields.map((draft, index) => {
+            const isLookup = draft.dataType === 'Lookup';
+            const isNumeric = NumericFieldTypes.includes(draft.dataType);
+
+            return (
+              <Table.Tr key={`new-${index}`}>
+                <Table.Td>
+                  <TextInput
+                    size="xs"
+                    label={t('registries.code')}
+                    disabled={!canEdit}
+                    value={draft.code}
+                    onChange={(event) =>
+                      onChangeField(index, { ...draft, code: event.currentTarget.value })
+                    }
+                  />
+                </Table.Td>
+                <Table.Td>
+                  <TextInput
+                    size="xs"
+                    label={t('registries.name')}
+                    disabled={!canEdit}
+                    value={draft.name}
+                    onChange={(event) =>
+                      onChangeField(index, { ...draft, name: event.currentTarget.value })
+                    }
+                  />
+                </Table.Td>
+                <Table.Td>
+                  <NativeSelect
+                    size="xs"
+                    label={t('registries.dataType')}
+                    disabled={!canEdit}
+                    value={draft.dataType}
+                    data={[...EditableFieldDataTypes]}
+                    onChange={(event) => {
+                      const dataType = event.currentTarget.value as FieldDataType;
+                      onChangeField(index, {
+                        ...draft,
+                        dataType,
+                        lookupRegistryDefId: dataType === 'Lookup' ? draft.lookupRegistryDefId : null,
+                        unitId: NumericFieldTypes.includes(dataType) ? draft.unitId : null,
+                      });
+                    }}
+                  />
+                </Table.Td>
+
+                {/* ⛔ Не інпут: нове поле обов'язковим бути не може
+                    (`FieldDraft` навіть не носить цього прапорця) — форма не
+                    показує вибору там, де сервер однаково відмовить. */}
+                <Table.Td>—</Table.Td>
+
+                <Table.Td>
+                  <Checkbox
+                    aria-label={t('registries.keyField')}
+                    disabled={!canEdit}
+                    checked={draft.isKey}
+                    onChange={(event) =>
+                      onChangeField(index, { ...draft, isKey: event.currentTarget.checked })
+                    }
+                  />
+                </Table.Td>
+
+                <Table.Td>
+                  {isLookup ? (
+                    <NativeSelect
+                      size="xs"
+                      label={t('registries.lookup')}
+                      disabled={!canEdit}
+                      value={draft.lookupRegistryDefId === null ? '' : String(draft.lookupRegistryDefId)}
+                      data={[{ value: '', label: '—' }, ...registryOptions]}
+                      onChange={(event) =>
+                        onChangeField(index, {
+                          ...draft,
+                          lookupRegistryDefId:
+                            event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
+                        })
+                      }
+                    />
+                  ) : (
+                    '—'
+                  )}
+                </Table.Td>
+
+                <Table.Td>
+                  {isNumeric ? (
+                    <NumberInput
+                      size="xs"
+                      label={t('registries.unit')}
+                      disabled={!canEdit}
+                      value={draft.unitId ?? ''}
+                      onChange={(value) =>
+                        onChangeField(index, { ...draft, unitId: typeof value === 'number' ? value : null })
+                      }
+                    />
+                  ) : (
+                    '—'
+                  )}
+                </Table.Td>
+
+                <Table.Td>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="statusError"
+                    disabled={!canEdit}
+                    onClick={() => onRemoveField(index)}
+                  >
+                    {t('registries.removeField')}
+                  </Button>
+                </Table.Td>
+              </Table.Tr>
+            );
+          })}
         </Table.Tbody>
       </Table>
+
+      {newFields.some((draft) => !isFieldComplete(draft)) && (
+        <Text size="xs" c="dimmed">
+          {t('registries.fieldIncomplete')}
+        </Text>
+      )}
     </Stack>
   );
 }

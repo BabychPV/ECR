@@ -1,4 +1,6 @@
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -45,6 +47,63 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                 "Дані змінилися після того, як ви їх прочитали.",
                 new Dictionary<string, object?> { ["conflicts"] = conflicts });
         }
+        catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
+        {
+            // ⛔ Integration-pending фікс findings 2-3: `CreateProjectHandler`
+            // не має перевірки коду заздалегідь (`UQ_Project_Code`), а
+            // `UpsertRegistryEntryHandler.CreateAsync` перевіряє дублікат
+            // проти знімка, прочитаного НА ПОЧАТКУ обробки запиту (TOCTOU,
+            // той самий клас, що й Q-241/Q-245) — подвійний клік на
+            // «Зберегти» посилає два запити тим самим кодом майже одночасно,
+            // обидва проходять перевірку ДО того, як перший закомітиться, і
+            // другий падає на `UQ_RegistryEntry` тут. В обох випадках без
+            // цієї гілки виняток ішов НЕОБРОБЛЕНИМ до
+            // `ExceptionHandlingMiddleware` голим `500 ECR-SYS-0500`.
+            //
+            // ⚠ Мапиться за ТИПОМ доданої сутності (`ex.Entries`), а не за
+            // назвою індексу з тексту `SqlException.Message`: розбір рядка
+            // повідомлення СУБД крихкий до локалізації сервера й версії, тип
+            // .NET-об'єкта — ні.
+            if (TryMapDuplicateKey(ex) is { } mapped)
+            {
+                throw mapped;
+            }
+
+            // Дублікат ключа сутності, для якої немає доменного
+            // повідомлення, — краще необроблений 500 із CorrelationId, ніж
+            // вигадана відповідь про те, чого перевірка тут не знає.
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Дублікат унікального коду ролі/проєкту/запису довідника — у чисту
+    /// доменну відмову. <c>null</c>, якщо серед доданих сутностей немає
+    /// жодної з відомих (виклик мусить перекинути оригінальний виняток).
+    /// </summary>
+    private static BusinessRuleException? TryMapDuplicateKey(DbUpdateException ex)
+    {
+        foreach (var entry in ex.Entries)
+        {
+            switch (entry.Entity)
+            {
+                case Domain.Entities.Documents.Project project:
+                    return new BusinessRuleException(
+                        ErrorCodes.ProjectDuplicate, $"Проєкт із кодом «{project.Code}» уже існує.");
+
+                case Domain.Entities.Dictionaries.RegistryEntry registryEntry:
+                    // ⚠ Той самий код, що й перевірка «до запису» в
+                    // `UpsertRegistryEntryHandler.CreateAsync` (`ECR-REG-0409`):
+                    // клієнт бачить ОДНУ причину незалежно від того, який із
+                    // двох одночасних запитів програв гонитву за унікальним
+                    // індексом.
+                    return new BusinessRuleException(
+                        ErrorCodes.RegistryEntryInUse,
+                        $"Запис із кодом «{registryEntry.Code}» у цьому довіднику вже існує.");
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />

@@ -343,6 +343,15 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.PeriodPolicyDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Той самий клас, що й `ECR-PRD-4091` вище: другий запис тим самим
+        // кодом ролі/проєкту падав на унікальному індексі БЕЗ жодної гілки
+        // тут — `DbUpdateException` не мапиться взагалі, і виняток ішов у
+        // fallback нижче голим `500`. Цифри коду — наш HTTP-статус, і
+        // «дублікат» — конфлікт, а не помилка введення (integration-pending
+        // фікс findings 1-3).
+        BusinessRuleException e when e.ErrorCode is ErrorCodes.RoleDuplicate or ErrorCodes.ProjectDuplicate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⚠ Той самий клас, що й `ECR-ROW-0409`/`ECR-RPT-0409` вище: задача не
         // в стані `Failed` — це конфлікт стану на дії, а не невірні дані
         // запиту (директива №11, T10 #40).

@@ -38,6 +38,19 @@ public static class ErrorCodes
     /// </remarks>
     public const string SecurityPrincipalNotFound = "ECR-SEC-0404";
 
+    /// <summary>
+    /// Роль із таким кодом уже існує (<c>UQ_Role</c>, integration-pending
+    /// фікс необробленого <c>500</c> на дублікаті коду ролі).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього коду не було зовсім: <c>CreateRoleHandler</c> не мав
+    /// перевірки коду, і другий запис тим самим кодом падав на
+    /// <c>UQ_Role</c> НЕОБРОБЛЕНИМ <c>DbUpdateException</c> аж до
+    /// <c>ExceptionHandlingMiddleware</c> — модалка збереження не показувала
+    /// НІЧОГО, ні тосту, ні помилки поля.
+    /// </remarks>
+    public const string RoleDuplicate = "ECR-SEC-0409";
+
     /// <summary>Дані облікового запису не проходять перевірку.</summary>
     /// <remarks>
     /// ⛔ Заведений замість запозиченого <c>ECR-ROW-0422</c>. <c>ROW</c> — це
@@ -177,6 +190,20 @@ public static class ErrorCodes
     /// користувача єдиної підказки, ЩО саме він назвав неправильно.
     /// </remarks>
     public const string ProjectNotFound = "ECR-PRJ-0404";
+
+    /// <summary>
+    /// Проєкт із таким кодом уже існує (<c>UQ_Project_Code</c>,
+    /// integration-pending фікс необробленого <c>500</c> на дублікаті коду
+    /// проєкту).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>CreateProjectHandler</c> не мав перевірки коду взагалі: другий
+    /// запит тим самим кодом падав на <c>UQ_Project_Code</c> НЕОБРОБЛЕНИМ
+    /// <c>DbUpdateException</c> — клієнт бачив загальний тост «внутрішня
+    /// помилка», модалка лишалася відкритою без жодної підказки, що код
+    /// зайнятий.
+    /// </remarks>
+    public const string ProjectDuplicate = "ECR-PRJ-0409";
 
     /// <summary>
     /// Код або ключ рядка не відповідає шаблону.

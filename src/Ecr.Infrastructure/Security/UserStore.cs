@@ -1,8 +1,10 @@
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -333,9 +335,25 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     /// <param name="role">Роль; після першого збереження має ідентифікатор.</param>
     /// <param name="permissionCodes">Коди прав.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">
+    /// Код ролі вже зайнятий — <c>ECR-SEC-0409</c> (integration-pending
+    /// фікс, finding 1). <c>CreateRoleHandler</c> не має перевірки коду
+    /// заздалегідь: другий запит тим самим кодом доходив до ЦЬОГО
+    /// <c>SaveChangesAsync</c> і падав на <c>UQ_Role</c> необробленим
+    /// <c>DbUpdateException</c> — модалка створення ролі не показувала ні
+    /// тосту, ні помилки поля, просто лишалася як є.
+    /// </exception>
     private async Task SaveRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct)
     {
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RoleDuplicate, $"Роль із кодом «{role.Code}» уже існує.");
+        }
 
         foreach (var code in permissionCodes.Distinct(StringComparer.Ordinal))
         {

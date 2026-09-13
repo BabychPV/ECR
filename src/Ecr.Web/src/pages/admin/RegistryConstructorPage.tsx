@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
+  RegistryDefDto,
   RegistryDefinitionDto,
   RegistryDefinitionVersionResponse,
   RegistryHistoryEntryDto,
@@ -19,9 +20,12 @@ import {
 } from '@/features/registries/RegistryConstructor';
 import {
   buildSaveRequest,
+  emptyField,
   emptyRule,
   isComplete,
+  isFieldComplete,
   toDraft,
+  type FieldDraft,
   type RuleDraft,
 } from '@/features/registries/definition';
 import { language, t } from '@/shared/i18n';
@@ -40,11 +44,13 @@ import { showApiError, showDone } from '@/shared/ui/notify';
  * `Registry.EditDefinition`). На друге треба вміти дати посилання
  * (`ФВ-14.29`).
  *
- * ⛔ Правила — єдина область, яку тут ПРАВЛЯТЬ. Поля, зв'язки і мапінг
- * показуються: код і тип наявного поля перетлумачують уже збережені значення
- * (`D2-202`), зв'язки обчислені з даних (`Q-027`), а мапінг заводять на екрані
- * джерела, де поруч є перелік тегів. Форма, яка дає натиснути там, де сервер
- * відмовить, гірша за відсутність кнопки.
+ * ⛔ Правила — область, де ПРАВЛЯТЬ наявні записи. Поля — область, куди лише
+ * ДОДАЮТЬ нові: код і тип НАЯВНОГО поля перетлумачують уже збережені значення
+ * (`D2-202`), і форма їх не чіпає, — але додати нове поле можна, бо сервер
+ * розрізняє «нове» від «правки наявного» за `id === null`, той самий принцип,
+ * що й у правил. Зв'язки обчислені з даних (`Q-027`), а мапінг заводять на
+ * екрані джерела, де поруч є перелік тегів, — там і далі лише показ. Форма,
+ * яка дає натиснути там, де сервер відмовить, гірша за відсутність кнопки.
  */
 export function RegistryConstructorPage(): JSX.Element {
   const { code = '' } = useParams();
@@ -52,6 +58,7 @@ export function RegistryConstructorPage(): JSX.Element {
   const queryClient = useQueryClient();
 
   const [rules, setRules] = useState<RuleDraft[]>([]);
+  const [newFields, setNewFields] = useState<FieldDraft[]>([]);
   const [reason, setReason] = useState('');
 
   const definition = useQuery({
@@ -111,17 +118,42 @@ export function RegistryConstructorPage(): JSX.Element {
     return map;
   }, [users.data]);
 
-  // ⚠ Чернетка правил синхронізується з відповіддю сервера, а не будується в
-  // рендері: інакше кожен натиск клавіші відкочував би поле до значення з
-  // кешу запиту.
+  /**
+   * Перелік довідників — щоб поле типу `Lookup` обирало ціль зі списку, а не
+   * вимагало вгадати ідентифікатор напам'ять. Той самий ключ і запит, що й
+   * `RegistriesPage.tsx` (`queryKeys.registries.list()`): обидва в межах
+   * одного `QueryClient` діляться кешем.
+   */
+  const registries = useQuery({
+    queryKey: queryKeys.registries.list(),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+  });
+
+  const registryOptions = useMemo(
+    () =>
+      (registries.data ?? []).map((registry) => ({
+        value: String(registry.id),
+        label: `${localized(registry.nameL10n)} (${registry.code})`,
+      })),
+    [registries.data],
+  );
+
+  // ⚠ Чернетка правил і нових полів синхронізується з відповіддю сервера, а
+  // не будується в рендері: інакше кожен натиск клавіші відкочував би поле до
+  // значення з кешу запиту. Нові поля скидаються тут само: після успішного
+  // збереження вони вже стали НАЯВНИМИ полями у свіжому `definition.data`, і
+  // лишити їх чернеткою означало б надіслати їх іще раз при наступному
+  // збереженні — під новим `id === null`, тобто як дублікат.
   useEffect(() => {
     if (definition.data !== undefined) {
       setRules(definition.data.rules.map((rule) => toDraft(rule, language())));
+      setNewFields([]);
     }
   }, [definition.data]);
 
   const mayEdit = can(session.data, 'Registry.EditDefinition');
-  const ready = rules.every(isComplete) && reason.trim().length > 0;
+  const ready =
+    rules.every(isComplete) && newFields.every(isFieldComplete) && reason.trim().length > 0;
 
   const save = useMutation({
     mutationFn: () =>
@@ -130,7 +162,7 @@ export function RegistryConstructorPage(): JSX.Element {
         {
           method: 'PUT',
           body: JSON.stringify(
-            buildSaveRequest(definition.data!, rules, reason, language()),
+            buildSaveRequest(definition.data!, rules, newFields, reason, language()),
           ),
         },
       ),
@@ -215,7 +247,19 @@ export function RegistryConstructorPage(): JSX.Element {
               </Tabs.List>
 
               <Tabs.Panel value="fields" pt="sm">
-                <RegistryFields definition={loaded} />
+                <RegistryFields
+                  definition={loaded}
+                  canEdit={mayEdit}
+                  newFields={newFields}
+                  registryOptions={registryOptions}
+                  onAddField={() => setNewFields((all) => [...all, emptyField()])}
+                  onChangeField={(index, field) =>
+                    setNewFields((all) => all.map((item, i) => (i === index ? field : item)))
+                  }
+                  onRemoveField={(index) =>
+                    setNewFields((all) => all.filter((_, i) => i !== index))
+                  }
+                />
               </Tabs.Panel>
 
               <Tabs.Panel value="relations" pt="sm">

@@ -321,16 +321,31 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
-    public Task<TableRelationDef?> FindTableRelationAsync(
+    public async Task<TableRelationDef?> FindTableRelationAsync(
         int templateVersionId, string code, CancellationToken ct)
     {
-        var tables = TableIdsOfVersion(templateVersionId);
+        // ⛔ МАТЕРІАЛІЗУЄМО ідентифікатори ОКРЕМИМ запитом, а не
+        // вбудовуємо `TableIdsOfVersion(...)` як вкладений `IQueryable` у
+        // `Contains`. EF Core визначає режим відстеження для ВСЬОГО
+        // складеного дерева виразу одразу, а не по частинах: коли
+        // `Contains` отримує НЕ звичайну колекцію, а IQueryable з власним
+        // `AsNoTracking()` усередині (`TableIdsOfVersion` навмисно
+        // AsNoTracking — вона лише перелічує ID, а не сутність, що
+        // редагується), ця позначка мовчки поширюється на весь запит.
+        // Наслідок був фатальний і без жодного видимого сліду: сутність
+        // поверталася зі станом `Detached`, `Update(...)` мутував лише
+        // відірваний від контексту об'єкт у пам'яті, а `SaveChangesAsync`
+        // не бачив у ній жодної зміни — 200 OK з ехом нових значень при
+        // повністю незмінному рядку в базі. Список (`ListTableRelationsAsync`)
+        // цієї вади не має: там `AsNoTracking()` стоїть явно й навмисно.
+        var tableIds = await TableIdsOfVersion(templateVersionId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
-        // ⛔ БЕЗ AsNoTracking: цю сутність зараз змінить `Update`, і без
-        // відстеження `SaveChanges` не побачив би жодної правки.
-        return db.TableRelations
-            .Where(r => r.Code == code && tables.Contains(r.SourceTableDefId))
-            .FirstOrDefaultAsync(ct);
+        return await db.TableRelations
+            .Where(r => r.Code == code && tableIds.Contains(r.SourceTableDefId))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />

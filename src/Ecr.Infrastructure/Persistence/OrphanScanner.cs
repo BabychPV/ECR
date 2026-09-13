@@ -61,13 +61,42 @@ public sealed class OrphanScanner(EcrDbContext db, RegistryResolver resolver, IC
 
         var periodKeys = periods.Select(p => p.PeriodKeyValue).ToList();
 
+        // ⚠ `PeriodKeyValue` (`Year*100+Sequence`) унікальний У МЕЖАХ ОДНОГО
+        // проєкту, а не глобально: два РІЗНІ проєкти (обидва `Monthly`) цілком
+        // законно мають відкритий період за той самий календарний місяць
+        // одночасно — кілька проєктів звітують паралельно, це не крайовий
+        // випадок. `GroupBy` тут — ВІДОМЕ спрощення, а не повне рішення:
+        // сканер бере ОДНЕ подання дати/стану на ключ, бо `TableRow`/`CellValue`
+        // несуть лише `PeriodKeyValue`, не `ProjectId` — без нього зіставити
+        // рядок із ПРАВИЛЬНИМ періодом серед кількох однойменних неможливо.
+        // Без угруповання нижче `ToDictionary` кидав `ArgumentException` на
+        // дублікаті ключа, щойно в системі існувало більше одного відкритого
+        // проєкту на той самий період, — сканер ПАДАВ на цілком звичайному
+        // стані, а не на межовому. Повне рішення вимагає зіставляти рядок із
+        // проєктом (`TableRow` → `TableInstance` → `Document` → `Project`), а
+        // не лише з `PeriodKeyValue`; поза межами цього фіксу.
+        var distinctPeriods = periods
+            .GroupBy(p => p.PeriodKeyValue)
+            .Select(g => g.First())
+            .ToList();
+
         // ⚠ Дата резолвінгу — КІНЕЦЬ періоду, а не «сьогодні». Запис, чинний
         // до 30 червня, лишається чинним для всього червневого звіту, навіть
         // якщо перевірка йде в жовтні (ФВ-8.5).
-        var asOfByPeriod = periods.ToDictionary(p => p.PeriodKeyValue, p => p.PeriodEnd);
-        var stateByPeriod = periods.ToDictionary(p => p.PeriodKeyValue, p => p.State);
+        var asOfByPeriod = distinctPeriods.ToDictionary(p => p.PeriodKeyValue, p => p.PeriodEnd);
+        var stateByPeriod = distinctPeriods.ToDictionary(p => p.PeriodKeyValue, p => p.State);
 
         // 2. Кандидати: рядки, у яких є хоч одна комірка-посилання на довідник.
+        //
+        // ⛔ Фільтр на конкретний запис (нижче) звужує запит ДО проєкції в
+        // іменований `CellReference`, а не після неї. `SetEntryValidityHandler`
+        // (єдиний виклик з `registryEntryId != null`) до цієї правки падав
+        // `InvalidOperationException: … could not be translated`: EF Core не
+        // вміє скласти `Where` НАД `Select` у ІМЕНОВАНИЙ record-тип назад у SQL
+        // (на відміну від анонімного типу) — і виняток не ловить ніхто, він
+        // доходить до `ExceptionHandlingMiddleware` голим `500 ECR-SYS-0500`.
+        // `ScanAllAsync` (`registryEntryId: null`) цієї гілки ніколи не виконує
+        // і тому лишався зеленим — тут і був єдиний працюючий шлях сценарію.
         var candidateQuery =
             from cell in db.CellValues.AsNoTracking()
             where cell.ValueRegistryEntryId != null
@@ -75,15 +104,20 @@ public sealed class OrphanScanner(EcrDbContext db, RegistryResolver resolver, IC
                 on new { P = cell.PeriodKeyValue, I = cell.TableRowId }
                 equals new { P = row.PeriodKeyValue, I = row.Id }
             where !row.IsDeleted && periodKeys.Contains(row.PeriodKeyValue)
-            select new CellReference(
-                row.Id, row.PeriodKeyValue, row.IsOrphaned, cell.ValueRegistryEntryId!.Value);
+            select new { cell, row };
 
         if (registryEntryId is { } single)
         {
-            candidateQuery = candidateQuery.Where(c => c.RegistryEntryId == single);
+            // ⚠ Порівняння з `int?` стовпця: `RegistryEntry.Id` (`long` у
+            // домені) конвертований у схемі до `int` (`RegistryEntryConfiguration`,
+            // `ФВ-8.12`), і `CellValue.ValueRegistryEntryId` — теж `int?`.
+            var singleEntryId = checked((int)single);
+            candidateQuery = candidateQuery.Where(x => x.cell.ValueRegistryEntryId == singleEntryId);
         }
 
         var references = await candidateQuery
+            .Select(x => new CellReference(
+                x.row.Id, x.row.PeriodKeyValue, x.row.IsOrphaned, x.cell.ValueRegistryEntryId!.Value))
             .Take(BatchSize)
             .ToListAsync(ct)
             .ConfigureAwait(false);

@@ -73,8 +73,24 @@ public sealed class SetEntryValidityHandler(
         //
         // Сканер працює В ОБИДВА боки: звуження ставить ознаку, розширення —
         // знімає (ФВ-8.13a).
+        //
+        // ⛔ Integration-pending фікс (finding 4, другий дефект у тому самому
+        // обробнику — окремий від необробленого `InvalidOperationException`
+        // в `OrphanScanner`). Нове вікно ЗБЕРІГАЄТЬСЯ тут ПЕРШИМ, а не
+        // востаннє: `entry.SetValidity`/`definition.BumpDataRevision` вище —
+        // це зміни в трекері EF, які нікуди не пишуться, доки не
+        // викликати `SaveChangesAsync`. `scanner.RescanForEntryAsync`
+        // читає `dic.RegistryEntry` НОВИМ запитом через `AsNoTracking()` —
+        // тобто буквальним `SELECT`, який до збереження бачить СТАРЕ вікно.
+        // Порядок «спершу сканувати, тоді зберегти» (був тут) означав, що
+        // перерахунок `IsOrphaned` завжди дивився на вікно, яке щойно
+        // замінили, — і на звуження, і на розширення рахував НУЛЬ
+        // зачеплених рядків, хоча сама зміна вікна проходила й лягала в
+        // базу коректно.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
             affected = await scanner.RescanForEntryAsync(registryEntryId, innerCt).ConfigureAwait(false);
 
             await audit.WriteStructureChangeAsync(
@@ -91,8 +107,6 @@ public sealed class SetEntryValidityHandler(
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
-
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         // Повертається масштаб наслідку, а не «ок»: той, хто звузив вікно, має
