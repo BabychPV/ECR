@@ -259,6 +259,63 @@ public sealed class SeedTests(SqlServerFixture sql)
         Assert.Equal(273.15m, await DecimalAsync("SELECT OffsetToBase FROM uom.Unit WHERE Code = N'degC'"));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9c")]
+    public async Task Повторний_запуск_після_відсутнього_рядка_піднімає_Revision()
+    {
+        // ⛔ Мутаційний доказ (D-134): без інкременту в `09-seed.sql` (одразу
+        // після MERGE `sys_ecr.UiString`) рядок нижче повертається в таблицю,
+        // але Revision і ETag лишаються тими самими — клієнт із чинним
+        // кешем НІКОЛИ не побачить нового перекладу. Живий випадок: методичні
+        // ключі `methodologies.requiredInputs` та інші (Q-306) у базі є, а на
+        // екрані досі `⟦methodologies.requiredInputs⟧`, доки хтось не
+        // збереже той самий ключ вручну через `/admin/ui-strings` — а це і є
+        // єдиний ІНШИЙ шлях, що інкрементує Revision (`SetUiStringHandler`,
+        // `UiStringRevisionTests`).
+        const string key = "methodologies.requiredInputs";
+
+        var before = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+
+        // Вдаємо «ключ, якого щойно змержений PR додав, а стара база не
+        // бачила» — видаляємо наявний рядок і даємо seed повернути його.
+        await ExecuteAsync($"DELETE FROM sys_ecr.UiString WHERE [Key] = N'{key}' AND LanguageCode = N'en'");
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        var after = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+
+        Assert.True(after > before, $"Revision не змінився: було {before}, стало {after}.");
+        Assert.Equal(1, await ScalarAsync(
+            $"SELECT COUNT(*) FROM sys_ecr.UiString WHERE [Key] = N'{key}' AND LanguageCode = N'en'"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9c")]
+    public async Task Повторний_запуск_без_нових_рядків_не_піднімає_Revision()
+    {
+        // ⚠ Протилежний бік того самого доказу: `SeedRunner` виконується на
+        // КОЖНОМУ старті застосунку, і безумовний інкремент означав би зайвий
+        // round-trip для кожного клієнта на кожному рестарті — навіть коли
+        // жодного нового рядка не додалося.
+        var before = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        var after = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+
+        Assert.Equal(before, after);
+    }
+
     private EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>()
             .UseSqlServer(sql.ConnectionString)
@@ -293,5 +350,14 @@ public sealed class SeedTests(SqlServerFixture sql)
         await using var command = connection.CreateCommand();
         command.CommandText = query;
         return (decimal)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+    }
+
+    private async Task ExecuteAsync(string query)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = query;
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 }

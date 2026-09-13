@@ -229,6 +229,17 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
   const cached = readCached(lang, scope);
   if (cached !== null && !loaded.has(cacheKey)) {
     loaded.set(cacheKey, cached);
+
+    // ⛔ Той самий клас дефекту, що в успішному шляху нижче (і що `Q-305`):
+    // збережений каталог підставляється СИНХРОННО, до будь-якого `await`, і
+    // якщо не оновити `current` тут-таки, підписник (`useSyncExternalStore`)
+    // побачить «каталог для нової мови вже є» разом зі СТАРОЮ активною мовою
+    // — саме цей шлях (кешоване значення з попереднього завантаження) і
+    // спрацьовував на кожному відкритті застосунку, а не лише щойно
+    // виправлений мережевий шлях.
+    if (isLatestRequest(scope, requestId)) {
+      current = lang;
+    }
     bumpCatalog();
   }
 
@@ -272,7 +283,22 @@ export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
     safeSet(storageKey(lang, scope, fresh.body.revision), JSON.stringify(fresh.body));
     safeSet(`uiStrings:${lang}:${scope}:revision`, String(fresh.body.revision));
     if (fresh.etag !== null) safeSet(etagKey(lang, scope), fresh.etag);
+
+    // ⛔ `current` міняється в ТОМУ Ж сповіщенні, що й вміст `loaded`, а не в
+    // окремому виклику `bumpCatalog()` нижче (той самий клас дефекту, що
+    // Q-305: `bumpCatalog` викликає підписників — зокрема `useSyncExternalStore`
+    // — СИНХРОННО, без пакетування React. Два окремих виклики означали б, що
+    // React примусово перемальовує дерево між ними, і компонент бачить
+    // «каталог для нової мови вже є» (`isCatalogResolved` — з `loaded`) РАЗОМ
+    // із активною мовою, яка ще стара, — тобто саме той стан, на який `t()`
+    // відповідає `⟦ключ⟧` і скаргою в консоль, хоча за мить усе стає на
+    // місце. Живим доказом були розсипані «Немає рядка інтерфейсу: nav.*»
+    // на КОЖНЕ відкриття застосунку — доки не встигав минути другий рендер.
+    if (isLatestRequest(scope, requestId)) {
+      current = lang;
+    }
     bumpCatalog();
+    return;
   } catch {
     // ⚠ Недоступний каталог не робить застосунок непридатним: показуємо
     // збережений, а якщо його немає — позначаємо відмову (`isCatalogFailed`)
