@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createProjectBody,
   createProjectIncomplete,
+  createProjectMissingFields,
 } from '@/features/projects/CreateProjectModal';
 
 /**
@@ -154,5 +155,78 @@ describe('Готовність форми створення проєкту', ()
     ['політику періодів', { policyId: null }],
   ])('без обов’язкового поля «%s» форма НЕ готова', (_name, patch) => {
     expect(createProjectIncomplete({ ...ready, ...patch })).toBe(true);
+  });
+});
+
+/**
+ * Перелік бракуючих полів (Q-298).
+ *
+ * ⛔ ЧЕРВОНИЙ до фіксу: кнопка «Зберегти» була `disabled` без жодного
+ * пояснення, ЯКЕ саме поле ще порожнє — `createProjectIncomplete` віддавав
+ * лише `boolean`, і підказки біля кнопки не існувало взагалі. Ці тести
+ * пильнують САМЕ ЗМІСТ переліку (а не лише його довжину чи сам факт
+ * непорожності): мутація, що переплутає поле чи забуде додати одне з них у
+ * {@link createProjectMissingFields}, тут впаде, а перевірка одного лише
+ * `.length > 0` — ні.
+ */
+describe('Перелік бракуючих полів форми створення проєкту (Q-298)', () => {
+  const ready = {
+    code: 'KASH_2026',
+    name: { en: 'Kashagan' },
+    timeZoneId: 'Asia/Aqtau',
+    versionId: '42',
+    policyId: '7',
+  };
+
+  it('заповнена форма — перелік порожній', () => {
+    expect(createProjectMissingFields(ready)).toEqual([]);
+  });
+
+  it('порожня форма — усі обов’язкові поля в переліку', () => {
+    expect(
+      createProjectMissingFields({
+        code: '',
+        name: {},
+        timeZoneId: null,
+        versionId: null,
+        policyId: null,
+      }),
+    ).toEqual(['code', 'name', 'timeZone', 'version', 'policy']);
+  });
+
+  it.each([
+    ['code', { code: '   ' }],
+    ['name', { name: {} }],
+    ['timeZone', { timeZoneId: null }],
+    ['version', { versionId: null }],
+    ['policy', { policyId: null }],
+  ])('бракує лише «%s», коли порожнє саме це поле', (field, patch) => {
+    expect(createProjectMissingFields({ ...ready, ...patch })).toEqual([field]);
+  });
+
+  it('Custom без кількості періодів додає customPeriodCount до переліку', () => {
+    expect(
+      createProjectMissingFields({ ...ready, periodKind: 'Custom', customPeriodCount: null }),
+    ).toEqual(['customPeriodCount']);
+  });
+
+  it('Custom із кількістю періодів — перелік порожній', () => {
+    expect(
+      createProjectMissingFields({ ...ready, periodKind: 'Custom', customPeriodCount: 6 }),
+    ).toEqual([]);
+  });
+
+  it('Monthly без кількості періодів НЕ додає customPeriodCount', () => {
+    expect(
+      createProjectMissingFields({ ...ready, periodKind: 'Monthly', customPeriodCount: null }),
+    ).toEqual([]);
+  });
+
+  it('createProjectIncomplete лишається узгодженим із довжиною переліку', () => {
+    const empty = createProjectMissingFields(ready);
+    const nonEmpty = createProjectMissingFields({ ...ready, code: '' });
+
+    expect(createProjectIncomplete(ready)).toBe(empty.length > 0);
+    expect(createProjectIncomplete({ ...ready, code: '' })).toBe(nonEmpty.length > 0);
   });
 });
