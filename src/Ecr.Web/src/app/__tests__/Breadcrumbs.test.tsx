@@ -321,7 +321,7 @@ describe('Breadcrumbs — нуль нових HTTP-запитів (найваж�
 /**
  * Компонент, що монтує НОВИЙ `useQuery` для ключа, якого ще нема в кеші —
  * саме те, що робить `RouteGuard.useSession()`, `DocumentsPage`,
- * `CreateDocumentModal` та десятки інших екранів після навігації (Q-304).
+ * `CreateDocumentModal` та десятки інших екранів після навігації (Q-305).
  *
  * ⚠ `enabled: false`: сам факт запиту нас не цікавить (і суперечив би
  * власній вимозі файлу «нуль нових HTTP-запитів» — тут це чужий компонент,
@@ -372,7 +372,7 @@ function toggleHarnessRouter() {
   );
 }
 
-describe('Breadcrumbs — Q-304: «Cannot update a component while rendering a different component»', () => {
+describe('Breadcrumbs — Q-305: «Cannot update a component while rendering a different component»', () => {
   it('монтування нового useQuery ІНШИМ компонентом після навігації не логує React-попередження', async () => {
     // Мутаційна перевірка (RED → GREEN): якщо `useCacheVersion` у
     // `Breadcrumbs.tsx` повернути до синхронного `setVersion` у самому
@@ -387,7 +387,7 @@ describe('Breadcrumbs — Q-304: «Cannot update a component while rendering a d
     show(toggleHarnessRouter(), queryClient);
 
     await user.click(screen.getByRole('button', { name: 'mount' }));
-    // Дає мікрозадачі, у яку Q-304 відкладає `setVersion`, гарантовано
+    // Дає мікрозадачі, у яку Q-305 відкладає `setVersion`, гарантовано
     // відпрацювати до перевірки нижче.
     await Promise.resolve();
     await Promise.resolve();

@@ -30,7 +30,7 @@ import { routeList, type RouteHandle } from './routes';
  * `useCacheVersion` нижче форсує перерендер на кожній зміні кешу — це
  * підписка на ПОДІЮ кешу, не запит.
  *
- * ⚠ Q-304: `setVersion` у підписці ВІДКЛАДЕНО через `queueMicrotask`, а не
+ * ⚠ Q-305: `setVersion` у підписці ВІДКЛАДЕНО через `queueMicrotask`, а не
  * викликається напряму з колбека `subscribe`. Причина — не стиль, а
  * відтворена й підтверджена вада: `QueryCache.notify()` (`query-core`)
  * викликає підписників СИНХРОННО всередині `notifyManager.batch()`, без
@@ -86,7 +86,7 @@ function useCacheVersion(queryClient: QueryClient): void {
     // на яку варто покладатися.
     let cancelled = false;
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      // Q-304: див. пояснення над компонентом — без цього відкладення
+      // Q-305: див. пояснення над компонентом — без цього відкладення
       // `setVersion` виконується СИНХРОННО всередині `notify()`, який сам
       // може бути викликаний під час рендера ІНШОГО компонента (будь-який
       // `useQuery`, що вперше монтується для нового ключа кешу).
