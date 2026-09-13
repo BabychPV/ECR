@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type JSX } from 'react';
+﻿import { useEffect, useMemo, useState, type JSX } from 'react';
 import { Badge, Button, Group, Tabs, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -8,6 +8,7 @@ import type {
   RegistryDefinitionDto,
   RegistryDefinitionVersionResponse,
   RegistryHistoryEntryDto,
+  UserPage,
 } from '@/api/types';
 import {
   RegistryFields,
@@ -77,6 +78,38 @@ export function RegistryConstructorPage(): JSX.Element {
         `/api/v1/registries/${encodeURIComponent(code)}/history`,
       ),
   });
+
+  /**
+   * Перелік користувачів — щоб історія показувала ІМ'Я автора, а не голий
+   * `changedByUserId` (сиблінг-виправлення до пропущеного в `AuditPage.tsx`).
+   *
+   * ⛔ Той самий ключ і ендпоінт, що й `SecurityPage.tsx`
+   * (`/api/v1/users?limit=200`, право `Security.ManageUsers`): той самий
+   * ключ `['users']` дає їм ділити кеш, коли обидва змонтовані в межах того
+   * самого `QueryClient`.
+   *
+   * ⛔ НЕ під головним `<AsyncBoundary>` нижче — і не в СВОЄМУ. Головна межа
+   * стосується `definition`: без опису довідника сторінки взагалі немає.
+   * Право читати перелік користувачів — ІНШЕ право (`Security.ManageUsers`
+   * проти `Registry.EditDefinition`/`Registry.View`), і `403` на ньому не
+   * повинен ховати решту сторінки під власним екраном «немає права» —
+   * глядач без цього права однаково має бачити ІСТОРІЮ, лише без імен
+   * авторів. `RegistryHistory` сама показує голий ідентифікатор і бейдж
+   * «нерозв'язано» в рядку, де ім'я не знайшлося (немає права, або
+   * користувача видалено і його немає в першій сторінці переліку).
+   */
+  const users = useQuery({
+    queryKey: ['users'],
+    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=200'),
+  });
+
+  const userNames = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const user of users.data?.items ?? []) {
+      map.set(user.id, user.displayName);
+    }
+    return map;
+  }, [users.data]);
 
   // ⚠ Чернетка правил синхронізується з відповіддю сервера, а не будується в
   // рендері: інакше кожен натиск клавіші відкочував би поле до значення з
@@ -205,7 +238,11 @@ export function RegistryConstructorPage(): JSX.Element {
               </Tabs.Panel>
 
               <Tabs.Panel value="history" pt="sm">
-                <RegistryHistory entries={history.data ?? []} />
+                <RegistryHistory
+                  entries={history.data ?? []}
+                  userNames={userNames}
+                  usersResolved={!users.isPending}
+                />
               </Tabs.Panel>
             </Tabs>
           </>

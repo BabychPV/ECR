@@ -964,6 +964,9 @@ USING (VALUES
     (N'registries.changedAt',            N'en', N'Changed at', 1),
     (N'registries.operation',            N'en', N'Operation', 1),
     (N'registries.author',               N'en', N'Author', 1),
+    -- ⚠ Показано, коли `changedByUserId` не знайшовся в переліку користувачів:
+    -- нема права `Security.ManageUsers`, або користувача видалено.
+    (N'registries.userUnresolved',       N'en', N'unresolved', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),

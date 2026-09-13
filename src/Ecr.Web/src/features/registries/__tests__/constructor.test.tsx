@@ -233,11 +233,52 @@ describe('Конструктор довідника', () => {
   it('ФВ-8.12: історія називає причину зміни, а не лише її факт', () => {
     // ⛔ Питання, на яке цей екран відповідає, — «чому тут з'явилося це поле».
     // Дата й операція без причини на нього не відповідають.
-    show(<RegistryHistory entries={History} />);
+    //
+    // ⚠ Запит переліку користувачів тут ще НЕ завершився (`usersResolved`
+    // хибний, мапа порожня) — саме тому автор показаний голим ідентифікатором
+    // БЕЗ бейджа «нерозв'язано»: цей тест перевіряє причину, а не резолюцію
+    // автора (для неї — окремі тести нижче).
+    show(<RegistryHistory entries={History} userNames={new Map()} usersResolved={false} />);
 
     const row = screen.getByText('SaveDefinition').closest('tr');
     expect(within(row!).getByText('ліміт перенесено з Configuration!J3')).toBeDefined();
     expect(within(row!).getByText('9')).toBeDefined();
+  });
+
+  it('ФВ-8.12/Q-296: автор історії показаний ІМ\'ЯМ, знайденим у переліку користувачів', () => {
+    // ⛔ Голий `changedByUserId` не відповідає нікому, крім того, хто тримає в
+    // голові таблицю користувачів (сиблінг пропущеного в `AuditPage.tsx`).
+    // Мутаційна проба: повернення на голий `entry.changedByUserId` без мапи
+    // провалює саме цю перевірку.
+    show(
+      <RegistryHistory
+        entries={History}
+        userNames={new Map([[9, 'Ada Lovelace']])}
+        usersResolved
+      />,
+    );
+
+    const row = screen.getByText('SaveDefinition').closest('tr');
+    expect(within(row!).getByText('Ada Lovelace')).toBeDefined();
+    // Голий ідентифікатор більше не єдине, що видно в клітинці автора.
+    expect(within(row!).queryByText('9')).toBeNull();
+  });
+
+  it('ФВ-8.12/Q-296: автор без права/видалений користувач — голий ідентифікатор і бейдж, решта історії лишається на екрані', () => {
+    // ⛔ Право читати перелік користувачів (`Security.ManageUsers`) — ІНШЕ за
+    // право дивитись історію довідника. Відмова на ньому (403) чи видалений
+    // користувач (немає в першій сторінці переліку) не повинні ховати рядок
+    // історії — лише ім'я автора в ньому.
+    show(<RegistryHistory entries={History} userNames={new Map()} usersResolved />);
+
+    // Решта історії видно й далі: операція та причина рендерені як завжди.
+    const row = screen.getByText('SaveDefinition').closest('tr');
+    expect(within(row!).getByText('ліміт перенесено з Configuration!J3')).toBeDefined();
+
+    // Автор — голий ідентифікатор і бейдж «нерозв'язано», а не порожньо й не
+    // виняток, що зупинив би рендер усього компонента.
+    expect(within(row!).getByText('9')).toBeDefined();
+    expect(within(row!).getByText(/registries\.userUnresolved/)).toBeDefined();
   });
 
   it('порожній перелік у кожній області каже про це прямо, а не мовчить', () => {
@@ -250,7 +291,7 @@ describe('Конструктор довідника', () => {
     show(<RegistryMappings definition={bare} />);
     expect(screen.getByText(/registries\.noMappings/)).toBeDefined();
 
-    show(<RegistryHistory entries={[]} />);
+    show(<RegistryHistory entries={[]} userNames={new Map()} usersResolved />);
     expect(screen.getByText(/registries\.noHistory/)).toBeDefined();
   });
 });

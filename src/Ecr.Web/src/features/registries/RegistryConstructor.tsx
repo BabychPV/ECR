@@ -307,11 +307,39 @@ export function RegistryMappings({
  * відповідає, — «чому тут з'явилося це поле», і відповідь на нього пише автор
  * зміни, а не система. Знімки `oldJson`/`newJson` лишаються в журналі для
  * розслідування, але на екрані вони витіснили б єдине, що читається.
+ *
+ * ⚠ Автор показується ІМ'ЯМ, а не голим `changedByUserId` (сиблінг-виправлення
+ * до того, що вже пропущено в `AuditPage.tsx`): число саме по собі не
+ * відповідає на «хто це зробив» нікому, крім того, хто тримає в голові
+ * таблицю користувачів. Мапу `userId → displayName` будує сторінка
+ * (`RegistryConstructorPage.tsx`, окремий запит `/api/v1/users`) — цей
+ * компонент лишається чистим і не знає, звідки мапа взялася.
+ *
+ * ⛔ Порожня мапа НЕ падає і не ховає рядок: право читати перелік
+ * користувачів (`Security.ManageUsers`) — ІНШЕ право за `Registry.View`, і
+ * глядач без нього однаково має побачити ЦЕЙ запис історії — просто без
+ * імені автора, з голим ідентифікатором і бейджем «нерозв'язано». Те саме —
+ * коли користувача видалили і його немає в першій сторінці переліку.
  */
 export function RegistryHistory({
   entries,
+  userNames,
+  usersResolved,
 }: {
   readonly entries: readonly RegistryHistoryEntryDto[];
+
+  /** Мапа `userId → displayName` — будує сторінка з відповіді `/api/v1/users`. */
+  readonly userNames: ReadonlyMap<number, string>;
+
+  /**
+   * Чи запит переліку користувачів уже ЗАВЕРШИВСЯ (успіхом або відмовою, у
+   * т.ч. `403`).
+   *
+   * ⚠ Доки він ще триває, бейдж «нерозв'язано» НЕ показуємо: мапа порожня і
+   * під час завантаження теж, і без цього прапорця бейдж спалахнув би на мить
+   * навіть у того, хто МАЄ право, — і одразу зник, щойно відповідь прийде.
+   */
+  readonly usersResolved: boolean;
 }): JSX.Element {
   if (entries.length === 0) {
     return (
@@ -345,12 +373,49 @@ export function RegistryHistory({
               <Table.Td>{entry.changedAt}</Table.Td>
               <Table.Td>{entry.operation}</Table.Td>
               <Table.Td>{entry.changeReason ?? '—'}</Table.Td>
-              <Table.Td>{entry.changedByUserId}</Table.Td>
+              <Table.Td>
+                <HistoryAuthor
+                  userId={entry.changedByUserId}
+                  userNames={userNames}
+                  usersResolved={usersResolved}
+                />
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
       </Table>
     </Stack>
+  );
+}
+
+/**
+ * Одна клітинка автора запису історії — ім'я, або голий ідентифікатор і
+ * бейдж, коли ім'я нерозв'язне (`RegistryHistory` вище).
+ */
+function HistoryAuthor({
+  userId,
+  userNames,
+  usersResolved,
+}: {
+  readonly userId: number;
+  readonly userNames: ReadonlyMap<number, string>;
+  readonly usersResolved: boolean;
+}): JSX.Element {
+  const name = userNames.get(userId);
+  if (name !== undefined) return <>{name}</>;
+
+  // Запит переліку користувачів ще триває: показати голий ідентифікатор БЕЗ
+  // бейджа — інакше «нерозв'язано» спалахнуло б на мить у кожного, у кого
+  // право є.
+  if (!usersResolved) return <>{userId}</>;
+
+  return (
+    <Group gap="xs" wrap="nowrap">
+      <Text span>{userId}</Text>
+      <Badge size="xs" variant="light" color="gray">
+        {t('registries.userUnresolved')}
+      </Badge>
+    </Group>
   );
 }
 
