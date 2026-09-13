@@ -1,4 +1,5 @@
 import type { DiagnosticInfo } from '@/api/types';
+import { t } from '@/shared/i18n';
 
 /**
  * Перетворення зауважень сервера на підкреслення в редакторі.
@@ -55,10 +56,31 @@ export function markersFor(
       startColumn: start.column,
       endLineNumber: end.lineNumber,
       endColumn: end.column,
-      message: diagnostic.message,
+      message: localizedMessage(diagnostic),
       code: diagnostic.code,
     };
   });
+}
+
+/**
+ * Текст зауваження мовою інтерфейсу (`Q-303`).
+ *
+ * ⛔ `diagnostic.message` — англійський запасний варіант сервера, а не
+ * готовий текст для показу: `Ecr.Expressions` — окрема бібліотека без
+ * доступу до каталогу рядків (`IUiStringCatalog`), тож локалізує не сервер,
+ * а клієнт за ключем, тим самим `t()`, яким читається решта інтерфейсу.
+ *
+ * ⚠ `messageKey` є не в кожної діагностики: зауваження рівня зв'язування
+ * (`ReferenceResolver`, `TypeChecker`, `UnitChecker`) цю картку свідомо не
+ * торкнулася (`docs/build/questions/Q-303.md`) — для них ключа немає, і
+ * `diagnostic.message` лишається єдиним текстом, який є.
+ */
+export function localizedMessage(diagnostic: DiagnosticInfo): string {
+  if (diagnostic.messageKey === null || diagnostic.messageKey === undefined) {
+    return diagnostic.message;
+  }
+
+  return t(diagnostic.messageKey, diagnostic.messageParams ?? undefined);
 }
 
 /**

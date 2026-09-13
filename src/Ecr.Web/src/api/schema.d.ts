@@ -8110,8 +8110,17 @@ export interface components {
              * @description Довжина проблемного фрагмента.
              */
             length: number;
-            /** @description Пояснення. */
+            /** @description Пояснення англійською — запасний варіант, коли MessageKey відсутній (діагностики публікації — `TypeChecker`,
+             *     `UnitChecker` і сусіди — його поки не несуть, `Q-303` навмисно обмежена
+             *     синтаксисом парсера/лексера) або клієнт не може його розв'язати. */
             message: string;
+            /** @description Ключ каталогу рядків для локалізації клієнтом (`Q-303`); `null` —
+             *     клієнт показує Message як є. */
+            messageKey?: null | string;
+            /** @description Підстановки для MessageKey. */
+            messageParams?: null | {
+                [key: string]: string;
+            };
             /**
              * Format: int32
              * @description Зсув у тексті виразу.

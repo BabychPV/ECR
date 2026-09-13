@@ -207,7 +207,23 @@ public sealed class PublishTemplateVersionHandler(
 /// потрібно конфігуратору для підсвічування — код, текст і межі фрагмента.
 /// </remarks>
 /// <param name="Code">Код помилки з каталогу.</param>
-/// <param name="Message">Пояснення.</param>
+/// <param name="Message">
+/// Пояснення англійською — запасний варіант, коли <paramref
+/// name="MessageKey"/> відсутній (діагностики публікації — `TypeChecker`,
+/// `UnitChecker` і сусіди — його поки не несуть, `Q-303` навмисно обмежена
+/// синтаксисом парсера/лексера) або клієнт не може його розв'язати.
+/// </param>
 /// <param name="Position">Зсув у тексті виразу.</param>
 /// <param name="Length">Довжина проблемного фрагмента.</param>
-public sealed record DiagnosticInfo(string Code, string Message, int Position, int Length);
+/// <param name="MessageKey">
+/// Ключ каталогу рядків для локалізації клієнтом (`Q-303`); <c>null</c> —
+/// клієнт показує <paramref name="Message"/> як є.
+/// </param>
+/// <param name="MessageParams">Підстановки для <paramref name="MessageKey"/>.</param>
+public sealed record DiagnosticInfo(
+    string Code,
+    string Message,
+    int Position,
+    int Length,
+    string? MessageKey = null,
+    IReadOnlyDictionary<string, string>? MessageParams = null);

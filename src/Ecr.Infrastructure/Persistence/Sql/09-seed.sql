@@ -1408,7 +1408,51 @@ USING (VALUES
     (N'periodRules.deleted',             N'en', N'The rule has been removed.', 1),
 
     (N'nav.notFound.title',              N'en', N'Page not found', 1),
-    (N'nav.notFound.hint',               N'en', N'This address does not match any screen in this system.', 1)
+    (N'nav.notFound.hint',               N'en', N'This address does not match any screen in this system.', 1),
+
+    -- Синтаксис виразів (`Q-303`): раніше конфігуратор показував ГОТОВЕ
+    -- українське речення з `ExpressionDiagnostic.Message` незалежно від мови
+    -- інтерфейсу — той самий клас дефекту, що й `err.*` до директиви ФВ-14.9a,
+    -- лише в іншому конвеєрі (`Ecr.Expressions` — окрема бібліотека без
+    -- доступу до каталогу, тому резолвить не сервер, а клієнт за ключем).
+    -- Приватна область: редактор виразів вимагає входу.
+    -- ⚠ Символи беруться в ПОДВІЙНІ лапки, не одинарні: одинарна лапка в
+    -- рядковому літералі T-SQL мусить подвоюватись, і ручне дублювання поруч
+    -- із плейсхолдерами `{name}` реально зламало цей самий блок при першій
+    -- спробі (SqlException «Incorrect syntax near ']'», знайдено живим
+    -- запуском застосунку проти щойно розгорнутої бази, не оглядом коду) —
+    -- подвійні лапки цієї проблеми не мають взагалі.
+    (N'expr.lex.unmatchedCloseBracket',        N'en', N'Closing bracket "]" without a matching "[".', 1),
+    (N'expr.lex.unclosedBracket',              N'en', N'Unclosed square bracket.', 1),
+    (N'expr.lex.unclosedString',               N'en', N'Unclosed string literal.', 1),
+    (N'expr.lex.unclosedPlaceholder',          N'en', N'Unclosed placeholder "{".', 1),
+    (N'expr.lex.identifierStartsWithDigit',    N'en', N'An identifier cannot start with a digit (R-B6).', 1),
+    (N'expr.lex.invalidNumber',                N'en', N'Invalid number "{value}".', 1),
+    (N'expr.lex.invalidCharacter',             N'en', N'Invalid character "{value}".', 1),
+    (N'expr.trailingText',                     N'en', N'Unexpected text after the end of the expression: "{text}".', 1),
+    (N'expr.expectedColonInTernary',           N'en', N'Expected ":" in the ternary operator.', 1),
+    (N'expr.caretNotPower',                    N'en', N'"^" in the methodology dialect does not mean exponentiation: it is bitwise XOR, and "2^3" equals 1, not 8. Use Pow(a, b).', 1),
+    (N'expr.expectedCloseParen',               N'en', N'Expected ")".', 1),
+    (N'expr.unexpectedToken',                  N'en', N'Unexpected token "{token}".', 1),
+    (N'expr.expectedNameAfterPrefix',          N'en', N'Expected a name after "{prefix}".', 1),
+    (N'expr.methodologyConstructInTemplate',   N'en', N'The construct "{construct}" belongs to the methodology dialect and is not allowed in template formulas.', 1),
+    (N'expr.bareNameNeedsAt',                  N'en', N'"{name}" is a bare name: in the methodology dialect a parameter is written with "@" ("@{name}"). Without the prefix, a name cannot be told apart from a typo in a function name.', 1),
+    (N'expr.unknownIdentifier',                N'en', N'Unknown identifier "{name}". A cell reference is written in square brackets.', 1),
+    (N'expr.expectedCloseParenInCall',         N'en', N'Expected ")" in the call to {name}.', 1),
+    (N'expr.unknownFunction',                  N'en', N'Function "{name}" is not available in the {dialect} dialect.', 1),
+    (N'expr.argCountAtLeast',                  N'en', N'Function "{name}" takes at least {min} argument(s), but received {actual}.', 1),
+    (N'expr.argCountExact',                    N'en', N'Function "{name}" takes {count} argument(s), but received {actual}.', 1),
+    (N'expr.argCountRange',                    N'en', N'Function "{name}" takes from {min} to {max} argument(s), but received {actual}.', 1),
+    (N'expr.calendarContextSyntax',            N'en', N'The calendar context is written as "[Period].Property".', 1),
+    (N'expr.cellReferencesForbiddenInMethodology', N'en', N'Cell references to the document are not allowed in the methodology dialect.', 1),
+    (N'expr.referenceLinkCount',               N'en', N'A reference has from one to four links.', 1),
+    (N'expr.referenceLastLinkColumn',          N'en', N'The last link of a reference is a column; a range is not allowed there.', 1),
+    (N'expr.expectedCloseBracketAfterPredicate', N'en', N'Expected "]" after the predicate.', 1),
+    (N'expr.referenceLinkEmpty',               N'en', N'Empty or invalid reference link.', 1),
+    (N'expr.periodExpectedNumber',             N'en', N'A number was expected after "[Period:".', 1),
+    (N'expr.expectedCloseBracket',             N'en', N'Expected "]".', 1),
+    (N'expr.rowKeyExpected',                   N'en', N'A row key was expected after ":".', 1),
+    (N'expr.expectedCloseBracketAfterRange',   N'en', N'Expected "]" after the range.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
