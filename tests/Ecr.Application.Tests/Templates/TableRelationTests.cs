@@ -54,6 +54,76 @@ public sealed class TableRelationTests(SqlServerFixture sql)
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
+    /// <summary>
+    /// Правка ІСНУЮЧОГО зв'язку — окремий шлях від створення, і саме
+    /// він мовчки НІЧОГО не зберігав: <c>PUT</c> повертав <c>200</c> з еном
+    /// нових значень (відповідь бере їх із мутованого <c>existing</c> у
+    /// пам'яті), а рядок у базі лишався попереднім — без жодного винятку,
+    /// без 409, без сліду в логах.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Корінь — у <c>TemplateVersionStore.FindTableRelationAsync</c>, не
+    /// тут: запит зіставляє <c>SourceTableDefId</c> через
+    /// <c>tables.Contains(...)</c>, де <c>tables</c> — окремий
+    /// <c>IQueryable</c> із власним <c>AsNoTracking()</c> усередині
+    /// (<c>TableIdsOfVersion</c>, спільний із <c>ListTableRelationsAsync</c>,
+    /// де саме такий режим і потрібен). EF Core визначає режим відстеження
+    /// для ВСЬОГО складеного дерева виразу одразу — і ця позначка мовчки
+    /// поширюється на зовнішній запит, попри те що сам він
+    /// <c>AsNoTracking()</c> не викликає. Сутність поверталася зі станом
+    /// <c>Detached</c>: <c>Update(...)</c> мутував об'єкт, відірваний від
+    /// контексту, і <c>SaveChangesAsync</c> не бачив у ньому жодної зміни.
+    ///
+    /// ⛔ Мутаційний доказ (D-134): цей тест падає, якщо в
+    /// <c>FindTableRelationAsync</c> повернути пряме вбудовування
+    /// <c>tables.Contains(...)</c> замість матеріалізованого списку — саме
+    /// так підтверджено RED перед фіксом.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public async Task Правка_наявного_зв_язку_справді_лягає_в_базу_а_не_лише_у_відповідь()
+    {
+        var version = await DraftAsync();
+
+        await using (var db = Context())
+        {
+            await Save(db).HandleAsync(
+                version.VersionId, version.RelationCode, Command(version), CancellationToken.None);
+        }
+
+        const string NewMatch = "MARKER_VIA_UI_999";
+
+        // ⛔ ОКРЕМИЙ контекст на правку, як і на створення в тесті вище:
+        // читання з того самого контексту, що тримав сутність у пам'яті,
+        // лишилося б зеленим навіть якби запис у базу не дійшов.
+        await using (var db = Context())
+        {
+            var saved = await Save(db).HandleAsync(
+                version.VersionId, version.RelationCode,
+                new SaveTableRelationCommand(
+                    version.SourceTableDefId, version.TargetTableDefId,
+                    TableRelationKind.Rollup, NewMatch, null, 1, true),
+                CancellationToken.None);
+
+            // ⚠ Ця перевірка сама по собі НЕ доводить збереження: відповідь
+            // складається з того самого мутованого об'єкта в пам'яті, який
+            // за дефекту лишався Detached. Вона лише підтверджує, що ехо
+            // справді відповідає репорту (200 OK із новими значеннями).
+            Assert.Equal(NewMatch, saved.MatchJson);
+        }
+
+        // ⛔ Доказ — тут: ТРЕТІЙ, зовсім новий контекст, без жодної згадки
+        // про сутність із попередніх двох.
+        await using var fresh = Context();
+        var stored = await fresh.TableRelations.AsNoTracking()
+            .SingleAsync(r => r.SourceTableDefId == version.SourceTableDefId);
+
+        Assert.Equal(NewMatch, stored.MatchJson);
+        Assert.Equal((byte)1, stored.OnSourceChange);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
