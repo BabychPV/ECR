@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Button,
+  Code,
   Group,
   Modal,
   Select,
@@ -10,6 +11,7 @@ import {
   Table,
   Text,
   TextInput,
+  Textarea,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -17,6 +19,8 @@ import type {
   CalculationLevel,
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
+  MethodologyPublicationDiff,
+  PublishMethodologyRequest,
   UnitRef,
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
@@ -28,6 +32,7 @@ import {
   deleteMethodologyFormula,
   methodologyFormulas,
   methodologyVersions,
+  publishMethodologyVersion,
   saveMethodologyFormula,
 } from '@/features/methodologies/api';
 import {
@@ -84,10 +89,26 @@ export function MethodologyVersionsPage(): JSX.Element {
   // обов'язкові, — вужча відповідальність, і саме тому в неї свій дозвіл.
   const mayManageRequiredInputs = can(session.data, 'Calculation.ManageRequiredInputs');
 
+  // ⛔ Право небезпечне (`sec.Permission.IsDangerous`) і вбудованим ролям
+  // seed-ом не видається взагалі (`PublishMethodologyHandler`, D-40):
+  // публікація змінює числа, які вже подані регуляторові.
+  const mayPublish = can(session.data, 'Calculation.Publish');
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newVersion, setNewVersion] = useState('');
   const [copyFrom, setCopyFrom] = useState<string | null>(null);
+
+  // ⛔ Кнопка публікації жила лише на `MethodologiesPage.tsx` (перелік
+  // методологій), а не тут — на екрані, де версію насправді доводять до
+  // готовності (формули, константи, виходи, правила, обов'язкові колонки,
+  // золотий набір, прив'язки). Хто пройшов увесь цей шлях сторінка за
+  // сторінкою, не бачив жодного «Publish» ні в рядку версії, ні в
+  // розгорнутій панелі — доводилося здогадуватися повернутися в перелік.
+  const [publishing, setPublishing] = useState<{ versionId: number } | null>(null);
+  const [publishReason, setPublishReason] = useState('');
+  const [publishEffectiveFrom, setPublishEffectiveFrom] = useState('');
+  const [publishDiff, setPublishDiff] = useState<MethodologyPublicationDiff | null>(null);
 
   // ⛔ Рівень драбини виразності (`ФВ-9.2`) став вибором, а не константою.
   // Тут стояло зашите `'Configuration'` із поясненням «клон бере рівень із
@@ -181,6 +202,40 @@ export function MethodologyVersionsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  /**
+   * Публікація версії, відкритої на цьому екрані. Право `Calculation.Publish`.
+   *
+   * ⛔ Причина й дата обов'язкові на сервері (`ECR-CALC-0422`, ФВ-14.7); тут
+   * лише не пускають порожню форму — сама заборона лишається доменною.
+   */
+  const publish = useMutation({
+    mutationFn: () =>
+      publishMethodologyVersion(methodologyId, publishing?.versionId ?? 0, {
+        changeReason: publishReason,
+        // ⚠ `date`, не `Date`: `toISOString()` іде через UTC і ввечері
+        // зсуває дату на добу назад (той самий застережний коментар, що й у
+        // `MethodologiesPage.tsx`).
+        effectiveFrom: publishEffectiveFrom,
+      } satisfies PublishMethodologyRequest),
+    onSuccess: async (diff) => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.methodologies.versionsOf(methodologyId),
+      });
+      setPublishing(null);
+      setPublishReason('');
+      setPublishEffectiveFrom('');
+      setPublishDiff(diff);
+      showDone(t('methodologies.published'));
+    },
+
+    // ⚠ Публікація падає з переліком конкретних проблем — немає золотого
+    // тесту (ФВ-9.12), незайнята дата, цикл формул тощо (`ECR-CALC-0422`,
+    // `ECR-CALC-0409`). `showApiError` показує ТЕКСТ відмови сервера, а не
+    // узагальнене «не вдалося»: саме цей клас багів (проковтнута відповідь
+    // сервера) уже знайдено в іншому місці цього аудиту.
+    onError: showApiError,
+  });
+
   const placement = useMemo<ExpressionPlacement>(
     () => ({ methodologyVersionId: editing?.versionId }),
     [editing?.versionId],
@@ -191,11 +246,24 @@ export function MethodologyVersionsPage(): JSX.Element {
       <PageHeader
         title={t('methodologies.versionsTitle')}
         actions={
-          mayEdit && (
-            <Button variant="default" onClick={() => setCreating(true)}>
-              {t('methodologies.newVersion')}
-            </Button>
-          )
+          <Group gap="xs">
+            {/* ⛔ Публікація ВІДКРИТОЇ версії — тут, поруч із заголовком, а не
+                лише в рядку таблиці внизу: саме сюди дивиться той, хто щойно
+                заповнив усі панелі версії (формули, константи, виходи,
+                правила, обов'язкові колонки, золотий набір, прив'язки) і шукає
+                «що далі». */}
+            {selected !== undefined && selected.status !== 'Published' && mayPublish && (
+              <Button onClick={() => setPublishing({ versionId: selected.id })}>
+                {t('methodologies.publish')}
+              </Button>
+            )}
+
+            {mayEdit && (
+              <Button variant="default" onClick={() => setCreating(true)}>
+                {t('methodologies.newVersion')}
+              </Button>
+            )}
+          </Group>
         }
       />
 
@@ -237,13 +305,30 @@ export function MethodologyVersionsPage(): JSX.Element {
                   </Table.Td>
                   <Table.Td>{version.effectiveFrom ?? '—'}</Table.Td>
                   <Table.Td>
-                    <Button
-                      size="compact-xs"
-                      variant={selected?.id === version.id ? 'filled' : 'subtle'}
-                      onClick={() => setSelectedId(String(version.id))}
-                    >
-                      {t('methodologies.openVersion')}
-                    </Button>
+                    <Group gap="xs" wrap="nowrap">
+                      <Button
+                        size="compact-xs"
+                        variant={selected?.id === version.id ? 'filled' : 'subtle'}
+                        onClick={() => setSelectedId(String(version.id))}
+                      >
+                        {t('methodologies.openVersion')}
+                      </Button>
+
+                      {/* ⛔ Публікація — тут, а не лише на переліку методологій
+                          (`MethodologiesPage.tsx`): той екран не показує жодної
+                          з панелей, якими version доводять до готовності
+                          (формули, константи, золотий набір), тож кнопка на
+                          ньому дає публікувати те, чого автор щойно не бачив. */}
+                      {version.status !== 'Published' && mayPublish && (
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          onClick={() => setPublishing({ versionId: version.id })}
+                        >
+                          {t('methodologies.publish')}
+                        </Button>
+                      )}
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -600,6 +685,108 @@ export function MethodologyVersionsPage(): JSX.Element {
             {t('methodologies.deleteFormulaConfirmTitle')}
           </Button>
         </Group>
+      </Modal>
+
+      {/*
+       * ⛔ Причина й дата — той самий патерн, що й публікація зі списку
+       * методологій (`MethodologiesPage.tsx`) і публікація версії шаблону
+       * (`TemplateVersionPage.tsx`, `ReasonModal`): обидва поля обов'язкові на
+       * сервері (`ECR-CALC-0422`, ФВ-14.7), і кнопка тут вимкнена, доки вони
+       * порожні — не з ввічливості, а щоб не вести на гарантовану відмову.
+       */}
+      <Modal
+        opened={publishing !== null}
+        onClose={() => setPublishing(null)}
+        title={t('methodologies.publishTitle')}
+      >
+        <Stack gap="sm">
+          <Textarea
+            label={t('methodologies.reason')}
+            description={t('methodologies.reasonHint')}
+            value={publishReason}
+            onChange={(event) => setPublishReason(event.currentTarget.value)}
+            minRows={3}
+            autosize
+            data-autofocus
+          />
+
+          <TextInput
+            type="date"
+            label={t('methodologies.effectiveFrom')}
+            description={t('methodologies.effectiveFromHint')}
+            value={publishEffectiveFrom}
+            onChange={(event) => setPublishEffectiveFrom(event.currentTarget.value)}
+          />
+
+          <Button
+            disabled={publishReason.trim().length === 0 || publishEffectiveFrom.length === 0}
+            loading={publish.isPending}
+            onClick={() => publish.mutate()}
+          >
+            {t('methodologies.publish')}
+          </Button>
+        </Stack>
+      </Modal>
+
+      {/*
+       * ⛔ Diff РЕЗУЛЬТАТІВ, не тексту формул (ФВ-9.6): змінений рядок виразу
+       * не каже нічого, змінена на 4 % емісія каже все. Той самий вигляд, що
+       * й на `MethodologiesPage.tsx` — друга розбіжна відповідь на «що
+       * показати після публікації» була б гіршою за одну спільну.
+       */}
+      <Modal
+        opened={publishDiff !== null}
+        onClose={() => setPublishDiff(null)}
+        title={t('methodologies.diffTitle')}
+        size="lg"
+      >
+        {publishDiff !== null && (
+          <Stack gap="sm">
+            <Text size="sm">
+              {t('methodologies.diffNumeric')}: {publishDiff.numeric.before} → {publishDiff.numeric.after}
+            </Text>
+            <Text size="sm">
+              {t('methodologies.diffCalendar')}: {publishDiff.calendar.before} → {publishDiff.calendar.after}
+            </Text>
+
+            <Text fw={600}>{t('methodologies.diffChanges')}</Text>
+            {publishDiff.changes.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                {t('methodologies.diffNone')}
+              </Text>
+            ) : (
+              <Table striped withTableBorder>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>{t('methodologies.testCode')}</Table.Th>
+                    <Table.Th>{t('methodologies.output')}</Table.Th>
+                    <Table.Th>{t('methodologies.before')}</Table.Th>
+                    <Table.Th>{t('methodologies.after')}</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {publishDiff.changes.map((change) => (
+                    <Table.Tr
+                      key={`${change.testCode}:${change.outputCode}:${String(change.substanceEntryId)}`}
+                    >
+                      <Table.Td>{change.testCode}</Table.Td>
+                      <Table.Td>{change.outputCode}</Table.Td>
+                      <Table.Td>{change.before ?? '—'}</Table.Td>
+                      <Table.Td>{change.after}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
+
+            {(publishDiff.warnings ?? []).length > 0 && (
+              <>
+                <Text fw={600}>{t('methodologies.warnings')}</Text>
+                <Code block>{(publishDiff.warnings ?? []).join('\n')}</Code>
+              </>
+            )}
+          </Stack>
+        )}
       </Modal>
     </Stack>
   );

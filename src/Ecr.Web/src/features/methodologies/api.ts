@@ -9,10 +9,12 @@ import type {
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
   MethodologyOutputDto,
+  MethodologyPublicationDiff,
   MethodologyRequiredInputDto,
   MethodologyRuleDto,
   MethodologySummaryDto,
   MethodologyTestCaseDto,
+  PublishMethodologyRequest,
   SaveCalculationBindingRequest,
   SaveMethodologyConstantRequest,
   SaveMethodologyFormulaRequest,
@@ -85,6 +87,30 @@ export function createMethodologyVersion(
         copyFromVersionId: body.copyFromVersionId,
         level: body.level,
       } satisfies CreateMethodologyVersionRequest),
+    },
+  );
+}
+
+/**
+ * Публікує версію-чернетку. Право `Calculation.Publish` — **небезпечне**
+ * (`sec.Permission.IsDangerous`), вбудованим ролям seed-ом не видається
+ * (`PublishMethodologyHandler`).
+ *
+ * ⛔ Причина зміни й дата набуття чинності обов'язкові на сервері
+ * (`ECR-CALC-0422`, ФВ-14.7): без дати незрозуміло, які періоди рахувати цією
+ * версією, а які — попередньою.
+ */
+export function publishMethodologyVersion(
+  methodologyId: number,
+  versionId: number,
+  body: PublishMethodologyRequest,
+): Promise<MethodologyPublicationDiff> {
+  return apiFetch<MethodologyPublicationDiff>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/publish`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     },
   );
 }
