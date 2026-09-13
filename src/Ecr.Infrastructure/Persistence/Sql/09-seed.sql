@@ -647,6 +647,8 @@ USING (VALUES
     (N'grants.saved',                    N'en', N'Access updated; affected sessions revalidate immediately.', 1),
     (N'grants.kind',                     N'en', N'Resource kind', 1),
     (N'grants.resource',                 N'en', N'Resource id', 1),
+    (N'grants.resourceName',             N'en', N'Resolved name', 1),
+    (N'grants.resourceNameUnknown',      N'en', N'Not found — resource deleted or the id is wrong', 1),
     (N'grants.level',                    N'en', N'Level', 1),
     (N'grants.deny',                     N'en', N'Deny', 1),
     (N'grants.remove',                   N'en', N'Remove', 1),
@@ -964,6 +966,9 @@ USING (VALUES
     (N'registries.changedAt',            N'en', N'Changed at', 1),
     (N'registries.operation',            N'en', N'Operation', 1),
     (N'registries.author',               N'en', N'Author', 1),
+    -- ⚠ Показано, коли `changedByUserId` не знайшовся в переліку користувачів:
+    -- нема права `Security.ManageUsers`, або користувача видалено.
+    (N'registries.userUnresolved',       N'en', N'unresolved', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
@@ -984,6 +989,11 @@ USING (VALUES
     -- інтерфейс, бо форма не мала звідки взяти кількість.
     (N'periods.customCount',             N'en', N'Number of periods', 1),
     (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
+    -- Q-298: підказка біля недоступної кнопки «Зберегти» у формі створення
+    -- проєкту — перелік бракуючих полів замість мовчазної недоступності
+    -- кнопки без жодного пояснення (`CreateDocumentModal.tsx` має той самий
+    -- дефект і поки що без цього фіксу).
+    (N'periods.stillNeeded',             N'en', N'Still needed: {fields}', 1),
     -- T6/#37: CRUD політик періодів — до цього завести чи змінити політику
     -- можна було лише сідингом або рукою DBA.
     (N'periods.managePolicies',          N'en', N'Manage policies', 1),

@@ -17,24 +17,61 @@ namespace Ecr.Application.Security;
 /// <param name="ResourceId">Ідентифікатор ресурсу.</param>
 /// <param name="Level">Рівень: <c>Read</c>…<c>Manage</c>.</param>
 /// <param name="IsDeny">Явна заборона; перекриває будь-який дозвіл (ФВ-6.6).</param>
+/// <param name="ResourceName">
+/// Розв'язаний код ресурсу (<c>Q-299</c>) — лише у ВІДПОВІДІ <see
+/// cref="ListResourceGrantsHandler"/>; <c>null</c>, якщо ресурс уже видалено
+/// або посилання «осиротіло». Поле ІГНОРУЄТЬСЯ на запис
+/// (<see cref="ReplaceResourceGrantsHandler"/> і <c>IUserStore.ReplaceGrantsAsync</c>
+/// читають лише перші чотири поля) — клієнту не треба вирізати його з
+/// чернетки перед збереженням.
+/// </param>
 public sealed record ResourceGrantDto(
-    ResourceKind ResourceKind, int ResourceId, GrantLevel Level, bool IsDeny);
+    ResourceKind ResourceKind, int ResourceId, GrantLevel Level, bool IsDeny,
+    string? ResourceName = null);
 
 /// <summary>Перелік грантів ролі. Право <c>Security.ManageRoles</c>.</summary>
+/// <remarks>
+/// ⛔ <c>Q-299</c>: `Sheet`/`Table`/`Column` адресуються лише в дереві
+/// структури КОНКРЕТНОЇ версії шаблону (<c>GET
+/// …/template-versions/{id}/structure</c>) — а перелік грантів ролі показує
+/// ресурси БЕЗ версії. До цієї правки адміністратор бачив голий
+/// <c>resourceId</c> і не мав жодного способу дізнатися, якому аркушу,
+/// таблиці чи колонці він відповідає, не перебираючи вручну версії шаблонів.
+/// Розв'язання можливе однозначно БЕЗ підказки версії, бо
+/// <c>SheetDef.Id</c>/<c>TableDef.Id</c>/<c>ColumnDef.Id</c> — суцільні
+/// IDENTITY-ключі таблиці (<c>TemplateStructureConfiguration.cs</c>:
+/// <c>HasKey(x => x.Id)</c>), а не складові з <c>TemplateVersionId</c> —
+/// той самий <c>Id</c> не повторюється у двох версіях одразу.
+/// </remarks>
 public sealed class ListResourceGrantsHandler(
-    IUserStore users, IAccessDecisionService access, ICurrentUser currentUser)
+    IUserStore users, IAccessDecisionService access, ICurrentUser currentUser,
+    IResourceNameResolver nameResolver)
 {
     /// <summary>Право на читання й зміну грантів.</summary>
     public const string Permission = "Security.ManageRoles";
 
-    /// <summary>Повертає гранти ролі.</summary>
+    /// <summary>Повертає гранти ролі з розв'язаними назвами ресурсів.</summary>
     /// <param name="roleId">Роль.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<ResourceGrantDto>> HandleAsync(int roleId, CancellationToken ct)
     {
         await RequireAsync(access, currentUser, ct).ConfigureAwait(false);
 
-        return await users.ListGrantsAsync(roleId, ct).ConfigureAwait(false);
+        var grants = await users.ListGrantsAsync(roleId, ct).ConfigureAwait(false);
+
+        if (grants.Count == 0)
+        {
+            return grants;
+        }
+
+        var names = await nameResolver
+            .ResolveAsync([.. grants.Select(g => (g.ResourceKind, g.ResourceId))], ct)
+            .ConfigureAwait(false);
+
+        return [.. grants.Select(g => g with
+        {
+            ResourceName = names.GetValueOrDefault((g.ResourceKind, g.ResourceId)),
+        })];
     }
 
     /// <summary>Перевіряє право поточного користувача.</summary>

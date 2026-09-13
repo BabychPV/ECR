@@ -5038,6 +5038,13 @@
           "resourceKind": {
             "$ref": "#/components/schemas/ResourceKind",
             "description": "Вид ресурсу: `Project`, `Sheet`, `Table`, `Column`."
+          },
+          "resourceName": {
+            "description": "Розв'язаний код ресурсу (`Q-299`) — лише у ВІДПОВІДІ ListResourceGrantsHandler; `null`, якщо ресурс уже видалено\nабо посилання «осиротіло». Поле ІГНОРУЄТЬСЯ на запис\n(ReplaceResourceGrantsHandler і `IUserStore.ReplaceGrantsAsync`\nчитають лише перші чотири поля) — клієнту не треба вирізати його з\nчернетки перед збереженням.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -7068,6 +7075,11 @@
         "properties": {
           "code": {
             "description": "Код: `kg`, `t`, `m3`.",
+            "type": "string"
+          },
+          "dimensionCode": {
+            "default": "",
+            "description": "Код розмірності з довідника `uom.Dimension` (`kg` → `Mass`).",
             "type": "string"
           },
           "dimensionId": {

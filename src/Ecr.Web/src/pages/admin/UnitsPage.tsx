@@ -145,7 +145,10 @@ export function UnitsPage(): JSX.Element {
             </Table.Thead>
             <Table.Tbody>
               {[...list]
-                .sort((a, b) => a.dimensionId - b.dimensionId || a.code.localeCompare(b.code))
+                .sort(
+                  (a, b) =>
+                    a.dimensionCode.localeCompare(b.dimensionCode) || a.code.localeCompare(b.code),
+                )
                 .map((unit) => (
                   <Table.Tr key={unit.id}>
                     <Table.Td>
@@ -159,7 +162,9 @@ export function UnitsPage(): JSX.Element {
                         </Badge>
                       )}
                     </Table.Td>
-                    <Table.Td>{unit.dimensionId}</Table.Td>
+                    {/* Q-297: до фіксу тут був голий `unit.dimensionId` — число
+                        без жодного сенсу для людини, що дивиться на екран. */}
+                    <Table.Td>{unit.dimensionCode}</Table.Td>
                     <Table.Td>{unit.factorToBase}</Table.Td>
                     <Table.Td>{unit.offsetToBase}</Table.Td>
                   </Table.Tr>

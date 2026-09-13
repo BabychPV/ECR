@@ -2321,6 +2321,22 @@ public interface IReportSnapshotBuilder
 }
 ```
 
+#### `IResourceNameResolver`
+
+Код ресурсу гранта (`Sheet`/`Table`/`Column`/`Project`) за видом і числовим
+`Id`, без підказки версії шаблону — однозначно, бо ці `Id` суцільні
+(IDENTITY власних таблиць), не складові з `TemplateVersionId` (`Q-299`).
+Пара, якої не знайдено (ресурс видалено чи посилання «осиротіло»), — просто
+відсутня в результаті, а не помилка.
+
+```csharp
+public interface IResourceNameResolver
+{
+    public Task<IReadOnlyDictionary<(ResourceKind Kind, int Id), string>> ResolveAsync(
+        IReadOnlyCollection<(ResourceKind Kind, int Id)> resources, CancellationToken ct);
+}
+```
+
 #### `ISecretProvider`
 
 Значення секрету за його іменем.

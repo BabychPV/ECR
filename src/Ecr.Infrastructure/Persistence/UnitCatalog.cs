@@ -33,6 +33,16 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ Q-297: розмірностей у системі десятки — окремий запит до
+        // `uom.Dimension` коштує один звід, а не по одному на кожну одиницю.
+        // Без нього `GET /api/v1/units` мав би лише голий `dimensionId`, і
+        // клієнт показував би число замість «Mass»/«Volume».
+        var dimensionCodes = await db.Dimensions
+            .AsNoTracking()
+            .Select(d => new { d.Id, d.Code })
+            .ToDictionaryAsync(d => d.Id, d => d.Code, ct)
+            .ConfigureAwait(false);
+
         // ⚠ Похідні одиниці складаються ПОСИЛАННЯМИ на чисельник і знаменник
         // (ФВ-16.2), а не розбираються з рядка «g/s». Розбір рядка означав би,
         // що «kg/h» і «kg / h» — різні одиниці, а «kgh» — теж якась.
@@ -46,7 +56,9 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
         _cached = new UnitCatalogSnapshot(
             units.ToDictionary(
                 u => u.Code,
-                u => new UnitRef(u.Id, u.Code, u.DimensionId, u.FactorToBase, u.OffsetToBase),
+                u => new UnitRef(
+                    u.Id, u.Code, u.DimensionId, u.FactorToBase, u.OffsetToBase,
+                    DimensionCode: dimensionCodes.GetValueOrDefault(u.DimensionId, string.Empty)),
                 StringComparer.OrdinalIgnoreCase),
             derived);
 

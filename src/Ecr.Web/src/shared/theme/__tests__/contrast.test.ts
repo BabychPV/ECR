@@ -283,6 +283,61 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     });
   });
 
+  /**
+   * `Q-289`: той самий дефект (T7-02/T7-03), ще один виклик, лишений поза
+   * межею `Q-285` (яка сама зафіксувала себе як «чотири виклики» —
+   * `HealthPage`, `JobsPage`, `PeriodsPage`, `notify.showDone()`; `Badge`
+   * у `SourcesPage.tsx` («останній запуск», стан `Succeeded`) до переліку
+   * не увійшов). `variant="light"` — той самий резолвер кольору, що й
+   * `Q-272` (alpha-композит, не пряма заливка), тож перевірка контрасту
+   * тут дзеркалить `Q-272`, а не `Q-285`.
+   */
+  describe('Q-289: SourcesPage — Badge «останній запуск», `statusSuccess`, не голий `green`', () => {
+    it('SourcesPage: колір Badge `Succeeded` — `statusSuccess`', () => {
+      const source = readFileSync(
+        path.resolve(process.cwd(), 'src/pages/admin/SourcesPage.tsx'),
+        'utf8',
+      );
+
+      // ⛔ Мутаційний доказ на джерело: поверни хтось голий `'green'` замість
+      // `'statusSuccess'` — цей рядок ловить регрес одразу.
+      expect(source).toMatch(
+        /source\.lastRun\.status === 'Succeeded' \? 'statusSuccess' : 'statusWarning'/,
+      );
+      expect(source).not.toMatch(
+        /source\.lastRun\.status === 'Succeeded' \? 'green' : 'statusWarning'/,
+      );
+    });
+
+    // Той самий `blend`, що й для Q-272: доводить не лише присутність рядка,
+    // а й що підміна дає РЕАЛЬНЕ покращення контрасту — Badge тут теж
+    // `variant="light"`, тобто alpha-композит, не пряма заливка.
+    it('підміна дає реальне покращення контрасту (variant="light", той самий композит, що й Q-272)', () => {
+      function blend(hex: string, alphaValue: number, bgHex: string): string {
+        const parse = (h: string): [number, number, number] => {
+          const m = h.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+          if (m === null) throw new Error(`не hex-колір: ${h}`);
+          return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+        };
+        const [fr, fg, fb] = parse(hex);
+        const [br, bg, bb] = parse(bgHex);
+        const mix = (f: number, b: number) => Math.round(f * alphaValue + b * (1 - alphaValue));
+        const toHex = (v: number) => v.toString(16).padStart(2, '0');
+        return `#${toHex(mix(fr, br))}${toHex(mix(fg, bg))}${toHex(mix(fb, bb))}`;
+      }
+
+      // ДО (контроль регресу): дефолтна Mantine-шкала `green`, індекс 6 —
+      // текст і тло `light`-варіанта у світлій темі. Провал AA.
+      const defaultMantineGreen6 = '#40c057';
+      const beforeComposite = blend(defaultMantineGreen6, 0.1, '#ffffff');
+      expect(contrast(defaultMantineGreen6, beforeComposite)).toBeLessThan(AA.text);
+
+      // ПІСЛЯ: `statusSuccess[6]` — той самий композит, проходить AA.
+      const afterComposite = blend(statusSuccess[6], 0.1, '#ffffff');
+      expect(contrast(statusSuccess[6], afterComposite)).toBeGreaterThanOrEqual(AA.text);
+    });
+  });
+
   it('обчислення контрасту дає відомі значення', () => {
     // ⚠ Калібрування самої лінійки. Без нього тест перевіряв би власну
     // помилку: функція, що завжди повертає 21, зробила б усе вище зеленим.
