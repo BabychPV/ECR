@@ -14,8 +14,15 @@ public sealed class LocalizedText
 {
     private readonly Dictionary<string, string> _values;
 
+    // ⛔ Q-301: параметр конструктора мусить збігатися ТИПОМ (не лише іменем) з
+    // публічною властивістю Values нижче — System.Text.Json зіставляє
+    // [JsonConstructor]-параметр із публічною властивістю за іменем без
+    // урахування регістру і кидає InvalidOperationException при першому ж
+    // використанні типу, якщо типи різні (тут було Dictionary<...> проти
+    // IReadOnlyDictionary<...>) — ламало БУДЬ-яку десеріалізацію через MVC,
+    // не лише випадок із непорожнім значенням.
     [JsonConstructor]
-    public LocalizedText(Dictionary<string, string>? values = null)
+    public LocalizedText(IReadOnlyDictionary<string, string>? values = null)
         => _values = values is null
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase);
