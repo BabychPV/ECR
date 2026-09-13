@@ -2756,7 +2756,7 @@ USING (VALUES
   (N'Calculation.View',         N'Calculation', 0), (N'Calculation.EditFormula',  N'Calculation', 0),
   (N'Calculation.EditConstant', N'Calculation', 0), (N'Calculation.EditRule',     N'Calculation', 0),
   (N'Calculation.EditScript',   N'Calculation', 1), (N'Calculation.Publish',      N'Calculation', 1),
-  (N'Calculation.Recalculate',  N'Calculation', 0),
+  (N'Calculation.Recalculate',  N'Calculation', 0), (N'Calculation.ManageRequiredInputs', N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
   (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),

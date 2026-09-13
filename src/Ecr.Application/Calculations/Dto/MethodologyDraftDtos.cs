@@ -138,6 +138,22 @@ public sealed record MethodologyRuleDto(
     int Priority,
     bool IsActive);
 
+/// <summary>
+/// Обов'язкова вхідна колонка методології — gate перед збереженням клітинки
+/// (директива «обов'язкові вхідні колонки методології»).
+/// </summary>
+/// <param name="Id">Ідентифікатор вимоги.</param>
+/// <param name="ColumnDefId">Колонка документа, обов'язкова як вхід.</param>
+/// <param name="Severity">Блокує чи лише попереджає збереження.</param>
+/// <param name="HintL10n">
+/// Текст поверх типового шаблону; <c>null</c> — типового шаблону достатньо.
+/// </param>
+public sealed record MethodologyRequiredInputDto(
+    int Id,
+    int ColumnDefId,
+    RequiredInputSeverity Severity,
+    IReadOnlyDictionary<string, string>? HintL10n);
+
 /// <summary>Оголошений вихід версії — те, що методологія повертає (ФВ-16.6).</summary>
 /// <param name="Id">Ідентифікатор виходу.</param>
 /// <param name="Code">Код виходу — адреса, на яку посилається прив'язка.</param>

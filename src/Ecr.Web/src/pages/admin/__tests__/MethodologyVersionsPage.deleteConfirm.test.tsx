@@ -29,6 +29,7 @@ vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
   MethodologyConstantsPanel: () => null,
   MethodologyOutputsPanel: () => null,
   MethodologyRulesPanel: () => null,
+  MethodologyRequiredInputsPanel: () => null,
   MethodologyTestsPanel: () => null,
   MethodologyBindingsPanel: () => null,
   MethodologyModesForm: () => null,

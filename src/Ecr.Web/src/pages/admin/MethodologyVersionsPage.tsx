@@ -40,6 +40,7 @@ import {
   MethodologyConstantsPanel,
   MethodologyModesForm,
   MethodologyOutputsPanel,
+  MethodologyRequiredInputsPanel,
   MethodologyRulesPanel,
   MethodologyTestsPanel,
 } from '@/features/methodologies/MethodologyContentPanels';
@@ -76,6 +77,12 @@ export function MethodologyVersionsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
   const mayEdit = can(session.data, 'Calculation.EditFormula');
+
+  // ⛔ Окреме право від `Calculation.EditFormula` (директива «обов'язкові
+  // вхідні колонки методології»): gate перед збереженням клітинки читає ці
+  // записи для ВСІХ, хто вводить дані, а хто вирішує, ЯКІ колонки
+  // обов'язкові, — вужча відповідальність, і саме тому в неї свій дозвіл.
+  const mayManageRequiredInputs = can(session.data, 'Calculation.ManageRequiredInputs');
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -116,6 +123,7 @@ export function MethodologyVersionsPage(): JSX.Element {
   // ⚠ Дві умови разом: стан версії каже сервер, право — профіль. Кожна окремо
   // веде користувача у відмову — `ECR-CALC-0409` або `403`.
   const editable = mayEditContent(selected, mayEdit);
+  const requiredInputsEditable = mayEditContent(selected, mayManageRequiredInputs);
 
   const formulas = useQuery({
     queryKey: queryKeys.methodologies.formulas(selected?.id),
@@ -383,6 +391,12 @@ export function MethodologyVersionsPage(): JSX.Element {
             methodologyId={methodologyId}
             versionId={selected.id}
             editable={editable}
+          />
+
+          <MethodologyRequiredInputsPanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+            editable={requiredInputsEditable}
           />
 
           <MethodologyTestsPanel

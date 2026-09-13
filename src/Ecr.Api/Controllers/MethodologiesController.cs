@@ -35,6 +35,8 @@ public sealed class MethodologiesController(
     SaveMethodologyConstantHandler saveConstant,
     ListMethodologyRulesHandler listRules,
     SaveMethodologyRuleHandler saveRule,
+    ListMethodologyRequiredInputsHandler listRequiredInputs,
+    SaveMethodologyRequiredInputHandler saveRequiredInput,
     ListMethodologyOutputsHandler listOutputs,
     SaveMethodologyOutputHandler saveOutput,
     ListMethodologyTestCasesHandler listTests,
@@ -279,6 +281,49 @@ public sealed class MethodologiesController(
 
         return Ok(await saveRule
             .HandleAsync(vid, code, request.MatchJson, request.Priority, request.IsActive, ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Обов'язкові вхідні колонки версії. Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/versions/{vid:int}/required-inputs")]
+    [ProducesResponseType<IReadOnlyList<MethodologyRequiredInputDto>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<MethodologyRequiredInputDto>>> RequiredInputs(
+        int id, int vid, CancellationToken ct)
+        => Ok(await listRequiredInputs.HandleAsync(vid, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Заводить або змінює обов'язкову вхідну колонку. Право
+    /// <c>Calculation.ManageRequiredInputs</c> (директива «обов'язкові вхідні
+    /// колонки методології»).
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="columnDefId">Колонка документа, обов'язкова як вхід.</param>
+    /// <param name="request">Критичність і підказка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Окреме право від <c>Calculation.EditRule</c>/<c>EditFormula</c>
+    /// навмисно: gate перед збереженням клітинки (<c>PatchCellsHandler</c>)
+    /// застосовується до ВСІХ, хто вводить дані, а хто вирішує, ЯКІ колонки
+    /// обов'язкові, — окрема, вужча відповідальність.
+    /// </remarks>
+    [HttpPut("{id:int}/versions/{vid:int}/required-inputs/{columnDefId:int}")]
+    [ProducesResponseType<MethodologyRequiredInputDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<MethodologyRequiredInputDto>> SaveRequiredInput(
+        int id, int vid, int columnDefId, [FromBody] SaveMethodologyRequiredInputRequest request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveRequiredInput
+            .HandleAsync(vid, columnDefId, request.Severity, request.HintL10n, ct)
             .ConfigureAwait(false));
     }
 
@@ -619,6 +664,16 @@ public sealed record SaveMethodologyConstantRequest(
 /// <param name="Priority">Менше значення — вищий пріоритет; перший збіг виграє (ФВ-13.4).</param>
 /// <param name="IsActive">Вимкнене правило не бере участі ні в зіставленні, ні в матриці покриття.</param>
 public sealed record SaveMethodologyRuleRequest(string MatchJson, int Priority, bool IsActive);
+
+/// <summary>Запит на запис обов'язкової вхідної колонки.</summary>
+/// <param name="Severity">Блокує чи лише попереджає збереження.</param>
+/// <param name="HintL10n">
+/// Текст поверх типового шаблону «Колонка «X» обов'язкова для методології «Y»»;
+/// <c>null</c> — типового шаблону достатньо (ASK директиви «обов'язкові вхідні
+/// колонки методології»).
+/// </param>
+public sealed record SaveMethodologyRequiredInputRequest(
+    RequiredInputSeverity Severity, Dictionary<string, string>? HintL10n);
 
 /// <summary>Запит на оголошення виходу версії.</summary>
 /// <param name="UnitId">Одиниця результату; обов'язкова — на ній тримається перевірка розмірностей.</param>

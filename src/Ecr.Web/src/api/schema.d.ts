@@ -2586,6 +2586,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/required-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Обов'язкові вхідні колонки версії. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyRequiredInputDto"][];
+                        "text/json": components["schemas"]["MethodologyRequiredInputDto"][];
+                        "text/plain": components["schemas"]["MethodologyRequiredInputDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Заводить або змінює обов'язкову вхідну колонку. Право
+         *     `Calculation.ManageRequiredInputs` (директива «обов'язкові вхідні
+         *     колонки методології»).
+         * @description ⛔ Окреме право від `Calculation.EditRule`/`EditFormula`
+         *     навмисно: gate перед збереженням клітинки (`PatchCellsHandler`)
+         *     застосовується до ВСІХ, хто вводить дані, а хто вирішує, ЯКІ колонки
+         *     обов'язкові, — окрема, вужча відповідальність.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                    /** @description Колонка документа, обов'язкова як вхід. */
+                    columnDefId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyRequiredInputRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyRequiredInputRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyRequiredInputRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyRequiredInputDto"];
+                        "text/json": components["schemas"]["MethodologyRequiredInputDto"];
+                        "text/plain": components["schemas"]["MethodologyRequiredInputDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/rules": {
         parameters: {
             query?: never;
@@ -8777,6 +8902,26 @@ export interface components {
              *     показане (№05 §7): оголошений і невжитий аргумент. */
             warnings?: null | string[];
         };
+        /** @description Обов'язкова вхідна колонка методології — gate перед збереженням клітинки
+         *     (директива «обов'язкові вхідні колонки методології»). */
+        MethodologyRequiredInputDto: {
+            /**
+             * Format: int32
+             * @description Колонка документа, обов'язкова як вхід.
+             */
+            columnDefId: number;
+            /** @description Текст поверх типового шаблону; `null` — типового шаблону достатньо. */
+            hintL10n: null | {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Ідентифікатор вимоги.
+             */
+            id: number;
+            /** @description Блокує чи лише попереджає збереження. */
+            severity: components["schemas"]["RequiredInputSeverity"];
+        };
         /** @description Одна розбіжність результату на золотому наборі. */
         MethodologyResultDelta: {
             /**
@@ -9763,6 +9908,13 @@ export interface components {
             /** @description Номер версії; унікальний у межах опису. */
             version: string;
         };
+        /**
+         * @description Критичність незаповненої обов'язкової вхідної колонки методології
+         *     (директива «обов'язкові вхідні колонки методології», gate перед
+         *     збереженням).
+         * @enum {unknown}
+         */
+        RequiredInputSeverity: "Block" | "Warn";
         /** @description Ресурсний грант у вигляді, придатному для передавання. */
         ResourceGrantDto: {
             /** @description Явна заборона; перекриває будь-який дозвіл (ФВ-6.6). */
@@ -10019,6 +10171,17 @@ export interface components {
              * @description Одиниця результату; обов'язкова — на ній тримається перевірка розмірностей.
              */
             unitId: number;
+        };
+        /** @description Запит на запис обов'язкової вхідної колонки. */
+        SaveMethodologyRequiredInputRequest: {
+            /** @description Текст поверх типового шаблону «Колонка «X» обов'язкова для методології «Y»»;
+             *     `null` — типового шаблону достатньо (ASK директиви «обов'язкові вхідні
+             *     колонки методології»). */
+            hintL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Блокує чи лише попереджає збереження. */
+            severity: components["schemas"]["RequiredInputSeverity"];
         };
         /** @description Запит на запис правила відбору рядків. */
         SaveMethodologyRuleRequest: {

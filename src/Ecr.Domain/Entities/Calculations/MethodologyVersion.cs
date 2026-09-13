@@ -392,6 +392,44 @@ public sealed class MethodologyVersion : Entity<int>
         rule.SetActive(isActive);
     }
 
+    /// <summary>
+    /// Оголошує обов'язкову вхідну колонку методології. Лише для чернетки
+    /// (директива «обов'язкові вхідні колонки методології»).
+    /// </summary>
+    /// <param name="columnDefId">Колонка документа, обов'язкова як вхід.</param>
+    /// <param name="severity">Блокує чи лише попереджає збереження.</param>
+    /// <param name="hint">Текст поверх типового шаблону; <c>null</c> — типового достатньо.</param>
+    /// <returns>Новий запис вимоги.</returns>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> — версія не чернетка.</exception>
+    public MethodologyRequiredInput AddRequiredInput(
+        int columnDefId, RequiredInputSeverity severity, LocalizedText? hint)
+    {
+        RequireDraft("обов'язкові вхідні колонки");
+
+        return new MethodologyRequiredInput(Id, columnDefId, severity, hint);
+    }
+
+    /// <summary>Змінює вимогу цієї версії. Лише для чернетки.</summary>
+    /// <param name="requiredInput">Запис, який уже належить цій версії.</param>
+    /// <param name="severity">Нова критичність.</param>
+    /// <param name="hint">Новий текст поверх типового шаблону.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або запис чужий.
+    /// </exception>
+    public void EditRequiredInput(
+        MethodologyRequiredInput requiredInput, RequiredInputSeverity severity, LocalizedText? hint)
+    {
+        ArgumentNullException.ThrowIfNull(requiredInput);
+
+        RequireDraft("обов'язкові вхідні колонки");
+        RequireOwn(
+            requiredInput.MethodologyVersionId,
+            "Обов'язкову вхідну колонку",
+            requiredInput.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        requiredInput.Update(severity, hint);
+    }
+
     /// <summary>Оголошує вихід версії. Лише для чернетки (ФВ-16.6).</summary>
     /// <param name="code">Код виходу — те, на що посилається прив'язка.</param>
     /// <param name="unitId">Одиниця результату; обов'язкова.</param>

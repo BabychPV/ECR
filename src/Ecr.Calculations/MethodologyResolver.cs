@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -139,7 +138,7 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
             // сховищем за `Priority`, і перебирати далі означало б
             // дозволити загальному правилу «вся таблиця» мовчки перекрити
             // точніше, поставлене перед ним.
-            var winner = rules.FirstOrDefault(rule => Matches(rule.MatchJson, values));
+            var winner = rules.FirstOrDefault(rule => MethodologyRuleMatcher.Matches(rule.MatchJson, values));
 
             if (winner is not null)
             {
@@ -148,50 +147,6 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
         }
 
         return matched;
-    }
-
-    /// <summary>Чи задовольняє рядок предикат правила.</summary>
-    /// <remarks>
-    /// Формат: плаский JSON-об'єкт «колонка → очікуване значення». Усі пари
-    /// мусять збігтися — це кон'юнкція. Складніші форми свідомо не
-    /// підтримуються: правило, яке неможливо прочитати очима, неможливо й
-    /// перевірити на перетин із сусіднім (ФВ-13.9).
-    /// </remarks>
-    private static bool Matches(string matchJson, Dictionary<string, string?> values)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(matchJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return false;
-            }
-
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                var expected = property.Value.ValueKind == JsonValueKind.String
-                    ? property.Value.GetString()
-                    : property.Value.ToString();
-
-                if (!values.TryGetValue(property.Name, out var actual)
-                    || !string.Equals(actual, expected, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-            }
-
-            // ⚠ Порожній об'єкт збігається з УСІМА рядками. Це легальне
-            // правило «вся таблиця», і саме тому воно має найнижчий Priority:
-            // інакше воно перекрило б усі точніші.
-            return true;
-        }
-        catch (JsonException)
-        {
-            // Зламаний предикат не збігається ні з чим. Кинути звідси означало б
-            // зупинити прогін цілої таблиці через одне правило; помилку ловить
-            // перевірка публікації, а тут вона не має валити решту.
-            return false;
-        }
     }
 
     /// <summary>Значення комірки як текст для порівняння в предикаті.</summary>

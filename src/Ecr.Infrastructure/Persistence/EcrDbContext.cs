@@ -92,6 +92,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
 
+    /// <summary>Обов'язкові вхідні колонки — gate перед збереженням клітинки (директива «обов'язкові вхідні колонки методології»).</summary>
+    public DbSet<MethodologyRequiredInput> MethodologyRequiredInputs => Set<MethodologyRequiredInput>();
+
     /// <summary>Чиї формули видно виразам версії через <c>!Name</c> (директива ПК-1 №05, поправка 10).</summary>
     public DbSet<MethodologyImport> MethodologyImports => Set<MethodologyImport>();
 

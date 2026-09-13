@@ -355,6 +355,98 @@ public sealed class SaveMethodologyRuleHandler(
     }
 }
 
+/// <summary>Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки методології»).</summary>
+public sealed class ListMethodologyRequiredInputsHandler(
+    IMethodologyDraftStore drafts,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право на читання (`02-contracts.md` §9).</summary>
+    public const string Permission = "Calculation.View";
+
+    /// <summary>Читає вимоги версії.</summary>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Вимоги в порядку <c>ColumnDefId</c>.</returns>
+    public async Task<IReadOnlyList<MethodologyRequiredInputDto>> HandleAsync(
+        int methodologyVersionId, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var requiredInputs = await drafts.GetAllRequiredInputsAsync(methodologyVersionId, ct)
+            .ConfigureAwait(false);
+
+        return [.. requiredInputs.Select(MethodologyAuthoringMap.RequiredInput)];
+    }
+}
+
+/// <summary>
+/// Заводить або змінює обов'язкову вхідну колонку **чернетки** (директива
+/// «обов'язкові вхідні колонки методології», gate перед збереженням клітинки).
+/// </summary>
+/// <remarks>
+/// ⛔ Конфігурація ЦІЄЇ вимоги — під окремим правом
+/// (<c>Calculation.ManageRequiredInputs</c>), а НЕ під <c>Calculation.EditRule</c>:
+/// сама перевірка при збереженні клітинки (<c>PatchCellsHandler</c>) права не
+/// питає ні в кого — інакше сенс gate-у зникає для будь-кого без права
+/// редагувати методологію, тобто для всіх, хто насправді вводить дані.
+/// </remarks>
+public sealed class SaveMethodologyRequiredInputHandler(
+    IMethodologyDraftStore drafts,
+    IUnitOfWork uow,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Право на конфігурацію вимог (`02-contracts.md` §9).</summary>
+    public const string Permission = "Calculation.ManageRequiredInputs";
+
+    /// <summary>Записує вимогу; створює її, якщо для цієї колонки ще немає.</summary>
+    /// <param name="methodologyVersionId">Версія-чернетка.</param>
+    /// <param name="columnDefId">Колонка документа, обов'язкова як вхід.</param>
+    /// <param name="severity">Блокує чи лише попереджає збереження.</param>
+    /// <param name="hint">Текст поверх типового шаблону; <c>null</c> — типового достатньо.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Записану вимогу.</returns>
+    /// <exception cref="NotFoundException">Версії немає.</exception>
+    /// <exception cref="BusinessRuleException">Версія опублікована.</exception>
+    public async Task<MethodologyRequiredInputDto> HandleAsync(
+        int methodologyVersionId,
+        int columnDefId,
+        RequiredInputSeverity severity,
+        IReadOnlyDictionary<string, string>? hint,
+        CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+
+        var hintText = hint is null ? null : new LocalizedText(hint);
+
+        var existing = await drafts
+            .FindRequiredInputAsync(methodologyVersionId, columnDefId, ct)
+            .ConfigureAwait(false);
+
+        MethodologyRequiredInput requiredInput;
+
+        if (existing is null)
+        {
+            requiredInput = version.AddRequiredInput(columnDefId, severity, hintText);
+            drafts.Add(requiredInput);
+        }
+        else
+        {
+            version.EditRequiredInput(existing, severity, hintText);
+            requiredInput = existing;
+        }
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return MethodologyAuthoringMap.RequiredInput(requiredInput);
+    }
+}
+
 /// <summary>Оголошені виходи версії (ФВ-16.6).</summary>
 public sealed class ListMethodologyOutputsHandler(
     IMethodologyStore methodologies,
@@ -764,6 +856,18 @@ public static class MethodologyAuthoringMap
         ArgumentNullException.ThrowIfNull(rule);
 
         return new MethodologyRuleDto(rule.Id, rule.Code, rule.MatchJson, rule.Priority, rule.IsActive);
+    }
+
+    /// <summary>Складає DTO обов'язкової вхідної колонки.</summary>
+    /// <param name="requiredInput">Вимога версії.</param>
+    /// <returns>Вимога для конфігуратора.</returns>
+    public static MethodologyRequiredInputDto RequiredInput(MethodologyRequiredInput requiredInput)
+    {
+        ArgumentNullException.ThrowIfNull(requiredInput);
+
+        return new MethodologyRequiredInputDto(
+            requiredInput.Id, requiredInput.ColumnDefId, requiredInput.Severity,
+            requiredInput.HintL10n?.Values);
     }
 
     /// <summary>Складає DTO виходу.</summary>

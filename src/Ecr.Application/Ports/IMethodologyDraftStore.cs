@@ -106,6 +106,19 @@ public interface IMethodologyDraftStore
     public Task<MethodologyRule?> FindRuleAsync(
         int methodologyVersionId, string code, CancellationToken ct);
 
+    /// <summary>Вимога версії за колонкою — відстежувана; <c>null</c>, якщо її немає.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="columnDefId">Колонка документа.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Вимога або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⚠ Ключ — колонка, а не код: <see cref="MethodologyRequiredInput"/> не
+    /// має природного коду (на відміну від <see cref="MethodologyRule"/>),
+    /// уникальність тримається на <c>(MethodologyVersionId, ColumnDefId)</c>.
+    /// </remarks>
+    public Task<MethodologyRequiredInput?> FindRequiredInputAsync(
+        int methodologyVersionId, int columnDefId, CancellationToken ct);
+
     /// <summary>Вихід версії за кодом — відстежуваний; <c>null</c>, якщо його немає.</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="code">Код виходу.</param>
@@ -135,6 +148,13 @@ public interface IMethodologyDraftStore
     public Task<IReadOnlyList<MethodologyRule>> GetAllRulesAsync(
         int methodologyVersionId, CancellationToken ct);
 
+    /// <summary>Усі обов'язкові вхідні колонки версії.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Вимоги в порядку <c>ColumnDefId</c>.</returns>
+    public Task<IReadOnlyList<MethodologyRequiredInput>> GetAllRequiredInputsAsync(
+        int methodologyVersionId, CancellationToken ct);
+
     /// <summary>Усі тести версії — золотий набір (ФВ-13.7).</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -153,6 +173,10 @@ public interface IMethodologyDraftStore
     /// <summary>Ставить правило в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="rule">Правило версії-чернетки.</param>
     public void Add(MethodologyRule rule);
+
+    /// <summary>Ставить вимогу в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="requiredInput">Обов'язкова вхідна колонка версії-чернетки.</param>
+    public void Add(MethodologyRequiredInput requiredInput);
 
     /// <summary>Ставить вихід у чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="output">Оголошений вихід версії-чернетки.</param>

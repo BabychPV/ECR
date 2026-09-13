@@ -191,6 +191,8 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveMethodologyConstantHandler>();
         services.AddScoped<Calculations.ListMethodologyRulesHandler>();
         services.AddScoped<Calculations.SaveMethodologyRuleHandler>();
+        services.AddScoped<Calculations.ListMethodologyRequiredInputsHandler>();
+        services.AddScoped<Calculations.SaveMethodologyRequiredInputHandler>();
         services.AddScoped<Calculations.ListMethodologyOutputsHandler>();
         services.AddScoped<Calculations.SaveMethodologyOutputHandler>();
         services.AddScoped<Calculations.ListMethodologyTestCasesHandler>();

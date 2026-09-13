@@ -171,3 +171,41 @@
  * анімований навмисно. Мигтіння «брудної» комірки в таблиці на 500 рядків
  * зробило б екран непридатним для роботи, а не помітнішим.
  */
+
+/*
+ * ── обов'язкові вхідні колонки методології (директива «обов'язкові вхідні
+ *    колонки методології») ─────────────────────────────────────────────────
+ *
+ * ⚠ ДОДАТКОВИЙ маркер, не шостий/сьомий пункт виміряної палітри вище: він
+ * накладається на будь-який стан (порожню комірку, dirty, readOnly, ...),
+ * а не змагається з ним за пріоритет `cellStateOf`. Тому й куток інший —
+ * лівий нижній, вільний від решти чотирьох маркерів, — і немає вимоги
+ * ΔE00 ≥ 20 проти п'яти станів вище: причина завжди продубльована текстом
+ * (`title`), а не лише кольором.
+ */
+.ecr-cell-required-input-blocked::before,
+.ecr-cell-required-input-warning::before {
+  content: '!';
+  position: absolute;
+  left: 2px;
+  bottom: 0;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.ecr-cell-required-input-blocked::before {
+  color: #b3170c;
+}
+
+.ecr-cell-required-input-warning::before {
+  color: #8a6100;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-required-input-blocked::before {
+  color: #f07369;
+}
+
+:root[data-mantine-color-scheme='dark'] .ecr-cell-required-input-warning::before {
+  color: #ffd24d;
+}
