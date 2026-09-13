@@ -1452,7 +1452,33 @@ USING (VALUES
     (N'expr.periodExpectedNumber',             N'en', N'A number was expected after "[Period:".', 1),
     (N'expr.expectedCloseBracket',             N'en', N'Expected "]".', 1),
     (N'expr.rowKeyExpected',                   N'en', N'A row key was expected after ":".', 1),
-    (N'expr.expectedCloseBracketAfterRange',   N'en', N'Expected "]" after the range.', 1)
+    (N'expr.expectedCloseBracketAfterRange',   N'en', N'Expected "]" after the range.', 1),
+
+    -- /admin/health (`Q-304`): статуси перевірок будувалися одразу готовим
+    -- українським реченням (`HealthCheckResult.Description`) — не через
+    -- `Ecr.Expressions`-подібну відсутність DI (`Q-303`), а через звичайний
+    -- пропуск: перевірки резолвяться в scope запиту (той самий, з якого
+    -- `DatabaseHealthCheck` уже бере `EcrDbContext`), просто каталогом не
+    -- скористались. Приватна область: `/admin/health` вимагає входу.
+    (N'health.db.rcsiDisabled',                N'en', N'RCSI is disabled.', 1),
+    (N'health.db.missingFilegroups',           N'en', N'Missing filegroups: {names}.', 1),
+    (N'health.db.partitionsLow',               N'en', N'Partitions ahead: {count} — below the minimum of {minimum}.', 1),
+    (N'health.db.available',                   N'en', N'Database is available.', 1),
+    (N'health.db.unavailable',                 N'en', N'Database is unavailable.', 1),
+    (N'health.db.limitation.onlineIndexRebuild', N'en', N'Online index rebuild requires a maintenance window (ONLINE = ON is not available).', 1),
+    (N'health.db.limitation.resourceGovernor', N'en', N'Background jobs are not isolated from the interactive peak (no Resource Governor).', 1),
+    (N'health.db.limitation.rcsi',              N'en', N'RCSI is disabled: reads will block writes during the peak of the last day of the period.', 1),
+    (N'health.db.limitation.archiveBatchSize', N'en', N'Archive batch size: {size}.', 1),
+    (N'health.jobs.notRegistered',              N'en', N'The scheduler is not registered in the container.', 1),
+    (N'health.jobs.stopped',                    N'en', N'The scheduler is stopped: no background job will run.', 1),
+    (N'health.jobs.noSchedules',                N'en', N'The scheduler is alive, but no schedule is registered.', 1),
+    (N'health.jobs.running',                    N'en', N'The scheduler is running.', 1),
+    (N'health.jobs.unavailable',                N'en', N'The scheduler is unavailable.', 1),
+    (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
+    (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
+    (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
+    (N'health.sources.gapsCount',                N'en', N'Sources with a coverage gap: {count}.', 1),
+    (N'health.sources.allCollectedNoGaps',      N'en', N'All active sources are collected with no gaps.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

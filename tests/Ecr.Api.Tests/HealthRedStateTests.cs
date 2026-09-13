@@ -1,4 +1,5 @@
 ﻿using Ecr.Api.Health;
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Infrastructure.Persistence;
@@ -44,7 +45,7 @@ public sealed class HealthRedStateTests
     [Trait("Requirement", "ФВ-12.9")]
     public async Task Задачі_червоніють_коли_планувальника_немає_в_контейнері()
     {
-        var check = new JobsHealthCheck(factory: null);
+        var check = Jobs(factory: null);
 
         var result = await check.CheckHealthAsync(Context, CancellationToken.None);
 
@@ -65,7 +66,7 @@ public sealed class HealthRedStateTests
         var factory = Substitute.For<ISchedulerFactory>();
         factory.GetScheduler(Arg.Any<CancellationToken>()).Returns(scheduler);
 
-        var result = await new JobsHealthCheck(factory).CheckHealthAsync(Context, CancellationToken.None);
+        var result = await Jobs(factory).CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
     }
@@ -80,7 +81,7 @@ public sealed class HealthRedStateTests
         var factory = Substitute.For<ISchedulerFactory>();
         factory.GetScheduler(Arg.Any<CancellationToken>()).Returns(scheduler);
 
-        var result = await new JobsHealthCheck(factory).CheckHealthAsync(Context, CancellationToken.None);
+        var result = await Jobs(factory).CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
     }
@@ -97,7 +98,7 @@ public sealed class HealthRedStateTests
         var factory = Substitute.For<ISchedulerFactory>();
         factory.GetScheduler(Arg.Any<CancellationToken>()).Returns(scheduler);
 
-        var result = await new JobsHealthCheck(factory).CheckHealthAsync(Context, CancellationToken.None);
+        var result = await Jobs(factory).CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
         Assert.Equal(7, result.Data["triggers"]);
@@ -110,7 +111,7 @@ public sealed class HealthRedStateTests
     [Trait("Requirement", "ФВ-11.9")]
     public async Task Джерела_червоніють_коли_сховища_немає_в_контейнері()
     {
-        var result = await new SourcesHealthCheck(sources: null)
+        var result = await Sources(sources: null)
             .CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
@@ -123,7 +124,7 @@ public sealed class HealthRedStateTests
     {
         var store = StoreWith(Source("pi-water", active: true, lastRunStatus: "Failed", gap: null));
 
-        var result = await new SourcesHealthCheck(store)
+        var result = await Sources(store)
             .CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
@@ -138,7 +139,7 @@ public sealed class HealthRedStateTests
         var store = StoreWith(
             Source("pi-water", active: true, lastRunStatus: "Succeeded", gap: new DateTime(2026, 1, 1)));
 
-        var result = await new SourcesHealthCheck(store)
+        var result = await Sources(store)
             .CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
@@ -152,7 +153,7 @@ public sealed class HealthRedStateTests
         // ⛔ Забуте налаштування мовчить, і мовчання приймають за спокій.
         var store = StoreWith(Source("pi-air", active: true, lastRunStatus: null, gap: null));
 
-        var result = await new SourcesHealthCheck(store)
+        var result = await Sources(store)
             .CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
@@ -168,7 +169,7 @@ public sealed class HealthRedStateTests
         // саме так виникають індикатори, на які перестають дивитися.
         var store = StoreWith(Source("pi-water", active: false, lastRunStatus: null, gap: null));
 
-        var result = await new SourcesHealthCheck(store)
+        var result = await Sources(store)
             .CheckHealthAsync(Context, CancellationToken.None);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
@@ -197,7 +198,9 @@ public sealed class HealthRedStateTests
         var check = new DatabaseHealthCheck(
             Substitute.For<ISqlCapabilities>(),
             broken,
-            Substitute.For<IClock>());
+            Substitute.For<IClock>(),
+            Substitute.For<IUiStringCatalog>(),
+            Substitute.For<ICurrentUser>());
 
         var result = await check.CheckHealthAsync(Context, CancellationToken.None);
 
@@ -211,6 +214,18 @@ public sealed class HealthRedStateTests
     }
 
     // ── допоміжне ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Незаповнена заглушка каталогу (`Q-304`): `HealthCatalogText.ResolveAsync`
+    /// ковтає збій резолву й повертає англійський fallback — тестам цього
+    /// файлу текст `Description` не важливий, важливий лише статус/`Data`.
+    /// </summary>
+    private static JobsHealthCheck Jobs(ISchedulerFactory? factory)
+        => new(factory, Substitute.For<IUiStringCatalog>(), Substitute.For<ICurrentUser>());
+
+    /// <summary>Те саме, що <see cref="Jobs"/>, для перевірки джерел.</summary>
+    private static SourcesHealthCheck Sources(ICollectionStore? sources)
+        => new(sources, Substitute.For<IUiStringCatalog>(), Substitute.For<ICurrentUser>());
 
     private static IScheduler StartedScheduler(int jobs, int triggers)
     {
