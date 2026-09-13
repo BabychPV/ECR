@@ -2,7 +2,6 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -209,16 +208,16 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     /// який та сама перевірка вже дає в нераситовому випадку.
     /// </summary>
     /// <remarks>
-    /// 2601 — «Cannot insert duplicate key row... with unique index»; 2627 —
-    /// «Violation of UNIQUE KEY constraint». SQL Server розрізняє їх залежно
-    /// від того, чи індекс сам є обмеженням (`CONSTRAINT`) — тут це звичайний
-    /// унікальний індекс (2601), але 2627 перевіряється теж: обидва коди
-    /// означають РІВНО те саме «дублікат ключа», і залежність від
-    /// внутрішньої деталі СУБД (яким саме шляхом СУБД оголосила порушення)
-    /// зробила б перевірку крихкою до версії сервера.
+    /// ⛔ Перевірка «це дублікат ключа?» винесена в <see cref="SqlConflict"/>
+    /// (integration-pending фікс необроблених `500` на дублікаті ролі/проєкту/
+    /// запису довідника, той самий клас дефекту за межами `doc.TableRow`):
+    /// три нові виклики (<c>UserStore.AddRoleAsync</c>,
+    /// <c>UnitOfWork.SaveChangesAsync</c>) читають РІВНО ту саму умову, і три
+    /// копії магічних чисел 2601/2627 розійшлися б до першої правки одного з
+    /// примірників.
     /// </remarks>
     private static bool IsRowKeyConflict(DbUpdateException ex)
-        => ex.InnerException is SqlException { Number: 2601 or 2627 };
+        => SqlConflict.IsUniqueConstraintViolation(ex);
 
     private static BusinessRuleException DuplicateRowKeyException(IReadOnlyList<string> rowKeys)
         => new(

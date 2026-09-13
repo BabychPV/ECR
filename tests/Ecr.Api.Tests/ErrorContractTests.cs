@@ -175,6 +175,34 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         Assert.Equal(ErrorCodes.RowDuplicate, code);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "lane1-2-4-unhandled-500-pattern")]
+    [InlineData("ECR-SEC-0409")]
+    [InlineData("ECR-PRJ-0409")]
+    public void Дублікат_коду_ролі_або_проєкту_повертає_409_а_не_422(string code)
+    {
+        // ⛔ Findings 1-2: до фіксу цих кодів не існувало взагалі, і другий
+        // запис тим самим кодом ролі/проєкту падав НЕОБРОБЛЕНИМ
+        // `DbUpdateException` — жодної гілки `Map` для нього не було, тож
+        // конвеєр віддавав голий `500`. Тепер `UserStore.AddRoleAsync` і
+        // `UnitOfWork.SaveChangesAsync` ловлять конфлікт унікального
+        // індексу і кидають `BusinessRuleException` із цими кодами — цей
+        // тест перевіряє РІВНО другу половину: що конвеєр відповідає на них
+        // `409`, а не провалюється у загальний арм `BusinessRuleException`
+        // (`422`), як `ECR-ROW-0409` до Q-150.
+        var exception = new Ecr.Application.Errors.BusinessRuleException(code, "Код уже зайнято.");
+
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var (status, mappedCode, _, _) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+
+        Assert.Equal(409, status);
+        Assert.Equal(code, mappedCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
