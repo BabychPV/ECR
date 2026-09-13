@@ -117,7 +117,8 @@ public sealed class CreateRoleHandler(
         if (!profile.Has(ListRolesHandler.Permission))
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Потрібне право {ListRolesHandler.Permission}.");
+                "ECR-AUTH-0403", $"Потрібне право {ListRolesHandler.Permission}.",
+                new Dictionary<string, object?> { ["permission"] = ListRolesHandler.Permission });
         }
 
         // ⛔ Правила «видати можна лише те, що маєш» більше НЕМАЄ (`D-121`,
@@ -461,7 +462,8 @@ public sealed class CreateUserHandler(
         if (!profile.Has(ListUsersHandler.Permission))
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Потрібне право {ListUsersHandler.Permission}.");
+                "ECR-AUTH-0403", $"Потрібне право {ListUsersHandler.Permission}.",
+                new Dictionary<string, object?> { ["permission"] = ListUsersHandler.Permission });
         }
 
         if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is not null)
