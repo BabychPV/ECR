@@ -91,6 +91,28 @@ public interface IMethodologyStore
     public Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Обов'язкові вхідні колонки версії — gate перед збереженням клітинки
+    /// (директива «обов'язкові вхідні колонки методології»).
+    /// </summary>
+    public Task<IReadOnlyList<MethodologyRequiredInput>> GetRequiredInputsAsync(
+        int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Методології, активно прив'язані бодай однією колонкою до цієї таблиці
+    /// (<c>cfg.CalculationBinding</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Потрібно gate-у обов'язкових вхідних колонок у
+    /// <c>PatchCellsHandler</c>: щоб перевірити, чи в рядка є визначена
+    /// методологія, спершу треба знати, яка методологія взагалі МОЖЕ
+    /// стосуватися цієї таблиці — так само, як <c>RecalculationJob</c> це
+    /// робить перед прогоном, лише прицільно по одній таблиці, а не по
+    /// всьому документу.
+    /// </remarks>
+    public Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTableAsync(
+        int tableDefId, CancellationToken ct);
+
+    /// <summary>
     /// Методологія-контейнер разом з усіма своїми версіями; <c>null</c> — версії немає.
     /// </summary>
     /// <remarks>

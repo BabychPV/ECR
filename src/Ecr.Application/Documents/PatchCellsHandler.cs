@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
 
@@ -27,6 +28,7 @@ public sealed class PatchCellsHandler(
     IMetadataCache metadata,
     IAccessDecisionService access,
     Validation.ValidationEngine validation,
+    IMethodologyStore methodologies,
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
@@ -59,7 +61,8 @@ public sealed class PatchCellsHandler(
         await EnsureAccessAsync(request, context, ct).ConfigureAwait(false);
 
         var changes = await BuildCellChangesAsync(request, context, ct).ConfigureAwait(false);
-        var messages = EnsureValidationPasses(context, request, changes);
+        var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
+        var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages);
 
         var now = clock.UtcNow;
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
@@ -417,12 +420,274 @@ public sealed class PatchCellsHandler(
     }
 
     /// <summary>
+    /// Gate обов'язкових вхідних колонок методології — директива «обов'язкові
+    /// вхідні колонки методології», §1.3: рядок, методологію якого вже видно з
+    /// прив'язки й правил, не можна зберегти з незаповненим Block-входом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рядок без визначеної методології — поведінка НЕ МІНЯЄТЬСЯ жодного
+    /// разу: перевірка виходить одразу, щойно з'ясовується, що таблиця не
+    /// прив'язана до жодної методології (найчастіший випадок), без жодного
+    /// додаткового читання бази понад одне (<c>GetMethodologyIdsBoundToTableAsync</c>).
+    ///
+    /// ⛔ Не через <c>Ecr.Calculations.MethodologyResolver</c>: той належить
+    /// проєкту, який САМ залежить від <c>Ecr.Application</c> (тут), і
+    /// послатися на нього означало б цикл посилань проєктів. Спільний
+    /// предикат зіставлення — <see cref="MethodologyRuleMatcher"/> (`Ecr.Domain`,
+    /// залежність якого — нуль), яким користуються ОБИДВА боки замість двох
+    /// копій логіки. Вибір чинної версії на дату — та сама LINQ-вибірка над
+    /// <see cref="MethodologyVersionKey.Currency"/>, що й
+    /// <c>MethodologyResolver.ResolveVersionAsync</c>: десяток рядків, не
+    /// другий рушій.
+    ///
+    /// ⚠ Комірки читаються ОДНИМ пакетним запитом на ВЕСЬ батч (усі зачеплені
+    /// рядки × усі потрібні колонки), і лише тоді, коли є бодай одна прив'язана
+    /// методологія з непорожнім правилом і непорожнім переліком вимог. Без
+    /// цього читання неможливо знати, чи заповнена вже збережена (не в ЦЬОМУ
+    /// патчі) колонка — перевіряється UNION бази й поточної правки, як вимагає
+    /// директива, а не сам лише патч.
+    /// </remarks>
+    private async Task<List<Validation.ValidationMessage>> EnforceRequiredInputsAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var messages = new List<Validation.ValidationMessage>();
+
+        if (changes.Touched.Count == 0)
+        {
+            return messages;
+        }
+
+        var methodologyIds = await methodologies
+            .GetMethodologyIdsBoundToTableAsync(context.Instance.TableDefId, ct)
+            .ConfigureAwait(false);
+
+        if (methodologyIds.Count == 0)
+        {
+            return messages;
+        }
+
+        var bounds = await periods
+            .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
+            .ConfigureAwait(false);
+
+        if (bounds is null)
+        {
+            return messages;
+        }
+
+        var applicable = new List<ApplicableMethodology>();
+        foreach (var methodologyId in methodologyIds)
+        {
+            var applied = await ResolveApplicableAsync(methodologyId, bounds.PeriodEnd, ct).ConfigureAwait(false);
+            if (applied is not null)
+            {
+                applicable.Add(applied);
+            }
+        }
+
+        if (applicable.Count == 0)
+        {
+            return messages;
+        }
+
+        // Колонки для зіставлення правил (MatchJson) і перевірки вимог, разом
+        // — щоб прочитати їх ОДНИМ пакетним запитом на всі рядки батчу.
+        var neededColumnIds = applicable
+            .SelectMany(a => a.RequiredInputs.Select(r => r.ColumnDefId))
+            .Concat(applicable.SelectMany(a => a.Rules.SelectMany(r => MatchJsonColumnIds(r.MatchJson))))
+            .Distinct()
+            .ToList();
+
+        var addresses = (
+            from rowId in changes.Touched
+            from columnId in neededColumnIds
+            select new CellAddress(context.PeriodKey, rowId, columnId))
+            .ToList();
+
+        var baseline = addresses.Count == 0
+            ? new Dictionary<CellAddress, CellValueData>()
+            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+
+        var patchByRow = changes.Upserts
+            .GroupBy(u => u.Address.TableRowId)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(u => u.Address.ColumnDefId, u => u.Value));
+        var deletedByRow = changes.Deletes
+            .GroupBy(d => d.TableRowId)
+            .ToDictionary(g => g.Key, g => g.Select(d => d.ColumnDefId).ToHashSet());
+
+        foreach (var rowId in changes.Touched)
+        {
+            string? ValueOf(int columnId)
+            {
+                if (deletedByRow.TryGetValue(rowId, out var deleted) && deleted.Contains(columnId))
+                {
+                    return null;
+                }
+
+                if (patchByRow.TryGetValue(rowId, out var patched)
+                    && patched.TryGetValue(columnId, out var patchedValue))
+                {
+                    return Text(patchedValue);
+                }
+
+                return baseline.TryGetValue(new CellAddress(context.PeriodKey, rowId, columnId), out var stored)
+                    ? Text(stored)
+                    : null;
+            }
+
+            var rowKey = changes.RowKeyById.GetValueOrDefault(rowId, string.Empty);
+            var matchValues = neededColumnIds.ToDictionary(
+                columnId => columnId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ValueOf,
+                StringComparer.Ordinal);
+
+            foreach (var applied in applicable)
+            {
+                var winner = applied.Rules
+                    .FirstOrDefault(rule => MethodologyRuleMatcher.Matches(rule.MatchJson, matchValues));
+
+                if (winner is null)
+                {
+                    continue;
+                }
+
+                foreach (var required in applied.RequiredInputs)
+                {
+                    if (ValueOf(required.ColumnDefId) is not null)
+                    {
+                        continue;
+                    }
+
+                    var columnCode = context.Snapshot.ColumnsById.TryGetValue(required.ColumnDefId, out var column)
+                        ? column.Code
+                        : required.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                    var defaultHint =
+                        $"Колонка «{columnCode}» обов'язкова для методології «{applied.MethodologyCode}».";
+
+                    messages.Add(new Validation.ValidationMessage(
+                        required.Severity == RequiredInputSeverity.Block
+                            ? ValidationSeverity.Error
+                            : ValidationSeverity.Warning,
+                        "ECR-CALC-0437",
+                        required.HintL10n?.Get("en") ?? defaultHint,
+                        context.Instance.TableDefId,
+                        rowKey,
+                        columnCode,
+                        BlocksSave: required.Severity == RequiredInputSeverity.Block));
+                }
+            }
+        }
+
+        return messages;
+    }
+
+    /// <summary>
+    /// Версія методології, чинна на дату, разом з активними правилами й
+    /// обов'язковими вхідними колонками; <c>null</c> — нічого з цього
+    /// перевіряти не треба (немає чинної версії, правил або вимог).
+    /// </summary>
+    private async Task<ApplicableMethodology?> ResolveApplicableAsync(
+        int methodologyId, DateOnly onDate, CancellationToken ct)
+    {
+        var versions = await methodologies.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
+
+        // ⚠ Те саме правило вибору, що й `MethodologyResolver.ResolveVersionAsync`
+        // (пізніша `EffectiveFrom` → старша версія → більший Id) — той самий
+        // компаратор домену, не друга копія.
+        var version = versions
+            .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= onDate)
+            .OrderByDescending(
+                v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                MethodologyVersionKey.Currency)
+            .FirstOrDefault();
+
+        if (version is null)
+        {
+            return null;
+        }
+
+        var rules = await methodologies.GetRulesAsync(version.Id, ct).ConfigureAwait(false);
+        if (rules.Count == 0)
+        {
+            return null;
+        }
+
+        var requiredInputs = await methodologies.GetRequiredInputsAsync(version.Id, ct).ConfigureAwait(false);
+        if (requiredInputs.Count == 0)
+        {
+            return null;
+        }
+
+        var methodology = await methodologies.FindByVersionAsync(version.Id, ct).ConfigureAwait(false);
+
+        return new ApplicableMethodology(methodology?.Code ?? methodologyId.ToString(
+            System.Globalization.CultureInfo.InvariantCulture), rules, requiredInputs);
+    }
+
+    /// <summary>Методологія, чия версія на дату дійсно має що перевіряти в рядку.</summary>
+    private sealed record ApplicableMethodology(
+        string MethodologyCode,
+        IReadOnlyList<MethodologyRule> Rules,
+        IReadOnlyList<MethodologyRequiredInput> RequiredInputs);
+
+    /// <summary>
+    /// <c>ColumnDefId</c>, згадані ключами предиката <c>MatchJson</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Зламаний предикат не має жодного потрібного стовпця — так само, як
+    /// <see cref="MethodologyRuleMatcher.Matches"/> вважає його таким, що не
+    /// збігається ні з чим, а не валить обробник.
+    /// </remarks>
+    private static IEnumerable<int> MatchJsonColumnIds(string matchJson)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(matchJson);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return [];
+            }
+
+            return [.. document.RootElement.EnumerateObject()
+                .Select(p => int.TryParse(
+                    p.Name, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
+                .Where(id => id is not null)
+                .Select(id => id!.Value)];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Значення комірки як текст — та сама умова «заповнено», що й у зіставленні правил.</summary>
+    private static string? Text(CellValueData value)
+        => value.ValueString
+           ?? value.ValueNumeric?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+           ?? value.ValueRegistryEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+           ?? value.ValueBool?.ToString();
+
+    /// <summary>
     /// Валідація. ⚠ Блокує запис ЛИШЕ комірковий Error (R-B3, D-90):
     /// заборона зберегти проміжний стан зробила б роботу з великою таблицею
     /// неможливою — користувач заповнює її не за один раз.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Обов'язкові вхідні колонки методології перевіряються ОКРЕМО від
+    /// коміркової/рядкової валідації, а не домішуються в той самий список
+    /// перед підрахунком блокуючих: інакше відмова, чия причина —
+    /// «методологія рядка не бачить заповненого входу», доїхала б клієнту як
+    /// <c>ECR-CELL-0422</c> — той самий код, що й звичайна помилка формату
+    /// значення, — і людина шукала б причину не там (директива «обов'язкові
+    /// вхідні колонки методології», §1.3).
+    /// </remarks>
     private List<Validation.ValidationMessage> EnsureValidationPasses(
-        RequestContext context, PatchCellsRequest request, CellChangeLists changes)
+        RequestContext context,
+        PatchCellsRequest request,
+        CellChangeLists changes,
+        IReadOnlyList<Validation.ValidationMessage> requiredInputMessages)
     {
         var messages = Validate(context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, context.RowIds);
         var blocking = messages.Where(m => m.BlocksSave).ToList();
@@ -438,6 +703,23 @@ public sealed class PatchCellsHandler(
                         .ToList(),
                 });
         }
+
+        var blockingRequiredInputs = requiredInputMessages.Where(m => m.BlocksSave).ToList();
+        if (blockingRequiredInputs.Count > 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0437",
+                $"Не заповнено обов'язкові вхідні колонки методології: рядків із помилкою — "
+                + $"{blockingRequiredInputs.Select(m => m.RowKey).Distinct().Count()}.",
+                new Dictionary<string, object?>
+                {
+                    ["cells"] = blockingRequiredInputs
+                        .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
+                        .ToList(),
+                });
+        }
+
+        messages.AddRange(requiredInputMessages);
 
         return messages;
     }

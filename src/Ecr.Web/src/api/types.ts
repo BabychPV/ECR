@@ -291,6 +291,15 @@ export type MethodologyRuleDto = Schemas['MethodologyRuleDto'];
 /** Запис правила відбору рядків. */
 export type SaveMethodologyRuleRequest = Schemas['SaveMethodologyRuleRequest'];
 
+/** Критичність незаповненої обов'язкової вхідної колонки: блокує чи попереджає. */
+export type RequiredInputSeverity = Schemas['RequiredInputSeverity'];
+
+/** Обов'язкова вхідна колонка методології (директива «обов'язкові вхідні колонки методології»). */
+export type MethodologyRequiredInputDto = Schemas['MethodologyRequiredInputDto'];
+
+/** Запис обов'язкової вхідної колонки. */
+export type SaveMethodologyRequiredInputRequest = Schemas['SaveMethodologyRequiredInputRequest'];
+
 /** Оголошений вихід версії — те, що методологія повертає. */
 export type MethodologyOutputDto = Schemas['MethodologyOutputDto'];
 

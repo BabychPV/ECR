@@ -1,4 +1,5 @@
 ﻿using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Units;
@@ -376,6 +377,50 @@ public sealed class MethodologyRuleConfiguration : IEntityTypeConfiguration<Meth
 
         builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
                .HasConstraintName("FK_MR_Version");
+    }
+}
+
+/// <summary>
+/// Конфігурація <see cref="MethodologyRequiredInput"/> — обов'язкових вхідних
+/// колонок (директива «обов'язкові вхідні колонки методології», gate перед
+/// збереженням).
+/// </summary>
+public sealed class MethodologyRequiredInputConfiguration
+    : IEntityTypeConfiguration<MethodologyRequiredInput>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyRequiredInput> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyRequiredInput", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Severity)
+               .HasColumnName("Severity")
+               .HasDefaultValue(Domain.Enums.RequiredInputSeverity.Block);
+
+        // ⚠ Той самий спосіб мапити НУЛЬОВНИЙ LocalizedText, що й
+        // `Document.NameL10n` (`DocumentConfiguration`): типова конвенція
+        // `LocalizedTextMapping.LocalizedText(...)` розрахована на ОБОВ'ЯЗКОВЕ
+        // поле й додає `IsRequired()`, а тут null — легальний стан («типового
+        // шаблону достатньо», ASK директиви).
+        builder.Property(x => x.HintL10n)
+               .HasConversion(
+                   v => v == null ? null : v.ToJson(),
+                   v => v == null ? null : Domain.ValueObjects.LocalizedText.FromJson(v))
+               .HasColumnType("nvarchar(max)");
+
+        // ⛔ Унікальність — не general-purpose "колонка обов'язкова" (та вісь —
+        // `ColumnDef.IsRequired`), а «ця колонка — вхід САМЕ ЦІЄЇ версії», і
+        // повторити пару двічі означало б два суперечливі записи про той самий
+        // факт (наприклад, Block і Warn на ту саму колонку одночасно).
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.ColumnDefId })
+               .IsUnique().HasDatabaseName("UQ_MethodologyRequiredInput");
+
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_MRI_Version");
+        builder.HasOne<ColumnDef>().WithMany().HasForeignKey(x => x.ColumnDefId)
+               .HasConstraintName("FK_MRI_Column");
     }
 }
 

@@ -3,7 +3,7 @@ import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import type { ColumnDto, CreateRowRequest, TableSliceDto } from '@/api/types';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
@@ -155,12 +155,47 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     async (edits: PendingEdit[]) => {
       if (edits.length === 0) return;
 
-      await patch(buildRequest(tableInstanceId, periodKey, edits));
-      setPending(new Map());
+      // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
+      // нижче. Позначки інших рядків (з попереднього, ще не повтореного
+      // збереження) лишаються як є: цей виклик про них нічого не знає.
+      const touchedRowKeys = new Set(edits.map((edit) => edit.rowKey));
 
-      // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
-      // значення, і локальна підстава більше не потрібна нікому.
-      setOverrides(new Map());
+      try {
+        const response = await patch(buildRequest(tableInstanceId, periodKey, edits));
+        setPending(new Map());
+
+        // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
+        // значення, і локальна підстава більше не потрібна нікому.
+        setOverrides(new Map());
+
+        // Успіх означає, що серед рядків цього патчу немає жодного Block:
+        // інакше сервер відхилив би весь батч (ECR-CALC-0437), а не повернув
+        // 200. Warn — навпаки, приходить САМЕ в успішній відповіді.
+        setRequiredInputBlocked((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
+        setRequiredInputWarnings((prev) => [
+          ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
+          ...response.validation
+            .filter(
+              (m): m is typeof m & { rowKey: string; columnCode: string } =>
+                m.ruleCode === 'ECR-CALC-0437' && m.rowKey !== null && m.columnCode !== null,
+            )
+            .map((m) => ({
+              rowKey: m.rowKey,
+              columnCode: m.columnCode,
+              ruleCode: m.ruleCode,
+              message: m.message,
+            })),
+        ]);
+      } catch (error) {
+        if (error instanceof EcrApiError && error.isRequiredInputMissing) {
+          setRequiredInputBlocked((prev) => [
+            ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
+            ...error.requiredInputCells,
+          ]);
+        }
+
+        throw error;
+      }
     },
     [patch, periodKey, tableInstanceId],
   );
@@ -204,6 +239,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // повідомлення без переліку — це «щось змінилося, розбирайся сам».
   const [rounded, setRounded] = useState<readonly RoundedCell[]>([]);
   const [showRounded, setShowRounded] = useState(false);
+
+  // ⛔ Директива «обов'язкові вхідні колонки методології»: два різних
+  // повідомлення сервера про той самий факт («у рядка вже визначена
+  // методологія, і в неї є незаповнений вхід») — Block ВІДХИЛЯЄ батч
+  // (`ECR-CALC-0437` з `EcrApiError`), Warn ПРОХОДИТЬ і повертається в
+  // `PatchCellsResponse.validation`. Обидва зберігаються по РЯДКАХ, а не
+  // цілим зрізом: інша таблиця чи інший рядок не повинні гаснути тут.
+  const [requiredInputBlocked, setRequiredInputBlocked] = useState<
+    readonly RequiredInputCell[]
+  >([]);
+  const [requiredInputWarnings, setRequiredInputWarnings] = useState<
+    readonly RequiredInputCell[]
+  >([]);
 
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
@@ -265,9 +313,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [pending, rounded],
   );
 
+  // ⚠ Директива «обов'язкові вхідні колонки методології»: за ключем комірки,
+  // а не станом `cellStateOf` — цей маркер ДОДАЄТЬСЯ поверх будь-якого стану
+  // (dirty, readOnly, ...), а не змагається з ним за пріоритет.
+  const requiredInputByCell = useMemo(() => {
+    const blocked = new Map<string, string>();
+    for (const cell of requiredInputBlocked) blocked.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
+
+    const warning = new Map<string, string>();
+    for (const cell of requiredInputWarnings) warning.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
+
+    return { blocked, warning };
+  }, [requiredInputBlocked, requiredInputWarnings]);
+
   const columns = useMemo(
-    () => (data === undefined ? [] : gridColumns(data, readOnly, flags, widths)),
-    [data, readOnly, flags, widths],
+    () => (data === undefined ? [] : gridColumns(data, readOnly, flags, widths, requiredInputByCell)),
+    [data, readOnly, flags, widths, requiredInputByCell],
   );
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
@@ -664,6 +725,37 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
+      {requiredInputBlocked.length > 0 && (
+        // ⛔ Директива «обов'язкові вхідні колонки методології»: батч
+        // ВІДХИЛЕНО (ECR-CALC-0437), комірки лишаються dirty. Перелік називає
+        // КОНКРЕТНІ колонки — «дані неповні» саме по собі нічого не пояснює.
+        <Alert
+          color="statusError"
+          title={t('grid.requiredInputBlockedTitle', { count: requiredInputBlocked.length })}
+        >
+          <List size="sm">
+            {requiredInputBlocked.map((cell) => (
+              <List.Item key={`${cell.rowKey}:${cell.columnCode}`}>{cell.message}</List.Item>
+            ))}
+          </List>
+        </Alert>
+      )}
+
+      {requiredInputWarnings.length > 0 && (
+        // ⚠ На відміну від блоку вище — запис ПРОЙШОВ. Це підказка, а не
+        // відмова, і лишається видимою, доки колонку не заповнять.
+        <Alert
+          color="statusWarning"
+          title={t('grid.requiredInputWarningTitle', { count: requiredInputWarnings.length })}
+        >
+          <List size="sm">
+            {requiredInputWarnings.map((cell) => (
+              <List.Item key={`${cell.rowKey}:${cell.columnCode}`}>{cell.message}</List.Item>
+            ))}
+          </List>
+        </Alert>
+      )}
+
       <RevoGrid
         theme="compact"
         range
@@ -748,6 +840,7 @@ function gridColumns(
   readOnly: boolean,
   flags: LocalCellFlags,
   widths: Record<string, number>,
+  requiredInput: { blocked: ReadonlyMap<string, string>; warning: ReadonlyMap<string, string> },
 ): ColumnRegular[] {
   return slice.columns.map((column) => ({
     prop: column.code,
@@ -770,21 +863,41 @@ function gridColumns(
     cellProperties: ({ model }) => {
       const rowKey = rowKeyOf(model);
       const state = cellStateOf(slice, rowKey, column, flags);
+      const key = cellKey(rowKey, column.code);
 
-      if (state === null) return {};
+      // ⛔ Директива «обов'язкові вхідні колонки методології»: маркер
+      // ДОДАЄТЬСЯ до класу стану, а не замінює його — Block і Warn не беруть
+      // участі в пріоритеті `cellStateOf` (`ФВ-14.18` рахує лише п'ять
+      // виміряних станів; переробляти ту палітру заради двох нових — окрема
+      // задача, не ця).
+      const requiredInputMessage = requiredInput.blocked.get(key) ?? requiredInput.warning.get(key);
+      const requiredInputClass = requiredInput.blocked.has(key)
+        ? 'ecr-cell-required-input-blocked'
+        : requiredInput.warning.has(key)
+          ? 'ecr-cell-required-input-warning'
+          : null;
+
+      if (state === null && requiredInputClass === null) return {};
 
       const decision = decide(slice, rowKey, column);
 
+      // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони чи
+      // незаповненого входу вже є на сервері — читалка має її почути.
+      const hint = [decision.hint, requiredInputMessage].filter((part) => !!part).join(' ');
+
       return {
-        class: cellStateClass(state),
+        // ⚠ Базовий `ecr-cell` завжди присутній, навіть коли `state === null`:
+        // від нього залежить `position: relative` і резерв місця під маркер
+        // (`cell-states.css`), а маркер обов'язкового входу — свій маркер.
+        class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass]
+          .filter((part): part is string => part !== null)
+          .join(' '),
 
         // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
         // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
-        'data-cell-state': state,
+        ...(state === null ? {} : { 'data-cell-state': state }),
 
-        // ⚠ Стан доступний і ТЕКСТОМ: форма й колір нічого не кажуть тому, хто
-        // працює з читалкою, а причина заборони вже є на сервері.
-        ...(decision.hint.length === 0 ? {} : { title: decision.hint }),
+        ...(hint.length === 0 ? {} : { title: hint }),
       };
     },
   }));

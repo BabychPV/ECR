@@ -288,6 +288,25 @@ public static class ErrorCodes
     /// </remarks>
     public const string ExtensionFunctionInLegacy = "ECR-CALC-0433";
 
+    /// <summary>
+    /// Рядок з визначеною методологією має незаповнену обов'язкову вхідну
+    /// колонку з <c>Severity = Block</c> (<c>ECR-CALC-0437</c>, директива
+    /// «обов'язкові вхідні колонки методології»).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Номер обраний СВІДОМО не наступним вільним (<c>0434</c>): три сусідні
+    /// коди (<c>0434</c>–<c>0436</c>) уже названі в TODO-коментарях
+    /// <c>MethodologyPublishChecks.cs</c>/<c>PublishMethodologyHandler.cs</c>
+    /// для перевірок публікації, яких ще не написано, — зайняти один із них
+    /// зараз означало б зіткнення, щойно ці TODO стануть кодом.
+    ///
+    /// ⛔ Окремий код від <see cref="CellInvalid"/> (<c>ECR-CELL-0422</c>) і
+    /// від <see cref="MethodologyNoGreenTest"/>: тут рівно одна правильна дія —
+    /// заповнити названу колонку, — а суб'єкт відмови не комірка й не публікація
+    /// версії, а РЯДОК документа з уже визначеною методологією.
+    /// </remarks>
+    public const string RequiredInputMissing = "ECR-CALC-0437";
+
     // Робочий процес
     /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
     public const string SubmitBlockedByOrphans = "ECR-SUB-4221";

@@ -116,6 +116,9 @@ const methodologies = {
   /** Правила відбору рядків (`ФВ-13.3`). */
   rules: (versionId: number) => ['methodologies', 'rules', versionId] as const,
 
+  /** Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки методології»). */
+  requiredInputs: (versionId: number) => ['methodologies', 'requiredInputs', versionId] as const,
+
   /** Оголошені виходи версії (`ФВ-16.6`). */
   outputs: (versionId: number) => ['methodologies', 'outputs', versionId] as const,
 

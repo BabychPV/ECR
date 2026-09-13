@@ -103,6 +103,14 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<MethodologyRequiredInput?> FindRequiredInputAsync(
+        int methodologyVersionId, int columnDefId, CancellationToken ct)
+        => await db.MethodologyRequiredInputs
+            .FirstOrDefaultAsync(
+                r => r.MethodologyVersionId == methodologyVersionId && r.ColumnDefId == columnDefId, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<MethodologyOutput?> FindOutputAsync(
         int methodologyVersionId, string code, CancellationToken ct)
         => await db.MethodologyOutputs
@@ -138,6 +146,17 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyRequiredInput>> GetAllRequiredInputsAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyRequiredInputs
+            .AsNoTracking()
+            .Where(r => r.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(r => r.ColumnDefId)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyTestCaseEntity>> GetTestCaseEntitiesAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologyTestCases
@@ -156,6 +175,9 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
 
     /// <inheritdoc />
     public void Add(MethodologyRule rule) => db.MethodologyRules.Add(rule);
+
+    /// <inheritdoc />
+    public void Add(MethodologyRequiredInput requiredInput) => db.MethodologyRequiredInputs.Add(requiredInput);
 
     /// <inheritdoc />
     public void Add(MethodologyOutput output) => db.MethodologyOutputs.Add(output);
@@ -272,6 +294,20 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             clone.SetActive(source.IsActive);
 
             db.MethodologyRules.Add(clone);
+        }
+
+        // ⛔ Обов'язкові вхідні колонки — теж ВМІСТ версії (директива
+        // «обов'язкові вхідні колонки методології»), і клон без них тихо
+        // вимикає gate на новій чернетці: рядки зберігаються без перевірки,
+        // яку методолог свідомо ввімкнув на джерелі. Сторож
+        // `Клон_версії_методології_переносить_кожен_набір_дочірніх_записів`
+        // саме тому й вимагає згадки кожного типу з `MethodologyVersionId`.
+        foreach (var source in await ChildrenAsync(
+                     db.MethodologyRequiredInputs.Where(r => r.MethodologyVersionId == sourceVersionId), ct)
+                     .ConfigureAwait(false))
+        {
+            db.MethodologyRequiredInputs.Add(new MethodologyRequiredInput(
+                targetVersionId, source.ColumnDefId, source.Severity, source.HintL10n));
         }
 
         foreach (var source in await ChildrenAsync(

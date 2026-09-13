@@ -293,6 +293,28 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyRequiredInput>> GetRequiredInputsAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyRequiredInputs
+            .AsNoTracking()
+            .Where(r => r.MethodologyVersionId == methodologyVersionId)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTableAsync(
+        int tableDefId, CancellationToken ct)
+        => await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && b.TableDefId == tableDefId)
+            .Select(b => b.MethodologyId)
+            .Distinct()
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Версії ЗАВАНТАЖУЮТЬСЯ разом із методологією і відстежуються: агрегат
     /// потрібен, щоб перевірити перетин вікон і опублікувати версію в одній

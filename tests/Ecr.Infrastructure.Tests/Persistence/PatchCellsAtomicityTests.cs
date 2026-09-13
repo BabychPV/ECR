@@ -136,10 +136,17 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(1);
 
+        // ⚠ Таблиця без прив'язаної методології — fast-path gate-у обов'язкових
+        // вхідних колонок (директива «обов'язкові вхідні колонки методології»):
+        // цей тест перевіряє атомарність транзакції, не методологію.
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetMethodologyIdsBoundToTableAsync(doc.TableDefId, Arg.Any<CancellationToken>())
+                     .Returns(Task.FromResult<IReadOnlyList<int>>([]));
+
         return new PatchCellsHandler(
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            audit, jobs, uow, user, clock);
+            methodologies, audit, jobs, uow, user, clock);
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

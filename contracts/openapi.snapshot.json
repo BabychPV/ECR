@@ -2989,6 +2989,42 @@
         ],
         "type": "object"
       },
+      "MethodologyRequiredInputDto": {
+        "description": "Обов'язкова вхідна колонка методології — gate перед збереженням клітинки\n(директива «обов'язкові вхідні колонки методології»).",
+        "properties": {
+          "columnDefId": {
+            "description": "Колонка документа, обов'язкова як вхід.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hintL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Текст поверх типового шаблону; `null` — типового шаблону достатньо.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор вимоги.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/RequiredInputSeverity",
+            "description": "Блокує чи лише попереджає збереження."
+          }
+        },
+        "required": [
+          "id",
+          "columnDefId",
+          "severity",
+          "hintL10n"
+        ],
+        "type": "object"
+      },
       "MethodologyResultDelta": {
         "description": "Одна розбіжність результату на золотому наборі.",
         "properties": {
@@ -5036,6 +5072,13 @@
         ],
         "type": "object"
       },
+      "RequiredInputSeverity": {
+        "description": "Критичність незаповненої обов'язкової вхідної колонки методології\n(директива «обов'язкові вхідні колонки методології», gate перед\nзбереженням).",
+        "enum": [
+          "Block",
+          "Warn"
+        ]
+      },
       "ResourceGrantDto": {
         "description": "Ресурсний грант у вигляді, придатному для передавання.",
         "properties": {
@@ -5562,6 +5605,30 @@
         "required": [
           "unitId",
           "ordinal"
+        ],
+        "type": "object"
+      },
+      "SaveMethodologyRequiredInputRequest": {
+        "description": "Запит на запис обов'язкової вхідної колонки.",
+        "properties": {
+          "hintL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Текст поверх типового шаблону «Колонка «X» обов'язкова для методології «Y»»;\n`null` — типового шаблону достатньо (ASK директиви «обов'язкові вхідні\nколонки методології»).",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/RequiredInputSeverity",
+            "description": "Блокує чи лише попереджає збереження."
+          }
+        },
+        "required": [
+          "severity",
+          "hintL10n"
         ],
         "type": "object"
       },
@@ -10867,6 +10934,196 @@
           }
         },
         "summary": "Публікує версію методології. Право `Calculation.Publish`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/required-inputs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyRequiredInputDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyRequiredInputDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyRequiredInputDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Обов'язкові вхідні колонки версії. Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}": {
+      "put": {
+        "description": "⛔ Окреме право від `Calculation.EditRule`/`EditFormula`\nнавмисно: gate перед збереженням клітинки (`PatchCellsHandler`)\nзастосовується до ВСІХ, хто вводить дані, а хто вирішує, ЯКІ колонки\nобов'язкові, — окрема, вужча відповідальність.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Колонка документа, обов'язкова як вхід.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyRequiredInputRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyRequiredInputRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyRequiredInputRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyRequiredInputDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyRequiredInputDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyRequiredInputDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Заводить або змінює обов'язкову вхідну колонку. Право\n`Calculation.ManageRequiredInputs` (директива «обов'язкові вхідні\nколонки методології»).",
         "tags": [
           "Methodologies"
         ]

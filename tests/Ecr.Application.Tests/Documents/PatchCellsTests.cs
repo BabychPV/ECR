@@ -5,6 +5,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -31,6 +32,7 @@ public sealed class PatchCellsTests
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -69,6 +71,13 @@ public sealed class PatchCellsTests
         _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
              .Returns(new TableInstanceRef(TableInstance, DocumentId: 700, TableDefId: 3, TemplateVersionId: 2, PeriodKey: Period));
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(snapshot);
+
+        // ⚠ Таблиця без прив'язаної методології — найчастіший випадок і
+        // fast-path gate-у обов'язкових вхідних колонок (директива «обов'язкові
+        // вхідні колонки методології»): без цього налаштування поведінка тестів,
+        // які не про методологію, лишається РІВНО такою, як до gate-у.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
+                       .Returns(Task.FromResult<IReadOnlyList<int>>([]));
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A" });
         _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -116,7 +125,7 @@ public sealed class PatchCellsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _audit, _jobs, _uow, _user, _clock);
+               _methodologies, _audit, _jobs, _uow, _user, _clock);
 
     /// <summary>Відповідь служби доступу на створення рядків.</summary>
     /// <param name="keys">Ключі, про які питали.</param>
@@ -279,6 +288,71 @@ public sealed class PatchCellsTests
                 TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
                 ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = column },
                 RowsByKey: rowsByKey ?? new Dictionary<(int, string), RowDef>()));
+    }
+
+    /// <summary>
+    /// Прив'язує таблицю до методології з одним правилом («вся таблиця») й
+    /// однією обов'язковою вхідною колонкою <c>Category</c> — окремою від
+    /// <c>Volume</c>, яку патчить сам тест (директива «обов'язкові вхідні
+    /// колонки методології»).
+    /// </summary>
+    /// <returns>Ідентифікатор колонки <c>Category</c>.</returns>
+    private int WithMethodology(RequiredInputSeverity severity)
+    {
+        const int CategoryColumnId = 12;
+
+        var volume = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("Volume"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
+        SetId(volume, VolumeColumnId);
+
+        var category = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("Category"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Category" }), 2, CellDataType.String);
+        SetId(category, CategoryColumnId);
+
+        var sheet = new SheetDef(
+            templateVersionId: 2, EcrCode.Create("Water"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Water" }), 1);
+        var table = new TableDef(
+            sheetDefId: 1, EcrCode.Create("Main"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Main" }), 1,
+            TableLayoutKind.MonthsInColumns, TableRowMode.Dynamic);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
+        table.AddColumn(volume);
+        table.AddColumn(category);
+        sheet.AddTable(table);
+
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(
+                TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
+                ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = volume, [CategoryColumnId] = category },
+                RowsByKey: new Dictionary<(int, string), RowDef>()));
+
+        const int MethodologyId = 100;
+
+        var methodology = new Methodology(EcrCode.Create("ECW_TEST"), new LocalizedText(
+            new Dictionary<string, string> { ["en"] = "Test methodology" }));
+        var version = new MethodologyVersion(MethodologyId, "1.0", CalculationLevel.Configuration, 1, Now);
+        var rule = version.AddRule(EcrCode.Create("all"), "{}", 100);
+        var requiredInput = version.AddRequiredInput(CategoryColumnId, severity, hint: null);
+        version.Publish(publishedByUserId: 2, "тестова публікація", new DateOnly(2026, 1, 1), testsPassed: true, Now);
+
+        _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<IReadOnlyList<int>>([MethodologyId]));
+        _methodologies.GetPublishedVersionsAsync(MethodologyId, Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<IReadOnlyList<MethodologyVersion>>([version]));
+        _methodologies.GetRulesAsync(version.Id, Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<IReadOnlyList<MethodologyRule>>([rule]));
+        _methodologies.GetRequiredInputsAsync(version.Id, Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<IReadOnlyList<MethodologyRequiredInput>>([requiredInput]));
+        _methodologies.FindByVersionAsync(version.Id, Arg.Any<CancellationToken>())
+                      .Returns(Task.FromResult<Methodology?>(methodology));
+
+        _periods.FindPeriodBoundsAsync(700, Period, Arg.Any<CancellationToken>())
+                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+
+        return CategoryColumnId;
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -481,6 +555,68 @@ public sealed class PatchCellsTests
             _jobs.EnqueueAsync<IFormulaRecalculationJob>(
                 Arg.Any<object>(), Arg.Any<CancellationToken>());
         });
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Незаповнена_Block_вхідна_колонка_методології_відхиляє_запис_ECR_CALC_0437()
+    {
+        // ⛔ Директива «обов'язкові вхідні колонки методології», §1.3, PR 3:
+        // мутаційний доказ — той самий патч без gate-у пройшов би без питань
+        // (`Category` до цієї директиви ніхто не перевіряв).
+        WithMethodology(RequiredInputSeverity.Block);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0437", error.ErrorCode);
+
+        // Повідомлення НАЗИВАЄ конкретну незаповнену колонку й методологію —
+        // «дані неповні» саме по собі відповіді не дає.
+        var details = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.Contains("Category", details, StringComparison.Ordinal);
+        Assert.Contains("ECW_TEST", details, StringComparison.Ordinal);
+
+        // Той самий блок, що й комірковий Error (R-B3): нічого не записано.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Незаповнена_Warn_вхідна_колонка_методології_не_блокує_запис_але_повідомляє()
+    {
+        WithMethodology(RequiredInputSeverity.Warn);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        // Запис відбувся — Warn НЕ блокує (на відміну від Block вище).
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+
+        var warning = Assert.Single(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+        Assert.Equal("7001001", warning.RowKey);
+        Assert.Equal("Category", warning.ColumnCode);
+        Assert.Contains("Category", warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Рядок_без_прив_язаної_методології_ігнорує_gate_обов_язкових_входів()
+    {
+        // ⚠ Регресійний доказ у той самий бік, що й решта 24 тестів файлу
+        // (усі — без прив'язаної методології за замовчуванням конструктора):
+        // тут явно перевіряється, що ЦЕЙ конкретний факт не зачепив
+        // GetPublishedVersionsAsync/GetRulesAsync/GetRequiredInputsAsync —
+        // gate виходить, щойно `GetMethodologyIdsBoundToTableAsync` порожній.
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.Empty(response.Validation);
+
+        await _methodologies.DidNotReceive().GetPublishedVersionsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]

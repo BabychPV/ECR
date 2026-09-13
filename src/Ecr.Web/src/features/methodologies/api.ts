@@ -9,6 +9,7 @@ import type {
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
   MethodologyOutputDto,
+  MethodologyRequiredInputDto,
   MethodologyRuleDto,
   MethodologySummaryDto,
   MethodologyTestCaseDto,
@@ -16,6 +17,7 @@ import type {
   SaveMethodologyConstantRequest,
   SaveMethodologyFormulaRequest,
   SaveMethodologyOutputRequest,
+  SaveMethodologyRequiredInputRequest,
   SaveMethodologyRuleRequest,
   SaveMethodologyTestCaseRequest,
   SetMethodologyModesRequest,
@@ -196,6 +198,38 @@ export function saveMethodologyRule(
 ): Promise<MethodologyRuleDto> {
   return apiFetch<MethodologyRuleDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/rules/${encodeURIComponent(code)}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки
+ * методології», gate перед збереженням клітинки).
+ */
+export function methodologyRequiredInputs(
+  methodologyId: number,
+  versionId: number,
+): Promise<MethodologyRequiredInputDto[]> {
+  return apiFetch<MethodologyRequiredInputDto[]>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/required-inputs`,
+  );
+}
+
+/**
+ * Заводить або змінює обов'язкову вхідну колонку.
+ *
+ * ⚠ Ключ — `ColumnDefId`, а не код: на відміну від правил і виходів, ця
+ * вимога не має природного коду, унікальність тримається на парі
+ * (версія, колонка).
+ */
+export function saveMethodologyRequiredInput(
+  methodologyId: number,
+  versionId: number,
+  columnDefId: number,
+  body: SaveMethodologyRequiredInputRequest,
+): Promise<MethodologyRequiredInputDto> {
+  return apiFetch<MethodologyRequiredInputDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/required-inputs/${String(columnDefId)}`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
   );
 }

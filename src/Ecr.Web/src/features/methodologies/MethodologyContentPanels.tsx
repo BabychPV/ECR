@@ -18,8 +18,10 @@ import type {
   MethodologyConstantDto,
   MethodologyDraftVersionDto,
   MethodologyOutputDto,
+  MethodologyRequiredInputDto,
   MethodologyRuleDto,
   MethodologyTestCaseDto,
+  RequiredInputSeverity,
   UnitRef,
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
@@ -31,12 +33,14 @@ import {
   calculationBindings,
   methodologyConstants,
   methodologyOutputs,
+  methodologyRequiredInputs,
   methodologyRules,
   methodologyTestCases,
   saveCalculationBinding,
   saveMethodologyConstant,
   saveMethodologyModes,
   saveMethodologyOutput,
+  saveMethodologyRequiredInput,
   saveMethodologyRule,
   saveMethodologyTestCase,
 } from './api';
@@ -483,6 +487,190 @@ export function MethodologyRulesPanel({
 
             <Button
               disabled={editing.code.trim().length === 0 || editing.matchJson.trim().length === 0}
+              loading={save.isPending}
+              onClick={() => save.mutate(editing)}
+            >
+              {t('methodologies.save')}
+            </Button>
+          </Stack>
+        )}
+      </Modal>
+    </>
+  );
+}
+
+/** Обов'язкова вхідна колонка, яку зараз правлять. */
+interface RequiredInputDraft {
+  readonly columnDefId: number;
+  readonly severity: RequiredInputSeverity;
+  readonly hint: string;
+  readonly isNew: boolean;
+}
+
+/**
+ * Обов'язкові вхідні колонки методології — gate перед збереженням клітинки
+ * (директива «обов'язкові вхідні колонки методології»).
+ *
+ * ⛔ Не те саме, що загальна обов'язковість колонки (`ColumnDef.IsRequired`):
+ * ця вимога прив'язана до КОНКРЕТНОЇ методології версії, і та сама колонка
+ * може бути обов'язковою для однієї методології таблиці й ні для сусідньої.
+ *
+ * ⚠ Ключ запису — `ColumnDefId`, а не код: на відміну від правил і виходів,
+ * ця сутність не має природного коду.
+ */
+export function MethodologyRequiredInputsPanel({
+  methodologyId,
+  versionId,
+  editable,
+}: PanelProps): JSX.Element {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<RequiredInputDraft | null>(null);
+
+  const requiredInputs = useQuery({
+    queryKey: queryKeys.methodologies.requiredInputs(versionId),
+    queryFn: () => methodologyRequiredInputs(methodologyId, versionId),
+  });
+
+  const save = useMutation({
+    mutationFn: (draft: RequiredInputDraft) =>
+      saveMethodologyRequiredInput(methodologyId, versionId, draft.columnDefId, {
+        severity: draft.severity,
+        hintL10n: draft.hint.trim().length === 0 ? null : { en: draft.hint },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.methodologies.requiredInputs(versionId),
+      });
+      setEditing(null);
+      showDone(t('methodologies.requiredInputSaved'));
+    },
+    onError: showApiError,
+  });
+
+  return (
+    <>
+      <Group justify="space-between">
+        <Text fw={600}>{t('methodologies.requiredInputs')}</Text>
+        {editable && (
+          <Button
+            size="compact-sm"
+            variant="default"
+            onClick={() =>
+              setEditing({ columnDefId: 0, severity: 'Block', hint: '', isNew: true })
+            }
+          >
+            {t('methodologies.addRequiredInput')}
+          </Button>
+        )}
+      </Group>
+
+      <AsyncBoundary<MethodologyRequiredInputDto[]>
+        isPending={requiredInputs.isPending}
+        error={requiredInputs.error}
+        data={requiredInputs.data}
+        isEmpty={(list) => list.length === 0}
+        emptyTitle={t('methodologies.noRequiredInputs')}
+        emptyHint={t('methodologies.noRequiredInputsHint')}
+        skeleton="table"
+        onRetry={() => void requiredInputs.refetch()}
+      >
+        {(list) => (
+          <Table striped withTableBorder>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{t('methodologies.columnDefId')}</Table.Th>
+                <Table.Th>{t('methodologies.severity')}</Table.Th>
+                <Table.Th>{t('methodologies.hint')}</Table.Th>
+                <Table.Th />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {list.map((requiredInput) => (
+                <Table.Tr key={requiredInput.id}>
+                  <Table.Td>{requiredInput.columnDefId}</Table.Td>
+                  <Table.Td>
+                    {requiredInput.severity === 'Block'
+                      ? t('methodologies.severityBlock')
+                      : t('methodologies.severityWarn')}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" c="dimmed">
+                      {requiredInput.hintL10n?.['en'] ?? '—'}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    {editable && (
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        onClick={() =>
+                          setEditing({
+                            columnDefId: requiredInput.columnDefId,
+                            severity: requiredInput.severity,
+                            hint: requiredInput.hintL10n?.['en'] ?? '',
+                            isNew: false,
+                          })
+                        }
+                      >
+                        {t('methodologies.editFormula')}
+                      </Button>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </AsyncBoundary>
+
+      <Modal
+        opened={editing !== null}
+        onClose={() => setEditing(null)}
+        title={t('methodologies.requiredInputs')}
+      >
+        {editing !== null && (
+          <Stack gap="sm">
+            <NumberInput
+              label={t('methodologies.columnDefId')}
+              description={t('methodologies.requiredInputColumnHint')}
+              value={editing.columnDefId}
+              disabled={!editing.isNew}
+              onChange={(value) =>
+                setEditing({
+                  ...editing,
+                  columnDefId: typeof value === 'number' ? value : editing.columnDefId,
+                })
+              }
+            />
+
+            <Select
+              label={t('methodologies.severity')}
+              description={t('methodologies.severityHint')}
+              data={[
+                { value: 'Block', label: t('methodologies.severityBlock') },
+                { value: 'Warn', label: t('methodologies.severityWarn') },
+              ]}
+              value={editing.severity}
+              allowDeselect={false}
+              onChange={(value) =>
+                setEditing({
+                  ...editing,
+                  severity: value === 'Warn' ? 'Warn' : 'Block',
+                })
+              }
+            />
+
+            <Textarea
+              label={t('methodologies.hint')}
+              description={t('methodologies.hintHint')}
+              value={editing.hint}
+              minRows={2}
+              autosize
+              onChange={(event) => setEditing({ ...editing, hint: event.currentTarget.value })}
+            />
+
+            <Button
+              disabled={editing.columnDefId <= 0}
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >

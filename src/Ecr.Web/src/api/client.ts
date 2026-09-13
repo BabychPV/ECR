@@ -38,6 +38,27 @@ export class EcrApiError extends Error {
   get conflicts(): unknown[] {
     return (this.problem.extensions2?.['conflicts'] as unknown[]) ?? [];
   }
+
+  /**
+   * Чи це відмова gate-у обов'язкових вхідних колонок методології
+   * (директива «обов'язкові вхідні колонки методології»).
+   */
+  get isRequiredInputMissing(): boolean {
+    return this.problem.errorCode === 'ECR-CALC-0437';
+  }
+
+  /** Незаповнені обов'язкові колонки, якщо відмова саме про них. */
+  get requiredInputCells(): RequiredInputCell[] {
+    return (this.problem.extensions2?.['cells'] as RequiredInputCell[]) ?? [];
+  }
+}
+
+/** Одна незаповнена обов'язкова вхідна колонка з відмови `ECR-CALC-0437`. */
+export interface RequiredInputCell {
+  rowKey: string;
+  columnCode: string;
+  ruleCode: string;
+  message: string;
 }
 
 /** Прийняте в роботу завдання: сервер відповів 202. */

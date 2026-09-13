@@ -150,15 +150,26 @@ public sealed class ExcelImporterTemplateVersionTests
         return stream;
     }
 
-    private ExcelImporter Importer() => new(
-        _metadata, _registries, _access, _user, _previews,
-        new PatchCellsHandler(
-            Substitute.For<ICellStore>(), Substitute.For<IRowStore>(), Substitute.For<IDocumentStore>(),
-            Substitute.For<IPeriodStore>(), Substitute.For<IMetadataCache>(), Substitute.For<IAccessDecisionService>(),
-            new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            Substitute.For<IAuditWriter>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
-            Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
-        new ImportDiffBuilder(), _cellStore, _rowStore);
+    private ExcelImporter Importer()
+    {
+        // ⚠ Таблиця без прив'язаної методології — fast-path gate-у обов'язкових
+        // вхідних колонок (директива «обов'язкові вхідні колонки методології»):
+        // цей тест — про імпорт xlsx, не про методологію.
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                     .Returns(Task.FromResult<IReadOnlyList<int>>([]));
+
+        return new(
+            _metadata, _registries, _access, _user, _previews,
+            new PatchCellsHandler(
+                Substitute.For<ICellStore>(), Substitute.For<IRowStore>(), Substitute.For<IDocumentStore>(),
+                Substitute.For<IPeriodStore>(), Substitute.For<IMetadataCache>(), Substitute.For<IAccessDecisionService>(),
+                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+                methodologies,
+                Substitute.For<IAuditWriter>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
+                Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
+            new ImportDiffBuilder(), _cellStore, _rowStore);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

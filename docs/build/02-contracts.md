@@ -2583,6 +2583,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CALC-0431` | 422 | `^` у діалекті методологій — це XOR, а не степінь |
 | `ECR-CALC-0432` | 422 | токен `@Arg` у виразі, якого немає в оголошеному списку аргументів формули: збірка його не підставить (директива ПК-1 №05 §7, пастка 2) |
 | `ECR-CALC-0433` | 422 | функція ярусу `Extension` у версії з `NumericMode = Legacy`: відтворювати їй нічого (`02b` §8) |
+| `ECR-CALC-0437` | 422 | рядок з визначеною методологією має незаповнену обов'язкову вхідну колонку з `Severity = Block` (директива «обов'язкові вхідні колонки методології») |
 | `ECR-PRJ-0422` | 422 | активація проєкту, який уже не чернетка або не має періодів (`A7-25`) |
 | `ECR-PRJ-0404` | 404 | проєкту з таким ідентифікатором не існує |
 | `ECR-CALC-4221` | 422 | перерахунок закритого періоду без окремого погодження (ФВ-9.7) |
@@ -2732,6 +2733,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}` | `Calculation.EditConstant` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rules` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/rules/{code}` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/outputs/{code}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/tests` | `Calculation.View` | 7 |
