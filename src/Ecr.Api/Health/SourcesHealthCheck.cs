@@ -1,3 +1,5 @@
+using System.Globalization;
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -18,7 +20,8 @@ namespace Ecr.Api.Health;
 /// а <c>/health/ready</c> усе одно був жовтим **завжди**. Перевірка, яка
 /// ніколи не змінює відповіді, не перевіряє нічого.
 /// </remarks>
-public sealed class SourcesHealthCheck(ICollectionStore? sources) : IHealthCheck
+public sealed class SourcesHealthCheck(
+    ICollectionStore? sources, IUiStringCatalog catalog, ICurrentUser currentUser) : IHealthCheck
 {
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -29,7 +32,10 @@ public sealed class SourcesHealthCheck(ICollectionStore? sources) : IHealthCheck
         // валить увесь `/health/ready` винятком контейнера (`Q-051`).
         if (sources is null)
         {
-            return HealthCheckResult.Unhealthy("Сховище збору не зареєстроване в контейнері.");
+            var notRegistered = await Text(
+                "health.sources.notRegistered", "The collection store is not registered in the container.",
+                null, cancellationToken).ConfigureAwait(false);
+            return HealthCheckResult.Unhealthy(notRegistered);
         }
 
         var entities = await sources.ListSourceEntitiesAsync(cancellationToken).ConfigureAwait(false);
@@ -40,9 +46,10 @@ public sealed class SourcesHealthCheck(ICollectionStore? sources) : IHealthCheck
         // означав би «щось не так» там, де все за налаштуванням.
         if (active.Count == 0)
         {
-            return HealthCheckResult.Healthy(
-                "Активних джерел збору немає.",
-                data: Data(0, 0, 0));
+            var noneActive = await Text(
+                "health.sources.noneActive", "No active collection sources.", null, cancellationToken)
+                .ConfigureAwait(false);
+            return HealthCheckResult.Healthy(noneActive, data: Data(0, 0, 0));
         }
 
         var failed = active.Count(e => e.LastRun?.Status is "Failed");
@@ -55,22 +62,33 @@ public sealed class SourcesHealthCheck(ICollectionStore? sources) : IHealthCheck
 
         if (failed > 0)
         {
-            return HealthCheckResult.Unhealthy(
-                $"Джерел з невдалим останнім збором: {failed}.",
-                data: Data(active.Count, failed, withGaps + neverRan));
+            var failedText = await Text(
+                "health.sources.failedCount", "Sources with a failed last run: {count}.",
+                Param("count", failed.ToString(CultureInfo.InvariantCulture)), cancellationToken)
+                .ConfigureAwait(false);
+            return HealthCheckResult.Unhealthy(failedText, data: Data(active.Count, failed, withGaps + neverRan));
         }
 
         if (withGaps + neverRan > 0)
         {
-            return HealthCheckResult.Degraded(
-                $"Джерел із прогалиною в покритті: {withGaps + neverRan}.",
-                data: Data(active.Count, 0, withGaps + neverRan));
+            var gapsText = await Text(
+                "health.sources.gapsCount", "Sources with a coverage gap: {count}.",
+                Param("count", (withGaps + neverRan).ToString(CultureInfo.InvariantCulture)), cancellationToken)
+                .ConfigureAwait(false);
+            return HealthCheckResult.Degraded(gapsText, data: Data(active.Count, 0, withGaps + neverRan));
         }
 
-        return HealthCheckResult.Healthy(
-            "Усі активні джерела зібрані без прогалин.",
-            data: Data(active.Count, 0, 0));
+        var allCollected = await Text(
+            "health.sources.allCollectedNoGaps", "All active sources are collected with no gaps.",
+            null, cancellationToken).ConfigureAwait(false);
+        return HealthCheckResult.Healthy(allCollected, data: Data(active.Count, 0, 0));
     }
+
+    private Task<string> Text(
+        string key, string fallback, IReadOnlyDictionary<string, string>? parameters, CancellationToken ct)
+        => HealthCatalogText.ResolveAsync(catalog, currentUser, key, fallback, parameters, ct);
+
+    private static Dictionary<string, string> Param(string name, string value) => new(1) { [name] = value };
 
     private static Dictionary<string, object> Data(int active, int failed, int gaps)
         => new(StringComparer.Ordinal)
