@@ -112,7 +112,9 @@ export function SourcesPage(): JSX.Element {
                     <Group gap="xs">
                       <Badge
                         variant="light"
-                        color={source.lastRun.status === 'Succeeded' ? 'green' : 'statusWarning'}
+                        color={
+                          source.lastRun.status === 'Succeeded' ? 'statusSuccess' : 'statusWarning'
+                        }
                       >
                         {source.lastRun.status}
                       </Badge>
