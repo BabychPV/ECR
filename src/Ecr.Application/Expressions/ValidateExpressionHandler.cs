@@ -88,7 +88,8 @@ public sealed class ValidateExpressionHandler(
         }
 
         return new ExpressionValidationDto(
-            [.. diagnostics.Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length))],
+            [.. diagnostics.Select(d => new DiagnosticInfo(
+                d.Code, d.Message, d.Position, d.Length, d.MessageKey, d.MessageParams))],
             result?.Expression.ResultType.ToString(),
             [.. skipped.Distinct()]);
     }

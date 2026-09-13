@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act } from '@testing-library/react';
 import type { DiagnosticInfo } from '@/api/types';
+import { loadCatalog } from '@/shared/i18n';
 import { markersFor, positionAt } from '../markers';
 
 /**
@@ -67,5 +69,73 @@ describe('підкреслення', () => {
 
     expect(markers).toHaveLength(2);
     expect(markers.map((m) => m.startColumn)).toEqual([6, 13]);
+  });
+});
+
+/**
+ * Локалізація тексту зауваження (`Q-303`).
+ *
+ * ⛔ `diagnostic.message` сервера — англійський запасний варіант, не готовий
+ * текст: `Ecr.Expressions` не має доступу до каталогу рядків, тож
+ * локалізує клієнт за `messageKey`/`messageParams` через `t()`. До цієї
+ * картки підкреслення несло `diagnostic.message` напряму — те саме
+ * СИРЕ УКРАЇНСЬКЕ речення парсера, незалежно від обраної мови інтерфейсу.
+ */
+describe('локалізація тексту зауваження (Q-303)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  function stubCatalog(strings: Record<string, string>): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ languageCode: 'en', revision: 1, strings }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ETag: '"private-en-1"' },
+          }),
+        ),
+      ),
+    );
+  }
+
+  it('зауваження з messageKey показує розв`язаний каталогом текст, не сирий message сервера', async () => {
+    stubCatalog({ 'expr.unexpectedToken': 'Unexpected token "{token}".' });
+    await act(async () => {
+      await loadCatalog('en', 'private');
+    });
+
+    const withKey: DiagnosticInfo = {
+      code: 'ECR-TMPL-0422',
+      message: 'Неочікувана лексема.',
+      messageKey: 'expr.unexpectedToken',
+      messageParams: { token: ')' },
+      position: 0,
+      length: 1,
+    };
+
+    const [marker] = markersFor('SUM(', [withKey]);
+
+    expect(marker?.message).toBe('Unexpected token ")".');
+    expect(marker?.message).not.toContain('Неочікувана');
+  });
+
+  it('зауваження БЕЗ messageKey (звірка типів/одиниць/посилань) лишає message сервера як є', () => {
+    // ⚠ `ReferenceResolver`/`TypeChecker`/`UnitChecker` ця картка свідомо не
+    // торкнулася (`docs/build/questions/Q-303.md`) — їхні зауваження досі не
+    // несуть ключа, і показ їхнього `message` без змін — БАЖАНА поведінка,
+    // не пропуск.
+    const withoutKey: DiagnosticInfo = {
+      code: 'ECR-TMPL-4223',
+      message: 'Incompatible units.',
+      position: 0,
+      length: 1,
+    };
+
+    const [marker] = markersFor('SUM([Jan])', [withoutKey]);
+
+    expect(marker?.message).toBe('Incompatible units.');
   });
 });

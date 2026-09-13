@@ -14,6 +14,10 @@ namespace Ecr.Expressions.Lexing;
 /// </remarks>
 public sealed class Lexer(DialectSyntax syntax)
 {
+    /// <summary>Один параметр підстановки для ключа каталогу (`Q-303`).</summary>
+    private static Dictionary<string, string> Param(string name, string value)
+        => new(1) { [name] = value };
+
     /// <summary>Ключові слова; порівняння регістронезалежне (02b §1).</summary>
     private static readonly Dictionary<string, TokenType> Keywords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -66,7 +70,8 @@ public sealed class Lexer(DialectSyntax syntax)
                 case ']':
                     if (depth == 0)
                     {
-                        throw new LexicalException("Закривна дужка ']' без відкривної.", start);
+                        throw new LexicalException(
+                            "Closing bracket \"]\" without a matching \"[\".", start, "expr.lex.unmatchedCloseBracket");
                     }
 
                     depth--;
@@ -116,7 +121,8 @@ public sealed class Lexer(DialectSyntax syntax)
 
         if (depth != 0)
         {
-            throw new LexicalException("Незакрита квадратна дужка.", expression.Length);
+            throw new LexicalException(
+                "Unclosed square bracket.", expression.Length, "expr.lex.unclosedBracket");
         }
 
         tokens.Add(new Token(TokenType.EndOfInput, string.Empty, expression.Length, 0));
@@ -134,7 +140,8 @@ public sealed class Lexer(DialectSyntax syntax)
         {
             if (i >= s.Length)
             {
-                throw new LexicalException("Незакритий рядковий літерал.", start);
+                throw new LexicalException(
+                    "Unclosed string literal.", start, "expr.lex.unclosedString");
             }
 
             if (s[i] == '\'')
@@ -164,7 +171,8 @@ public sealed class Lexer(DialectSyntax syntax)
         var close = s.IndexOf('}', i);
         if (close < 0)
         {
-            throw new LexicalException("Незакритий плейсхолдер '{'.", start);
+            throw new LexicalException(
+                "Unclosed placeholder \"{\".", start, "expr.lex.unclosedPlaceholder");
         }
 
         i = close + 1;
@@ -224,13 +232,14 @@ public sealed class Lexer(DialectSyntax syntax)
         if (i < s.Length && (char.IsLetter(s[i]) || s[i] == '_'))
         {
             throw new LexicalException(
-                "Ідентифікатор не може починатися з цифри (R-B6).", start);
+                "An identifier cannot start with a digit (R-B6).", start, "expr.lex.identifierStartsWithDigit");
         }
 
         var text = s[start..i];
         if (!decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out _))
         {
-            throw new LexicalException($"Некоректне число '{text}'.", start);
+            throw new LexicalException(
+                $"Invalid number \"{text}\".", start, "expr.lex.invalidNumber", Param("value", text));
         }
 
         return new Token(TokenType.Number, text, start, i - start);
@@ -381,7 +390,8 @@ public sealed class Lexer(DialectSyntax syntax)
 
         if (single is null)
         {
-            throw new LexicalException($"Недопустимий символ '{s[i]}'.", start);
+            throw new LexicalException(
+                $"Invalid character \"{s[i]}\".", start, "expr.lex.invalidCharacter", Param("value", s[i].ToString()));
         }
 
         i++;
@@ -390,8 +400,25 @@ public sealed class Lexer(DialectSyntax syntax)
 }
 
 /// <summary>Помилка лексичного аналізу.</summary>
-public sealed class LexicalException(string message, int position) : Exception(message)
+/// <remarks>
+/// ⚠ `Q-303`: <paramref name="messageKey"/>/<paramref name="messageParams"/>
+/// — той самий механізм, що й <c>ExpressionDiagnostic</c> (лексер не бачить
+/// цей тип, живе в іншому просторі імен): <c>message</c> лишається
+/// англійським запасним варіантом, а ключ дає клієнту справжню локалізацію
+/// (en/ru/kz) замість готового українського речення.
+/// </remarks>
+public sealed class LexicalException(
+    string message,
+    int position,
+    string? messageKey = null,
+    IReadOnlyDictionary<string, string>? messageParams = null) : Exception(message)
 {
     /// <summary>Позиція проблемного символу.</summary>
     public int Position { get; } = position;
+
+    /// <summary>Ключ каталогу рядків для локалізації клієнтом; <c>null</c> — немає.</summary>
+    public string? MessageKey { get; } = messageKey;
+
+    /// <summary>Підстановки для <see cref="MessageKey"/>; <c>null</c> — без змінних частин.</summary>
+    public IReadOnlyDictionary<string, string>? MessageParams { get; } = messageParams;
 }

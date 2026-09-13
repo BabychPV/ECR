@@ -21,6 +21,22 @@ public sealed class Parser
 {
     private static readonly FunctionRegistry Functions = new();
 
+    /// <summary>Один параметр підстановки для ключа каталогу (`Q-303`).</summary>
+    private static Dictionary<string, string> Param(string name, string value)
+        => new(1) { [name] = value };
+
+    /// <summary>Довільна кількість параметрів підстановки для ключа каталогу (`Q-303`).</summary>
+    private static Dictionary<string, string> Params(params (string Name, string Value)[] pairs)
+    {
+        var result = new Dictionary<string, string>(pairs.Length);
+        foreach (var (name, value) in pairs)
+        {
+            result[name] = value;
+        }
+
+        return result;
+    }
+
     /// <summary>Розбирає вираз.</summary>
     /// <param name="expression">Текст.</param>
     /// <param name="dialect">Діалект — визначає, які посилання дозволені.</param>
@@ -52,7 +68,7 @@ public sealed class Parser
         catch (LexicalException ex)
         {
             diagnostics.Add(new ExpressionDiagnostic(
-                ExpressionErrors.Syntax, ex.Message, ex.Position, 1));
+                ExpressionErrors.Syntax, ex.Message, ex.Position, 1, ex.MessageKey, ex.MessageParams));
             return new ParseResult(false, null, diagnostics);
         }
 
@@ -63,7 +79,9 @@ public sealed class Parser
             root = ParseExpression(state);
             if (state.Current.Type != TokenType.EndOfInput)
             {
-                state.Error($"Зайвий текст після кінця виразу: '{state.Current.Text}'.");
+                state.Error(
+                    "expr.trailingText", Param("text", state.Current.Text),
+                    $"Unexpected text after the end of the expression: \"{state.Current.Text}\".");
                 // ⚠ Лексеми до кінця поглинаються навмисно: інакше цикл
                 // розбору піде по колу на тій самій позиції.
                 state.SkipToEnd();
@@ -91,7 +109,7 @@ public sealed class Parser
         }
 
         var whenTrue = ParseExpression(s);
-        s.Expect(TokenType.Colon, "Очікувалася ':' у тернарному операторі.");
+        s.Expect(TokenType.Colon, "expr.expectedColonInTernary", "Expected \":\" in the ternary operator.");
         var whenFalse = ParseExpression(s);
         return new ConditionalNode(condition, whenTrue, whenFalse) { Position = condition.Position };
     }
@@ -278,8 +296,10 @@ public sealed class Parser
             // кроку 2 директиви №05), тож альтернативи в пораді бути не може.
             s.Error(
                 ExpressionErrors.CaretNotPower,
-                "'^' у діалекті методологій не означає степінь: це побітовий XOR, "
-                + "і '2^3' дорівнює 1, а не 8. Використайте Pow(a, b).",
+                "expr.caretNotPower",
+                null,
+                "\"^\" in the methodology dialect does not mean exponentiation: it is bitwise XOR, "
+                + "and \"2^3\" equals 1, not 8. Use Pow(a, b).",
                 s.Current.Position,
                 1);
         }
@@ -319,7 +339,7 @@ public sealed class Parser
             {
                 s.Advance();
                 var inner = ParseExpression(s);
-                s.Expect(TokenType.RParen, "Очікувалася ')'.");
+                s.Expect(TokenType.RParen, "expr.expectedCloseParen", "Expected \")\".");
                 return inner;
             }
 
@@ -338,7 +358,7 @@ public sealed class Parser
                 return ParseIdentifier(s);
         }
 
-        s.Error($"Неочікувана лексема '{token.Text}'.");
+        s.Error("expr.unexpectedToken", Param("token", token.Text), $"Unexpected token \"{token.Text}\".");
         throw new ParseAbort();
     }
 
@@ -346,7 +366,8 @@ public sealed class Parser
     {
         if (s.Current.Type != TokenType.Identifier)
         {
-            s.Error($"Після '{prefix}' очікувалося ім'я.");
+            s.Error(
+                "expr.expectedNameAfterPrefix", Param("prefix", prefix), $"Expected a name after \"{prefix}\".");
             throw new ParseAbort();
         }
 
@@ -355,8 +376,11 @@ public sealed class Parser
 
         if (s.Dialect == ExpressionDialect.Template)
         {
+            var construct = $"{prefix}{name}";
             s.Error(
-                $"Конструкція '{prefix}{name}' належить діалекту методологій і заборонена у формулах шаблону.",
+                "expr.methodologyConstructInTemplate", Param("construct", construct),
+                $"The construct \"{construct}\" belongs to the methodology dialect "
+                + "and is not allowed in template formulas.",
                 position, prefix.Length + name.Length);
         }
 
@@ -386,8 +410,11 @@ public sealed class Parser
 
                 if (kind == SymbolKind.Constant && s.Dialect == ExpressionDialect.Template)
                 {
+                    var construct = $"CST.{name}";
                     s.Error(
-                        $"Конструкція 'CST.{name}' належить діалекту методологій і заборонена у формулах шаблону.",
+                        "expr.methodologyConstructInTemplate", Param("construct", construct),
+                        $"The construct \"{construct}\" belongs to the methodology dialect "
+                        + "and is not allowed in template formulas.",
                         token.Position, token.Length + 1 + name.Length);
                 }
 
@@ -416,10 +443,21 @@ public sealed class Parser
         // комірок немає за побудовою (02b §3.4), і порада «пишіть у квадратних
         // дужках» відправила б методолога робити те, що заборонено; там єдина
         // правильна поправка — дописати `@`.
-        s.Error(s.Dialect == ExpressionDialect.Methodology
-            ? $"'{token.Text}' — голе ім'я: у діалекті методологій параметр пишеться з '@' ('@{token.Text}'). "
-              + "Без префікса ім'я не відрізнити від описки в назві функції."
-            : $"Невідомий ідентифікатор '{token.Text}'. Посилання на комірку пишеться у квадратних дужках.");
+        if (s.Dialect == ExpressionDialect.Methodology)
+        {
+            s.Error(
+                "expr.bareNameNeedsAt", Param("name", token.Text),
+                $"\"{token.Text}\" is a bare name: in the methodology dialect a parameter is written "
+                + $"with \"@\" (\"@{token.Text}\"). Without the prefix, a name cannot be told apart "
+                + "from a typo in a function name.");
+        }
+        else
+        {
+            s.Error(
+                "expr.unknownIdentifier", Param("name", token.Text),
+                $"Unknown identifier \"{token.Text}\". A cell reference is written in square brackets.");
+        }
+
         throw new ParseAbort();
     }
 
@@ -440,7 +478,9 @@ public sealed class Parser
             }
         }
 
-        s.Expect(TokenType.RParen, $"Очікувалася ')' у виклику {name}.");
+        s.Expect(
+            TokenType.RParen, "expr.expectedCloseParenInCall", Param("name", name),
+            $"Expected \")\" in the call to {name}.");
 
         // Набір функцій ЗАКРИТИЙ (02b §7–8). Невідома функція — це не «поки що
         // не реалізовано», а помилка публікації: інакше друкарська помилка в
@@ -448,14 +488,12 @@ public sealed class Parser
         var signature = SignatureOf(name, s.Dialect);
         if (signature is null)
         {
-            s.Error(UnknownFunction(name, s.Dialect), token.Position, token.Length);
+            ReportUnknownFunction(s, name, token);
         }
         else if (args.Count < signature.MinArgs
                  || (signature.MaxArgs is { } max && args.Count > max))
         {
-            s.Error(
-                $"Функція '{name}' приймає {Describe(signature)}, а отримала {args.Count}.",
-                token.Position, token.Length);
+            ReportArgCountMismatch(s, name, signature, args.Count, token);
         }
 
         return new FunctionNode(name, args) { Position = token.Position };
@@ -482,34 +520,74 @@ public sealed class Parser
             ? DialectCatalog.Find(name)
             : Functions.IsAllowed(name) ? Functions.GetSignature(name) : null;
 
-    /// <summary>Текст відмови для імені, якого в діалекті немає.</summary>
+    /// <summary>Відмова для імені, якого в діалекті немає.</summary>
     /// <remarks>
     /// ⚠ Порада — не ввічливість. У діалекті методологій більшість промахів
     /// має рівно одну правильну поправку: <c>POW</c> це описка регістру,
     /// <c>POWER</c> і <c>SWITCH</c> — наш власний вигаданий набір, який ці
     /// формули приймав. «Невідома функція» відправила б методолога шукати те,
     /// чого нема, замість переписати одне слово.
+    ///
+    /// ⛔ `Q-303`: базове речення тепер локалізоване (ключ каталогу), а порада
+    /// з <see cref="DialectCatalog.Advice"/> — НІ, і це свідоме, назване
+    /// рішення про межу картки, не пропуск. Порада — вільний текст (шість
+    /// записів <c>DialectCatalog.Replacements</c>, кожен — власне речення, не
+    /// шаблон із параметрами), і локалізувати її означало б завести окрему
+    /// картку для окремого файлу з інакшою формою тексту. Замість двомовного
+    /// речення (локалізована основа + сирий український суфікс) діагностика
+    /// з порадою лишається ПОВНІСТЮ без ключа — клієнт показує <c>Message</c>
+    /// як є, той самий шлях, яким сьогодні йдуть усі діагностики зв'язування
+    /// (<c>TypeChecker</c>, <c>UnitChecker</c> і сусіди), яких ця картка теж
+    /// свідомо не торкається.
     /// </remarks>
-    private static string UnknownFunction(string name, ExpressionDialect dialect)
+    private static void ReportUnknownFunction(State s, string name, Token token)
     {
-        var message = $"Функція '{name}' недоступна в діалекті {dialect}.";
+        var advice = s.Dialect == ExpressionDialect.Methodology ? DialectCatalog.Advice(name) : null;
 
-        if (dialect != ExpressionDialect.Methodology)
+        if (advice is null)
         {
-            return message;
+            s.Error(
+                "expr.unknownFunction", Params(("name", name), ("dialect", s.Dialect.ToString())),
+                $"Function \"{name}\" is not available in the {s.Dialect} dialect.",
+                token.Position, token.Length);
+            return;
         }
 
-        return DialectCatalog.Advice(name) is { } advice
-            ? $"{message} У наборі чинного рушія (NCalc 1.3.8) {advice}."
-            : message;
+        s.Error(
+            $"Функція '{name}' недоступна в діалекті {s.Dialect}. У наборі чинного рушія (NCalc 1.3.8) {advice}.",
+            token.Position, token.Length);
     }
 
-    private static string Describe(FunctionSignature signature)
-        => signature.MaxArgs is null
-            ? $"щонайменше {signature.MinArgs} аргументів"
-            : signature.MinArgs == signature.MaxArgs
-                ? $"{signature.MinArgs} аргументів"
-                : $"від {signature.MinArgs} до {signature.MaxArgs} аргументів";
+    /// <summary>Відмова через кількість аргументів — три форми сигнатури, три ключі (`Q-303`).</summary>
+    private static void ReportArgCountMismatch(State s, string name, FunctionSignature signature, int actual, Token token)
+    {
+        var min = signature.MinArgs.ToString(CultureInfo.InvariantCulture);
+        var actualText = actual.ToString(CultureInfo.InvariantCulture);
+
+        if (signature.MaxArgs is null)
+        {
+            s.Error(
+                "expr.argCountAtLeast", Params(("name", name), ("min", min), ("actual", actualText)),
+                $"Function \"{name}\" takes at least {signature.MinArgs} argument(s), but received {actual}.",
+                token.Position, token.Length);
+        }
+        else if (signature.MinArgs == signature.MaxArgs)
+        {
+            s.Error(
+                "expr.argCountExact", Params(("name", name), ("count", min), ("actual", actualText)),
+                $"Function \"{name}\" takes {signature.MinArgs} argument(s), but received {actual}.",
+                token.Position, token.Length);
+        }
+        else
+        {
+            var max = signature.MaxArgs.Value.ToString(CultureInfo.InvariantCulture);
+            s.Error(
+                "expr.argCountRange", Params(("name", name), ("min", min), ("max", max), ("actual", actualText)),
+                $"Function \"{name}\" takes from {signature.MinArgs} to {signature.MaxArgs} argument(s), "
+                + $"but received {actual}.",
+                token.Position, token.Length);
+        }
+    }
 
     // ——— посилання ———
 
@@ -541,7 +619,9 @@ public sealed class Parser
             var offset = segments.Count == 1 && segments[0].Period is { } p ? p : 0;
             if (segments.Count != 1 || segments[0].Period is null)
             {
-                s.Error("Календарний контекст пишеться як '[Period].Property'.", position, 1);
+                s.Error(
+                    "expr.calendarContextSyntax", null,
+                    "The calendar context is written as \"[Period].Property\".", position, 1);
             }
 
             return new PeriodPropertyNode(property, offset) { Position = position };
@@ -559,20 +639,25 @@ public sealed class Parser
             // Методологія працює з підготовленими аргументами, а не лізе в
             // документ сама. Це межа, яка робить її переносною між шаблонами.
             s.Error(
-                "Посилання на комірки документа заборонені в діалекті методологій.",
+                "expr.cellReferencesForbiddenInMethodology", null,
+                "Cell references to the document are not allowed in the methodology dialect.",
                 position, 1);
         }
 
         if (segments.Count is < 1 or > 4)
         {
-            s.Error("Посилання має від однієї до чотирьох ланок.", position, 1);
+            s.Error(
+                "expr.referenceLinkCount", null,
+                "A reference has from one to four links.", position, 1);
             throw new ParseAbort();
         }
 
         var column = segments[^1];
         if (column.Range is not null || column.Predicate is not null)
         {
-            s.Error("Остання ланка посилання — колонка, діапазон тут неприпустимий.", position, 1);
+            s.Error(
+                "expr.referenceLastLinkColumn", null,
+                "The last link of a reference is a column; a range is not allowed there.", position, 1);
             throw new ParseAbort();
         }
 
@@ -620,13 +705,17 @@ public sealed class Parser
         {
             s.Advance();
             var condition = ParseExpression(s);
-            s.Expect(TokenType.RBracket, "Очікувалася ']' після предиката.");
+            s.Expect(
+                TokenType.RBracket, "expr.expectedCloseBracketAfterPredicate",
+                "Expected \"]\" after the predicate.");
             return new Segment(null, null, condition, null);
         }
 
         if (s.Current.Type != TokenType.Identifier)
         {
-            s.Error("Порожня або некоректна ланка посилання.", open, 1);
+            s.Error(
+                "expr.referenceLinkEmpty", null,
+                "Empty or invalid reference link.", open, 1);
             throw new ParseAbort();
         }
 
@@ -654,7 +743,9 @@ public sealed class Parser
                 // це зсув періоду. Тому перевіряється текст, а не тип лексеми.
                 if (!s.Current.Text.All(char.IsAsciiDigit) || s.Current.Text.Length == 0)
                 {
-                    s.Error("Після '[Period:' очікувалося число.", open, 1);
+                    s.Error(
+                        "expr.periodExpectedNumber", null,
+                        "A number was expected after \"[Period:\".", open, 1);
                     throw new ParseAbort();
                 }
 
@@ -662,7 +753,7 @@ public sealed class Parser
                 s.Advance();
             }
 
-            s.Expect(TokenType.RBracket, "Очікувалася ']'.");
+            s.Expect(TokenType.RBracket, "expr.expectedCloseBracket", "Expected \"]\".");
             return new Segment(text, null, null, offset);
         }
 
@@ -671,17 +762,20 @@ public sealed class Parser
         {
             if (s.Current.Type != TokenType.Identifier)
             {
-                s.Error("Після ':' очікувався ключ рядка.", open, 1);
+                s.Error(
+                    "expr.rowKeyExpected", null,
+                    "A row key was expected after \":\".", open, 1);
                 throw new ParseAbort();
             }
 
             var to = s.Current.Text;
             s.Advance();
-            s.Expect(TokenType.RBracket, "Очікувалася ']' після діапазону.");
+            s.Expect(
+                TokenType.RBracket, "expr.expectedCloseBracketAfterRange", "Expected \"]\" after the range.");
             return new Segment(null, (text, to), null, null);
         }
 
-        s.Expect(TokenType.RBracket, "Очікувалася ']'.");
+        s.Expect(TokenType.RBracket, "expr.expectedCloseBracket", "Expected \"]\".");
         return new Segment(text, null, null, null);
     }
 
@@ -773,6 +867,21 @@ public sealed class Parser
             }
         }
 
+        /// <summary>Те саме, що <see cref="Expect(TokenType, string)"/>, з ключем каталогу (`Q-303`).</summary>
+        public void Expect(TokenType type, string messageKey, string message)
+            => Expect(type, messageKey, null, message);
+
+        /// <summary>Те саме, з підстановками для ключа.</summary>
+        public void Expect(
+            TokenType type, string messageKey, IReadOnlyDictionary<string, string>? messageParams, string message)
+        {
+            if (!Match(type))
+            {
+                Error(messageKey, messageParams, message);
+                throw new ParseAbort();
+            }
+        }
+
         public void Error(string message) => Error(message, Current.Position, Math.Max(Current.Length, 1));
 
         public void Error(string message, int position, int length)
@@ -789,5 +898,28 @@ public sealed class Parser
         /// </remarks>
         public void Error(string code, string message, int position, int length)
             => diagnostics.Add(new ExpressionDiagnostic(code, message, position, length));
+
+        /// <summary>
+        /// Діагностика з ключем каталогу — для локалізації клієнтом (`Q-303`).
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Код лишається <see cref="ExpressionErrors.Syntax"/>: ключ
+        /// відповідає лише за ТЕКСТ, код — за те, як конфігуратор і клієнт
+        /// класифікують діагностику (незмінно від цієї картки).
+        /// </remarks>
+        public void Error(string messageKey, IReadOnlyDictionary<string, string>? messageParams, string message)
+            => Error(messageKey, messageParams, message, Current.Position, Math.Max(Current.Length, 1));
+
+        /// <summary>Те саме, що вище, з явною позицією/довжиною фрагмента.</summary>
+        public void Error(
+            string messageKey, IReadOnlyDictionary<string, string>? messageParams, string message,
+            int position, int length)
+            => Error(ExpressionErrors.Syntax, messageKey, messageParams, message, position, length);
+
+        /// <summary>Ключ каталогу РАЗОМ із власним кодом (`ExpressionErrors.CaretNotPower` і подібні).</summary>
+        public void Error(
+            string code, string messageKey, IReadOnlyDictionary<string, string>? messageParams, string message,
+            int position, int length)
+            => diagnostics.Add(new ExpressionDiagnostic(code, message, position, length, messageKey, messageParams));
     }
 }

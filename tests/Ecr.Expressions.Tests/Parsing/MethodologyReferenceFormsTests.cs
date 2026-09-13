@@ -129,7 +129,9 @@ public sealed class MethodologyReferenceFormsTests
         var editor = Expr.Parse(formula, ExpressionDialect.Methodology);
 
         Assert.False(editor.IsSuccess);
-        Assert.Contains(editor.Diagnostics, d => d.Message.Contains("голе ім'я", StringComparison.Ordinal));
+        // ⚠ За ключем каталогу (`Q-303`): `Message` — англійський запасний
+        // варіант, не текст для порівняння в тесті.
+        Assert.Contains(editor.Diagnostics, d => d.MessageKey == "expr.bareNameNeedsAt");
         Assert.Contains(editor.Diagnostics, d => d.Message.Contains("@FlareUnitMode", StringComparison.Ordinal));
     }
 
@@ -163,7 +165,9 @@ public sealed class MethodologyReferenceFormsTests
         var result = Expr.Parse("Duration * 2", ExpressionDialect.Template, ExpressionParseMode.Import);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains(result.Diagnostics, d => d.Message.Contains("квадратних дужках", StringComparison.Ordinal));
+        // ⚠ За ключем каталогу (`Q-303`): `Message` — англійський запасний
+        // варіант, не текст для порівняння в тесті.
+        Assert.Contains(result.Diagnostics, d => d.MessageKey == "expr.unknownIdentifier");
     }
 
     [Fact]

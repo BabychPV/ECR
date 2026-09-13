@@ -1488,8 +1488,25 @@
             "type": "integer"
           },
           "message": {
-            "description": "Пояснення.",
+            "description": "Пояснення англійською — запасний варіант, коли MessageKey відсутній (діагностики публікації — `TypeChecker`,\n`UnitChecker` і сусіди — його поки не несуть, `Q-303` навмисно обмежена\nсинтаксисом парсера/лексера) або клієнт не може його розв'язати.",
             "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ каталогу рядків для локалізації клієнтом (`Q-303`); `null` —\nклієнт показує Message як є.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageParams": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підстановки для MessageKey.",
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "position": {
             "description": "Зсув у тексті виразу.",

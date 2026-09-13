@@ -11,6 +11,7 @@ import type {
   TemplateVersionPage,
 } from '@/api/types';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
+import { localizedMessage } from '@/features/expressions/markers';
 import { TestCaseRunner } from '@/features/expressions/TestCaseRunner';
 import type { ExpressionPlacement } from '@/features/expressions/api';
 import { t } from '@/shared/i18n';
@@ -236,7 +237,11 @@ function Findings({ result }: { readonly result: ExpressionValidationDto | null 
                   <Text span size="sm" fw={600}>
                     {d.code}
                   </Text>{' '}
-                  {d.message}
+                  {/* ⛔ Та сама функція, що й підкреслення в Monaco
+                      (`markers.ts`, `Q-303`) — не незалежна копія логіки:
+                      `d.message` сервера — англійський запасний варіант, не
+                      готовий текст, і локалізує клієнт за `messageKey`. */}
+                  {localizedMessage(d)}
                 </List.Item>
               ))}
             </List>

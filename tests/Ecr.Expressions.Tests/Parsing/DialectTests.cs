@@ -43,7 +43,12 @@ public sealed class DialectTests
         var result = Expr.Parse("[Water_07].[Main].[7001001].[Jan]", ExpressionDialect.Methodology);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains(result.Diagnostics, d => d.Message.Contains("методолог", StringComparison.Ordinal));
+        // ⚠ За ключем каталогу (`Q-303`), не за фрагментом тексту: `Message`
+        // тепер англійський запасний варіант для клієнта, який каталог не
+        // резолвить (`t()`, `shared/i18n`), а не текст, за яким зручно
+        // розрізняти причину в тесті.
+        Assert.Contains(
+            result.Diagnostics, d => d.MessageKey == "expr.cellReferencesForbiddenInMethodology");
 
         Assert.True(Expr.Parse("[Water_07].[Main].[7001001].[Jan]", ExpressionDialect.Template).IsSuccess);
     }
