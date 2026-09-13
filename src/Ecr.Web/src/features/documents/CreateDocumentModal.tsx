@@ -173,13 +173,25 @@ export function CreateDocumentModal({
                 key={sheet.id}
                 label={sheet.label}
                 checked={sheets.includes(sheet.id)}
-                onChange={(event) =>
+                onChange={(event) => {
+                  // ⛔ `event.currentTarget` — поле СИНТЕТИЧНОЇ події, і React
+                  // обнуляє його одразу після завершення цього обробника
+                  // (`react.dev`: «After the event handler has been called,
+                  // event.currentTarget will be set to null»). Функція-апдейтер
+                  // `setSheets` читала його ЛІНИВО, у момент виклику React —
+                  // під `StrictMode` (є в `main.tsx`) React навмисно викликає
+                  // апдейтер ДВІЧІ, і на другому виклику `currentTarget` уже
+                  // `null`: `TypeError: Cannot read properties of null (reading
+                  // 'checked')`, і без `ErrorBoundary` на цьому маршруті — весь
+                  // застосунок замінюється голим «Unexpected Application
+                  // Error!» React Router. Тепер `checked` читається ОДРАЗУ,
+                  // синхронно в обробнику, а не всередині апдейтера.
+                  const checked = event.currentTarget.checked;
+
                   setSheets((current) =>
-                    event.currentTarget.checked
-                      ? [...current, sheet.id]
-                      : current.filter((id) => id !== sheet.id),
-                  )
-                }
+                    checked ? [...current, sheet.id] : current.filter((id) => id !== sheet.id),
+                  );
+                }}
               />
             ))}
           </Stack>

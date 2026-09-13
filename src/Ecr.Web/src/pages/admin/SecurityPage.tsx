@@ -507,13 +507,23 @@ export function SecurityPage(): JSX.Element {
                   </Group>
                 }
                 checked={rolePermissions.includes(permission.code)}
-                onChange={(event) =>
+                onChange={(event) => {
+                  // ⛔ Той самий клас дефекту, що `CreateDocumentModal.tsx`:
+                  // `event.currentTarget` React обнуляє одразу після
+                  // завершення обробника, а апдейтер `setRolePermissions`
+                  // читав його ЛІНИВО — під `StrictMode` (`main.tsx`) React
+                  // навмисно кличе апдейтер ДВІЧІ, і другий виклик падає з
+                  // `TypeError: Cannot read properties of null (reading
+                  // 'checked')`, розбиваючи весь застосунок без
+                  // `ErrorBoundary` на маршруті.
+                  const checked = event.currentTarget.checked;
+
                   setRolePermissions((current) =>
-                    event.currentTarget.checked
+                    checked
                       ? [...current, permission.code]
                       : current.filter((code) => code !== permission.code),
-                  )
-                }
+                  );
+                }}
               />
             ))}
           </Stack>

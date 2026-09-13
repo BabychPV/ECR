@@ -114,9 +114,18 @@ export function RegistryEntryEditor({
               label={`${field.code}${field.isRequired ? ' *' : ''}`}
               description={field.dataType}
               value={values[field.code] ?? ''}
-              onChange={(event) =>
-                setValues((current) => ({ ...current, [field.code]: event.currentTarget.value }))
-              }
+              onChange={(event) => {
+                // ⛔ Той самий клас дефекту, що `CreateDocumentModal.tsx`:
+                // `event.currentTarget` React обнуляє одразу після завершення
+                // обробника, а апдейтер `setValues` читав його ЛІНИВО — під
+                // `StrictMode` (`main.tsx`) React навмисно кличе апдейтер
+                // ДВІЧІ, і другий виклик падає з `TypeError: Cannot read
+                // properties of null (reading 'value')`, розбиваючи весь
+                // застосунок без `ErrorBoundary` на маршруті.
+                const value = event.currentTarget.value;
+
+                setValues((current) => ({ ...current, [field.code]: value }));
+              }}
             />
           ))}
         </Stack>
