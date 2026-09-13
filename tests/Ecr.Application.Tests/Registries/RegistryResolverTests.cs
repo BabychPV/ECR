@@ -184,6 +184,37 @@ public sealed class RegistryResolverTests
         Assert.True(entry.IsDeleted);
     }
 
+    /// <summary>
+    /// Секвенційний пре-чек у <c>UpsertRegistryEntryHandler.CreateAsync</c> —
+    /// ⛔ Q-30x: без <c>Details["messageKey"]</c> подробиця доїжджала клієнту
+    /// сирим українським реченням незалежно від мови інтерфейсу.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-8.6")]
+    public async Task Створення_запису_з_зайнятим_кодом_несе_ключ_каталогу()
+    {
+        var definition = Definition();
+        var duplicate = Entry(101, Permits, "PERMIT_A");
+
+        _registries.FindDefinitionByIdAsync(Permits, Arg.Any<CancellationToken>()).Returns(definition);
+        _registries.FindEntryByCodeAsync(Permits, "PERMIT_A", Arg.Any<CancellationToken>()).Returns(duplicate);
+
+        var handler = new UpsertRegistryEntryHandler(_registries, _uow, _access, _user, _clock);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(
+            new RegistryEntryUpsertDto(
+                Id: null, RegistryDefId: Permits, Code: "PERMIT_A",
+                Display: Text("Дозвіл A (дублікат)"),
+                ParentEntryId: null,
+                Values: new Dictionary<string, object?>()),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-REG-0409", error.ErrorCode);
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-REG-0409", error.Details!["messageKey"]);
+        Assert.Equal("PERMIT_A", error.Details["code"]);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Зміна_записів_інкрементує_ревізію_даних_реєстру()
     {

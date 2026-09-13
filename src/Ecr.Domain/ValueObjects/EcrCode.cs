@@ -40,7 +40,18 @@ public readonly partial record struct EcrCode
             : throw new DomainException(
                 "ECR-CFG-0422",
                 $"Код «{value}» недопустимий: дозволені латинські літери, цифри й підкреслення, "
-                + "перший символ — літера, довжина до 64.");
+                + "перший символ — літера, довжина до 64.",
+                // ⛔ Domain не має і ніколи не матиме доступу до IUiStringCatalog
+                // (шар нижче за Application/Infrastructure) — тому це не готове
+                // речення каталогу, а СТРУКТУРОВАНИЙ ключ + підстановка, яку
+                // резолвить ExceptionHandlingMiddleware.LocalizedDetailAsync,
+                // маючи каталог. Українське речення вище лишається як message
+                // для логів/трасування, а не для показу користувачу — саме
+                // воно й доїжджало клієнту сирим до цього фіксу (Q-30x): цей
+                // код валідує КОЖНЕ поле «код» у застосунку (роль, проєкт,
+                // методологія, шаблон, довідник), і жоден із цих викликів не
+                // має доступу до каталогу рядків у Domain-шарі.
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422", ["code"] = value });
 
     public static bool TryCreate(string? value, out EcrCode code)
     {

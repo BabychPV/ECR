@@ -92,6 +92,28 @@ public sealed class ErrorFamilyTests
                 new CursorRequest(), CancellationToken.None));
 
         Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу.
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-REQ-0422.auditWindowOrder", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Задовге_вікно_аудиту_дає_ECR_REQ_0422_і_ключ_каталогу()
+    {
+        var handler = new GetCellChangesHandler(_auditReader, _access, _user);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(
+                from: Now, to: Now.Add(GetCellChangesHandler.MaxWindow).AddDays(1), documentId: null,
+                new CursorRequest(), CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-REQ-0422.auditWindowTooWide", error.Details!["messageKey"]);
+        Assert.Equal("92", error.Details["maxDays"]);
     }
 
     [Fact]
@@ -179,5 +201,11 @@ public sealed class ErrorFamilyTests
                 CancellationToken.None));
 
         Assert.Equal("ECR-USR-0409", error.ErrorCode);
+
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу.
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-USR-0409", error.Details!["messageKey"]);
+        Assert.Equal("ivanov", error.Details["userName"]);
     }
 }

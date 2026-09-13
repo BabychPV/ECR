@@ -47,6 +47,11 @@ public sealed class MethodologyConstantValidityTests
             () => constant.SetValidity(new DateOnly(2025, 1, 1), new DateOnly(2024, 1, 1)));
         Assert.Equal("ECR-CALC-0422", reversed.ErrorCode);
 
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу.
+        Assert.NotNull(reversed.Details);
+        Assert.Equal("err.validityWindowEmpty", reversed.Details!["messageKey"]);
+
         var equal = Assert.Throws<DomainException>(
             () => constant.SetValidity(new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 1)));
         Assert.Equal("ECR-CALC-0422", equal.ErrorCode);

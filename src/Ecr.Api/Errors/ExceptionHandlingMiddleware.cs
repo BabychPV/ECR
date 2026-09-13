@@ -203,25 +203,40 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// <summary>Ключ каталогу для підпису «Потрібне право» перед кодом права.</summary>
     private const string RequiresPermissionKey = "err.ECR-AUTH-0403.requiresPermission";
 
+    /// <summary>Ключ у <c>Details</c>, що позначає узагальнений шлях локалізації (нижче).</summary>
+    private const string MessageKeyDetailName = "messageKey";
+
     /// <summary>
     /// Клієнтська <c>Detail</c>: здебільшого — те саме `message`, яке вже
-    /// написане людською мовою прямо в обробнику. Виняток — коди, де виняток
-    /// несе СТРУКТУРОВАНУ подробицю замість готового речення (сьогодні лише
-    /// <c>ECR-AUTH-0403</c>: код права з <c>PermissionCheck</c>, не текст) —
-    /// для них речення будується тут із каталогу, тим самим механізмом, що й
-    /// <see cref="LocalizedTitleAsync"/> для заголовка.
+    /// написане людською мовою прямо в обробнику. Виняток — винятки, що
+    /// несуть СТРУКТУРОВАНУ подробицю замість готового речення — для них
+    /// речення будується тут із каталогу, тим самим механізмом, що й
+    /// <see cref="LocalizedTitleAsync"/> для заголовка. Два незалежних шляхи:
+    /// (1) узагальнений — БУДЬ-ЯКИЙ виняток із <c>Details["messageKey"]</c>
+    /// (`Q-30x`: домени, що не мають доступу до каталогу — насамперед
+    /// `Ecr.Domain`, напр. <c>EcrCode.Create</c> — несуть ключ і сирі
+    /// підстановки, а не готове речення); (2) `ECR-AUTH-0403` — старший,
+    /// точковий шлях (`Q-242`/`Q-300`), лишений без змін, щоб не чіпати вже
+    /// доведений код.
     /// </summary>
     /// <remarks>
-    /// ⛔ Без цього подробиця `ECR-AUTH-0403` доїжджала клієнту сирим
-    /// українським реченням незалежно від мови інтерфейсу користувача —
-    /// текст, написаний розробником обробника для СЕРВЕРНОГО боку, а не для
-    /// показу (виявлено реальним входом у застосунок під час аудиту, не
-    /// прогоном тестів: `Title` уже читався каталогом за `D-95`, а `Detail`
-    /// поруч — ні, і речення виходило двомовним).
+    /// ⛔ Без цього подробиця доїжджала клієнту сирим українським реченням
+    /// незалежно від мови інтерфейсу користувача — текст, написаний
+    /// розробником обробника для СЕРВЕРНОГО боку, а не для показу (виявлено
+    /// реальним входом у застосунок під час аудиту, не прогоном тестів:
+    /// `Title` уже читався каталогом за `D-95`, а `Detail` поруч — ні, і
+    /// речення виходило двомовним).
     /// </remarks>
     private static async Task<string> LocalizedDetailAsync(
         HttpContext context, string code, string message, IReadOnlyDictionary<string, object?>? details)
     {
+        if (details is not null
+            && details.TryGetValue(MessageKeyDetailName, out var keyValue)
+            && keyValue is string messageKey)
+        {
+            return await ResolveGenericMessageAsync(context, message, messageKey, details).ConfigureAwait(false);
+        }
+
         if (!string.Equals(code, ErrorCodes.Forbidden, StringComparison.Ordinal)
             || details is null
             || !details.TryGetValue("permission", out var permissionValue)
@@ -251,6 +266,55 @@ public sealed partial class ExceptionHandlingMiddleware(
             return string.Equals(label, RequiresPermissionKey, StringComparison.Ordinal)
                 ? message
                 : $"{label} {permission}";
+        }
+#pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return message;
+        }
+    }
+
+    /// <summary>
+    /// Узагальнений шлях (`Q-30x`): резолвить <paramref name="messageKey"/> із
+    /// каталогу й підставляє в нього решту <paramref name="details"/> як
+    /// <c>{ім'я}</c>-плейсхолдери (<see cref="UiStringResolver.Format"/>, той
+    /// самий синтаксис, що й клієнтський <c>t()</c>). Дозволяє БУДЬ-ЯКОМУ
+    /// винятку — насамперед <c>DomainException</c> із <c>Ecr.Domain</c>, де
+    /// каталогу взагалі нема, — дійти до клієнта локалізованим без власного
+    /// точкового арму в цьому файлі на кожен новий код.
+    /// </summary>
+    private static async Task<string> ResolveGenericMessageAsync(
+        HttpContext context, string message, string messageKey, IReadOnlyDictionary<string, object?> details)
+    {
+        try
+        {
+            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
+            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+
+            if (catalog is null || currentUser is null)
+            {
+                return message;
+            }
+
+            var strings = await catalog
+                .GetAsync(currentUser.Language, context.RequestAborted)
+                .ConfigureAwait(false);
+
+            var template = UiStringResolver.Resolve(strings, messageKey);
+
+            // Ключа немає в каталозі — краще сире (написане розробником)
+            // речення, ніж сам ключ показаний користувачу як текст.
+            if (string.Equals(template, messageKey, StringComparison.Ordinal))
+            {
+                return message;
+            }
+
+            var parameters = details
+                .Where(pair => pair.Key != MessageKeyDetailName && pair.Value is string)
+                .ToDictionary(pair => pair.Key, pair => (string)pair.Value!, StringComparer.Ordinal);
+
+            return UiStringResolver.Format(template, parameters);
         }
 #pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
         catch (Exception)
@@ -362,10 +426,10 @@ public sealed partial class ExceptionHandlingMiddleware(
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
         DomainException e when e.ErrorCode == ErrorCodes.ReportImmutable =>
-            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, null),
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         DomainException e =>
-            (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, null),
+            (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
               "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", null),

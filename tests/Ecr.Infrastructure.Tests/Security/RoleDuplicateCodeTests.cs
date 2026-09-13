@@ -59,6 +59,14 @@ public sealed class RoleDuplicateCodeTests(SqlServerFixture sql)
 
         Assert.Equal("ECR-SEC-0409", thrown.ErrorCode);
         Assert.Contains(code, thrown.Message, StringComparison.Ordinal);
+
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу —
+        // ExceptionHandlingMiddleware.LocalizedDetailAsync резолвить це
+        // ЛИШЕ коли Details несе цей ключ.
+        Assert.NotNull(thrown.Details);
+        Assert.Equal("err.ECR-SEC-0409", thrown.Details!["messageKey"]);
+        Assert.Equal(code, thrown.Details["code"]);
     }
 
     private static LocalizedText Text(string value)

@@ -53,15 +53,21 @@ public sealed class GetCellChangesHandler(
         if (to <= from)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, "Кінець вікна аудиту має бути пізнішим за початок.");
+                ErrorCodes.RequestInvalid, "Кінець вікна аудиту має бути пізнішим за початок.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.auditWindowOrder" });
         }
 
         if (to - from > MaxWindow)
         {
+            var maxDays = MaxWindow.TotalDays.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
-                $"Вікно аудиту ширше за {MaxWindow.TotalDays:F0} днів: запит пішов би по всіх партиціях.",
-                new Dictionary<string, object?> { ["maxDays"] = MaxWindow.TotalDays });
+                $"Вікно аудиту ширше за {maxDays} днів: запит пішов би по всіх партиціях.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.auditWindowTooWide",
+                    ["maxDays"] = maxDays,
+                });
         }
 
         if (!page.IsValid)

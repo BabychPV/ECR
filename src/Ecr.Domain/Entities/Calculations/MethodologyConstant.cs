@@ -301,7 +301,13 @@ public sealed class MethodologyConstant : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Порожнє вікно чинності: виключний кінець {to} не пізніший за початок {from}.");
+                $"Порожнє вікно чинності: виключний кінець {to} не пізніший за початок {from}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.validityWindowEmpty",
+                    ["from"] = from?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "—",
+                    ["to"] = to?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? "—",
+                });
         }
 
         ValidFrom = from;

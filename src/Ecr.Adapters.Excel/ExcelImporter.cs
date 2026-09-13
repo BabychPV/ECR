@@ -318,7 +318,8 @@ public sealed class ExcelImporter(
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or FormatException)
         {
             throw new BusinessRuleException(
-                "ECR-IMP-0422", "Файл не читається як книга .xlsx.");
+                "ECR-IMP-0422", "Файл не читається як книга .xlsx.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.notAWorkbook" });
         }
     }
 

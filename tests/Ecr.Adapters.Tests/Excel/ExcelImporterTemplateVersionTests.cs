@@ -4,6 +4,7 @@ using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -217,5 +218,24 @@ public sealed class ExcelImporterTemplateVersionTests
         // чужі дані ще до будь-якого рішення про доступ.
         await _cellStore.Received(1).ReadSlicesAsync(
             Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 0), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Аудит-пас 4: файл, що не є книгою `.xlsx`, кидав `BusinessRuleException`
+    /// без <c>Details["messageKey"]</c> — сире українське речення доходило до
+    /// клієнта незалежно від мови інтерфейсу (той самий клас, що Q-303/Q-304).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Файл_що_не_є_книгою_несе_ключ_каталогу()
+    {
+        using var garbage = new MemoryStream("це не .xlsx"u8.ToArray());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Importer().PreviewAsync(DocumentId, garbage, CancellationToken.None));
+
+        Assert.Equal("ECR-IMP-0422", error.ErrorCode);
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-IMP-0422.notAWorkbook", error.Details!["messageKey"]);
     }
 }

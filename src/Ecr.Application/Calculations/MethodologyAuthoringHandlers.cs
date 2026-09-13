@@ -249,7 +249,8 @@ public sealed class SaveMethodologyConstantHandler(
            ?? throw new BusinessRuleException(
                "ECR-CALC-0422",
                "Числова константа без значення: порожнє число — не «нуль за замовчуванням», "
-               + "а рішення, якого ніхто не ухвалив (поправка 2-біс директиви ПК-1 №05).");
+               + "а рішення, якого ніхто не ухвалив (поправка 2-біс директиви ПК-1 №05).",
+               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.constantNoValue" });
 
     /// <summary>Одиниця з запиту або відмова з названою причиною.</summary>
     /// <param name="request">Запит на запис константи.</param>
@@ -259,7 +260,8 @@ public sealed class SaveMethodologyConstantHandler(
         => request.UnitId
            ?? throw new BusinessRuleException(
                "ECR-CALC-0422",
-               "Числова константа без одиниці: перевірка розмірностей без неї неможлива (ФВ-16.1).");
+               "Числова константа без одиниці: перевірка розмірностей без неї неможлива (ФВ-16.1).",
+               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.constantNoUnit" });
 }
 
 /// <summary>Правила відбору рядків версії (ФВ-13.3).</summary>
