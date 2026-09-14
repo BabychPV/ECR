@@ -128,6 +128,16 @@ export function SecurityPage(): JSX.Element {
    * ⚠ Права обираються з тих, що вже оголошені: вигадати право на клієнті
    * не можна, сервер приймає лише коди з каталогу.
    */
+  // ⛔ Аудит-пас 5: скидання чернетки жило ЛИШЕ в `onSuccess` — Cancel/закриття
+  // діалогу (`onClose`) лишали код/назву/права в стані, і повторне відкриття
+  // «Add role» показувало чернетку ПОПЕРЕДНЬОЇ спроби, не порожню форму.
+  const resetRoleForm = (): void => {
+    setCreatingRole(false);
+    setRoleCode('');
+    setRoleName({});
+    setRolePermissions([]);
+  };
+
   const createRole = useMutation({
     mutationFn: () =>
       apiFetch<RoleIdResponse>('/api/v1/roles', {
@@ -140,10 +150,7 @@ export function SecurityPage(): JSX.Element {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['roles'] });
-      setCreatingRole(false);
-      setRoleCode('');
-      setRoleName({});
-      setRolePermissions([]);
+      resetRoleForm();
       showDone(t('security.roleCreated'));
     },
     onError: showApiError,
@@ -160,6 +167,19 @@ export function SecurityPage(): JSX.Element {
    * сервером із разовим паролем і прапорцем `MustChangePassword`
    * (`ФВ-6.18`): пароль, який знає той, хто його видав, — це не пароль.
    */
+  // ⛔ Аудит-пас 5: той самий дефект, що й `resetRoleForm` — скидання чернетки
+  // жило ЛИШЕ в `onSuccess`, і Cancel/закриття діалогу лишали ім'я/пароль/
+  // ролі в стані для наступного відкриття.
+  const resetUserForm = (): void => {
+    setCreatingUser(false);
+    setUserName('');
+    setDisplayName('');
+    setSid('');
+    setOneTimePassword('');
+    setEmail('');
+    setNewUserRoles([]);
+  };
+
   const createUser = useMutation({
     mutationFn: () =>
       apiFetch<UserIdResponse>('/api/v1/users', {
@@ -181,13 +201,7 @@ export function SecurityPage(): JSX.Element {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] });
-      setCreatingUser(false);
-      setUserName('');
-      setDisplayName('');
-      setSid('');
-      setOneTimePassword('');
-      setEmail('');
-      setNewUserRoles([]);
+      resetUserForm();
       showDone(t('security.userCreated'));
     },
     onError: showApiError,
@@ -461,7 +475,7 @@ export function SecurityPage(): JSX.Element {
 
       <Modal
         opened={creatingRole}
-        onClose={() => setCreatingRole(false)}
+        onClose={resetRoleForm}
         title={t('security.createRole')}
         size="lg"
       >
@@ -530,7 +544,7 @@ export function SecurityPage(): JSX.Element {
         </ScrollArea>
 
         <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setCreatingRole(false)}>
+          <Button variant="default" onClick={resetRoleForm}>
             {t('common.cancel')}
           </Button>
           <Button
@@ -551,7 +565,7 @@ export function SecurityPage(): JSX.Element {
 
       <Modal
         opened={creatingUser}
-        onClose={() => setCreatingUser(false)}
+        onClose={resetUserForm}
         title={t('security.createUser')}
       >
         <Select
@@ -630,7 +644,7 @@ export function SecurityPage(): JSX.Element {
         />
 
         <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setCreatingUser(false)}>
+          <Button variant="default" onClick={resetUserForm}>
             {t('common.cancel')}
           </Button>
           <Button

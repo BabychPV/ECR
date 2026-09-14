@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, NumberInput, Select, Table, Text } from '@mantine/core';
+import { Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
@@ -49,6 +49,12 @@ export function SnapshotsPage(): JSX.Element {
     queryKey: ['projects'],
     queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
   });
+
+  // ⛔ Аудит-пас 5: рядок списку показував голий `snapshot.projectId`
+  // (число з бази) замість коду проєкту — той самий довідник уже
+  // завантажено для селектора вище, лишалося лише звести id → код.
+  const projectCodeOf = (projectId: number): string =>
+    projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
 
   // ⛔ Перелік описів звітів, а не поле для набору коду руками (`W7`). До
   // цього єдиним способом вказати звіт було ВГАДАТИ його код: описів у базі
@@ -145,6 +151,12 @@ export function SnapshotsPage(): JSX.Element {
         onRetry={() => void snapshots.refetch()}
       >
         {(all) => (
+          // ⛔ Аудит-пас 5: без обмеження ширини контейнера `Badge`-мітка
+          // статусу (`snapshots.status`) обтиналась еліпсисом, щойно сторінка
+          // звужувалась (Mantine `Badge .label` — `overflow:hidden;
+          // text-overflow:ellipsis`) — той самий дефект, що вже виправлено
+          // для матриці ролей у `SecurityPage.tsx`, тим самим прийомом.
+          <ScrollArea type="auto" offsetScrollbars>
           <Table striped className="ecr-sticky-head">
             <Table.Thead>
               <Table.Tr>
@@ -167,7 +179,7 @@ export function SnapshotsPage(): JSX.Element {
                       </Badge>
                     )}
                   </Table.Td>
-                  <Table.Td>{snapshot.projectId}</Table.Td>
+                  <Table.Td>{projectCodeOf(snapshot.projectId)}</Table.Td>
                   <Table.Td>{snapshot.periodKey ?? '—'}</Table.Td>
                   <Table.Td>{snapshot.rowCount}</Table.Td>
                   <Table.Td>
@@ -190,6 +202,7 @@ export function SnapshotsPage(): JSX.Element {
               ))}
             </Table.Tbody>
           </Table>
+          </ScrollArea>
         )}
       </AsyncBoundary>
 

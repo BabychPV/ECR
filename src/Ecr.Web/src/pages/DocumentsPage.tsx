@@ -3,7 +3,7 @@ import { Badge, Button, Group, NumberInput, Table } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { DocumentPage } from '@/api/types';
+import type { DocumentPage, PagedProjects } from '@/api/types';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -37,6 +37,17 @@ export function DocumentsPage(): JSX.Element {
           (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
       ),
   });
+
+  // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
+  // — та сама сутність, чий код уже видно в діалозі «New document» одним
+  // кліком поруч (`CreateDocumentModal`).
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+  });
+
+  const projectCodeOf = (projectId: number): string =>
+    projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
 
   return (
     <>
@@ -100,7 +111,7 @@ export function DocumentsPage(): JSX.Element {
                     <Table.Td>
                       <Link to={`/documents/${document.id}`}>{document.businessKey}</Link>
                     </Table.Td>
-                    <Table.Td>{document.projectId}</Table.Td>
+                    <Table.Td>{projectCodeOf(document.projectId)}</Table.Td>
                     <Table.Td>{document.sheetCount}</Table.Td>
                     <Table.Td>
                       <Group gap="xs">

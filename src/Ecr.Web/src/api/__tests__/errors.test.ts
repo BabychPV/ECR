@@ -94,6 +94,34 @@ describe('Обробка помилок API', () => {
     expect(attempts).toHaveBeenCalledTimes(1);
   });
 
+  it('Аудит-пас 5: 401 на самому вході НЕ веде на сторінку входу — форма вже там', async () => {
+    // ⛔ До фіксу невірний пароль на формі входу (теж `401`) викликав
+    // `redirectToLogin` так само, як 401 будь-де інде — сторінка входу
+    // перезавантажувала САМУ СЕБЕ в момент невдалої спроби, і
+    // `LoginPage.tsx` не встигав показати відповідь сервера користувачу.
+    const redirect = vi.fn();
+    setLoginRedirect(redirect);
+
+    respond(401, {
+      title: 'Неправильний логін або пароль',
+      status: 401,
+      detail: 'Неправильний логін або пароль.',
+      errorCode: 'ECR-AUTH-0401',
+      correlationId: 'cid-login',
+    });
+
+    const error = (await apiFetch('/api/v1/login/local', { method: 'POST' }).catch(
+      (e: unknown) => e,
+    )) as EcrApiError;
+
+    expect(redirect).not.toHaveBeenCalled();
+
+    // ⚠ Реальне повідомлення сервера доходить до `LoginPage.tsx`, а не
+    // узагальнене «Потрібна автентифікація», яким гілка-редирект підміняла
+    // відповідь.
+    expect(error.message).toBe('Неправильний логін або пароль.');
+  });
+
   it('4xx не повторюється автоматично', () => {
     const forbidden = new EcrApiError({
       title: 'Немає права',

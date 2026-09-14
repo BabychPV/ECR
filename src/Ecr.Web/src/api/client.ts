@@ -158,7 +158,15 @@ async function apiFetchRaw(
 
   const response = await fetch(path, { ...init, headers, credentials: 'include' });
 
-  if (response.status === 401) {
+  // ⛔ Аудит-пас 5: невірний пароль на самій формі входу — теж `401`, і до
+  // цього фіксу він так само викликав `redirectToLogin` (реальний
+  // `window.location.assign` у продакшні): сторінка входу починала
+  // перезавантажувати САМУ СЕБЕ в момент невдалої спроби, і `LoginPage.tsx`
+  // не встигав показати відповідь сервера (`setError` у `submit()` —
+  // код, що вже правильно ловить і показує помилку, просто ніколи не
+  // отримував шансу спрацювати до навігації). Ендпоінти входу відповідають
+  // за власний `401` самі — тут перенаправляти нема куди й нема чого.
+  if (response.status === 401 && path !== '/api/v1/login/local' && path !== '/api/v1/login/windows') {
     redirectToLogin(typeof window === 'undefined' ? path : window.location.pathname);
     throw new EcrApiError({
       title: 'Потрібна автентифікація',

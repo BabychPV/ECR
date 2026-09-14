@@ -259,7 +259,18 @@ export const theme = createTheme({
 
     // ⚠ Тривалість переходу задана ТУТ, а не в кожному діалозі: інакше перший
     // же новий екран поставить свою.
-    Modal: { defaultProps: { transitionProps: { duration: 150 } } },
+    // ⛔ Аудит-пас 5: кнопка закриття модалки не мала жодного `aria-label`
+    // (Mantine не задає дефолтний) — скрінрідер оголошував лише «кнопка»,
+    // без жодного натяку на дію. Рядок — статичний, а не через `t()`:
+    // `theme` створюється РІВНО ОДИН РАЗ при завантаженні модуля (ФВ-14.11,
+    // `App.tsx`), задовго до того, як каталог рядків довантажиться з
+    // сервера, — підстановка тут застигла б назавжди як `⟦common.close⟧`.
+    // Той самий компроміс, що вже прийнятий для `Breadcrumbs.tsx`
+    // (`aria-label="Show all breadcrumbs"`) — текст лише для скрінрідера,
+    // не видимий UI-напис.
+    Modal: {
+      defaultProps: { transitionProps: { duration: 150 }, closeButtonProps: { 'aria-label': 'Close' } },
+    },
     Drawer: { defaultProps: { transitionProps: { duration: 150 } } },
     Tooltip: { defaultProps: { transitionProps: { duration: 80 } } },
   },

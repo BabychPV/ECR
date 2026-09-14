@@ -30,6 +30,9 @@ public sealed class CloneProjectTests
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IUserStore _users = Substitute.For<IUserStore>();
+
+    private const int ManagerRoleId = 1;
 
     private readonly Project _source = new(
         EcrCode.Create("KASH_2026"),
@@ -60,12 +63,23 @@ public sealed class CloneProjectTests
             .Returns(new AccessBuilder { UserId = 9 }
                 .Permission("Project.Manage")
                 .Grant(ResourceKind.Project, 1, GrantLevel.Manage)
+                .Role(ManagerRoleId)
                 .Build());
+
+        // ⛔ Аудит-пас 5: CloneProjectHandler тепер видає творцю грант Manage
+        // на щойно СТВОРЕНИЙ КЛОН — той самий механізм, що CreateProjectHandler
+        // (Q-179), через ProjectOwnershipGrant. Фікстура задає рівно одну
+        // роль творця, що несе Project.Manage.
+        _users.ListRolesAsync(Arg.Any<CancellationToken>()).Returns(
+            [new RoleView(ManagerRoleId, "Manager", IsBuiltIn: false, IsActive: true,
+                Permissions: ["Project.Manage"], DangerousPermissions: [])]);
+        _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
+            .Returns(new List<ResourceGrantDto>());
     }
 
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
 
-    private CloneProjectHandler Handler() => new(_periods, _uow, _audit, _user, _clock, _access);
+    private CloneProjectHandler Handler() => new(_periods, _uow, _audit, _user, _clock, _access, _users);
 
     /// <summary>Проєкт, який обробник передав сховищу.</summary>
     private Project Cloned()
@@ -156,6 +170,30 @@ public sealed class CloneProjectTests
             () => Handler().HandleAsync(1, "KASH_2027", CancellationToken.None));
 
         await _periods.DidNotReceive().AddProjectAsync(Arg.Any<Project>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Клонування_видає_творцю_грант_Manage_на_клон()
+    {
+        // ⛔ Аудит-пас 5: до фіксу творець клону не отримував ЖОДНОГО гранта
+        // на щойно клонований проєкт — не міг сам активувати/архівувати чи
+        // погодити власний клон, доки хтось не видасть грант окремим кроком
+        // (той самий клас дефекту, що Q-179 уже виправив для СТВОРЕННЯ).
+        await Handler().HandleAsync(1, "KASH_2027", CancellationToken.None);
+
+        var clone = Cloned();
+
+        await _users.Received(1).ReplaceGrantsAsync(
+            ManagerRoleId,
+            Arg.Is<IReadOnlyList<ResourceGrantDto>>(grants =>
+                grants.Any(g => g.ResourceKind == ResourceKind.Project
+                                 && g.ResourceId == clone.Id
+                                 && g.Level == GrantLevel.Manage
+                                 && !g.IsDeny)),
+            Arg.Any<CancellationToken>());
+
+        await _access.Received(1).InvalidateProfileAsync(9, Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -843,7 +843,10 @@ USING (VALUES
     (N'version.clone',                   N'en', N'Clone version', 1),
     (N'version.diff',                    N'en', N'Compare versions', 1),
     (N'version.diffOther',               N'en', N'Compare with version id', 1),
-    (N'version.diffOtherHint',           N'en', N'The other version to compare against; take the id from the template list.', 1),
+    -- ⛔ Аудит-пас 5: старий текст надсилав до переліку шаблонів по ідентифікатор
+    -- версії, а той список показує лише номер версії (`1.0.0.0`), не id —
+    -- ідентифікатор видно ЛИШЕ в адресному рядку відкритої версії.
+    (N'version.diffOtherHint',           N'en', N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).', 1),
     (N'version.diffPick',                N'en', N'Enter the other version', 1),
     (N'version.diffSame',                N'en', N'The versions are structurally identical', 1),
     (N'version.diffSameHint',            N'en', N'Nothing to migrate: documents can move between them freely.', 1),

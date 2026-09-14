@@ -127,7 +127,7 @@ public sealed class ErrorFamilyTests
         // ПРОЄКТУ, а не «період поза межами проєкту».
         _periods.FindProjectAsync(404, Arg.Any<CancellationToken>()).Returns((Project?)null);
 
-        var handler = new CloneProjectHandler(_periods, _uow, _audit, _user, _clock, _access);
+        var handler = new CloneProjectHandler(_periods, _uow, _audit, _user, _clock, _access, _users);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
             () => handler.HandleAsync(
@@ -207,5 +207,45 @@ public sealed class ErrorFamilyTests
         Assert.NotNull(error.Details);
         Assert.Equal("err.ECR-USR-0409", error.Details!["messageKey"]);
         Assert.Equal("ivanov", error.Details["userName"]);
+    }
+
+    /// <summary>
+    /// Аудит-пас 5: `ChangePasswordHandler` перевіряє `PasswordPolicy.MinLength`
+    /// (Q-... власна зміна пароля), а `CreateUserHandler` — ні, до цього
+    /// фіксу. Адмін міг видати новому користувачу разовий пароль коротший за
+    /// політику; до першої зміни саме він і є чинним паролем облікового
+    /// запису.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Закороткий_разовий_пароль_відхиляється_ECR_PWD_0422()
+    {
+        var handler = new CreateUserHandler(
+            _users,
+            _hasher,
+            _access,
+            new DisableBootstrapAdminHandler(_users, _uow, _audit, _user, _clock),
+            _uow,
+            _audit,
+            _user,
+            _clock);
+
+        // Дефолтна політика фейка — MinLength 12 (`FakeUserStore.Policy`).
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(
+                userName: "petrov",
+                displayName: "Петров",
+                provider: AuthProvider.Local,
+                windowsSid: null,
+                initialPassword: "short1",
+                roleCodes: [],
+                email: null,
+                CancellationToken.None));
+
+        Assert.Equal("ECR-PWD-0422", error.ErrorCode);
+
+        // ⚠ Відмова ДО створення: користувач не мав з'явитися в сховищі з
+        // паролем, який нижче за політику.
+        Assert.Null(await _users.FindByUserNameAsync("petrov", CancellationToken.None));
     }
 }

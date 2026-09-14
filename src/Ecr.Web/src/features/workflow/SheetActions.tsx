@@ -146,6 +146,16 @@ export function SheetActions({
     onError: showApiError,
   });
 
+  /**
+   * ⛔ Захист від подвійного кліку — СИНХРОННИЙ, не через `recalculate.isPending`.
+   * Mantine `Button` вимикається лише разом із `loading`, а той оновлюється
+   * лише на НАСТУПНОМУ рендері React — швидкий подвійний клік встигає
+   * викликати `mutate()` двічі ДО першого перерендеру, і ставить у чергу два
+   * однакових перерахунки. `useRef` читається й пишеться негайно, у тому
+   * самому обробнику, без очікування на React.
+   */
+  const recalculateInFlight = useRef(false);
+
   const recalcJob = useQuery({
     queryKey: ['job', recalcJobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(recalcJobId ?? '')}`),
@@ -221,7 +231,15 @@ export function SheetActions({
             size="xs"
             variant="default"
             loading={recalculate.isPending || recalcRunning}
-            onClick={() => recalculate.mutate()}
+            onClick={() => {
+              if (recalculateInFlight.current) return;
+              recalculateInFlight.current = true;
+              recalculate.mutate(undefined, {
+                onSettled: () => {
+                  recalculateInFlight.current = false;
+                },
+              });
+            }}
           >
             {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>

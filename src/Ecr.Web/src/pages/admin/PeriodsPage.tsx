@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, Select, Table, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Group, Modal, ScrollArea, Select, Table, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -459,6 +459,12 @@ export function PeriodsPage(): JSX.Element {
           {t('periods.timeZone')}: {calendar.timeZoneId}
         </Text>
 
+        {/* ⛔ Аудит-пас 5: без обмеження ширини контейнера `Badge`-мітки
+            стану (`Table.Th периods.state`) обтинались еліпсисом, щойно
+            сторінка звужувалась (Mantine `Badge .label` — `overflow:hidden;
+            text-overflow:ellipsis`) — той самий дефект, що вже виправлено
+            для матриці ролей у `SecurityPage.tsx`, тим самим прийомом. */}
+        <ScrollArea type="auto" offsetScrollbars>
         <Table striped className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
@@ -526,6 +532,7 @@ export function PeriodsPage(): JSX.Element {
             ))}
           </Table.Tbody>
         </Table>
+        </ScrollArea>
         </>
         )}
       </AsyncBoundary>
