@@ -537,6 +537,23 @@ public sealed class CreateUserHandler(
             }
 
             user = new User(userName, displayName, AuthProvider.Local);
+
+            // ⛔ Аудит-пас 5: `ChangePasswordHandler` перевіряє
+            // `PasswordPolicy.MinLength` (щойно свій пароль міняє чинний
+            // власник), а `CreateUserHandler` — ні. Розрив: адмін міг
+            // видати НОВОМУ користувачу разовий пароль коротший за політику,
+            // і саме цей пароль (не обраний самим користувачем) ніколи
+            // повторно не перевіряється довжиною — до першої зміни він і є
+            // чинним паролем облікового запису.
+            var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
+            if (initialPassword.Length < policy.MinLength)
+            {
+                throw new BusinessRuleException(
+                    "ECR-PWD-0422",
+                    $"Разовий пароль коротший за {policy.MinLength} символів.",
+                    new Dictionary<string, object?> { ["minLength"] = policy.MinLength });
+            }
+
             user.SetPassword(hasher.Hash(initialPassword));
 
             // ⚠ Разовий пароль знає той, хто створював. Доки його не змінили,

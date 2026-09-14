@@ -28,7 +28,8 @@ public sealed class CloneProjectHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    Security.IAccessDecisionService access)
+    Security.IAccessDecisionService access,
+    IUserStore users)
 {
     /// <summary>Створює проєкт-копію з новим кодом.</summary>
     /// <param name="sourceProjectId">Проєкт-джерело.</param>
@@ -122,6 +123,22 @@ public sealed class CloneProjectHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ Аудит-пас 5: клон не отримував ЖОДНОГО гранта на щойно
+        // створений проєкт — той самий дефект, який `Q-179` уже виправив для
+        // `CreateProjectHandler` (спільний механізм тепер у
+        // `ProjectOwnershipGrant`). Без цього творець клону не міг сам
+        // активувати/архівувати чи погодити власний клон, доки хтось не
+        // видасть грант окремим кроком.
+        // ⛔ Аудит-пас 5: клон не отримував ЖОДНОГО гранта на щойно
+        // створений проєкт — той самий дефект, який `Q-179` уже виправив для
+        // `CreateProjectHandler` (спільний механізм тепер у
+        // `ProjectOwnershipGrant`). Без цього творець клону не міг сам
+        // активувати/архівувати чи погодити власний клон, доки хтось не
+        // видасть грант окремим кроком.
+        await ProjectOwnershipGrant.GrantAsync(
+            users, access, audit, uow, currentUser, clock,
+            profile, clone.Id, "Project.Manage", "CloneProjectOwnership", ct).ConfigureAwait(false);
 
         return clone.Id;
     }

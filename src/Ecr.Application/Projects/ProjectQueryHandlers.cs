@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -396,62 +395,10 @@ public sealed class CreateProjectHandler(
     /// хв) або новому вході — так само, як будь-яка інша зміна грантів, що
     /// не супроводжується ротацією штампа.
     /// </remarks>
-    private async Task GrantOwnershipAsync(AccessProfile profile, int projectId, CancellationToken ct)
-    {
-        var allRoles = await users.ListRolesAsync(ct).ConfigureAwait(false);
-        var qualifyingRoles = allRoles
-            .Where(r => profile.RoleIds.Contains(r.Id) && r.Permissions.Contains(Permission))
-            .ToList();
-
-        var grantedAny = false;
-
-        foreach (var role in qualifyingRoles)
-        {
-            var existing = await users.ListGrantsAsync(role.Id, ct).ConfigureAwait(false);
-
-            // ⚠ Проєкт щойно створений — дубліката бути не може за
-            // побудовою (`projectId` ще не існував ні для кого), але
-            // перевірка тут коштує дешевше за мовчазний `UQ_ResourceGrant`
-            // виняток, якби це припущення колись перестало виконуватися.
-            if (existing.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == projectId))
-            {
-                continue;
-            }
-
-            var updated = existing
-                .Append(new ResourceGrantDto(ResourceKind.Project, projectId, GrantLevel.Manage, IsDeny: false))
-                .ToList();
-
-            await users.ReplaceGrantsAsync(role.Id, updated, ct).ConfigureAwait(false);
-            grantedAny = true;
-
-            await audit.WriteSecurityEventAsync(
-                new SecurityEventRecord(
-                    clock.UtcNow,
-                    "ResourceGrantsReplaced",
-                    TargetUserId: null,
-                    TargetRoleId: role.Id,
-                    DetailsJson: JsonSerializer.Serialize(new
-                    {
-                        role = role.Code,
-                        reason = "CreateProjectOwnership",
-                        projectId,
-                    }),
-                    // ⚠ `!.Value`, не повторна перевірка: `PermissionCheck.RequireAsync`
-                    // вище вже вимагав автентифікованого користувача, інакше
-                    // сюди взагалі не дійшли б.
-                    ChangedByUserId: currentUser.UserId!.Value,
-                    CorrelationId: currentUser.CorrelationId),
-                ct).ConfigureAwait(false);
-        }
-
-        if (grantedAny)
-        {
-            await access.InvalidateProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
-        }
-
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
+    private Task GrantOwnershipAsync(AccessProfile profile, int projectId, CancellationToken ct)
+        => ProjectOwnershipGrant.GrantAsync(
+            users, access, audit, uow, currentUser, clock,
+            profile, projectId, Permission, "CreateProjectOwnership", ct);
 }
 
 /// <summary>
