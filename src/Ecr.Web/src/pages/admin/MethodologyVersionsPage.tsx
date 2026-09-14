@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import type {
   CalculationLevel,
+  ExpressionValidationDto,
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
   MethodologyPublicationDiff,
@@ -27,6 +28,7 @@ import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
 import type { ExpressionPlacement } from '@/features/expressions/api';
+import { localizedMessage } from '@/features/expressions/markers';
 import {
   createMethodologyVersion,
   deleteMethodologyFormula,
@@ -118,6 +120,16 @@ export function MethodologyVersionsPage(): JSX.Element {
   const [level, setLevel] = useState<CalculationLevel>('Configuration');
   const [editing, setEditing] = useState<FormulaDraft | null>(null);
 
+  // ⛔ UI-аудит, lane 5: діалог формули мав ТОЙ САМИЙ `ExpressionEditor`
+  // (`ФВ-9.15a`), що й `/admin/expressions`, — і той самий сервер, що
+  // повертає діагностику синтаксису (`Q-303`) — але жодного місця на
+  // екрані, куди цю діагностику показати, і жодної перевірки перед
+  // збереженням: `(1 + 2))` (зайва дужка) зберігався як є, з видимим лише
+  // непідписаним підкресленням у Monaco. `expressions.findings`
+  // (`/admin/expressions`) — той самий текст, не власний ключ: діагностика
+  // й тут, і там — той самий контракт (`ExpressionValidationDto`).
+  const [expressionErrors, setExpressionErrors] = useState<ExpressionValidationDto | null>(null);
+
   // ⛔ Видалення формули незворотне (`ФВ-9.15`) і досі спрацьовувало прямо з
   // кліку — та сама помилка одним кліком, проти якої вже стоїть підтвердження
   // в `DocumentGrid` (`AllowWithConfirmation`, `#43`) і в перемиканні джерела
@@ -186,6 +198,7 @@ export function MethodologyVersionsPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.allFormulas() });
       setEditing(null);
+      setExpressionErrors(null);
       showDone(t('methodologies.formulaSaved'));
     },
     onError: showApiError,
@@ -360,7 +373,7 @@ export function MethodologyVersionsPage(): JSX.Element {
               <Button
                 size="compact-sm"
                 variant="default"
-                onClick={() =>
+                onClick={() => {
                   setEditing({
                     versionId: selected.id,
                     code: '',
@@ -369,8 +382,9 @@ export function MethodologyVersionsPage(): JSX.Element {
                     outputUnitId: null,
                     argumentsCsv: '',
                     isNew: true,
-                  })
-                }
+                  });
+                  setExpressionErrors(null);
+                }}
               >
                 {t('methodologies.addFormula')}
               </Button>
@@ -419,7 +433,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                             <Button
                               size="compact-xs"
                               variant="subtle"
-                              onClick={() =>
+                              onClick={() => {
                                 setEditing({
                                   versionId: selected.id,
                                   code: formula.code,
@@ -428,8 +442,9 @@ export function MethodologyVersionsPage(): JSX.Element {
                                   outputUnitId: formula.outputUnitId,
                                   argumentsCsv: formula.argumentsCsv ?? '',
                                   isNew: false,
-                                })
-                              }
+                                });
+                                setExpressionErrors(null);
+                              }}
                             >
                               {t('methodologies.editFormula')}
                             </Button>
@@ -561,7 +576,10 @@ export function MethodologyVersionsPage(): JSX.Element {
 
       <Modal
         opened={editing !== null}
-        onClose={() => setEditing(null)}
+        onClose={() => {
+          setEditing(null);
+          setExpressionErrors(null);
+        }}
         title={t('methodologies.formulaTitle')}
         size="lg"
       >
@@ -584,7 +602,27 @@ export function MethodologyVersionsPage(): JSX.Element {
               placement={placement}
               ariaLabel={t('methodologies.expression')}
               height="140px"
+              onValidated={setExpressionErrors}
             />
+
+            {/* ⛔ UI-аудит, lane 5: підкреслення в Monaco саме по собі не
+                несе тексту (ані підказки, ані тултипа) — без цього блоку
+                єдиний спосіб дізнатися, ЩО саме не так, був недоступний
+                із цього діалогу взагалі, хоча сервер його вже повертає. */}
+            {(expressionErrors?.diagnostics.length ?? 0) > 0 && (
+              <Alert color="statusError" title={t('expressions.findings', { count: expressionErrors?.diagnostics.length ?? 0 })}>
+                <Stack gap="xs">
+                  {expressionErrors?.diagnostics.map((d, index) => (
+                    <Text key={`${d.code}-${String(d.position)}-${String(index)}`} size="sm">
+                      <Text span fw={600}>
+                        {d.code}
+                      </Text>{' '}
+                      {localizedMessage(d)}
+                    </Text>
+                  ))}
+                </Stack>
+              </Alert>
+            )}
 
             <Select
               label={t('methodologies.resultType')}
@@ -644,7 +682,11 @@ export function MethodologyVersionsPage(): JSX.Element {
             )}
 
             <Button
-              disabled={editing.code.trim().length === 0 || editing.expression.trim().length === 0}
+              disabled={
+                editing.code.trim().length === 0 ||
+                editing.expression.trim().length === 0 ||
+                (expressionErrors?.diagnostics.length ?? 0) > 0
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >
