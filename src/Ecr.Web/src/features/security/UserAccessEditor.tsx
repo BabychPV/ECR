@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, Modal, MultiSelect, TextInput } from '@mantine/core';
+import { Button, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { AffectedRolesResponse, RoleView, UserView } from '@/api/types';
@@ -89,27 +89,61 @@ export function UserAccessEditor({
        * причину збою побачити не можна було нізвідки (`Q-254`). `AsyncBoundary`
        * малює помилку (`ErrorAlert`, `role="alert"`) окремо від порожнього
        * стану — той самий клас дефекту, що й `A7-04`.
+       *
+       * ⛔ УВАГА (аудит UI, lane 1): тут НАВМИСНО немає `isEmpty` —
+       * `AsyncBoundary` без нього ніколи не підмінює дітей порожнім станом.
+       * Раніше `isEmpty={() => selected.length === 0}` перевіряв ЖИВИЙ стан
+       * форми, а не відповідь сервера: щойно адмін знімав останню роль-чіп
+       * у `MultiSelect`, `AsyncBoundary` миттю ховав САМ `MultiSelect` і
+       * малював натомість нередаговуваний текст — без жодного контролю,
+       * щоб додати роль назад. Єдиний вихід був «Cancel», що відкидав і цю
+       * зміну, і будь-яку іншу зроблену в тому самому сеансі (наприклад,
+       * правку email). Попередження нижче (`security.noRolesTitle`/
+       * `security.noRolesWarning`) лишається — тим самим текстом — але
+       * ПОРЯД із контролем, а не ЗАМІСТЬ нього (той самий рисунок, що вже
+       * working «Add grant» у `GrantsPanel.tsx`: кнопка стоїть ПОЗА
+       * `AsyncBoundary`, тож порожній перелік грантів так само не ховає
+       * спосіб додати перший).
        */}
       <AsyncBoundary<string[]>
         isPending={user !== null && assigned.isPending}
         error={assigned.error}
         data={user === null ? undefined : assigned.data}
-        isEmpty={() => selected.length === 0}
-        emptyTitle={t('security.noRolesTitle')}
-        emptyHint={t('security.noRolesWarning')}
         skeleton="form"
         onRetry={() => void assigned.refetch()}
       >
         {() => (
-          <MultiSelect
-            mt="md"
-            label={t('security.roles')}
-            description={t('security.rolesHint')}
-            data={roles.map((r) => r.code)}
-            value={selected}
-            onChange={setSelected}
-            searchable
-          />
+          <>
+            <MultiSelect
+              mt="md"
+              label={t('security.roles')}
+              description={t('security.rolesHint')}
+              data={roles.map((r) => r.code)}
+              value={selected}
+              onChange={setSelected}
+              searchable
+            />
+
+            {/*
+             * ⛔ НЕ `<Alert>`: Mantine ставить йому `role="alert"` за
+             * умовчанням, а це саме той стан, від якого `Q-254` навмисно
+             * відрізняв «дійсно порожньо» (`AsyncBoundary.tsx`'s власний
+             * коментар про `NoPermissionState`/`EmptyState` — обидва
+             * СВІДОМО без `role="alert"`, щоб код помилки з кореляцією
+             * (`ErrorAlert`) лишався єдиним, що читач екрана чує як
+             * тривогу).
+             */}
+            {selected.length === 0 && (
+              <Stack gap="xs" mt="xs">
+                <Text size="sm" fw={600} c="statusWarning">
+                  {t('security.noRolesTitle')}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {t('security.noRolesWarning')}
+                </Text>
+              </Stack>
+            )}
+          </>
         )}
       </AsyncBoundary>
 
