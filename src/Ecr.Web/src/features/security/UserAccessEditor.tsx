@@ -35,6 +35,18 @@ export function UserAccessEditor({
   const [selected, setSelected] = useState<string[]>([]);
   const [email, setEmail] = useState('');
 
+  // ⛔ UI-аудит, lane 1: обраний перелік МІГ бути непорожнім і водночас не
+  // давати жодного права — роль без прав `AsyncBoundary`'s «ролей немає»
+  // (нижче) не бачить узагалі, бо з погляду мультиселекту роль ПРИЗНАЧЕНА.
+  // Адмін, що зняв єдину змістовну роль і додав замість неї порожню, не
+  // отримував жодного натяку, чому обліковий запис і далі нічого не бачить.
+  const grantsNothing =
+    selected.length > 0 &&
+    selected.every((code) => {
+      const role = roles.find((r) => r.code === code);
+      return role !== undefined && role.permissions.length === 0 && role.dangerousPermissions.length === 0;
+    });
+
   const assigned = useQuery({
     queryKey: ['user-roles', user?.id],
     queryFn: () => apiFetch<string[]>(`/api/v1/users/${user?.id ?? 0}/roles`),
@@ -140,6 +152,20 @@ export function UserAccessEditor({
                 </Text>
                 <Text size="sm" c="dimmed">
                   {t('security.noRolesWarning')}
+                </Text>
+              </Stack>
+            )}
+
+            {/* ⛔ UI-аудит, lane 1: роль(і) призначені, але жодна не несе
+                жодного права — та сама пастка, що й «ролей немає», лише
+                непомітна для самого мультиселекту. */}
+            {grantsNothing && (
+              <Stack gap="xs" mt="xs">
+                <Text size="sm" fw={600} c="statusWarning">
+                  {t('security.rolesGrantNothingTitle')}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {t('security.rolesGrantNothingWarning')}
                 </Text>
               </Stack>
             )}

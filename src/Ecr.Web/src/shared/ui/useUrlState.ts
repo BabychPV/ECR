@@ -61,3 +61,44 @@ export function useUrlNumber(name: string): [number | null, (value: number | nul
 
   return [Number.isFinite(parsed) ? parsed : null, set];
 }
+
+/**
+ * Онова КІЛЬКОХ параметрів адреси ОДНИМ переходом.
+ *
+ * ⛔ UI-аудит, lane 3: два окремі виклики сеттера `useUrlState` в одному
+ * обробнику (наприклад, `setPeriodKey(value)` одразу за ним `setCursor(null)`)
+ * НЕ компонуються — react-router's `setSearchParams`, викликаний двічі
+ * синхронно в тому самому тіку, губить ОБИДВІ зміни, а не лише другу
+ * (підтверджено ізольованим тестом на голому `useSearchParams`, без жодної
+ * обгортки цього файлу: другий виклик не «перемагає» перший — обидва
+ * зникають). Наслідок у `DocumentsPage.tsx` — поле «Period» набирало
+ * значення на екрані (некерований DOM встигав його показати), але жоден
+ * запит ніколи не бачив `periodKey` в адресі. Коли треба змінити більш ніж
+ * один параметр за одну дію — використовуй цей хук, а не два окремі
+ * `useUrlState`.
+ */
+export function useUrlParamsSetter(): (updates: Record<string, string | number | null>) => void {
+  const [, setParams] = useSearchParams();
+
+  return useCallback(
+    (updates: Record<string, string | number | null>) => {
+      setParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+
+          for (const [name, value] of Object.entries(updates)) {
+            if (value === null || value === '') {
+              next.delete(name);
+            } else {
+              next.set(name, String(value));
+            }
+          }
+
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+}

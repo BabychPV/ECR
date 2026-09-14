@@ -333,6 +333,30 @@ export function MethodologyConstantsPanel({
   );
 }
 
+/**
+ * Чи предикат — catch-all («порожній об'єкт відповідає всій таблиці»).
+ *
+ * ⛔ UI-аудит, lane 5: діалог сам стверджує інваріант («An empty object
+ * matches the whole table - which is why such a rule must have the lowest
+ * priority»), але ніде його не перевіряв. Синтаксично некоректний JSON тут
+ * НЕ catch-all — це просто ще не готовий чернетковий текст, і `false` за
+ * замовчуванням не піднімає хибне попередження на кожному натисканні
+ * клавіші.
+ */
+function isCatchAllMatchJson(matchJson: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(matchJson);
+    return (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Правило, яке зараз правлять. */
 interface RuleDraft {
   readonly code: string;
@@ -452,7 +476,31 @@ export function MethodologyRulesPanel({
       </AsyncBoundary>
 
       <Modal opened={editing !== null} onClose={() => setEditing(null)} title={t('methodologies.rules')}>
-        {editing !== null && (
+        {editing !== null && (() => {
+          // ⛔ UI-аудит, lane 5: діалог сам пояснює інваріант («An empty
+          // object matches the whole table - which is why such a rule must
+          // have the lowest priority» / «The lower the number, the higher
+          // the priority»), але зберігав будь-яке порушення мовчки: ні
+          // підтвердження, ні попередження, ні позначки в таблиці. Реальний
+          // редактор міг згодом додати друге правило й ніколи не помітити,
+          // що воно вже недосяжне, — доти, доки хтось не почне з'ясовувати,
+          // чому розрахунок не бачить рядків, які має бачити.
+          const otherRules = (rules.data ?? []).filter((rule) => editing.isNew || rule.code !== editing.code);
+          const editingIsCatchAll = isCatchAllMatchJson(editing.matchJson);
+          const maxOtherPriority =
+            otherRules.length === 0 ? null : Math.max(...otherRules.map((rule) => rule.priority));
+
+          // Catch-all повинен мати НАЙБІЛЬШЕ число (перевіряється останнім).
+          const catchAllNotLowest =
+            editingIsCatchAll && maxOtherPriority !== null && editing.priority <= maxOtherPriority;
+
+          // Існуючий catch-all з МЕНШИМ числом (вищим пріоритетом) заявляє
+          // на себе кожен рядок раніше, ніж черга дійде до цього правила.
+          const blockingCatchAll = otherRules.find(
+            (rule) => isCatchAllMatchJson(rule.matchJson) && rule.priority < editing.priority,
+          );
+
+          return (
           <Stack gap="sm">
             <TextInput
               label={t('methodologies.code')}
@@ -479,6 +527,28 @@ export function MethodologyRulesPanel({
               }
             />
 
+            {catchAllNotLowest && (
+              <Stack gap="xs">
+                <Text size="sm" fw={600} c="statusWarning">
+                  {t('methodologies.catchAllNotLowestTitle')}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {t('methodologies.catchAllNotLowestWarning')}
+                </Text>
+              </Stack>
+            )}
+
+            {blockingCatchAll !== undefined && (
+              <Stack gap="xs">
+                <Text size="sm" fw={600} c="statusWarning">
+                  {t('methodologies.shadowedByCatchAllTitle')}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {t('methodologies.shadowedByCatchAllWarning', { code: blockingCatchAll.code })}
+                </Text>
+              </Stack>
+            )}
+
             <Checkbox
               label={t('methodologies.active')}
               checked={editing.isActive}
@@ -493,7 +563,8 @@ export function MethodologyRulesPanel({
               {t('methodologies.save')}
             </Button>
           </Stack>
-        )}
+          );
+        })()}
       </Modal>
     </>
   );

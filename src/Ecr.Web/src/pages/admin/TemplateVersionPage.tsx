@@ -21,6 +21,7 @@ import type {
   PublishVersionRequest,
   TemplateColumnDto,
   TemplateStructureDto,
+  TemplateVersionPage as TemplateVersionPageDto,
   VersionIdResponse,
 } from '@/api/types';
 import { AccessMatrix } from '@/features/templates/AccessMatrix';
@@ -435,10 +436,29 @@ export function TemplateVersionPage(): JSX.Element {
     },
     onError: showApiError,
   });
-  // ⚠ Структура не несе статусу версії: його віддає перелік версій шаблону.
-  // Тому кнопка публікації тут показується за правом, а сервер лишається
-  // єдиним, хто вирішує, чи можна публікувати саме цю версію.
-  const editable = true;
+  // ⛔ UI-аудит, lane 7: `editable` тут БУВ зашитий у `true` — коментар-
+  // попередник пояснював це тим, що `TemplateStructureDto` не несе статусу
+  // версії, а перелік версій живе на ІНШІЙ сторінці. Наслідок — «Publish» і
+  // «Withdraw from use» лишалися повністю активними НАЗАВЖДИ, включно з уже
+  // опублікованою чи виведеною з обігу версією, хоча сервер (`ECR-TMPL-0409`)
+  // однаково відхилив би обидві дії поза їхнім єдиним допустимим станом
+  // (`TemplateVersion.cs`: `Publish` вимагає `Draft`, `Deprecate` — саме
+  // `Published`, ніколи не `Draft`). Перелік версій — той самий ендпоінт,
+  // що вже working на `ExpressionsPage`/`TemplateVersionsPage` — дає статус
+  // без потреби розширювати контракт `TemplateStructureDto` заради одного
+  // поля.
+  const templateIdNumber = Number(templateId);
+
+  const versionsList = useQuery({
+    queryKey: queryKeys.templates.versionsOf(templateIdNumber),
+    queryFn: () =>
+      apiFetch<TemplateVersionPageDto>(`/api/v1/templates/${templateIdNumber}/versions?limit=100`),
+    enabled: Number.isFinite(templateIdNumber),
+  });
+
+  const versionStatus = versionsList.data?.items.find((v) => v.id === id)?.status;
+  const canPublish = versionStatus === 'Draft';
+  const canWithdraw = versionStatus === 'Published';
 
   // ⛔ Форма аркуша, на відміну від кнопки публікації вище, ХОВАЄТЬСЯ на
   // опублікованій версії: `isEditable` рахує СЕРВЕР (той самий прапорець,
@@ -511,24 +531,25 @@ export function TemplateVersionPage(): JSX.Element {
               </Button>
             )}
 
-            {editable && can(session.data, 'Template.Publish') && (
-              <>
-                <Button size="xs" onClick={() => setPublishing(true)}>
-                  {t('version.publish')}
-                </Button>
+            {canPublish && can(session.data, 'Template.Publish') && (
+              <Button size="xs" onClick={() => setPublishing(true)}>
+                {t('version.publish')}
+              </Button>
+            )}
 
-                {/* ⚠ Право те саме, що на публікацію: вивести з обігу —
-                    рішення тієї самої ваги, що й випустити. Сервер
-                    відмовить, якщо версія ще чернетка. */}
-                <Button
-                  size="xs"
-                  variant="default"
-                  color="statusError"
-                  onClick={() => setDeprecating(true)}
-                >
-                  {t('version.deprecate')}
-                </Button>
-              </>
+            {/* ⚠ Право те саме, що на публікацію: вивести з обігу —
+                рішення тієї самої ваги, що й випустити. Показано лише для
+                вже ОПУБЛІКОВАНОЇ версії — сервер (`ECR-TMPL-0409`) відмовляє
+                чернетці й уже виведеній з обігу версії однаково. */}
+            {canWithdraw && can(session.data, 'Template.Publish') && (
+              <Button
+                size="xs"
+                variant="default"
+                color="statusError"
+                onClick={() => setDeprecating(true)}
+              >
+                {t('version.deprecate')}
+              </Button>
             )}
           </Group>
         }
