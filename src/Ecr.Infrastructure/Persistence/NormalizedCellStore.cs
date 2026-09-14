@@ -337,7 +337,12 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 AddNullable(command, $"@vn{i}", value.ValueNumeric, SqlDbType.Decimal);
                 AddNullable(command, $"@vd{i}", value.ValueDate, SqlDbType.DateTime2);
                 AddNullable(command, $"@vb{i}", value.ValueBool, SqlDbType.Bit);
-                AddNullable(command, $"@ve{i}", value.ValueRegistryEntryId, SqlDbType.Int);
+                // ⛔ Звужено до int навмисно: фізична колонка лишається
+                // `int` (RegistryEntry.Id — long у CLR, конвертований у int
+                // лише для зберігання, RegistryEntryConfiguration.cs:41).
+                // Сирий SQL-параметр повз конвеєр EF `HasConversion<int?>()`
+                // потребує того самого звуження, що й BulkCellLoader.
+                AddNullable(command, $"@ve{i}", (int?)value.ValueRegistryEntryId, SqlDbType.Int);
                 AddNullable(command, $"@vu{i}", value.ValueUnitId, SqlDbType.Int);
                 command.Parameters.AddWithValue($"@ic{i}", value.IsCalculated);
                 command.Parameters.AddWithValue($"@ie{i}", value.IsEmpty);

@@ -34,7 +34,7 @@ public sealed class CellValue
     public decimal? ValueNumeric { get; private set; }
     public DateTime? ValueDate { get; private set; }
     public bool? ValueBool { get; private set; }
-    public int? ValueRegistryEntryId { get; private set; }
+    public long? ValueRegistryEntryId { get; private set; }
 
     /// <summary>Одиниця на рядок; лише для <c>DataType = Unit</c> (R-A4).</summary>
     public int? ValueUnitId { get; private set; }

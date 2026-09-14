@@ -58,22 +58,50 @@ public sealed class ConsistencyCheckJobWriteTests(SqlServerFixture sql)
         Assert.Equal(2, count);
     }
 
+    /// <remarks>
+    /// ⛔ Директива registry-lookup, PR A1: `FK_CellValue_Entry` тепер
+    /// забороняє САМЕ це посилання звичайним записом — і це правильно.
+    /// `NOCHECK`/`WITH NOCHECK CHECK` тут чесно відтворює дані, які
+    /// потрапили в базу ПОЗА звичайним шляхом (до міграції, ручне
+    /// втручання DBA), а не обхід перевірки, яку мав пройти звичайний
+    /// запис — `try`/`finally` гарантує повернення обмеження навіть при
+    /// падінні самої вставки.
+    /// </remarks>
     private async Task InsertOrphanCellAsync(TestDocument doc, long rowId, long registryEntryId)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync(CancellationToken.None);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT doc.CellValue
-                (PeriodKey, TableRowId, TableDefId, ColumnDefId, ValueRegistryEntryId, IsCalculated, IsEmpty)
-            VALUES (@p, @r, @t, @c, @reg, 0, 0);
-            """;
-        command.Parameters.AddWithValue("@p", doc.PeriodKey.Value);
-        command.Parameters.AddWithValue("@r", rowId);
-        command.Parameters.AddWithValue("@t", doc.TableDefId);
-        command.Parameters.AddWithValue("@c", doc.ColumnDefIds[0]);
-        command.Parameters.AddWithValue("@reg", registryEntryId);
-        await command.ExecuteNonQueryAsync(CancellationToken.None);
+
+        await using (var disable = connection.CreateCommand())
+        {
+            disable.CommandText = "ALTER TABLE doc.CellValue NOCHECK CONSTRAINT FK_CellValue_Entry;";
+            await disable.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT doc.CellValue
+                    (PeriodKey, TableRowId, TableDefId, ColumnDefId, ValueRegistryEntryId, IsCalculated, IsEmpty)
+                VALUES (@p, @r, @t, @c, @reg, 0, 0);
+                """;
+            command.Parameters.AddWithValue("@p", doc.PeriodKey.Value);
+            command.Parameters.AddWithValue("@r", rowId);
+            command.Parameters.AddWithValue("@t", doc.TableDefId);
+            command.Parameters.AddWithValue("@c", doc.ColumnDefIds[0]);
+            command.Parameters.AddWithValue("@reg", registryEntryId);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+        finally
+        {
+            // ⚠ `WITH NOCHECK` при повторному вмиканні — обов'язково: звичайне
+            // `CHECK CONSTRAINT` перевалідувало б ВСЮ таблицю і впало б на
+            // щойно вставленому навмисно зламаному рядку.
+            await using var enable = connection.CreateCommand();
+            enable.CommandText = "ALTER TABLE doc.CellValue WITH NOCHECK CHECK CONSTRAINT FK_CellValue_Entry;";
+            await enable.ExecuteNonQueryAsync(CancellationToken.None);
+        }
     }
 
     private async Task<int> CountIssuesAsync(string ruleCode, IReadOnlyList<long> entityIds, CancellationToken ct)

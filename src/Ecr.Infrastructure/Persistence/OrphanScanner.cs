@@ -108,11 +108,7 @@ public sealed class OrphanScanner(EcrDbContext db, RegistryResolver resolver, IC
 
         if (registryEntryId is { } single)
         {
-            // ⚠ Порівняння з `int?` стовпця: `RegistryEntry.Id` (`long` у
-            // домені) конвертований у схемі до `int` (`RegistryEntryConfiguration`,
-            // `ФВ-8.12`), і `CellValue.ValueRegistryEntryId` — теж `int?`.
-            var singleEntryId = checked((int)single);
-            candidateQuery = candidateQuery.Where(x => x.cell.ValueRegistryEntryId == singleEntryId);
+            candidateQuery = candidateQuery.Where(x => x.cell.ValueRegistryEntryId == single);
         }
 
         var references = await candidateQuery

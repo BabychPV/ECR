@@ -287,7 +287,7 @@ public sealed class PeriodAccessSliceTests(SqlServerFixture sql) : IDisposable
             db.CellValues.Add(new CellValue(
                 new CellAddress(new PeriodKey(PeriodKeyValue), rowId, doc.ColumnDefIds[0]),
                 doc.TableDefId,
-                new CellValueData { ValueRegistryEntryId = (int)entry.Id }));
+                new CellValueData { ValueRegistryEntryId = entry.Id }));
         }
 
         await db.SaveChangesAsync(CancellationToken.None);

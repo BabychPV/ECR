@@ -41,6 +41,16 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
         builder.Property(x => x.ValueNumeric).HasPrecision(28, 10);
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
+        // ⛔ Директива registry-lookup, PR A1. Той самий прийом, що вже working
+        // для FK_MC_Substance (MethodologyConstant.SubstanceEntryId): long? у
+        // CLR, HasConversion<int?>() у зберіганні — фізична колонка лишається
+        // int (RegistryEntry.Id теж конвертований у int, RegistryEntryConfiguration.cs:41),
+        // а CLR-типи по обидва боки FK тепер збігаються (long), тож EF дозволяє
+        // зіставити зовнішній ключ. Раніше тут був голий int? — CLR-типи не
+        // збігалися з RegistryEntry.Id (long), і FK додати було неможливо
+        // (детальний розбір — Q-222, знятий цим фіксом).
+        builder.Property(x => x.ValueRegistryEntryId).HasConversion<int?>();
+
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
@@ -67,28 +77,22 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
                .HasConstraintName("FK_CellValue_Column")
                .OnDelete(DeleteBehavior.Restrict);
 
-        // ⛔ Q-222: FK_CellValue_Entry (ValueRegistryEntryId → dic.RegistryEntry)
-        // з 02a-db-schema.md НАВМИСНО НЕ додано тут — не тому, що не
-        // помітили, а тому, що додати правильно не вдалося: ValueRegistryEntryId
-        // тут — голий int?, а RegistryEntry : Entity<long> (Id — long,
-        // конвертований у int лише для зберігання, RegistryEntryConfiguration.cs:41).
-        // EF звіряє СУМІСНІСТЬ CLR-типів залежного й головного ключа ДО
-        // конвертації, тож int? проти long не проходить — попри те, що
-        // фізично обидва зберігаються як int. Той самий зв'язок в іншому
-        // місці (MethodologyConstant.SubstanceEntryId) зроблено правильно:
-        // long? + HasConversion<int?>() — той самий CLR-тип, що в
-        // RegistryEntry.Id, тому FK_MC_Substance вже працює. Виправити тут
-        // так само означало б поміняти CellValue.ValueRegistryEntryId на
-        // long? — а це ~18 файлів поза міграціями (RegistryStore,
-        // AccessDecisionService, BulkCellLoader, ExcelExporter, ...) на
-        // НАЙгарячішому шляху системи (~108 млн рядків/рік). Свідомо
-        // залишено як окрема, задокументована прогалина — не мій виклик
-        // мовчки поміняти тип на гарячому шляху без окремого рев'ю.
-        //
-        // FK_CellValue_Unit — не той самий випадок: Unit.Id це голий int
-        // (не Entity<T>, без конвертації), тому ValueUnitId (int?) і
-        // Unit.Id (int) сумісні напряму.
+        // ⛔ Директива registry-lookup, PR A1 (Q-222, закрито). Комірка
+        // Lookup-типу фізично не може посилатися на неіснуючий запис
+        // довідника — той самий захист, що FK_CellValue_Column уже дає
+        // колонці. RESTRICT, а не CASCADE: видалення запису довідника, на
+        // який посилаються дані, — окрема бізнес-помилка
+        // (`RegistryStore.CountReferencesAsync`, ФВ-8.13), не мовчазне
+        // видалення чужих комірок.
+        builder.HasOne<Domain.Entities.Dictionaries.RegistryEntry>()
+               .WithMany()
+               .HasForeignKey(x => x.ValueRegistryEntryId)
+               .HasConstraintName("FK_CellValue_Entry")
+               .OnDelete(DeleteBehavior.Restrict);
 
+        // FK_CellValue_Unit — той самий захист для одиниці вимірювання:
+        // Unit.Id це голий int (не Entity<T>, без конвертації), тому
+        // ValueUnitId (int?) і Unit.Id (int) сумісні напряму.
         builder.HasOne<Domain.Entities.Units.Unit>()
                .WithMany()
                .HasForeignKey(x => x.ValueUnitId)

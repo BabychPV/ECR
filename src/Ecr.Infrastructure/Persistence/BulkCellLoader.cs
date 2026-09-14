@@ -153,7 +153,16 @@ public sealed class BulkCellLoader(string connectionString, int batchSize)
                 5 => (object?)value.ValueNumeric ?? DBNull.Value,
                 6 => (object?)value.ValueDate ?? DBNull.Value,
                 7 => (object?)value.ValueBool ?? DBNull.Value,
-                8 => (object?)value.ValueRegistryEntryId ?? DBNull.Value,
+                // ⛔ Звужено до int навмисно: фізична колонка `doc.CellValue
+                // .ValueRegistryEntryId` лишається `int` (RegistryEntry.Id —
+                // long у CLR, конвертований у int лише для зберігання,
+                // RegistryEntryConfiguration.cs:41). EF приховує це
+                // конверсією (`HasConversion<int?>()`), але цей `IDataReader`
+                // годує `SqlBulkCopy` напряму, повз конвеєр EF — без явного
+                // звуження тут SqlBulkCopy отримав би `boxed long` проти
+                // `int`-колонки призначення (`InvalidOperationException` на
+                // мільйонах рядків/рік, найгарячіший шлях системи).
+                8 => (object?)(int?)value.ValueRegistryEntryId ?? DBNull.Value,
                 9 => (object?)value.ValueUnitId ?? DBNull.Value,
                 10 => value.IsCalculated,
                 11 => value.IsEmpty,

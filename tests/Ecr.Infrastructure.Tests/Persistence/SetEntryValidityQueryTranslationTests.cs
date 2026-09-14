@@ -77,7 +77,7 @@ public sealed class SetEntryValidityQueryTranslationTests(SqlServerFixture sql)
         var address = new CellAddress(doc.PeriodKey, doc.RowIds[0], doc.ColumnDefIds[0]);
         var cell = new CellValue(address, doc.TableDefId, new CellValueData
         {
-            ValueRegistryEntryId = checked((int)entry.Id),
+            ValueRegistryEntryId = entry.Id,
         });
         db.CellValues.Add(cell);
         await db.SaveChangesAsync();
