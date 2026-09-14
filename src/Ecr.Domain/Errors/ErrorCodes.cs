@@ -394,6 +394,18 @@ public static class ErrorCodes
     public const string SourceEntityNotFound = "ECR-INT-0404";
 
     /// <summary>
+    /// Ціль мапінгу (колонка або поле реєстру) не існує (<c>ECR-INT-0405</c>,
+    /// Прогалина 1 директиви паритету).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один код на обидва види цілі (колонка чи поле реєстру): суб'єкт
+    /// відмови той самий — <c>CreateEntityFieldMapHandler</c> отримав
+    /// ідентифікатор цілі, за яким у базі нічого немає. Яку саме ціль назвали,
+    /// каже текст повідомлення, а не сам код.
+    /// </remarks>
+    public const string EntityFieldMapTargetNotFound = "ECR-INT-0405";
+
+    /// <summary>
     /// Джерело відмовило в автентифікації (<c>ECR-INT-0502</c>).
     /// </summary>
     /// <remarks>

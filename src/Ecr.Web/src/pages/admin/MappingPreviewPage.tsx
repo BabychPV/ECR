@@ -1,11 +1,13 @@
-import { useMemo, type JSX } from 'react';
-import { Alert, Group, Select, Text } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState, type JSX } from 'react';
+import { Alert, Button, Group, Select, Text } from '@mantine/core';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { MappingPreview, SourceEntityStatus } from '@/api/types';
 import { WindowDays, fetchMappingPreview, windowFrom } from '@/features/mapping/api';
+import { CreateMappingModal } from '@/features/mapping/CreateMappingModal';
 import { MappingGaps } from '@/features/mapping/MappingGaps';
 import { MappingRows } from '@/features/mapping/MappingRows';
+import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
@@ -27,6 +29,9 @@ import { t } from '@/shared/i18n';
  */
 export function MappingPreviewPage(): JSX.Element {
   const [entityId, setEntityId] = useUrlNumber('entity');
+  const [createOpened, setCreateOpened] = useState(false);
+  const session = useSession();
+  const queryClient = useQueryClient();
 
   const sources = useQuery({
     queryKey: ['sources'],
@@ -62,9 +67,26 @@ export function MappingPreviewPage(): JSX.Element {
                 label: source.displayName ?? source.code,
               }))}
             />
+
+            {/* ⛔ Прогалина 1 директиви паритету: до цієї кнопки заведення
+                мапінгу мало лише один шлях — ручний SQL. */}
+            {entityId !== null && can(session.data, 'Integration.Manage') && (
+              <Button size="xs" variant="default" onClick={() => setCreateOpened(true)}>
+                {t('mapping.create')}
+              </Button>
+            )}
           </Group>
         }
       />
+
+      {entityId !== null && (
+        <CreateMappingModal
+          sourceEntityId={entityId}
+          opened={createOpened}
+          onClose={() => setCreateOpened(false)}
+          onCreated={() => void queryClient.invalidateQueries({ queryKey: ['mapping-preview', entityId] })}
+        />
+      )}
 
       {/*
        * ⛔ Помилка переліку сутностей показується ОКРЕМО від помилки перегляду:

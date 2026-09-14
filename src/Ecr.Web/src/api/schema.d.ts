@@ -1075,6 +1075,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/entity-field-maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Заводить мапінг. Право `Integration.Manage`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateEntityFieldMapRequest"];
+                    "application/json": components["schemas"]["CreateEntityFieldMapRequest"];
+                    "text/json": components["schemas"]["CreateEntityFieldMapRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expressions/metadata": {
         parameters: {
             query?: never;
@@ -7717,6 +7762,8 @@ export interface components {
              */
             steps: number;
         };
+        /** @enum {unknown} */
+        AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | null;
         /** @description Маршрут погодження проєкту. */
         ApprovalRouteDto: {
             /** @description Чи налаштований власний маршрут. `false` — затвердження одноетапне:
@@ -8049,6 +8096,41 @@ export interface components {
              * @description Опублікована версія шаблону.
              */
             templateVersionId: number;
+        };
+        /** @description Запит на створення мапінгу. */
+        CreateEntityFieldMapRequest: {
+            aggregation: null | components["schemas"]["AggregationKind"];
+            /**
+             * Format: int32
+             * @description Сутність джерела.
+             */
+            sourceEntityId: number;
+            /** @description Поле або тег у джерелі. */
+            sourceField: string;
+            /**
+             * Format: int32
+             * @description Одиниця ДЖЕРЕЛА (ФВ-16.9); `null` — безрозмірне.
+             */
+            sourceUnitId: null | number;
+            /**
+             * Format: int32
+             * @description Колонка-ціль; обов'язкове для FieldTargetKind.Column.
+             */
+            targetColumnDefId: null | number;
+            /** @description Куди лягає значення: колонка чи поле реєстру. */
+            targetKind: components["schemas"]["FieldTargetKind"];
+            /**
+             * Format: int32
+             * @description Поле реєстру-ціль; обов'язкове для FieldTargetKind.RegistryField.
+             */
+            targetRegistryFieldDefId: null | number;
+            /** @description Рядок-адресат (`D-118`); `null` — не матеріалізується. */
+            targetRowKey: null | string;
+            /**
+             * Format: int32
+             * @description Одиниця, у якій значення лягає в ECR; `null` — безрозмірне.
+             */
+            targetUnitId: null | number;
         };
         /** @description Запит на заведення методології-контейнера. */
         CreateMethodologyRequest: {
@@ -8425,6 +8507,48 @@ export interface components {
          * @enum {unknown}
          */
         EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow";
+        /** @description Мапінг у відповіді на створення. */
+        EntityFieldMapDto: {
+            aggregation: null | components["schemas"]["AggregationKind"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор запису `ext.EntityFieldMap`.
+             */
+            id: number;
+            /** @description Чи діє мапінг. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Сутність джерела.
+             */
+            sourceEntityId: number;
+            /** @description Поле в джерелі. */
+            sourceField: string;
+            /**
+             * Format: int32
+             * @description Одиниця джерела; `null` — безрозмірне.
+             */
+            sourceUnitId: null | number;
+            /**
+             * Format: int32
+             * @description Колонка-ціль; `null` — мапінг на поле реєстру.
+             */
+            targetColumnDefId: null | number;
+            /** @description Куди лягає значення. */
+            targetKind: components["schemas"]["FieldTargetKind"];
+            /**
+             * Format: int32
+             * @description Поле реєстру-ціль; `null` — мапінг на колонку.
+             */
+            targetRegistryFieldDefId: null | number;
+            /** @description Рядок-адресат; `null` — не матеріалізується. */
+            targetRowKey: null | string;
+            /**
+             * Format: int32
+             * @description Одиниця цілі; `null` — безрозмірне.
+             */
+            targetUnitId: null | number;
+        };
         EntityTagHeaderValue: {
             isWeak?: boolean;
             tag?: components["schemas"]["StringSegment"];
@@ -8503,6 +8627,11 @@ export interface components {
              *     публікацію, якої не буде. */
             skippedChecks: string[];
         };
+        /**
+         * @description Куди лягає поле джерела.
+         * @enum {unknown}
+         */
+        FieldTargetKind: "Column" | "RegistryField";
         FileResult: {
             contentType?: null | string;
             enableRangeProcessing?: boolean;

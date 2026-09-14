@@ -239,6 +239,17 @@
         ],
         "type": "object"
       },
+      "AggregationKind": {
+        "enum": [
+          "Sum",
+          "Avg",
+          "Min",
+          "Max",
+          "Last",
+          "First",
+          null
+        ]
+      },
       "ApprovalRouteDto": {
         "description": "Маршрут погодження проєкту.",
         "properties": {
@@ -960,6 +971,86 @@
           "projectId",
           "templateVersionId",
           "sheetDefIds"
+        ],
+        "type": "object"
+      },
+      "CreateEntityFieldMapRequest": {
+        "description": "Запит на створення мапінгу.",
+        "properties": {
+          "aggregation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AggregationKind",
+                "description": "Спосіб згортання точок періоду; обов'язковий разом із TargetRowKey."
+              }
+            ]
+          },
+          "sourceEntityId": {
+            "description": "Сутність джерела.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceField": {
+            "description": "Поле або тег у джерелі.",
+            "type": "string"
+          },
+          "sourceUnitId": {
+            "description": "Одиниця ДЖЕРЕЛА (ФВ-16.9); `null` — безрозмірне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetColumnDefId": {
+            "description": "Колонка-ціль; обов'язкове для FieldTargetKind.Column.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetKind": {
+            "$ref": "#/components/schemas/FieldTargetKind",
+            "description": "Куди лягає значення: колонка чи поле реєстру."
+          },
+          "targetRegistryFieldDefId": {
+            "description": "Поле реєстру-ціль; обов'язкове для FieldTargetKind.RegistryField.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetRowKey": {
+            "description": "Рядок-адресат (`D-118`); `null` — не матеріалізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetUnitId": {
+            "description": "Одиниця, у якій значення лягає в ECR; `null` — безрозмірне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "sourceEntityId",
+          "sourceField",
+          "targetKind",
+          "targetColumnDefId",
+          "targetRegistryFieldDefId",
+          "sourceUnitId",
+          "targetUnitId",
+          "targetRowKey",
+          "aggregation"
         ],
         "type": "object"
       },
@@ -1734,6 +1825,97 @@
           "OutsidePermitWindow"
         ]
       },
+      "EntityFieldMapDto": {
+        "description": "Мапінг у відповіді на створення.",
+        "properties": {
+          "aggregation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AggregationKind",
+                "description": "Спосіб згортання точок періоду."
+              }
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор запису `ext.EntityFieldMap`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи діє мапінг.",
+            "type": "boolean"
+          },
+          "sourceEntityId": {
+            "description": "Сутність джерела.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceField": {
+            "description": "Поле в джерелі.",
+            "type": "string"
+          },
+          "sourceUnitId": {
+            "description": "Одиниця джерела; `null` — безрозмірне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetColumnDefId": {
+            "description": "Колонка-ціль; `null` — мапінг на поле реєстру.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetKind": {
+            "$ref": "#/components/schemas/FieldTargetKind",
+            "description": "Куди лягає значення."
+          },
+          "targetRegistryFieldDefId": {
+            "description": "Поле реєстру-ціль; `null` — мапінг на колонку.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "targetRowKey": {
+            "description": "Рядок-адресат; `null` — не матеріалізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetUnitId": {
+            "description": "Одиниця цілі; `null` — безрозмірне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sourceEntityId",
+          "sourceField",
+          "targetKind",
+          "targetColumnDefId",
+          "targetRegistryFieldDefId",
+          "sourceUnitId",
+          "targetUnitId",
+          "targetRowKey",
+          "aggregation",
+          "isActive"
+        ],
+        "type": "object"
+      },
       "EntityTagHeaderValue": {
         "properties": {
           "isWeak": {
@@ -1935,6 +2117,13 @@
           "skippedChecks"
         ],
         "type": "object"
+      },
+      "FieldTargetKind": {
+        "description": "Куди лягає поле джерела.",
+        "enum": [
+          "Column",
+          "RegistryField"
+        ]
       },
       "FileResult": {
         "properties": {
@@ -9016,6 +9205,57 @@
         "summary": "Останній результат перевірки. Право `Document.View`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/entity-field-maps": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEntityFieldMapRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEntityFieldMapRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEntityFieldMapRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Заводить мапінг. Право `Integration.Manage`.",
+        "tags": [
+          "EntityFieldMaps"
         ]
       }
     },
@@ -17543,6 +17783,9 @@
     },
     {
       "name": "Documents"
+    },
+    {
+      "name": "EntityFieldMaps"
     },
     {
       "name": "Expressions"

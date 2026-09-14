@@ -69,6 +69,24 @@ public interface ICollectionStore
     /// </remarks>
     public Task<IReadOnlyList<EntityFieldMap>> GetFieldMapsAsync(
         int sourceEntityId, CancellationToken ct);
+
+    /// <summary>
+    /// Заводить мапінг поля джерела (<c>ext.EntityFieldMap</c>) і повертає його
+    /// зі присвоєним <c>Id</c> (Прогалина 1 директиви паритету: до цього
+    /// порту не було жодного шляху ЗАПИСУ — лише статичні фабрики домену й
+    /// READ-ONLY перегляд).
+    /// </summary>
+    public Task<EntityFieldMap> AddFieldMapAsync(EntityFieldMap map, CancellationToken ct);
+
+    /// <summary>Колонка-ціль існує і не м'яко видалена.</summary>
+    public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct);
+
+    /// <summary>Поле реєстру-ціль існує.</summary>
+    public Task<bool> RegistryFieldDefExistsAsync(int registryFieldDefId, CancellationToken ct);
+
+    /// <summary>Одиниця межі інтеграції (ФВ-16.9) існує.</summary>
+    public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct);
+
     /// <summary>
     /// Перелік сутностей збору з ознаками здоров'я.
     /// </summary>

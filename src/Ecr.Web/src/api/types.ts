@@ -722,6 +722,21 @@ export type UnmappedSourceField = Schemas['UnmappedSourceField'];
 export type UncoveredColumn = Schemas['UncoveredColumn'];
 
 /**
+ * Заведення мапінгу поля джерела (Прогалина 1 директиви паритету зі старою
+ * системою): куди лягає значення — колонка чи поле реєстру.
+ */
+export type FieldTargetKind = Schemas['FieldTargetKind'];
+
+/** Спосіб згортання точок періоду в одне число (`D-118`). */
+export type AggregationKind = Schemas['AggregationKind'];
+
+/** Запит на створення мапінгу (`POST /api/v1/entity-field-maps`). */
+export type CreateEntityFieldMapRequest = Schemas['CreateEntityFieldMapRequest'];
+
+/** Мапінг у відповіді на створення. */
+export type EntityFieldMapDto = Schemas['EntityFieldMapDto'];
+
+/**
  * Що станеться з рядком джерела або з мапінгом.
  *
  * ⚠ Тип **згенерований** із серверного переліку: новий різновид розриву

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Group } from '@mantine/core';
+import { Button, Group, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -226,23 +226,36 @@ export function SheetActions({
   return (
     <>
       <Group gap="xs">
+        {/*
+         * ⛔ Прогалина 2 директиви паритету зі старою системою: кнопка стоїть
+         * на екрані ОДНОГО аркуша (`SheetActions` отримує `sheetDefId`), а
+         * `POST /documents/{id}/recalculate` перераховує ВЕСЬ документ — усі
+         * аркуші за цей період, не лише активний. Підпис кнопки лишається
+         * нейтральним «Recalculate» (той самий, що й на екрані проєкту,
+         * `PeriodsPage.tsx`, де він так само не звужує обіцянку), тому
+         * підказка тут — не виправлення тексту, а прибирання оманливого
+         * ВИГЛЯДУ: без неї людина, що дивиться на конкретний аркуш, розумно
+         * припускає вузький ефект дії поруч із ним.
+         */}
         {can(me, 'Calculation.Recalculate') && (
-          <Button
-            size="xs"
-            variant="default"
-            loading={recalculate.isPending || recalcRunning}
-            onClick={() => {
-              if (recalculateInFlight.current) return;
-              recalculateInFlight.current = true;
-              recalculate.mutate(undefined, {
-                onSettled: () => {
-                  recalculateInFlight.current = false;
-                },
-              });
-            }}
-          >
-            {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
-          </Button>
+          <Tooltip label={t('workflow.recalculateHint')} multiline w={260}>
+            <Button
+              size="xs"
+              variant="default"
+              loading={recalculate.isPending || recalcRunning}
+              onClick={() => {
+                if (recalculateInFlight.current) return;
+                recalculateInFlight.current = true;
+                recalculate.mutate(undefined, {
+                  onSettled: () => {
+                    recalculateInFlight.current = false;
+                  },
+                });
+              }}
+            >
+              {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
+            </Button>
+          </Tooltip>
         )}
 
         {isAllowed('submit', state) && (

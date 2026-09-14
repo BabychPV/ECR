@@ -808,6 +808,11 @@ USING (VALUES
     (N'workflow.reject',                 N'en', N'Reject', 1),
     (N'workflow.reopen',                 N'en', N'Return for edits', 1),
     (N'workflow.recalculate',            N'en', N'Recalculate', 1),
+
+    -- Прогалина 2 директиви паритету зі старою системою: підказка прибирає
+    -- оманливий вигляд кнопки на екрані ОДНОГО аркуша, яка насправді
+    -- перераховує весь документ.
+    (N'workflow.recalculateHint',        N'en', N'Recalculates every sheet of this document for the shown period, not only this one.', 1),
     (N'workflow.approved',               N'en', N'The sheet has been approved.', 1),
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
@@ -1272,6 +1277,22 @@ USING (VALUES
     (N'mapping.unmappedRow',             N'en', N'lands nowhere', 1),
     (N'mapping.targetMissing',           N'en', N'column is gone', 1),
     (N'mapping.noData',                  N'en', N'no rows in the source', 1),
+
+    -- Заведення мапінгу поля джерела (Прогалина 1 директиви паритету зі
+    -- старою системою): до цих рядків жоден екран не мав способу завести
+    -- мапінг інакше, ніж ручним SQL.
+    (N'mapping.create',                  N'en', N'Add mapping', 1),
+    (N'mapping.createTitle',             N'en', N'Add a source field mapping', 1),
+    (N'mapping.createField',             N'en', N'Source field or tag', 1),
+    (N'mapping.createKind',              N'en', N'Target', 1),
+    (N'mapping.createKindColumn',        N'en', N'Document column', 1),
+    (N'mapping.createKindRegistry',      N'en', N'Registry field', 1),
+    (N'mapping.createTargetId',          N'en', N'Target identifier', 1),
+    (N'mapping.createRowKey',            N'en', N'Target row key', 1),
+    (N'mapping.createRowKeyHint',        N'en', N'Leave empty to keep points raw for reconciliation (D-118) instead of landing them in a cell.', 1),
+    (N'mapping.createAggregation',       N'en', N'Fold period points as', 1),
+    (N'mapping.createSubmit',            N'en', N'Save mapping', 1),
+    (N'mapping.created',                 N'en', N'The mapping has been created.', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),

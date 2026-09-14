@@ -240,6 +240,9 @@ public static class DependencyInjection
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
 
+        // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
+        services.AddScoped<Sources.CreateEntityFieldMapHandler>();
+
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();
 

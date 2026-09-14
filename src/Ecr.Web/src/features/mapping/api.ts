@@ -1,5 +1,10 @@
 import { apiFetch } from '@/api/client';
-import type { MappedFieldPreview, MappingPreview } from '@/api/types';
+import type {
+  CreateEntityFieldMapRequest,
+  EntityFieldMapDto,
+  MappedFieldPreview,
+  MappingPreview,
+} from '@/api/types';
 
 /**
  * Ширина вікна перегляду за замовчуванням, у днях.
@@ -56,4 +61,20 @@ export function hasNoGaps(preview: MappingPreview): boolean {
     preview.unmappedSourceFields.length === 0 &&
     preview.uncoveredColumns.length === 0
   );
+}
+
+/**
+ * Заводить мапінг поля джерела (Прогалина 1 директиви паритету зі старою
+ * системою).
+ *
+ * ⛔ До цієї функції жоден екран не мав способу завести мапінг для
+ * щойно доданої колонки чи щойно побаченого в переліку розривів поля
+ * джерела — єдиним шляхом лишався ручний SQL.
+ */
+export function createEntityFieldMap(body: CreateEntityFieldMapRequest): Promise<EntityFieldMapDto> {
+  return apiFetch<EntityFieldMapDto>('/api/v1/entity-field-maps', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
