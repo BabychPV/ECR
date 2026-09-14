@@ -1,13 +1,16 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
   BuildSnapshotRequest,
+  JobStatus,
   PagedProjects,
   ReportDefinition,
   ReportSnapshotSummary,
 } from '@/api/types';
+import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -84,19 +87,64 @@ export function SnapshotsPage(): JSX.Element {
       ),
   });
 
+  // ⛔ UI-аудит, lane 6: побудова повертає `202` з `jobId` — задача фонова,
+  // і в момент відповіді сервера рядок зрізу ще не існує. Стара версія
+  // інвалідувала `['snapshots']` ОДРАЗУ на цій відповіді (не на завершенні
+  // задачі), тож перезапит незмінно приходив ще ДО того, як задача встигала
+  // хоч щось записати — сторінка лишалася на «зрізів іще нема» назавжди,
+  // без жодного опитування, аж доки хтось не перезавантажить сторінку
+  // руками. Прийом і модуль (`jobFollow.ts`, `pollInterval`/`outcomeOf`) —
+  // ті самі, що вже working у `ExportButton.tsx`/`PeriodsPage.tsx`.
+  const [jobId, setJobId] = useState<string | null>(null);
+
   const build = useMutation({
     mutationFn: () =>
       apiEnqueue(`/api/v1/reports/${encodeURIComponent(code ?? '')}/build`, {
         projectId: projectId ?? 0,
         periodKey: buildPeriod,
       } satisfies BuildSnapshotRequest),
-    onSuccess: async (job) => {
-      await queryClient.invalidateQueries({ queryKey: ['snapshots'] });
+    onSuccess: (job) => {
+      setJobId(job.jobId);
       setBuilding(false);
       showDone(t('snapshots.queued', { job: job.jobId }));
     },
     onError: showApiError,
   });
+
+  const job = useQuery({
+    queryKey: ['job', jobId],
+    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
+    enabled: jobId !== null,
+    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    retry: false,
+  });
+
+  const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
+
+  // ⚠ Інвалідація й тост — ОДИН раз на задачу, не на кожен рендер: `ref`,
+  // не стан, той самий захист, що й `ExportButton.tsx`.
+  const reported = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (jobId === null || outcome === null || outcome === 'running') return;
+    if (reported.current === jobId) return;
+
+    reported.current = jobId;
+
+    if (outcome === 'succeeded') {
+      void queryClient.invalidateQueries({ queryKey: ['snapshots'] });
+      showDone(t('snapshots.built'));
+    } else if (outcome === 'failed') {
+      notifications.show({
+        color: 'statusError',
+        message: job.data?.error ?? t('snapshots.buildFailed'),
+      });
+    }
+
+    // ⛔ `unknown` (стан прочитати не вдалося, брак `System.ViewHealth`) —
+    // навмисно без тосту, той самий прецедент, що й `ExportButton.tsx`:
+    // причина — брак права на читання задачі, а не збій побудови.
+  }, [jobId, outcome, job.data?.error, queryClient]);
 
   return (
     <>

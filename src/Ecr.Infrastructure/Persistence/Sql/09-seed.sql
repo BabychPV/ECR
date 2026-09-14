@@ -1132,6 +1132,11 @@ USING (VALUES
     (N'snapshots.build',                 N'en', N'Build snapshot', 1),
     (N'snapshots.buildHint',             N'en', N'A snapshot is immutable: building again creates a new one instead of overwriting.', 1),
     (N'snapshots.queued',                N'en', N'Build queued as job {job}.', 1),
+    -- ⛔ UI-аудит, lane 6: побудова успішно завершується майже одразу, але
+    -- список не оновлювався — ці два рядки супроводжують нове стеження за
+    -- задачею (`jobFollow.ts`), не саму постановку в чергу.
+    (N'snapshots.built',                 N'en', N'Snapshot built.', 1),
+    (N'snapshots.buildFailed',           N'en', N'Snapshot build failed.', 1),
     (N'snapshots.code',                  N'en', N'Report code', 1),
     (N'snapshots.codeHint',              N'en', N'The report definition to build from; definitions are data, not code.', 1),
     (N'snapshots.builtAt',               N'en', N'Built at', 1),
