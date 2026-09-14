@@ -586,7 +586,7 @@ public sealed class AccessDecisionService(
                     on new { cell.PeriodKeyValue, Id = cell.TableRowId }
                     equals new { row.PeriodKeyValue, row.Id }
                 join entry in db.RegistryEntries.AsNoTracking()
-                    on (long)cell.ValueRegistryEntryId!.Value equals entry.Id
+                    on cell.ValueRegistryEntryId!.Value equals entry.Id
                 where row.TableInstanceId == tableInstanceId
                       && cell.PeriodKeyValue == periodKey.Value
                       && cell.ValueRegistryEntryId != null

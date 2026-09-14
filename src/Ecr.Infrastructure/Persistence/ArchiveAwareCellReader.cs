@@ -147,7 +147,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         decimal? ValueNumeric,
         DateTime? ValueDate,
         bool? ValueBool,
-        int? ValueRegistryEntryId,
+        long? ValueRegistryEntryId,
         int? ValueUnitId,
         bool IsCalculated,
         bool IsEmpty);

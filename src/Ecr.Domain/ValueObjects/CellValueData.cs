@@ -14,7 +14,7 @@ public sealed record CellValueData
     public decimal? ValueNumeric { get; init; }
     public DateTime? ValueDate { get; init; }
     public bool? ValueBool { get; init; }
-    public int? ValueRegistryEntryId { get; init; }
+    public long? ValueRegistryEntryId { get; init; }
 
     /// <summary>Одиниця вимірювання; лише для <see cref="CellDataType.Unit"/> (R-A4).</summary>
     public int? ValueUnitId { get; init; }
