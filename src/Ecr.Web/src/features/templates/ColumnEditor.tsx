@@ -1,6 +1,11 @@
-import type { JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
+import type { RegistryDefDto } from '@/api/types';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import {
   type ColumnBlocker,
@@ -35,6 +40,27 @@ export function ColumnEditor({
   const blocker = whyCannotSaveColumn(draft);
   const isDecimal = draft.dataType === 'Decimal';
   const isLookup = draft.dataType === 'Lookup';
+
+  // ⛔ Директива registry-lookup, PR A3: колонку `Lookup` конфігурували
+  // сирим числовим `RegistryDefId` — автор шаблону мав знати ідентифікатор
+  // напам'ять, узятий десь поза цим екраном. Запит лінивий (лише коли
+  // форма відкрита на колонці Lookup), бо саме тоді список і потрібен.
+  const registries = useQuery({
+    queryKey: queryKeys.registries.list(),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    enabled: isLookup,
+  });
+
+  // ⚠ Мемоізовано: `[]`-літерал у пропі `data` перебудовувався б щорендеру,
+  // поки запит іще `pending`, — новий референс масиву на кожен рендер.
+  const registryOptions = useMemo(
+    () =>
+      (registries.data ?? []).map((registry) => ({
+        value: String(registry.id),
+        label: `${localized(registry.nameL10n)} (${registry.code})`,
+      })),
+    [registries.data],
+  );
 
   return (
     <Stack gap="sm">
@@ -135,13 +161,21 @@ export function ColumnEditor({
       )}
 
       {isLookup && (
-        <NumberInput
+        <Select
           label={t('columns.lookupRegistryDefId')}
           description={t('columns.lookupRegistryDefIdHint')}
           disabled={disabled}
-          value={draft.lookupRegistryDefId ?? ''}
+          searchable
+          nothingFoundMessage={t('columns.lookupRegistryDefIdEmpty')}
+          data={registryOptions}
+          // ⚠ Рядок, не число: Mantine `Select` завжди працює з текстовим
+          // `value`. Наявні колонки з уже заданим (сирим) ідентифікатором
+          // і далі показують правильно вибраний довідник — досить, щоб він
+          // був серед завантажених `data` (зворотна сумісність, не міграція
+          // даних).
+          value={draft.lookupRegistryDefId === null ? null : String(draft.lookupRegistryDefId)}
           onChange={(value) =>
-            onChange({ ...draft, lookupRegistryDefId: typeof value === 'number' ? value : null })
+            onChange({ ...draft, lookupRegistryDefId: value === null ? null : Number(value) })
           }
         />
       )}
