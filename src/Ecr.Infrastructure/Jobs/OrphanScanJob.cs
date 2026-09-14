@@ -1,5 +1,6 @@
 // src/Ecr.Infrastructure/Jobs/OrphanScanJob.cs
 
+using System.Globalization;
 using Ecr.Application.Ports;
 using Microsoft.Extensions.Logging;
 
@@ -34,11 +35,20 @@ public sealed partial class OrphanScanJob(IOrphanScanner scanner, ILogger<Orphan
     {
         ArgumentNullException.ThrowIfNull(progress);
 
-        await progress.ReportAsync(0, "Перевірка посилань на довідники", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(0, "jobs.orphanScanChecking", ct).ConfigureAwait(false);
 
         var changed = await scanner.ScanAllAsync(ct).ConfigureAwait(false);
 
-        await progress.ReportAsync(100, $"Змінено рядків: {changed}", ct).ConfigureAwait(false);
+        await progress
+            .ReportKeyAsync(
+                100,
+                "jobs.orphanScanDone",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["changed"] = changed.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
+            .ConfigureAwait(false);
 
         // ⚠ Підсумок у журнал ЗАВЖДИ, зокрема нульовий. Задача, яка мовчить,
         // коли нічого не знайшла, і мовчить, коли не запустилася, — це задача,

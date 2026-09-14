@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Integration;
@@ -138,9 +139,14 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
             batches++;
 
             await progress
-                .ReportAsync(
+                .ReportKeyAsync(
                     Math.Min(99, batches * 100 / MaxBatchesPerRun),
-                    $"Прибрано зрізів: {totalSnapshots}, рядків: {totalRows}",
+                    "jobs.retentionCleared",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["snapshots"] = totalSnapshots.ToString(CultureInfo.InvariantCulture),
+                        ["rows"] = totalRows.ToString(CultureInfo.InvariantCulture),
+                    },
                     ct)
                 .ConfigureAwait(false);
 
@@ -159,7 +165,15 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         await progress
-            .ReportAsync(100, $"Прибрано зрізів: {totalSnapshots}, рядків: {totalRows}", ct)
+            .ReportKeyAsync(
+                100,
+                "jobs.retentionCleared",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["snapshots"] = totalSnapshots.ToString(CultureInfo.InvariantCulture),
+                    ["rows"] = totalRows.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
             .ConfigureAwait(false);
     }
 }

@@ -23,6 +23,13 @@ public sealed class GetJobStatusHandlerTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
+    // ⚠ Q-326: підробка каталогу, не substitute без налаштувань — тести
+    // цього файлу навмисно перевіряють ПРАВА, а `status.Message` тут завжди
+    // "export-abc": не JSON-конверт, тож резолвер (`JobProgressMessageResolver`)
+    // повертає його як є й НІКОЛИ не звертається до каталогу. Підробка лишає
+    // це видимим, а не прихованим за незвʼязаним substitute.
+    private readonly FakeUiStringCatalog _catalog = new();
+
     public GetJobStatusHandlerTests()
     {
         _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
@@ -89,5 +96,60 @@ public sealed class GetJobStatusHandlerTests
         await _jobs.DidNotReceive().GetCreatedByUserIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
-    private GetJobStatusHandler Handler() => new(_jobs, _access, _user);
+    /// <summary>
+    /// Q-326: структурований конверт (<see cref="JobProgressMessageEnvelope"/>)
+    /// резолвиться мовою ЧИТАЧА, а не написаний готовим українським рядком —
+    /// саме той дефект, який lane6 медіум-аудиту (<c>Q-325</c>) знайшов
+    /// системним у 13 файлах фонових задач.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Структурований_конверт_прогресу_резолвиться_каталогом_мовою_читача()
+    {
+        const string StructuredJobId = "job-structured";
+        _catalog.Add("en", "jobs.recalcFormulasDone", "Template formulas: recalculated cells — {cells}.");
+
+        var envelope = new JobProgressMessageEnvelope(
+            "jobs.recalcFormulasDone",
+            new Dictionary<string, string> { ["cells"] = "42" });
+        _jobs.GetStatusAsync(StructuredJobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(
+                StructuredJobId, "Succeeded", 100, JobProgressMessageCodec.Encode(envelope), null));
+
+        _user.UserId.Returns(Author);
+        _user.Language.Returns("en");
+        _access.BuildProfileAsync(Author, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = Author }.Build());
+        _jobs.GetCreatedByUserIdAsync(StructuredJobId, Arg.Any<CancellationToken>()).Returns(Author);
+
+        var status = await Handler().HandleAsync(StructuredJobId, CancellationToken.None);
+
+        Assert.Equal("Template formulas: recalculated cells — 42.", status!.Message);
+    }
+
+    /// <summary>
+    /// Q-326: старий прямий запис (готовий український текст, ДО цієї
+    /// картки) не є JSON-конвертом — лишається читабельним як є, а не
+    /// перетворюється на ключ каталогу чи порожнечу.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Старий_прямий_текст_без_конверта_лишається_без_змін()
+    {
+        const string LegacyJobId = "job-legacy";
+        _jobs.GetStatusAsync(LegacyJobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(LegacyJobId, "Succeeded", 100, "Перерахунок методологій.", null));
+
+        _user.UserId.Returns(Author);
+        _user.Language.Returns("en");
+        _access.BuildProfileAsync(Author, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = Author }.Build());
+        _jobs.GetCreatedByUserIdAsync(LegacyJobId, Arg.Any<CancellationToken>()).Returns(Author);
+
+        var status = await Handler().HandleAsync(LegacyJobId, CancellationToken.None);
+
+        Assert.Equal("Перерахунок методологій.", status!.Message);
+    }
+
+    private GetJobStatusHandler Handler() => new(_jobs, _access, _user, _catalog);
 }
