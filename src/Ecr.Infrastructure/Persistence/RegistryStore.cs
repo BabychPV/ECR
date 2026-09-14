@@ -71,6 +71,24 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         => db.RegistryEntries.FirstOrDefaultAsync(e => e.Id == registryEntryId, ct);
 
     /// <inheritdoc />
+    public async Task<IReadOnlySet<long>> FindExistingEntryIdsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        if (registryEntryIds.Count == 0)
+        {
+            return new HashSet<long>();
+        }
+
+        var found = await db.RegistryEntries
+            .Where(e => registryEntryIds.Contains(e.Id))
+            .Select(e => e.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return found.ToHashSet();
+    }
+
+    /// <inheritdoc />
     public Task<RegistryEntry?> FindEntryByCodeAsync(
         int registryDefId, string code, CancellationToken ct)
         => db.RegistryEntries

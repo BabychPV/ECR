@@ -143,10 +143,17 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         methodologies.GetMethodologyIdsBoundToTableAsync(doc.TableDefId, Arg.Any<CancellationToken>())
                      .Returns(Task.FromResult<IReadOnlyList<int>>([]));
 
+        // ⛔ Директива registry-lookup, PR A2: за замовчуванням усе, про що
+        // питають, «існує» — цей тест про атомарність транзакції, не про
+        // Lookup-посилання.
+        var registries = Substitute.For<IRegistryStore>();
+        registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                  .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
+
         return new PatchCellsHandler(
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, audit, jobs, uow, user, clock);
+            methodologies, registries, audit, jobs, uow, user, clock);
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

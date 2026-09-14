@@ -150,6 +150,22 @@ public static class ErrorCodes
     /// </remarks>
     public const string CellOutOfRange = "ECR-CELL-4222";
 
+    /// <summary>
+    /// Комірка <c>Lookup</c> посилається на запис довідника, якого не існує.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Директива registry-lookup, PR A2. До <c>FK_CellValue_Entry</c>
+    /// (`Q-222`, `Q-316`) таке значення мовчки записувалось; після — база
+    /// відхиляє його сирим порушенням зовнішнього ключа (`500`, без коду й
+    /// тексту, зрозумілого користувачу). Перевірка ТУТ (<c>PatchCellsHandler</c>,
+    /// до збереження) дає ту саму чисту бізнес-помилку, що інші структурні
+    /// відмови комірки — окремий код, не <see cref="CellInvalid"/>, з тієї
+    /// самої причини, що обов'язкові вхідні колонки методології (`ECR-CALC-0437`)
+    /// не діляться кодом зі звичайною помилкою формату: інакше користувач
+    /// шукав би причину не там.
+    /// </remarks>
+    public const string CellRegistryEntryMissing = "ECR-CELL-4223";
+
     // Періоди і проєкти
     public const string PeriodClosed = "ECR-PRD-0409";
     public const string PeriodOutOfProject = "ECR-PRD-0422";

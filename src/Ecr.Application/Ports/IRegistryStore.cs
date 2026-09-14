@@ -52,6 +52,19 @@ public interface IRegistryStore
     /// <summary>Запис за ідентифікатором; <c>null</c> — немає.</summary>
     public Task<RegistryEntry?> FindEntryAsync(long registryEntryId, CancellationToken ct);
 
+    /// <summary>
+    /// Які з переданих ідентифікаторів справді існують серед записів
+    /// довідників.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Директива registry-lookup, PR A2. Один запит на весь батч комірок
+    /// <c>Lookup</c>, а не по одному на комірку (<c>FindEntryAsync</c>) —
+    /// бюджет запису лишається p95 300 мс на 100 комірок (tz/08 §8.2)
+    /// незалежно від того, скільки з них Lookup-типу.
+    /// </remarks>
+    public Task<IReadOnlySet<long>> FindExistingEntryIdsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
     /// <summary>Запис за кодом у межах довідника; <c>null</c> — немає.</summary>
     public Task<RegistryEntry?> FindEntryByCodeAsync(int registryDefId, string code, CancellationToken ct);
 
