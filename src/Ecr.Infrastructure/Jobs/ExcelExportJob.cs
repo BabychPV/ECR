@@ -42,13 +42,13 @@ public sealed class ExcelExportJob(IExcelExporter exporter, IExportStore exports
 
         var task = ExportPayload.Parse(payload);
 
-        await progress.ReportAsync(10, "Читання документа", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(10, "jobs.exportReadingDocument", ct).ConfigureAwait(false);
 
         await using var book = await exporter
             .ExportAsync(task.DocumentId, task.Options, ct)
             .ConfigureAwait(false);
 
-        await progress.ReportAsync(80, "Збереження книги", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(80, "jobs.exportSavingWorkbook", ct).ConfigureAwait(false);
 
         using var buffer = new MemoryStream();
         await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
@@ -57,8 +57,11 @@ public sealed class ExcelExportJob(IExcelExporter exporter, IExportStore exports
             .SaveAsync(task.ExportId, task.DocumentId, buffer.ToArray(), Lifetime, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Ключ повідомляється в прогресі: саме за ним клієнт, побачивши
-        // завершення задачі, забирає книгу.
+        // ⚠ Q-326: НЕ конвертується на структурований ключ. Ключ
+        // повідомляється в прогресі: саме за ним клієнт (`ExportButton.tsx`),
+        // побачивши завершення задачі, забирає книгу — `exportId` тут ДАНІ,
+        // а не текст для людини, і `JobProgressMessageResolver` пропускає
+        // будь-який рядок, що не є JSON-конвертом, без змін.
         await progress.ReportAsync(100, task.ExportId, ct).ConfigureAwait(false);
     }
 }

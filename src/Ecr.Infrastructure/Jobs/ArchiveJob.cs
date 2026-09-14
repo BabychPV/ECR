@@ -64,7 +64,15 @@ public sealed class ArchiveJob(
         var range = ArchiveRange.ForYear(request.Year, project.PeriodKind);
 
         await progress
-            .ReportAsync(0, $"Архівація {range.From}…{range.To}", ct)
+            .ReportKeyAsync(
+                0,
+                "jobs.archiveRange",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["from"] = range.From.ToString(CultureInfo.InvariantCulture),
+                    ["to"] = range.To.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
             .ConfigureAwait(false);
 
         // ⚠ Викликається ПРОЦЕДУРА. Копіювання, звірка сум і звільнення
@@ -97,10 +105,15 @@ public sealed class ArchiveJob(
             .ReportAsync(
                 100,
                 run is null
-                    ? "Прогін не зафіксовано"
-                    : string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"{run.Status}: перенесено {run.RowsMoved}, останній період {run.LastDone}"),
+                    ? JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope("jobs.archiveRunMissing"))
+                    : JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                        "jobs.archiveResult",
+                        new Dictionary<string, string>(StringComparer.Ordinal)
+                        {
+                            ["status"] = run.Status,
+                            ["rowsMoved"] = run.RowsMoved.ToString(CultureInfo.InvariantCulture),
+                            ["lastPeriod"] = run.LastDone?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                        })),
                 ct)
             .ConfigureAwait(false);
     }

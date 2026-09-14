@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ecr.Application.Ports;
 
 namespace Ecr.Infrastructure.Jobs;
@@ -22,7 +23,7 @@ public sealed class ReportSnapshotJob(IReportSnapshotBuilder builder) : IReportS
         // ⚠ Прогрес по кроках, а не стрибком 0 → 100. Смуга, що стоїть на
         // нулі й раптом стає повною, для користувача не відрізняється від
         // зависання — і він перезапускає задачу, яка працює.
-        await progress.ReportAsync(10, "Читання даних", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(10, "jobs.snapshotReading", ct).ConfigureAwait(false);
 
         var snapshotId = await builder
             .BuildAsync(
@@ -33,7 +34,16 @@ public sealed class ReportSnapshotJob(IReportSnapshotBuilder builder) : IReportS
                 ct)
             .ConfigureAwait(false);
 
-        await progress.ReportAsync(100, $"Зріз {snapshotId} побудовано", ct).ConfigureAwait(false);
+        await progress
+            .ReportKeyAsync(
+                100,
+                "jobs.snapshotBuilt",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["snapshotId"] = snapshotId.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
+            .ConfigureAwait(false);
     }
 }
 

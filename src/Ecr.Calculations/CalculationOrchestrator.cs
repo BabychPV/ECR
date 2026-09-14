@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
@@ -131,7 +132,15 @@ public sealed class CalculationOrchestrator(
             done += batch.MethodologyVersionIds.Count;
 
             await progress
-                .ReportAsync(done * 100 / resolved.Count, $"Пакет {batch.Ordinal + 1} із {batches.Count}", ct)
+                .ReportKeyAsync(
+                    done * 100 / resolved.Count,
+                    "jobs.batchProgress",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["ordinal"] = (batch.Ordinal + 1).ToString(CultureInfo.InvariantCulture),
+                        ["total"] = batches.Count.ToString(CultureInfo.InvariantCulture),
+                    },
+                    ct)
                 .ConfigureAwait(false);
         }
 

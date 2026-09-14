@@ -103,7 +103,8 @@ public sealed class ListSourceEntitiesHandler(
 public sealed class GetJobStatusHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUiStringCatalog catalog)
 {
     /// <summary>Право на перегляд стану системи (`02-contracts.md` §9).</summary>
     public const string Permission = "System.ViewHealth";
@@ -125,6 +126,17 @@ public sealed class GetJobStatusHandler(
     /// Існування перевіряється ПЕРЕД грантом (той самий порядок, що й у
     /// Q-179/Q-180) — інакше невідомий `jobId` завжди впав би на «немає
     /// права», ховаючи справжню причину (задачі просто немає) за 403.
+    /// </para>
+    /// <para>
+    /// ⚠ <c>Q-326</c> (лишалося відкладеним з lane6 медіум-аудиту, `Q-325`):
+    /// <c>status.Message</c> резолвиться каталогом рядків ТУТ, а не в момент
+    /// запису прогресу. Задача пише структурований конверт
+    /// (<see cref="JobProgressMessageEnvelope"/>) без відомої мови ЧИТАЧА;
+    /// цей обробник — request-scope з `[Authorize]`, де мова читача
+    /// (<c>currentUser.Language</c>) вже точно відома. Стара пряма форма
+    /// запису (готовий український текст ДО цієї картки) і нетекстові дані
+    /// в тому самому стовпці (<c>exportId</c> у 100 % `ExcelExportJob`)
+    /// проходять крізь резолвер без змін (<see cref="JobProgressMessageResolver"/>).
     /// </para>
     /// </remarks>
     public async Task<JobStatus?> HandleAsync(string jobId, CancellationToken ct)
@@ -154,7 +166,11 @@ public sealed class GetJobStatusHandler(
             }
         }
 
-        return status;
+        var resolvedMessage = await JobProgressMessageResolver
+            .ResolveAsync(catalog, currentUser.Language, status.Message, ct)
+            .ConfigureAwait(false);
+
+        return status with { Message = resolvedMessage };
     }
 }
 

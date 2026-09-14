@@ -1565,7 +1565,57 @@ USING (VALUES
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
     (N'health.sources.gapsCount',                N'en', N'Sources with a coverage gap: {count}.', 1),
-    (N'health.sources.allCollectedNoGaps',      N'en', N'All active sources are collected with no gaps.', 1)
+    (N'health.sources.allCollectedNoGaps',      N'en', N'All active sources are collected with no gaps.', 1),
+
+    -- /admin/jobs (lane6 медіум-аудиту, `Q-325` → `Q-326`): жоден тип фонової
+    -- задачі не проводив повідомлення прогресу через каталог — усі писали
+    -- готовий український рядок напряму в `itg.JobProgress.Message`.
+    -- Користувач з англійським чи казахським інтерфейсом бачив необ'єднаний
+    -- український текст на екрані стеження за задачею. Задача тепер пише
+    -- структурований конверт (ключ + параметри, `JobProgressMessageEnvelope`)
+    -- у ТОЙ САМИЙ стовпець; ключі нижче резолвяться мовою ЧИТАЧА при
+    -- `GET /api/v1/jobs/{jobId}` (`GetJobStatusHandler`), не в момент запису.
+    (N'jobs.recalcFormulas',                      N'en', N'Recalculating template formulas.', 1),
+    (N'jobs.recalcFormulasDone',                  N'en', N'Template formulas: recalculated cells — {cells}.', 1),
+    (N'jobs.recalcMethodologiesStart',            N'en', N'Recalculating methodologies.', 1),
+    (N'jobs.documentPrefix',                      N'en', N'Document {id} ({index} of {count}): {message}', 1),
+    (N'jobs.phaseMethodologies',                  N'en', N'Methodologies: {message}', 1),
+    (N'jobs.batchProgress',                       N'en', N'Batch {ordinal} of {total}', 1),
+    (N'jobs.snapshotReading',                     N'en', N'Reading data', 1),
+    (N'jobs.snapshotBuilt',                       N'en', N'Snapshot {snapshotId} built', 1),
+    (N'jobs.archiveRange',                        N'en', N'Archiving {from}…{to}', 1),
+    (N'jobs.archiveRunMissing',                   N'en', N'Run not recorded', 1),
+    (N'jobs.archiveResult',                       N'en', N'{status}: moved {rowsMoved}, last period {lastPeriod}', 1),
+    (N'jobs.collectionRange',                     N'en', N'Collecting entity {sourceEntityId} for {from}…{to}', 1),
+    (N'jobs.consistencyOrphanedCells',            N'en', N'Orphaned cells', 1),
+    (N'jobs.consistencyBrokenRefs',                N'en', N'Broken references', 1),
+    (N'jobs.consistencyArchiveCheck',              N'en', N'Archive reconciliation', 1),
+    (N'jobs.consistencyRecalcOrphaned',            N'en', N'Recalculating IsOrphaned', 1),
+    (N'jobs.consistencyIssuesFound',               N'en', N'Issues found: {count}', 1),
+    (N'jobs.exportReadingDocument',                N'en', N'Reading document', 1),
+    (N'jobs.exportSavingWorkbook',                 N'en', N'Saving workbook', 1),
+    (N'jobs.importApplyingDiff',                   N'en', N'Applying diff', 1),
+    (N'jobs.importApplied',                        N'en', N'Applied cells: {cells}; validation messages: {validationCount}', 1),
+    (N'jobs.formulaRecalcNone',                    N'en', N'No changed cells.', 1),
+    (N'jobs.formulaRecalcDone',                    N'en', N'Recalculated cells: {written}.', 1),
+    (N'jobs.materializeReadingMappings',           N'en', N'Reading mappings', 1),
+    (N'jobs.materializeNoMappings',                N'en', N'No materialized mappings', 1),
+    (N'jobs.materializePeriodClosed',              N'en', N'Period is closed: transfer skipped', 1),
+    (N'jobs.materializeFolding',                   N'en', N'Folding points', 1),
+    (N'jobs.materializeNoPoints',                  N'en', N'No points in interval', 1),
+    (N'jobs.materializeWriting',                   N'en', N'Writing to cells', 1),
+    (N'jobs.materializeDone',                      N'en', N'Written {applied}; kept manual {keptManual}', 1),
+    (N'jobs.notificationReadingCollectionFailures', N'en', N'Reading collection failures', 1),
+    (N'jobs.notificationReadingMaintenanceFailures', N'en', N'Reading maintenance failures', 1),
+    (N'jobs.notificationSendingQueue',              N'en', N'Sending notification queue', 1),
+    (N'jobs.notificationDone',                      N'en', N'Failures in digest: {count}; sent: {sent}; still queued: {pending}', 1),
+    (N'jobs.orphanScanChecking',                    N'en', N'Checking registry references', 1),
+    (N'jobs.orphanScanDone',                        N'en', N'Rows changed: {changed}', 1),
+    (N'jobs.partitionUnavailable',                  N'en', N'Partitioning unavailable', 1),
+    (N'jobs.partitionAhead',                        N'en', N'Partitions ahead: {ahead}', 1),
+    (N'jobs.partitionShortage',                     N'en', N'PARTITION SHORTAGE: {ahead}', 1),
+    (N'jobs.retentionCleared',                      N'en', N'Cleared snapshots: {snapshots}, rows: {rows}', 1),
+    (N'jobs.retryScheduled',                        N'en', N'Attempt {attempt}/{max} in {delaySeconds}s after error: {error}', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

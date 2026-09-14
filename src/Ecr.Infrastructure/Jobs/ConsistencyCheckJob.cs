@@ -71,20 +71,20 @@ public sealed class ConsistencyCheckJob(
     {
         var issues = new List<ConsistencyIssue>();
 
-        await progress.ReportAsync(10, "Осиротілі комірки", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(10, "jobs.consistencyOrphanedCells", ct).ConfigureAwait(false);
         issues.AddRange(await OrphanedCellsAsync(ct).ConfigureAwait(false));
 
-        await progress.ReportAsync(40, "Порушені посилання", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(40, "jobs.consistencyBrokenRefs", ct).ConfigureAwait(false);
         issues.AddRange(await BrokenReferencesAsync(ct).ConfigureAwait(false));
 
-        await progress.ReportAsync(60, "Звірка архіву", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(60, "jobs.consistencyArchiveCheck", ct).ConfigureAwait(false);
         issues.AddRange(await ArchiveChecksumsAsync(ct).ConfigureAwait(false));
 
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
         // половина функції, а пастка — виправлення довідника не розблокувало б
         // Submit, і користувач лишився б із помилкою, причину якої вже усунуто.
-        await progress.ReportAsync(80, "Перерахунок IsOrphaned", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(80, "jobs.consistencyRecalcOrphaned", ct).ConfigureAwait(false);
         var rescanned = await scanner.ScanAllAsync(ct).ConfigureAwait(false);
 
         await WriteIssuesAsync(issues, ct).ConfigureAwait(false);
@@ -108,7 +108,16 @@ public sealed class ConsistencyCheckJob(
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        await progress.ReportAsync(100, $"Знахідок: {issues.Count}", ct).ConfigureAwait(false);
+        await progress
+            .ReportKeyAsync(
+                100,
+                "jobs.consistencyIssuesFound",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["count"] = issues.Count.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

@@ -195,10 +195,25 @@ public sealed partial class QuartzJobAdapter(
 
         if (progress is not null)
         {
+            // ⚠ Q-326: той самий структурований конверт, що й у решти задач —
+            // цей виклик пише напряму в `IJobProgressStore` (не через
+            // `IJobProgress`/`ReportKeyAsync`), тож конверт кодується вручну.
+            // `ex.Message` лишається НЕ перекладеним параметром (дані, як
+            // `run.Status` в `ArchiveJob`) — текст винятку вже такий, яким
+            // його сформував код, що його кинув, а не готовий UI-рядок.
+            var envelope = new JobProgressMessageEnvelope(
+                "jobs.retryScheduled",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["attempt"] = nextAttempt.ToString(CultureInfo.InvariantCulture),
+                    ["max"] = MaxRetryAttempts.ToString(CultureInfo.InvariantCulture),
+                    ["delaySeconds"] = delay.TotalSeconds.ToString("0", CultureInfo.InvariantCulture),
+                    ["error"] = ex.Message,
+                });
+
             await progress.ReportAsync(
-                jobId, 0,
-                $"Спроба {nextAttempt}/{MaxRetryAttempts} за {delay.TotalSeconds:0} с після помилки: {ex.Message}",
-                clock.UtcNow, CancellationToken.None).ConfigureAwait(false);
+                jobId, 0, JobProgressMessageCodec.Encode(envelope), clock.UtcNow, CancellationToken.None)
+                .ConfigureAwait(false);
         }
     }
 
