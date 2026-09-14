@@ -194,6 +194,29 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     private const int MaxFieldMaps = 1_000;
 
     /// <inheritdoc />
+    public async Task<EntityFieldMap> AddFieldMapAsync(EntityFieldMap map, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+
+        db.EntityFieldMaps.Add(map);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return map;
+    }
+
+    /// <inheritdoc />
+    public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct)
+        => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
+
+    /// <inheritdoc />
+    public Task<bool> RegistryFieldDefExistsAsync(int registryFieldDefId, CancellationToken ct)
+        => db.RegistryFieldDefs.AsNoTracking().AnyAsync(f => f.Id == registryFieldDefId, ct);
+
+    /// <inheritdoc />
+    public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct)
+        => db.Units.AsNoTracking().AnyAsync(u => u.Id == unitId, ct);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<SourceEntityStatus>> ListSourceEntitiesAsync(CancellationToken ct)
     {
         // ⚠ Три запити на весь перелік, а не три на кожну сутність: джерел

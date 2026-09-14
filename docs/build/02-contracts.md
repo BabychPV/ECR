@@ -2612,6 +2612,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-INT-0503` | 503 | зовнішнє джерело недоступне; збір перейде в catch-up |
 | `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9) |
 | `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена |
+| `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
 | `ECR-INT-0502` | 502 | джерело **відмовило в автентифікації**: збір зупинено, у наздоганяння НЕ йде (`H-20`) |
 | `ECR-RPT-0404` | 404 | звіту з таким кодом немає або жодну версію не опубліковано |
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
@@ -2784,6 +2785,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
