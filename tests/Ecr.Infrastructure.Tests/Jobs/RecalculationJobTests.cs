@@ -130,12 +130,18 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
 
         // ⛔ Голе «40 %» не означає нічого: фаз дві, і перше, що питає той,
         // хто розбирає повільний прогін, — у якій саме.
-        Assert.Contains(progress.Reports, r => r.Message!.Contains("формул шаблону", StringComparison.Ordinal));
-        Assert.Contains(progress.Reports, r => r.Message!.Contains("методологій", StringComparison.Ordinal));
+        //
+        // ⚠ Q-326: повідомлення — структурований конверт (ключ каталогу), не
+        // готовий український текст; тест перевіряє КЛЮЧ, а не підрядок —
+        // текст мовою читача резолвиться пізніше, при читанні
+        // (`GetJobStatusHandler`), не тут.
+        Assert.Contains(
+            progress.Reports, r => KeyOf(r.Message)!.StartsWith("jobs.recalcFormulas", StringComparison.Ordinal));
+        Assert.Contains(progress.Reports, r => KeyOf(r.Message) == "jobs.recalcMethodologiesStart");
 
         // ⚠ Шкала оркестратора (0…100 від власного нуля) переведена в
         // залишок загальної: інакше вона стрибала б назад із 40 % на 5 %.
-        var scaled = progress.Reports.Single(r => r.Message!.StartsWith("Методології:", StringComparison.Ordinal));
+        var scaled = progress.Reports.Single(r => KeyOf(r.Message) == "jobs.phaseMethodologies");
         Assert.Equal(70, scaled.Percent);
 
         // ⚠ Жоден звіт не йде назад: 0 → 40 → 40 → 70.
@@ -230,12 +236,22 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 
         // ⚠ Одного документа замало для розбору: коли їх кілька, повідомлення
-        // мусить називати, ПРО ЯКИЙ документ саме йдеться.
-        Assert.Contains(progress.Reports, r => r.Message!.Contains("Документ ", StringComparison.Ordinal));
+        // мусить називати, ПРО ЯКИЙ документ саме йдеться. Q-326: конверт
+        // `jobs.documentPrefix` — це і є той шар, що називає документ; сам
+        // текст «Document N (…): …» резолвиться пізніше, мовою читача.
+        Assert.Contains(progress.Reports, r => KeyOf(r.Message) == "jobs.documentPrefix");
 
         // ⚠ Жоден звіт не йде назад навіть коли документів кілька.
         Assert.Equal(progress.Reports.Select(r => r.Percent).Order(), progress.Reports.Select(r => r.Percent));
     }
+
+    /// <summary>
+    /// Ключ структурованого конверта повідомлення прогресу (<c>Q-326</c>), або
+    /// сам рядок, якщо це не конверт — так тести перевіряють НАМІР
+    /// (який ключ пишеться), а не готовий текст однією мовою.
+    /// </summary>
+    private static string? KeyOf(string? message)
+        => JobProgressMessageCodec.TryDecode(message, out var envelope) ? envelope.Key : message;
 
     /// <summary>Завдання на перерахунок цього документа за його період.</summary>
     private static RecalculationRequest Request(TestDocument document)

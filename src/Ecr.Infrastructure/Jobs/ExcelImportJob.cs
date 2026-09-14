@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 
@@ -25,7 +26,7 @@ public sealed class ExcelImportJob(IExcelImporter importer) : IExcelImportJob
 
         var task = ImportPayload.Parse(payload);
 
-        await progress.ReportAsync(10, "Застосування diff", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(10, "jobs.importApplyingDiff", ct).ConfigureAwait(false);
 
         var result = await importer.ApplyAsync(task.DocumentId, task.PreviewToken, ct).ConfigureAwait(false);
 
@@ -33,8 +34,14 @@ public sealed class ExcelImportJob(IExcelImporter importer) : IExcelImportJob
         // результат застосування невеликий, і повідомлення прогресу досить,
         // щоб показати підсумок без другого запиту.
         await progress
-            .ReportAsync(
-                100, $"Застосовано комірок: {result.AppliedCells}; повідомлень валідації: {result.Validation.Count}",
+            .ReportKeyAsync(
+                100,
+                "jobs.importApplied",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["cells"] = result.AppliedCells.ToString(CultureInfo.InvariantCulture),
+                    ["validationCount"] = result.Validation.Count.ToString(CultureInfo.InvariantCulture),
+                },
                 ct)
             .ConfigureAwait(false);
     }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
@@ -117,9 +118,6 @@ public sealed class RecalculationJob(
             for (var i = 0; i < documentIds.Count; i++)
             {
                 var documentId = documentIds[i];
-                var prefix = documentIds.Count > 1
-                    ? $"Документ {documentId} ({i + 1} із {documentIds.Count}): "
-                    : string.Empty;
 
                 // ⚠ Один документ — той самий діапазон 0…100, що й завжди
                 // (i=0, Count=1 дає floor=0, ceiling=100): жодна наявна
@@ -133,8 +131,21 @@ public sealed class RecalculationJob(
                 // тут мусить позначити прогін `Failed` із причиною, а не
                 // лишити його `Running` назавжди: рівно цей клас дефекту в
                 // цьому файлі вже коштував розбору двічі (`D2-285`, `D2-286`).
+                //
+                // ⚠ Q-326: повідомлення прогресу — структурований конверт
+                // (ключ каталогу + параметри), не готовий український текст.
+                // Префікс «Документ N (i з M): » — окремий шар композиції
+                // (`jobs.documentPrefix`), застосований лише коли документів
+                // кілька — той самий умовний префікс, що й раніше, але тепер
+                // РЕЗОЛВИТЬСЯ мовою читача при `GET /api/v1/jobs/{jobId}`, а
+                // не записаний однією мовою назавжди.
                 await progress
-                    .ReportAsync(floor, $"{prefix}Перерахунок формул шаблону.", ct)
+                    .ReportAsync(
+                        floor,
+                        JobProgressMessageCodec.Encode(WithDocumentPrefix(
+                            new JobProgressMessageEnvelope("jobs.recalcFormulas"),
+                            documentId, i + 1, documentIds.Count)),
+                        ct)
                     .ConfigureAwait(false);
 
                 var docRequest = request with { DocumentId = documentId };
@@ -142,7 +153,16 @@ public sealed class RecalculationJob(
 
                 await progress
                     .ReportAsync(
-                        formulaCeiling, $"{prefix}Формули шаблону: перераховано комірок — {cells}.", ct)
+                        formulaCeiling,
+                        JobProgressMessageCodec.Encode(WithDocumentPrefix(
+                            new JobProgressMessageEnvelope(
+                                "jobs.recalcFormulasDone",
+                                new Dictionary<string, string>(StringComparer.Ordinal)
+                                {
+                                    ["cells"] = cells.ToString(CultureInfo.InvariantCulture),
+                                }),
+                            documentId, i + 1, documentIds.Count)),
+                        ct)
                     .ConfigureAwait(false);
 
                 var bindings = await BindingsAsync(docRequest, ct).ConfigureAwait(false);
@@ -150,7 +170,12 @@ public sealed class RecalculationJob(
                 // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно
                 // стали актуальними.
                 await progress
-                    .ReportAsync(formulaCeiling, $"{prefix}Перерахунок методологій.", ct)
+                    .ReportAsync(
+                        formulaCeiling,
+                        JobProgressMessageCodec.Encode(WithDocumentPrefix(
+                            new JobProgressMessageEnvelope("jobs.recalcMethodologiesStart"),
+                            documentId, i + 1, documentIds.Count)),
+                        ct)
                     .ConfigureAwait(false);
 
                 // ⛔ ОДИН прогін (`run.Id`) на всі документи — `CalculationRun`
@@ -165,7 +190,7 @@ public sealed class RecalculationJob(
                         documentId,
                         new PeriodKey(request.PeriodKey ?? 0),
                         bindings,
-                        new PhaseProgress(progress, formulaCeiling, ceiling, "Методології"),
+                        new PhaseProgress(progress, formulaCeiling, ceiling, "jobs.phaseMethodologies"),
                         ct)
                     .ConfigureAwait(false);
 
@@ -300,6 +325,29 @@ public sealed class RecalculationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+    /// <summary>
+    /// Загортає повідомлення в конверт «Документ N (i з M): {message}»
+    /// (<c>jobs.documentPrefix</c>), коли документів кілька — той самий умовний
+    /// префікс, що діяв тут ДО <c>Q-326</c>, лише тепер структурований.
+    /// </summary>
+    /// <param name="inner">Повідомлення нижчого шару.</param>
+    /// <param name="documentId">Документ поточної ітерації.</param>
+    /// <param name="index">Порядковий номер документа, від 1.</param>
+    /// <param name="count">Скільки всього документів у прогоні.</param>
+    private static JobProgressMessageEnvelope WithDocumentPrefix(
+        JobProgressMessageEnvelope inner, long documentId, int index, int count)
+        => count > 1
+            ? new JobProgressMessageEnvelope(
+                "jobs.documentPrefix",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["id"] = documentId.ToString(CultureInfo.InvariantCulture),
+                    ["index"] = index.ToString(CultureInfo.InvariantCulture),
+                    ["count"] = count.ToString(CultureInfo.InvariantCulture),
+                },
+                inner)
+            : inner;
+
     /// <summary>Розбирає завдання черги.</summary>
     /// <remarks>
     /// Payload приходить як анонімний об'єкт від use-case і як JSON із черги —
@@ -333,7 +381,7 @@ public sealed class RecalculationJob(
     /// <param name="inner">Канал прогресу задачі.</param>
     /// <param name="floor">Скільки відсотків уже пройдено до цієї фази.</param>
     /// <param name="ceiling">Скільки відсотків відведено на кінець цієї фази.</param>
-    /// <param name="phase">Ім'я фази — префікс кожного повідомлення.</param>
+    /// <param name="phaseKey">Ключ каталогу фази — обгортає кожне повідомлення (<c>Q-326</c>).</param>
     /// <remarks>
     /// ⛔ Голе «40 %» не означає нічого: у прогоні дві фази, і перше, на що
     /// дивиться той, хто розбирає повільний прогін, — у якій він саме зараз.
@@ -345,16 +393,35 @@ public sealed class RecalculationJob(
     /// не зламати наявний тест точних відсотків. Кілька документів ділять
     /// шкалу на рівні відрізки <c>floor…ceiling</c> між собою.
     /// </para>
+    /// <para>
+    /// ⚠ Q-326: <paramref name="phaseKey"/> — ключ каталогу («Methodologies:
+    /// {message}»), не готовий текст. Повідомлення оркестратора
+    /// (<c>CalculationOrchestrator</c>, вже структурований конверт
+    /// <c>jobs.batchProgress</c>) стає <see cref="JobProgressMessageEnvelope.Inner"/>
+    /// нового конверта — той самий принцип композиції, що й
+    /// <c>RecalculationJob.WithDocumentPrefix</c>, лише на іншому шарі.
+    /// </para>
     /// </remarks>
-    private sealed class PhaseProgress(IJobProgress inner, int floor, int ceiling, string phase)
+    private sealed class PhaseProgress(IJobProgress inner, int floor, int ceiling, string phaseKey)
         : IJobProgress
     {
         /// <inheritdoc />
         public Task ReportAsync(int percent, string? message, CancellationToken ct)
-            => inner.ReportAsync(
-                floor + (Math.Clamp(percent, 0, 100) * (ceiling - floor) / 100),
-                string.IsNullOrWhiteSpace(message) ? phase : $"{phase}: {message}",
-                ct);
+        {
+            var scaled = floor + (Math.Clamp(percent, 0, 100) * (ceiling - floor) / 100);
+
+            // ⚠ `message` тут — ЗАВЖДИ структурований конверт: єдиний
+            // викликач цього класу (`orchestrator.RunAsync`, тобто
+            // `CalculationOrchestrator`) уже перейшов на `ReportKeyAsync`
+            // (`Q-326`). `TryDecode` про всяк випадок захищає від
+            // непередбаченого прямого виклику з готовим текстом — тоді
+            // фазовий конверт лишається без `Inner`.
+            var envelope = message is not null && JobProgressMessageCodec.TryDecode(message, out var decoded)
+                ? new JobProgressMessageEnvelope(phaseKey, Inner: decoded)
+                : new JobProgressMessageEnvelope(phaseKey);
+
+            return inner.ReportAsync(scaled, JobProgressMessageCodec.Encode(envelope), ct);
+        }
     }
 }
 

@@ -89,7 +89,7 @@ public sealed class NotificationJob(
     private async Task RunAsync(
         MaintenanceRun run, DateTime now, DateTime since, IJobProgress progress, CancellationToken ct)
     {
-        await progress.ReportAsync(20, "Читання збоїв збору", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(20, "jobs.notificationReadingCollectionFailures", ct).ConfigureAwait(false);
 
         // Ідентифікатор перетворюється на рядок ВЖЕ після вибірки: усередині
         // запиту це був би виклик, який SQL Server форматує за своєю мовою.
@@ -127,7 +127,7 @@ public sealed class NotificationJob(
                 r.FinishedAt))
             .ToList();
 
-        await progress.ReportAsync(60, "Читання збоїв обслуговування", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(60, "jobs.notificationReadingMaintenanceFailures", ct).ConfigureAwait(false);
 
         var maintenance = await db.MaintenanceRuns
             .AsNoTracking()
@@ -207,14 +207,20 @@ public sealed class NotificationJob(
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        await progress.ReportAsync(80, "Відправка черги сповіщень", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(80, "jobs.notificationSendingQueue", ct).ConfigureAwait(false);
 
         var (sent, pending) = await outbox.FlushAsync(ct).ConfigureAwait(false);
 
         await progress
-            .ReportAsync(
+            .ReportKeyAsync(
                 100,
-                $"Збоїв у зведенні: {items.Count}; надіслано: {sent}; лишилося в черзі: {pending}",
+                "jobs.notificationDone",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["count"] = items.Count.ToString(CultureInfo.InvariantCulture),
+                    ["sent"] = sent.ToString(CultureInfo.InvariantCulture),
+                    ["pending"] = pending.ToString(CultureInfo.InvariantCulture),
+                },
                 ct)
             .ConfigureAwait(false);
     }

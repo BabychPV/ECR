@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
@@ -50,7 +51,16 @@ public sealed class CollectionJob(
         var from = request.FromUtc ?? to.AddDays(-(schedule?.LookbackDays ?? DefaultLookbackDays));
 
         await progress
-            .ReportAsync(5, $"Збір сутності {request.SourceEntityId} за {from:yyyy-MM-dd}…{to:yyyy-MM-dd}", ct)
+            .ReportKeyAsync(
+                5,
+                "jobs.collectionRange",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["sourceEntityId"] = request.SourceEntityId.ToString(CultureInfo.InvariantCulture),
+                    ["from"] = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    ["to"] = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                },
+                ct)
             .ConfigureAwait(false);
 
         try

@@ -123,6 +123,38 @@ public sealed class QuartzJobAdapterRetryTests
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// Q-326: повідомлення про ретрай — структурований конверт (ключ
+    /// каталогу + параметри), не готовий український рядок «Спроба N/M за
+    /// … с після помилки: …» — той самий системний дефект, що й у решти
+    /// 13 файлів фонових задач (lane6 медіум-аудиту, `Q-325`).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "T10-40")]
+    public async Task Повідомлення_про_ретрай_це_структурований_ключ_а_не_готовий_текст()
+    {
+        var (adapter, progress) = Adapter();
+        var (context, _) = ContextAt(0);
+
+        await adapter.Execute(context);
+
+        await progress.Received(1).ReportAsync(
+            JobId,
+            0,
+            Arg.Is<string?>(m => IsRetryScheduledEnvelope(m)),
+            Arg.Any<DateTime>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>Правда лише для повідомлення першого ретраю з очікуваними параметрами.</summary>
+    private static bool IsRetryScheduledEnvelope(string? message)
+        => JobProgressMessageCodec.TryDecode(message, out var envelope)
+           && envelope.Key == "jobs.retryScheduled"
+           && envelope.Params!["attempt"] == "1"
+           && envelope.Params["max"] == QuartzJobAdapter.MaxRetryAttempts.ToString(CultureInfo.InvariantCulture)
+           && envelope.Params["error"].Contains("транзієнтної", StringComparison.Ordinal);
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-40")]

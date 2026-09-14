@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
@@ -46,7 +47,7 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation) 
         // перетворив би кожну правку на прогін по всьому документу.
         if (dirty.IsEmpty)
         {
-            await progress.ReportAsync(100, "Змінених комірок немає.", ct).ConfigureAwait(false);
+            await progress.ReportKeyAsync(100, "jobs.formulaRecalcNone", ct).ConfigureAwait(false);
 
             return;
         }
@@ -56,7 +57,14 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation) 
             .ConfigureAwait(false);
 
         await progress
-            .ReportAsync(100, $"Перераховано комірок: {written}.", ct)
+            .ReportKeyAsync(
+                100,
+                "jobs.formulaRecalcDone",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["written"] = written.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
             .ConfigureAwait(false);
     }
 

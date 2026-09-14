@@ -79,7 +79,7 @@ public sealed class PartitionCheckJob(
                 clock.UtcNow);
 
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
-            await progress.ReportAsync(100, "Партиціонування недоступне", ct).ConfigureAwait(false);
+            await progress.ReportKeyAsync(100, "jobs.partitionUnavailable", ct).ConfigureAwait(false);
             return;
         }
 
@@ -101,7 +101,14 @@ public sealed class PartitionCheckJob(
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await progress
-            .ReportAsync(100, enough ? $"Запас партицій: {ahead}" : $"НЕСТАЧА партицій: {ahead}", ct)
+            .ReportKeyAsync(
+                100,
+                enough ? "jobs.partitionAhead" : "jobs.partitionShortage",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["ahead"] = ahead.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
             .ConfigureAwait(false);
 
         // ⛔ Задача НЕ виконує DDL. `SPLIT` робить SQL Agent під окремим

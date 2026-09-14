@@ -1,4 +1,5 @@
 // src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs
+using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
@@ -58,7 +59,7 @@ public sealed class MaterializeCollectedDataJob(
         var task = MaterializePayload.Parse(payload);
         var periodKey = new PeriodKey(task.PeriodKey);
 
-        await progress.ReportAsync(10, "Читання мапінгів", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(10, "jobs.materializeReadingMappings", ct).ConfigureAwait(false);
 
         // ⚠ Беруться лише МАТЕРІАЛІЗОВАНІ мапінги: `TargetRowKey IS NULL`
         // означає «точки лишаються сирими для звірки», і це легальний стан.
@@ -73,7 +74,7 @@ public sealed class MaterializeCollectedDataJob(
 
         if (maps.Count == 0)
         {
-            await progress.ReportAsync(100, "Матеріалізованих мапінгів немає", ct).ConfigureAwait(false);
+            await progress.ReportKeyAsync(100, "jobs.materializeNoMappings", ct).ConfigureAwait(false);
             return;
         }
 
@@ -94,21 +95,21 @@ public sealed class MaterializeCollectedDataJob(
                     $"Період у стані {state?.ToString() ?? "невідомо"}: пізній збір лишається сирим.", ct)
                 .ConfigureAwait(false);
 
-            await progress.ReportAsync(100, "Період закритий: перенесення пропущено", ct).ConfigureAwait(false);
+            await progress.ReportKeyAsync(100, "jobs.materializePeriodClosed", ct).ConfigureAwait(false);
             return;
         }
 
-        await progress.ReportAsync(30, "Згортання точок", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(30, "jobs.materializeFolding", ct).ConfigureAwait(false);
 
         var aggregated = await AggregateAsync(task, maps, ct).ConfigureAwait(false);
 
         if (aggregated.Count == 0)
         {
-            await progress.ReportAsync(100, "Точок за інтервал немає", ct).ConfigureAwait(false);
+            await progress.ReportKeyAsync(100, "jobs.materializeNoPoints", ct).ConfigureAwait(false);
             return;
         }
 
-        await progress.ReportAsync(60, "Запис у комірки", ct).ConfigureAwait(false);
+        await progress.ReportKeyAsync(60, "jobs.materializeWriting", ct).ConfigureAwait(false);
 
         var written = await patcher
             .ApplyIntegrationAsync(task.DocumentId, task.TableInstanceId, periodKey, aggregated, ct)
@@ -132,8 +133,14 @@ public sealed class MaterializeCollectedDataJob(
         }
 
         await progress
-            .ReportAsync(100,
-                $"Записано {written.Applied}; збережено ручних {written.KeptManual.Count}",
+            .ReportKeyAsync(
+                100,
+                "jobs.materializeDone",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["applied"] = written.Applied.ToString(CultureInfo.InvariantCulture),
+                    ["keptManual"] = written.KeptManual.Count.ToString(CultureInfo.InvariantCulture),
+                },
                 ct)
             .ConfigureAwait(false);
     }
