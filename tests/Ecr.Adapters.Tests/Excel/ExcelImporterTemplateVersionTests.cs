@@ -160,13 +160,19 @@ public sealed class ExcelImporterTemplateVersionTests
         methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                      .Returns(Task.FromResult<IReadOnlyList<int>>([]));
 
+        // ⛔ Директива registry-lookup, PR A2: за замовчуванням усе, про що
+        // питають, «існує» — цей тест не про Lookup-посилання.
+        var patchRegistries = Substitute.For<IRegistryStore>();
+        patchRegistries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                       .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
+
         return new(
             _metadata, _registries, _access, _user, _previews,
             new PatchCellsHandler(
                 Substitute.For<ICellStore>(), Substitute.For<IRowStore>(), Substitute.For<IDocumentStore>(),
                 Substitute.For<IPeriodStore>(), Substitute.For<IMetadataCache>(), Substitute.For<IAccessDecisionService>(),
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-                methodologies,
+                methodologies, patchRegistries,
                 Substitute.For<IAuditWriter>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
                 Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
             new ImportDiffBuilder(), _cellStore, _rowStore);

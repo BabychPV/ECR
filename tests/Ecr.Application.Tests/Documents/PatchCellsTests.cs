@@ -21,6 +21,7 @@ public sealed class PatchCellsTests
     private const long TableInstance = 500;
     private const int Period = 202601;
     private const int VolumeColumnId = 11;
+    private const int RegistryLinkColumnId = 12;
     private static readonly DateTime Now = new(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc);
 
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
@@ -33,6 +34,7 @@ public sealed class PatchCellsTests
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
+    private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -45,6 +47,15 @@ public sealed class PatchCellsTests
             tableDefId: 3, EcrCode.Create("Volume"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
         SetId(column, VolumeColumnId);
+
+        // ⛔ Директива registry-lookup, PR A2: колонка Lookup, потрібна лише
+        // для перевірки посилання на неіснуючий запис довідника.
+        var registryLinkColumn = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("RegistryLink"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Registry link" }), 2,
+            CellDataType.Lookup);
+        registryLinkColumn.SetLookup(registryDefId: 1);
+        SetId(registryLinkColumn, RegistryLinkColumnId);
 
         // ⚠ Q-148: PatchCellsHandler тепер шукає TableDef у Sheets, щоб
         // перевірити RowMode/MaxDynamicRows на створення рядка. Dynamic —
@@ -59,11 +70,16 @@ public sealed class PatchCellsTests
             TableLayoutKind.MonthsInColumns, TableRowMode.Dynamic);
         typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(table, 3);
         table.AddColumn(column);
+        table.AddColumn(registryLinkColumn);
         sheet.AddTable(table);
 
         var snapshot = new TemplateVersionSnapshot(
             TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
-            ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = column },
+            ColumnsById: new Dictionary<int, ColumnDef>
+            {
+                [VolumeColumnId] = column,
+                [RegistryLinkColumnId] = registryLinkColumn,
+            },
             RowsByKey: new Dictionary<(int, string), RowDef>());
 
         _clock.UtcNow.Returns(Now);
@@ -109,6 +125,12 @@ public sealed class PatchCellsTests
         // Ecr.Infrastructure.Tests проти реального SQL Server, не тут).
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
+        // ⛔ Директива registry-lookup, PR A2: за замовчуванням усе, про що
+        // питають, «існує» — тести, які не про Lookup-посилання, не мають
+        // падати на новій перевірці. Той тест, що про неї, підставляє інше.
+        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
     }
 
     private static void SetId(ColumnDef column, int id)
@@ -125,7 +147,7 @@ public sealed class PatchCellsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _audit, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _audit, _jobs, _uow, _user, _clock);
 
     /// <summary>Відповідь служби доступу на створення рядків.</summary>
     /// <param name="keys">Ключі, про які питали.</param>
@@ -634,6 +656,34 @@ public sealed class PatchCellsTests
 
         // Нічого не записано: комірковий Error — єдиний рівень, який блокує
         // запис (R-B3), і блокує він увесь батч, а не одну комірку.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Директива registry-lookup, PR A2: до цього перевірка ловила лише ФОРМУ
+    /// значення (`ValidateValue`, синхронна) — посилання на РЕАЛЬНО ІСНУЮЧИЙ
+    /// запис довідника не перевіряв ніхто, і до `FK_CellValue_Entry` (Q-316)
+    /// таке значення мовчки записувалось.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Lookup_комірка_з_неіснуючим_записом_довідника_блокує_запис_ECR_CELL_4223()
+    {
+        // ⛔ Дефолт конструктора («усе, про що питають, існує») тут навмисно
+        // замінений на порожню множину — жоден запит про існування не
+        // повертає жодного id.
+        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new HashSet<long>());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("RegistryLink", 999_999_999L)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-4223", error.ErrorCode);
+
+        // Нічого не записано — той самий блокуючий контракт, що інші
+        // структурні відмови комірки (R-B3).
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }

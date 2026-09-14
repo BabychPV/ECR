@@ -7,6 +7,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -29,6 +30,7 @@ public sealed class PatchCellsHandler(
     IAccessDecisionService access,
     Validation.ValidationEngine validation,
     IMethodologyStore methodologies,
+    IRegistryStore registries,
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
@@ -43,7 +45,9 @@ public sealed class PatchCellsHandler(
     /// Хоч одна комірка недоступна — <c>ECR-ACCS-0403</c> із причиною.
     /// </exception>
     /// <exception cref="BusinessRuleException">
-    /// Комірковий <c>Error</c> валідації — <c>ECR-CELL-0422</c>.
+    /// Комірковий <c>Error</c> валідації — <c>ECR-CELL-0422</c>; посилання
+    /// <c>Lookup</c>-комірки на неіснуючий запис довідника —
+    /// <c>ECR-CELL-4223</c>.
     /// </exception>
     /// <remarks>
     /// Орієнтир — тільки послідовність кроків: увесь контекст рішень,
@@ -63,6 +67,7 @@ public sealed class PatchCellsHandler(
         var changes = await BuildCellChangesAsync(request, context, ct).ConfigureAwait(false);
         var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
         var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages);
+        await EnsureRegistryReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
@@ -722,6 +727,67 @@ public sealed class PatchCellsHandler(
         messages.AddRange(requiredInputMessages);
 
         return messages;
+    }
+
+    /// <summary>
+    /// Директива registry-lookup, PR A2: комірка <c>Lookup</c> не може
+    /// посилатися на запис довідника, якого не існує.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цієї перевірки таке значення доходило до
+    /// <see cref="IUnitOfWork.SaveChangesAsync"/> і падало сирим порушенням
+    /// <c>FK_CellValue_Entry</c> (`Q-222`, `Q-316`) — `500` без коду й тексту,
+    /// зрозумілого користувачу. Перевірка ТУТ, ДО запису, дає ту саму чисту
+    /// бізнес-помилку, що інші структурні відмови комірки.
+    ///
+    /// ⚠ Один запит на весь батч (<see cref="IRegistryStore.FindExistingEntryIdsAsync"/>),
+    /// а не по одному на комірку: бюджет запису лишається p95 300 мс на
+    /// 100 комірок незалежно від того, скільки з них <c>Lookup</c>-типу.
+    ///
+    /// ⚠ Викликається ПІСЛЯ <see cref="EnsureValidationPasses"/> навмисно:
+    /// та перевірка вже гарантує, що <c>Lookup</c>-комірка несе НЕПОРОЖНІЙ
+    /// <c>ValueRegistryEntryId</c> (інакше — <c>ECR-CELL-0422</c>) — питати
+    /// існування порожнього ідентифікатора немає сенсу.
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-CELL-4223</c>.</exception>
+    private async Task EnsureRegistryReferencesExistAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var lookups = changes.Upserts
+            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
+                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Lookup)
+            .Select(record => (record.Address, EntryId: record.Value.ValueRegistryEntryId))
+            .Where(cell => cell.EntryId is not null)
+            .ToList();
+
+        if (lookups.Count == 0)
+        {
+            return;
+        }
+
+        var requestedIds = lookups.Select(cell => cell.EntryId!.Value).Distinct().ToList();
+        var existingIds = await registries.FindExistingEntryIdsAsync(requestedIds, ct).ConfigureAwait(false);
+
+        var byRowId = context.RowIds.ToDictionary(p => p.Value, p => p.Key);
+        var missing = lookups
+            .Where(cell => !existingIds.Contains(cell.EntryId!.Value))
+            .Select(cell => new
+            {
+                RowKey = byRowId.GetValueOrDefault(cell.Address.TableRowId),
+                ColumnCode = context.Snapshot.ColumnsById[cell.Address.ColumnDefId].Code,
+                EntryId = cell.EntryId!.Value,
+            })
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.CellRegistryEntryMissing,
+            $"Посилання на неіснуючий запис довідника: комірок — {missing.Count}.",
+            new Dictionary<string, object?> { ["cells"] = missing });
     }
 
     /// <summary>
