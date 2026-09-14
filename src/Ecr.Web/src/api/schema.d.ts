@@ -7088,7 +7088,59 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** Заводить нову похідну одиницю (UI-аудит, lane 4: доти жоден шлях,
+         *     доступний людині, не існував — `Uom.EditCatalog`). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateUnitRequest"];
+                    "application/json": components["schemas"]["CreateUnitRequest"];
+                    "text/json": components["schemas"]["CreateUnitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UnitRef"];
+                        "text/json": components["schemas"]["UnitRef"];
+                        "text/plain": components["schemas"]["UnitRef"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -8167,6 +8219,34 @@ export interface components {
             cloneFromVersionId: null | number;
             /** @description Номер нової версії. */
             versionNumber: string;
+        };
+        /** @description Запит на заведення нової похідної одиниці. */
+        CreateUnitRequest: {
+            /** @description Код, унікальний серед одиниць. */
+            code: string;
+            /**
+             * Format: uint8
+             * @description Розмірність — має існувати в `uom.Dimension`.
+             */
+            dimensionId: number;
+            /**
+             * Format: double
+             * @description Множник переходу до базової одиниці розмірності.
+             */
+            factorToBase: number;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: double
+             * @description Зсув; ненульовий лише для одиниць температури.
+             */
+            offsetToBase: number;
+            /** @description Позначення мовами каталогу. */
+            symbolL10n: {
+                [key: string]: string;
+            };
         };
         /** @description Запит на створення користувача. */
         CreateUserRequest: {

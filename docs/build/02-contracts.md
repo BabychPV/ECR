@@ -2384,6 +2384,22 @@ public interface IUnitCatalog
 }
 ```
 
+#### `IUnitStore`
+
+Заведення нової одиниці довідника `uom.Unit` (UI-аудит, lane 4). Окремий від
+`IUnitCatalog` навмисно: той — кешований знімок для перевірки публікації,
+цей — звичайний репозиторій для адміністративного запису.
+
+```csharp
+public interface IUnitStore
+{
+    public interface IUnitStore
+    public Task<Unit?> FindUnitByCodeAsync(string code, CancellationToken ct);
+    public Task<bool> DimensionExistsAsync(byte dimensionId, CancellationToken ct);
+    public void AddUnit(Unit unit);
+}
+```
+
 #### `IUserStore`
 
 Доступ до облікових записів для use-cases безпеки.
@@ -2579,6 +2595,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія між різними розмірностями (ФВ-16.3) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
+| `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
+| `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
 | `ECR-CALC-0409` | 409 | публікація методології автором останньої правки (D-40) |
 | `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
@@ -2724,6 +2742,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/email` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/units` | — | 4 |
+| `POST` | `/api/v1/units` | `Uom.EditCatalog` | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |

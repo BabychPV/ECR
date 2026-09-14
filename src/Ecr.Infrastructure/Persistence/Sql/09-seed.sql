@@ -61,6 +61,12 @@ USING (VALUES
   (N'Report.EditDefinition',    N'Report',      1),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
+  -- ⛔ UI-аудит, lane 4: жоден обліковий запис, включно з повноправним
+  -- адміністратором, не мав шляху додати одиницю виміру — не спеціальне
+  -- обмеження права (`IsDangerous`), а відсутність будь-якого ендпоінта.
+  -- Не небезпечне: заведення одиниці не змінює наявні дані й не впливає на
+  -- вже збережені числа (той самий клас, що `Registry.EditDefinition`).
+  (N'Uom.EditCatalog',          N'Uom',         0),
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
@@ -361,6 +367,10 @@ USING (VALUES
     -- ⛔ Аудит-пас 4: ще шість джерел, той самий клас дефекту (Q-303/Q-304)
     -- — готове українське речення доходило до клієнта незалежно від мови.
     (N'err.ECR-REG-4091',  N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.', 1),
+    -- ⛔ UI-аудит, lane 4: заведення одиниці виміру не мало жодного шляху,
+    -- доступного людині — той самий клас дефекту, що вже виправлений для
+    -- довідників (`Q-200`).
+    (N'err.ECR-UOM-4091',  N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
@@ -1114,6 +1124,17 @@ USING (VALUES
     (N'units.base',                      N'en', N'base', 1),
     (N'units.empty',                     N'en', N'No units registered', 1),
     (N'units.emptyHint',                 N'en', N'Without units a formula cannot state what its numbers mean, and conversion is impossible.', 1),
+    -- ⛔ UI-аудит, lane 4: жоден обліковий запис, включно з повноправним
+    -- адміністратором, не мав шляху додати одиницю виміру.
+    (N'units.new',                       N'en', N'New unit', 1),
+    (N'units.newCode',                   N'en', N'Code', 1),
+    (N'units.newCodeHint',               N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
+    (N'units.symbol',                    N'en', N'Symbol', 1),
+    (N'units.symbolHint',                N'en', N'Shown next to values, e.g. "kg".', 1),
+    (N'units.name',                      N'en', N'Name', 1),
+    (N'units.factorHint',                N'en', N'Multiplier to the dimension''s base unit.', 1),
+    (N'units.offsetHint',                N'en', N'Only nonzero for temperature units (°C to K).', 1),
+    (N'units.created',                   N'en', N'Unit created.', 1),
     (N'nav.audit',                       N'en', N'Audit trail', 1),
     (N'audit.title',                     N'en', N'Audit trail', 1),
     (N'audit.from',                      N'en', N'From', 1),

@@ -1,11 +1,13 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Select, Table, Text } from '@mantine/core';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { Badge, Button, Group, Modal, NumberInput, Select, Stack, Table, Text, TextInput } from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
+import { createUnit } from '@/features/units/api';
+import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { showApiError } from '@/shared/ui/notify';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
 /**
@@ -28,6 +30,9 @@ import { t } from '@/shared/i18n';
  * сервер відхилить, означало б обіцяти неможливе.
  */
 export function UnitsPage(): JSX.Element {
+  const session = useSession();
+  const queryClient = useQueryClient();
+
   const [value, setValue] = useState(1);
   const [fromUnit, setFromUnit] = useState<string | null>(null);
   const [toUnit, setToUnit] = useState<string | null>(null);
@@ -59,6 +64,54 @@ export function UnitsPage(): JSX.Element {
         } satisfies ConvertUnitRequest),
       }),
     onSuccess: setResult,
+    onError: showApiError,
+  });
+
+  // ⛔ UI-аудит, lane 4: жоден обліковий запис, включно з повноправним
+  // адміністратором, не мав шляху додати одиницю виміру — той самий клас
+  // дефекту, що вже виправлений для довідників (`Q-200`).
+  //
+  // ⚠ Розмірність вибирається зі СПИСКУ, отриманого з уже завантажених
+  // одиниць (унікальні пари `dimensionId`/`dimensionCode`), а не окремим
+  // запитом: `GET /api/v1/dimensions` не існує в системі взагалі —
+  // розмірності ніде не віддаються самі по собі, лише вкладені в кожну
+  // одиницю. Судження виконавця: усі 11 розмінностей seed-у вже
+  // представлені хоч однією одиницею, тож цього списку досить для форми;
+  // заводити новий ендпоінт лише заради випадаючого списку означало б
+  // розширювати контракт заради поля, яке й так має звідки взятися.
+  const [creating, setCreating] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [newSymbol, setNewSymbol] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newDimensionId, setNewDimensionId] = useState<string | null>(null);
+  const [newFactor, setNewFactor] = useState(1);
+  const [newOffset, setNewOffset] = useState(0);
+
+  const dimensions = Array.from(
+    new Map(all.map((unit) => [unit.dimensionId, unit.dimensionCode])).entries(),
+  ).sort(([, a], [, b]) => a.localeCompare(b));
+
+  const create = useMutation({
+    mutationFn: () =>
+      createUnit({
+        code: newCode,
+        symbolL10n: { en: newSymbol },
+        nameL10n: { en: newName },
+        dimensionId: Number(newDimensionId ?? 0),
+        factorToBase: newFactor,
+        offsetToBase: newOffset,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['units'] });
+      setCreating(false);
+      setNewCode('');
+      setNewSymbol('');
+      setNewName('');
+      setNewDimensionId(null);
+      setNewFactor(1);
+      setNewOffset(0);
+      showDone(t('units.created'));
+    },
     onError: showApiError,
   });
 
@@ -119,6 +172,12 @@ export function UnitsPage(): JSX.Element {
                 {result.value} {result.unit}
               </Text>
             )}
+
+            {can(session.data, 'Uom.EditCatalog') && (
+              <Button size="xs" variant="default" onClick={() => setCreating(true)}>
+                {t('units.new')}
+              </Button>
+            )}
           </Group>
         }
       />
@@ -173,6 +232,70 @@ export function UnitsPage(): JSX.Element {
           </Table>
         )}
       </AsyncBoundary>
+
+      <Modal opened={creating} onClose={() => setCreating(false)} title={t('units.new')}>
+        <Stack gap="sm">
+          <TextInput
+            label={t('units.newCode')}
+            description={t('units.newCodeHint')}
+            value={newCode}
+            onChange={(event) => setNewCode(event.currentTarget.value)}
+            data-autofocus
+          />
+
+          <TextInput
+            label={t('units.symbol')}
+            description={t('units.symbolHint')}
+            value={newSymbol}
+            onChange={(event) => setNewSymbol(event.currentTarget.value)}
+          />
+
+          <TextInput
+            label={t('units.name')}
+            value={newName}
+            onChange={(event) => setNewName(event.currentTarget.value)}
+          />
+
+          <Select
+            label={t('units.dimension')}
+            data={dimensions.map(([id, code]) => ({ value: String(id), label: code }))}
+            value={newDimensionId}
+            onChange={setNewDimensionId}
+          />
+
+          <NumberInput
+            label={t('units.factor')}
+            description={t('units.factorHint')}
+            value={newFactor}
+            onChange={(next) => setNewFactor(typeof next === 'number' ? next : newFactor)}
+          />
+
+          <NumberInput
+            label={t('units.offset')}
+            description={t('units.offsetHint')}
+            value={newOffset}
+            onChange={(next) => setNewOffset(typeof next === 'number' ? next : newOffset)}
+          />
+
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setCreating(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              disabled={
+                newCode.trim().length === 0 ||
+                newSymbol.trim().length === 0 ||
+                newName.trim().length === 0 ||
+                newDimensionId === null
+              }
+              loading={create.isPending}
+              onClick={() => create.mutate()}
+            >
+              {t('units.new')}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   );
 }

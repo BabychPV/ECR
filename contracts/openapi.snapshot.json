@@ -1328,6 +1328,53 @@
         ],
         "type": "object"
       },
+      "CreateUnitRequest": {
+        "description": "Запит на заведення нової похідної одиниці.",
+        "properties": {
+          "code": {
+            "description": "Код, унікальний серед одиниць.",
+            "type": "string"
+          },
+          "dimensionId": {
+            "description": "Розмірність — має існувати в `uom.Dimension`.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "factorToBase": {
+            "description": "Множник переходу до базової одиниці розмірності.",
+            "format": "double",
+            "type": "number"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          },
+          "offsetToBase": {
+            "description": "Зсув; ненульовий лише для одиниць температури.",
+            "format": "double",
+            "type": "number"
+          },
+          "symbolL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Позначення мовами каталогу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "symbolL10n",
+          "nameL10n",
+          "dimensionId",
+          "factorToBase",
+          "offsetToBase"
+        ],
+        "type": "object"
+      },
       "CreateUserRequest": {
         "description": "Запит на створення користувача.",
         "properties": {
@@ -16911,6 +16958,95 @@
           }
         },
         "summary": "Перелік одиниць із їхніми розмірностями.",
+        "tags": [
+          "Units"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUnitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUnitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUnitRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitRef"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitRef"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitRef"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить нову похідну одиницю (UI-аудит, lane 4: доти жоден шлях,\nдоступний людині, не існував — `Uom.EditCatalog`).",
         "tags": [
           "Units"
         ]
