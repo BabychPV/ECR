@@ -334,6 +334,16 @@ export function SecurityPage(): JSX.Element {
                           {t('security.dangerous', { count: role.dangerousPermissions.length })}
                         </Badge>
                       )}
+
+                      {/* ⛔ UI-аудит, lane 1: роль без жодного права виглядала
+                          в цій таблиці однаково з «навмисно вузькою роллю» —
+                          рядок увесь порожній, і нічого не пояснює різницю
+                          між «звужена свідомо» і «нічого не робить». */}
+                      {role.permissions.length === 0 && role.dangerousPermissions.length === 0 && (
+                        <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
+                          {t('security.noPermissions')}
+                        </Badge>
+                      )}
                     </Table.Td>
                     {permissions.map((permission) => (
                       <Table.Td key={permission.code}>

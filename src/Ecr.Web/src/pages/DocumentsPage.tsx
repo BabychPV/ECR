@@ -8,7 +8,7 @@ import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
+import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -23,8 +23,9 @@ export function DocumentsPage(): JSX.Element {
   // ⛔ Період і курсор — в АДРЕСІ (`ФВ-14.29`). Перелік документів за
   // конкретний період — це те, що надсилають колезі; у локальному стані таке
   // посилання вело б на порожній екран із проханням обрати період наново.
-  const [periodKey, setPeriodKey] = useUrlNumber('periodKey');
-  const [cursor, setCursor] = useUrlState('cursor');
+  const [periodKey] = useUrlNumber('periodKey');
+  const [cursor] = useUrlState('cursor');
+  const setUrlParams = useUrlParamsSetter();
   const [creating, setCreating] = useState(false);
   const session = useSession();
 
@@ -55,14 +56,22 @@ export function DocumentsPage(): JSX.Element {
         title={t('documents.title')}
         actions={
           <Group gap="xs" align="end">
+            {/* ⛔ UI-аудит, lane 3: `setPeriodKey(...)` одразу за ним
+                `setCursor(null)` — два ОКРЕМІ виклики сеттера `useUrlState`
+                в одному обробнику — не компонувались: `setSearchParams`,
+                викликаний двічі синхронно в тому самому тіку, губив ОБИДВІ
+                зміни (підтверджено ізольованим тестом на голому
+                `useSearchParams`). Поле «Period» виглядало інтерактивним
+                (некерований DOM встигав показати введене), але жоден запит
+                ніколи не бачив `periodKey` в адресі. `useUrlParamsSetter`
+                оновлює обидва параметри ОДНИМ переходом. */}
             <NumberInput
               size="xs"
               miw={120}
               label={t('documents.period')}
               value={periodKey ?? ''}
               onChange={(value) => {
-                setPeriodKey(typeof value === 'number' ? value : null);
-                setCursor(null);
+                setUrlParams({ periodKey: typeof value === 'number' ? value : null, cursor: null });
               }}
             />
 
@@ -130,7 +139,7 @@ export function DocumentsPage(): JSX.Element {
             {/* ⚠ Курсорна пагінація, а не offset: за місяць у проєкті тисячі
                 документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
             {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
+              <Button mt="md" variant="default" onClick={() => setUrlParams({ cursor: page.nextCursor })}>
                 {t('documents.more')}
               </Button>
             )}

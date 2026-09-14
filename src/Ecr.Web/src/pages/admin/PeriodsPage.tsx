@@ -486,13 +486,36 @@ export function PeriodsPage(): JSX.Element {
                       {t('periods.current')}
                     </Badge>
                   )}
+                  {/* ⛔ UI-аудит, lane 2: `CurrentPeriod` — підказка
+                      інтерфейсу, а НЕ правило доступу (`D-77`); «Pin»
+                      дозволяє призначити поточним будь-який період незалежно
+                      від його стану. Наслідок без цього бейджа — «current»
+                      мовчки опинявся на Closed-періоді, а той, що
+                      справді Open, лишався взагалі без жодної позначки, і
+                      нічого на екрані про це не сигналило. */}
+                  {period.isCurrent && period.state !== 'Open' && (
+                    <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
+                      {t('periods.currentNotOpen')}
+                    </Badge>
+                  )}
                 </Table.Td>
                 <Table.Td>{period.sequence}</Table.Td>
                 <Table.Td>
                   {period.startsAt} — {period.endsAt}
                 </Table.Td>
                 <Table.Td>
-                  <Badge color={stateColor(period.state)} variant="light">
+                  {/* ⛔ UI-аудит, lane 8: `ScrollArea` (Аудит-пас 5) обгортає
+                      ТАБЛИЦЮ, але сам `Badge` лишався здатним стискатись —
+                      table-layout: auto бере ширину стовпця з того, що
+                      РЕНДЕРИТЬСЯ, а `.mantine-Badge-label`'s власний
+                      `overflow:hidden` дозволяє йому «поміститись» у будь-яку
+                      ширину замість того, щоб змусити таблицю (і тим самим
+                      ScrollArea) прокручуватись. Наслідок — «Scheduled»
+                      ставало нечитабельним «S…» саме на типовій ширині вікна,
+                      де прокрутка мала б увімкнутись, а не текст обтинатись.
+                      `miw="fit-content"` тримає власну мінімальну ширину
+                      бейджа рівно рівною його тексту. */}
+                  <Badge color={stateColor(period.state)} variant="light" miw="fit-content">
                     {period.state}
                   </Badge>
                   {/* ⚠ Відкритий понад календар період видно окремо: інакше

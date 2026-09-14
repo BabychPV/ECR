@@ -625,6 +625,10 @@ USING (VALUES
     (N'methodologies.matchJsonHint', N'en', N'A structured predicate, not an expression. An empty object matches the whole table - which is why such a rule must have the lowest priority.', 1),
     (N'methodologies.priority', N'en', N'Priority', 1),
     (N'methodologies.priorityHint', N'en', N'The lower the number, the higher the priority. The first match wins.', 1),
+    (N'methodologies.catchAllNotLowestTitle', N'en', N'This catch-all rule is not at the lowest priority', 1),
+    (N'methodologies.catchAllNotLowestWarning', N'en', N'An empty predicate matches every row. Give it the highest priority number here, or any rule with a lower number will never be reached.', 1),
+    (N'methodologies.shadowedByCatchAllTitle', N'en', N'This rule can never match', 1),
+    (N'methodologies.shadowedByCatchAllWarning', N'en', N'Rule {code} already matches every row at a higher priority. Rows never reach this rule.', 1),
     (N'methodologies.active', N'en', N'Active', 1),
     (N'methodologies.noRules', N'en', N'This version has no selection rules', 1),
     (N'methodologies.noRulesHint', N'en', N'Without a rule the methodology touches no document row, and recalculation succeeds having computed nothing.', 1),
@@ -904,6 +908,7 @@ USING (VALUES
     (N'periods.archiveConfirm',          N'en', N'The project becomes read-only. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.archived',                N'en', N'The project is archived. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.current',                 N'en', N'current', 1),
+    (N'periods.currentNotOpen',          N'en', N'current is not Open', 1),
     (N'periods.pin',                     N'en', N'Make current', 1),
     (N'periods.pinHint',                 N'en', N'The calendar stops choosing the current period by itself. Say why.', 1),
     (N'periods.pinned',                  N'en', N'The current period is pinned.', 1),
@@ -1080,6 +1085,12 @@ USING (VALUES
     (N'security.rolesHint',              N'en', N'The whole set at once: these roles are the person''s authority, and it should be seen as a whole.', 1),
     (N'security.noRolesTitle',           N'en', N'No roles assigned', 1),
     (N'security.noRolesWarning',         N'en', N'The account will open, and every screen will be empty. Assign at least one role.', 1),
+    -- ⛔ UI-аудит, lane 1: роль(і) призначено, але жодна з них не несе
+    -- жодного права — з погляду мультиселекту це "роль є", хоча ефект
+    -- той самий, що й узагалі без ролі.
+    (N'security.noPermissions',          N'en', N'no permissions', 1),
+    (N'security.rolesGrantNothingTitle', N'en', N'Assigned role grants nothing', 1),
+    (N'security.rolesGrantNothingWarning', N'en', N'The account will open, and every screen will be empty, even though a role is assigned. Assign a role that actually grants a permission.', 1),
     (N'security.email',                  N'en', N'Email', 1),
     (N'security.emailHint',              N'en', N'Without it no notification reaches this person, and the alerts switch stays off.', 1),
     (N'security.oneTimePassword',        N'en', N'One-time password', 1),
