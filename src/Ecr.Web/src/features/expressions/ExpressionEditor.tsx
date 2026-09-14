@@ -73,6 +73,19 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   // назавжди лишається тим, який був у мить реєстрації.
   const metadata = useRef<ExpressionMetadataDto | undefined>(undefined);
 
+  // ⛔ Ефект створення редактора (нижче) виконується ОДИН раз і ніколи не
+  // перезапускається — тож `onDidChangeModelContent`, зареєстрований
+  // усередині нього, замкнув би саме ТОЙ `onChange`, що існував на момент
+  // монтування, назавжди. Викликач (наприклад, форма формули) типово передає
+  // інлайн-стрілку, що читає поточний стан ЗІ СВОГО замикання (`editing`) —
+  // застаріла версія такої стрілки записувала б назад застарілий стан,
+  // стираючи все, що змінилося в інших полях після монтування редактора.
+  // Ref завжди тримає НАЙСВІЖІШУ функцію, без цього ефект мусив би або
+  // перестворювати редактор на кожен рендер (скидаючи курсор), або взагалі
+  // не міг би обійтися без застарілого замикання.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   const scheme = useComputedColorScheme('light');
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -97,7 +110,7 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
         });
 
         editor.current.onDidChangeModelContent(() => {
-          onChange(editor.current?.getValue() ?? '');
+          onChangeRef.current(editor.current?.getValue() ?? '');
         });
 
         setReady(true);
