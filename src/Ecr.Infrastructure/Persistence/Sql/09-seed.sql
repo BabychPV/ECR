@@ -345,6 +345,28 @@ USING (VALUES
     (N'err.ECR-AUTH-0423', N'en', N'The account is locked.', 0),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
+    -- ⛔ Q-30x: EcrCode.Create (Ecr.Domain — без доступу до IUiStringCatalog)
+    -- будує лише ключ + підстановку `{code}`, не готове речення; це
+    -- речення резолвить ExceptionHandlingMiddleware.LocalizedDetailAsync.
+    -- Приватна область: код валідується лише на автентифікованих
+    -- адмін-екранах (роль, проєкт, шаблон, довідник, методологія).
+    (N'err.ECR-CFG-0422',  N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.', 1),
+    -- ⛔ Q-30x: чотири варіанти «код/ім'я вже зайняте», кожен — своя сутність
+    -- (роль/проєкт/довідниковий запис/користувач), кожен свій messageKey,
+    -- усі приватної області (лише автентифіковані адмін-екрани).
+    (N'err.ECR-SEC-0409',  N'en', N'A role with code "{code}" already exists.', 1),
+    (N'err.ECR-PRJ-0409',  N'en', N'A project with code "{code}" already exists.', 1),
+    (N'err.ECR-REG-0409',  N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
+    (N'err.ECR-USR-0409',  N'en', N'A user named "{userName}" already exists.', 1),
+    -- ⛔ Аудит-пас 4: ще шість джерел, той самий клас дефекту (Q-303/Q-304)
+    -- — готове українське речення доходило до клієнта незалежно від мови.
+    (N'err.ECR-REG-4091',  N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.', 1),
+    (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
+    (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
+    (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
+    (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
+    (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
+    (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
 
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),

@@ -352,7 +352,12 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate, $"Роль із кодом «{role.Code}» уже існує.");
+                ErrorCodes.RoleDuplicate, $"Роль із кодом «{role.Code}» уже існує.",
+                // ⛔ Q-30x: без цього словника подробиця доїжджала клієнту
+                // сирим українським реченням незалежно від мови інтерфейсу —
+                // узагальнений шлях ExceptionHandlingMiddleware, не точковий
+                // арм на цей один код.
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409", ["code"] = role.Code });
         }
 
         foreach (var code in permissionCodes.Distinct(StringComparer.Ordinal))

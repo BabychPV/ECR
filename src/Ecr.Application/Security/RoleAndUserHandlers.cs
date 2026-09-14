@@ -473,7 +473,13 @@ public sealed class CreateUserHandler(
             // створення користувача не має сітки, і відмова доїжджала в
             // обробник, у якого для неї немає ні місця, ні тексту.
             throw new BusinessRuleException(
-                ErrorCodes.UserDuplicate, $"Користувач з іменем «{userName}» уже існує.");
+                ErrorCodes.UserDuplicate, $"Користувач з іменем «{userName}» уже існує.",
+                // ⛔ Q-30x: без цього словника подробиця доїжджала клієнту
+                // сирим українським реченням незалежно від мови інтерфейсу —
+                // той самий клас дефекту, що ECR-AUTH-0403 до Q-300, тепер
+                // через узагальнений шлях (ExceptionHandlingMiddleware,
+                // messageKey), а не точковий арм на цей один код.
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0409", ["userName"] = userName });
         }
 
         // ⛔ Ролі перевіряються ТУТ і ДО створення чого-небудь. Сховище

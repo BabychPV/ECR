@@ -89,7 +89,15 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
             {
                 case Domain.Entities.Documents.Project project:
                     return new BusinessRuleException(
-                        ErrorCodes.ProjectDuplicate, $"Проєкт із кодом «{project.Code}» уже існує.");
+                        ErrorCodes.ProjectDuplicate, $"Проєкт із кодом «{project.Code}» уже існує.",
+                        // ⛔ Q-30x: узагальнений шлях ExceptionHandlingMiddleware
+                        // (messageKey), не точковий арм на цей один код —
+                        // без нього подробиця доїжджала клієнту сирим
+                        // українським реченням незалежно від мови інтерфейсу.
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-PRJ-0409", ["code"] = project.Code,
+                        });
 
                 case Domain.Entities.Dictionaries.RegistryEntry registryEntry:
                     // ⚠ Той самий код, що й перевірка «до запису» в
@@ -99,7 +107,11 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                     // індексом.
                     return new BusinessRuleException(
                         ErrorCodes.RegistryEntryInUse,
-                        $"Запис із кодом «{registryEntry.Code}» у цьому довіднику вже існує.");
+                        $"Запис із кодом «{registryEntry.Code}» у цьому довіднику вже існує.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0409", ["code"] = registryEntry.Code,
+                        });
             }
         }
 

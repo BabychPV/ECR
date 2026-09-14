@@ -71,6 +71,12 @@ public sealed class ProjectDuplicateCodeTests(SqlServerFixture sql)
 
         Assert.Equal("ECR-PRJ-0409", thrown.ErrorCode);
         Assert.Contains(code, thrown.Message, StringComparison.Ordinal);
+
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу.
+        Assert.NotNull(thrown.Details);
+        Assert.Equal("err.ECR-PRJ-0409", thrown.Details!["messageKey"]);
+        Assert.Equal(code, thrown.Details["code"]);
     }
 
     private static LocalizedText Text(string value)

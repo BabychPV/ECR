@@ -79,6 +79,12 @@ public sealed class CreateRegistryTests
 
         Assert.Equal("ECR-REG-4091", error.ErrorCode);
 
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу.
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-REG-4091", error.Details!["messageKey"]);
+        Assert.Equal("WASTE_GROUP", error.Details["code"]);
+
         _registries.DidNotReceive().AddDefinition(Arg.Any<RegistryDef>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }

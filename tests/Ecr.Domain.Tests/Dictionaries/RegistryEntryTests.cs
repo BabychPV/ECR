@@ -69,6 +69,13 @@ public sealed class RegistryEntryTests
         var error = Assert.Throws<DomainException>(
             () => entry.SetValidity(new DateOnly(2026, 6, 30), new DateOnly(2026, 1, 1)));
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
+
+        // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
+        // сирим українським реченням незалежно від мови інтерфейсу.
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.validityWindowEmpty", error.Details!["messageKey"]);
+        Assert.Equal("2026-06-30", error.Details["from"]);
+        Assert.Equal("2026-01-01", error.Details["to"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

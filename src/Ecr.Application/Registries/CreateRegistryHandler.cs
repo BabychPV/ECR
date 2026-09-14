@@ -67,7 +67,13 @@ public sealed class CreateRegistryHandler(
             throw new BusinessRuleException(
                 "ECR-REG-4091",
                 $"Довідник «{registryCode.Value}» уже існує (ідентифікатор {clash.Id}): "
-                + "код — те, чим на нього посилаються поля-довідники і колонки шаблону.");
+                + "код — те, чим на нього посилаються поля-довідники і колонки шаблону.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-4091",
+                    ["code"] = registryCode.Value,
+                    ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var definition = new RegistryDef(

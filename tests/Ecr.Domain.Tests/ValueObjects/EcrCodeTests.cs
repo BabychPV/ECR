@@ -57,4 +57,22 @@ public sealed class EcrCodeTests
         Assert.Equal(65, tooLong.Length);
         Assert.Throws<Ecr.Domain.Abstractions.DomainException>(() => EcrCode.Create(tooLong));
     }
+
+    /// <summary>
+    /// `Q-30x`: `Details` несе ключ каталогу + сире значення коду, а НЕ готове
+    /// речення — `Ecr.Domain` не має доступу до `IUiStringCatalog` і ніколи
+    /// не матиме, тож локалізація можлива лише через структуровані дані, які
+    /// резолвить `ExceptionHandlingMiddleware` вище по конвеєру.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Виняток_недопустимого_коду_несе_ключ_каталогу_і_саме_значення()
+    {
+        var exception = Assert.Throws<Ecr.Domain.Abstractions.DomainException>(
+            () => EcrCode.Create("bad code"));
+
+        Assert.NotNull(exception.Details);
+        Assert.Equal("err.ECR-CFG-0422", exception.Details!["messageKey"]);
+        Assert.Equal("bad code", exception.Details["code"]);
+    }
 }

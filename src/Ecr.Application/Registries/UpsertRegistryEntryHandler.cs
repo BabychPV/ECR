@@ -166,7 +166,16 @@ public sealed class UpsertRegistryEntryHandler(
             // стали б одним заднім числом.
             throw new BusinessRuleException(
                 "ECR-REG-0409",
-                $"Запис із кодом «{code.Value}» у цьому довіднику вже існує (Id {duplicate.Id}).");
+                $"Запис із кодом «{code.Value}» у цьому довіднику вже існує (Id {duplicate.Id}).",
+                // ⛔ Q-30x: узагальнений шлях ExceptionHandlingMiddleware
+                // (messageKey) — без нього подробиця доїжджала клієнту сирим
+                // українським реченням незалежно від мови інтерфейсу.
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0409",
+                    ["code"] = code.Value,
+                    ["id"] = duplicate.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var entry = new RegistryEntry(registryDefId, code, dto.Display, userId, clock.UtcNow);
