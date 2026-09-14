@@ -163,6 +163,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
+        services.AddScoped<Units.CreateUnitHandler>();
 
         // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
         // мапінг і історія опису.

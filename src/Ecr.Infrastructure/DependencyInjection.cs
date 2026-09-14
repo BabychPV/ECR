@@ -73,6 +73,7 @@ public static class DependencyInjection
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
+        services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
         services.AddScoped<IConstantStore, ConstantStore>();

@@ -572,6 +572,9 @@ export type UnitRef = Schemas['UnitRef'];
 /** Запит на конверсію значення між одиницями. */
 export type ConvertUnitRequest = Schemas['ConvertUnitRequest'];
 
+/** Запит на заведення нової похідної одиниці (UI-аудит, lane 4). */
+export type CreateUnitRequest = Schemas['CreateUnitRequest'];
+
 /** Результат конверсії. */
 export type ConvertUnitResponse = Schemas['ConvertUnitResponse'];
 

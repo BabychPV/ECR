@@ -2761,6 +2761,7 @@ USING (VALUES
   (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
+  (N'Uom.EditCatalog',          N'Uom',         0),
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),

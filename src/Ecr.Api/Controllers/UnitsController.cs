@@ -9,7 +9,8 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/units")]
 [Authorize]
-public sealed class UnitsController(ListUnitsHandler list, ConvertUnitHandler convert) : ControllerBase
+public sealed class UnitsController(
+    ListUnitsHandler list, ConvertUnitHandler convert, CreateUnitHandler create) : ControllerBase
 {
     /// <summary>Перелік одиниць із їхніми розмірностями.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -22,6 +23,30 @@ public sealed class UnitsController(ListUnitsHandler list, ConvertUnitHandler co
     [ProducesResponseType<IReadOnlyList<UnitRef>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<UnitRef>>> List(CancellationToken ct)
         => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Заводить нову похідну одиницю (UI-аудит, lane 4: доти жоден шлях,
+    /// доступний людині, не існував — `Uom.EditCatalog`).
+    /// </summary>
+    /// <param name="request">Код, позначення, назва, розмірність, коефіцієнти.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost]
+    [ProducesResponseType<UnitRef>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UnitRef>> Create(
+        [FromBody] CreateUnitRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var unit = await create
+            .HandleAsync(
+                request.Code, request.SymbolL10n, request.NameL10n,
+                request.DimensionId, request.FactorToBase, request.OffsetToBase, ct)
+            .ConfigureAwait(false);
+
+        return Ok(new UnitRef(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase));
+    }
 
     /// <summary>
     /// Конвертує значення між одиницями.
@@ -65,3 +90,18 @@ public sealed record ConvertUnitRequest(decimal Value, string FromUnit, string T
 /// <param name="Value">Значення у цільовій одиниці.</param>
 /// <param name="Unit">Код цільової одиниці.</param>
 public sealed record ConvertUnitResponse(decimal Value, string Unit);
+
+/// <summary>Запит на заведення нової похідної одиниці.</summary>
+/// <param name="Code">Код, унікальний серед одиниць.</param>
+/// <param name="SymbolL10n">Позначення мовами каталогу.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <param name="DimensionId">Розмірність — має існувати в <c>uom.Dimension</c>.</param>
+/// <param name="FactorToBase">Множник переходу до базової одиниці розмірності.</param>
+/// <param name="OffsetToBase">Зсув; ненульовий лише для одиниць температури.</param>
+public sealed record CreateUnitRequest(
+    string Code,
+    IReadOnlyDictionary<string, string> SymbolL10n,
+    IReadOnlyDictionary<string, string> NameL10n,
+    byte DimensionId,
+    decimal FactorToBase,
+    decimal OffsetToBase);
