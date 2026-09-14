@@ -1356,7 +1356,11 @@ USING (VALUES
     (N'columns.precision',               N'en', N'Precision', 1),
     (N'columns.scale',                   N'en', N'Scale', 1),
     (N'columns.lookupRegistryDefId',     N'en', N'Registry', 1),
-    (N'columns.lookupRegistryDefIdHint', N'en', N'Identifier of the registry this column looks values up from.', 1),
+    -- ⛔ Директива registry-lookup, PR A3: раніше автор шаблону мав уводити
+    -- сирий числовий ідентифікатор довідника напам'ять; тепер це вибір зі
+    -- списку за назвою й кодом.
+    (N'columns.lookupRegistryDefIdHint', N'en', N'The registry this column looks values up from.', 1),
+    (N'columns.lookupRegistryDefIdEmpty', N'en', N'No registries found', 1),
     (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.', 1),
     (N'columns.errCode',                 N'en', N'Give the column a code: it is how the column is addressed.', 1),
     (N'columns.errHeader',               N'en', N'Give the column a header in at least one language.', 1),
