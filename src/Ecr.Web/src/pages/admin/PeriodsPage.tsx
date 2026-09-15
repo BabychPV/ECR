@@ -18,6 +18,7 @@ import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
+import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -262,7 +263,9 @@ export function PeriodsPage(): JSX.Element {
       } satisfies ProjectRecalculationRequest),
     onSuccess: (job) => {
       setRecalcJobId(job.jobId);
-      showDone(t('workflow.recalcQueued', { job: job.jobId }));
+      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані —
+      // і в запиті опитування — не змінюється.
+      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
     },
     onError: showApiError,
   });
