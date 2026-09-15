@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
 
@@ -28,10 +29,17 @@ public sealed class CreateDocumentHandler(
     /// <param name="projectId">Проєкт.</param>
     /// <param name="templateVersionId">Версія шаблону.</param>
     /// <param name="sheetDefIds">Аркуші, які входять у документ.</param>
+    /// <param name="name">
+    /// Людське ім'я документа мовами каталогу; <c>null</c> — не задано.
+    /// Опційне: <see cref="Domain.Entities.Documents.Document.BusinessKey"/>
+    /// лишається унікальним технічним ключем незалежно від нього (директива
+    /// "людське ім'я документа").
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор документа.</returns>
     public async Task<long> HandleAsync(
-        int projectId, int templateVersionId, IReadOnlyList<int> sheetDefIds, CancellationToken ct)
+        int projectId, int templateVersionId, IReadOnlyList<int> sheetDefIds,
+        IReadOnlyDictionary<string, string>? name, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(sheetDefIds);
 
@@ -90,6 +98,16 @@ public sealed class CreateDocumentHandler(
 
         var now = clock.UtcNow;
         var document = new Document(projectId, businessKey, userId, now);
+
+        // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
+        // технічного ключа тут не змінюється (директива "людське ім'я
+        // документа"). Порожній перелік мов (об'єкт `{}`) трактується так
+        // само, як відсутність імені — надсилати його як щось відмінне від
+        // null означало б давати другий спосіб сказати те саме.
+        if (name is { Count: > 0 })
+        {
+            document.SetName(new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
+        }
 
         // ⛔ Статус документа НЕ ставиться — його не існує (D-93). Робочий стан
         // з'явиться у wf.ApprovalState при першому Submit, і буде він на

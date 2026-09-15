@@ -1,11 +1,12 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Table } from '@mantine/core';
+import { Badge, Button, Group, NumberInput, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { DocumentPage, PagedProjects } from '@/api/types';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
 import { can, useSession } from '@/shared/session/useSession';
+import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -115,10 +116,26 @@ export function DocumentsPage(): JSX.Element {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {page.items.map((document) => (
+                {page.items.map((document) => {
+                  const name = localized(document.nameL10n);
+
+                  return (
                   <Table.Tr key={document.id}>
                     <Table.Td>
-                      <Link to={`/documents/${document.id}`}>{document.businessKey}</Link>
+                      {/* ⛔ Директива "людське ім'я документа": показуємо
+                          ім'я ПОРУЧ із бізнес-ключем, а не замість нього —
+                          ключ бере участь в експортах і аудиті, і має
+                          лишатися видимим завжди. */}
+                      {name.length > 0 ? (
+                        <Stack gap="xs">
+                          <Link to={`/documents/${document.id}`}>{name}</Link>
+                          <Text size="xs" c="dimmed">
+                            {document.businessKey}
+                          </Text>
+                        </Stack>
+                      ) : (
+                        <Link to={`/documents/${document.id}`}>{document.businessKey}</Link>
+                      )}
                     </Table.Td>
                     <Table.Td>{projectCodeOf(document.projectId)}</Table.Td>
                     <Table.Td>{document.sheetCount}</Table.Td>
@@ -132,7 +149,8 @@ export function DocumentsPage(): JSX.Element {
                       </Group>
                     </Table.Td>
                   </Table.Tr>
-                ))}
+                  );
+                })}
               </Table.Tbody>
             </Table>
 

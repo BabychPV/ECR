@@ -2104,6 +2104,38 @@ public interface IDocumentStore
     public Task<PagedResult<DocumentSummary>> ListAsync(
     public Task<IReadOnlyList<CompositionViolation>> ValidateCompositionAsync(
     public Task<string> NextBusinessKeyAsync(int projectId, int templateVersionId, CancellationToken ct);
+    public Task<IReadOnlyList<SheetGroupRuleSummary>> GetGroupRulesAsync(int templateVersionId, CancellationToken ct);
+}
+```
+
+⚠ Дозапис (директиви "людське ім'я документа" і "live-попередження про
+порушення SheetGroupRule"): `DocumentSummary` тепер несе опційний
+`NameL10n` (людське ім'я документа ПОРУЧ із `BusinessKey`, який лишається
+технічним ключем), а `CreateDocumentRequest` — опційний `Name` тієї самої
+форми, що `CreateProjectRequest.NameL10n`. `GetGroupRulesAsync` віддає сирі
+правила складу (`SheetGroupRuleSummary`) для `GET
+.../template-versions/{id}/structure` (нове поле `TemplateStructureDto.GroupRules`,
+`SheetGroupRuleDto`) — клієнт (`CreateDocumentModal.tsx`) рахує порушення
+складу локально при кожній зміні вибору аркушів, тим самим правилом, що й
+`ValidateCompositionAsync` (лише `RequiresAll`/`RequiresOne` — `Excludes`
+сервер сьогодні не перевіряє, і клієнт навмисно цього не вигадує).
+
+#### `IColumnDefSearchStore`
+
+Пошук колонок за назвою чи кодом, поза межами однієї таблиці (директива
+"пошук колонки за назвою замість голого ColumnDefId"). `MethodologyRequiredInputsPanel`
+і `MethodologyBindingsPanel` (`src/Ecr.Web/src/features/methodologies/MethodologyContentPanels.tsx`)
+приймали `ColumnDefId` голим числом у `NumberInput`; тепер це вибір зі
+списку, наповненого `GET /api/v1/column-defs/search?q=...`. Пошук
+наскрізний по всіх версіях шаблонів одразу: прив'язка методології не
+обмежена ОДНІЄЮ таблицею — `TableDefId` виводиться із самої колонки
+(`SaveCalculationBindingHandler`).
+
+```csharp
+public interface IColumnDefSearchStore
+{
+    public Task<IReadOnlyList<ColumnDefSearchResult>> SearchAsync(
+        string? query, int limit, CancellationToken ct);
 }
 ```
 
@@ -2685,6 +2717,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/diff/{otherId}` | `Template.View` | 1 |
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
+| `GET` | `/api/v1/column-defs/search` | `Template.View` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/access-matrix` | `Template.View` | 3 |
 | `GET` | `/api/v1/template-versions/{id}/relations` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/relations/{code}` | `Template.Edit` | 7 |

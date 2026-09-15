@@ -70,7 +70,7 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         var documentId = await create
-            .HandleAsync(request.ProjectId, request.TemplateVersionId, request.SheetDefIds, ct)
+            .HandleAsync(request.ProjectId, request.TemplateVersionId, request.SheetDefIds, request.Name, ct)
             .ConfigureAwait(false);
 
         return Created($"/api/v1/documents/{documentId}", new Contracts.DocumentIdResponse(documentId));
@@ -377,7 +377,16 @@ public sealed class DocumentsController(
 /// <param name="ProjectId">Проєкт.</param>
 /// <param name="TemplateVersionId">Опублікована версія шаблону.</param>
 /// <param name="SheetDefIds">Аркуші, які входять у документ.</param>
-public sealed record CreateDocumentRequest(int ProjectId, int TemplateVersionId, IReadOnlyList<int> SheetDefIds);
+/// <param name="Name">
+/// Людське ім'я документа мовами каталогу; <c>null</c> — без імені.
+/// Опційне і суто презентаційне: <c>BusinessKey</c> лишається технічним
+/// ключем незалежно від нього (директива "людське ім'я документа").
+/// </param>
+public sealed record CreateDocumentRequest(
+    int ProjectId,
+    int TemplateVersionId,
+    IReadOnlyList<int> SheetDefIds,
+    IReadOnlyDictionary<string, string>? Name = null);
 
 /// <summary>Дія над документом у межах одного періоду.</summary>
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
