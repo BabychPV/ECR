@@ -165,7 +165,7 @@ public sealed class DocumentsController(
     /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Calculation.Recalculate</c>.</summary>
     /// <remarks>
     /// Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.
-    /// <c>SheetDefId</c> звужує перерахунок до одного аркуша (Q-328); без нього —
+    /// <c>SheetDefId</c> звужує перерахунок до одного аркуша (Q-329); без нього —
     /// увесь документ, як і раніше.
     /// </remarks>
     [HttpPost("{id:long}/recalculate")]
@@ -383,10 +383,10 @@ public sealed record CreateDocumentRequest(int ProjectId, int TemplateVersionId,
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
 public sealed record DocumentPeriodRequest(int PeriodKey);
 
-/// <summary>Запит на перерахунок документа (Q-328).</summary>
+/// <summary>Запит на перерахунок документа (Q-329).</summary>
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
 /// <param name="SheetDefId">
-/// Аркуш; <c>null</c> — увесь документ (поведінка до Q-328). Заданий —
+/// Аркуш; <c>null</c> — увесь документ (поведінка до Q-329). Заданий —
 /// звужує перерахунок до ОДНОГО аркуша (директива паритету зі старою
 /// системою, прогалина 2): вхідні дані читаються як і раніше з усього
 /// документа, звужується лише те, ЩО ЗАПИСУЄТЬСЯ.

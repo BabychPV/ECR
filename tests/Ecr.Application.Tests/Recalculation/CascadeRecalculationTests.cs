@@ -177,11 +177,11 @@ public sealed class CascadeRecalculationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "Q-328")]
+    [Trait("Requirement", "Q-329")]
     public async Task Повний_перерахунок_із_SheetDefId_пише_лише_формули_свого_аркуша()
     {
         // ⛔ Директива паритету зі старою системою, прогалина 2 (Q-327 →
-        // Q-328): кнопка «Recalculate» аркуша мала перераховувати ЛИШЕ цей
+        // Q-329): кнопка «Recalculate» аркуша мала перераховувати ЛИШЕ цей
         // аркуш, а перераховувала ввесь документ. Два аркуші, кожен зі своєю
         // таблицею й формулою підсумку — `RecalculateAllAsync` із заданим
         // `sheetDefId` має записати РІВНО одну формулу (свого аркуша) і не
@@ -254,7 +254,7 @@ public sealed class CascadeRecalculationTests
         // ⛔ ГОЛОВНЕ ТВЕРДЖЕННЯ: рівно ОДНА комірка записана — формула
         // аркуша `sheet1`. Формула `sheet2` (`formula2`) НЕ порахована, хоч
         // її входи (`jan2`/`feb2`) присутні й прочитані так само, як і
-        // раніше (компроміс Q-328: звужується запис, не читання).
+        // раніше (компроміс Q-329: звужується запис, не читання).
         Assert.Equal(1, written);
 
         var upsert = Assert.Single(Applied());
