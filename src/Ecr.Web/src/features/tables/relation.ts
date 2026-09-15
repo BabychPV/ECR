@@ -102,8 +102,26 @@ export function draftOf(relation: TableRelationDto): RelationDraft {
   };
 }
 
-/** Що саме заважає зберегти чернетку. */
-export type RelationBlocker = 'Code' | 'Source' | 'Target' | 'Self' | 'Match' | 'MatchSyntax';
+/**
+ * Що саме заважає зберегти чернетку.
+ *
+ * ⛔ Q-336 (`table.ts`) розділила той самий блокувальник на `CodeEmpty` і
+ * `CodeInvalid` — тут ця перевірка кодом раніше НЕ ІСНУВАЛА взагалі: форма
+ * приймала код із недопустимими символами (`[`, `]`, `-`) і везла його в
+ * мережу, де його відхиляв лише сервер (`EcrCode.Create`, `ECR-CFG-0422` —
+ * саме той валідатор, який конструює `TableRelationDef`,
+ * `TableRelationHandlers.cs`). Тепер клієнт ловить те саме ДО запиту, як і
+ * сусідні форми (`sheet.ts`, `column.ts`, `table.ts`, `validationRule.ts`) —
+ * той самий формат коду, той самий регулярний вираз.
+ */
+export type RelationBlocker =
+  | 'CodeEmpty'
+  | 'CodeInvalid'
+  | 'Source'
+  | 'Target'
+  | 'Self'
+  | 'Match'
+  | 'MatchSyntax';
 
 /**
  * Чому чернетку ще не можна зберегти; `null` — можна.
@@ -120,7 +138,8 @@ export type RelationBlocker = 'Code' | 'Source' | 'Target' | 'Self' | 'Match' | 
  * (`D2-172`).
  */
 export function whyCannotSave(draft: RelationDraft): RelationBlocker | null {
-  if (draft.code.trim().length === 0) return 'Code';
+  if (draft.code.trim().length === 0) return 'CodeEmpty';
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(draft.code)) return 'CodeInvalid';
   if (draft.sourceTableDefId === null) return 'Source';
   if (draft.targetTableDefId === null) return 'Target';
 

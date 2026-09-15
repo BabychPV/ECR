@@ -1394,6 +1394,9 @@ USING (VALUES
     (N'tables.relationSaved',            N'en', N'The relation has been saved.', 1),
     (N'tables.relationDeleted',          N'en', N'The relation has been removed.', 1),
     (N'tables.errCode',                  N'en', N'Give the relation a code: it is how the relation is addressed.', 1),
+    -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336) — код
+    -- зв'язку тепер теж перевіряється на формат до мережевого запиту.
+    (N'tables.errCodeInvalid',           N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'tables.errSource',                N'en', N'Pick the source table.', 1),
     (N'tables.errTarget',                N'en', N'Pick the target table.', 1),
     (N'tables.errSelf',                  N'en', N'Source and target must differ: a table cannot be related to itself.', 1),
@@ -1422,6 +1425,8 @@ USING (VALUES
     (N'sheets.visible',                  N'en', N'Visible', 1),
     (N'sheets.visibleHint',              N'en', N'Hidden sheets stay in the structure but do not show on the form.', 1),
     (N'sheets.errCode',                  N'en', N'Give the sheet a code: it is how the sheet is addressed.', 1),
+    -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336).
+    (N'sheets.errCodeInvalid',           N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'sheets.errName',                  N'en', N'Give the sheet a name in at least one language.', 1),
     -- Редактор таблиць (W5.1) — другий вертикальний зріз авторства структури,
     -- той самий патерн, що й аркуші вище.
@@ -1486,6 +1491,8 @@ USING (VALUES
     (N'columns.lookupRegistryDefIdEmpty', N'en', N'No registries found', 1),
     (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.', 1),
     (N'columns.errCode',                 N'en', N'Give the column a code: it is how the column is addressed.', 1),
+    -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336).
+    (N'columns.errCodeInvalid',          N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'columns.errHeader',               N'en', N'Give the column a header in at least one language.', 1),
     (N'columns.errScale',                N'en', N'Scale cannot exceed precision.', 1),
     -- Редактор рядків фіксованої таблиці (W5.2) — третій вертикальний зріз.
@@ -1541,6 +1548,8 @@ USING (VALUES
     (N'validationRules.save',            N'en', N'Save rule', 1),
     (N'validationRules.delete',          N'en', N'Remove rule', 1),
     (N'validationRules.errCode',         N'en', N'Give the rule a code: it is how the rule is addressed.', 1),
+    -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336).
+    (N'validationRules.errCodeInvalid',  N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'validationRules.errExpression',   N'en', N'Give the rule an expression, otherwise it checks nothing.', 1),
     (N'validationRules.errMessage',      N'en', N'Give the rule a message in at least one language.', 1),
     -- Редактор правил доступу до періоду (ФВ-2.15, W5.4).

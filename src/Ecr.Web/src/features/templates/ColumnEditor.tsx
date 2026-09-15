@@ -201,8 +201,10 @@ export function ColumnEditor({
 /** Підпис причини, з якої зберегти ще не можна. */
 function blockerLabel(blocker: ColumnBlocker): string {
   switch (blocker) {
-    case 'Code':
+    case 'CodeEmpty':
       return t('columns.errCode');
+    case 'CodeInvalid':
+      return t('columns.errCodeInvalid');
     case 'Header':
       return t('columns.errHeader');
     case 'Scale':

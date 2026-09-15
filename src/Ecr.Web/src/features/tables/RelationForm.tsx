@@ -205,8 +205,10 @@ function kindLabel(kind: TableRelationKind): string {
 /** Підпис причини, з якої зберегти ще не можна. */
 function blockerLabel(blocker: RelationBlocker): string {
   switch (blocker) {
-    case 'Code':
+    case 'CodeEmpty':
       return t('tables.errCode');
+    case 'CodeInvalid':
+      return t('tables.errCodeInvalid');
     case 'Source':
       return t('tables.errSource');
     case 'Target':

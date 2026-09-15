@@ -17,7 +17,30 @@ import {
  */
 describe('Чернетка зв’язку між таблицями', () => {
   it('порожня чернетка не зберігається без коду', () => {
-    expect(whyCannotSave(emptyDraft())).toBe('Code');
+    expect(whyCannotSave(emptyDraft())).toBe('CodeEmpty');
+  });
+
+  /**
+   * ⛔ Мутаційний доказ, той самий, що й `table.test.ts` (Q-336): порожній
+   * код і недопустимий код мають РІЗНИТИСЯ, а не звалюватися в одне значення
+   * блокувальника, — інакше повідомлення на екрані не міняється, коли поле
+   * вже заповнене, але містить символи поза `[A-Za-z][A-Za-z0-9_]*`.
+   */
+  it('порожній код і недопустимий код — РІЗНІ причини', () => {
+    const empty = whyCannotSave({ ...emptyDraft(), code: '' });
+    const invalid = whyCannotSave({ ...emptyDraft(), code: 'ab-[cd]' });
+
+    expect(empty).toBe('CodeEmpty');
+    expect(invalid).toBe('CodeInvalid');
+    expect(empty).not.toBe(invalid);
+  });
+
+  it('код лише з пробілів — теж «порожній», а не «недопустимий»', () => {
+    expect(whyCannotSave({ ...emptyDraft(), code: '   ' })).toBe('CodeEmpty');
+  });
+
+  it('код, що починається з цифри — недопустимий', () => {
+    expect(whyCannotSave({ ...emptyDraft(), code: '1abc' })).toBe('CodeInvalid');
   });
 
   it('таблиця не може бути пов’язана сама із собою', () => {
