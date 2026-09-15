@@ -40,6 +40,8 @@ public sealed class GetTableSliceTests
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
+    private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
 
     public GetTableSliceTests()
     {
@@ -74,6 +76,13 @@ public sealed class GetTableSliceTests
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+
+        // ⚠ За замовчуванням жодна методологія до таблиці НЕ прив'язана —
+        // предмет цих тестів вміст зрізу, а не позначку методології
+        // (`ColumnDto.IsRequiredByMethodology` доводить окремий файл,
+        // `RequiredByMethodologyColumnTests`).
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                      .Returns(new List<int>());
     }
 
     private static LocalizedText Text(string s) => new(new Dictionary<string, string> { ["en"] = s });
@@ -104,7 +113,7 @@ public sealed class GetTableSliceTests
         return catalogue;
     }
 
-    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, Units(), _access);
+    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods);
 
     private void Cells(params CellRecord[] records)
         => _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(records);

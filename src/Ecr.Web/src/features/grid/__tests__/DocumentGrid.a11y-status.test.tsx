@@ -61,6 +61,7 @@ function sliceFixture(): TableSliceDto {
         id: 1,
         isReadOnly: false,
         isRequired: false,
+        isRequiredByMethodology: false,
         lookupRegistryDefId: null,
         ordinal: 0,
         unitId: null,

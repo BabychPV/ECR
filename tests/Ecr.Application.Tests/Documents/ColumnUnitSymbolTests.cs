@@ -40,6 +40,8 @@ public sealed class ColumnUnitSymbolTests
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
+    private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
 
     public ColumnUnitSymbolTests()
     {
@@ -90,9 +92,14 @@ public sealed class ColumnUnitSymbolTests
                 ["m3"] = new(CubicMetre, "m3", DimensionId: 2),
             },
             new Dictionary<string, int>(StringComparer.Ordinal)));
+
+        // ⚠ Предмет цих тестів — позначення одиниці, не методології: жодна
+        // до таблиці не прив'язана.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                      .Returns(new List<int>());
     }
 
-    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, _units, _access);
+    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, _units, _access, _methodologies, _periods);
 
     private static LocalizedText Text(string s) => new(new Dictionary<string, string> { ["en"] = s });
 

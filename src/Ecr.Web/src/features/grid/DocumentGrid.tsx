@@ -934,75 +934,98 @@ export function gridColumns(
   requiredInput: { blocked: ReadonlyMap<string, string>; warning: ReadonlyMap<string, string> },
   saveErrorByCell: ReadonlyMap<string, string> = new Map(),
 ): ColumnRegular[] {
-  return slice.columns.map((column) => ({
-    prop: column.code,
+  return slice.columns.map((column) => {
+    // ⛔ Обов'язковість — НА СІТЦІ, ДО спроби зберегти, а не лише в момент
+    // відхиленого PATCH. Дві незалежні осі зливаються в один сигнал
+    // (`ColumnDto.IsRequiredByMethodology` навмисно документує це як «інша
+    // вісь, той самий екран» — `02-contracts.md`): звичайна структурна
+    // обов'язковість (`IsRequired`) і обов'язковий вхід чинної методології
+    // — оператору однаково байдуже ЗВІДКИ вимога, важливо лише «заповни це
+    // до подання».
+    const isRequired = column.isRequired || column.isRequiredByMethodology;
+    const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
 
-    // ⛔ Одиниця — В ЗАГОЛОВКУ, а не в підказці. Оператор дивиться на
-    // числа, а не на підказки, і «12» без одиниці — це або 12 кілограмів,
-    // або 12 тонн. Різниця в тисячу разів, і помічає її регулятор.
-    //
-    // ⚠ Поле приходило порожнім завжди: обидва обробники сервера віддавали
-    // `UnitSymbol: null` (`A7-47`). Тепер воно розв'язується з довідника.
-    name: column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`,
+    return {
+      prop: column.code,
 
-    // Збережена ширина цієї колонки для цього робочого місця (ФВ-14.29).
-    size: widths[column.code] ?? DefaultColumnWidth,
+      // ⛔ Одиниця — В ЗАГОЛОВКУ, а не в підказці. Оператор дивиться на
+      // числа, а не на підказки, і «12» без одиниці — це або 12 кілограмів,
+      // або 12 тонн. Різниця в тисячу разів, і помічає її регулятор.
+      //
+      // ⚠ Поле приходило порожнім завжди: обидва обробники сервера віддавали
+      // `UnitSymbol: null` (`A7-47`). Тепер воно розв'язується з довідника.
+      //
+      // ⚠ Зірочка ДОДАЄТЬСЯ до вже сформованого заголовка (з одиницею чи
+      // без), а не замінює його: обидва сигнали мають лишатися видимими
+      // одночасно.
+      name:
+        (column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`) +
+        (isRequired ? ' *' : ''),
 
-    // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
-    // «сюди не вставиться» мають відповідати одним правилом.
-    readonly: ({ model }) => readOnly || !decide(slice, rowKeyOf(model), column).editable,
+      // Збережена ширина цієї колонки для цього робочого місця (ФВ-14.29).
+      size: widths[column.code] ?? DefaultColumnWidth,
 
-    cellProperties: ({ model }) => {
-      const rowKey = rowKeyOf(model);
-      const state = cellStateOf(slice, rowKey, column, flags);
-      const key = cellKey(rowKey, column.code);
+      // ⚠ Зірочка в заголовку — це ЗНАК, а не пояснення: читалка екрана й
+      // наведення миші мають почути/побачити ПОВНИЙ текст вимоги, а не лише
+      // символ (той самий принцип, що й `hint` у `cellProperties` нижче).
+      ...(requiredHint === null ? {} : { columnProperties: () => ({ title: requiredHint }) }),
 
-      // ⛔ Директива «обов'язкові вхідні колонки методології»: маркер
-      // ДОДАЄТЬСЯ до класу стану, а не замінює його — Block і Warn не беруть
-      // участі в пріоритеті `cellStateOf` (`ФВ-14.18` рахує лише п'ять
-      // виміряних станів; переробляти ту палітру заради двох нових — окрема
-      // задача, не ця).
-      const requiredInputMessage = requiredInput.blocked.get(key) ?? requiredInput.warning.get(key);
-      const requiredInputClass = requiredInput.blocked.has(key)
-        ? 'ecr-cell-required-input-blocked'
-        : requiredInput.warning.has(key)
-          ? 'ecr-cell-required-input-warning'
-          : null;
+      // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
+      // «сюди не вставиться» мають відповідати одним правилом.
+      readonly: ({ model }) => readOnly || !decide(slice, rowKeyOf(model), column).editable,
 
-      // ⛔ Q-30x (High): той самий взірець маркера, що й обов'язкові вхідні
-      // колонки вище — ДОДАЄТЬСЯ до класу стану, а не змагається з ним за
-      // пріоритет `cellStateOf`. На відміну від Block/Warn, тут завжди РІВНО
-      // одна причина на комірку (остання відповідь сервера), тому й маркер
-      // один, без варіанту blocked/warning.
-      const saveErrorMessage = saveErrorByCell.get(key) ?? null;
-      const saveErrorClass = saveErrorMessage === null ? null : 'ecr-cell-save-error';
+      cellProperties: ({ model }) => {
+        const rowKey = rowKeyOf(model);
+        const state = cellStateOf(slice, rowKey, column, flags);
+        const key = cellKey(rowKey, column.code);
 
-      if (state === null && requiredInputClass === null && saveErrorClass === null) return {};
+        // ⛔ Директива «обов'язкові вхідні колонки методології»: маркер
+        // ДОДАЄТЬСЯ до класу стану, а не замінює його — Block і Warn не
+        // беруть участі в пріоритеті `cellStateOf` (`ФВ-14.18` рахує лише
+        // п'ять виміряних станів; переробляти ту палітру заради двох нових —
+        // окрема задача, не ця).
+        const requiredInputMessage = requiredInput.blocked.get(key) ?? requiredInput.warning.get(key);
+        const requiredInputClass = requiredInput.blocked.has(key)
+          ? 'ecr-cell-required-input-blocked'
+          : requiredInput.warning.has(key)
+            ? 'ecr-cell-required-input-warning'
+            : null;
 
-      const decision = decide(slice, rowKey, column);
+        // ⛔ Q-30x (High): той самий взірець маркера, що й обов'язкові вхідні
+        // колонки вище — ДОДАЄТЬСЯ до класу стану, а не змагається з ним за
+        // пріоритет `cellStateOf`. На відміну від Block/Warn, тут завжди
+        // РІВНО одна причина на комірку (остання відповідь сервера), тому й
+        // маркер один, без варіанту blocked/warning.
+        const saveErrorMessage = saveErrorByCell.get(key) ?? null;
+        const saveErrorClass = saveErrorMessage === null ? null : 'ecr-cell-save-error';
 
-      // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони чи
-      // незаповненого входу вже є на сервері — читалка має її почути.
-      const hint = [decision.hint, requiredInputMessage, saveErrorMessage]
-        .filter((part) => !!part)
-        .join(' ');
+        if (state === null && requiredInputClass === null && saveErrorClass === null) return {};
 
-      return {
-        // ⚠ Базовий `ecr-cell` завжди присутній, навіть коли `state === null`:
-        // від нього залежить `position: relative` і резерв місця під маркер
-        // (`cell-states.css`), а маркер обов'язкового входу — свій маркер.
-        class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass, saveErrorClass]
-          .filter((part): part is string => part !== null)
-          .join(' '),
+        const decision = decide(slice, rowKey, column);
 
-        // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
-        // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
-        ...(state === null ? {} : { 'data-cell-state': state }),
+        // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
+        // чи незаповненого входу вже є на сервері — читалка має її почути.
+        const hint = [decision.hint, requiredInputMessage, saveErrorMessage]
+          .filter((part) => !!part)
+          .join(' ');
 
-        ...(hint.length === 0 ? {} : { title: hint }),
-      };
-    },
-  }));
+        return {
+          // ⚠ Базовий `ecr-cell` завжди присутній, навіть коли `state === null`:
+          // від нього залежить `position: relative` і резерв місця під маркер
+          // (`cell-states.css`), а маркер обов'язкового входу — свій маркер.
+          class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass, saveErrorClass]
+            .filter((part): part is string => part !== null)
+            .join(' '),
+
+          // ⚠ Атрибут окремо від класу: тест читає саме його і тому доводить
+          // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
+          ...(state === null ? {} : { 'data-cell-state': state }),
+
+          ...(hint.length === 0 ? {} : { title: hint }),
+        };
+      },
+    };
+  });
 }
 
 /**

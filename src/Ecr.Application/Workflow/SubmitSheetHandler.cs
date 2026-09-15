@@ -122,8 +122,22 @@ public sealed class SubmitSheetHandler(
 
         foreach (var instance in instances)
         {
-            if (!tables.TryGetValue(instance.TableDefId, out var table)
-                || table.ValidationRules.Count == 0)
+            if (!tables.TryGetValue(instance.TableDefId, out var table))
+            {
+                continue;
+            }
+
+            // ⛔ Обов'язкова колонка (`ColumnDef.IsRequired`), якої НІКОЛИ не
+            // торкались редагуванням, не лишає запису в `doc.CellValue`
+            // (ФВ-3.8) — і тому не проходить через жодну перевірку на шляху
+            // запису: `PatchCellsHandler` перевіряє `IsRequired` лише в
+            // момент явного `PATCH` цієї самої клітинки. Рядок із порожнім
+            // обов'язковим полем, якого ніхто не торкався, спокійно проходив
+            // подання. Перевірка тут читає САМІ РЯДКИ екземпляра
+            // (`IRowStore.GetRowIdsAsync`), а не клітинки, — інакше рядок без
+            // жодного запису в зрізі був би для неї «не існує взагалі».
+            var requiredColumns = table.Columns.Where(c => !c.IsDeleted && c.IsRequired).ToList();
+            if (table.ValidationRules.Count == 0 && requiredColumns.Count == 0)
             {
                 continue;
             }
@@ -131,9 +145,14 @@ public sealed class SubmitSheetHandler(
             var cells = await cellStore.ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
             var rowIds = await rowStore.GetRowIdsAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
 
-            blocking.AddRange(Validation.TableValidation
-                .Run(validation, table, cells, rowIds)
-                .Where(m => m.Severity == ValidationSeverity.Error));
+            if (table.ValidationRules.Count > 0)
+            {
+                blocking.AddRange(Validation.TableValidation
+                    .Run(validation, table, cells, rowIds)
+                    .Where(m => m.Severity == ValidationSeverity.Error));
+            }
+
+            blocking.AddRange(MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds));
         }
 
         if (blocking.Count > 0)
@@ -215,6 +234,59 @@ public sealed class SubmitSheetHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Обов'язкова колонка (<c>ColumnDef.IsRequired</c>) без заповненого
+    /// значення для кожного існуючого рядка екземпляра.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ «Заповнене» перевіряється як <c>!Value.IsEmpty</c>, а не як «є запис
+    /// у зрізі»: явна порожнеча (R-B4) теж матеріалізується, і рядок, у якому
+    /// обов'язкову клітинку колись занулили, має блокувати подання так само,
+    /// як рядок, де її взагалі не було. `PatchCellsHandler`/`ColumnDef.ValidateValue`
+    /// вже забороняють ЗАПИСАТИ такий стан явно (`ECR-CELL-0422`) — ця
+    /// перевірка ловить рядок, що прийшов до цього стану БЕЗ жодного запису
+    /// (найчастіше — просто ніхто не торкався клітинки).
+    /// </remarks>
+    private static List<Validation.ValidationMessage> MissingRequiredColumnMessages(
+        Domain.Entities.Configuration.TableDef table,
+        List<Domain.Entities.Configuration.ColumnDef> requiredColumns,
+        IReadOnlyList<CellRecord> cells,
+        IReadOnlyDictionary<string, long> rowIds)
+    {
+        if (requiredColumns.Count == 0 || rowIds.Count == 0)
+        {
+            return [];
+        }
+
+        var filled = cells
+            .Where(c => !c.Value.IsEmpty)
+            .Select(c => (c.Address.TableRowId, c.Address.ColumnDefId))
+            .ToHashSet();
+
+        var messages = new List<Validation.ValidationMessage>();
+        foreach (var (rowKey, rowId) in rowIds)
+        {
+            foreach (var column in requiredColumns)
+            {
+                if (filled.Contains((rowId, column.Id)))
+                {
+                    continue;
+                }
+
+                messages.Add(new Validation.ValidationMessage(
+                    ValidationSeverity.Error,
+                    "ECR-CELL-0422",
+                    $"Колонка «{column.Code}» обов'язкова.",
+                    table.Id,
+                    rowKey,
+                    column.Code,
+                    BlocksSave: true));
+            }
+        }
+
+        return messages;
     }
 
     /// <summary>Версія шаблону, за якою живе документ.</summary>
