@@ -14,6 +14,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { outcomeOf, pollInterval } from './jobFollow';
+import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
 
@@ -147,7 +148,10 @@ export function SheetActions({
       } satisfies RecalculateDocumentRequest),
     onSuccess: (job) => {
       setRecalcJobId(job.jobId);
-      showDone(t('workflow.recalcQueued', { job: job.jobId }));
+      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані
+      // (`setRecalcJobId`) — і, отже, в запиті опитування нижче — не
+      // змінюється.
+      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
     },
     onError: showApiError,
   });

@@ -31,6 +31,15 @@ export function RegistriesPage(): JSX.Element {
   const session = useSession();
   const queryClient = useQueryClient();
 
+  // ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
+  // списком без жодного пошуку чи фільтра — акцесибіліті-дерево теж
+  // підтверджувало відсутність контролю. Клієнтський фільтр достатній: цей
+  // запит (`entries` нижче) повертає ПОВНИЙ масив без курсора/пагінації —
+  // сервер тут не розбиває відповідь на сторінки (`RegistryEntryDto[]`, не
+  // `Paged*`), тож фільтрувати вже завантажене дешевше й миттєвіше, ніж
+  // додавати параметр пошуку в API заради списку, що й так цілий.
+  const [search, setSearch] = useState('');
+
   // `undefined` — діалог закритий; `null` — новий запис; об'єкт — правка.
   const [editing, setEditing] = useState<RegistryEntryDto | null | undefined>(undefined);
 
@@ -193,55 +202,98 @@ export function RegistriesPage(): JSX.Element {
         skeleton="table"
         onRetry={() => void entries.refetch()}
       >
-        {(all) => (
-          <Table striped highlightOnHover className="ecr-sticky-head">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('registries.code')}</Table.Th>
-                <Table.Th>{t('registries.name')}</Table.Th>
-                <Table.Th>{t('registries.parent')}</Table.Th>
-                <Table.Th>{t('registries.validity')}</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {all.map((entry) => (
-                <Table.Tr key={entry.id}>
-                  <Table.Td>{entry.code}</Table.Td>
-                  <Table.Td>{entry.display}</Table.Td>
-                  <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
-                  <Table.Td>{(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}</Table.Td>
-                  <Table.Td>
-                    <Group gap="xs" justify="flex-end">
-                      {can(session.data, 'Registry.EditData') && (
-                        <>
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            onClick={() => setEditing(entry)}
-                          >
-                            {t('registries.editEntry')}
-                          </Button>
+        {(all) => {
+          // ⛔ UI-аудит-пас 8, lane4, п.6: фільтр за кодом чи назвою —
+          // клієнтський, бо `all` тут уже ПОВНИЙ масив (сервер не пагінує
+          // цей маршрут).
+          const needle = search.trim().toLowerCase();
+          const filtered =
+            needle.length === 0
+              ? all
+              : all.filter(
+                  (entry) =>
+                    entry.code.toLowerCase().includes(needle) ||
+                    entry.display.toLowerCase().includes(needle),
+                );
 
-                          {/* ⚠ Вікно чинності — окрема дія, і саме воно
-                              замінює видалення: запис, на який посилаються
-                              комірки, закривають датою (`ФВ-8.5`). */}
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            onClick={() => setValidity(entry)}
-                          >
-                            {t('registries.validity')}
-                          </Button>
-                        </>
-                      )}
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
+          return (
+            <>
+              <TextInput
+                size="xs"
+                mb="xs"
+                miw={220}
+                label={t('registries.search')}
+                placeholder={t('registries.searchPlaceholder')}
+                value={search}
+                onChange={(event) => setSearch(event.currentTarget.value)}
+              />
+
+              <Table striped highlightOnHover className="ecr-sticky-head">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>{t('registries.code')}</Table.Th>
+                    <Table.Th>{t('registries.name')}</Table.Th>
+                    <Table.Th>{t('registries.parent')}</Table.Th>
+                    <Table.Th>{t('registries.validity')}</Table.Th>
+                    <Table.Th />
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {filtered.map((entry) => (
+                    <Table.Tr key={entry.id}>
+                      <Table.Td>{entry.code}</Table.Td>
+                      {/* ⛔ UI-аудит-пас 8, lane4, п.5: довгий рядок БЕЗ
+                          пробілів (~570 символів в «Name · English»)
+                          розтягував клітинку, таблицю й ВСЮ сторінку —
+                          навігація теж їхала вбік. `.ecr-wrap-anywhere`
+                          (`motion.css`) дає браузеру переносити такий рядок
+                          замість розтягувати розкладку; повне значення
+                          лишається читаним, на відміну від еліпсиса. */}
+                      <Table.Td className="ecr-wrap-anywhere">{entry.display}</Table.Td>
+                      <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
+                      <Table.Td>
+                        {(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" justify="flex-end">
+                          {can(session.data, 'Registry.EditData') && (
+                            <>
+                              <Button
+                                size="compact-xs"
+                                variant="subtle"
+                                onClick={() => setEditing(entry)}
+                              >
+                                {t('registries.editEntry')}
+                              </Button>
+
+                              {/* ⚠ Вікно чинності — окрема дія, і саме воно
+                                  замінює видалення: запис, на який
+                                  посилаються комірки, закривають датою
+                                  (`ФВ-8.5`). */}
+                              <Button
+                                size="compact-xs"
+                                variant="subtle"
+                                onClick={() => setValidity(entry)}
+                              >
+                                {t('registries.validity')}
+                              </Button>
+                            </>
+                          )}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+
+              {filtered.length === 0 && (
+                <Text size="sm" c="dimmed" mt="xs">
+                  {t('registries.searchNoMatches')}
+                </Text>
+              )}
+            </>
+          );
+        }}
       </AsyncBoundary>
 
       {selected !== undefined && (

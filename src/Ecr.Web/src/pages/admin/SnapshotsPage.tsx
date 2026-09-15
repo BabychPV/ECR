@@ -11,6 +11,7 @@ import type {
   ReportSnapshotSummary,
 } from '@/api/types';
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
+import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -106,7 +107,8 @@ export function SnapshotsPage(): JSX.Element {
     onSuccess: (job) => {
       setJobId(job.jobId);
       setBuilding(false);
-      showDone(t('snapshots.queued', { job: job.jobId }));
+      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
+      showDone(t('snapshots.queued', { job: humanizeJobId(job.jobId) }));
     },
     onError: showApiError,
   });
@@ -235,7 +237,19 @@ export function SnapshotsPage(): JSX.Element {
                         `Draft` існує, але регулятор його не бачить —
                         вʼюха `rpt.v_*` віддає лише `Approved` і `Submitted`
                         (`ФВ-10.11`). */}
-                    <Badge variant="light">{snapshot.status}</Badge>
+                    {/* ⛔ UI-аудит-пас 8, lane6, п.9: той самий дефект, що вже
+                        виправлено для бейджа стану `PeriodsPage.tsx`
+                        (`miw="fit-content"` вище в тому файлі) — без нього
+                        `table-layout: auto` дає стовпцю ширину з того, що
+                        РЕНДЕРИТЬСЯ, а `.mantine-Badge-label`'s власний
+                        `overflow:hidden; text-overflow:ellipsis` дозволяє
+                        бейджу «поміститись» у будь-яку ширину замість того,
+                        щоб змусити таблицю прокручуватись. Наслідок —
+                        «DRAFT» ставало нечитабельним «D…» на типовій ширині
+                        вікна. */}
+                    <Badge variant="light" miw="fit-content">
+                      {snapshot.status}
+                    </Badge>
                   </Table.Td>
                   <Table.Td>
                     {/* ⛔ Контрольна сума показується цілком, а не обрізаною:

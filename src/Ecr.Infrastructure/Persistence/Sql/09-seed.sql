@@ -487,6 +487,11 @@ USING (VALUES
     (N'registries.validity',             N'en', N'Valid', 1),
     (N'registries.hierarchical',         N'en', N'hierarchical', 1),
     (N'registries.temporal',             N'en', N'time-bound', 1),
+    -- ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
+    -- списком без пошуку чи фільтра.
+    (N'registries.search',               N'en', N'Search', 1),
+    (N'registries.searchPlaceholder',    N'en', N'Filter by code or name', 1),
+    (N'registries.searchNoMatches',      N'en', N'No entries match this search.', 1),
     -- Редактор виразів (`ФВ-9.15a`, область 10).
     (N'expressions.title',               N'en', N'Expression editor', 1),
     (N'expressions.dialect',             N'en', N'Dialect', 1),
@@ -755,8 +760,30 @@ USING (VALUES
     (N'jobs.recentCode',                 N'en', N'Job', 1),
     (N'jobs.recentState',                N'en', N'State', 1),
     (N'jobs.recentWatch',                N'en', N'Watch', 1),
+    -- ⛔ Аудит-пас 8, lane6, п.8: людські назви типів фонової задачі —
+    -- `jobLabel.ts` мапує на них СИРІ .NET-імена (`jobCode`/`jobId`) лише для
+    -- показу; сам ідентифікатор у сховищі й API не змінюється.
+    (N'jobs.kind.recalculation',            N'en', N'Recalculation', 1),
+    (N'jobs.kind.formulaRecalculation',      N'en', N'Formula recalculation', 1),
+    (N'jobs.kind.excelExport',               N'en', N'Excel export', 1),
+    (N'jobs.kind.excelImport',               N'en', N'Excel import', 1),
+    (N'jobs.kind.materializeCollectedData',  N'en', N'Materializing collected data', 1),
+    (N'jobs.kind.reportSnapshot',            N'en', N'Report snapshot build', 1),
+    (N'jobs.kind.collection',                N'en', N'Data collection', 1),
     (N'health.title',                    N'en', N'Health', 1),
     (N'health.database',                 N'en', N'Database', 1),
+    -- ⛔ Аудит-пас 8, lane6, п.7: людські підписи для дев'яти технічних полів
+    -- `/health/db` (`DatabaseHealthCheck.cs`) — до фіксу панель показувала
+    -- буквально `edition`, `effectiveMode`, `rcsi` тощо.
+    (N'health.database.edition',          N'en', N'SQL Server edition', 1),
+    (N'health.database.effectiveMode',    N'en', N'Effective mode', 1),
+    (N'health.database.majorVersion',     N'en', N'Major version', 1),
+    (N'health.database.rcsi',             N'en', N'Read Committed Snapshot Isolation (RCSI)', 1),
+    (N'health.database.archiveBatchSize', N'en', N'Archive batch size', 1),
+    (N'health.database.filegroups',       N'en', N'Filegroups', 1),
+    (N'health.database.missingFilegroups', N'en', N'Missing filegroups', 1),
+    (N'health.database.partitionsAhead',  N'en', N'Partitions ahead', 1),
+    (N'health.database.limitations',      N'en', N'Limitations in this mode', 1),
     (N'documents.emptyHint',             N'en', N'Documents appear once the period is open and a template version is published.', 1),
     (N'document.noSheetsHint',           N'en', N'The period may not be open yet: sheet instances are created when it opens.', 1),
     (N'templates.empty',                 N'en', N'No templates yet', 1),
@@ -930,6 +957,7 @@ USING (VALUES
     (N'periods.cloned',                  N'en', N'The clone is ready and selected.', 1),
     (N'periods.archive',                 N'en', N'Archive', 1),
     (N'periods.archiveConfirm',          N'en', N'The project becomes read-only. It is not deleted: submitted forms still refer to it.', 1),
+    (N'periods.archiveOpenPeriods',       N'en', N'This project still has periods that are not Closed. Archiving is only allowed once every period is closed.', 1),
     (N'periods.archived',                N'en', N'The project is archived. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.current',                 N'en', N'current', 1),
     (N'periods.currentNotOpen',          N'en', N'current is not Open', 1),

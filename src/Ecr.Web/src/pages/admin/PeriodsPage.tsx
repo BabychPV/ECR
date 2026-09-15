@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import {
+  Alert,
   Badge,
   Button,
   Group,
@@ -29,6 +30,7 @@ import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
+import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -101,6 +103,13 @@ export function PeriodsPage(): JSX.Element {
   });
 
   const selected = (projects.data?.items ?? []).find((p) => p.id === projectId);
+
+  // ⚠ Аудит-пас 8, п.2: `POST /archive` відмовляє `409 ECR-PRD-0409`, коли є
+  // хоч один незакритий період, — але діалог підтвердження про це мовчав, і
+  // відмова виринала лише ПІСЛЯ кліку «Архівувати» в діалозі. Дані про стан
+  // періодів уже завантажені на цій сторінці (`periods` вище), новий запит
+  // не потрібен.
+  const openPeriods = (periods.data?.periods ?? []).filter((p) => p.state !== 'Closed');
 
   /** Перечитує проєкти і календар після будь-якої зміни. */
   const refresh = async (): Promise<void> => {
@@ -266,7 +275,9 @@ export function PeriodsPage(): JSX.Element {
       } satisfies ProjectRecalculationRequest),
     onSuccess: (job) => {
       setRecalcJobId(job.jobId);
-      showDone(t('workflow.recalcQueued', { job: job.jobId }));
+      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані —
+      // і в запиті опитування — не змінюється.
+      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
     },
     onError: showApiError,
   });
@@ -481,7 +492,7 @@ export function PeriodsPage(): JSX.Element {
             <Table.Tr>
               <Table.Th>{t('periods.key')}</Table.Th>
               <Table.Th>{t('periods.sequence')}</Table.Th>
-              {/* ⛔ UI-аудит, lane 2 (Q-333): «Range» і «Grace until» не мали
+              {/* ⛔ UI-аудит, lane 2 (Q-336): «Range» і «Grace until» не мали
                   на сторінці ЖОДНОГО пояснення, хоч похідні від чотирьох
                   чисел політики (мітка `+15/45` у формі створення проєкту
                   показує лише два з чотирьох, і НЕ тут). Тултипи нижче
@@ -697,6 +708,16 @@ export function PeriodsPage(): JSX.Element {
           {t('periods.archiveConfirm')}
         </Text>
 
+        {/* ⚠ Аудит-пас 8, п.2: попередження про передумову ДО кліку, а не
+            `409 ECR-PRD-0409` ПІСЛЯ нього. Кнопка нижче заблокована з тієї ж
+            причини — підтвердження, яке заздалегідь приречене на відмову
+            сервера, гірше за підтвердження, недоступне для кліку. */}
+        {openPeriods.length > 0 && (
+          <Alert color="statusWarning" variant="light" mb="sm">
+            {t('periods.archiveOpenPeriods')}
+          </Alert>
+        )}
+
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={() => setArchiving(false)}>
             {t('common.cancel')}
@@ -704,6 +725,7 @@ export function PeriodsPage(): JSX.Element {
           <Button
             color="statusError"
             loading={archive.isPending}
+            disabled={openPeriods.length > 0}
             onClick={() => {
               if (selected !== undefined) archive.mutate(selected.id);
             }}

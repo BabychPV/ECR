@@ -71,9 +71,33 @@ describe('Дашборд здоров’я', () => {
     show();
 
     // Саме те, заради чого `/health/db` існує (АРХ-7 п. 5).
-    expect(await screen.findAllByText('effectiveMode')).not.toHaveLength(0);
     expect(await screen.findAllByText('Enterprise')).not.toHaveLength(0);
+
+    // ⛔ Аудит-пас 8, lane6, п.7: людський підпис через каталог, а не сире
+    // ім'я поля. Цей тест НЕ завантажує каталог (як і решта файлу — див.
+    // `⟦health.noChecks⟧` нижче), тому `t()` повертає позначений ключ, а не
+    // готовий переклад: саме ключ і є доказом, що рядок пройшов через `t()`,
+    // а не через голе `{key}`.
+    expect(await screen.findAllByText('⟦health.database.effectiveMode⟧')).not.toHaveLength(0);
   });
+
+  it(
+    'аудит-пас 8, lane6, п.7: панель бази не показує сирі camelCase-імена полів',
+    async () => {
+      respond(sample);
+      show();
+
+      await screen.findAllByText('⟦health.database.effectiveMode⟧');
+
+      // ⛔ Мутаційний доказ: повернення `{key}` замість `{fieldLabel(key)}` у
+      // `HealthPage.tsx` зробить цей тест червоним — `effectiveMode` знову
+      // з'явиться в DOM буквально, замість позначеного ключа каталогу.
+      expect(screen.queryByText('effectiveMode')).toBeNull();
+      expect(screen.queryByText('rcsi')).toBeNull();
+      expect(screen.queryByText('archiveBatchSize')).toBeNull();
+      expect(screen.queryByText('majorVersion')).toBeNull();
+    },
+  );
 
   it('ФВ-14.22: невдалий запит НЕ виглядає як порожній дашборд (A7-04)', async () => {
     respond(
@@ -150,7 +174,7 @@ describe('Дашборд здоров’я', () => {
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.map((a) => a.textContent).join(' ')).toContain('ECR-SYS-0503');
 
-    expect(await screen.findAllByText('effectiveMode')).not.toHaveLength(0);
+    expect(await screen.findAllByText('⟦health.database.effectiveMode⟧')).not.toHaveLength(0);
     expect(await screen.findAllByText('Enterprise')).not.toHaveLength(0);
   });
 });

@@ -7,6 +7,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
+import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 
 /** Як часто опитувати стан задачі, поки вона виконується. */
@@ -96,7 +97,11 @@ export function JobsPage(): JSX.Element {
         <Card withBorder>
           <Stack gap="xs">
             <Group justify="space-between">
-              <Text fw={600}>{status.jobId}</Text>
+              {/* ⛔ Аудит-пас 8, lane6, п.8: `humanizeJobId` лишає GUID
+                  екземпляра (копіювати/шукати ним і далі можна), але заміняє
+                  сирий `.NET`-тип на людську назву — `IRecalculationJob-a1b2…`
+                  замінюється на `Recalculation-a1b2…`. */}
+              <Text fw={600}>{humanizeJobId(status.jobId)}</Text>
               <Badge color={stateColor(status.state)}>{status.state}</Badge>
             </Group>
 
@@ -177,7 +182,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
           <Table.Tbody>
             {list.map((job) => (
               <Table.Tr key={job.jobId}>
-                <Table.Td>{job.jobCode}</Table.Td>
+                <Table.Td>{jobKindLabel(job.jobCode)}</Table.Td>
                 <Table.Td>
                   <Badge color={stateColor(job.state)}>{job.state}</Badge>
                 </Table.Td>
