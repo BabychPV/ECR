@@ -93,7 +93,11 @@ public sealed class TableRelationTests(SqlServerFixture sql)
                 version.VersionId, version.RelationCode, Command(version), CancellationToken.None);
         }
 
-        const string NewMatch = "MARKER_VIA_UI_999";
+        // ⛔ Q-337, lane 7: MatchJson тепер валідується як JSON-об'єкт
+        // (`TableRelationDef.Apply`) — довільний рядок-маркер більше не
+        // проходить. Маркер лишається розпізнаваним (значення поля, а не
+        // сам рядок), лише обгорнутий у валідний об'єкт.
+        const string NewMatch = """{"marker":"MARKER_VIA_UI_999"}""";
 
         // ⛔ ОКРЕМИЙ контекст на правку, як і на створення в тесті вище:
         // читання з того самого контексту, що тримав сутність у пам'яті,

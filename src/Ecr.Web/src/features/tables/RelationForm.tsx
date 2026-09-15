@@ -215,6 +215,8 @@ function blockerLabel(blocker: RelationBlocker): string {
       return t('tables.errSelf');
     case 'Match':
       return t('tables.errMatch');
+    case 'MatchSyntax':
+      return t('tables.errMatchSyntax');
     default:
       return blocker;
   }

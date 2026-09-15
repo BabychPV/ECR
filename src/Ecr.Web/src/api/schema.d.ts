@@ -9215,6 +9215,13 @@ export interface components {
              * @description Колонка документа, обов'язкова як вхід.
              */
             columnDefId: number;
+            /** @description ⛔ UI-аудит, lane 5 (`Q-337`): без цього поля панель показувала
+             *     `Column: X, Severity: Block` для колонки, чию прив'язку (`CalculationBinding`)
+             *     давно деактивували — вимога й далі блокувала збереження даних для
+             *     колонки, яку методологія вже не пише, БЕЗ жодного натяку чому. `false`
+             *     НЕ помилка сама по собі: вимогу можна додати ДО прив'язки — лише
+             *     попередження в UI, не заборона. */
+            hasActiveBinding: boolean;
             /** @description Текст поверх типового шаблону; `null` — типового шаблону достатньо. */
             hintL10n: null | {
                 [key: string]: string;
@@ -9555,6 +9562,12 @@ export interface components {
             periodKind: components["schemas"]["PeriodKind"];
             /** @description Періоди в порядку зростання `PeriodKey`. */
             periods: components["schemas"]["PeriodDto"][];
+            /** @description Політика зсувів проєкту (`Q-337`, lane 2 UI-аудиту): сторінка Periods
+             *     показувала «Grace until»/«Range» без жодного зв'язку з чотирма цифрами
+             *     політики (ярлик `+15/45` у формі створення проєкту показує лише два з
+             *     чотирьох, і НЕ на цій сторінці). Клієнт бере ці числа звідси для
+             *     тултипів на заголовках колонок — замість вигаданого пояснення. */
+            policy: components["schemas"]["PeriodPolicyDto"];
             /**
              * Format: int32
              * @description Проєкт.
@@ -9569,12 +9582,20 @@ export interface components {
         PeriodDto: {
             /**
              * Format: date-time
-             * @description Кінець періоду в поясі майданчика, виключно.
+             * @description Жорстке закриття (`PeriodEnd + HardCloseOffsetDays`) у поясі
+             *     майданчика, виключно: після цього моменту період `Closed`, і
+             *     пільгове вікно також скінчилося.
              */
             endsAt: string;
             /**
              * Format: date-time
-             * @description Кінець пільгового вікна; після нього період закривається.
+             * @description ⚠ Назва історична (`Q-337`, lane 2 UI-аудиту): це НЕ кінець пільгового
+             *     вікна, а його ПОЧАТОК — момент, коли період переходить з `Open` у
+             *     `Grace` (`PeriodEnd + GraceOffsetDays`). До цього моменту зміни
+             *     звичайні; від нього й до DateTimeOffset PeriodDto.EndsAt вони ще дозволені, але
+             *     позначаються як пізні (`IsLateEditWindow`). Перейменування поля
+             *     вийшло б за межі цього виправлення (торкнулося б контракту API й
+             *     клієнта) — лишено як є, з цим поясненням.
              */
             graceEndsAt: null | string;
             /**

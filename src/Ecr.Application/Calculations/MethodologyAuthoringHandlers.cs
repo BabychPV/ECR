@@ -360,6 +360,7 @@ public sealed class SaveMethodologyRuleHandler(
 /// <summary>Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки методології»).</summary>
 public sealed class ListMethodologyRequiredInputsHandler(
     IMethodologyDraftStore drafts,
+    ICalculationBindingStore bindings,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
@@ -370,15 +371,30 @@ public sealed class ListMethodologyRequiredInputsHandler(
     /// <param name="methodologyVersionId">Версія методології.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Вимоги в порядку <c>ColumnDefId</c>.</returns>
+    /// <exception cref="NotFoundException">Версії немає.</exception>
     public async Task<IReadOnlyList<MethodologyRequiredInputDto>> HandleAsync(
         int methodologyVersionId, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
+        var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+
         var requiredInputs = await drafts.GetAllRequiredInputsAsync(methodologyVersionId, ct)
             .ConfigureAwait(false);
 
-        return [.. requiredInputs.Select(MethodologyAuthoringMap.RequiredInput)];
+        // ⛔ UI-аудит, lane 5 (`Q-337`): «зависла» вимога — колонка, чию
+        // прив'язку деактивували, і далі блокувала збереження без жодного
+        // натяку. Прив'язки належать МЕТОДОЛОГІЇ (`Q-337`/`SaveCalculationBindingHandler`),
+        // не версії, — тому окремий запит саме за `version.MethodologyId`.
+        var activeColumns = (await bindings.ListAsync(version.MethodologyId, ct).ConfigureAwait(false))
+            .Where(b => b.IsActive)
+            .Select(b => b.ColumnDefId)
+            .ToHashSet();
+
+        return [.. requiredInputs.Select(
+            r => MethodologyAuthoringMap.RequiredInput(r, activeColumns.Contains(r.ColumnDefId)))];
     }
 }
 
@@ -395,6 +411,7 @@ public sealed class ListMethodologyRequiredInputsHandler(
 /// </remarks>
 public sealed class SaveMethodologyRequiredInputHandler(
     IMethodologyDraftStore drafts,
+    ICalculationBindingStore bindings,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -409,8 +426,19 @@ public sealed class SaveMethodologyRequiredInputHandler(
     /// <param name="hint">Текст поверх типового шаблону; <c>null</c> — типового достатньо.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Записану вимогу.</returns>
-    /// <exception cref="NotFoundException">Версії немає.</exception>
+    /// <exception cref="NotFoundException">Версії або колонки немає.</exception>
     /// <exception cref="BusinessRuleException">Версія опублікована.</exception>
+    /// <remarks>
+    /// ⛔ UI-аудит, lane 5 (`Q-337`): до цього нічого не перевіряло, що
+    /// `columnDefId` — реальна колонка. Навіть коли вибір іде через
+    /// searchable dropdown (`Q-332`), клієнт лише ПРОПОНУЄ реальні id — сервер
+    /// має перевіряти сам, а не покладатись на те, що клієнт чесний. Перевірка
+    /// — та сама, що вже `SaveCalculationBindingHandler` (той самий
+    /// `ECR-TMPL-0404`, той самий `FindTableOfColumnAsync`): існування
+    /// колонки, а НЕ наявність активної прив'язки цієї методології — вимогу
+    /// свідомо можна додати ДО прив'язки (нижче в UI лишається лише
+    /// попередження, не блокування).
+    /// </remarks>
     public async Task<MethodologyRequiredInputDto> HandleAsync(
         int methodologyVersionId,
         int columnDefId,
@@ -423,6 +451,11 @@ public sealed class SaveMethodologyRequiredInputHandler(
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+
+        _ = await bindings.FindTableOfColumnAsync(columnDefId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Колонки {columnDefId} не існує або її видалено: обов'язковий вхід нема до чого прив'язати.");
 
         var hintText = hint is null ? null : new LocalizedText(hint);
 
@@ -445,7 +478,15 @@ public sealed class SaveMethodologyRequiredInputHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return MethodologyAuthoringMap.RequiredInput(requiredInput);
+        // ⚠ Активну прив'язку не рахуємо ТУТ: щойно заведена вимога свідомо
+        // МОЖЕ бути без неї (методологію ще проєктують) — не помилка на
+        // збереженні, лише позначка в списку (`ListMethodologyRequiredInputsHandler`).
+        var activeColumns = (await bindings.ListAsync(version.MethodologyId, ct).ConfigureAwait(false))
+            .Where(b => b.IsActive)
+            .Select(b => b.ColumnDefId)
+            .ToHashSet();
+
+        return MethodologyAuthoringMap.RequiredInput(requiredInput, activeColumns.Contains(columnDefId));
     }
 }
 
@@ -862,14 +903,20 @@ public static class MethodologyAuthoringMap
 
     /// <summary>Складає DTO обов'язкової вхідної колонки.</summary>
     /// <param name="requiredInput">Вимога версії.</param>
+    /// <param name="hasActiveBinding">
+    /// Чи має колонка вимоги хоч одну АКТИВНУ прив'язку цієї методології
+    /// (`Q-337`, lane 5 UI-аудиту) — обчислюється викликачем, бо для цього
+    /// потрібен окремий запит бінднгів методології, не самої вимоги.
+    /// </param>
     /// <returns>Вимога для конфігуратора.</returns>
-    public static MethodologyRequiredInputDto RequiredInput(MethodologyRequiredInput requiredInput)
+    public static MethodologyRequiredInputDto RequiredInput(
+        MethodologyRequiredInput requiredInput, bool hasActiveBinding)
     {
         ArgumentNullException.ThrowIfNull(requiredInput);
 
         return new MethodologyRequiredInputDto(
             requiredInput.Id, requiredInput.ColumnDefId, requiredInput.Severity,
-            requiredInput.HintL10n?.Values);
+            requiredInput.HintL10n?.Values, hasActiveBinding);
     }
 
     /// <summary>Складає DTO виходу.</summary>

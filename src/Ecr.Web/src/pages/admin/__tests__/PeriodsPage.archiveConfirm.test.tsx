@@ -35,6 +35,9 @@ const calendar = {
   periodKind: 'Monthly' as const,
   currentPeriodMode: 'Auto' as const,
   timeZoneId: 'Europe/Kyiv',
+  // Q-337, lane 2: `PeriodCalendarDto.Policy` — тултипи заголовків «Range»/
+  // «Grace until» тепер підставляють ці числа.
+  policy: { id: 1, code: 'ECR-Standard', openOffsetDays: 0, graceOffsetDays: 15, hardCloseOffsetDays: 45, yearGraceOffsetDays: 45 },
   periods: [],
 };
 

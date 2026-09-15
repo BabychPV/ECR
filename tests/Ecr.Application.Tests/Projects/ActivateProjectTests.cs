@@ -25,8 +25,15 @@ namespace Ecr.Application.Tests.Projects;
 /// </remarks>
 public sealed class ActivateProjectTests
 {
-    /// <summary>Середина лютого 2026: січень у Grace, лютий відкритий.</summary>
-    private static readonly DateTime Now = new(2026, 2, 10, 9, 0, 0, DateTimeKind.Utc);
+    // ⛔ UI-аудит, lane 2 (Q-337): `ProjectBuilder.Policy()` — 15-денний
+    // пільговий строк (`graceOffsetDays: 15`); до фіксу `GraceOffsetDays`
+    // ігнорувався й січень переходив у `Grace` вже 1 лютого, тож "середина
+    // лютого" (10-те) давала рівно один `Open`-період. Тепер січень
+    // лишається `Open` до 15 лютого (`PeriodEnd + GraceOffsetDays`) — на
+    // 10-те лютого `Open` були б ОБИДВА суміжні періоди одночасно.
+    // 20 лютого — вже ПІСЛЯ цього вікна: січень `Grace`, лютий — єдиний `Open`.
+    /// <summary>Кінець лютого 2026: січень у Grace, лютий — єдиний Open.</summary>
+    private static readonly DateTime Now = new(2026, 2, 20, 9, 0, 0, DateTimeKind.Utc);
 
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();

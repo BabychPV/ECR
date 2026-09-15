@@ -69,6 +69,32 @@ public sealed class PeriodStateCalculatorTests
         Assert.Equal(PeriodState.Grace, state);
     }
 
+    /// <summary>
+    /// ⛔ UI-аудит, lane 2 (Q-337): до фіксу `graceOffsetDays` у
+    /// `RecomputeBoundaries` не читався ВЗАГАЛІ — період переходив з `Open`
+    /// у `Grace` рівно наступного дня після кінця, хоч фікстура нижче
+    /// налаштовує 5-денний пільговий строк. Мутаційний доказ: якщо хтось
+    /// поверне `PeriodEnd.AddDays(1)` замість `PeriodEnd.AddDays(policy.
+    /// GraceOffsetDays)`, момент "за день до завершення пільгового строку"
+    /// (4 лютого) неправильно вже показав би `Grace` — цей тест впаде.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.7")]
+    public void GraceOffsetDays_із_політики_реально_зсуває_перехід_Open_у_Grace()
+    {
+        var period = January(); // graceOffsetDays: 5, кінець періоду 31.01.
+
+        // За день до спливання 5-денного пільгового строку — усе ще Open,
+        // а не Grace: 5 днів ще не минуло.
+        var beforeGraceElapses = SiteMidnight(2026, 2, 4);
+        Assert.Equal(PeriodState.Open, Calculator.Calculate(period, beforeGraceElapses, Site));
+
+        // Рівно на 5-й день (опівночі 5 лютого за майданчиком) — уже Grace.
+        var graceStarts = SiteMidnight(2026, 2, 5);
+        Assert.Equal(PeriodState.Grace, Calculator.Calculate(period, graceStarts, Site));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-1.8")]
@@ -114,7 +140,14 @@ public sealed class PeriodStateCalculatorTests
 
         // Опівніч 1 січня в поясі UTC+5 — це 31 грудня 19:00 UTC.
         Assert.Equal(new DateTime(2025, 12, 31, 19, 0, 0, DateTimeKind.Utc), period.ComputedOpenAt);
-        Assert.Equal(new DateTime(2026, 1, 31, 19, 0, 0, DateTimeKind.Utc), period.ComputedGraceAt);
+
+        // ⛔ UI-аудит, lane 2 (Q-337): до фіксу тут стояло жорстке
+        // `PeriodEnd + 1` (2026-01-31 19:00 UTC, тобто опівніч 1 лютого) —
+        // `graceOffsetDays: 5` цієї фікстури не впливав на результат
+        // ВЗАГАЛІ. Правильно — `PeriodEnd + GraceOffsetDays` (31.01 + 5 =
+        // 5 лютого, опівніч за майданчиком = 4 лютого 19:00 UTC), той
+        // самий взірець, що й `ComputedCloseAt` рядком нижче.
+        Assert.Equal(new DateTime(2026, 2, 4, 19, 0, 0, DateTimeKind.Utc), period.ComputedGraceAt);
         Assert.Equal(new DateTime(2026, 2, 19, 19, 0, 0, DateTimeKind.Utc), period.ComputedCloseAt);
     }
 

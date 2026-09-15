@@ -148,11 +148,20 @@ public sealed record MethodologyRuleDto(
 /// <param name="HintL10n">
 /// Текст поверх типового шаблону; <c>null</c> — типового шаблону достатньо.
 /// </param>
+/// <param name="HasActiveBinding">
+/// ⛔ UI-аудит, lane 5 (`Q-337`): без цього поля панель показувала
+/// `Column: X, Severity: Block` для колонки, чию прив'язку (`CalculationBinding`)
+/// давно деактивували — вимога й далі блокувала збереження даних для
+/// колонки, яку методологія вже не пише, БЕЗ жодного натяку чому. `false`
+/// НЕ помилка сама по собі: вимогу можна додати ДО прив'язки — лише
+/// попередження в UI, не заборона.
+/// </param>
 public sealed record MethodologyRequiredInputDto(
     int Id,
     int ColumnDefId,
     RequiredInputSeverity Severity,
-    IReadOnlyDictionary<string, string>? HintL10n);
+    IReadOnlyDictionary<string, string>? HintL10n,
+    bool HasActiveBinding);
 
 /// <summary>Оголошений вихід версії — те, що методологія повертає (ФВ-16.6).</summary>
 /// <param name="Id">Ідентифікатор виходу.</param>

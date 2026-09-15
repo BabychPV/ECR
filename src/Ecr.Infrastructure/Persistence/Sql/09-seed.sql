@@ -650,6 +650,12 @@ USING (VALUES
     (N'methodologies.hintHint', N'en', N'Text shown instead of the default template; leave empty to use it.', 1),
     (N'methodologies.noRequiredInputs', N'en', N'This version has no required input columns', 1),
     (N'methodologies.noRequiredInputsHint', N'en', N'Without a required input, a row can be saved even though the methodology has nothing meaningful to compute from it.', 1),
+    -- ⛔ UI-аудит, lane 5 (Q-337): деактивована прив'язка лишала вимогу без
+    -- ЖОДНОГО натяку, що вона зависла — рядок і далі показував "Column: X,
+    -- Severity: Block", наче все гаразд, і далі блокував збереження даних
+    -- для колонки, яку методологія вже не пише.
+    (N'methodologies.requiredInputUnattached',     N'en', N'unattached', 1),
+    (N'methodologies.requiredInputUnattachedHint', N'en', N'This column has no active binding for this methodology right now: the requirement still blocks or warns on save, but nothing writes a result into it. Reactivate the binding, or remove this requirement.', 1),
     (N'methodologies.addOutput', N'en', N'Add output', 1),
     (N'methodologies.outputSaved', N'en', N'The output has been saved.', 1),
     (N'methodologies.outputCodeHint', N'en', N'The address the binding points at; it matches the code of the formula that produces it.', 1),
@@ -725,8 +731,16 @@ USING (VALUES
     (N'periods.key',                     N'en', N'Period', 1),
     (N'periods.sequence',                N'en', N'Sequence', 1),
     (N'periods.range',                   N'en', N'Range', 1),
+    -- ⛔ Q-337, lane 2 UI-аудиту: сторінка показувала «Range»/«Grace until»
+    -- без жодного пояснення, а мітка політики `+15/45` (форма створення
+    -- проєкту) показує лише два з чотирьох чисел і не на цій сторінці.
+    -- Тултипи нижче пояснюють похідну формулу в термінах РЕАЛЬНИХ чисел
+    -- політики проєкту (`{open}`/`{grace}`/`{hardClose}`/`{code}` —
+    -- підставляються з `PeriodCalendarDto.Policy`, а не вигадані).
+    (N'periods.rangeHint',               N'en', N'Start = period start + Open offset ({open} d). End = period end + Hard-close offset ({hardClose} d, policy {code}): the period is fully Closed after this moment, and even late edits are no longer accepted.', 1),
     (N'periods.state',                   N'en', N'State', 1),
     (N'periods.grace',                   N'en', N'Grace until', 1),
+    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}). It stays in Grace until the end of Range (Hard-close, +{hardClose} d).', 1),
     (N'periods.activate',                N'en', N'Activate project', 1),
     (N'periods.activated',               N'en', N'The project is active: periods now follow their dates.', 1),
     (N'periods.draftHint',               N'en', N'The project is a draft: periods stay closed until it is activated.', 1),
@@ -1384,6 +1398,10 @@ USING (VALUES
     (N'tables.errTarget',                N'en', N'Pick the target table.', 1),
     (N'tables.errSelf',                  N'en', N'Source and target must differ: a table cannot be related to itself.', 1),
     (N'tables.errMatch',                 N'en', N'Describe how rows are matched, otherwise the relation joins nothing.', 1),
+    -- ⛔ UI-аудит, lane 7 (Q-337): форма приймала геть будь-який текст у "Row
+    -- matching" без жодного натяку, що це не той JSON-об'єкт, на який
+    -- зважає сервер (TableRelationDef.Apply, ECR-TMPL-0422).
+    (N'tables.errMatchSyntax',           N'en', N'Row matching must be a valid JSON object, for example {} for every row.', 1),
     -- Редактор аркушів (ФВ-2.1) — перший вертикальний зріз авторства структури.
     (N'sheets.add',                      N'en', N'Add sheet', 1),
     (N'sheets.edit',                     N'en', N'Edit', 1),

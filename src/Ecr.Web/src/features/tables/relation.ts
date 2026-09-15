@@ -103,7 +103,7 @@ export function draftOf(relation: TableRelationDto): RelationDraft {
 }
 
 /** Що саме заважає зберегти чернетку. */
-export type RelationBlocker = 'Code' | 'Source' | 'Target' | 'Self' | 'Match';
+export type RelationBlocker = 'Code' | 'Source' | 'Target' | 'Self' | 'Match' | 'MatchSyntax';
 
 /**
  * Чому чернетку ще не можна зберегти; `null` — можна.
@@ -132,7 +132,29 @@ export function whyCannotSave(draft: RelationDraft): RelationBlocker | null {
   // рядка — саме та мовчазна порожнеча, яку ловить домен.
   if (draft.matchJson.trim().length === 0) return 'Match';
 
+  // ⛔ UI-аудит, lane 7 (`Q-337`): форма приймала геть будь-який текст —
+  // `totally not valid syntax {{{ ??? nonsense_column_xyz` зберігався
+  // успішно (`200 OK`). Той самий живий UX-компроміс, що вже working для
+  // порожнього поля вище: клієнт ловить очевидне ДО мережевого запиту,
+  // сервер (`TableRelationDef.Apply`, `ECR-TMPL-0422`) лишається межею.
+  // Взірець структурованого предиката в застосунку (`MethodologyRule`,
+  // `CalculationBinding`, `RegistryRuleDef`) — завжди JSON-об'єкт, тому й
+  // тут відхиляється не лише поламаний синтаксис, а й валідний JSON, що не
+  // є об'єктом (`"true"` — крос-джойн без жодного натяку, що це, ймовірно,
+  // не те, що малося на увазі).
+  if (!isJsonObject(draft.matchJson)) return 'MatchSyntax';
+
   return null;
+}
+
+/** Чи є рядок синтаксично валідним JSON-об'єктом (`{}` — увесь перелік). */
+function isJsonObject(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
 }
 
 /**

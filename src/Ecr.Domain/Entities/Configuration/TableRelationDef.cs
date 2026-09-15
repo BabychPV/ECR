@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -123,6 +124,44 @@ public sealed class TableRelationDef : Entity<int>
                 "ECR-TMPL-0422",
                 $"Зв'язок {Code} не має зіставлення рядків (MatchJson). " +
                 "Без нього він не з'єднує жодного рядка, лишаючись на вигляд налаштованим.");
+        }
+
+        // ⛔ UI-аудит, lane 7 (`Q-337`): форма "New relation" приймала геть
+        // будь-який текст у `Row matching` — `totally not valid syntax {{{ ???`
+        // зберігався успішно (`200 OK`) і повертався буквально при наступному
+        // `GET`. Перевірка тут — та сама, що вже `RegistryRuleDef.SetParameters`/
+        // `RegistryEntryLink` (синтаксис JSON, і саме ОБ'ЄКТ — той самий
+        // взірець структурованого предиката, що документований поруч
+        // `cfg.TableRelationDef.MatchJson`/`cfg.CalculationBinding.MatchJson`/
+        // `cfg.FormulaDependency.FilterJson`, усі — JSON-об'єкти, `{}` як
+        // порожній/catch-all запис). Це відхиляє і `"true"` (валідний JSON,
+        // але не об'єкт) — семантично марний предикат для Rollup-зв'язку, що
+        // фактично дає крос-джойн, БЕЗ жодного натяку, що це, ймовірно, не те,
+        // що малося на увазі.
+        //
+        // ⚠ Глибша перевірка — що коди колонок/рядків усередині справді
+        // існують у джерельній/цільовій таблиці — НЕ зроблена: для цього
+        // потрібна схема самого предиката (які ключі означають що), а
+        // жодного обробника/матчера, що РЕАЛЬНО читає `MatchJson` цього
+        // зв'язку під час роботи, у застосунку ще немає (на відміну від
+        // `MethodologyRuleMatcher` для методологій) — вигадувати цю схему
+        // значило б вигадати бізнес-факт, не судження про те, як писати код.
+        try
+        {
+            using var parsed = JsonDocument.Parse(matchJson);
+            if (parsed.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new DomainException(
+                    "ECR-TMPL-0422",
+                    $"Зіставлення рядків (MatchJson) зв'язку {Code} має бути JSON-об'єктом " +
+                    "(`{}` — весь перелік), а не іншим значенням JSON.");
+            }
+        }
+        catch (JsonException ex)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Зіставлення рядків (MatchJson) зв'язку {Code} не є валідним JSON: {ex.Message}");
         }
 
         if (onSourceChange > OnSourceChangeBlock)

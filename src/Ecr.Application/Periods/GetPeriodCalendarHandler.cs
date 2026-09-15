@@ -1,6 +1,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Periods.Dto;
 using Ecr.Application.Ports;
+using Ecr.Application.Projects;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -53,6 +54,16 @@ public sealed class GetPeriodCalendarHandler(
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
 
+        // ⛔ Q-337, lane 2 UI-аудиту: сторінка Periods показувала «Grace
+        // until»/«Range» без жодного зв'язку з чотирма цифрами політики
+        // (`Open offset`/`Grace offset`/`Hard-close offset`/`Year grace`) —
+        // ярлик `+15/45` у формі створення проєкту показує лише два з
+        // чотирьох, і НЕ на цій сторінці взагалі. Політика проєкту вже
+        // завантажується для інших операцій (`RecomputeBoundaries` під час
+        // побудови календаря) — тут вона потрібна лише для тултипів клієнта,
+        // тож окремий запит виправданий саме цим.
+        var policy = await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false);
+
         var items = project.Periods
             .OrderBy(p => p.PeriodKeyValue)
             .Select(p => new PeriodDto(
@@ -74,8 +85,12 @@ public sealed class GetPeriodCalendarHandler(
                 p.ReopenedUntil is { } until ? ToSite(until, zone) : null))
             .ToList();
 
+        var policyDto = new PeriodPolicyDto(
+            policy.Id, policy.Code, policy.OpenOffsetDays, policy.GraceOffsetDays,
+            policy.HardCloseOffsetDays, policy.YearGraceOffsetDays);
+
         return new PeriodCalendarDto(
-            project.Id, project.TimeZoneId, project.PeriodKind, project.CurrentPeriodMode, items);
+            project.Id, project.TimeZoneId, project.PeriodKind, project.CurrentPeriodMode, policyDto, items);
     }
 
     /// <summary>UTC → момент у поясі майданчика зі збереженим зсувом.</summary>
