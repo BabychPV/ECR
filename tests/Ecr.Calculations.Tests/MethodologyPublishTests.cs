@@ -30,6 +30,7 @@ public sealed class MethodologyPublishTests
     private static readonly DateOnly From = new(2026, 6, 1);
 
     private readonly IMethodologyStore _store = Substitute.For<IMethodologyStore>();
+    private readonly ICalculationBindingStore _bindings = Substitute.For<ICalculationBindingStore>();
     private readonly IConstantStore _constants = Substitute.For<IConstantStore>();
     private readonly ICalculationModule _module = Substitute.For<ICalculationModule>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -69,6 +70,13 @@ public sealed class MethodologyPublishTests
         _store.FindByVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(_methodology);
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(Formulas());
         _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(TestCases());
+
+        // ⚠ За замовчуванням — БЕЗ прив'язок: предмет більшості тестів цього
+        // класу не структурна перевірка ECR-CALC-0438 (її власні тести нижче
+        // налаштовують прив'язки самі), а решта правил публікації. Методологія
+        // без жодної прив'язки цю перевірку пропускає (див. `CheckArgumentColumnsAsync`).
+        _bindings.ListAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<Ecr.Domain.Entities.Configuration.CalculationBinding>());
 
         // Модуль повертає числа, що збігаються з очікуваними: набір зелений.
         _module.ExecuteAsync(Arg.Any<CalculationInput>(), Arg.Any<CancellationToken>())
@@ -321,6 +329,64 @@ public sealed class MethodologyPublishTests
         Assert.True(order["MassKg"] < order["gsec"], "MassKg має рахуватися до gsec");
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Аргумент_якого_немає_серед_колонок_прив_язаної_таблиці_відхиляється_ECR_CALC_0438()
+    {
+        // ⛔ «Volume» вживає `@Jan`, `@Feb`, `@Mar` (Formulas()); таблиця,
+        // до якої прив'язана методологія, має колонку лише під `Jan`/`Feb` —
+        // `Mar` тут немає ЖОДНОЇ структурної підстави, і збірка
+        // (`CalculationInputBuilder`) не побудує для неї аргумент узагалі:
+        // без цієї перевірки формула мовчки порахувала б `Volume` без березня.
+        const int TableDefId = 900;
+
+        _bindings.ListAsync(_methodology.Id, Arg.Any<CancellationToken>())
+                 .Returns([new Ecr.Domain.Entities.Configuration.CalculationBinding(
+                     TableDefId, columnDefId: 1, _methodology.Id, "tons", "{}")]);
+
+        _bindings.ListColumnCodesAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(TableDefId)),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, IReadOnlyList<string>>
+            {
+                [TableDefId] = ["Jan", "Feb"],
+            });
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        // ⚠ Повідомлення називає САМЕ ЦЕЙ аргумент і САМЕ ЦЮ таблицю: методолог
+        // не має перебирати всі колонки, щоб зрозуміти, чого бракує.
+        Assert.Equal("ECR-CALC-0438", error.ErrorCode);
+        Assert.Contains("Mar", error.Message, StringComparison.Ordinal);
+        Assert.Contains(TableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            error.Message, StringComparison.Ordinal);
+        Assert.False(_version.IsPublished);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Аргументи_що_відповідають_усім_колонкам_прив_язаної_таблиці_проходять()
+    {
+        // Той самий набір формул, але таблиця цього разу має усі три колонки —
+        // перевірка не має валити публікацію без причини.
+        const int TableDefId = 900;
+
+        _bindings.ListAsync(_methodology.Id, Arg.Any<CancellationToken>())
+                 .Returns([new Ecr.Domain.Entities.Configuration.CalculationBinding(
+                     TableDefId, columnDefId: 1, _methodology.Id, "tons", "{}")]);
+
+        _bindings.ListColumnCodesAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(TableDefId)),
+                Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, IReadOnlyList<string>>
+            {
+                [TableDefId] = ["Jan", "Feb", "Mar"],
+            });
+
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
     /// <summary>Профіль із небезпечним правом публікації методології.</summary>
     private static AccessProfile Profile() => new()
     {
@@ -334,7 +400,7 @@ public sealed class MethodologyPublishTests
     };
 
     private PublishMethodologyHandler Handler()
-        => new(_module, _store, new RealFormulaEngine(), _uow, _audit, _access, _user, _clock);
+        => new(_module, _store, new RealFormulaEngine(), _bindings, _uow, _audit, _access, _user, _clock);
 
     private MethodologyVersion AddVersion(int id, string number)
     {

@@ -60,5 +60,29 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> ListColumnCodesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        if (tableDefIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<string>>();
+        }
+
+        var rows = await db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => tableDefIds.Contains(c.TableDefId) && !c.IsDeleted)
+            .Select(c => new { c.TableDefId, c.Code })
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.TableDefId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g.Select(r => r.Code).ToList());
+    }
+
+    /// <inheritdoc />
     public void Add(CalculationBinding binding) => db.CalculationBindings.Add(binding);
 }
