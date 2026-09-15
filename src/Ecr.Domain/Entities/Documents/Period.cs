@@ -67,9 +67,20 @@ public sealed class Period : Entity<int>
 
         ComputedOpenAt = ToUtc(PeriodStart.AddDays(policy.OpenOffsetDays), siteTimeZone);
 
-        // Grace починається наступної доби після кінця періоду: сам останній
-        // день ще належить періоду цілком.
-        ComputedGraceAt = ToUtc(PeriodEnd.AddDays(1), siteTimeZone);
+        // ⛔ UI-аудит, lane 2 (Q-333): `policy.GraceOffsetDays` рахувався,
+        // валідувався (`CK_PP_Order`: grace <= hard-close) і показувався в
+        // адмінці — і НІДЕ не читався тут. `ComputedGraceAt` завжди був
+        // `PeriodEnd + 1` буквально, тож період переходив у `Grace`
+        // (позначка пізньої правки, `IsLateEditWindow`) наступного ж дня
+        // після номінального кінця НЕЗАЛЕЖНО від налаштованого пільгового
+        // строку (типово 15 днів) — параметр був мертвим кодом, а сторінка
+        // Periods показувала «Grace until», що завжди збігалося з межею
+        // наступного календарного періоду і не мало жодного зв'язку з
+        // «+15». Формула нижче — той самий приклад, що й `ComputedCloseAt`
+        // рядком нижче (`PeriodEnd.AddDays(N)` напряму, без прихованого
+        // +1): узгоджено з `CK_PP_Order`, де grace і hard-close — offsets
+        // від ТІЄЇ Ж точки відліку (кінця періоду).
+        ComputedGraceAt = ToUtc(PeriodEnd.AddDays(policy.GraceOffsetDays), siteTimeZone);
         ComputedCloseAt = ToUtc(PeriodEnd.AddDays(policy.HardCloseOffsetDays), siteTimeZone);
     }
 

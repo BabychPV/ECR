@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, ScrollArea, Select, Table, Text, TextInput } from '@mantine/core';
+import {
+  Badge,
+  Button,
+  Group,
+  Modal,
+  ScrollArea,
+  Select,
+  Table,
+  Text,
+  TextInput,
+  Tooltip,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -470,9 +481,43 @@ export function PeriodsPage(): JSX.Element {
             <Table.Tr>
               <Table.Th>{t('periods.key')}</Table.Th>
               <Table.Th>{t('periods.sequence')}</Table.Th>
-              <Table.Th>{t('periods.range')}</Table.Th>
+              {/* ⛔ UI-аудит, lane 2 (Q-333): «Range» і «Grace until» не мали
+                  на сторінці ЖОДНОГО пояснення, хоч похідні від чотирьох
+                  чисел політики (мітка `+15/45` у формі створення проєкту
+                  показує лише два з чотирьох, і НЕ тут). Тултипи нижче
+                  підставляють РЕАЛЬНІ числа активної політики проєкту
+                  (`calendar.policy`), а не переказують ярлик. */}
+              <Table.Th>
+                <Tooltip
+                  multiline
+                  w={320}
+                  label={t('periods.rangeHint', {
+                    open: calendar.policy.openOffsetDays,
+                    hardClose: calendar.policy.hardCloseOffsetDays,
+                    code: calendar.policy.code,
+                  })}
+                >
+                  <Text span td="underline dotted" fw={600} size="sm">
+                    {t('periods.range')}
+                  </Text>
+                </Tooltip>
+              </Table.Th>
               <Table.Th>{t('periods.state')}</Table.Th>
-              <Table.Th>{t('periods.grace')}</Table.Th>
+              <Table.Th>
+                <Tooltip
+                  multiline
+                  w={320}
+                  label={t('periods.graceHint', {
+                    grace: calendar.policy.graceOffsetDays,
+                    hardClose: calendar.policy.hardCloseOffsetDays,
+                    code: calendar.policy.code,
+                  })}
+                >
+                  <Text span td="underline dotted" fw={600} size="sm">
+                    {t('periods.grace')}
+                  </Text>
+                </Tooltip>
+              </Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>

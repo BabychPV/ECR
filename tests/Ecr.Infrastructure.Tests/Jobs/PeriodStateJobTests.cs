@@ -25,21 +25,27 @@ public sealed class PeriodStateJobTests
         var onSite = Periods(Site)[0];
         var onUtc = Periods(TimeZoneInfo.Utc)[0];
 
-        // 31 січня 23:00 у поясі майданчика (UTC+5) — це 18:00 UTC. Період ще
-        // відкритий: останній день належить йому цілком.
-        var stillOpen = new DateTime(2026, 1, 31, 18, 0, 0, DateTimeKind.Utc);
+        // ⛔ UI-аудит, lane 2 (Q-333): `ProjectBuilder.Policy()` — 15-денний
+        // пільговий строк (`graceOffsetDays: 15`), і до фіксу
+        // `RecomputeBoundaries` це ігнорував — перехід у Grace завжди
+        // ставався наступного дня (1 лютого) незалежно від значення
+        // політики. Правильна межа — 31 січня + 15 днів = 15 лютого.
+        //
+        // 14 лютого 23:00 у поясі майданчика (UTC+5) — це 18:00 UTC.
+        // Пільговий строк ще не сплив, період ще Open.
+        var stillOpen = new DateTime(2026, 2, 14, 18, 0, 0, DateTimeKind.Utc);
         Assert.Equal(PeriodState.Open, _calculator.Calculate(onSite, stillOpen, Site));
 
-        // Місцева північ 1 лютого — це 19:00 UTC 31 січня. Саме тут
-        // період має перейти в Grace.
-        var localMidnight = new DateTime(2026, 1, 31, 19, 0, 0, DateTimeKind.Utc);
+        // Місцева північ 15 лютого — це 19:00 UTC 14 лютого. Саме тут
+        // період має перейти в Grace (31 січня + 15 днів пільгового строку).
+        var localMidnight = new DateTime(2026, 2, 14, 19, 0, 0, DateTimeKind.Utc);
         Assert.Equal(PeriodState.Grace, _calculator.Calculate(onSite, localMidnight, Site));
 
         // ⚠ Той самий період із межами, порахованими в UTC, о тій самій миті
         // ще відкритий — і залишатиметься відкритим до 05:00 місцевого часу
-        // 1 лютого. Межа періоду перестає збігатися з тим, що люди називають
-        // «кінець місяця», а на майданчику із від’ємним зсувом — закривається раніше,
-        // ніж закінчився останній робочий день (D-68).
+        // 15 лютого. Межа пільгового строку перестає збігатися з тим, що
+        // люди мають на увазі, а на майданчику із від'ємним зсувом —
+        // закривається раніше, ніж мало б за налаштованою політикою (D-68).
         Assert.Equal(PeriodState.Open, _calculator.Calculate(onUtc, localMidnight, TimeZoneInfo.Utc));
         Assert.NotEqual(onSite.ComputedGraceAt, onUtc.ComputedGraceAt);
         Assert.Equal(TimeSpan.FromHours(5), onUtc.ComputedGraceAt - onSite.ComputedGraceAt);
@@ -52,7 +58,13 @@ public sealed class PeriodStateJobTests
         var periods = Periods();
         ProjectBuilder.Attach(project, periods);
 
-        var now = new DateTime(2026, 2, 10, 6, 0, 0, DateTimeKind.Utc);
+        // ⛔ UI-аудит, lane 2 (Q-333): `ProjectBuilder.Policy()` дає 15-денний
+        // пільговий строк — 10 лютого лежить УСЕРЕДИНІ цього вікна, тож
+        // після фіксу `GraceOffsetDays` січень ще `Open`, а не `Grace`
+        // («найраніший Open» тоді обрав би січень, і контраст «пін тримає
+        // січень, хоч задача пропонує лютий» зник би). 20 лютого — вже ПІСЛЯ
+        // 15-денного вікна, січень справді `Grace`, лютий — єдиний `Open`.
+        var now = new DateTime(2026, 2, 20, 6, 0, 0, DateTimeKind.Utc);
         var pinned = periods[0].Id;
         project.PinCurrentPeriod(pinned, "звірка річного звіту", userId: 7, now);
 

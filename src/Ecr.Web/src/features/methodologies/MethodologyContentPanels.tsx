@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import {
+  Badge,
   Button,
   Checkbox,
   Group,
@@ -11,6 +12,7 @@ import {
   Text,
   Textarea,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
@@ -685,7 +687,23 @@ export function MethodologyRequiredInputsPanel({
             <Table.Tbody>
               {list.map((requiredInput) => (
                 <Table.Tr key={requiredInput.id}>
-                  <Table.Td>{requiredInput.columnDefId}</Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" wrap="nowrap">
+                      {requiredInput.columnDefId}
+                      {/* ⛔ UI-аудит, lane 5 (`Q-333`): деактивована прив'язка
+                          лишала вимогу без ЖОДНОГО натяку, що вона зависла —
+                          рядок і далі показував `Column: X, Severity: Block`
+                          так, наче все гаразд, і далі блокував збереження
+                          даних для колонки, яку методологія вже не пише. */}
+                      {!requiredInput.hasActiveBinding && (
+                        <Tooltip label={t('methodologies.requiredInputUnattachedHint')} multiline w={280}>
+                          <Badge size="xs" color="statusWarning" variant="outline">
+                            {t('methodologies.requiredInputUnattached')}
+                          </Badge>
+                        </Tooltip>
+                      )}
+                    </Group>
+                  </Table.Td>
                   <Table.Td>
                     {requiredInput.severity === 'Block'
                       ? t('methodologies.severityBlock')

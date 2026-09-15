@@ -48,6 +48,49 @@ describe('Чернетка зв’язку між таблицями', () => {
     expect(whyCannotSave(draft)).toBe('Match');
   });
 
+  /**
+   * ⛔ UI-аудит, lane 7 (`Q-333`): форма приймала геть будь-який текст у
+   * "Row matching" — `totally not valid syntax {{{ ??? nonsense_column_xyz`
+   * зберігався успішно (`200 OK`), і подальший `GET` підтверджував, що воно
+   * так і збереглося буквально.
+   */
+  it.each(['totally not valid syntax {{{ ??? nonsense_column_xyz', '{not even close to json', '[1, 2, 3'])(
+    'синтаксично некоректний matchJson блокує збереження: %s',
+    (matchJson) => {
+      const draft = {
+        ...emptyDraft(),
+        code: 'Rollup7',
+        sourceTableDefId: 5,
+        targetTableDefId: 6,
+        matchJson,
+      };
+
+      expect(whyCannotSave(draft)).toBe('MatchSyntax');
+    },
+  );
+
+  /**
+   * ⛔ `"true"` — валідний JSON, але не об'єкт. Для `Rollup`-зв'язку це
+   * семантично марний предикат (крос-джойн кожного рядка джерела з кожним
+   * рядком приймача) без жодного натяку, що це, ймовірно, не те, що малося
+   * на увазі. Взірець структурованого предиката в застосунку
+   * (`MethodologyRule`, `CalculationBinding`) — завжди JSON-об'єкт.
+   */
+  it.each(['true', '42', '"just a string"', '[1, 2, 3]'])(
+    'валідний JSON, що не є об\'єктом, теж блокує збереження: %s',
+    (matchJson) => {
+      const draft = {
+        ...emptyDraft(),
+        code: 'Rollup7',
+        sourceTableDefId: 5,
+        targetTableDefId: 6,
+        matchJson,
+      };
+
+      expect(whyCannotSave(draft)).toBe('MatchSyntax');
+    },
+  );
+
   it('повна чернетка зберігається', () => {
     const draft = {
       ...emptyDraft(),

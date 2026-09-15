@@ -1,5 +1,5 @@
-import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
+import { useEffect, useRef, useState, type JSX } from 'react';
+import { Button, Combobox, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { AffectedRolesResponse, RoleView, UserView } from '@/api/types';
@@ -34,6 +34,26 @@ export function UserAccessEditor({
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [email, setEmail] = useState('');
+
+  // ⛔ UI-аудит, lane 1 (`lane1-roles-dropdown-traps-clicks.md`): `Escape`,
+  // клік по власному шеврону мультиселекту й клік деінде в діалозі не
+  // закривали список опцій ролей — лишався відкритим ПОВЕРХ Save/Cancel і
+  // перехоплював кліки, призначені для них. Причина не одна: (1) стоковий
+  // `MultiSelect.onClick` для `searchable` ЗАВЖДИ викликає `openDropdown()`
+  // (ніколи `toggleDropdown()`), тож клік по власному тоглу не міг
+  // закрити його; (2) `Modal`'s Escape — це window-level capture-listener
+  // (`use-modal.cjs`), який спрацьовує РАНІШЕ за будь-який React-обробник
+  // на вкладеному полі, тож покладатися на те, що дропдаун сам «встигне»
+  // зупинити його — крихко. Рішення: керуємо станом дропдауна САМІ
+  // (`dropdownOpened`/`onDropdownOpen`/`onDropdownClose`), вимикаємо
+  // `Modal.closeOnEscape`, поки він відкритий, і власний capture-обробник
+  // на `Escape`/клік перехоплює обидва випадки ДО того, як вони дійдуть до
+  // Save/Cancel чи до `Modal`. Клік ВСЕРЕДИНІ самого дропдауна (реальні
+  // опції, позначені `role="listbox"`/`role="option"` — стандартний ARIA-
+  // патерн Mantine `Combobox`, не деталь реалізації, що могла б змінитися
+  // непомітно) не займаємо: Mantine продовжує сама вибирати опцію.
+  const [rolesOpened, setRolesOpened] = useState(false);
+  const rolesFieldRef = useRef<HTMLDivElement>(null);
 
   // ⛔ UI-аудит, lane 1: обраний перелік МІГ бути непорожнім і водночас не
   // давати жодного права — роль без прав `AsyncBoundary`'s «ролей немає»
@@ -94,7 +114,40 @@ export function UserAccessEditor({
       opened={user !== null}
       onClose={onClose}
       title={`${t('security.access')} · ${user?.userName ?? ''}`}
+      // ⛔ lane 1: доки список ролей відкритий, `Escape` має закрити ЛИШЕ
+      // його — не весь діалог (`Modal`'s власний Escape інакше спрацював
+      // би раніше за capture-обробник нижче, дивись коментар вище).
+      closeOnEscape={!rolesOpened}
     >
+      {/* ⛔ lane 1: capture-обробники на ОБГОРТЦІ — щоб побачити клік/Escape
+          РАНІШЕ за Save/Cancel і за сам `MultiSelect`. Клік усередині поля
+          ролей чи в самому дропдауні (реальні опції, `role="listbox"`)
+          проходить далі без змін; будь-який інший клік, поки список
+          відкритий, лише закриває його й НЕ доходить до Save/Cancel — це і
+          є фікс «клік по Save під час відкритого списку не повинен обрати
+          роль», без другого кліка список уже не заважає. */}
+      <div
+        onClickCapture={(event) => {
+          if (!rolesOpened) {
+            return;
+          }
+          const target = event.target instanceof Element ? event.target : null;
+          const insideDropdown = target?.closest('[role="listbox"]') != null;
+          const insideField = rolesFieldRef.current?.contains(target) ?? false;
+          if (insideDropdown || insideField) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setRolesOpened(false);
+        }}
+        onKeyDownCapture={(event) => {
+          if (rolesOpened && event.key === 'Escape') {
+            event.stopPropagation();
+            setRolesOpened(false);
+          }
+        }}
+      >
       {/*
        * ⛔ Невдалий запит ролей і справді порожній перелік раніше виглядали
        * ОДНАКОВО: обидва малювали ту саму жовту пересторогу «ролей немає», і
@@ -126,15 +179,40 @@ export function UserAccessEditor({
       >
         {() => (
           <>
-            <MultiSelect
-              mt="md"
-              label={t('security.roles')}
-              description={t('security.rolesHint')}
-              data={roles.map((r) => r.code)}
-              value={selected}
-              onChange={setSelected}
-              searchable
-            />
+            <div ref={rolesFieldRef}>
+              <MultiSelect
+                mt="md"
+                label={t('security.roles')}
+                description={t('security.rolesHint')}
+                data={roles.map((r) => r.code)}
+                value={selected}
+                onChange={setSelected}
+                searchable
+                dropdownOpened={rolesOpened}
+                onDropdownOpen={() => setRolesOpened(true)}
+                onDropdownClose={() => setRolesOpened(false)}
+                rightSectionPointerEvents="all"
+                rightSection={
+                  <Combobox.Chevron
+                    size="sm"
+                    style={{ cursor: 'pointer' }}
+                    data-testid="roles-dropdown-toggle"
+                    // ⛔ lane 1: стоковий `rightSection`-шеврон не реагує
+                    // на клік узагалі (`rightSectionPointerEvents` за
+                    // умовчанням "none", коли `clearable` вимкнено) — тож
+                    // «клік по власному шеврону» раніше не робив НІЧОГО.
+                    // `stopPropagation` тут не дає кліку дійти до
+                    // обгортки `PillsInput`, чий власний `onClick` для
+                    // `searchable` ЗАВЖДИ відкриває (ніколи не закриває).
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setRolesOpened((opened) => !opened);
+                    }}
+                  />
+                }
+              />
+            </div>
 
             {/*
              * ⛔ НЕ `<Alert>`: Mantine ставить йому `role="alert"` за
@@ -198,6 +276,7 @@ export function UserAccessEditor({
           {t('common.save')}
         </Button>
       </Group>
+      </div>
     </Modal>
   );
 }

@@ -1,3 +1,4 @@
+using Ecr.Application.Projects;
 using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Periods.Dto;
@@ -15,8 +16,20 @@ namespace Ecr.Application.Periods.Dto;
 /// <param name="Sequence">Порядковий номер у році: <c>1…12</c> для місячних, <c>1…4</c> для квартальних.</param>
 /// <param name="State">Стан; обчислює <c>PeriodStateJob</c>, а не запит.</param>
 /// <param name="StartsAt">Початок періоду в поясі майданчика.</param>
-/// <param name="EndsAt">Кінець періоду в поясі майданчика, виключно.</param>
-/// <param name="GraceEndsAt">Кінець пільгового вікна; після нього період закривається.</param>
+/// <param name="EndsAt">
+/// Жорстке закриття (<c>PeriodEnd + HardCloseOffsetDays</c>) у поясі
+/// майданчика, виключно: після цього моменту період <c>Closed</c>, і
+/// пільгове вікно також скінчилося.
+/// </param>
+/// <param name="GraceEndsAt">
+/// ⚠ Назва історична (`Q-333`, lane 2 UI-аудиту): це НЕ кінець пільгового
+/// вікна, а його ПОЧАТОК — момент, коли період переходить з `Open` у
+/// `Grace` (<c>PeriodEnd + GraceOffsetDays</c>). До цього моменту зміни
+/// звичайні; від нього й до <see cref="EndsAt"/> вони ще дозволені, але
+/// позначаються як пізні (<c>IsLateEditWindow</c>). Перейменування поля
+/// вийшло б за межі цього виправлення (торкнулося б контракту API й
+/// клієнта) — лишено як є, з цим поясненням.
+/// </param>
 /// <param name="IsCurrent">Чи є періодом за замовчуванням для UI.</param>
 /// <param name="ReopenedUntil">Якщо період відкрито повторно — до якого моменту.</param>
 public sealed record PeriodDto(
@@ -46,10 +59,18 @@ public sealed record PeriodDto(
 /// </param>
 /// <param name="PeriodKind">Періодичність.</param>
 /// <param name="CurrentPeriodMode">Автоматичний вибір чи закріплений період.</param>
+/// <param name="Policy">
+/// Політика зсувів проєкту (`Q-333`, lane 2 UI-аудиту): сторінка Periods
+/// показувала «Grace until»/«Range» без жодного зв'язку з чотирма цифрами
+/// політики (ярлик `+15/45` у формі створення проєкту показує лише два з
+/// чотирьох, і НЕ на цій сторінці). Клієнт бере ці числа звідси для
+/// тултипів на заголовках колонок — замість вигаданого пояснення.
+/// </param>
 /// <param name="Periods">Періоди в порядку зростання <c>PeriodKey</c>.</param>
 public sealed record PeriodCalendarDto(
     int ProjectId,
     string TimeZoneId,
     PeriodKind PeriodKind,
     CurrentPeriodMode CurrentPeriodMode,
+    PeriodPolicyDto Policy,
     IReadOnlyList<PeriodDto> Periods);

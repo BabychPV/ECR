@@ -67,6 +67,48 @@ public sealed class TableRelationDefTests
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
     }
 
+    /// <summary>
+    /// UI-аудит, lane 7 (`Q-333`): форма "New relation" приймала геть будь-
+    /// який текст у "Row matching" — `totally not valid syntax {{{ ???
+    /// nonsense_column_xyz` зберігався успішно (`200 OK`), і `GET`
+    /// підтверджував, що воно так і збереглося буквально.
+    /// </summary>
+    [Theory]
+    [InlineData("totally not valid syntax {{{ ??? nonsense_column_xyz")]
+    [InlineData("{not even close to json")]
+    [InlineData("[1, 2, 3")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public void Синтаксично_некоректний_MatchJson_відхиляється(string matchJson)
+    {
+        var error = Assert.Throws<DomainException>(() =>
+            new TableRelationDef(EcrCode.Create("Garbage"), 5, 6, TableRelationKind.Rollup, matchJson));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+    }
+
+    /// <summary>
+    /// UI-аудит, lane 7: `"true"` — валідний JSON, але не об'єкт. Для
+    /// `Rollup`-зв'язку це семантично марний предикат (крос-джойн кожного
+    /// рядка джерела з кожним рядком приймача), і взірець структурованого
+    /// предиката в застосунку (`MethodologyRule`, `CalculationBinding`,
+    /// `RegistryRuleDef`) — завжди JSON-об'єкт.
+    /// </summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData("42")]
+    [InlineData("\"just a string\"")]
+    [InlineData("[1, 2, 3]")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public void Валідний_JSON_що_не_є_об_єктом_теж_відхиляється(string matchJson)
+    {
+        var error = Assert.Throws<DomainException>(() =>
+            new TableRelationDef(EcrCode.Create("NotObject"), 5, 6, TableRelationKind.Rollup, matchJson));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-2.12")]
