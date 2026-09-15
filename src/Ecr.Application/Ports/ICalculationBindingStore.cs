@@ -60,6 +60,26 @@ public interface ICalculationBindingStore
     /// </remarks>
     public Task<int?> FindTableOfColumnAsync(int columnDefId, CancellationToken ct);
 
+    /// <summary>
+    /// Коди колонок кожної з названих таблиць — для публікаційної перевірки
+    /// «аргумент методології відповідає колонці таблиці, до якої вона
+    /// прив'язана» (<c>ECR-CALC-0438</c>).
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці, чиї колонки цікавлять.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// <c>TableDefId</c> → коди його НЕ видалених колонок; таблиця без жодної
+    /// колонки в результаті не з'являється взагалі.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Видалені колонки виключені з тієї самої причини, що й у
+    /// <see cref="FindTableOfColumnAsync"/>: <c>CalculationInputBuilder</c>
+    /// будує аргументи з живого знімка структури, і м'яко видалену колонку
+    /// туди не візьме.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> ListColumnCodesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
     /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);

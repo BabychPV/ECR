@@ -51,6 +51,7 @@ public sealed class MethodologyDependencyGraphTests
     private static readonly DateOnly From = new(2026, 6, 1);
 
     private readonly IMethodologyStore _store = Substitute.For<IMethodologyStore>();
+    private readonly ICalculationBindingStore _bindings = Substitute.For<ICalculationBindingStore>();
     private readonly ICalculationModule _module = Substitute.For<ICalculationModule>();
     private readonly IFormulaEngine _formulas = Substitute.For<IFormulaEngine>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -81,6 +82,11 @@ public sealed class MethodologyDependencyGraphTests
         _store.FindByVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(_methodology);
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(Formulas());
         _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(TestCases());
+
+        // ⚠ Без прив'язок: предмет цих тестів — ребра графа залежностей, а не
+        // структурна перевірка ECR-CALC-0438.
+        _bindings.ListAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<CalculationBinding>());
 
         // Набір зелений: предмет тесту — ребра графа, а не правила публікації.
         _module.ExecuteAsync(Arg.Any<CalculationInput>(), Arg.Any<CancellationToken>())
@@ -194,7 +200,7 @@ public sealed class MethodologyDependencyGraphTests
     // ─────────────────────────────────────────────────────────────────────────
 
     private PublishMethodologyHandler Handler()
-        => new(_module, _store, _formulas, _uow, _audit, _access, _user, _clock);
+        => new(_module, _store, _formulas, _bindings, _uow, _audit, _access, _user, _clock);
 
     /// <summary>Профіль із небезпечним правом публікації методології.</summary>
     private static AccessProfile Profile() => new()

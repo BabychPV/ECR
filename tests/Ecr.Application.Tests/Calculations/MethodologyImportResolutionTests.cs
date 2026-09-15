@@ -51,6 +51,7 @@ public sealed class MethodologyImportResolutionTests
     private static readonly DateOnly From = new(2026, 6, 1);
 
     private readonly IMethodologyStore _store = Substitute.For<IMethodologyStore>();
+    private readonly ICalculationBindingStore _bindings = Substitute.For<ICalculationBindingStore>();
     private readonly ICalculationModule _module = Substitute.For<ICalculationModule>();
     private readonly IFormulaEngine _formulas = Substitute.For<IFormulaEngine>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
@@ -91,6 +92,11 @@ public sealed class MethodologyImportResolutionTests
               .Returns(new List<MethodologyOutput>());
         _store.GetRulesAsync(VersionId, Arg.Any<CancellationToken>())
               .Returns(new List<MethodologyRule>());
+
+        // ⚠ Без прив'язок: предмет цих тестів — резолвінг `!Name` через межу
+        // методології, а не структурна перевірка ECR-CALC-0438.
+        _bindings.ListAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<CalculationBinding>());
 
         _store.ReplaceDependenciesAsync(
                   Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
@@ -231,7 +237,7 @@ public sealed class MethodologyImportResolutionTests
     // ─────────────────────────────────────────────────────────────────────────
 
     private PublishMethodologyHandler Handler()
-        => new(_module, _store, _formulas, _uow, _audit, _access, _user, _clock);
+        => new(_module, _store, _formulas, _bindings, _uow, _audit, _access, _user, _clock);
 
     private void Formulas(List<MethodologyFormula> formulas)
         => _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(formulas);

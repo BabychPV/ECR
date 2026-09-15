@@ -350,6 +350,28 @@ public static class ErrorCodes
     /// </remarks>
     public const string RequiredInputMissing = "ECR-CALC-0437";
 
+    /// <summary>
+    /// Аргумент, який формула версії вживає, не відповідає жодній колонці
+    /// таблиці, до якої <c>CalculationBinding</c> прив'язує методологію
+    /// (<c>ECR-CALC-0438</c>, директива «структурна перевірка аргументів
+    /// методології при публікації»).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Причина, чому це публікаційна перевірка, а не рантайм-подія: збірка
+    /// (<c>CalculationInputBuilder</c>) будує один <c>CalculationArgument</c> на
+    /// кожну КЛІТИНКУ рядка, іменований кодом її колонки, а
+    /// <c>MethodologyEvaluationContext.GetArgument</c> на промах МОВЧКИ
+    /// повертав <c>null</c> — без жодного сигналу, де саме зникло значення.
+    /// Методологію, перенесену на іншу таблицю, чи колонку, яку перейменували
+    /// чи видалили вже ПІСЛЯ того, як формулу написали на її код, це виявляло б
+    /// лише на звірці через місяць, а не тут.
+    ///
+    /// ⚠ Номер — наступний вільний ПІСЛЯ <c>0437</c>, а не <c>0434</c>–<c>0436</c>:
+    /// три сусідні коди вже названі в TODO-коментарях
+    /// <c>MethodologyPublishChecks.cs</c> для інших перевірок публікації.
+    /// </remarks>
+    public const string MethodologyArgumentColumnMissing = "ECR-CALC-0438";
+
     // Робочий процес
     /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
     public const string SubmitBlockedByOrphans = "ECR-SUB-4221";

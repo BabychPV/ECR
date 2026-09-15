@@ -53,8 +53,24 @@ internal sealed class MethodologyEvaluationContext(
         int tableDefId, string filterJson, int columnDefId) => [];
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Відсутній аргумент — це <c>#ARG</c>, а не <c>null</c> (директива
+    /// «структурна перевірка аргументів методології при публікації», друга
+    /// лінія захисту). Той самий вибір, що вже стоїть нижче в
+    /// <see cref="GetConstant"/> для відсутньої константи: <c>arguments</c>
+    /// зібрав <see cref="CalculationInputBuilder"/> по одному
+    /// <c>CalculationArgument</c> на кожну КЛІТИНКУ рядка, іменовану кодом її
+    /// колонки, — і ключа, якого там немає, означає, що колонки з таким кодом
+    /// немає в таблиці (структурна вада, яку мала зловити публікація) АБО
+    /// клітинка не існує фізично. Обидва випадки відрізняються від
+    /// ЛЕГІТИМНОГО <c>null</c> — коли ключ Є, а значення клітинки порожнє, —
+    /// і саме цю різницю трейс невдалого розрахунку мусить показати, а не
+    /// одну голу <c>null</c> на все.
+    /// </remarks>
     public ExpressionValue GetArgument(string name)
-        => arguments.TryGetValue(name, out var value) ? value : ExpressionValue.Null;
+        => arguments.TryGetValue(name, out var value)
+            ? value
+            : ExpressionValue.Error(ExpressionErrors.ArgumentNotFound);
 
     /// <inheritdoc />
     /// <remarks>

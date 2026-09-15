@@ -22,6 +22,7 @@ public sealed class PublishMethodologyHandler(
     ICalculationModule module,
     IMethodologyStore methodologies,
     IFormulaEngine formulaEngine,
+    ICalculationBindingStore bindings,
     IUnitOfWork uow,
     IAuditWriter audit,
     Security.IAccessDecisionService access,
@@ -212,6 +213,12 @@ public sealed class PublishMethodologyHandler(
 
         RejectExtensionFunctions(parsed, version.NumericMode);
 
+        // ⛔ Лінія 1 захисту від мовчазного null: аргумент, який формула
+        // вживає, мусить відповідати колонці таблиці, до якої прив'язана
+        // методологія — інакше збірка (`CalculationInputBuilder`) не знайде
+        // звідки його взяти, і розрахунок «успішно» порахує порожньо.
+        await CheckArgumentColumnsAsync(methodology.Id, parsed, ct).ConfigureAwait(false);
+
         // ⚠ Попередження НЕ валять публікацію (№05 §7): «оголошено,
         // не вжито» чинна система допускала, і ламати через це міграцію не можна.
         // Вони йдуть у відповідь публікації, а не в журнал: той, хто публікує,
@@ -313,6 +320,40 @@ public sealed class PublishMethodologyHandler(
             + "чинного рушія, але використовує функції, яких той не обчислює: "
             + $"{string.Join("; ", found)}. Або приберіть їх, або переведіть версію в "
             + $"{NumericMode.Strict} з нової дати дії.");
+    }
+
+    /// <summary>
+    /// Звіряє аргументи формул версії з колонками таблиць, до яких методологію
+    /// прив'язано (<c>ECR-CALC-0438</c>, лінія 1 захисту).
+    /// </summary>
+    /// <param name="methodologyId">
+    /// Методологія-контейнер — <c>CalculationBinding</c> прив'язана саме до
+    /// неї, а не до конкретної версії (вона переживає всі версії одразу).
+    /// </param>
+    /// <param name="formulas">Розібрані формули версії, що публікується.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Методологія без жодної прив'язки перевірку пропускає мовчки: це не
+    /// послаблення, а межа предмета — прив'язку заводять окремим кроком
+    /// (<c>SaveCalculationBindingHandler</c>), і публікація версії без неї
+    /// сьогодні законний проміжний стан («методологію ще не підключили»).
+    /// Перевіряти нема з чим, доки прив'язки не існує.
+    /// </remarks>
+    private async Task CheckArgumentColumnsAsync(
+        int methodologyId, IReadOnlyList<ParsedFormula> formulas, CancellationToken ct)
+    {
+        var methodologyBindings = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
+        if (methodologyBindings.Count == 0)
+        {
+            return;
+        }
+
+        var tableDefIds = methodologyBindings.Select(b => b.TableDefId).Distinct().ToList();
+        var columnCodesByTable = await bindings
+            .ListColumnCodesAsync(tableDefIds, ct)
+            .ConfigureAwait(false);
+
+        MethodologyPublishChecks.CheckArgumentTableColumns(formulas, columnCodesByTable);
     }
 
     /// <summary>Усі виклики функцій у дереві, у порядку обходу.</summary>

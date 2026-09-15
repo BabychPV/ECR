@@ -1,6 +1,7 @@
 // src/Ecr.Application/Calculations/MethodologyPublishChecks.cs
 using System.Globalization;
 using Ecr.Application.Errors;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -210,6 +211,111 @@ public static class MethodologyPublishChecks
             + undeclared.Count.ToString(CultureInfo.InvariantCulture) + " — "
             + string.Join("; ", undeclared) + ".",
             new Dictionary<string, object?>(StringComparer.Ordinal) { ["undeclared"] = undeclared });
+    }
+
+    /// <summary>
+    /// Звіряє аргументи, які формули версії РЕАЛЬНО вживають, з кодами колонок
+    /// таблиць, куди <c>CalculationBinding</c> цю методологію прив'язує
+    /// (директива «структурна перевірка аргументів методології при
+    /// публікації», лінія 1).
+    /// </summary>
+    /// <param name="formulas">Формули версії з розібраними деревами.</param>
+    /// <param name="columnCodesByTable">
+    /// Коди колонок кожної таблиці, до якої прив'язана методологія (див.
+    /// <see cref="ICalculationBindingStore.ListColumnCodesAsync"/>);
+    /// таблиця без жодного запису в словнику вважається такою, що не має
+    /// жодної колонки, — усі аргументи для неї будуть «відсутні».
+    /// </param>
+    /// <param name="contextualArguments">
+    /// Контекстні аргументи, звільнені від цієї перевірки так само, як від
+    /// перевірки оголошення (<see cref="DefaultContextualArguments"/> за
+    /// замовчуванням): їх передає збірка, а не структура таблиці.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="formulas"/> або <paramref name="columnCodesByTable"/> —
+    /// <c>null</c>.
+    /// </exception>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0438</c> — аргумент, який формула вживає, не відповідає
+    /// жодній колонці однієї з прив'язаних таблиць.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Перевіряється КОЖНА прив'язана таблиця окремо, а не об'єднання їхніх
+    /// колонок: та сама версія методології може бути прив'язана до кількох
+    /// таблиць (кількох <c>CalculationBinding</c> з різними
+    /// <c>TableDefId</c>), і аргумент, якого бракує лише в одній з них,
+    /// зіпсує розрахунок рівно для рядків цієї таблиці — так само мовчки,
+    /// як і решта класу дефектів, що ловить ця перевірка.
+    ///
+    /// ⚠ Виклик передає прив'язки УСІХ станів, включно з вимкненими: вмикання
+    /// наявної прив'язки (<c>SaveCalculationBindingHandler</c>) не проходить
+    /// через публікацію версії, тож структурна вада вимкненої прив'язки не
+    /// отримала б другого шансу на перевірку в момент, коли її нарешті
+    /// увімкнуть.
+    /// </remarks>
+    public static void CheckArgumentTableColumns(
+        IReadOnlyList<ParsedFormula> formulas,
+        IReadOnlyDictionary<int, IReadOnlyList<string>> columnCodesByTable,
+        IReadOnlyList<string>? contextualArguments = null)
+    {
+        ArgumentNullException.ThrowIfNull(formulas);
+        ArgumentNullException.ThrowIfNull(columnCodesByTable);
+
+        var contextualKeys = new HashSet<string>(
+            (contextualArguments ?? DefaultContextualArguments)
+                .Select(ArgumentDeclarationChecker.NormalizeName),
+            StringComparer.OrdinalIgnoreCase);
+
+        var used = new List<string>();
+        foreach (var formula in formulas)
+        {
+            if (formula.Root is null)
+            {
+                continue;
+            }
+
+            used.AddRange(ArgumentDeclarationChecker.Used(formula.Root)
+                .Select(usage => ArgumentDeclarationChecker.NormalizeName(usage.Name)));
+        }
+
+        var requiredArguments = used
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(name => !contextualKeys.Contains(name))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (requiredArguments.Count == 0)
+        {
+            return;
+        }
+
+        var problems = new List<string>();
+
+        foreach (var (tableDefId, codes) in columnCodesByTable)
+        {
+            var codeSet = new HashSet<string>(codes, StringComparer.OrdinalIgnoreCase);
+            var missing = requiredArguments.Where(name => !codeSet.Contains(name)).ToList();
+
+            if (missing.Count > 0)
+            {
+                problems.Add(
+                    $"TableDefId {tableDefId.ToString(CultureInfo.InvariantCulture)}: немає колонок "
+                    + $"для аргументів {string.Join(", ", missing.Select(m => "@" + m))}");
+            }
+        }
+
+        if (problems.Count == 0)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.MethodologyArgumentColumnMissing,
+            "Аргумент, який формула методології вживає, збірка (`CalculationInputBuilder`) будує з "
+            + "клітинки колонки з тим самим кодом у таблиці, до якої прив'язана методологія цим "
+            + "аргументом; колонки з таким кодом там немає — розрахунок мовчки порахує null без "
+            + "жодної помилки. Проблемні таблиці: " + string.Join(" | ", problems) + ".",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["problems"] = problems });
     }
 
     /// <summary>
