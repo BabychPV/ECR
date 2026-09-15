@@ -916,6 +916,7 @@ USING (VALUES
     (N'periods.cloned',                  N'en', N'The clone is ready and selected.', 1),
     (N'periods.archive',                 N'en', N'Archive', 1),
     (N'periods.archiveConfirm',          N'en', N'The project becomes read-only. It is not deleted: submitted forms still refer to it.', 1),
+    (N'periods.archiveOpenPeriods',       N'en', N'This project still has periods that are not Closed. Archiving is only allowed once every period is closed.', 1),
     (N'periods.archived',                N'en', N'The project is archived. It is not deleted: submitted forms still refer to it.', 1),
     (N'periods.current',                 N'en', N'current', 1),
     (N'periods.currentNotOpen',          N'en', N'current is not Open', 1),
