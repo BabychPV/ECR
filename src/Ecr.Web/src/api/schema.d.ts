@@ -6305,6 +6305,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/styles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перелік стилів версії — для вибору наявного стилю під час
+         *     конструювання шаблону. Право `Template.View`.
+         * @description Директива registry-lookup / cell-style, Частина B (PR B1).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StyleDefDto"][];
+                        "text/json": components["schemas"]["StyleDefDto"][];
+                        "text/plain": components["schemas"]["StyleDefDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/styles/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує стиль версії-чернетки (заводить чи змінює за кодом). Право
+         *     `Template.Edit`.
+         * @description Директива registry-lookup / cell-style, Частина B (PR B1): CRUD
+         *     стилю, якого раніше не було жодного — модель і споживач
+         *     (`StyleMapper.cs`) уже існували.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код стилю. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveStyleDefRequest"];
+                    "application/json": components["schemas"]["SaveStyleDefRequest"];
+                    "text/json": components["schemas"]["SaveStyleDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StyleDefDto"];
+                        "text/json": components["schemas"]["StyleDefDto"];
+                        "text/plain": components["schemas"]["StyleDefDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}": {
         parameters: {
             query?: never;
@@ -8007,6 +8141,26 @@ export interface components {
          * @enum {unknown}
          */
         CellDataType: "String" | "Int" | "Decimal" | "Bool" | "Date" | "Lookup" | "Formula" | "Unit" | "Calculated";
+        /** @description Підмножина `StyleDef`, потрібна ЖИВІЙ сітці (директива registry-
+         *     lookup / cell-style, PR B2) — рамки/формат числа тут НЕ несуться:
+         *     перші читає лише Excel-експорт (`StyleMapper.cs`), другий сітка вже має
+         *     свій (`ColumnDef.DisplayFormat`), а IsBold/кольори/вирівнювання/перенос —
+         *     саме те, що змінює вигляд НЕ значення, а КОМІРКИ, тобто прямий аналог
+         *     CSS (`font-weight`, `color`, `background-color`, `text-align`,
+         *     `white-space`). */
+        CellStyleDto: {
+            /** Format: int32 */
+            backgroundArgb: null | number;
+            /** Format: int32 */
+            foregroundArgb: null | number;
+            /** Format: uint8 */
+            horizontalAlign: null | number;
+            isBold: boolean;
+            isItalic: boolean;
+            /** Format: uint8 */
+            verticalAlign: null | number;
+            wrapText: boolean;
+        };
         /**
          * @description Клас структурної зміни (документ 10 «Еволюція схеми»).
          * @enum {unknown}
@@ -8140,6 +8294,7 @@ export interface components {
             precision?: null | number;
             /** Format: uint8 */
             scale?: null | number;
+            style?: null | components["schemas"]["CellStyleDto"];
             /** Format: int32 */
             unitId: null | number;
             unitSymbol: null | string;
@@ -10644,6 +10799,46 @@ export interface components {
             /** @description Група для правил складу документа; `null` — поза групами. */
             sheetGroup: null | string;
         };
+        /** @description Оформлення стилю чернетки (директива registry-lookup / cell-style, Частина B). */
+        SaveStyleDefRequest: {
+            /**
+             * Format: int32
+             * @description Колір заливки, ARGB.
+             */
+            backgroundArgb: null | number;
+            /** @description Межі за стороною, товщина 0..3 (`StyleMapper.ApplyBorders`). */
+            borderJson: null | string;
+            /** @description `null`/порожнє — шрифт теми за замовчуванням. */
+            fontName: null | string;
+            /**
+             * Format: double
+             * @description `null` — розмір теми за замовчуванням.
+             */
+            fontSize: null | number;
+            /**
+             * Format: int32
+             * @description Колір тексту, ARGB.
+             */
+            foregroundArgb: null | number;
+            /**
+             * Format: uint8
+             * @description 0 Left, 1 Center, 2 Right, 3 Justify.
+             */
+            horizontalAlign: null | number;
+            /** @description Жирний. */
+            isBold: boolean;
+            /** @description Курсив. */
+            isItalic: boolean;
+            /** @description Формат числа Excel; `null` — формат теми. */
+            numberFormat: null | string;
+            /**
+             * Format: uint8
+             * @description 0 Top, 1 Center, 2 Bottom.
+             */
+            verticalAlign: null | number;
+            /** @description Перенос тексту в комірці. */
+            wrapText: boolean;
+        };
         /** @description Налаштування таблиці на аркуші чернетки (`W5.1`). */
         SaveTableDefRequest: {
             /** @description Розкладка: як періоди лягають на структуру. */
@@ -10905,6 +11100,28 @@ export interface components {
             /** Format: int32 */
             offset?: number;
             value?: null | string;
+        };
+        /** @description Стиль у відповіді на запис/перелік. */
+        StyleDefDto: {
+            /** Format: int32 */
+            backgroundArgb: null | number;
+            borderJson: null | string;
+            code: string;
+            fontName: null | string;
+            /** Format: double */
+            fontSize: null | number;
+            /** Format: int32 */
+            foregroundArgb: null | number;
+            /** Format: uint8 */
+            horizontalAlign: null | number;
+            /** Format: int32 */
+            id: number;
+            isBold: boolean;
+            isItalic: boolean;
+            numberFormat: null | string;
+            /** Format: uint8 */
+            verticalAlign: null | number;
+            wrapText: boolean;
         };
         /** @description Запит на перемикання master-джерела набору довідників. */
         SwitchSourceKindRequest: {

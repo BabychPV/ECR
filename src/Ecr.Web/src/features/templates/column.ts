@@ -1,6 +1,7 @@
 import type { components } from '@/api/schema';
 import type { TemplateColumnDto } from '@/api/types';
 import type { LocalizedValue } from '@/shared/ui/LocalizedInput';
+import { type StyleDraft, whyCannotSaveStyle } from './style';
 
 /**
  * Чернетка колонки таблиці в редакторі (`W5.2`, другий вертикальний зріз
@@ -68,6 +69,23 @@ export interface ColumnDraft {
   readonly unitId: number | null;
   readonly isNew: boolean;
 
+  /**
+   * Стиль показу (директива registry-lookup / cell-style, Частина B, PR
+   * B1) — ідентифікатор уже ЗБЕРЕЖЕНОГО `StyleDef`; `null` — колонка без
+   * стилю. Незалежний від {@link style} нижче: це те, що сервер уже знає,
+   * `style` — те, що редагує ця сесія форми ПРЯМО ЗАРАЗ.
+   */
+  readonly styleId: number | null;
+
+  /**
+   * Чернетка стилю, що редагується РАЗОМ із колонкою в цій формі; `null` —
+   * перемикач «власний стиль» вимкнено (колонка лишається без стилю, або зі
+   * старим {@link styleId}, якщо він був). Не персиститься сама по собі:
+   * `saveColumn` (`columnApi.ts`) спершу зберігає ЇЇ (`PUT …/styles/{code}`),
+   * і лише потім — колонку з отриманим `styleId`.
+   */
+  readonly style: StyleDraft | null;
+
   /** `false` — розширені поля вище невідомі клієнту (див. коментар типу). */
   readonly hasFullData: boolean;
 }
@@ -88,6 +106,8 @@ export function emptyColumnDraft(nextOrdinal: number): ColumnDraft {
     displayFormat: '',
     lookupRegistryDefId: null,
     unitId: null,
+    styleId: null,
+    style: null,
     isNew: true,
     hasFullData: true,
   };
@@ -117,6 +137,8 @@ export function columnDraftOf(column: TemplateColumnDto, full?: ColumnDefDto): C
       displayFormat: full.displayFormat ?? '',
       lookupRegistryDefId: full.lookupRegistryDefId,
       unitId: full.unitId,
+      styleId: full.styleId,
+      style: null,
       isNew: false,
       hasFullData: true,
     };
@@ -136,6 +158,8 @@ export function columnDraftOf(column: TemplateColumnDto, full?: ColumnDefDto): C
     displayFormat: column.displayFormat ?? '',
     lookupRegistryDefId: null,
     unitId: null,
+    styleId: null,
+    style: null,
     isNew: false,
     hasFullData: false,
   };
@@ -150,7 +174,7 @@ export function columnDraftOf(column: TemplateColumnDto, full?: ColumnDefDto): C
  * код» не мінялося, коли причина насправді була в символах, а не в порожньому
  * полі.
  */
-export type ColumnBlocker = 'CodeEmpty' | 'CodeInvalid' | 'Header' | 'Scale';
+export type ColumnBlocker = 'CodeEmpty' | 'CodeInvalid' | 'Header' | 'Scale' | 'StyleCode';
 
 /** Чому чернетку ще не можна зберегти; `null` — можна. */
 export function whyCannotSaveColumn(draft: ColumnDraft): ColumnBlocker | null {
@@ -162,6 +186,13 @@ export function whyCannotSaveColumn(draft: ColumnDraft): ColumnBlocker | null {
   // ⚠ Дзеркалить `ColumnDef.SetNumericFormat`: сервер відхилив би те саме,
   // форма лише не везе в мережу те, що напевно повернеться відмовою.
   if (draft.precision !== null && draft.scale !== null && draft.scale > draft.precision) return 'Scale';
+
+  // ⛔ Директива registry-lookup / cell-style, PR B1: перемикач «власний
+  // стиль» увімкнено (`draft.style !== null`), і код стилю ще недійсний —
+  // збереження колонки заблоковане РАЗОМ зі стилем: `saveColumn` шле стиль
+  // ПЕРШИМ (`columnApi.ts`), і недійсний код там дав би сиру відмову сервера
+  // замість цієї, зрозумілої одразу на формі.
+  if (draft.style !== null && whyCannotSaveStyle(draft.style) !== null) return 'StyleCode';
 
   return null;
 }
@@ -179,7 +210,15 @@ export function columnBody(draft: ColumnDraft): SaveColumnDefRequest {
     scale: draft.scale,
     defaultValue: draft.defaultValue.trim().length === 0 ? null : draft.defaultValue.trim(),
     displayFormat: draft.displayFormat.trim().length === 0 ? null : draft.displayFormat.trim(),
-    styleId: null,
+
+    // ⛔ Директива registry-lookup / cell-style, PR B1: раніше сюди завжди
+    // йшов `null` — жоден код у застосунку не міг записати `ColumnDef.StyleId`
+    // взагалі, бо не було чим його ЗАВЕСТИ. `saveColumn` (`columnApi.ts`)
+    // підставляє СПРАВЖНІй, щойно збережений `styleId` замість цього поля,
+    // коли форма несе чернетку стилю (`draft.style !== null`) — тут лишається
+    // те, що вже персистентне (наявний `styleId`, або `null`, якщо стилю
+    // ніколи не було).
+    styleId: draft.styleId,
     lookupRegistryDefId: draft.lookupRegistryDefId,
     lookupFilter: null,
     unitId: draft.unitId,

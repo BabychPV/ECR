@@ -76,6 +76,11 @@ public static class DependencyInjection
         services.AddScoped<SaveRowDefHandler>();
         services.AddScoped<DeleteRowDefHandler>();
 
+        // Директива registry-lookup / cell-style, Частина B (PR B1): CRUD
+        // стилю — той самий патерн, що колонка/рядок вище.
+        services.AddScoped<SaveStyleDefHandler>();
+        services.AddScoped<ListStyleDefsHandler>();
+
         // П'ятий зріз — формула колонки чи рядка (W5.3), за зразком вище.
         services.AddScoped<SaveFormulaDefHandler>();
         services.AddScoped<DeleteFormulaDefHandler>();

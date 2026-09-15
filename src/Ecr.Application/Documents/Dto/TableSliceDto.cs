@@ -1,4 +1,6 @@
 ﻿// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
+using Ecr.Domain.Entities.Configuration;
+
 namespace Ecr.Application.Documents.Dto;
 
 /// <summary>
@@ -55,6 +57,10 @@ public sealed record TableSliceDto(
 /// методологією таблиці», а не «обов'язкова для КОЖНОГО рядка»: та сама
 /// точність, що вже прийнята для <see cref="IsRequired"/> (він теж не
 /// знає про рядки).
+///
+/// ⚠ <see cref="Style"/> — оформлення, задане автором шаблону (директива
+/// registry-lookup / cell-style, PR B2); <c>null</c> —
+/// <see cref="ColumnDef.StyleId"/> не задано, комірка виглядає як завжди.
 /// </remarks>
 public sealed record ColumnDto(
     int Id,
@@ -71,7 +77,26 @@ public sealed record ColumnDto(
     string? UnitSymbol,
     byte? Precision = null,
     byte? Scale = null,
-    bool IsRequiredByMethodology = false);
+    bool IsRequiredByMethodology = false,
+    CellStyleDto? Style = null);
+
+/// <summary>
+/// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-
+/// lookup / cell-style, PR B2) — рамки/формат числа тут НЕ несуться:
+/// перші читає лише Excel-експорт (`StyleMapper.cs`), другий сітка вже має
+/// свій (`ColumnDef.DisplayFormat`), а IsBold/кольори/вирівнювання/перенос —
+/// саме те, що змінює вигляд НЕ значення, а КОМІРКИ, тобто прямий аналог
+/// CSS (`font-weight`, `color`, `background-color`, `text-align`,
+/// `white-space`).
+/// </summary>
+public sealed record CellStyleDto(
+    bool IsBold,
+    bool IsItalic,
+    int? ForegroundArgb,
+    int? BackgroundArgb,
+    byte? HorizontalAlign,
+    byte? VerticalAlign,
+    bool WrapText);
 
 /// <summary>Рядок зі значеннями. Ключ у <paramref name="Cells"/> — код колонки.</summary>
 /// <param name="RowKey">Ідентичність рядка.</param>

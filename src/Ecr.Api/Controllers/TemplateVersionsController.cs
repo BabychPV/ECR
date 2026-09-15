@@ -30,6 +30,8 @@ public sealed class TemplateVersionsController(
     DeleteTableDefHandler deleteTable,
     SaveColumnDefHandler saveColumn,
     DeleteColumnDefHandler deleteColumn,
+    SaveStyleDefHandler saveStyle,
+    ListStyleDefsHandler listStyles,
     SaveRowDefHandler saveRow,
     DeleteRowDefHandler deleteRow,
     SaveFormulaDefHandler saveFormula,
@@ -512,6 +514,55 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>
+    /// Перелік стилів версії — для вибору наявного стилю під час
+    /// конструювання шаблону. Право <c>Template.View</c>.
+    /// </summary>
+    /// <param name="id">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Директива registry-lookup / cell-style, Частина B (PR B1).
+    /// </remarks>
+    [HttpGet("styles")]
+    [ProducesResponseType<IReadOnlyList<StyleDefDto>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<StyleDefDto>>> ListStyles(int id, CancellationToken ct)
+        => Ok(await listStyles.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Записує стиль версії-чернетки (заводить чи змінює за кодом). Право
+    /// <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="code">Код стилю.</param>
+    /// <param name="request">Оформлення.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Директива registry-lookup / cell-style, Частина B (PR B1): CRUD
+    /// стилю, якого раніше не було жодного — модель і споживач
+    /// (`StyleMapper.cs`) уже існували.
+    /// </remarks>
+    [HttpPut("styles/{code}")]
+    [ProducesResponseType<StyleDefDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<StyleDefDto>> SaveStyle(
+        int id, string code, [FromBody] SaveStyleDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveStyle
+            .HandleAsync(
+                id,
+                code,
+                new SaveStyleDefCommand(
+                    request.FontName, request.FontSize, request.IsBold, request.IsItalic,
+                    request.ForegroundArgb, request.BackgroundArgb, request.BorderJson,
+                    request.HorizontalAlign, request.VerticalAlign, request.WrapText, request.NumberFormat),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
     /// Записує рядок фіксованої таблиці чернетки. Право <c>Template.Edit</c>.
     /// </summary>
     /// <param name="id">Версія-чернетка.</param>
@@ -849,6 +900,31 @@ public sealed record SaveColumnDefRequest(
     int? LookupRegistryDefId,
     string? LookupFilter,
     int? UnitId);
+
+/// <summary>Оформлення стилю чернетки (директива registry-lookup / cell-style, Частина B).</summary>
+/// <param name="FontName"><c>null</c>/порожнє — шрифт теми за замовчуванням.</param>
+/// <param name="FontSize"><c>null</c> — розмір теми за замовчуванням.</param>
+/// <param name="IsBold">Жирний.</param>
+/// <param name="IsItalic">Курсив.</param>
+/// <param name="ForegroundArgb">Колір тексту, ARGB.</param>
+/// <param name="BackgroundArgb">Колір заливки, ARGB.</param>
+/// <param name="BorderJson">Межі за стороною, товщина 0..3 (`StyleMapper.ApplyBorders`).</param>
+/// <param name="HorizontalAlign">0 Left, 1 Center, 2 Right, 3 Justify.</param>
+/// <param name="VerticalAlign">0 Top, 1 Center, 2 Bottom.</param>
+/// <param name="WrapText">Перенос тексту в комірці.</param>
+/// <param name="NumberFormat">Формат числа Excel; <c>null</c> — формат теми.</param>
+public sealed record SaveStyleDefRequest(
+    string? FontName,
+    decimal? FontSize,
+    bool IsBold,
+    bool IsItalic,
+    int? ForegroundArgb,
+    int? BackgroundArgb,
+    string? BorderJson,
+    byte? HorizontalAlign,
+    byte? VerticalAlign,
+    bool WrapText,
+    string? NumberFormat);
 
 /// <summary>Налаштування рядка фіксованої таблиці чернетки (<c>W5.2</c>).</summary>
 /// <param name="LabelL10n">Підпис рядка мовами каталогу.</param>

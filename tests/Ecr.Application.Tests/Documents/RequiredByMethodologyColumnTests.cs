@@ -92,6 +92,15 @@ public sealed class RequiredByMethodologyColumnTests
         return catalogue;
     }
 
+    /// <summary>Порожній каталог стилів (директива registry-lookup / cell-style, PR B2) — не предмет цих тестів.</summary>
+    private static IStyleCatalog Styles()
+    {
+        var catalogue = Substitute.For<IStyleCatalog>();
+        catalogue.GetAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, StyleDef>());
+        return catalogue;
+    }
+
     private static AccessProfile Profile() => new()
     {
         CacheKey = "p", UserId = 9, SecurityStamp = "s",
@@ -101,7 +110,7 @@ public sealed class RequiredByMethodologyColumnTests
     };
 
     private GetTableSliceHandler Handler()
-        => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods);
+        => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods, Styles());
 
     /// <summary>Методологія, чинна для таблиці, з обов'язковим входом <c>Category</c>.</summary>
     /// <param name="withRule">

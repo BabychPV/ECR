@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { emptyColumnDraft, whyCannotSaveColumn } from '../column';
+import type { TemplateColumnDto } from '@/api/types';
+import { columnDraftOf, columnBody, emptyColumnDraft, whyCannotSaveColumn, type ColumnDefDto } from '../column';
+import { emptyStyleDraft } from '../style';
 
 /**
  * Той самий дефект, що й `table.test.ts` (Q-336, `table.ts`): форма колонки
@@ -42,5 +44,96 @@ describe('whyCannotSaveColumn (ColumnDraft)', () => {
         headerL10n: { en: 'Column' },
       }),
     ).toBeNull();
+  });
+
+  // ⛔ Директива registry-lookup / cell-style, PR B1: «власний стиль» —
+  // ДРУГА причина, за якою колонку не можна зберегти, поверх решти форми.
+  // Без цієї гілки недійсний код стилю пройшов би повз клієнтську валідацію
+  // і впав би сирою відмовою сервера на ОКРЕМОМУ запиті (`PUT …/styles/…`,
+  // `columnApi.ts`), який форма шле РАНІШЕ за сам запис колонки.
+  it('увімкнено власний стиль з порожнім кодом — блокує StyleCode', () => {
+    expect(
+      whyCannotSaveColumn({
+        ...emptyColumnDraft(1),
+        code: 'VALID_CODE',
+        headerL10n: { en: 'Column' },
+        style: emptyStyleDraft(''),
+      }),
+    ).toBe('StyleCode');
+  });
+
+  it('увімкнено власний стиль з чинним кодом — не блокує', () => {
+    expect(
+      whyCannotSaveColumn({
+        ...emptyColumnDraft(1),
+        code: 'VALID_CODE',
+        headerL10n: { en: 'Column' },
+        style: emptyStyleDraft('BoldStyle'),
+      }),
+    ).toBeNull();
+  });
+});
+
+/**
+ * Живий перегляд (Етап 3, лана "Documents core" — прогін уже готового PR
+ * B1, не окрема лана) знайшов реальну шорсткість: `TemplateColumnDto`
+ * (`GET …/structure`) НЕ несе `styleId` — той самий клас обмеження, що вже
+ * мали `precision`/`lookup`/`unit` (`D-137`, `hasFullData`). Відкриття
+ * форми колонки БЕЗ кешу цього сеансу (прямий перехід на сторінку версії)
+ * тому завжди бачить чернетку без стилю, і збереження такої форми стерло б
+ * наявний стиль колонки мовчки — якби не попередження `hasFullData`, яке
+ * вже покриває цей самий клас дефекту для інших полів.
+ */
+describe('columnDraftOf: styleId — той самий клас "неповних даних", що precision/lookup', () => {
+  const templateColumn: TemplateColumnDto = {
+    id: 1,
+    code: 'C1',
+    headerL10n: { values: { en: 'Column 1' } },
+    dataType: 'Decimal',
+    ordinal: 0,
+    isRequired: false,
+    isReadOnly: false,
+    isHidden: false,
+    displayFormat: null,
+    unitSymbol: null,
+  };
+
+  const fullColumn: ColumnDefDto = {
+    id: 1,
+    code: 'C1',
+    headerL10n: { values: { en: 'Column 1' } },
+    ordinal: 0,
+    dataType: 'Decimal',
+    isRequired: false,
+    isReadOnly: false,
+    isHidden: false,
+    precision: null,
+    scale: null,
+    defaultValue: null,
+    displayFormat: null,
+    styleId: 42,
+    lookupRegistryDefId: null,
+    lookupFilter: null,
+    unitId: null,
+  };
+
+  it('без кешу сеансу (лише TemplateColumnDto) — styleId завжди null, hasFullData: false', () => {
+    const draft = columnDraftOf(templateColumn);
+
+    expect(draft.styleId).toBeNull();
+    expect(draft.hasFullData).toBe(false);
+  });
+
+  it('з кешем сеансу (ColumnDefDto щойно збереженого PUT) — styleId зберігається', () => {
+    const draft = columnDraftOf(templateColumn, fullColumn);
+
+    expect(draft.styleId).toBe(42);
+    expect(draft.hasFullData).toBe(true);
+  });
+
+  it('мутаційний доказ: збереження чернетки БЕЗ кешу шле styleId: null — саме тому попередження hasFullData обов\'язкове', () => {
+    const draft = columnDraftOf(templateColumn);
+
+    expect(columnBody(draft).styleId).toBeNull();
   });
 });

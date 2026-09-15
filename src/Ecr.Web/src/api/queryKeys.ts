@@ -65,6 +65,12 @@ const templates = {
 
   /** `GET /api/v1/template-versions/{versionId}/access-matrix`. */
   accessMatrix: (versionId: number) => ['templates', 'accessMatrix', versionId] as const,
+
+  /**
+   * `GET /api/v1/template-versions/{versionId}/styles` — усі стилі версії
+   * (директива registry-lookup / cell-style, PR B1).
+   */
+  stylesOf: (versionId: number) => ['templates', 'stylesOf', versionId] as const,
 };
 
 /** Домен `registries`: перелік довідників, записи, опис (definition), історія. */

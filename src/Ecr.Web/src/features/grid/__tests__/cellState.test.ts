@@ -92,6 +92,35 @@ describe('Стани комірки', () => {
   });
 });
 
+// ⛔ Аудит Етапу 3, лана "Documents core"
+// (`lane3-readonly-cell-after-submit-not-communicated`): після Submit
+// `DocumentPage.tsx` передає `readOnly=true` в `DocumentGrid`, і воно блокує
+// РЕДАГУВАННЯ (RevoGrid `readonly`), але до цього фіксу жодна комірка не
+// ОТРИМУВАЛА жодного стану через це — `decide()` (сервер) не знає нічого
+// про статус подання, лише про колонку/рядок/період/гранти. Комірка, яку
+// жодне з ЦИХ правил не забороняло, лишалася виглядом «звичайна редагована»
+// — клацання по ній нічого не робило, і ніщо в самій комірці цього не
+// пояснювало.
+describe('gridReadOnly: стан подання, а не бізнес-правило комірки', () => {
+  it('grid readOnly=true — комірка, яку decide() дозволив би, усе одно readOnly', () => {
+    // ⚠ Порожні `cellPermissions` — сервер НЕ забороняє цю комірку жодним
+    // власним правилом. Без `gridReadOnly` це дало б `null` (RED).
+    expect(cellStateOf(slice(), 'R1', column(), noFlags, true)).toBe('readOnly');
+  });
+
+  it('grid readOnly=false (типово) — поведінка НЕ змінилась: редагована комірка без стану', () => {
+    expect(cellStateOf(slice(), 'R1', column(), noFlags, false)).toBeNull();
+    expect(cellStateOf(slice(), 'R1', column(), noFlags)).toBeNull();
+  });
+
+  it('grid readOnly=true не перекриває dirty/orphaned — пріоритет станів той самий', () => {
+    const s = slice();
+    s.rows[0]!.isOrphaned = true;
+
+    expect(cellStateOf(s, 'R1', column(), noFlags, true)).toBe('orphaned');
+  });
+});
+
 describe('Розрізнення станів БЕЗ кольору (ФВ-14.18)', () => {
   const states: CellStateName[] = ['orphaned', 'dirty', 'rounded', 'calculated', 'readOnly'];
 

@@ -106,4 +106,29 @@ describe('Правка в grid', () => {
     expect(coerce('так', 'Bool')).toBe(true);
     expect(coerce('false', 'Bool')).toBe(false);
   });
+
+  // ⛔ Директива registry-lookup, PR A4: `LookupCellEditor` завжди шле сюди
+  // рядкове представлення `entry.Id` (`String(entryId)`) або порожній рядок
+  // (скасовано вибір) — НІКОЛИ текст показу (`entry.Display`). До цієї гілки
+  // `coerce()` не мав окремого випадку для `'Lookup'` і провалювався в
+  // `return raw`, тобто зберігав би ДЕСЯТКОВЕ ЧИСЛО як РЯДОК — і
+  // `CellValueReader.Read` (бекенд) розібрав би `'3'`-рядок у
+  // `ValueRegistryEntryId` коректно лише випадково, через `int.TryParse`
+  // фолбек, а результат все одно НЕ number на клієнті (порушує контракт
+  // `PatchCellsRequest.PatchCell.Value: object`, де Lookup-комірки мають
+  // нести число — `directive-registry-lookup-and-cell-style.md`, PR A4,
+  // «збереження — ValueRegistryEntryId (число), не текст»).
+  it('Lookup: рядкове представлення entryId стає числом', () => {
+    expect(coerce('3', 'Lookup')).toBe(3);
+    expect(coerce('42', 'Lookup')).toBe(42);
+  });
+
+  it('Lookup: порожній вибір (скасування) — null, не 0 і не порожній рядок', () => {
+    expect(coerce('', 'Lookup')).toBeNull();
+    expect(coerce('   ', 'Lookup')).toBeNull();
+  });
+
+  it('Lookup: нерозпізнаний ідентифікатор лишається текстом (сервер відповість ECR-CELL-0422)', () => {
+    expect(coerce('н/д', 'Lookup')).toBe('н/д');
+  });
 });

@@ -113,7 +113,26 @@ public sealed class GetTableSliceTests
         return catalogue;
     }
 
-    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods);
+    /// <summary>
+    /// Каталог стилів для зрізу (директива registry-lookup / cell-style,
+    /// PR B2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній навмисно, тим самим прийомом, що й <see cref="Units"/>
+    /// вище: ці тести не про оформлення, і колонка без стилю має віддавати
+    /// <c>Style: null</c>, а не падати.
+    /// </remarks>
+    private static IStyleCatalog Styles()
+    {
+        var catalogue = NSubstitute.Substitute.For<IStyleCatalog>();
+        catalogue.GetAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, StyleDef>());
+
+        return catalogue;
+    }
+
+    private GetTableSliceHandler Handler()
+        => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods, Styles());
 
     private void Cells(params CellRecord[] records)
         => _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(records);

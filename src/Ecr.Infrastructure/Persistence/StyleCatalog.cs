@@ -30,4 +30,14 @@ public sealed class StyleCatalog(EcrDbContext db) : IStyleCatalog
 
         return styles.ToDictionary(s => s.Id);
     }
+
+    /// <inheritdoc />
+    public async Task<StyleDef?> FindByCodeAsync(int templateVersionId, string code, CancellationToken ct)
+        => await db.StyleDefs
+            .FirstOrDefaultAsync(
+                s => s.TemplateVersionId == templateVersionId && s.Code == code, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddDefinition(StyleDef style) => db.StyleDefs.Add(style);
 }

@@ -445,6 +445,12 @@ USING (VALUES
     (N'grid.confirmTitle',               N'en', N'Confirm this change', 1),
     (N'grid.confirmCancel',              N'en', N'Cancel', 1),
     (N'grid.confirmProceed',             N'en', N'Proceed', 1),
+    -- ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-readonly-cell-after-
+    -- submit-not-communicated`): до цього рядка комірка після Submit
+    -- показувала штрихування й курсор "not-allowed" (`.ecr-cell--read-only`
+    -- уже існував), але без ЖОДНОГО тексту — клацання виглядало як
+    -- зависання, не як «сюди не можна саме тому, що аркуш подано».
+    (N'grid.submittedReadOnlyHint',      N'en', N'This sheet has been submitted; editing is closed until it is reopened.', 1),
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
     (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),
@@ -1489,12 +1495,54 @@ USING (VALUES
     -- списку за назвою й кодом.
     (N'columns.lookupRegistryDefIdHint', N'en', N'The registry this column looks values up from.', 1),
     (N'columns.lookupRegistryDefIdEmpty', N'en', N'No registries found', 1),
-    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.', 1),
+    -- ⛔ Директива registry-lookup / cell-style, PR B1: `styleId` приєднався
+    -- до того самого класу полів, що `precision`/`lookup`/`unit` уже мали —
+    -- `TemplateColumnDto` (GET …/structure) його теж не несе (`D-137`), тож
+    -- редагування колонки без кешу цього сеансу так само стерло б стиль.
+    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.', 1),
     (N'columns.errCode',                 N'en', N'Give the column a code: it is how the column is addressed.', 1),
     -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336).
     (N'columns.errCodeInvalid',          N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'columns.errHeader',               N'en', N'Give the column a header in at least one language.', 1),
     (N'columns.errScale',                N'en', N'Scale cannot exceed precision.', 1),
+    -- ⛔ Директива registry-lookup / cell-style, PR B1: раніше жоден екран не
+    -- давав автору шаблону задати StyleDef колонки — стиль долітав лише до
+    -- Excel-експорту (`StyleMapper.cs`), заведеного в базу лише seed-ом.
+    (N'columns.customStyle',             N'en', N'Custom style', 1),
+    (N'columns.customStyleHint',         N'en', N'Set once when building the template; the person filling in the form only sees it.', 1),
+    (N'styles.legend',                   N'en', N'Style', 1),
+    (N'styles.code',                     N'en', N'Style code', 1),
+    (N'styles.codeHint',                 N'en', N'Unique within this template version; used to reference this style.', 1),
+    (N'styles.errCode',                  N'en', N'Give the style a code.', 1),
+    (N'styles.errCodeInvalid',           N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
+    (N'styles.bold',                     N'en', N'Bold', 1),
+    (N'styles.italic',                   N'en', N'Italic', 1),
+    (N'styles.wrapText',                 N'en', N'Wrap text', 1),
+    (N'styles.fontName',                 N'en', N'Font name', 1),
+    (N'styles.fontNameHint',             N'en', N'Leave empty for the workbook theme font.', 1),
+    (N'styles.fontSize',                 N'en', N'Font size', 1),
+    (N'styles.foreground',               N'en', N'Text color', 1),
+    (N'styles.background',               N'en', N'Fill color', 1),
+    (N'styles.horizontalAlign',          N'en', N'Horizontal align', 1),
+    (N'styles.verticalAlign',            N'en', N'Vertical align', 1),
+    (N'styles.alignLeft',                N'en', N'Left', 1),
+    (N'styles.alignCenter',              N'en', N'Center', 1),
+    (N'styles.alignRight',               N'en', N'Right', 1),
+    (N'styles.alignJustify',             N'en', N'Justify', 1),
+    (N'styles.alignTop',                 N'en', N'Top', 1),
+    (N'styles.alignMiddle',              N'en', N'Middle', 1),
+    (N'styles.alignBottom',              N'en', N'Bottom', 1),
+    (N'styles.borderLegend',             N'en', N'Border', 1),
+    (N'styles.borderTop',                N'en', N'Top', 1),
+    (N'styles.borderRight',              N'en', N'Right', 1),
+    (N'styles.borderBottom',             N'en', N'Bottom', 1),
+    (N'styles.borderLeft',               N'en', N'Left', 1),
+    (N'styles.borderNone',               N'en', N'None', 1),
+    (N'styles.borderThin',               N'en', N'Thin', 1),
+    (N'styles.borderMedium',             N'en', N'Medium', 1),
+    (N'styles.borderThick',              N'en', N'Thick', 1),
+    (N'styles.numberFormat',             N'en', N'Number format', 1),
+    (N'styles.numberFormatHint',         N'en', N'Excel number format, e.g. 0.00; leave empty for the theme default.', 1),
     -- Редактор рядків фіксованої таблиці (W5.2) — третій вертикальний зріз.
     (N'rows.title',                      N'en', N'Rows', 1),
     (N'rows.add',                        N'en', N'Add row', 1),

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Group, Tooltip } from '@mantine/core';
+import { Button, Divider, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -233,79 +233,106 @@ export function SheetActions({
 
   const me = session.data;
 
+  // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
+  // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН
+  // пласкій `Group`, що несе Period/Validate/Import/Export і — до цього
+  // фіксу — ВКЛАДЕНИЙ `<Group>` цього компонента (Recalculate/Submit/
+  // Approve/Reject/Reopen). Вкладена Group у флекс-контейнері поводиться
+  // як ОДИН елемент переносу, тож рядок ламався нерівномірно залежно від
+  // того, скільки кнопок показано (права/стан аркуша різні для кожного
+  // користувача) — «кнопки не згруповані та не в одному ряду».
+  //
+  // ⚠ Фікс — без Group ТУТ: кнопки повертаються ПРЯМИМИ дітьми фрагмента,
+  // тобто прямими flex-елементами БАТЬКІВСЬКОГО `Group` (`DocumentPage.tsx`),
+  // а не вкладеним контейнером. `Divider` перед ними — видимий кордон між
+  // «безпечними» діями (Period/Validate/Export/Import) і «робочим процесом»
+  // (Recalculate/Submit/Approve/Reject/Reopen, останні три вже кольорові:
+  // green/statusError) — те саме розділення класів ризику, що директива вже
+  // застосувала для лан 1-7.
+  const hasAnyAction =
+    can(me, 'Calculation.Recalculate') ||
+    isAllowed('submit', state) ||
+    isAllowed('approve', state) ||
+    isAllowed('reject', state) ||
+    (isAllowed('reopen', state) && can(me, 'Document.Reopen'));
+
   return (
     <>
-      <Group gap="xs">
-        {/*
-         * ⛔ Прогалина 2 директиви паритету зі старою системою (Q-327 →
-         * Q-331): до Q-331 кнопка стояла на екрані ОДНОГО аркуша
-         * (`SheetActions` отримує `sheetDefId`), а `POST
-         * /documents/{id}/recalculate` перераховувала ВЕСЬ документ — усі
-         * аркуші за цей період, не лише активний. Тепер `sheetDefId`
-         * справді йде в тілі запиту, і сервер звужує ЗАПИС до таблиць цього
-         * аркуша. Підказка лишається (текст оновлено), бо нюанс і досі є:
-         * формула цього аркуша має право читати дані сусіднього, тож
-         * перерахунок однаково враховує весь документ на ВХОДІ, хоч і пише
-         * лише в цей аркуш. Підпис кнопки лишається нейтральним «Recalculate»
-         * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
-         */}
-        {can(me, 'Calculation.Recalculate') && (
-          <Tooltip label={t('workflow.recalculateHint')} multiline w={260}>
-            <Button
-              size="xs"
-              variant="default"
-              loading={recalculate.isPending || recalcRunning}
-              onClick={() => {
-                if (recalculateInFlight.current) return;
-                recalculateInFlight.current = true;
-                recalculate.mutate(undefined, {
-                  onSettled: () => {
-                    recalculateInFlight.current = false;
-                  },
-                });
-              }}
-            >
-              {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
-            </Button>
-          </Tooltip>
-        )}
-
-        {isAllowed('submit', state) && (
-          <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate()}>
-            {t('document.submit')}
-          </Button>
-        )}
-
-        {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка
-            «Затвердити» без «Відхилити» перетворює погодження на формальність:
-            єдиний спосіб не затвердити — не натиснути нічого, і аркуш висить
-            у `Submitted` без жодного сліду причини. */}
-        {isAllowed('approve', state) && (
+      {hasAnyAction && (
+        // ⚠ Роздільник — лише коли є ЩО розділяти: порожній `Divider` без
+        // жодної кнопки за ним (роль без жодного права робочого процесу,
+        // напр. Auditor) виглядав би як зламаний хвіст рядка.
+        <Divider orientation="vertical" />
+      )}
+      {/*
+       * ⛔ Прогалина 2 директиви паритету зі старою системою (Q-327 →
+       * Q-331): до Q-331 кнопка стояла на екрані ОДНОГО аркуша
+       * (`SheetActions` отримує `sheetDefId`), а `POST
+       * /documents/{id}/recalculate` перераховувала ВЕСЬ документ — усі
+       * аркуші за цей період, не лише активний. Тепер `sheetDefId`
+       * справді йде в тілі запиту, і сервер звужує ЗАПИС до таблиць цього
+       * аркуша. Підказка лишається (текст оновлено), бо нюанс і досі є:
+       * формула цього аркуша має право читати дані сусіднього, тож
+       * перерахунок однаково враховує весь документ на ВХОДІ, хоч і пише
+       * лише в цей аркуш. Підпис кнопки лишається нейтральним «Recalculate»
+       * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
+       */}
+      {can(me, 'Calculation.Recalculate') && (
+        <Tooltip label={t('workflow.recalculateHint')} multiline w={260}>
           <Button
             size="xs"
-            color="green"
-            loading={decide.isPending}
-            onClick={() => decide.mutate({ approved: true, reason: null })}
+            variant="default"
+            loading={recalculate.isPending || recalcRunning}
+            onClick={() => {
+              if (recalculateInFlight.current) return;
+              recalculateInFlight.current = true;
+              recalculate.mutate(undefined, {
+                onSettled: () => {
+                  recalculateInFlight.current = false;
+                },
+              });
+            }}
           >
-            {t('workflow.approve')}
+            {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>
-        )}
+        </Tooltip>
+      )}
 
-        {isAllowed('reject', state) && (
-          <Button size="xs" color="statusError" variant="light" onClick={() => setAsking('reject')}>
-            {t('workflow.reject')}
-          </Button>
-        )}
+      {isAllowed('submit', state) && (
+        <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate()}>
+          {t('document.submit')}
+        </Button>
+      )}
 
-        {/* ⚠ Повернення в роботу — окреме небезпечне право (`ФВ-6.12`): воно
-            дає змогу змінити вже подані числа. Тому і кнопка окрема, і
-            причина обов'язкова. */}
-        {isAllowed('reopen', state) && can(me, 'Document.Reopen') && (
-          <Button size="xs" variant="light" onClick={() => setAsking('reopen')}>
-            {t('workflow.reopen')}
-          </Button>
-        )}
-      </Group>
+      {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка
+          «Затвердити» без «Відхилити» перетворює погодження на формальність:
+          єдиний спосіб не затвердити — не натиснути нічого, і аркуш висить
+          у `Submitted` без жодного сліду причини. */}
+      {isAllowed('approve', state) && (
+        <Button
+          size="xs"
+          color="green"
+          loading={decide.isPending}
+          onClick={() => decide.mutate({ approved: true, reason: null })}
+        >
+          {t('workflow.approve')}
+        </Button>
+      )}
+
+      {isAllowed('reject', state) && (
+        <Button size="xs" color="statusError" variant="light" onClick={() => setAsking('reject')}>
+          {t('workflow.reject')}
+        </Button>
+      )}
+
+      {/* ⚠ Повернення в роботу — окреме небезпечне право (`ФВ-6.12`): воно
+          дає змогу змінити вже подані числа. Тому і кнопка окрема, і
+          причина обов'язкова. */}
+      {isAllowed('reopen', state) && can(me, 'Document.Reopen') && (
+        <Button size="xs" variant="light" onClick={() => setAsking('reopen')}>
+          {t('workflow.reopen')}
+        </Button>
+      )}
 
       <ReasonModal
         opened={asking === 'reject'}

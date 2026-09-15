@@ -1043,6 +1043,7 @@ export function TemplateVersionPage(): JSX.Element {
             draft={columnEdit.draft}
             disabled={!canEditSheets}
             saving={saveColumnMutation.isPending}
+            templateVersionId={id}
             onChange={(draft) => setColumnEdit({ tableId: columnEdit.tableId, draft })}
             onSubmit={() => saveColumnMutation.mutate(columnEdit)}
             onCancel={() => setColumnEdit(null)}

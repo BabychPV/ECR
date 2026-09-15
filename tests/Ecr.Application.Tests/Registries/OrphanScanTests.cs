@@ -288,7 +288,18 @@ public sealed class OrphanScanTests
         return catalogue;
     }
 
-    private GetTableSliceHandler Slice() => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods);
+    /// <summary>Порожній каталог стилів (директива registry-lookup / cell-style, PR B2) — не предмет цих тестів.</summary>
+    private static Ecr.Application.Ports.IStyleCatalog Styles()
+    {
+        var catalogue = NSubstitute.Substitute.For<Ecr.Application.Ports.IStyleCatalog>();
+        catalogue.GetAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, Ecr.Domain.Entities.Configuration.StyleDef>());
+
+        return catalogue;
+    }
+
+    private GetTableSliceHandler Slice()
+        => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods, Styles());
 
     private SubmitSheetHandler Submit()
         => new(

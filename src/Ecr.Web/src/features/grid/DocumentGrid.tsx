@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
-import type { ColumnDto, CreateRowRequest, TableSliceDto } from '@/api/types';
+import { queryKeys } from '@/api/queryKeys';
+import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
+import { cellAppearanceOf } from './cellAppearance';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
+import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, confirmationOf, decide, guardOf } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
@@ -384,12 +387,73 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return byCell;
   }, [saveErrorCells]);
 
+  // ⛔ Директива registry-lookup, PR A4: `ColumnDto.lookupRegistryDefId` — це
+  // ID довідника, а ендпоінт записів адресується КОДОМ
+  // (`GET /api/v1/registries/{code}/entries`) — те саме розходження, що вже
+  // розв'язала `ColumnEditor.tsx` (A3). Резолв іде у два кроки: перелік
+  // довідників (ID → код) один раз для будь-якої кількості `Lookup`-колонок,
+  // потім по одному запиту записів НА ДОВІДНИК (не на колонку — кілька
+  // колонок можуть ділити той самий довідник, `gridColumns` вище).
+  const lookupRegistryDefIds = useMemo(
+    () => [
+      ...new Set(
+        (data?.columns ?? [])
+          .filter((column) => column.dataType === 'Lookup' && column.lookupRegistryDefId !== null)
+          .map((column) => column.lookupRegistryDefId as number),
+      ),
+    ],
+    [data],
+  );
+
+  const registriesList = useQuery({
+    queryKey: queryKeys.registries.list(),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    enabled: lookupRegistryDefIds.length > 0,
+
+    // ⚠ Перелік довідників міняється рідко (адміністративна дія, не робота
+    // оператора) — довший `staleTime`, ніж дефолтний `App.tsx` (30 с), тут
+    // не потрібен: дефолт і так рідко перезапитується в межах одного сеансу
+    // роботи з документом.
+  });
+
+  const lookupRegistryCodes = useMemo(() => {
+    const byId = new Map((registriesList.data ?? []).map((registry) => [registry.id, registry.code]));
+    return lookupRegistryDefIds
+      .map((id) => ({ id, code: byId.get(id) }))
+      .filter((entry): entry is { id: number; code: string } => entry.code !== undefined);
+  }, [lookupRegistryDefIds, registriesList.data]);
+
+  const lookupEntriesQueries = useQueries({
+    queries: lookupRegistryCodes.map(({ code }) => ({
+      queryKey: queryKeys.registries.entries(code),
+      queryFn: () => apiFetch<RegistryEntryDto[]>(`/api/v1/registries/${encodeURIComponent(code)}/entries`),
+    })),
+  });
+
+  const lookupEntriesByRegistryId = useMemo(() => {
+    const map = new Map<number, readonly RegistryEntryDto[]>();
+    lookupRegistryCodes.forEach(({ id }, index) => {
+      const entries = lookupEntriesQueries[index]?.data;
+      if (entries !== undefined) map.set(id, entries);
+    });
+
+    return map;
+  }, [lookupRegistryCodes, lookupEntriesQueries]);
+
   const columns = useMemo(
     () =>
       data === undefined
         ? []
-        : gridColumns(data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell),
-    [data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell],
+        : gridColumns(
+            data,
+            readOnly,
+            flags,
+            widths,
+            requiredInputByCell,
+            saveErrorByCell,
+            lookupEntriesByRegistryId,
+          ),
+    [data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell, lookupEntriesByRegistryId],
   );
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
@@ -933,6 +997,14 @@ export function gridColumns(
   widths: Record<string, number>,
   requiredInput: { blocked: ReadonlyMap<string, string>; warning: ReadonlyMap<string, string> },
   saveErrorByCell: ReadonlyMap<string, string> = new Map(),
+
+  // ⛔ Директива registry-lookup, PR A4: перелік записів на РЕЄСТР
+  // (`ColumnDto.lookupRegistryDefId`), не на колонку — кілька `Lookup`-колонок
+  // однієї таблиці можуть посилатись на той самий довідник, і дублювати запит
+  // означало б потрапити в ту саму пастку, яку вже виправив пакетний
+  // `StatesBatchAsync` (`Q-325`, коментар вище) — по одному запиту на кожну
+  // з них замість одного на довідник.
+  lookupEntriesByRegistryId: ReadonlyMap<number, readonly RegistryEntryDto[]> = new Map(),
 ): ColumnRegular[] {
   return slice.columns.map((column) => {
     // ⛔ Обов'язковість — НА СІТЦІ, ДО спроби зберегти, а не лише в момент
@@ -944,6 +1016,16 @@ export function gridColumns(
     // до подання».
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
+
+    // ⛔ Директива registry-lookup, PR A4: перелік — за `lookupRegistryDefId`
+    // ЦІЄЇ колонки. `null`/відсутній у мапі (запит ще вантажиться, або
+    // колонку налаштовано без довідника) — редактор і показ деградують до
+    // порожнього переліку, а не падають: комірка лишається текстовим
+    // інпутом на секунду вантаження, не помилкою на екрані.
+    const lookupEntries =
+      column.dataType === 'Lookup' && column.lookupRegistryDefId !== null
+        ? (lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? [])
+        : null;
 
     return {
       prop: column.code,
@@ -970,13 +1052,25 @@ export function gridColumns(
       // символ (той самий принцип, що й `hint` у `cellProperties` нижче).
       ...(requiredHint === null ? {} : { columnProperties: () => ({ title: requiredHint }) }),
 
+      // ⛔ Директива registry-lookup, PR A4: `Lookup`-колонка редагується
+      // dropdown-ом записів довідника (`LookupCellEditor.ts`), не звичайним
+      // текстовим інпутом RevoGrid, і показує `entry.Display`, а не сирий
+      // `ValueRegistryEntryId`, поки комірка НЕ редагується.
+      ...(lookupEntries === null
+        ? {}
+        : {
+            editor: createLookupCellEditor(lookupEntries),
+            cellTemplate: (_h, props: { value?: unknown }) =>
+              lookupCellDisplay(props.value, lookupEntries),
+          }),
+
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
       // «сюди не вставиться» мають відповідати одним правилом.
       readonly: ({ model }) => readOnly || !decide(slice, rowKeyOf(model), column).editable,
 
       cellProperties: ({ model }) => {
         const rowKey = rowKeyOf(model);
-        const state = cellStateOf(slice, rowKey, column, flags);
+        const state = cellStateOf(slice, rowKey, column, flags, readOnly);
         const key = cellKey(rowKey, column.code);
 
         // ⛔ Директива «обов'язкові вхідні колонки методології»: маркер
@@ -999,13 +1093,30 @@ export function gridColumns(
         const saveErrorMessage = saveErrorByCell.get(key) ?? null;
         const saveErrorClass = saveErrorMessage === null ? null : 'ecr-cell-save-error';
 
-        if (state === null && requiredInputClass === null && saveErrorClass === null) return {};
+        // ⛔ Директива registry-lookup / cell-style, PR B2: оформлення
+        // автора шаблону — ШАР ПІД будь-яким станом (`cellStateOf` вище),
+        // не заміна: рахується ЗАВЖДИ, незалежно від того, чи спрацював
+        // хоч один з інших маркерів, — інакше жирна колонка без стилю
+        // фарбувалась би, лише щойно комірку зроблено `dirty`.
+        const appearance = cellAppearanceOf(column.style);
+
+        if (state === null && requiredInputClass === null && saveErrorClass === null && appearance === undefined) {
+          return {};
+        }
 
         const decision = decide(slice, rowKey, column);
 
+        // ⛔ Аудит Етапу 3, лана "Documents core": `decision.hint` порожній
+        // САМЕ тоді, коли причина — не бізнес-правило комірки, а стан
+        // ПОДАННЯ (`readOnly` пропу, вище) — сервер вважає комірку
+        // дозволеною, це грід ЦІЛКОМ замкнено ззовні. Без цього фолбеку
+        // заштрихована комірка мала б `cursor: not-allowed`, але жодного
+        // ТЕКСТУ — той самий дефект, half-fixed.
+        const submittedHint = readOnly && decision.editable ? t('grid.submittedReadOnlyHint') : null;
+
         // Стан доступний і ТЕКСТОМ, не лише кольором/формою: причина заборони
         // чи незаповненого входу вже є на сервері — читалка має її почути.
-        const hint = [decision.hint, requiredInputMessage, saveErrorMessage]
+        const hint = [decision.hint, submittedHint, requiredInputMessage, saveErrorMessage]
           .filter((part) => !!part)
           .join(' ');
 
@@ -1022,6 +1133,12 @@ export function gridColumns(
           ...(state === null ? {} : { 'data-cell-state': state }),
 
           ...(hint.length === 0 ? {} : { title: hint }),
+
+          // ⚠ `backgroundColor`/`verticalAlign` НЕМАЄ серед перенесених полів
+          // — див. коментар `cellAppearanceOf` (`cellAppearance.ts`): перший
+          // ховав би індикатор стану під кольором автора, другий не робить
+          // нічого на звичайному `<div>`.
+          ...(appearance === undefined ? {} : { style: appearance }),
         };
       },
     };

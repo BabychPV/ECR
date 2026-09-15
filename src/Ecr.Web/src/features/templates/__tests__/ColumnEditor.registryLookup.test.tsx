@@ -113,6 +113,7 @@ async function show(draft: ColumnDraft, onChange: (next: ColumnDraft) => void): 
           draft={draft}
           disabled={false}
           saving={false}
+          templateVersionId={1}
           onChange={onChange}
           onSubmit={() => {}}
           onCancel={() => {}}

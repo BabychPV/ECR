@@ -588,6 +588,58 @@
           "Calculated"
         ]
       },
+      "CellStyleDto": {
+        "description": "Підмножина `StyleDef`, потрібна ЖИВІЙ сітці (директива registry-\nlookup / cell-style, PR B2) — рамки/формат числа тут НЕ несуться:\nперші читає лише Excel-експорт (`StyleMapper.cs`), другий сітка вже має\nсвій (`ColumnDef.DisplayFormat`), а IsBold/кольори/вирівнювання/перенос —\nсаме те, що змінює вигляд НЕ значення, а КОМІРКИ, тобто прямий аналог\nCSS (`font-weight`, `color`, `background-color`, `text-align`,\n`white-space`).",
+        "properties": {
+          "backgroundArgb": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "foregroundArgb": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "horizontalAlign": {
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "isBold": {
+            "type": "boolean"
+          },
+          "isItalic": {
+            "type": "boolean"
+          },
+          "verticalAlign": {
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "wrapText": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "isBold",
+          "isItalic",
+          "foregroundArgb",
+          "backgroundArgb",
+          "horizontalAlign",
+          "verticalAlign",
+          "wrapText"
+        ],
+        "type": "object"
+      },
       "ChangeClass": {
         "description": "Клас структурної зміни (документ 10 «Еволюція схеми»).",
         "enum": [
@@ -918,6 +970,16 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "style": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleDto"
+              }
             ]
           },
           "unitId": {
@@ -6241,6 +6303,98 @@
         ],
         "type": "object"
       },
+      "SaveStyleDefRequest": {
+        "description": "Оформлення стилю чернетки (директива registry-lookup / cell-style, Частина B).",
+        "properties": {
+          "backgroundArgb": {
+            "description": "Колір заливки, ARGB.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "borderJson": {
+            "description": "Межі за стороною, товщина 0..3 (`StyleMapper.ApplyBorders`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fontName": {
+            "description": "`null`/порожнє — шрифт теми за замовчуванням.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fontSize": {
+            "description": "`null` — розмір теми за замовчуванням.",
+            "format": "double",
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "foregroundArgb": {
+            "description": "Колір тексту, ARGB.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "horizontalAlign": {
+            "description": "0 Left, 1 Center, 2 Right, 3 Justify.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "isBold": {
+            "description": "Жирний.",
+            "type": "boolean"
+          },
+          "isItalic": {
+            "description": "Курсив.",
+            "type": "boolean"
+          },
+          "numberFormat": {
+            "description": "Формат числа Excel; `null` — формат теми.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "verticalAlign": {
+            "description": "0 Top, 1 Center, 2 Bottom.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "wrapText": {
+            "description": "Перенос тексту в комірці.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fontName",
+          "fontSize",
+          "isBold",
+          "isItalic",
+          "foregroundArgb",
+          "backgroundArgb",
+          "borderJson",
+          "horizontalAlign",
+          "verticalAlign",
+          "wrapText",
+          "numberFormat"
+        ],
+        "type": "object"
+      },
       "SaveTableDefRequest": {
         "description": "Налаштування таблиці на аркуші чернетки (`W5.1`).",
         "properties": {
@@ -6806,6 +6960,96 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "StyleDefDto": {
+        "description": "Стиль у відповіді на запис/перелік.",
+        "properties": {
+          "backgroundArgb": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "borderJson": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "fontName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fontSize": {
+            "format": "double",
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "foregroundArgb": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "horizontalAlign": {
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "isBold": {
+            "type": "boolean"
+          },
+          "isItalic": {
+            "type": "boolean"
+          },
+          "numberFormat": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "verticalAlign": {
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "wrapText": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "fontName",
+          "fontSize",
+          "isBold",
+          "isItalic",
+          "foregroundArgb",
+          "backgroundArgb",
+          "borderJson",
+          "horizontalAlign",
+          "verticalAlign",
+          "wrapText",
+          "numberFormat"
+        ],
         "type": "object"
       },
       "SwitchSourceKindRequest": {
@@ -16084,6 +16328,193 @@
           }
         },
         "summary": "Структура версії для клієнта. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/styles": {
+      "get": {
+        "description": "Директива registry-lookup / cell-style, Частина B (PR B1).",
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StyleDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StyleDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StyleDefDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Перелік стилів версії — для вибору наявного стилю під час\nконструювання шаблону. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/styles/{code}": {
+      "put": {
+        "description": "Директива registry-lookup / cell-style, Частина B (PR B1): CRUD\nстилю, якого раніше не було жодного — модель і споживач\n(`StyleMapper.cs`) уже існували.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код стилю.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveStyleDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveStyleDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveStyleDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StyleDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StyleDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/StyleDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує стиль версії-чернетки (заводить чи змінює за кодом). Право\n`Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]
