@@ -161,6 +161,11 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetDefId">
+    /// Аркуш; <c>null</c> — увесь документ. Звужує лише ЦІЛІ запису (формули,
+    /// чия таблиця належить цьому аркушу) — читання лишається на весь документ,
+    /// бо формула аркуша має право читати сусідній (Q-331, `RecalculationJob`).
+    /// </param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Окремий метод, а НЕ прапорець на <see cref="RecalculateAsync"/>.
@@ -183,7 +188,8 @@ public sealed class RecalculationService(
     /// навпаки, рахуються ОДРАЗУ — цей прогін уже фоновий, і відкласти
     /// означало б не порахувати ніколи.
     /// </remarks>
-    public async Task<int> RecalculateAllAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    public async Task<int> RecalculateAllAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -201,14 +207,26 @@ public sealed class RecalculationService(
         var written = 0;
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
         {
-            written += await RunAsync(group.First(), dirty: null, ct).ConfigureAwait(false);
+            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId).ConfigureAwait(false);
         }
 
         return written;
     }
 
     /// <summary>Спільне тіло обох входів: <c>dirty is null</c> — повний прогін.</summary>
-    private async Task<int> RunAsync(TableInstanceRef instance, DirtySet? dirty, CancellationToken ct)
+    /// <param name="instance">Один із екземплярів таблиць документа за період — джерело його версії шаблону.</param>
+    /// <param name="dirty">Змінені комірки; <c>null</c> — повний прогін.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="sheetDefId">
+    /// Q-331: звужує повний прогін (<paramref name="dirty"/> = <c>null</c>) до
+    /// формул, чия таблиця належить цьому аркушу; <c>null</c> — увесь документ.
+    /// Інкрементний прогін (<paramref name="dirty"/> не <c>null</c>) його НЕ
+    /// приймає — той шлях завжди йде від правки конкретної комірки, і звужувати
+    /// каскад за аркушем означало б не порахувати залежну формулу сусіднього
+    /// аркуша, на яку саме каскад і розрахований.
+    /// </param>
+    private async Task<int> RunAsync(
+        TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -258,6 +276,15 @@ public sealed class RecalculationService(
 
         var plan = RecalculationPlanBuilder.Build(snapshot, dependencies, rowIdsByTable, periodKey);
 
+        // ⚠ Q-331: перенесено ВИЩЕ вибору цілей (`targets` нижче) — фільтр
+        // повного прогону за аркушем потребує знати, якій таблиці належить
+        // кожна формула, ДО того, як список цілей уже сформований.
+        var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+
+        var formulas = tables.Values
+            .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
+            .ToDictionary(pair => pair.Formula.Id);
+
         List<int> targets;
 
         if (dirty is null)
@@ -265,7 +292,19 @@ public sealed class RecalculationService(
             // ⛔ Повний прогін бере формули з ПЛАНУ, а не з насіння: формула,
             // додана в шаблон після введення даних, не має жодної брудної
             // комірки — і саме тому в інкрементний набір не потрапляє ніколи.
-            targets = [.. plan.AllFormulas().Where(id => !plan.IsSnapshot(id))];
+            //
+            // ⚠ Q-331: коли `sheetDefId` заданий, ЦІЛІ звужуються до формул,
+            // чия таблиця належить цьому аркушу — компроміс, а не половинчастий
+            // фікс (`RecalculationJob` docs): методологія й формула шаблону
+            // ПИШУТЬ у таблицю свого аркуша, а ЧИТАЄ контекст (`values` нижче)
+            // усе одно ввесь документ, тож формула сусіднього аркуша, яка читає
+            // цю таблицю, отримає вже перераховане значення так само, як і
+            // раніше.
+            targets = [.. plan.AllFormulas()
+                .Where(id => !plan.IsSnapshot(id)
+                             && (sheetDefId is null
+                                 || (formulas.TryGetValue(id, out var owned)
+                                     && owned.Table.SheetDefId == sheetDefId)))];
         }
         else
         {
@@ -285,12 +324,6 @@ public sealed class RecalculationService(
         {
             return 0;
         }
-
-        var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
-
-        var formulas = tables.Values
-            .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (Table: t, Formula: f)))
-            .ToDictionary(pair => pair.Formula.Id);
 
         var values = await LoadValuesAsync(instance, ct).ConfigureAwait(false);
 

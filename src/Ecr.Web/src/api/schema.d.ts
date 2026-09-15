@@ -759,8 +759,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Перерахунок документа. Право `Calculation.Recalculate`.
+         * Перерахунок документа, або лише одного його аркуша. Право `Calculation.Recalculate`.
          * @description Довга операція — у фон із прогресом; повертає `jobId`, а не результат.
+         *     `SheetDefId` звужує перерахунок до одного аркуша (Q-331); без нього —
+         *     увесь документ, як і раніше.
          */
         post: {
             parameters: {
@@ -773,9 +775,9 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/*+json": components["schemas"]["DocumentPeriodRequest"];
-                    "application/json": components["schemas"]["DocumentPeriodRequest"];
-                    "text/json": components["schemas"]["DocumentPeriodRequest"];
+                    "application/*+json": components["schemas"]["RecalculateDocumentRequest"];
+                    "application/json": components["schemas"]["RecalculateDocumentRequest"];
+                    "text/json": components["schemas"]["RecalculateDocumentRequest"];
                 };
             };
             responses: {
@@ -788,6 +790,17 @@ export interface paths {
                         "application/json": components["schemas"]["RecalculationAcceptedResponse"];
                         "text/json": components["schemas"]["RecalculationAcceptedResponse"];
                         "text/plain": components["schemas"]["RecalculationAcceptedResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -9672,6 +9685,22 @@ export interface components {
              *     має бути відповідь, а не літерал `"Publish"`, однаковий для кожної
              *     публікації. */
             reason: string;
+        };
+        /** @description Запит на перерахунок документа (Q-331). */
+        RecalculateDocumentRequest: {
+            /**
+             * Format: int32
+             * @description Період; `Рік*100 + Номер` (R-A6).
+             */
+            periodKey: number;
+            /**
+             * Format: int32
+             * @description Аркуш; `null` — увесь документ (поведінка до Q-331). Заданий —
+             *     звужує перерахунок до ОДНОГО аркуша (директива паритету зі старою
+             *     системою, прогалина 2): вхідні дані читаються як і раніше з усього
+             *     документа, звужується лише те, ЩО ЗАПИСУЄТЬСЯ.
+             */
+            sheetDefId?: null | number;
         };
         /** @description Прийнятий у чергу перерахунок. */
         RecalculationAcceptedResponse: {

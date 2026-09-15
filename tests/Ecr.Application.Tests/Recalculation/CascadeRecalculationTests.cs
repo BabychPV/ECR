@@ -177,6 +177,94 @@ public sealed class CascadeRecalculationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "Q-331")]
+    public async Task Повний_перерахунок_із_SheetDefId_пише_лише_формули_свого_аркуша()
+    {
+        // ⛔ Директива паритету зі старою системою, прогалина 2 (Q-327 →
+        // Q-331): кнопка «Recalculate» аркуша мала перераховувати ЛИШЕ цей
+        // аркуш, а перераховувала ввесь документ. Два аркуші, кожен зі своєю
+        // таблицею й формулою підсумку — `RecalculateAllAsync` із заданим
+        // `sheetDefId` має записати РІВНО одну формулу (свого аркуша) і не
+        // торкнутися сусідньої, хоч обидві присутні в тому самому документі
+        // й періоді.
+        var builder = new TemplateBuilder { TemplateVersionId = Version };
+
+        var sheet1 = builder.Sheet("Sheet1");
+        var table1 = builder.Table(sheet1, "Main1");
+        var jan1 = builder.Column(table1, "Jan", isMonthColumn: true);
+        var feb1 = builder.Column(table1, "Feb", isMonthColumn: true);
+        var total1 = builder.Column(table1, "Total");
+        builder.Row(table1, "R1", 1);
+        builder.Formula(table1, "[Jan] + [Feb]", column: total1);
+
+        var sheet2 = builder.Sheet("Sheet2");
+        var table2 = builder.Table(sheet2, "Main2");
+        var jan2 = builder.Column(table2, "Jan", isMonthColumn: true);
+        var feb2 = builder.Column(table2, "Feb", isMonthColumn: true);
+        var total2 = builder.Column(table2, "Total");
+        builder.Row(table2, "R1", 1);
+        builder.Formula(table2, "[Jan] + [Feb]", column: total2);
+
+        var snapshot = builder.Build();
+        _metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(snapshot);
+
+        const long instance1 = 700;
+        const long instance2 = 701;
+        const long row1Id = 9001;
+        const long row2Id = 9002;
+
+        _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new TableInstanceRef(instance1, DocumentId, table1.Id, Version, Period.Value),
+                new TableInstanceRef(instance2, DocumentId, table2.Id, Version, Period.Value),
+            ]);
+
+        _rows.GetRowIdsBatchAsync(
+                Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<string, long>>
+            {
+                [instance1] = new Dictionary<string, long> { ["R1"] = row1Id },
+                [instance2] = new Dictionary<string, long> { ["R1"] = row2Id },
+            });
+
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
+            {
+                [instance1] =
+                [
+                    new CellRecord(new CellAddress(Period, row1Id, jan1.Id), table1.Id, new CellValueData { ValueNumeric = 10m }),
+                    new CellRecord(new CellAddress(Period, row1Id, feb1.Id), table1.Id, new CellValueData { ValueNumeric = 5m }),
+                ],
+                [instance2] =
+                [
+                    new CellRecord(new CellAddress(Period, row2Id, jan2.Id), table2.Id, new CellValueData { ValueNumeric = 100m }),
+                    new CellRecord(new CellAddress(Period, row2Id, feb2.Id), table2.Id, new CellValueData { ValueNumeric = 50m }),
+                ],
+            });
+
+        // ⚠ Обидва формула-ребра — інакше «формула, додана після введення
+        // даних» (інший тест цього класу) заперечила б і повний прогін тут
+        // теж узяв би формули з насіння, а не з плану; це навмисно НЕ той
+        // сценарій.
+        _versions.ListFormulaDependenciesAsync(Version, Arg.Any<CancellationToken>()).Returns([]);
+
+        var written = await Service()
+            .RecalculateAllAsync(DocumentId, Period, CancellationToken.None, sheetDefId: sheet1.Id);
+
+        // ⛔ ГОЛОВНЕ ТВЕРДЖЕННЯ: рівно ОДНА комірка записана — формула
+        // аркуша `sheet1`. Формула `sheet2` (`formula2`) НЕ порахована, хоч
+        // її входи (`jan2`/`feb2`) присутні й прочитані так само, як і
+        // раніше (компроміс Q-331: звужується запис, не читання).
+        Assert.Equal(1, written);
+
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(table1.Id, upsert.TableDefId);
+        Assert.Equal(total1.Id, upsert.Address.ColumnDefId);
+        Assert.Equal(15m, upsert.Value.ValueNumeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Повний_перерахунок_документа_без_екземплярів_нічого_не_читає()
     {
         // ⚠ Документа за цей період немає — рахувати нема де. Це не помилка:

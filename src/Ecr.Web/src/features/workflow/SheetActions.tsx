@@ -5,8 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
   ApproveSheetRequest,
-  DocumentPeriodRequest,
   JobStatus,
+  RecalculateDocumentRequest,
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
@@ -136,9 +136,15 @@ export function SheetActions({
 
   const recalculate = useMutation({
     mutationFn: () =>
+      // ⛔ Q-331: `sheetDefId` тепер справді звужує перерахунок до ЦЬОГО
+      // аркуша (директива паритету зі старою системою, прогалина 2) — до
+      // цього пакета кнопка передавала лише `periodKey`, і сервер
+      // перераховував увесь документ незалежно від того, з якого аркуша її
+      // натиснули.
       apiEnqueue(`/api/v1/documents/${documentId}/recalculate`, {
         periodKey,
-      } satisfies DocumentPeriodRequest),
+        sheetDefId,
+      } satisfies RecalculateDocumentRequest),
     onSuccess: (job) => {
       setRecalcJobId(job.jobId);
       showDone(t('workflow.recalcQueued', { job: job.jobId }));
@@ -227,15 +233,17 @@ export function SheetActions({
     <>
       <Group gap="xs">
         {/*
-         * ⛔ Прогалина 2 директиви паритету зі старою системою: кнопка стоїть
-         * на екрані ОДНОГО аркуша (`SheetActions` отримує `sheetDefId`), а
-         * `POST /documents/{id}/recalculate` перераховує ВЕСЬ документ — усі
-         * аркуші за цей період, не лише активний. Підпис кнопки лишається
-         * нейтральним «Recalculate» (той самий, що й на екрані проєкту,
-         * `PeriodsPage.tsx`, де він так само не звужує обіцянку), тому
-         * підказка тут — не виправлення тексту, а прибирання оманливого
-         * ВИГЛЯДУ: без неї людина, що дивиться на конкретний аркуш, розумно
-         * припускає вузький ефект дії поруч із ним.
+         * ⛔ Прогалина 2 директиви паритету зі старою системою (Q-327 →
+         * Q-331): до Q-331 кнопка стояла на екрані ОДНОГО аркуша
+         * (`SheetActions` отримує `sheetDefId`), а `POST
+         * /documents/{id}/recalculate` перераховувала ВЕСЬ документ — усі
+         * аркуші за цей період, не лише активний. Тепер `sheetDefId`
+         * справді йде в тілі запиту, і сервер звужує ЗАПИС до таблиць цього
+         * аркуша. Підказка лишається (текст оновлено), бо нюанс і досі є:
+         * формула цього аркуша має право читати дані сусіднього, тож
+         * перерахунок однаково враховує весь документ на ВХОДІ, хоч і пише
+         * лише в цей аркуш. Підпис кнопки лишається нейтральним «Recalculate»
+         * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
          */}
         {can(me, 'Calculation.Recalculate') && (
           <Tooltip label={t('workflow.recalculateHint')} multiline w={260}>
