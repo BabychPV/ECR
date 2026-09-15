@@ -24,11 +24,36 @@ namespace Ecr.Application.Templates.Dto;
 /// правила «опублікована незмінна».
 /// </param>
 /// <param name="Sheets">Аркуші в порядку <c>Ordinal</c>.</param>
+/// <param name="GroupRules">
+/// Правила складу за групами аркушів (<c>ФВ-3.2</c>), директива
+/// "live-попередження про порушення SheetGroupRule". Клієнт
+/// (<c>CreateDocumentModal.tsx</c>) рахує порушення локально при кожній
+/// зміні вибору аркушів, щоб попередити ДО спроби зберегти — сервер
+/// лишається останньою лінією правди через
+/// <c>IDocumentStore.ValidateCompositionAsync</c>.
+/// </param>
 public sealed record TemplateStructureDto(
     int TemplateVersionId,
     int PresentationRevision,
     bool IsEditable,
-    IReadOnlyList<SheetDto> Sheets);
+    IReadOnlyList<SheetDto> Sheets,
+    IReadOnlyList<SheetGroupRuleDto> GroupRules);
+
+/// <summary>Одне правило складу документа для конкретної групи аркушів (<c>ФВ-3.2</c>).</summary>
+/// <param name="SheetGroup">Група, якої стосується правило.</param>
+/// <param name="RuleKind">
+/// Вид правила: <c>0 RequiresAll</c>, <c>1 RequiresOne</c>, <c>2 Excludes</c>.
+/// </param>
+/// <param name="TargetGroup">Група-ціль; заповнена лише для <c>Excludes</c>.</param>
+/// <remarks>
+/// ⚠ Сервер сьогодні перевіряє (<c>DocumentStore.ValidateCompositionAsync</c>)
+/// лише <c>RequiresAll</c> і <c>RequiresOne</c> — <c>Excludes</c> віддається
+/// тут для повноти опису структури, але жоден шлях запису його ще не
+/// застосовує. Клієнтське попередження навмисно дзеркалить рівно ту саму
+/// пару правил, що й сервер: попереджати про те, чого сервер не перевіряє,
+/// означало б розійтися з ним, а не підстрахувати його.
+/// </remarks>
+public sealed record SheetGroupRuleDto(string SheetGroup, byte RuleKind, string? TargetGroup);
 
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код — ідентичність аркуша й адреса в <c>PUT …/sheets/{code}</c>.</param>

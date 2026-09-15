@@ -180,7 +180,13 @@ export function DocumentPage(): JSX.Element {
       {(document) => (
     <Stack>
       <PageHeader
-        title={document.businessKey}
+        // ⛔ Директива "людське ім'я документа": ім'я ПОРУЧ із бізнес-ключем,
+        // а не замість нього — ключ лишається видимим завжди.
+        title={
+          localized(document.nameL10n).length > 0
+            ? `${localized(document.nameL10n)} · ${document.businessKey}`
+            : document.businessKey
+        }
         actions={
           <Group gap="xs">
             <NumberInput

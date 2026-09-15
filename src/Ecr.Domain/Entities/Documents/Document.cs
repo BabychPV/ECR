@@ -65,4 +65,17 @@ public sealed class Document : Entity<long>
         ModifiedAt = utcNow;
         ModifiedByUserId = userId;
     }
+
+    /// <summary>
+    /// Задає людське ім'я документа — підпис ПОРУЧ із <see cref="BusinessKey"/>,
+    /// а не замість нього (директива "людське ім'я документа").
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>BusinessKey</c> лишається технічним ключем: він бере участь у
+    /// іменах експортів і в аудиті, і зміна його механізму — окреме рішення,
+    /// не це. <c>NameL10n</c> — чисто презентаційне поле, яке нічому не
+    /// заважає, якщо його не задано (<c>null</c> — поведінка як до цього поля).
+    /// </remarks>
+    /// <param name="name"><c>null</c> — ім'я не задано або знято.</param>
+    public void SetName(LocalizedText? name) => NameL10n = name;
 }

@@ -122,6 +122,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/column-defs/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пошук колонок. Право `Template.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Підрядок коду чи будь-якого перекладу заголовка; порожній — без фільтра. */
+                    q?: string;
+                    /** @description Стеля кількості результатів; `0` — типове значення. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ColumnDefSearchResultDto"][];
+                        "text/json": components["schemas"]["ColumnDefSearchResultDto"][];
+                        "text/plain": components["schemas"]["ColumnDefSearchResultDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -8045,6 +8088,37 @@ export interface components {
             /** Format: int32 */
             unitId: null | number;
         };
+        /** @description Одна знахідка пошуку колонки, у формі відповіді API. */
+        ColumnDefSearchResultDto: {
+            /** @description Код колонки; унікальний у межах таблиці, не глобально. */
+            code: string;
+            /** @description Заголовок колонки мовами каталогу. */
+            headerL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор колонки — те саме значення, що йде в `ColumnDefId`.
+             */
+            id: number;
+            /** @description Код аркуша — для підпису в списку вибору. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Аркуш таблиці.
+             */
+            sheetDefId: number;
+            /** @description Код таблиці — для підпису в списку вибору. */
+            tableCode: string;
+            /**
+             * Format: int32
+             * @description Таблиця колонки.
+             */
+            tableDefId: number;
+            /**
+             * Format: int32
+             * @description Версія шаблону, якій належить аркуш.
+             */
+            templateVersionId: number;
+        };
         /** @description Опис колонки для клієнта. */
         ColumnDto: {
             code: string;
@@ -8099,6 +8173,12 @@ export interface components {
         };
         /** @description Запит на створення документа. */
         CreateDocumentRequest: {
+            /** @description Людське ім'я документа мовами каталогу; `null` — без імені.
+             *     Опційне і суто презентаційне: `BusinessKey` лишається технічним
+             *     ключем незалежно від нього (директива "людське ім'я документа"). */
+            name?: null | {
+                [key: string]: string;
+            };
             /**
              * Format: int32
              * @description Проєкт.
@@ -8459,6 +8539,7 @@ export interface components {
              * @description Ідентифікатор.
              */
             id: number;
+            nameL10n?: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
              * @description Проєкт.
@@ -10686,6 +10767,18 @@ export interface components {
             /** @description Таблиці аркуша в порядку `Ordinal`. */
             tables: components["schemas"]["TableDto"][];
         };
+        /** @description Одне правило складу документа для конкретної групи аркушів (`ФВ-3.2`). */
+        SheetGroupRuleDto: {
+            /**
+             * Format: uint8
+             * @description Вид правила: `0 RequiresAll`, `1 RequiresOne`, `2 Excludes`.
+             */
+            ruleKind: number;
+            /** @description Група, якої стосується правило. */
+            sheetGroup: string;
+            /** @description Група-ціль; заповнена лише для `Excludes`. */
+            targetGroup: null | string;
+        };
         /** @description Аркуш × період — адреса операції робочого процесу. */
         SheetWorkflowRequest: {
             /**
@@ -11010,6 +11103,13 @@ export interface components {
         /** @description Структура версії — те, що віддається клієнту й кешується за ключем
          *     `v{id}:r{rev}` (`ФВ-2.5`). */
         TemplateStructureDto: {
+            /** @description Правила складу за групами аркушів (`ФВ-3.2`), директива
+             *     "live-попередження про порушення SheetGroupRule". Клієнт
+             *     (`CreateDocumentModal.tsx`) рахує порушення локально при кожній
+             *     зміні вибору аркушів, щоб попередити ДО спроби зберегти — сервер
+             *     лишається останньою лінією правди через
+             *     `IDocumentStore.ValidateCompositionAsync`. */
+            groupRules: components["schemas"]["SheetGroupRuleDto"][];
             /** @description Чи дозволяє стан версії структурну правку (`ФВ-7.1`). Рахує СЕРВЕР —
              *     той самий прапорець, що й bool TableRelationsDto.IsEditable:
              *     клієнт, який виводив би його зі статусу самостійно, тримав би другу копію

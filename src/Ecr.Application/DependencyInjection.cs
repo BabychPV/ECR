@@ -41,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<CreateTemplateVersionHandler>();
         services.AddScoped<CloneTemplateVersionHandler>();
         services.AddScoped<GetTemplateStructureHandler>();
+        services.AddScoped<Templates.SearchColumnDefsHandler>();
         services.AddScoped<GetAccessMatrixHandler>();
         services.AddScoped<Projects.ListPeriodPoliciesHandler>();
         services.AddScoped<Projects.CreatePeriodPolicyHandler>();

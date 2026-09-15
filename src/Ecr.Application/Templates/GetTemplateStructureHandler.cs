@@ -23,6 +23,7 @@ public sealed class GetTemplateStructureHandler(
     IMetadataCache metadata,
     IUnitCatalog units,
     IRepository<TemplateVersion, int> versions,
+    IDocumentStore documents,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -57,6 +58,13 @@ public sealed class GetTemplateStructureHandler(
         var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
         var symbolById = catalogue.Units.Values.ToDictionary(u => u.Id, u => u.Code);
 
+        // ⚠ Директива "live-попередження про порушення SheetGroupRule":
+        // правила складу читаються ОКРЕМИМ легким запитом поверх кешованого
+        // дерева (той самий клас звернення, що й `versions.FindAsync` вище) —
+        // вони не частина презентаційного знімка `ФВ-2.5`, а клієнту потрібні
+        // ДО того, як він обере склад, щоб попередити ще на чекбоксах.
+        var groupRules = await documents.GetGroupRulesAsync(templateVersionId, ct).ConfigureAwait(false);
+
         var sheets = snapshot.Sheets
             .OrderBy(s => s.Ordinal)
             .Select(sheet => new SheetDto(
@@ -71,7 +79,8 @@ public sealed class GetTemplateStructureHandler(
             .ToList();
 
         return new TemplateStructureDto(
-            snapshot.TemplateVersionId, snapshot.PresentationRevision, !version.IsStructurallyFrozen, sheets);
+            snapshot.TemplateVersionId, snapshot.PresentationRevision, !version.IsStructurallyFrozen, sheets,
+            [.. groupRules.Select(r => new SheetGroupRuleDto(r.SheetGroup, r.RuleKind, r.TargetGroup))]);
     }
 
     // ⚠ Сигнатура тримає крок за `TableDto` (W5.1: `NameL10n`/`Ordinal`

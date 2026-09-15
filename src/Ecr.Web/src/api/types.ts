@@ -602,6 +602,12 @@ export type SheetDto = Schemas['SheetDto'];
 /** Таблиця у структурі версії. */
 export type TableDto = Schemas['TableDto'];
 
+/**
+ * Знахідка пошуку колонки за назвою чи кодом (директива "пошук колонки за
+ * назвою замість голого ColumnDefId") — `GET /api/v1/column-defs/search`.
+ */
+export type ColumnDefSearchResultDto = Schemas['ColumnDefSearchResultDto'];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Створення сутностей.
 //

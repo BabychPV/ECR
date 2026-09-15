@@ -15,6 +15,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CalculationBindingDto,
+  ColumnDefSearchResultDto,
   MethodologyConstantDto,
   MethodologyDraftVersionDto,
   MethodologyOutputDto,
@@ -26,6 +27,7 @@ import type {
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -44,6 +46,30 @@ import {
   saveMethodologyRule,
   saveMethodologyTestCase,
 } from './api';
+
+/**
+ * Список колонок для пошуку за назвою (директива "пошук колонки за назвою
+ * замість голого ColumnDefId") — той самий прийом, що вибір довідника в
+ * `ColumnEditor.tsx` (`Select searchable`, лейбл `Назва (КОД)`, наповнений
+ * ОДНИМ запитом без живого пошуку по мережі на кожне натискання).
+ *
+ * ⚠ Пошук наскрізний по всіх версіях шаблонів одразу (`limit=200`): прив'язка
+ * методології не обмежена ОДНІЄЮ таблицею — `TableDefId` виводиться із самої
+ * колонки (`SaveCalculationBindingHandler`), тому й колонку для вибору
+ * потрібно шукати серед усіх, а не лише в межах контексту цього екрана.
+ */
+function useColumnDefOptions(): { value: string; label: string }[] {
+  const columns = useQuery({
+    queryKey: ['column-defs-search'],
+    queryFn: () => apiFetch<ColumnDefSearchResultDto[]>('/api/v1/column-defs/search?limit=200'),
+    staleTime: 60 * 1000,
+  });
+
+  return (columns.data ?? []).map((column) => ({
+    value: String(column.id),
+    label: `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`,
+  }));
+}
 
 /**
  * Вміст версії методології, якого доти не було чим ані завести, ані побачити
@@ -596,6 +622,7 @@ export function MethodologyRequiredInputsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<RequiredInputDraft | null>(null);
+  const columnOptions = useColumnDefOptions();
 
   const requiredInputs = useQuery({
     queryKey: queryKeys.methodologies.requiredInputs(versionId),
@@ -701,15 +728,21 @@ export function MethodologyRequiredInputsPanel({
       >
         {editing !== null && (
           <Stack gap="sm">
-            <NumberInput
+            {/* ⛔ Директива "пошук колонки за назвою замість голого
+                ColumnDefId": адміністратор більше не має пам'ятати
+                внутрішній ідентифікатор — вибір за назвою чи кодом,
+                той самий прийом, що вибір довідника в `ColumnEditor.tsx`. */}
+            <Select
               label={t('methodologies.columnDefId')}
               description={t('methodologies.requiredInputColumnHint')}
-              value={editing.columnDefId}
+              searchable
               disabled={!editing.isNew}
+              value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
+              data={columnOptions}
               onChange={(value) =>
                 setEditing({
                   ...editing,
-                  columnDefId: typeof value === 'number' ? value : editing.columnDefId,
+                  columnDefId: value === null ? 0 : Number(value),
                 })
               }
             />
@@ -1129,6 +1162,7 @@ export function MethodologyBindingsPanel({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<BindingDraft | null>(null);
+  const columnOptions = useColumnDefOptions();
 
   const bindings = useQuery({
     queryKey: queryKeys.methodologies.bindings(methodologyId),
@@ -1239,15 +1273,21 @@ export function MethodologyBindingsPanel({
       >
         {editing !== null && (
           <Stack gap="sm">
-            <NumberInput
+            {/* ⛔ Директива "пошук колонки за назвою замість голого
+                ColumnDefId": той самий прийом, що вибір довідника в
+                `ColumnEditor.tsx` — пошук наскрізь по всіх версіях, бо
+                прив'язка не обмежена ОДНІЄЮ таблицею. */}
+            <Select
               label={t('methodologies.columnDefId')}
               description={t('methodologies.columnDefIdHint')}
-              value={editing.columnDefId}
+              searchable
               disabled={!editing.isNew}
+              value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
+              data={columnOptions}
               onChange={(value) =>
                 setEditing({
                   ...editing,
-                  columnDefId: typeof value === 'number' ? value : editing.columnDefId,
+                  columnDefId: value === null ? 0 : Number(value),
                 })
               }
             />

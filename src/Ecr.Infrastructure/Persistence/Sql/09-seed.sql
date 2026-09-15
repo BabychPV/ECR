@@ -954,6 +954,10 @@ USING (VALUES
     (N'documents.versionHint',           N'en', N'Only published versions: a draft has no frozen structure.', 1),
     (N'documents.pickVersion',           N'en', N'Pick a version', 1),
     (N'documents.sheetsHint',            N'en', N'Composition rules are checked by the server: a group may require all of its sheets, or exactly one.', 1),
+    (N'documents.name',                  N'en', N'Document name', 1),
+    (N'documents.nameHint',              N'en', N'Optional. Shown next to the business key; does not replace it.', 1),
+    (N'documents.groupRuleRequiresAll',  N'en', N'Group "{group}": {picked} of {total} sheets selected — the group requires all of them.', 1),
+    (N'documents.groupRuleRequiresOne',  N'en', N'Group "{group}": requires at least one sheet.', 1),
 
     -- Записи довідників і вікна чинності.
     (N'registries.newEntry',             N'en', N'New entry', 1),

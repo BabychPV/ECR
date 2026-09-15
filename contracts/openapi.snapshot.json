@@ -805,6 +805,58 @@
         ],
         "type": "object"
       },
+      "ColumnDefSearchResultDto": {
+        "description": "Одна знахідка пошуку колонки, у формі відповіді API.",
+        "properties": {
+          "code": {
+            "description": "Код колонки; унікальний у межах таблиці, не глобально.",
+            "type": "string"
+          },
+          "headerL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Заголовок колонки мовами каталогу."
+          },
+          "id": {
+            "description": "Ідентифікатор колонки — те саме значення, що йде в `ColumnDefId`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша — для підпису в списку вибору.",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш таблиці.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableCode": {
+            "description": "Код таблиці — для підпису в списку вибору.",
+            "type": "string"
+          },
+          "tableDefId": {
+            "description": "Таблиця колонки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону, якій належить аркуш.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "headerL10n",
+          "tableDefId",
+          "tableCode",
+          "sheetDefId",
+          "sheetCode",
+          "templateVersionId"
+        ],
+        "type": "object"
+      },
       "ColumnDto": {
         "description": "Опис колонки для клієнта.",
         "properties": {
@@ -952,6 +1004,16 @@
       "CreateDocumentRequest": {
         "description": "Запит на створення документа.",
         "properties": {
+          "name": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Людське ім'я документа мовами каталогу; `null` — без імені.\nОпційне і суто презентаційне: `BusinessKey` лишається технічним\nключем незалежно від нього (директива \"людське ім'я документа\").",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "projectId": {
             "description": "Проєкт.",
             "format": "int32",
@@ -1708,6 +1770,17 @@
             "description": "Ідентифікатор.",
             "format": "int64",
             "type": "integer"
+          },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Людське ім'я документа мовами каталогу; `null` — не задано\n(директива \"людське ім'я документа\"). Показується ПОРУЧ із\nBusinessKey, не замість нього."
+              }
+            ]
           },
           "projectId": {
             "description": "Проєкт.",
@@ -6473,6 +6546,33 @@
         ],
         "type": "object"
       },
+      "SheetGroupRuleDto": {
+        "description": "Одне правило складу документа для конкретної групи аркушів (`ФВ-3.2`).",
+        "properties": {
+          "ruleKind": {
+            "description": "Вид правила: `0 RequiresAll`, `1 RequiresOne`, `2 Excludes`.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "sheetGroup": {
+            "description": "Група, якої стосується правило.",
+            "type": "string"
+          },
+          "targetGroup": {
+            "description": "Група-ціль; заповнена лише для `Excludes`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sheetGroup",
+          "ruleKind",
+          "targetGroup"
+        ],
+        "type": "object"
+      },
       "SheetWorkflowRequest": {
         "description": "Аркуш × період — адреса операції робочого процесу.",
         "properties": {
@@ -7147,6 +7247,13 @@
       "TemplateStructureDto": {
         "description": "Структура версії — те, що віддається клієнту й кешується за ключем\n`v{id}:r{rev}` (`ФВ-2.5`).",
         "properties": {
+          "groupRules": {
+            "description": "Правила складу за групами аркушів (`ФВ-3.2`), директива\n\"live-попередження про порушення SheetGroupRule\". Клієнт\n(`CreateDocumentModal.tsx`) рахує порушення локально при кожній\nзміні вибору аркушів, щоб попередити ДО спроби зберегти — сервер\nлишається останньою лінією правди через\n`IDocumentStore.ValidateCompositionAsync`.",
+            "items": {
+              "$ref": "#/components/schemas/SheetGroupRuleDto"
+            },
+            "type": "array"
+          },
           "isEditable": {
             "description": "Чи дозволяє стан версії структурну правку (`ФВ-7.1`). Рахує СЕРВЕР —\nтой самий прапорець, що й bool TableRelationsDto.IsEditable:\nклієнт, який виводив би його зі статусу самостійно, тримав би другу копію\nправила «опублікована незмінна».",
             "type": "boolean"
@@ -7173,7 +7280,8 @@
           "templateVersionId",
           "presentationRevision",
           "isEditable",
-          "sheets"
+          "sheets",
+          "groupRules"
         ],
         "type": "object"
       },
@@ -8040,6 +8148,64 @@
         "summary": "Зміна власного пароля.",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/column-defs/search": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Підрядок коду чи будь-якого перекладу заголовка; порожній — без фільтра.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Стеля кількості результатів; `0` — типове значення.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefSearchResultDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefSearchResultDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefSearchResultDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Пошук колонок. Право `Template.View`.",
+        "tags": [
+          "ColumnDefs"
         ]
       }
     },
@@ -17826,6 +17992,9 @@
     },
     {
       "name": "Cells"
+    },
+    {
+      "name": "ColumnDefs"
     },
     {
       "name": "Documents"

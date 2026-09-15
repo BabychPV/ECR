@@ -29,7 +29,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var document = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Select(d => new { d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt })
+            .Select(d => new { d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -44,7 +44,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
-            await StatesAsync(documentId, period, ct).ConfigureAwait(false));
+            await StatesAsync(documentId, period, ct).ConfigureAwait(false),
+            document.NameL10n);
     }
 
     /// <inheritdoc />
@@ -65,7 +66,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 d.ProjectId,
                 d.BusinessKey,
                 d.CreatedAt,
-                db.DocumentSheets.Count(s => s.DocumentId == d.Id && s.IsIncluded)))
+                db.DocumentSheets.Count(s => s.DocumentId == d.Id && s.IsIncluded),
+                d.NameL10n))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -86,7 +88,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 ? found
                 : new Dictionary<string, string>(StringComparer.Ordinal);
 
-            items.Add(new DocumentSummary(d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states));
+            items.Add(new DocumentSummary(
+                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states, d.NameL10n));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -150,6 +153,20 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         }
 
         return violations;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SheetGroupRuleSummary>> GetGroupRulesAsync(
+        int templateVersionId, CancellationToken ct)
+    {
+        var rules = await db.SheetGroupRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == templateVersionId)
+            .Take(MaxRules)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rules.Select(r => new SheetGroupRuleSummary(r.SheetGroup, r.RuleKind, r.TargetGroup))];
     }
 
     /// <inheritdoc />
@@ -314,7 +331,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// легко, як людині.
     /// </remarks>
     private sealed record DocumentRow(
-        long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount);
+        long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
+        Domain.ValueObjects.LocalizedText? NameL10n);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;

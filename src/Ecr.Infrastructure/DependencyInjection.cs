@@ -69,6 +69,7 @@ public static class DependencyInjection
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
+        services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();

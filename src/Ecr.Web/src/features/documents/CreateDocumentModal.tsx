@@ -12,7 +12,9 @@ import type {
   TemplateStructureDto,
   TemplateVersionPage,
 } from '@/api/types';
+import { groupRuleViolations } from './groupRuleViolations';
 import { localized } from '@/shared/i18n/localized';
+import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -44,6 +46,10 @@ export function CreateDocumentModal({
   const [projectId, setProjectId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [sheets, setSheets] = useState<number[]>([]);
+
+  // ⛔ Опційне: `BusinessKey` лишається унікальним технічним ключем
+  // незалежно від того, чи задане ім'я (директива "людське ім'я документа").
+  const [name, setName] = useState<LocalizedValue>({});
 
   const projects = useQuery({
     queryKey: ['projects'],
@@ -103,6 +109,12 @@ export function CreateDocumentModal({
           projectId: Number(projectId),
           templateVersionId: Number(versionId),
           sheetDefIds: sheets,
+
+          // ⚠ Поле пропускається цілком, а не надсилається `undefined`:
+          // порожній об'єкт і відсутність імені — те саме за змістом, і
+          // `exactOptionalPropertyTypes` не дозволяє явний `undefined` на
+          // опційному полі — лише його відсутність.
+          ...(hasAnyText(name) ? { name } : {}),
         } satisfies CreateDocumentRequest),
       }),
     onSuccess: async (result) => {
@@ -110,6 +122,7 @@ export function CreateDocumentModal({
 
       onClose();
       setSheets([]);
+      setName({});
       showDone(t('documents.created'));
 
       // Одразу відкриваємо документ: інакше користувач шукає його в переліку
@@ -126,6 +139,12 @@ export function CreateDocumentModal({
     id: sheet.id,
     label: `${localized(sheet.nameL10n) || sheet.code} (${sheet.code})`,
   }));
+
+  // ⛔ Директива "live-попередження про порушення SheetGroupRule": ДО цього
+  // порушення складу дізнавалися лише після відхиленого `POST /documents`.
+  // Кнопка «Save» нижче НЕ блокується — сервер лишається останньою лінією
+  // правди про всяк випадок, якщо ця копія колись розійдеться з оригіналом.
+  const violations = groupRuleViolations(structure.data, sheets);
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('documents.create')} size="lg">
@@ -157,6 +176,15 @@ export function CreateDocumentModal({
           setSheets([]);
         }}
       />
+
+      <Stack gap="xs" mt="sm">
+        <LocalizedInput
+          label={t('documents.name')}
+          description={t('documents.nameHint')}
+          value={name}
+          onChange={setName}
+        />
+      </Stack>
 
       {versionId !== null && (
         <>
@@ -195,6 +223,19 @@ export function CreateDocumentModal({
               />
             ))}
           </Stack>
+
+          {/* ⛔ Непорушний, не блокуючий «Save»: сервер — остання лінія
+              правди (`ValidateCompositionAsync`), а тут — попередження ДО
+              спроби зберегти. */}
+          {violations.length > 0 && (
+            <Stack gap="xs" mt="xs">
+              {violations.map((message) => (
+                <Text key={message} size="sm" c="statusError">
+                  {message}
+                </Text>
+              ))}
+            </Stack>
+          )}
         </>
       )}
 

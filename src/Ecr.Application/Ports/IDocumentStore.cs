@@ -1,5 +1,6 @@
 using Ecr.Application.Common;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Ports;
 
@@ -17,19 +18,44 @@ namespace Ecr.Application.Ports;
 /// <param name="CreatedAt">Момент створення.</param>
 /// <param name="SheetCount">Скільки аркушів у складі.</param>
 /// <param name="SheetStates">Стан робочого процесу: аркуш → статус.</param>
+/// <param name="NameL10n">
+/// Людське ім'я документа мовами каталогу; <c>null</c> — не задано
+/// (директива "людське ім'я документа"). Показується ПОРУЧ із
+/// <paramref name="BusinessKey"/>, не замість нього.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
     string BusinessKey,
     DateTime CreatedAt,
     int SheetCount,
-    IReadOnlyDictionary<string, string> SheetStates);
+    IReadOnlyDictionary<string, string> SheetStates,
+    LocalizedText? NameL10n = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
 /// <param name="RuleKind">Вид правила: 0 <c>RequiresAll</c>, 1 <c>RequiresOne</c>, 2 <c>Optional</c>.</param>
 /// <param name="Detail">Що саме не так.</param>
 public sealed record CompositionViolation(string SheetGroup, byte RuleKind, string Detail);
+
+/// <summary>
+/// Сире правило складу документа — без перевірки конкретного вибору
+/// аркушів (директива "live-попередження про порушення SheetGroupRule").
+/// </summary>
+/// <param name="SheetGroup">Група, якої стосується правило.</param>
+/// <param name="RuleKind">
+/// Вид правила: <c>0 RequiresAll</c>, <c>1 RequiresOne</c>, <c>2 Excludes</c>.
+/// </param>
+/// <param name="TargetGroup">Група-ціль; заповнена лише для <c>Excludes</c>.</param>
+/// <remarks>
+/// ⚠ Віддається СИРИМ правилом, а не готовим вердиктом
+/// (<see cref="CompositionViolation"/>): вердикт залежить від вибору
+/// аркушів, якого на момент читання структури клієнт ще не зробив.
+/// Клієнт (<c>CreateDocumentModal.tsx</c>) рахує порушення локально при
+/// кожній зміні чекбоксів — сервер лишається останньою лінією правди
+/// через <see cref="IDocumentStore.ValidateCompositionAsync"/>.
+/// </remarks>
+public sealed record SheetGroupRuleSummary(string SheetGroup, byte RuleKind, string? TargetGroup);
 
 /// <summary>Читання і створення документів.</summary>
 public interface IDocumentStore
@@ -50,6 +76,13 @@ public interface IDocumentStore
     /// <returns>Порожній перелік — склад коректний.</returns>
     public Task<IReadOnlyList<CompositionViolation>> ValidateCompositionAsync(
         int templateVersionId, IReadOnlyList<int> sheetDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Усі правила складу версії, без перевірки конкретного вибору
+    /// (директива "live-попередження про порушення SheetGroupRule").
+    /// </summary>
+    public Task<IReadOnlyList<SheetGroupRuleSummary>> GetGroupRulesAsync(
+        int templateVersionId, CancellationToken ct);
 
     /// <summary>Наступний вільний бізнес-ключ у межах проєкту.</summary>
     public Task<string> NextBusinessKeyAsync(int projectId, int templateVersionId, CancellationToken ct);
