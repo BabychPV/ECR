@@ -38,6 +38,23 @@ public sealed record TableSliceDto(
 /// масштаб колонки; без цих полів вставка з реального аркуша Excel
 /// відхилялася б цілком (<c>ECR-CELL-0422</c>), тобто головний шлях введення
 /// не працював би.
+///
+/// ⚠ <see cref="IsRequiredByMethodology"/> — колонка є обов'язковим входом
+/// (<c>Domain.Entities.Calculations.MethodologyRequiredInput</c>) бодай
+/// однієї методології, чинної зараз для цієї таблиці. Це ІНША вісь, ніж
+/// <see cref="IsRequired"/> (те саме розрізнення документує сам
+/// <c>MethodologyRequiredInput</c>), але з погляду grid обидва означають
+/// одне: «заповни це до подання» — тому позначаються на екрані однаково
+/// (`*` у заголовку), без розрізнення джерела вимоги.
+///
+/// Рахується на РІВНІ КОЛОНКИ, а не рядка: чи справді методологія
+/// застосовна до КОНКРЕТНОГО рядка, залежить від значень інших колонок
+/// цього рядка (<c>MethodologyRuleMatcher</c>) — а зірочка в заголовку
+/// показується один раз на всю таблицю, до того, як рядки взагалі
+/// заповнені. Тому ознака — «ця колонка МОЖЕ бути обов'язковою за чинною
+/// методологією таблиці», а не «обов'язкова для КОЖНОГО рядка»: та сама
+/// точність, що вже прийнята для <see cref="IsRequired"/> (він теж не
+/// знає про рядки).
 /// </remarks>
 public sealed record ColumnDto(
     int Id,
@@ -53,7 +70,8 @@ public sealed record ColumnDto(
     int? UnitId,
     string? UnitSymbol,
     byte? Precision = null,
-    byte? Scale = null);
+    byte? Scale = null,
+    bool IsRequiredByMethodology = false);
 
 /// <summary>Рядок зі значеннями. Ключ у <paramref name="Cells"/> — код колонки.</summary>
 /// <param name="RowKey">Ідентичність рядка.</param>

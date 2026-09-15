@@ -20,6 +20,7 @@ function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
     ordinal: 1,
     isReadOnly: false,
     isRequired: false,
+    isRequiredByMethodology: false,
     displayFormat: null,
     defaultValue: null,
     lookupRegistryDefId: null,

@@ -8043,6 +8043,8 @@ export interface components {
             id: number;
             isReadOnly: boolean;
             isRequired: boolean;
+            /** @default false */
+            isRequiredByMethodology: boolean;
             /** Format: int32 */
             lookupRegistryDefId: null | number;
             /** Format: int32 */
