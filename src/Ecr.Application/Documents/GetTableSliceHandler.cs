@@ -16,7 +16,8 @@ public sealed class GetTableSliceHandler(
     IUnitCatalog units,
     IAccessDecisionService access,
     IMethodologyStore methodologies,
-    IPeriodStore periods)
+    IPeriodStore periods,
+    IStyleCatalog styles)
 {
     /// <summary>Читає зріз.</summary>
     public async Task<TableSliceDto> HandleAsync(long documentId, long tableInstanceId,
@@ -106,6 +107,14 @@ public sealed class GetTableSliceHandler(
         var requiredByMethodology = await RequiredByMethodologyColumnIdsAsync(
             table.Id, documentId, instance.PeriodKey, ct).ConfigureAwait(false);
 
+        // ⛔ Директива registry-lookup / cell-style, PR B2: жива сітка досі не
+        // показувала оформлення, задане автором шаблону (`ColumnDef.StyleId`)
+        // — стиль долітав лише до Excel-експорту (`StyleMapper.cs`). Один
+        // запит на ВЕСЬ знімок стилів версії (`IStyleCatalog.GetAsync`, уже
+        // такий самий за формою, що й `units.GetAsync` вище), не по колонці:
+        // шістдесят колонок не повинні коштувати шістдесяти походів у базу.
+        var styleById = await styles.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+
         var columns = table.Columns
             .Where(c => !c.IsDeleted)
             .OrderBy(c => c.Ordinal)
@@ -113,7 +122,7 @@ public sealed class GetTableSliceHandler(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
                 c.Ordinal, c.IsReadOnly, c.IsRequired, c.DisplayFormat, c.DefaultValue,
                 c.LookupRegistryDefId, c.UnitId, SymbolOf(symbolById, c.UnitId),
-                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id)))
+                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId)))
             .ToList();
 
         var columnCodeById = table.Columns.ToDictionary(c => c.Id, c => c.Code);
@@ -293,6 +302,25 @@ public sealed class GetTableSliceHandler(
     /// </remarks>
     private static string? SymbolOf(Dictionary<int, string> symbols, int? unitId)
         => unitId is { } id && symbols.TryGetValue(id, out var code) ? code : null;
+
+    /// <summary>
+    /// Оформлення колонки для клієнта (директива registry-lookup /
+    /// cell-style, PR B2); <c>null</c> — колонка без стилю, або стиль
+    /// вилучили (посилання лишилось, запису вже нема — той самий клас
+    /// «м'якого» неспівпадіння, що й <see cref="SymbolOf"/> для одиниці).
+    /// </summary>
+    private static CellStyleDto? StyleOf(
+        IReadOnlyDictionary<int, Domain.Entities.Configuration.StyleDef> styles, int? styleId)
+    {
+        if (styleId is not { } id || !styles.TryGetValue(id, out var style))
+        {
+            return null;
+        }
+
+        return new CellStyleDto(
+            style.IsBold, style.IsItalic, style.ForegroundArgb, style.BackgroundArgb,
+            style.HorizontalAlign, style.VerticalAlign, style.WrapText);
+    }
 
     /// <summary>
     /// Розгортає типізоване значення в те, що піде клієнтові.

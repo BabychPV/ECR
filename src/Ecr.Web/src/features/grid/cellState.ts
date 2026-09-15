@@ -57,6 +57,19 @@ export function cellStateOf(
   rowKey: string,
   column: ColumnDto,
   flags: LocalCellFlags = NoLocalFlags,
+
+  // ⛔ Аудит Етапу 3, лана "Documents core": після Submit ціла таблиця стає
+  // `readOnly` (`DocumentPage.tsx`: `readOnly = !isEditable(state)`,
+  // прокинуто в `DocumentGrid` → RevoGrid `readonly`), але `decide()` про це
+  // НІЧОГО не знає — сервер вирішує редагованість комірки з колонки/рядка/
+  // періоду/грантів, а не зі стану ПОДАННЯ (`AccessDecisionService.Decide`).
+  // Без цього прапорця комірка, яку жодне з тих правил не забороняє, після
+  // Submit лишалася або НЕ мала жодного стану (`active.readOnly === false`)
+  // — тобто виглядала звичайною редагованою, і клік по ній мовчки нічого не
+  // робив: ні заштрихованого фону, ні `cursor: not-allowed`, ні підказки,
+  // ЖОДНОГО сигналу в самій комірці (єдині натяки — бейдж статусу аркуша і
+  // зниклий тулбар імпорту, обидва ПОЗА сіткою).
+  gridReadOnly = false,
 ): CellStateName | null {
   const key = cellKey(rowKey, column.code);
   const decision = decide(slice, rowKey, column);
@@ -71,7 +84,7 @@ export function cellStateOf(
     // прапорцем: причину рахує сервер, і другий прапорець довелося б тримати
     // синхронним із нею — тобто рано чи пізно він би розійшовся.
     calculated: decision.reason === 'CalculatedCell',
-    readOnly: !decision.editable,
+    readOnly: gridReadOnly || !decision.editable,
   };
 
   return Priority.find((state) => active[state]) ?? null;

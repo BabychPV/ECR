@@ -95,5 +95,19 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
     return normalized === 'true' || normalized === '1' || normalized === 'так';
   }
 
+  // ⛔ Директива registry-lookup, PR A4: комірка `Lookup` тримає
+  // `ValueRegistryEntryId` (`CellValueReader.Read`, бекенд) — ЧИСЛО, не текст
+  // показу. `LookupCellEditor` завжди шле сюди або порожній рядок (скасовано
+  // вибір), або рядкове представлення `entry.Id`, обраного зі списку, — той
+  // самий шлях, що й `Int`/`Decimal` вище: нерозпізнане значення лишається
+  // текстом, і сервер відповість `ECR-CELL-0422`, а не мовчазний нуль.
+  if (dataType === 'Lookup') {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return null;
+
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : raw;
+  }
+
   return raw;
 }

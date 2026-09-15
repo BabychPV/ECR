@@ -42,6 +42,7 @@ public sealed class ColumnUnitSymbolTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
+    private readonly IStyleCatalog _styles = Substitute.For<IStyleCatalog>();
 
     public ColumnUnitSymbolTests()
     {
@@ -97,9 +98,15 @@ public sealed class ColumnUnitSymbolTests
         // до таблиці не прив'язана.
         _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                       .Returns(new List<int>());
+
+        // ⚠ Предмет цих тестів — позначення одиниці, не стиль: порожній
+        // каталог стилів (директива registry-lookup / cell-style, PR B2).
+        _styles.GetAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<int, StyleDef>());
     }
 
-    private GetTableSliceHandler Handler() => new(_rows, _cells, _metadata, _units, _access, _methodologies, _periods);
+    private GetTableSliceHandler Handler()
+        => new(_rows, _cells, _metadata, _units, _access, _methodologies, _periods, _styles);
 
     private static LocalizedText Text(string s) => new(new Dictionary<string, string> { ["en"] = s });
 
