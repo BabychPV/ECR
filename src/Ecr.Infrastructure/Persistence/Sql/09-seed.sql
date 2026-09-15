@@ -919,6 +919,9 @@ USING (VALUES
     (N'version.deprecateHint',           N'en', N'The version is not deleted: projects already bound to it keep working. It simply stops being offered for new ones.', 1),
     (N'version.deprecated',              N'en', N'The version is withdrawn from use.', 1),
     (N'version.cloneHint',               N'en', N'A published version is frozen: structural changes go into a clone, keeping codes and row keys.', 1),
+    -- ⛔ Аудит-пас 8, lane7, п.11: те саме пояснення, але НА самій сторінці
+    -- версії — раніше воно жило лише всередині діалогу клонування.
+    (N'version.structureFrozen',         N'en', N'This published version is frozen: structural changes go through "Clone version".', 1),
     (N'version.cloned',                  N'en', N'The clone is ready and open.', 1),
     (N'version.presentation',            N'en', N'Appearance', 1),
     (N'version.patched',                 N'en', N'Applied; the version is now at revision {revision}.', 1),
@@ -1353,6 +1356,10 @@ USING (VALUES
     (N'tables.matchJsonHint',            N'en', N'How a source row is paired with a target row. Without it the relation looks configured and joins nothing.', 1),
     (N'tables.mapJson',                  N'en', N'Column mapping', 1),
     (N'tables.mapJsonHint',              N'en', N'Which column goes into which. Leave empty when the relation carries no values.', 1),
+    -- ⛔ Аудит-пас 8, lane7, п.12: `Check` — «a cross-table rule, no values
+    -- move» (`tables.kindCheck`) — поле вимкнене й пояснюється цим рядком
+    -- замість звичайної підказки `tables.mapJsonHint`.
+    (N'tables.mapJsonNotApplicableForCheck', N'en', N'Not applicable: Check is a cross-table rule and carries no values between tables.', 1),
     (N'tables.onSourceChange',           N'en', N'When the source changes', 1),
     (N'tables.onSourceChangeHint',       N'en', N'What happens to the target once a source row is edited.', 1),
     (N'tables.onChangeRecalc',           N'en', N'recalculate the target', 1),
@@ -1424,6 +1431,9 @@ USING (VALUES
     (N'tableDef.rowModeDynamic',         N'en', N'Added by the person filling in the form', 1),
     (N'tableDef.rowModeMixed',           N'en', N'Fixed plus rows the person adds', 1),
     (N'tableDef.errCode',                N'en', N'Give the table a code: it is how the table is addressed.', 1),
+    -- ⛔ Аудит-пас 8, lane7, п.10: причина ІНША, ніж «поле порожнє» —
+    -- повідомлення теж має бути іншим (`TableBlocker.CodeInvalid`).
+    (N'tableDef.errCodeInvalid',         N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'tableDef.errName',                N'en', N'Give the table a name in at least one language.', 1),
     -- Редактор колонок (W5.2) — третій і четвертий вертикальні зрізи авторства структури.
     (N'columns.add',                     N'en', N'Add column', 1),
