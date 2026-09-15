@@ -487,6 +487,11 @@ USING (VALUES
     (N'registries.validity',             N'en', N'Valid', 1),
     (N'registries.hierarchical',         N'en', N'hierarchical', 1),
     (N'registries.temporal',             N'en', N'time-bound', 1),
+    -- ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
+    -- списком без пошуку чи фільтра.
+    (N'registries.search',               N'en', N'Search', 1),
+    (N'registries.searchPlaceholder',    N'en', N'Filter by code or name', 1),
+    (N'registries.searchNoMatches',      N'en', N'No entries match this search.', 1),
     -- Редактор виразів (`ФВ-9.15a`, область 10).
     (N'expressions.title',               N'en', N'Expression editor', 1),
     (N'expressions.dialect',             N'en', N'Dialect', 1),
