@@ -95,7 +95,7 @@ export function HealthPage(): JSX.Element {
               <Table.Tbody>
                 {Object.entries(details(report) ?? {}).map(([key, value]) => (
                   <Table.Tr key={key}>
-                    <Table.Td miw={200}>{key}</Table.Td>
+                    <Table.Td miw={200}>{fieldLabel(key)}</Table.Td>
                     <Table.Td>{String(value)}</Table.Td>
                   </Table.Tr>
                 ))}
@@ -118,6 +118,35 @@ function details(report: HealthReport): Record<string, unknown> | null {
   const check = report.checks.find((candidate) => candidate.name === 'db');
 
   return check === undefined || Object.keys(check.data).length === 0 ? null : check.data;
+}
+
+/**
+ * Технічне ім'я поля `/health/db` → ключ каталогу з людським підписом.
+ *
+ * ⛔ Аудит-пас 8, lane6, п.7: до фіксу рядок панелі показував буквально
+ * `edition`, `effectiveMode`, `rcsi` тощо (`DatabaseHealthCheck.cs` — сталий
+ * camelCase-словник) — не текст із каталогу з іншою мовою, а взагалі не
+ * підпис. Дев'ять полів фіксовані контрактом `/health/db`, тому мапа тут, а
+ * не вгадування: невідоме поле показує сам ключ (той самий принцип запасного
+ * варіанту, що й `reasonOf` у `permissions.ts` — краще показати ім'я поля,
+ * ніж вигадати підпис).
+ */
+const FieldLabelKeys: Record<string, string> = {
+  edition: 'health.database.edition',
+  effectiveMode: 'health.database.effectiveMode',
+  majorVersion: 'health.database.majorVersion',
+  rcsi: 'health.database.rcsi',
+  archiveBatchSize: 'health.database.archiveBatchSize',
+  filegroups: 'health.database.filegroups',
+  missingFilegroups: 'health.database.missingFilegroups',
+  partitionsAhead: 'health.database.partitionsAhead',
+  limitations: 'health.database.limitations',
+};
+
+function fieldLabel(key: string): string {
+  const translationKey = FieldLabelKeys[key];
+
+  return translationKey === undefined ? key : t(translationKey);
 }
 
 /**

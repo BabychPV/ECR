@@ -5,6 +5,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
+import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { t } from '@/shared/i18n';
@@ -41,7 +42,8 @@ export function SourcesPage(): JSX.Element {
     onSuccess: (job) => {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його
       // тривалість визначає не наш код.
-      notifications.show({ message: t('sources.queued', { job: job.jobId }) });
+      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
+      notifications.show({ message: t('sources.queued', { job: humanizeJobId(job.jobId) }) });
     },
     onError: (error) => {
       notifications.show({
