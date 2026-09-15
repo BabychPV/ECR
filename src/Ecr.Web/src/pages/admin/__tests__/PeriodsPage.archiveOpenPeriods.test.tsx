@@ -49,6 +49,17 @@ function calendarWith(states: Array<'Open' | 'Closed'>) {
     periodKind: 'Monthly' as const,
     currentPeriodMode: 'Auto' as const,
     timeZoneId: 'Europe/Kyiv',
+    // ⛔ Q-337, lane 2: `PeriodCalendarDto.Policy` — тултипи заголовків
+    // «Range»/«Grace until» читають ці числа безумовно (контракт гарантує
+    // поле); без нього рендер падає `TypeError` на `calendar.policy.X`.
+    policy: {
+      id: 1,
+      code: 'ECR-Standard',
+      openOffsetDays: 0,
+      graceOffsetDays: 15,
+      hardCloseOffsetDays: 45,
+      yearGraceOffsetDays: 45,
+    },
     periods: states.map((state, index) => period(index + 1, index + 1, state)),
   };
 }
