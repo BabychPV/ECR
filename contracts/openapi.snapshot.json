@@ -839,6 +839,10 @@
           "isRequired": {
             "type": "boolean"
           },
+          "isRequiredByMethodology": {
+            "default": false,
+            "type": "boolean"
+          },
           "lookupRegistryDefId": {
             "format": "int32",
             "type": [

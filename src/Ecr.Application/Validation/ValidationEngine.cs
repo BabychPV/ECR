@@ -38,7 +38,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         if (column.ValidateValue(value) is { } structural)
         {
             messages.Add(new ValidationMessage(
-                ValidationSeverity.Error, "ECR-CELL-0422", structural,
+                ValidationSeverity.Error, "ECR-CELL-0422", StructuralMessage(column, value, structural),
                 column.TableDefId, null, column.Code, BlocksSave: true));
         }
 
@@ -123,6 +123,30 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     private static ValidationMessage Broken(
         ValidationRule rule, int tableDefId, string? rowKey, string? columnCode, string message)
         => new(ValidationSeverity.Warning, BrokenRuleCode, message, tableDefId, rowKey, columnCode, BlocksSave: false);
+
+    /// <summary>
+    /// Текст структурного порушення для клієнта.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До цього виправлення тут ішов ГОЛИЙ код <paramref name="structuralCode"/>
+    /// (<c>"ECR-CELL-0422"</c>) — те саме значення, що <c>ColumnDef.ValidateValue</c>
+    /// повертає як код, а не як текст. Найчастіший шлях сюди — очищена
+    /// обов'язкова комірка: оператор бачив у підказці буквально код помилки
+    /// замість пояснення, що робити.
+    ///
+    /// ⚠ Розпізнається лише ЦЕЙ конкретний випадок (порожнє значення в
+    /// обов'язковій колонці — той самий предикат, що й гілка 3 у
+    /// <c>ColumnDef.ValidateValue</c>). Решта причин <c>ECR-CELL-0422</c>
+    /// (невідповідність типу, точність/масштаб) на практиці не долітають
+    /// сюди непоміченими: тип відсіює <c>CellValueReader</c> зі своїм
+    /// людським текстом ДО виклику цього методу — див. коментар класу.
+    /// Розширювати цей метод на решту причин — окрема задача, не ця.
+    /// </remarks>
+    private static string StructuralMessage(
+        ColumnDef column, Domain.ValueObjects.CellValueData value, string structuralCode)
+        => structuralCode == "ECR-CELL-0422" && column.IsRequired && value.IsEmpty && value.IsWellFormed()
+            ? $"Колонка «{column.Code}» обов'язкова."
+            : structuralCode;
 
     private static SingleCellContext CellContext(ColumnDef column, Domain.ValueObjects.CellValueData value)
         => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null));

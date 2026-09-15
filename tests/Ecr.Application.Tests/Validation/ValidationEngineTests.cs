@@ -108,6 +108,27 @@ public sealed class ValidationEngineTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.8")]
+    public void Порожня_обовязкова_комірка_дає_людський_текст_а_не_код()
+    {
+        var column = Column("Volume");
+        column.SetRequired(true);
+
+        var messages = Engine().ValidateCell(column, CellValueData.Empty, []);
+
+        var message = Assert.Single(messages);
+
+        // ⛔ До фіксу тут стояло буквально "ECR-CELL-0422" — той самий рядок,
+        // що йде в `RuleCode`, копіювався і в `Message`, і саме цей текст
+        // бачив оператор у тултипі комірки: `Message` передається клієнту
+        // через `PatchCellsHandler.EnsureValidationPasses` як `cells[].message`.
+        Assert.Equal("ECR-CELL-0422", message.RuleCode);
+        Assert.NotEqual("ECR-CELL-0422", message.Message);
+        Assert.Contains(column.Code, message.Message, StringComparison.Ordinal);
+        Assert.True(message.BlocksSave);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.6")]
     public void Результат_валідації_переживає_перезавантаження()
     {
