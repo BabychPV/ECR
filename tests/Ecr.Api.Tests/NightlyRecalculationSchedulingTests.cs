@@ -9,7 +9,7 @@ using Xunit;
 namespace Ecr.Api.Tests;
 
 /// <summary>
-/// Q-330, директива №09 частина B: нічний повний перерахунок — ОПЦІЯ на
+/// Q-331, директива №09 частина B: нічний повний перерахунок — ОПЦІЯ на
 /// рівні конфігурації, вимкнена за замовчуванням.
 /// </summary>
 /// <remarks>
@@ -26,7 +26,7 @@ public sealed class NightlyRecalculationSchedulingTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "Q-330")]
+    [Trait("Requirement", "Q-331")]
     public async Task Прапорець_вимкнений_за_замовчуванням_не_ставить_нічого()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
@@ -58,7 +58,7 @@ public sealed class NightlyRecalculationSchedulingTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "Q-330")]
+    [Trait("Requirement", "Q-331")]
     public async Task Прапорець_явно_вимкнений_не_ставить_нічого()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
@@ -88,7 +88,7 @@ public sealed class NightlyRecalculationSchedulingTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "Q-330")]
+    [Trait("Requirement", "Q-331")]
     public async Task Прапорець_увімкнений_ставить_тригер_лише_на_активні_проєкти()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);

@@ -164,7 +164,7 @@ public sealed class RecalculationService(
     /// <param name="sheetDefId">
     /// Аркуш; <c>null</c> — увесь документ. Звужує лише ЦІЛІ запису (формули,
     /// чия таблиця належить цьому аркушу) — читання лишається на весь документ,
-    /// бо формула аркуша має право читати сусідній (Q-330, `RecalculationJob`).
+    /// бо формула аркуша має право читати сусідній (Q-331, `RecalculationJob`).
     /// </param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
@@ -218,7 +218,7 @@ public sealed class RecalculationService(
     /// <param name="dirty">Змінені комірки; <c>null</c> — повний прогін.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="sheetDefId">
-    /// Q-330: звужує повний прогін (<paramref name="dirty"/> = <c>null</c>) до
+    /// Q-331: звужує повний прогін (<paramref name="dirty"/> = <c>null</c>) до
     /// формул, чия таблиця належить цьому аркушу; <c>null</c> — увесь документ.
     /// Інкрементний прогін (<paramref name="dirty"/> не <c>null</c>) його НЕ
     /// приймає — той шлях завжди йде від правки конкретної комірки, і звужувати
@@ -276,7 +276,7 @@ public sealed class RecalculationService(
 
         var plan = RecalculationPlanBuilder.Build(snapshot, dependencies, rowIdsByTable, periodKey);
 
-        // ⚠ Q-330: перенесено ВИЩЕ вибору цілей (`targets` нижче) — фільтр
+        // ⚠ Q-331: перенесено ВИЩЕ вибору цілей (`targets` нижче) — фільтр
         // повного прогону за аркушем потребує знати, якій таблиці належить
         // кожна формула, ДО того, як список цілей уже сформований.
         var tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
@@ -293,7 +293,7 @@ public sealed class RecalculationService(
             // додана в шаблон після введення даних, не має жодної брудної
             // комірки — і саме тому в інкрементний набір не потрапляє ніколи.
             //
-            // ⚠ Q-330: коли `sheetDefId` заданий, ЦІЛІ звужуються до формул,
+            // ⚠ Q-331: коли `sheetDefId` заданий, ЦІЛІ звужуються до формул,
             // чия таблиця належить цьому аркушу — компроміс, а не половинчастий
             // фікс (`RecalculationJob` docs): методологія й формула шаблону
             // ПИШУТЬ у таблицю свого аркуша, а ЧИТАЄ контекст (`values` нижче)

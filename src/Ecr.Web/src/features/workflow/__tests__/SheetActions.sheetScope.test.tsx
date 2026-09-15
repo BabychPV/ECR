@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SheetActions } from '../SheetActions';
 
 /**
- * Q-330: директива паритету зі старою системою, прогалина 2 (Q-327 → Q-330).
+ * Q-331: директива паритету зі старою системою, прогалина 2 (Q-327 → Q-331).
  * До цього пакета кнопка «Recalculate» на екрані аркуша слала лише
  * `periodKey` — сервер перераховував увесь документ незалежно від того,
  * який аркуш був відкритий. Тест доводить МУТАЦІЄЮ, що кнопка тепер справді
@@ -80,7 +80,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('SheetActions: кнопка «Перерахувати» звужує перерахунок до свого аркуша (Q-330)', () => {
+describe('SheetActions: кнопка «Перерахувати» звужує перерахунок до свого аркуша (Q-331)', () => {
   it('шле sheetDefId цього аркуша в тілі POST /documents/{id}/recalculate', async () => {
     mockFetch();
 

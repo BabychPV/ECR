@@ -135,7 +135,7 @@ public sealed partial class RecurringScheduleService(
         var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
 
         // ⛔ Прогалини 4+5 директиви паритету зі старою системою (Q-327 →
-        // Q-330): нічний повний перерахунок — ОПЦІЯ, вимкнена за
+        // Q-331): нічний повний перерахунок — ОПЦІЯ, вимкнена за
         // замовчуванням (`NightlyRecalculationScheduling.EnabledKey`), не
         // завжди-увімкнений режим для всіх проєктів одразу. Коли вимкнена
         // (типовий стан) — нічого не ставиться, і поведінка проду не
