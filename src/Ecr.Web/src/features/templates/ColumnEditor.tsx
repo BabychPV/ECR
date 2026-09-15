@@ -1,5 +1,5 @@
-import { useEffect, useMemo, type JSX } from 'react';
-import { Alert, Button, Group, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
+import { lazy, Suspense, useEffect, useMemo, type JSX } from 'react';
+import { Alert, Button, Group, NumberInput, Select, Skeleton, Stack, Switch, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -14,7 +14,23 @@ import {
   whyCannotSaveColumn,
 } from './column';
 import { emptyStyleDraft, styleDraftOf, type StyleDefDto } from './style';
-import { StyleEditor } from './StyleEditor';
+
+/**
+ * ⛔ Директива registry-lookup / cell-style, PR B1 — гейт бюджету `D-132`
+ * (`TemplateVersionPage` — 252.3 КБ gzip проти межі 250, знайдено `client`
+ * гейтом CI): статичний імпорт `StyleEditor.tsx` (кольори, рамка,
+ * вирівнювання — кілька компонентів `@mantine/core`, які більше НІХТО в
+ * застосунку не використовував) вкидав свою вагу в бібліотеку колонки
+ * КОЖНОГО, хто відкриває конструктор шаблону, а не лише того, хто
+ * увімкнув «Custom style». Той самий прийом, що вже рятує `DocumentGrid`
+ * (`DocumentPage.tsx`, RevoGrid 79% ваги маршруту) і Monaco
+ * (`ExpressionEditor.tsx`, 818 КБ): `lazy()` виносить чанк ЗА межі
+ * статичного графа `check-bundle-budget.mjs` — браузер вантажить його лише
+ * тоді, коли перемикач справді відкриває панель.
+ */
+const StyleEditor = lazy(async () => ({
+  default: (await import('./StyleEditor')).StyleEditor,
+}));
 
 /**
  * Форма колонки — другий вертикальний зріз авторства структури шаблону
@@ -243,11 +259,13 @@ export function ColumnEditor({
       />
 
       {draft.style !== null && (
-        <StyleEditor
-          draft={draft.style}
-          disabled={disabled}
-          onChange={(style) => onChange({ ...draft, style })}
-        />
+        <Suspense fallback={<Skeleton height={220} radius="sm" />}>
+          <StyleEditor
+            draft={draft.style}
+            disabled={disabled}
+            onChange={(style) => onChange({ ...draft, style })}
+          />
+        </Suspense>
       )}
 
       {!draft.hasFullData && (
