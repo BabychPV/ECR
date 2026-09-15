@@ -1,4 +1,4 @@
-import { useMemo, type JSX } from 'react';
+import { useEffect, useMemo, type JSX } from 'react';
 import { Alert, Button, Group, NumberInput, Select, Stack, Switch, TextInput } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -13,6 +13,8 @@ import {
   EditableDataTypes,
   whyCannotSaveColumn,
 } from './column';
+import { emptyStyleDraft, styleDraftOf, type StyleDefDto } from './style';
+import { StyleEditor } from './StyleEditor';
 
 /**
  * Форма колонки — другий вертикальний зріз авторства структури шаблону
@@ -26,6 +28,7 @@ export function ColumnEditor({
   draft,
   disabled,
   saving,
+  templateVersionId,
   onChange,
   onSubmit,
   onCancel,
@@ -33,6 +36,13 @@ export function ColumnEditor({
   draft: ColumnDraft;
   disabled: boolean;
   saving: boolean;
+
+  /**
+   * Версія-чернетка (директива registry-lookup / cell-style, PR B1) —
+   * потрібна лише для `GET …/styles` (перелік наявних стилів для
+   * повторного використання); саму колонку зберігає викликач.
+   */
+  templateVersionId: number;
   onChange: (next: ColumnDraft) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -61,6 +71,35 @@ export function ColumnEditor({
       })),
     [registries.data],
   );
+
+  // ⛔ Директива registry-lookup / cell-style, PR B1: перелік стилів версії —
+  // щоб увімкнення «власного стилю» на колонці, яка вже МАЄ `styleId`
+  // (збережений раніше), відкривало форму з наявними значеннями, а не
+  // порожньою чернеткою, яка мовчки перезаписала б стиль при збереженні.
+  const styles = useQuery({
+    queryKey: queryKeys.templates.stylesOf(templateVersionId),
+    queryFn: () =>
+      apiFetch<StyleDefDto[]>(`/api/v1/template-versions/${String(templateVersionId)}/styles`),
+    enabled: draft.styleId !== null,
+  });
+
+  const existingStyle = styles.data?.find((s) => s.id === draft.styleId) ?? null;
+
+  // ⛔ Живий перегляд (не тест) знайшов реальну шорсткість: без цього ефекту
+  // перемикач «власний стиль» показував ВИМКНЕНО для колонки, яка НАСПРАВДІ
+  // вже має стиль (`draft.styleId !== null`, просто ще не завантажений у
+  // форму, `draft.style === null`) — той самий стан, що й «стилю немає
+  // взагалі», хоча дані різні. Автозаповнення панелі, щойно перелік стилів
+  // версії довантажиться, прибирає цю двозначність: перемикач ЗАВЖДИ
+  // відповідає факту «колонка має стиль», а не «форму щойно відкрили».
+  useEffect(() => {
+    if (draft.style === null && existingStyle !== null) {
+      onChange({ ...draft, style: styleDraftOf(existingStyle) });
+    }
+    // ⚠ Лише `existingStyle`: `draft`/`onChange` у залежностях викликали б
+    // цей ефект на КОЖНУ зміну поля форми (включно з тими, що заповнює сам
+    // перегляд стилю), а не лише на довантаження списку стилів.
+  }, [existingStyle]);
 
   return (
     <Stack gap="sm">
@@ -177,6 +216,37 @@ export function ColumnEditor({
           onChange={(value) =>
             onChange({ ...draft, lookupRegistryDefId: value === null ? null : Number(value) })
           }
+        />
+      )}
+
+      <Switch
+        label={t('columns.customStyle')}
+        description={t('columns.customStyleHint')}
+        disabled={disabled}
+        checked={draft.style !== null}
+        onChange={(event) => {
+          if (event.currentTarget.checked) {
+            // ⚠ Стиль, що вже прив'язаний до колонки, відкривається З ЙОГО
+            // значеннями (`existingStyle`), а не порожньою чернеткою: інакше
+            // збереження мовчки перезаписало б наявний стиль дефолтами.
+            onChange({
+              ...draft,
+              style: existingStyle === null ? emptyStyleDraft(`${draft.code}Style`) : styleDraftOf(existingStyle),
+            });
+          } else {
+            // ⛔ Вимкнути перемикач — це ВІДЧЕПИТИ стиль від колонки, а не
+            // лише згорнути форму: `styleId: null` тут і в `columnBody`
+            // (`column.ts`) — те саме поле, яке піде в PUT колонки.
+            onChange({ ...draft, style: null, styleId: null });
+          }
+        }}
+      />
+
+      {draft.style !== null && (
+        <StyleEditor
+          draft={draft.style}
+          disabled={disabled}
+          onChange={(style) => onChange({ ...draft, style })}
         />
       )}
 

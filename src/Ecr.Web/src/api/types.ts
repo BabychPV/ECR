@@ -26,6 +26,13 @@ type Schemas = components['schemas'];
 export type ColumnDto = Schemas['ColumnDto'];
 
 /**
+ * Оформлення колонки, задане автором шаблону (директива registry-lookup /
+ * cell-style, PR B2) — підмножина `StyleDef`, яку читає жива сітка.
+ * `ColumnDto.style` — `null`, якщо `ColumnDef.StyleId` не задано.
+ */
+export type CellStyleDto = Schemas['CellStyleDto'];
+
+/**
  * Рядок зі значеннями; ключ у `cells` — код колонки.
  *
  * ⚠ Присутній ключ зі значенням `null` — **явна порожнеча**; відсутній ключ —
