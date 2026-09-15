@@ -156,8 +156,10 @@ function rowModeLabel(mode: TableDto['rowMode']): string {
 /** Підпис причини, з якої зберегти ще не можна. */
 function blockerLabel(blocker: TableBlocker): string {
   switch (blocker) {
-    case 'Code':
+    case 'CodeEmpty':
       return t('tableDef.errCode');
+    case 'CodeInvalid':
+      return t('tableDef.errCodeInvalid');
     case 'Name':
       return t('tableDef.errName');
     default:

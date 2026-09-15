@@ -64,8 +64,16 @@ export function draftOf(table: TableDto): TableDraft {
   };
 }
 
-/** Що саме заважає зберегти чернетку. */
-export type TableBlocker = 'Code' | 'Name';
+/**
+ * Що саме заважає зберегти чернетку.
+ *
+ * ⛔ Аудит-пас 8, lane7, п.10: `CodeEmpty` і `CodeInvalid` були ОДНИМ
+ * значенням (`'Code'`) — повідомлення «дай коду код» не мінялося, коли
+ * причина насправді була в недопустимих символах (`[`, `]`, `-`), а не в
+ * порожньому полі. Поле вже заповнене, повідомлення каже «заповни» — і
+ * людина шукає, що не так, замість того щоб побачити причину.
+ */
+export type TableBlocker = 'CodeEmpty' | 'CodeInvalid' | 'Name';
 
 /**
  * Чому чернетку ще не можна зберегти; `null` — можна.
@@ -75,8 +83,8 @@ export type TableBlocker = 'Code' | 'Name';
  * що й `SheetDraft.whyCannotSave`: сервер відхиляє недопустимий код і сам.
  */
 export function whyCannotSave(draft: TableDraft): TableBlocker | null {
-  if (draft.code.trim().length === 0) return 'Code';
-  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(draft.code)) return 'Code';
+  if (draft.code.trim().length === 0) return 'CodeEmpty';
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(draft.code)) return 'CodeInvalid';
 
   if (Object.values(draft.nameL10n).every((text) => text.trim().length === 0)) return 'Name';
 
