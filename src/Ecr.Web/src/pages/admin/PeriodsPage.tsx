@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, ScrollArea, Select, Table, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Group, Modal, ScrollArea, Select, Table, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -90,6 +90,13 @@ export function PeriodsPage(): JSX.Element {
   });
 
   const selected = (projects.data?.items ?? []).find((p) => p.id === projectId);
+
+  // ⚠ Аудит-пас 8, п.2: `POST /archive` відмовляє `409 ECR-PRD-0409`, коли є
+  // хоч один незакритий період, — але діалог підтвердження про це мовчав, і
+  // відмова виринала лише ПІСЛЯ кліку «Архівувати» в діалозі. Дані про стан
+  // періодів уже завантажені на цій сторінці (`periods` вище), новий запит
+  // не потрібен.
+  const openPeriods = (periods.data?.periods ?? []).filter((p) => p.state !== 'Closed');
 
   /** Перечитує проєкти і календар після будь-якої зміни. */
   const refresh = async (): Promise<void> => {
@@ -652,6 +659,16 @@ export function PeriodsPage(): JSX.Element {
           {t('periods.archiveConfirm')}
         </Text>
 
+        {/* ⚠ Аудит-пас 8, п.2: попередження про передумову ДО кліку, а не
+            `409 ECR-PRD-0409` ПІСЛЯ нього. Кнопка нижче заблокована з тієї ж
+            причини — підтвердження, яке заздалегідь приречене на відмову
+            сервера, гірше за підтвердження, недоступне для кліку. */}
+        {openPeriods.length > 0 && (
+          <Alert color="statusWarning" variant="light" mb="sm">
+            {t('periods.archiveOpenPeriods')}
+          </Alert>
+        )}
+
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={() => setArchiving(false)}>
             {t('common.cancel')}
@@ -659,6 +676,7 @@ export function PeriodsPage(): JSX.Element {
           <Button
             color="statusError"
             loading={archive.isPending}
+            disabled={openPeriods.length > 0}
             onClick={() => {
               if (selected !== undefined) archive.mutate(selected.id);
             }}
