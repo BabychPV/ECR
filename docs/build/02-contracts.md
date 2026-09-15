@@ -3204,6 +3204,13 @@ public sealed record TableSliceDto(
     IReadOnlyDictionary<string, string> CellConfirmations);
 
 /// <summary>Опис колонки для клієнта.</summary>
+/// <remarks>
+/// ⚠ <c>IsRequiredByMethodology</c> — колонка є обов'язковим входом
+/// (<c>Domain.Entities.Calculations.MethodologyRequiredInput</c>) бодай
+/// однієї методології, чинної зараз для цієї таблиці. Інша вісь, ніж
+/// <c>IsRequired</c>, але на екрані обидві позначаються однаково (`*` у
+/// заголовку) — з погляду оператора різниця джерела не має значення.
+/// </remarks>
 public sealed record ColumnDto(
     int Id,
     string Code,
@@ -3216,7 +3223,10 @@ public sealed record ColumnDto(
     string? DefaultValue,
     int? LookupRegistryDefId,
     int? UnitId,
-    string? UnitSymbol);
+    string? UnitSymbol,
+    byte? Precision = null,
+    byte? Scale = null,
+    bool IsRequiredByMethodology = false);
 
 /// <summary>Рядок зі значеннями. Ключ у <paramref name="Cells"/> — код колонки.</summary>
 /// <param name="RowKey">Ідентичність рядка.</param>

@@ -105,13 +105,21 @@ public sealed class SubmitApproveTests
     /// Знімок структури: аркуш <c>Water</c> з однією таблицею й колонкою.
     /// </summary>
     /// <param name="rule">Правило валідації таблиці; <c>null</c> — без правил.</param>
+    /// <param name="requiredColumn">
+    /// Колонка <c>Volume</c> обов'язкова (<c>ColumnDef.IsRequired</c>) — предмет
+    /// перевірки «рядок, чиєї обов'язкової клітинки НІКОЛИ не торкались».
+    /// </param>
     private static Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot(
-        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null)
+        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false)
     {
         var column = new Ecr.Domain.Entities.Configuration.ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
         typeof(Entity<int>).GetProperty("Id")!.SetValue(column, 11);
+        if (requiredColumn)
+        {
+            column.SetRequired(true);
+        }
 
         var sheet = new Ecr.Domain.Entities.Configuration.SheetDef(
             TemplateVersion, EcrCode.Create("WATER"),
@@ -366,6 +374,51 @@ public sealed class SubmitApproveTests
             Snapshot(new Ecr.Domain.Entities.Configuration.ValidationRule(
                 tableDefId: 3, EcrCode.Create("CAP"), severity, scope: 1, expression,
                 new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume is over the cap" }))));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-3.2")]
+    public async Task Подання_рядка_чию_обовязкову_клітинку_ніколи_не_редагували_відхиляється()
+    {
+        // ⛔ Це саме та прогалина, яку `PatchCellsHandler` не закриває:
+        // `ColumnDef.IsRequired` перевіряється ЛИШЕ в момент запису значення
+        // через `PATCH /cells`. Рядок, чию обов'язкову клітинку взагалі не
+        // торкались редагуванням, не лишає жодного запису `doc.CellValue`
+        // (ФВ-3.8) — і тому не проходить НІ через `ColumnDef.ValidateValue`,
+        // ні через жодну іншу перевірку. Подання — природна точка
+        // «готовність», де ця гарантія має нарешті з'явитися.
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot(requiredColumn: true));
+
+        // Зріз ПОРОЖНІЙ: рядок 7001001 існує (є в `GetRowIdsAsync`, підставленому
+        // в конструкторі), але жодної клітинки за нього ніколи не записували.
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>())
+              .Returns(new List<CellRecord>());
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-3.2")]
+    public async Task Подання_рядка_з_явно_заповненою_обовязковою_клітинкою_проходить()
+    {
+        // Контрольний випадок для попереднього теста: та сама обов'язкова
+        // колонка, але значення справді записане — подання не має чіплятися
+        // до заповнених рядків.
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot(requiredColumn: true));
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Поданий_аркуш_не_редагується_навіть_у_стані_Grace()

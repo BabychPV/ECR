@@ -51,6 +51,8 @@ public sealed class OrphanScanTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
+    private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
 
     public OrphanScanTests()
     {
@@ -112,6 +114,11 @@ public sealed class OrphanScanTests
                  .Returns(new ApprovalState(Document, Sheet, Period));
         _workflow.SaveSnapshotAsync(Arg.Any<SubmissionSnapshotRecord>(), Arg.Any<CancellationToken>())
                  .Returns(1L);
+
+        // ⚠ Предмет цього класу — осиротілі рядки, не методології: жодна до
+        // таблиці не прив'язана.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                      .Returns(new List<int>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -281,7 +288,7 @@ public sealed class OrphanScanTests
         return catalogue;
     }
 
-    private GetTableSliceHandler Slice() => new(_rows, _cells, _metadata, Units(), _access);
+    private GetTableSliceHandler Slice() => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods);
 
     private SubmitSheetHandler Submit()
         => new(

@@ -1,6 +1,7 @@
 ﻿using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Calculations;
 
 namespace Ecr.Application.Documents;
 
@@ -13,7 +14,9 @@ public sealed class GetTableSliceHandler(
     ICellStore cellStore,
     IMetadataCache metadata,
     IUnitCatalog units,
-    IAccessDecisionService access)
+    IAccessDecisionService access,
+    IMethodologyStore methodologies,
+    IPeriodStore periods)
 {
     /// <summary>Читає зріз.</summary>
     public async Task<TableSliceDto> HandleAsync(long documentId, long tableInstanceId,
@@ -94,6 +97,15 @@ public sealed class GetTableSliceHandler(
         var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
         var symbolById = catalogue.Units.Values.ToDictionary(u => u.Id, u => u.Code);
 
+        // ⛔ Директива «правила методологій на сторінці»: оператор мав
+        // дізнаватися про обов'язковий вхід методології лише ПІСЛЯ спроби
+        // зберегти (`PatchCellsHandler.EnforceRequiredInputsAsync`) — жодного
+        // сигналу на сітці ДО того не було. Тут той самий факт (яка версія
+        // методології зараз чинна для цієї таблиці й що вона вимагає)
+        // рахується для позначки в заголовку, а не для gate.
+        var requiredByMethodology = await RequiredByMethodologyColumnIdsAsync(
+            table.Id, documentId, instance.PeriodKey, ct).ConfigureAwait(false);
+
         var columns = table.Columns
             .Where(c => !c.IsDeleted)
             .OrderBy(c => c.Ordinal)
@@ -101,7 +113,7 @@ public sealed class GetTableSliceHandler(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
                 c.Ordinal, c.IsReadOnly, c.IsRequired, c.DisplayFormat, c.DefaultValue,
                 c.LookupRegistryDefId, c.UnitId, SymbolOf(symbolById, c.UnitId),
-                c.Precision, c.Scale))
+                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id)))
             .ToList();
 
         var columnCodeById = table.Columns.ToDictionary(c => c.Id, c => c.Code);
@@ -190,6 +202,86 @@ public sealed class GetTableSliceHandler(
 
         return new TableSliceDto(
             tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations);
+    }
+
+    /// <summary>
+    /// <c>ColumnDefId</c> обов'язкових вхідних колонок усіх методологій,
+    /// чинних ЗАРАЗ (на кінець періоду екземпляра) для цієї таблиці.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Вибір чинної версії — те саме правило, що й
+    /// <c>PatchCellsHandler.ResolveApplicableAsync</c> (найпізніший
+    /// <c>EffectiveFrom</c> ≤ дата, потім старша версія, потім більший
+    /// <c>Id</c> — <see cref="MethodologyVersionKey.Currency"/>), навмисно
+    /// НЕ винесене в спільний метод: там вибір — частина ворожіння правил
+    /// прив'язки по КОНКРЕТНОМУ рядку (gate перед записом), тут — підсумок
+    /// по ВСІЙ таблиці для заголовка (жодного рядка ще може не бути).
+    /// Спільний із обома предикат зіставлення рядка — <c>MethodologyRuleMatcher</c>
+    /// — тут не потрібен: зірочка в заголовку не знає про рядки взагалі
+    /// (див. <see cref="ColumnDto.IsRequiredByMethodology"/>).
+    ///
+    /// ⚠ Немає меж періоду (`FindPeriodBoundsAsync` повернув <c>null</c>) —
+    /// порожній набір, а не відмова: сітку показати треба навіть тоді, коли
+    /// не вдалося визначити межі періоду, просто без позначки методології.
+    /// </remarks>
+    private async Task<HashSet<int>> RequiredByMethodologyColumnIdsAsync(
+        int tableDefId, long documentId, int periodKey, CancellationToken ct)
+    {
+        var methodologyIds = await methodologies
+            .GetMethodologyIdsBoundToTableAsync(tableDefId, ct).ConfigureAwait(false);
+
+        if (methodologyIds.Count == 0)
+        {
+            return [];
+        }
+
+        var bounds = await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        if (bounds is null)
+        {
+            return [];
+        }
+
+        var result = new HashSet<int>();
+
+        foreach (var methodologyId in methodologyIds)
+        {
+            var versions = await methodologies.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
+
+            var version = versions
+                .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= bounds.PeriodEnd)
+                .OrderByDescending(
+                    v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
+                    MethodologyVersionKey.Currency)
+                .FirstOrDefault();
+
+            if (version is null)
+            {
+                continue;
+            }
+
+            // ⚠ Версія без ЖОДНОГО правила прив'язки ніколи не потрапляє в
+            // gate `PatchCellsHandler.ResolveApplicableAsync` (`rules.Count == 0`
+            // → методологія пропускається цілком, незалежно від вимог) — тобто
+            // її обов'язкові входи НІКОЛИ насправді не enforced. Позначати тут
+            // колонку зірочкою за вимогою, яка ніколи не спрацює, означало б
+            // брехати оператору. Той самий предикат «застосовність», без
+            // самого зіставлення рядка (воно тут не потрібне).
+            var rules = await methodologies.GetRulesAsync(version.Id, ct).ConfigureAwait(false);
+            if (rules.Count == 0)
+            {
+                continue;
+            }
+
+            var requiredInputs = await methodologies
+                .GetRequiredInputsAsync(version.Id, ct).ConfigureAwait(false);
+
+            foreach (var input in requiredInputs)
+            {
+                result.Add(input.ColumnDefId);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Позначення одиниці колонки; <c>null</c> — колонка безрозмірна.</summary>
