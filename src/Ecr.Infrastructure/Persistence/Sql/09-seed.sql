@@ -809,10 +809,14 @@ USING (VALUES
     (N'workflow.reopen',                 N'en', N'Return for edits', 1),
     (N'workflow.recalculate',            N'en', N'Recalculate', 1),
 
-    -- Прогалина 2 директиви паритету зі старою системою: підказка прибирає
-    -- оманливий вигляд кнопки на екрані ОДНОГО аркуша, яка насправді
-    -- перераховує весь документ.
-    (N'workflow.recalculateHint',        N'en', N'Recalculates every sheet of this document for the shown period, not only this one.', 1),
+    -- Прогалина 2 директиви паритету зі старою системою (Q-327 → Q-328):
+    -- до Q-328 кнопка на екрані аркуша насправді перераховувала весь
+    -- документ, і підказка лише чесно про це попереджала. Тепер перерахунок
+    -- дійсно звужений до цього аркуша — підказка називає лишень те, що й
+    -- досі відрізняється від наївного очікування: формула цього аркуша
+    -- має право читати дані сусіднього, тож перерахунок однаково враховує
+    -- весь документ, хоч і пише лише в цей аркуш.
+    (N'workflow.recalculateHint',        N'en', N'Recalculates this sheet. Formulas may still read data from other sheets of the same document.', 1),
     (N'workflow.approved',               N'en', N'The sheet has been approved.', 1),
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),

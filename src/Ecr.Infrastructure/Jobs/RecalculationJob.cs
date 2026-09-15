@@ -249,10 +249,23 @@ public sealed class RecalculationJob(
         // той може бути `null` — «повний рік», — і `new PeriodKey(0)` тоді
         // виглядав би як звичайний період, у якому просто нічого немає
         // (`A7-28`, `PeriodKey.IsValid`).
-        var scopes = await db.TableInstances
+        //
+        // ⚠ Q-328: коли `SheetDefId` заданий, скоуп звужується до періодів, у
+        // яких є ХОЧ ОДНА таблиця ЦЬОГО аркуша — період, де аркуш порожній,
+        // однаково не запише жодної комірки; фільтр лише економить прогони, що
+        // напевно нічого не запишуть.
+        var scopesQuery = db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey))
+                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey));
+
+        if (request.SheetDefId is { } scopeSheetId)
+        {
+            scopesQuery = scopesQuery.Where(i =>
+                db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == scopeSheetId));
+        }
+
+        var scopes = await scopesQuery
             .Select(i => new ScopeRow(i.DocumentId, i.PeriodKeyValue))
             .Distinct()
             .Take(MaxBindings)
@@ -264,7 +277,8 @@ public sealed class RecalculationJob(
         foreach (var scope in scopes.OrderBy(s => s.PeriodKeyValue))
         {
             written += await formulas
-                .RecalculateAllAsync(scope.DocumentId, new PeriodKey(scope.PeriodKeyValue), ct)
+                .RecalculateAllAsync(
+                    scope.DocumentId, new PeriodKey(scope.PeriodKeyValue), ct, request.SheetDefId)
                 .ConfigureAwait(false);
         }
 
@@ -280,10 +294,25 @@ public sealed class RecalculationJob(
     private async Task<List<CalculationBindingRef>> BindingsAsync(
         RecalculationRequest request, CancellationToken ct)
     {
-        var instances = await db.TableInstances
+        // ⚠ Q-328: методологія прив'язана до `TableDefId`, тобто до конкретної
+        // таблиці — і, транзитивно, до аркуша, якому та таблиця належить
+        // (`TableDef.SheetDefId`). Звузити прив'язки до аркуша тут БЕЗПЕЧНО
+        // так само, як і формули шаблону вище: методологія рахує РЕЗУЛЬТАТ у
+        // `calc.CalculationResult` для таблиці цього аркуша, а вхідні дані
+        // (`CalculationInputBuilder`) читає з `doc.CellValue` без огляду на
+        // те, прив'язку якого аркуша перераховує цей прогін.
+        var instancesQuery = db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey))
+                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey));
+
+        if (request.SheetDefId is { } bindingSheetId)
+        {
+            instancesQuery = instancesQuery.Where(i =>
+                db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == bindingSheetId));
+        }
+
+        var instances = await instancesQuery
             .Take(MaxBindings)
             .Select(i => new InstanceRow(i.Id, i.TableDefId))
             .ToListAsync(ct)
@@ -430,5 +459,14 @@ public sealed class RecalculationJob(
 /// <param name="DocumentId">Документ; нуль — усі документи проєкту.</param>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік.</param>
 /// <param name="TriggeredByUserId">Хто запустив; <c>null</c> — за розкладом.</param>
+/// <param name="SheetDefId">
+/// Аркуш; <c>null</c> — увесь документ (поведінка до Q-328). Звужує лише те, ЩО
+/// ЗАПИСУЄТЬСЯ (формули й методології, чиї цілі належать таблицям цього
+/// аркуша) — входи, як і раніше, читаються з УСІХ таблиць документа: формула
+/// цього аркуша має право читати сусідній (`ReferenceResolver.FindTable`
+/// резолвить <c>[SheetCode].[TableCode]</c> у БУДЬ-ЯКИЙ аркуш документа), і
+/// звузити читання означало б порахувати з частково застарілих входів —
+/// тихо неправильне число замість «кнопка ширша за назву» (Q-327).
+/// </param>
 public sealed record RecalculationRequest(
-    int ProjectId, long DocumentId, int? PeriodKey, int? TriggeredByUserId);
+    int ProjectId, long DocumentId, int? PeriodKey, int? TriggeredByUserId, int? SheetDefId = null);

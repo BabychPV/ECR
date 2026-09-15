@@ -18,7 +18,8 @@ namespace Ecr.Application.Documents;
 public sealed class RecalculateDocumentHandler(
     IBackgroundJobScheduler jobs,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IDocumentStore documents)
 {
     /// <summary>Право на запуск перерахунку (`02-contracts.md` §9).</summary>
     public const string Permission = "Calculation.Recalculate";
@@ -26,13 +27,22 @@ public sealed class RecalculateDocumentHandler(
     /// <summary>Ставить задачу в чергу і повертає її ідентифікатор.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
+    /// <param name="sheetDefId">
+    /// Аркуш; <c>null</c> — увесь документ (поведінка до Q-328). Реальний
+    /// перерахунок ОДНОГО аркуша (директива паритету зі старою системою,
+    /// прогалина 2, Q-327 → Q-328): звужує ЦІЛІ запису до таблиць цього
+    /// аркуша, входи лишаються з усього документа (`RecalculationJob`,
+    /// `RecalculationService.RunAsync`).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="Errors.NotFoundException"><c>ECR-DOC-0404</c> — аркуша немає в складі документа.</exception>
     /// <remarks>
     /// ⚠ ЗАКРИТІ періоди АВТОМАТИЧНО не перераховуються ніколи (ФВ-9.7) —
     /// це перевіряє <c>RunCalculationHandler</c>, якому задача передає
     /// керування. Тут — право і чергування.
     /// </remarks>
-    public async Task<string> HandleAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    public async Task<string> HandleAsync(
+        long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
@@ -48,6 +58,20 @@ public sealed class RecalculateDocumentHandler(
         {
             throw new Errors.AccessDeniedException(
                 "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+        }
+
+        // ⛔ Q-328: аркуш мусить входити в СКЛАД документа — той самий гейт,
+        // що вже стоїть перед `SubmitSheetHandler` (`ФВ-3.2`). Без нього
+        // перерахунок довільного `sheetDefId` (навіть чужого документа чи
+        // такого, якого не існує взагалі) тихо повертав би `jobId`, чий прогін
+        // не запише НІЧОГО: `RecalculationJob`/`RecalculationService` просто не
+        // знайшли б жодної таблиці цього аркуша в документі — і людина
+        // отримала б «перераховано» без жодного перерахунку.
+        if (sheetDefId is { } targetSheetId
+            && !await documents.HasSheetAsync(documentId, targetSheetId, ct).ConfigureAwait(false))
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404", $"Аркуша {targetSheetId} немає в складі документа {documentId}.");
         }
 
         // ⛔ Новий перерахунок ВИТІСНЯЄ попередній над тим самим документом і
@@ -76,7 +100,13 @@ public sealed class RecalculateDocumentHandler(
         return await jobs
             .EnqueueExclusiveAsync<IRecalculationJob>(
                 TargetOf(documentId, periodKey),
-                new { DocumentId = documentId, PeriodKey = periodKey.Value, TriggeredByUserId = currentUser.UserId },
+                new
+                {
+                    DocumentId = documentId,
+                    PeriodKey = periodKey.Value,
+                    TriggeredByUserId = currentUser.UserId,
+                    SheetDefId = sheetDefId,
+                },
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
@@ -90,6 +120,15 @@ public sealed class RecalculateDocumentHandler(
     /// ⚠ Саме пара, а не самий документ: перерахунок різних періодів одного
     /// документа — це різна робота над різними партиціями, і витісняти одне
     /// одним означало б, що заповнення грудня скасовує перерахунок листопада.
+    /// <para>
+    /// ⚠ Q-328: НЕ пара «документ + аркуш» — умисно. Кожен прогін перемикає
+    /// актуальність усього <c>CalculationRun</c> документа за період
+    /// (<c>RunCalculationHandler.CompleteAsync</c>), а не лише свого аркуша;
+    /// два одночасні прогони над тим самим документом і періодом, хай навіть
+    /// різних аркушів, гонялися б за тим самим перемиканням актуальності —
+    /// той самий клас проблеми, що вже описаний нижче для двох повних
+    /// перерахунків (`H-23c`).
+    /// </para>
     /// </remarks>
     public static string TargetOf(long documentId, PeriodKey periodKey)
         => string.Create(

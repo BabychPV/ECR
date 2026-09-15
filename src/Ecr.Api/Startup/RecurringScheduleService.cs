@@ -23,7 +23,8 @@ namespace Ecr.Api.Startup;
 public sealed partial class RecurringScheduleService(
     IServiceProvider services,
     IHostApplicationLifetime lifetime,
-    ILogger<RecurringScheduleService> logger) : IHostedService
+    ILogger<RecurringScheduleService> logger,
+    IConfiguration configuration) : IHostedService
 {
     /// <summary>Cron нічних перевірок: 02:15, поза вікном роботи людей.</summary>
     public const string NightlyCron = "0 15 2 * * ?";
@@ -131,12 +132,22 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.NotificationJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+
+        // ⛔ Прогалини 4+5 директиви паритету зі старою системою (Q-327 →
+        // Q-328): нічний повний перерахунок — ОПЦІЯ, вимкнена за
+        // замовчуванням (`NightlyRecalculationScheduling.EnabledKey`), не
+        // завжди-увімкнений режим для всіх проєктів одразу. Коли вимкнена
+        // (типовий стан) — нічого не ставиться, і поведінка проду не
+        // змінюється.
+        var nightlyRecalcCount = await NightlyRecalculationScheduling
+            .ScheduleAsync(configuration, db, scheduler, CancellationToken.None)
+            .ConfigureAwait(false);
+
         // ⚠ Збір ставиться ОКРЕМО на кожну сутність джерела, з її власним
         // cron: у розкладі саме сутність, а не «інтеграція взагалі». Спільна
         // задача на всі джерела означала б, що недоступність одного затримує
         // решту.
-        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
-
         var schedules = await db.CollectionSchedules
             .AsNoTracking()
             .Where(s => s.IsEnabled)
@@ -172,7 +183,7 @@ public sealed partial class RecurringScheduleService(
                 .ConfigureAwait(false);
         }
 
-        LogSchedulesDone(logger, schedules.Count);
+        LogSchedulesDone(logger, schedules.Count, nightlyRecalcCount);
     }
 
     [LoggerMessage(
@@ -192,8 +203,9 @@ public sealed partial class RecurringScheduleService(
 
     [LoggerMessage(
         Level = LogLevel.Information,
-        Message = "Старт: постійні розклади поставлено, зокрема збору: {Count}.")]
-    private static partial void LogSchedulesDone(ILogger logger, int count);
+        Message = "Старт: постійні розклади поставлено, зокрема збору: {Count}; "
+            + "нічного перерахунку: {NightlyRecalcCount} проєктів (0 — опція вимкнена).")]
+    private static partial void LogSchedulesDone(ILogger logger, int count, int nightlyRecalcCount);
 
     [LoggerMessage(
         Level = LogLevel.Critical,

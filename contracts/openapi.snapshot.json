@@ -4348,6 +4348,28 @@
         ],
         "type": "object"
       },
+      "RecalculateDocumentRequest": {
+        "description": "Запит на перерахунок документа (Q-328).",
+        "properties": {
+          "periodKey": {
+            "description": "Період; `Рік*100 + Номер` (R-A6).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetDefId": {
+            "description": "Аркуш; `null` — увесь документ (поведінка до Q-328). Заданий —\nзвужує перерахунок до ОДНОГО аркуша (директива паритету зі старою\nсистемою, прогалина 2): вхідні дані читаються як і раніше з усього\nдокумента, звужується лише те, ЩО ЗАПИСУЄТЬСЯ.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "periodKey"
+        ],
+        "type": "object"
+      },
       "RecalculationAcceptedResponse": {
         "description": "Прийнятий у чергу перерахунок.",
         "properties": {
@@ -8820,7 +8842,7 @@
     },
     "/api/v1/documents/{id}/recalculate": {
       "post": {
-        "description": "Довга операція — у фон із прогресом; повертає `jobId`, а не результат.",
+        "description": "Довга операція — у фон із прогресом; повертає `jobId`, а не результат.\n`SheetDefId` звужує перерахунок до одного аркуша (Q-328); без нього —\nувесь документ, як і раніше.",
         "parameters": [
           {
             "in": "path",
@@ -8837,17 +8859,17 @@
           "content": {
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/DocumentPeriodRequest"
+                "$ref": "#/components/schemas/RecalculateDocumentRequest"
               }
             },
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DocumentPeriodRequest"
+                "$ref": "#/components/schemas/RecalculateDocumentRequest"
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/DocumentPeriodRequest"
+                "$ref": "#/components/schemas/RecalculateDocumentRequest"
               }
             }
           },
@@ -8873,9 +8895,29 @@
               }
             },
             "description": "Accepted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
-        "summary": "Перерахунок документа. Право `Calculation.Recalculate`.",
+        "summary": "Перерахунок документа, або лише одного його аркуша. Право `Calculation.Recalculate`.",
         "tags": [
           "Documents"
         ]

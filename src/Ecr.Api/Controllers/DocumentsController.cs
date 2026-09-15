@@ -162,19 +162,26 @@ public sealed class DocumentsController(
                     m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
-    /// <summary>Перерахунок документа. Право <c>Calculation.Recalculate</c>.</summary>
-    /// <remarks>Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.</remarks>
+    /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Calculation.Recalculate</c>.</summary>
+    /// <remarks>
+    /// Довга операція — у фон із прогресом; повертає <c>jobId</c>, а не результат.
+    /// <c>SheetDefId</c> звужує перерахунок до одного аркуша (Q-328); без нього —
+    /// увесь документ, як і раніше.
+    /// </remarks>
     [HttpPost("{id:long}/recalculate")]
     [ProducesResponseType<Contracts.RecalculationAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Recalculate(
-        long id, [FromBody] DocumentPeriodRequest request, CancellationToken ct)
+        long id, [FromBody] RecalculateDocumentRequest request, CancellationToken ct)
     {
         // Контролер лише делегує: рішення про чергу, payload і умови — у
         // прикладному шарі, інакше те саме правило почало б жити у двох місцях.
         ArgumentNullException.ThrowIfNull(request);
 
         var periodKey = request.PeriodKey;
-        var jobId = await recalculate.HandleAsync(id, PeriodKey.Parse(periodKey), ct).ConfigureAwait(false);
+        var jobId = await recalculate
+            .HandleAsync(id, PeriodKey.Parse(periodKey), request.SheetDefId, ct)
+            .ConfigureAwait(false);
 
         return Accepted(new Contracts.RecalculationAcceptedResponse(jobId, id, periodKey));
     }
@@ -375,6 +382,16 @@ public sealed record CreateDocumentRequest(int ProjectId, int TemplateVersionId,
 /// <summary>Дія над документом у межах одного періоду.</summary>
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
 public sealed record DocumentPeriodRequest(int PeriodKey);
+
+/// <summary>Запит на перерахунок документа (Q-328).</summary>
+/// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
+/// <param name="SheetDefId">
+/// Аркуш; <c>null</c> — увесь документ (поведінка до Q-328). Заданий —
+/// звужує перерахунок до ОДНОГО аркуша (директива паритету зі старою
+/// системою, прогалина 2): вхідні дані читаються як і раніше з усього
+/// документа, звужується лише те, ЩО ЗАПИСУЄТЬСЯ.
+/// </param>
+public sealed record RecalculateDocumentRequest(int PeriodKey, int? SheetDefId = null);
 
 /// <summary>Аркуш × період — адреса операції робочого процесу.</summary>
 /// <param name="SheetDefId">Аркуш.</param>

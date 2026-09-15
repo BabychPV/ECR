@@ -464,8 +464,11 @@ export type ImportApplyRequest = Schemas['ImportApplyRequest'];
 /** Подання або затвердження аркуша. */
 export type SheetWorkflowRequest = Schemas['SheetWorkflowRequest'];
 
-/** Дія над документом у межах одного періоду: валідація, перерахунок. */
+/** Дія над документом у межах одного періоду: валідація. */
 export type DocumentPeriodRequest = Schemas['DocumentPeriodRequest'];
+
+/** Перерахунок документа, або лише одного його аркуша (Q-328). */
+export type RecalculateDocumentRequest = Schemas['RecalculateDocumentRequest'];
 
 /** Заміна набору ресурсних грантів ролі. */
 export type ReplaceGrantsRequest = Schemas['ReplaceGrantsRequest'];
