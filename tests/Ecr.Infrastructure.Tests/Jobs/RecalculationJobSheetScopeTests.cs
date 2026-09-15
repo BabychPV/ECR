@@ -17,11 +17,11 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
-/// Q-329: перерахунок з <c>SheetDefId</c> звужує прив'язки методологій
+/// Q-330: перерахунок з <c>SheetDefId</c> звужує прив'язки методологій
 /// (<c>RecalculationJob.BindingsAsync</c>) до таблиць ЦЬОГО аркуша.
 /// </summary>
 /// <remarks>
-/// ⛔ Директива паритету зі старою системою, прогалина 2 (Q-327 → Q-329):
+/// ⛔ Директива паритету зі старою системою, прогалина 2 (Q-327 → Q-330):
 /// до цього пакета кнопка «Recalculate» аркуша перераховувала ВЕСЬ документ —
 /// підказка (Q-327) лише чесно про це попереджала, контракт не звужувався.
 /// Цей тест доводить МУТАЦІЄЮ, що звуження реальне: прибери фільтр за
@@ -103,7 +103,7 @@ public sealed class RecalculationJobSheetScopeTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task SheetDefId_відсутній_дає_прив_язки_УСЬОГО_документа()
     {
-        // ⚠ Контрольний тест: поведінка до Q-329 (`SheetDefId = null`)
+        // ⚠ Контрольний тест: поведінка до Q-330 (`SheetDefId = null`)
         // лишається незмінною — обидві прив'язки документа доходять до
         // оркестратора, як і раніше.
         var builder = new TestDocumentBuilder(sql.ConnectionString);
