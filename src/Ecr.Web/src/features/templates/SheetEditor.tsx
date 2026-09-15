@@ -101,8 +101,10 @@ export function SheetEditor({
 /** Підпис причини, з якої зберегти ще не можна. */
 function blockerLabel(blocker: SheetBlocker): string {
   switch (blocker) {
-    case 'Code':
+    case 'CodeEmpty':
       return t('sheets.errCode');
+    case 'CodeInvalid':
+      return t('sheets.errCodeInvalid');
     case 'Name':
       return t('sheets.errName');
     default:

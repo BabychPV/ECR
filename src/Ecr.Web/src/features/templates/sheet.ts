@@ -47,8 +47,16 @@ export function draftOf(sheet: SheetDto): SheetDraft {
   };
 }
 
-/** Що саме заважає зберегти чернетку. */
-export type SheetBlocker = 'Code' | 'Name';
+/**
+ * Що саме заважає зберегти чернетку.
+ *
+ * ⛔ Q-336 (`table.ts`) розділила той самий блокувальник на `CodeEmpty` і
+ * `CodeInvalid` — тут та сама причина: `'Code'` одним значенням покривало і
+ * порожнє поле, і код із недопустимими символами, тож повідомлення «дай коду
+ * код» не мінялося, коли причина насправді була в символах, а не в порожньому
+ * полі.
+ */
+export type SheetBlocker = 'CodeEmpty' | 'CodeInvalid' | 'Name';
 
 /**
  * Чому чернетку ще не можна зберегти; `null` — можна.
@@ -58,8 +66,8 @@ export type SheetBlocker = 'Code' | 'Name';
  * мережу те, що напевно повернеться відмовою.
  */
 export function whyCannotSave(draft: SheetDraft): SheetBlocker | null {
-  if (draft.code.trim().length === 0) return 'Code';
-  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(draft.code)) return 'Code';
+  if (draft.code.trim().length === 0) return 'CodeEmpty';
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(draft.code)) return 'CodeInvalid';
 
   if (Object.values(draft.nameL10n).every((text) => text.trim().length === 0)) return 'Name';
 

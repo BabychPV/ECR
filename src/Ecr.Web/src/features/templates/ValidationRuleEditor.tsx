@@ -119,8 +119,10 @@ export function ValidationRuleEditor({
 /** Підпис причини, з якої зберегти ще не можна. */
 function blockerLabel(blocker: ValidationRuleBlocker): string {
   switch (blocker) {
-    case 'Code':
+    case 'CodeEmpty':
       return t('validationRules.errCode');
+    case 'CodeInvalid':
+      return t('validationRules.errCodeInvalid');
     case 'Expression':
       return t('validationRules.errExpression');
     case 'Message':
