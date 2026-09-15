@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import {
   Accordion,
+  Alert,
   Badge,
   Button,
   Divider,
@@ -554,6 +555,23 @@ export function TemplateVersionPage(): JSX.Element {
           </Group>
         }
       />
+
+      {/*
+       * ⛔ Аудит-пас 8, lane7, п.11: опублікована версія коректно не дає
+       * редагувати структуру, але ЄДИНЕ пояснення до фіксу жило ВСЕРЕДИНІ
+       * діалогу клонування (`version.cloneHint`), який треба здогадатися
+       * відкрити. Мітка `· Fixed` біля таблиці (`tableDef.rowModeFixed`) —
+       * про ІНШЕ (спосіб формування рядків, не стан заморозки) і оманливо
+       * виглядає як пояснення. Банер тут — НА самій сторінці, а не лише в
+       * діалозі клонування, показується за тим самим прапорцем, що вже
+       * ховає форму аркуша (`canEditSheets` вище читає той самий
+       * `structure.data?.isEditable`).
+       */}
+      {can(session.data, 'Template.Edit') && structure.data?.isEditable === false && (
+        <Alert color="statusWarning" variant="light" mb="sm">
+          {t('version.structureFrozen')}
+        </Alert>
+      )}
 
       {/*
        * ⚠ Версія без аркушів — окремий стан: опублікувати таку не можна, і
