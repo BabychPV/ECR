@@ -690,7 +690,7 @@ export function MethodologyRequiredInputsPanel({
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
                       {requiredInput.columnDefId}
-                      {/* ⛔ UI-аудит, lane 5 (`Q-333`): деактивована прив'язка
+                      {/* ⛔ UI-аудит, lane 5 (`Q-337`): деактивована прив'язка
                           лишала вимогу без ЖОДНОГО натяку, що вона зависла —
                           рядок і далі показував `Column: X, Severity: Block`
                           так, наче все гаразд, і далі блокував збереження

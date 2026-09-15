@@ -384,9 +384,9 @@ public sealed class ListMethodologyRequiredInputsHandler(
         var requiredInputs = await drafts.GetAllRequiredInputsAsync(methodologyVersionId, ct)
             .ConfigureAwait(false);
 
-        // ⛔ UI-аудит, lane 5 (`Q-333`): «зависла» вимога — колонка, чию
+        // ⛔ UI-аудит, lane 5 (`Q-337`): «зависла» вимога — колонка, чию
         // прив'язку деактивували, і далі блокувала збереження без жодного
-        // натяку. Прив'язки належать МЕТОДОЛОГІЇ (`Q-336`/`SaveCalculationBindingHandler`),
+        // натяку. Прив'язки належать МЕТОДОЛОГІЇ (`Q-337`/`SaveCalculationBindingHandler`),
         // не версії, — тому окремий запит саме за `version.MethodologyId`.
         var activeColumns = (await bindings.ListAsync(version.MethodologyId, ct).ConfigureAwait(false))
             .Where(b => b.IsActive)
@@ -429,7 +429,7 @@ public sealed class SaveMethodologyRequiredInputHandler(
     /// <exception cref="NotFoundException">Версії або колонки немає.</exception>
     /// <exception cref="BusinessRuleException">Версія опублікована.</exception>
     /// <remarks>
-    /// ⛔ UI-аудит, lane 5 (`Q-333`): до цього нічого не перевіряло, що
+    /// ⛔ UI-аудит, lane 5 (`Q-337`): до цього нічого не перевіряло, що
     /// `columnDefId` — реальна колонка. Навіть коли вибір іде через
     /// searchable dropdown (`Q-332`), клієнт лише ПРОПОНУЄ реальні id — сервер
     /// має перевіряти сам, а не покладатись на те, що клієнт чесний. Перевірка
@@ -905,7 +905,7 @@ public static class MethodologyAuthoringMap
     /// <param name="requiredInput">Вимога версії.</param>
     /// <param name="hasActiveBinding">
     /// Чи має колонка вимоги хоч одну АКТИВНУ прив'язку цієї методології
-    /// (`Q-333`, lane 5 UI-аудиту) — обчислюється викликачем, бо для цього
+    /// (`Q-337`, lane 5 UI-аудиту) — обчислюється викликачем, бо для цього
     /// потрібен окремий запит бінднгів методології, не самої вимоги.
     /// </param>
     /// <returns>Вимога для конфігуратора.</returns>

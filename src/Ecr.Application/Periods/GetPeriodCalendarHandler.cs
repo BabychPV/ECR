@@ -54,7 +54,7 @@ public sealed class GetPeriodCalendarHandler(
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
 
-        // ⛔ Q-333, lane 2 UI-аудиту: сторінка Periods показувала «Grace
+        // ⛔ Q-337, lane 2 UI-аудиту: сторінка Periods показувала «Grace
         // until»/«Range» без жодного зв'язку з чотирма цифрами політики
         // (`Open offset`/`Grace offset`/`Hard-close offset`/`Year grace`) —
         // ярлик `+15/45` у формі створення проєкту показує лише два з

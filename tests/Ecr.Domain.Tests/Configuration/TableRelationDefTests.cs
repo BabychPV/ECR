@@ -68,7 +68,7 @@ public sealed class TableRelationDefTests
     }
 
     /// <summary>
-    /// UI-аудит, lane 7 (`Q-333`): форма "New relation" приймала геть будь-
+    /// UI-аудит, lane 7 (`Q-337`): форма "New relation" приймала геть будь-
     /// який текст у "Row matching" — `totally not valid syntax {{{ ???
     /// nonsense_column_xyz` зберігався успішно (`200 OK`), і `GET`
     /// підтверджував, що воно так і збереглося буквально.

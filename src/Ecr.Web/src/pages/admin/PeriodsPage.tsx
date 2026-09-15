@@ -492,7 +492,7 @@ export function PeriodsPage(): JSX.Element {
             <Table.Tr>
               <Table.Th>{t('periods.key')}</Table.Th>
               <Table.Th>{t('periods.sequence')}</Table.Th>
-              {/* ⛔ UI-аудит, lane 2 (Q-336): «Range» і «Grace until» не мали
+              {/* ⛔ UI-аудит, lane 2 (Q-337): «Range» і «Grace until» не мали
                   на сторінці ЖОДНОГО пояснення, хоч похідні від чотирьох
                   чисел політики (мітка `+15/45` у формі створення проєкту
                   показує лише два з чотирьох, і НЕ тут). Тултипи нижче

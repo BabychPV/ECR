@@ -25,7 +25,7 @@ public sealed class PeriodStateJobTests
         var onSite = Periods(Site)[0];
         var onUtc = Periods(TimeZoneInfo.Utc)[0];
 
-        // ⛔ UI-аудит, lane 2 (Q-333): `ProjectBuilder.Policy()` — 15-денний
+        // ⛔ UI-аудит, lane 2 (Q-337): `ProjectBuilder.Policy()` — 15-денний
         // пільговий строк (`graceOffsetDays: 15`), і до фіксу
         // `RecomputeBoundaries` це ігнорував — перехід у Grace завжди
         // ставався наступного дня (1 лютого) незалежно від значення
@@ -58,7 +58,7 @@ public sealed class PeriodStateJobTests
         var periods = Periods();
         ProjectBuilder.Attach(project, periods);
 
-        // ⛔ UI-аудит, lane 2 (Q-333): `ProjectBuilder.Policy()` дає 15-денний
+        // ⛔ UI-аудит, lane 2 (Q-337): `ProjectBuilder.Policy()` дає 15-денний
         // пільговий строк — 10 лютого лежить УСЕРЕДИНІ цього вікна, тож
         // після фіксу `GraceOffsetDays` січень ще `Open`, а не `Grace`
         // («найраніший Open» тоді обрав би січень, і контраст «пін тримає

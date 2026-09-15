@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
 
 /**
- * UI-аудит, lane 2 (Q-333): «Grace until»/«Range» на сторінці Periods не
+ * UI-аудит, lane 2 (Q-337): «Grace until»/«Range» на сторінці Periods не
  * мали ЖОДНОГО пояснення. Ярлик політики `+15/45` (форма створення проєкту)
  * показує лише два з чотирьох чисел і взагалі не на цій сторінці; «Grace
  * until» (2026-02-01 для періоду 202601) виглядав як просто межа наступного
@@ -138,7 +138,7 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
-describe('PeriodsPage: тултипи Range/Grace until пояснюють похідну формулу (Q-333, lane2)', () => {
+describe('PeriodsPage: тултипи Range/Grace until пояснюють похідну формулу (Q-337, lane2)', () => {
   it(
     'тултип "Range" називає Open offset і Hard-close offset із РЕАЛЬНИМИ числами політики',
     async () => {

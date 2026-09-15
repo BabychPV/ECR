@@ -93,7 +93,7 @@ public sealed class TableRelationTests(SqlServerFixture sql)
                 version.VersionId, version.RelationCode, Command(version), CancellationToken.None);
         }
 
-        // ⛔ Q-333, lane 7: MatchJson тепер валідується як JSON-об'єкт
+        // ⛔ Q-337, lane 7: MatchJson тепер валідується як JSON-об'єкт
         // (`TableRelationDef.Apply`) — довільний рядок-маркер більше не
         // проходить. Маркер лишається розпізнаваним (значення поля, а не
         // сам рядок), лише обгорнутий у валідний об'єкт.

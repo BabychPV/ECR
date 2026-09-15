@@ -132,7 +132,7 @@ export function whyCannotSave(draft: RelationDraft): RelationBlocker | null {
   // рядка — саме та мовчазна порожнеча, яку ловить домен.
   if (draft.matchJson.trim().length === 0) return 'Match';
 
-  // ⛔ UI-аудит, lane 7 (`Q-333`): форма приймала геть будь-який текст —
+  // ⛔ UI-аудит, lane 7 (`Q-337`): форма приймала геть будь-який текст —
   // `totally not valid syntax {{{ ??? nonsense_column_xyz` зберігався
   // успішно (`200 OK`). Той самий живий UX-компроміс, що вже working для
   // порожнього поля вище: клієнт ловить очевидне ДО мережевого запиту,

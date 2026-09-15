@@ -67,7 +67,7 @@ public sealed class Period : Entity<int>
 
         ComputedOpenAt = ToUtc(PeriodStart.AddDays(policy.OpenOffsetDays), siteTimeZone);
 
-        // ⛔ UI-аудит, lane 2 (Q-333): `policy.GraceOffsetDays` рахувався,
+        // ⛔ UI-аудит, lane 2 (Q-337): `policy.GraceOffsetDays` рахувався,
         // валідувався (`CK_PP_Order`: grace <= hard-close) і показувався в
         // адмінці — і НІДЕ не читався тут. `ComputedGraceAt` завжди був
         // `PeriodEnd + 1` буквально, тож період переходив у `Grace`

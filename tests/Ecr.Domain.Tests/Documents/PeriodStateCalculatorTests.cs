@@ -70,7 +70,7 @@ public sealed class PeriodStateCalculatorTests
     }
 
     /// <summary>
-    /// ⛔ UI-аудит, lane 2 (Q-333): до фіксу `graceOffsetDays` у
+    /// ⛔ UI-аудит, lane 2 (Q-337): до фіксу `graceOffsetDays` у
     /// `RecomputeBoundaries` не читався ВЗАГАЛІ — період переходив з `Open`
     /// у `Grace` рівно наступного дня після кінця, хоч фікстура нижче
     /// налаштовує 5-денний пільговий строк. Мутаційний доказ: якщо хтось
@@ -141,7 +141,7 @@ public sealed class PeriodStateCalculatorTests
         // Опівніч 1 січня в поясі UTC+5 — це 31 грудня 19:00 UTC.
         Assert.Equal(new DateTime(2025, 12, 31, 19, 0, 0, DateTimeKind.Utc), period.ComputedOpenAt);
 
-        // ⛔ UI-аудит, lane 2 (Q-333): до фіксу тут стояло жорстке
+        // ⛔ UI-аудит, lane 2 (Q-337): до фіксу тут стояло жорстке
         // `PeriodEnd + 1` (2026-01-31 19:00 UTC, тобто опівніч 1 лютого) —
         // `graceOffsetDays: 5` цієї фікстури не впливав на результат
         // ВЗАГАЛІ. Правильно — `PeriodEnd + GraceOffsetDays` (31.01 + 5 =

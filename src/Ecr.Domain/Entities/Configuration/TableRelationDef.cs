@@ -126,7 +126,7 @@ public sealed class TableRelationDef : Entity<int>
                 "Без нього він не з'єднує жодного рядка, лишаючись на вигляд налаштованим.");
         }
 
-        // ⛔ UI-аудит, lane 7 (`Q-333`): форма "New relation" приймала геть
+        // ⛔ UI-аудит, lane 7 (`Q-337`): форма "New relation" приймала геть
         // будь-який текст у `Row matching` — `totally not valid syntax {{{ ???`
         // зберігався успішно (`200 OK`) і повертався буквально при наступному
         // `GET`. Перевірка тут — та сама, що вже `RegistryRuleDef.SetParameters`/

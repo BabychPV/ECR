@@ -650,7 +650,7 @@ USING (VALUES
     (N'methodologies.hintHint', N'en', N'Text shown instead of the default template; leave empty to use it.', 1),
     (N'methodologies.noRequiredInputs', N'en', N'This version has no required input columns', 1),
     (N'methodologies.noRequiredInputsHint', N'en', N'Without a required input, a row can be saved even though the methodology has nothing meaningful to compute from it.', 1),
-    -- ⛔ UI-аудит, lane 5 (Q-333): деактивована прив'язка лишала вимогу без
+    -- ⛔ UI-аудит, lane 5 (Q-337): деактивована прив'язка лишала вимогу без
     -- ЖОДНОГО натяку, що вона зависла — рядок і далі показував "Column: X,
     -- Severity: Block", наче все гаразд, і далі блокував збереження даних
     -- для колонки, яку методологія вже не пише.
@@ -731,7 +731,7 @@ USING (VALUES
     (N'periods.key',                     N'en', N'Period', 1),
     (N'periods.sequence',                N'en', N'Sequence', 1),
     (N'periods.range',                   N'en', N'Range', 1),
-    -- ⛔ Q-333, lane 2 UI-аудиту: сторінка показувала «Range»/«Grace until»
+    -- ⛔ Q-337, lane 2 UI-аудиту: сторінка показувала «Range»/«Grace until»
     -- без жодного пояснення, а мітка політики `+15/45` (форма створення
     -- проєкту) показує лише два з чотирьох чисел і не на цій сторінці.
     -- Тултипи нижче пояснюють похідну формулу в термінах РЕАЛЬНИХ чисел
@@ -1391,7 +1391,7 @@ USING (VALUES
     (N'tables.errTarget',                N'en', N'Pick the target table.', 1),
     (N'tables.errSelf',                  N'en', N'Source and target must differ: a table cannot be related to itself.', 1),
     (N'tables.errMatch',                 N'en', N'Describe how rows are matched, otherwise the relation joins nothing.', 1),
-    -- ⛔ UI-аудит, lane 7 (Q-333): форма приймала геть будь-який текст у "Row
+    -- ⛔ UI-аудит, lane 7 (Q-337): форма приймала геть будь-який текст у "Row
     -- matching" без жодного натяку, що це не той JSON-об'єкт, на який
     -- зважає сервер (TableRelationDef.Apply, ECR-TMPL-0422).
     (N'tables.errMatchSyntax',           N'en', N'Row matching must be a valid JSON object, for example {} for every row.', 1),

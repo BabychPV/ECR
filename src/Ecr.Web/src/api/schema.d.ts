@@ -9215,7 +9215,7 @@ export interface components {
              * @description Колонка документа, обов'язкова як вхід.
              */
             columnDefId: number;
-            /** @description ⛔ UI-аудит, lane 5 (`Q-333`): без цього поля панель показувала
+            /** @description ⛔ UI-аудит, lane 5 (`Q-337`): без цього поля панель показувала
              *     `Column: X, Severity: Block` для колонки, чию прив'язку (`CalculationBinding`)
              *     давно деактивували — вимога й далі блокувала збереження даних для
              *     колонки, яку методологія вже не пише, БЕЗ жодного натяку чому. `false`
@@ -9562,7 +9562,7 @@ export interface components {
             periodKind: components["schemas"]["PeriodKind"];
             /** @description Періоди в порядку зростання `PeriodKey`. */
             periods: components["schemas"]["PeriodDto"][];
-            /** @description Політика зсувів проєкту (`Q-333`, lane 2 UI-аудиту): сторінка Periods
+            /** @description Політика зсувів проєкту (`Q-337`, lane 2 UI-аудиту): сторінка Periods
              *     показувала «Grace until»/«Range» без жодного зв'язку з чотирма цифрами
              *     політики (ярлик `+15/45` у формі створення проєкту показує лише два з
              *     чотирьох, і НЕ на цій сторінці). Клієнт бере ці числа звідси для
@@ -9589,7 +9589,7 @@ export interface components {
             endsAt: string;
             /**
              * Format: date-time
-             * @description ⚠ Назва історична (`Q-333`, lane 2 UI-аудиту): це НЕ кінець пільгового
+             * @description ⚠ Назва історична (`Q-337`, lane 2 UI-аудиту): це НЕ кінець пільгового
              *     вікна, а його ПОЧАТОК — момент, коли період переходить з `Open` у
              *     `Grace` (`PeriodEnd + GraceOffsetDays`). До цього моменту зміни
              *     звичайні; від нього й до DateTimeOffset PeriodDto.EndsAt вони ще дозволені, але

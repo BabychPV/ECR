@@ -5,7 +5,7 @@ import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
 
 /**
- * UI-аудит, lane 5 (`Q-333`): коли прив'язку (`CalculationBinding`)
+ * UI-аудит, lane 5 (`Q-337`): коли прив'язку (`CalculationBinding`)
  * деактивують, панель Required Input Columns і далі показувала
  * `Column: X, Severity: Block` БЕЗ жодного попередження, що ця колонка
  * більше не має активної прив'язки для цієї методології — вимога
@@ -87,7 +87,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('MethodologyRequiredInputsPanel: позначка "завислої" вимоги (Q-333, lane5)', () => {
+describe('MethodologyRequiredInputsPanel: позначка "завислої" вимоги (Q-337, lane5)', () => {
   it('колонка з активною прив\'язкою — без бейджа "unattached"', async () => {
     mockApi([
       { id: 1, columnDefId: 42, severity: 'Block', hintL10n: null, hasActiveBinding: true },

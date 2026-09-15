@@ -25,7 +25,7 @@ namespace Ecr.Application.Tests.Projects;
 /// </remarks>
 public sealed class ActivateProjectTests
 {
-    // ⛔ UI-аудит, lane 2 (Q-333): `ProjectBuilder.Policy()` — 15-денний
+    // ⛔ UI-аудит, lane 2 (Q-337): `ProjectBuilder.Policy()` — 15-денний
     // пільговий строк (`graceOffsetDays: 15`); до фіксу `GraceOffsetDays`
     // ігнорувався й січень переходив у `Grace` вже 1 лютого, тож "середина
     // лютого" (10-те) давала рівно один `Open`-період. Тепер січень
