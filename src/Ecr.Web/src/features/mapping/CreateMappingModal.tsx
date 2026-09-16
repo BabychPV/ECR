@@ -88,7 +88,20 @@ export function CreateMappingModal({
           label={t('mapping.createKind')}
           value={targetKind}
           allowDeselect={false}
-          onChange={(value) => setTargetKind((value as FieldTargetKind | null) ?? 'Column')}
+          onChange={(value) => {
+            setTargetKind((value as FieldTargetKind | null) ?? 'Column');
+
+            // ⛔ Аудит 2026-09-16 §10.4: ID належить ВИДУ цілі, а не формі.
+            // Без цього скидання введений для `Column` ідентифікатор `42`
+            // лишався в полі після перемикання на `RegistryField` — і
+            // `canSubmit` (дивиться лише на `targetId !== ''`) дозволяв
+            // надіслати його як `targetRegistryFieldDefId`. Число з чужого
+            // простору імен проти реєстрових полів не перевіряється ніде, і
+            // випадковий збіг з непов'язаною сутністю дав би мапінг, що тихо
+            // вказує не туди. Той самий прийом, що `setSheets([])` на зміну
+            // версії шаблону (`CreateDocumentModal.tsx`).
+            setTargetId('');
+          }}
           data={[
             { value: 'Column', label: t('mapping.createKindColumn') },
             { value: 'RegistryField', label: t('mapping.createKindRegistry') },
