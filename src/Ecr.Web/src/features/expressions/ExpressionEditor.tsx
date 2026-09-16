@@ -86,6 +86,18 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  // ⛔ Аудит 2026-09-16 §10.3: те саме, і з тієї самої причини, для ТЕКСТУ.
+  // Ефект створення (нижче) читав `value` зі свого замикання, тобто значення
+  // НА МОМЕНТ МОНТУВАННЯ, а створює редактор асинхронно — після
+  // `await import('./monaco')`. Чанк Monaco важить ~818 КБ gzip і через
+  // корпоративний канал легко приходить ПІЗНІШЕ за короткий запит формули:
+  // форма відкривається з `value=""`, текст доїжджає, редактор створюється з
+  // застарілою порожнечею — і перший же натиск клавіші віддає батькові майже
+  // порожній рядок, стираючи правильну формулу. Ref завжди тримає найсвіжіший
+  // текст, тож `create` сідується тим, що є ЗАРАЗ, а не тим, що було.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
   const scheme = useComputedColorScheme('light');
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -103,7 +115,10 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
         const languageId = monaco.prepare(dialect, () => metadata.current);
 
         editor.current = monaco.create(host.current, {
-          value,
+          // ⛔ З ref, не із замикання (§10.3): між монтуванням і цим рядком
+          // проходить усе завантаження чанка редактора, і текст за цей час
+          // цілком міг приїхати з сервера.
+          value: valueRef.current,
           language: languageId,
           theme: scheme === 'dark' ? monaco.DarkTheme : monaco.LightTheme,
           ariaLabel,
@@ -140,12 +155,21 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   }, []);
 
   // ── Зовнішня зміна тексту ─────────────────────────────────────────────────
+  //
+  // ⛔ `ready` у залежностях — не про перестраховку (§10.3). Доки Monaco не
+  // завантажено, `editor.current === null`, і цей ефект тихо не робить нічого:
+  // без `ready` він більше не перезапускався б НІКОЛИ (`value` після
+  // завантаження вже не змінюється сам), і текст, що приїхав під час
+  // завантаження чанка, лишався б невидимим назавжди. Сідування `create` з
+  // `valueRef` вище закриває цю саму щілину з іншого боку; обидва разом
+  // означають, що показане завжди дорівнює переданому — незалежно від того,
+  // хто прийшов першим.
   useEffect(() => {
     const current = editor.current;
     if (current === null || current.getValue() === value) return;
 
     current.setValue(value);
-  }, [value]);
+  }, [value, ready]);
 
   // ── Тема ──────────────────────────────────────────────────────────────────
   useEffect(() => {
