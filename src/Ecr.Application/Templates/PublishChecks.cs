@@ -25,6 +25,39 @@ namespace Ecr.Application.Templates;
 /// </remarks>
 public static class PublishChecks
 {
+    /// <summary>
+    /// Живі таблиці версії: аркуш не видалений і таблиця не видалена.
+    /// </summary>
+    /// <param name="sheets">Аркуші версії.</param>
+    /// <remarks>
+    /// ⛔ Одне місце на всі обходи структури при публікації (аудит 2026-09-16,
+    /// §4.1). До цього `version.Sheets.SelectMany(s => s.Tables)` писалося
+    /// шість разів і НІ РАЗУ не фільтрувало `IsDeleted` на рівні аркуша чи
+    /// таблиці — фільтрувалися лише формули й колонки.
+    /// `DeleteTableDefHandler`/`DeleteSheetDefHandler` ставлять
+    /// <c>IsDeleted = true</c> БЕЗ каскаду на дітей, тож перевірка публікації
+    /// працювала над «мертвою» структурою і псувала це в обидва боки одразу:
+    /// формули видаленої таблиці проганялися через
+    /// <c>CheckExpression</c>/<c>TypeChecker</c>/<c>UnitChecker</c> і
+    /// обґрунтовано відхиляли публікацію через вміст, який користувач вважає
+    /// видаленим (надто суворо), а <c>GetColumnType</c>/<c>GetColumnUnit</c>
+    /// резолвили посилання на видалену колонку у справжній тип замість помилки
+    /// про мертве посилання (надто дозволяюче).
+    ///
+    /// ⚠ Так само, як це вже робить <c>MetadataCache.LoadAsync</c> на рівні SQL:
+    /// публікація і рантайм мусять бачити ту саму структуру, інакше версія
+    /// публікується за одним набором правил, а рахується за іншим.
+    /// </remarks>
+    public static IEnumerable<TableDef> LiveTables(IEnumerable<SheetDef> sheets)
+    {
+        ArgumentNullException.ThrowIfNull(sheets);
+
+        return sheets
+            .Where(s => !s.IsDeleted)
+            .SelectMany(s => s.Tables)
+            .Where(t => !t.IsDeleted);
+    }
+
     /// <summary>Перевіряє всі формули версії.</summary>
     /// <param name="version">Версія, що публікується.</param>
     /// <param name="formulaEngine">Рушій — розбір і топологічний порядок.</param>
@@ -43,9 +76,7 @@ public static class PublishChecks
         var diagnostics = new List<ExpressionDiagnostic>();
         var snapshot = Snapshot(version);
 
-        var tables = snapshot.Sheets
-            .SelectMany(s => s.Tables)
-            .ToDictionary(t => t.Id);
+        var tables = LiveTables(snapshot.Sheets).ToDictionary(t => t.Id);
 
         var nodes = new List<FormulaNode>();
 
@@ -142,9 +173,7 @@ public static class PublishChecks
 
         var snapshot = Snapshot(version);
 
-        var tables = snapshot.Sheets
-            .SelectMany(s => s.Tables)
-            .ToDictionary(t => t.Id);
+        var tables = LiveTables(snapshot.Sheets).ToDictionary(t => t.Id);
 
         var result = new List<FormulaDependency>();
 
@@ -353,14 +382,18 @@ public static class PublishChecks
         var columns = new Dictionary<int, ColumnDef>();
         var rows = new Dictionary<(int TableDefId, string RowKey), RowDef>();
 
-        foreach (var table in version.Sheets.SelectMany(s => s.Tables))
+        // ⛔ І тут фільтр той самий (аудит §4.1): знімок живить резолвер
+        // посилань і типів, тож колонка видаленої таблиці, що потрапила в
+        // `ColumnsById`, робить посилання на неї «дійсним» — саме той бік
+        // дефекту, який був НАДТО ДОЗВОЛЯЮЧИМ.
+        foreach (var table in LiveTables(version.Sheets))
         {
-            foreach (var column in table.Columns)
+            foreach (var column in table.Columns.Where(c => !c.IsDeleted))
             {
                 columns[column.Id] = column;
             }
 
-            foreach (var row in table.Rows)
+            foreach (var row in table.Rows.Where(r => !r.IsDeleted))
             {
                 rows[(table.Id, row.RowKeyValue)] = row;
             }
@@ -394,7 +427,7 @@ public static class PublishChecks
 
         var diagnostics = new List<ExpressionDiagnostic>();
 
-        foreach (var table in version.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted))
+        foreach (var table in LiveTables(version.Sheets))
         {
             CheckSeverityConflicts(table, diagnostics);
             CheckRequiredCoverage(table, diagnostics);
