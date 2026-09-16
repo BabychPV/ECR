@@ -319,7 +319,14 @@ public sealed class PatchCellsTests
     /// колонки методології»).
     /// </summary>
     /// <returns>Ідентифікатор колонки <c>Category</c>.</returns>
-    private int WithMethodology(RequiredInputSeverity severity)
+    /// <param name="severity">Рівень вимоги.</param>
+    /// <param name="categoryType">
+    /// Тип обов'язкової колонки. Date/Unit тут не косметика: саме для них
+    /// `PatchCellsHandler.Text()` не мав гілки (аудит §3.1), і gate бачив
+    /// порожнечу в заповненій комірці.
+    /// </param>
+    private int WithMethodology(
+        RequiredInputSeverity severity, CellDataType categoryType = CellDataType.String)
     {
         const int CategoryColumnId = 12;
 
@@ -330,7 +337,7 @@ public sealed class PatchCellsTests
 
         var category = new ColumnDef(
             tableDefId: 3, EcrCode.Create("Category"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "Category" }), 2, CellDataType.String);
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Category" }), 2, categoryType);
         SetId(category, CategoryColumnId);
 
         var sheet = new SheetDef(
@@ -603,6 +610,51 @@ public sealed class PatchCellsTests
         // Той самий блок, що й комірковий Error (R-B3): нічого не записано.
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(CellDataType.Date)]
+    [InlineData(CellDataType.Unit)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Заповнена_Date_чи_Unit_вхідна_колонка_НЕ_блокує_запис(CellDataType type)
+    {
+        // ⛔ Аудит 2026-09-16, §3.1. `PatchCellsHandler.Text()` — те, чим
+        // живиться `ValueOf()` у `EnforceRequiredInputsAsync` — не мав гілок для
+        // `ValueDate`/`ValueUnitId` (на відміну від сусіднього `Describe()`, що
+        // обробляв усі шість полів `CellValueData`). Тож методологія з
+        // обов'язковою Date-колонкою БЛОКУВАЛА рядок НАЗАВЖДИ: комірка
+        // заповнена, а `ValueOf()` завжди `null` → `ECR-CALC-0437` на кожній
+        // спробі, і жодного способу це обійти з інтерфейсу.
+        var categoryId = WithMethodology(RequiredInputSeverity.Block, type);
+        Assert.Equal(12, categoryId);
+
+        object filled = type == CellDataType.Date
+            ? new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
+            : 7; // ValueUnitId
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Category", filled)])),
+            CancellationToken.None);
+
+        // Запис пройшов, і жодної згадки про незаповнений обов'язковий вхід.
+        Assert.Equal(1, response.AppliedCells);
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Порожня_Date_вхідна_колонка_і_далі_блокує_запис()
+    {
+        // Зворотний бік §3.1: розширення `Text()` не має ослабити сам gate —
+        // НЕзаповнена Date-колонка мусить блокувати так само, як String.
+        WithMethodology(RequiredInputSeverity.Block, CellDataType.Date);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0437", error.ErrorCode);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
