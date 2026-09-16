@@ -225,6 +225,57 @@ public sealed class ColumnDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Код_видаленої_колонки_дає_ЗРОЗУМІЛУ_відмову_а_не_помилку_про_тип()
+    {
+        // ⛔ Аудит 2026-09-16, §4.4. Пошук наявної колонки йшов без фільтра
+        // `!IsDeleted`, тож `PUT` за кодом видаленої колонки тихо потрапляв у
+        // гілку ОНОВЛЕННЯ мертвої сутності. Найяскравіше це було видно саме тут:
+        // користувач, який видалив Decimal-колонку `LIMIT` і хоче завести нову
+        // String-колонку з тим самим кодом, отримував `ECR-TMPL-0422` про
+        // незмінність типу МЕРТВОЇ колонки — помилку, у якій немає жодної
+        // підказки, що робити.
+        //
+        // ⚠ Рішення: ЗАБОРОНА З ПОЯСНЕННЯМ, а не «оживлення». Код — ідентичність,
+        // і `TableDef.AddColumn` тримає його унікальним включно з м'яко
+        // видаленими; операції відродження в системі немає, і вигадувати її в
+        // цьому фіксі було б рішенням про семантику даних, а не про формулювання
+        // помилки.
+        await Save().HandleAsync(
+            1, _table.Id, "LIMIT", Command(dataType: CellDataType.Decimal), CancellationToken.None);
+
+        await Delete().HandleAsync(1, _table.Id, "LIMIT", CancellationToken.None);
+        Assert.True(Assert.Single(_table.Columns).IsDeleted);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                1, _table.Id, "LIMIT", Command(dataType: CellDataType.String), CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+
+        // ⛔ Головне: повідомлення каже про ВИДАЛЕНУ колонку, а не про
+        // «незмінність типу» — саме заміна цього тексту і є фіксом.
+        Assert.Contains("видаленою колонкою", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("незмінний", error.Message, StringComparison.Ordinal);
+
+        // І нічого не змінилося: мертва колонка лишилася мертвою, живої немає.
+        Assert.True(Assert.Single(_table.Columns).IsDeleted);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Повторний_запис_за_кодом_живої_колонки_і_далі_оновлює_її()
+    {
+        // Зворотний бік §4.4: фільтр `!IsDeleted` не має перетворити звичайне
+        // оновлення на дублювання — саме це й перевіряє пара з тестом вище.
+        await Save().HandleAsync(1, _table.Id, "Jan", Command(en: "v1"), CancellationToken.None);
+        await Save().HandleAsync(1, _table.Id, "Jan", Command(en: "v2"), CancellationToken.None);
+
+        var column = Assert.Single(_table.Columns);
+        Assert.Equal("v2", column.HeaderL10n.Get("en"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task Без_права_Template_Edit_колонка_не_записується()
     {
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())

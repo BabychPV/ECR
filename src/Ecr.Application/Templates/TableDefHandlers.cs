@@ -92,8 +92,25 @@ public sealed class SaveTableDefHandler(
         var ecrCode = EcrCode.Create(code);
         var name = new LocalizedText(new Dictionary<string, string>(command.NameL10n, StringComparer.OrdinalIgnoreCase));
 
+        // ⛔ Не видалені — той самий фільтр, що й у `SaveSheetDefHandler`
+        // (аудит 2026-09-16, §4.4): повторний `PUT` за кодом видаленої таблиці
+        // заводить нову, а не оновлює мертву, яку більше ніде не видно.
         var existing = sheet.Tables.FirstOrDefault(
-            t => string.Equals(t.Code, ecrCode.Value, StringComparison.Ordinal));
+            t => !t.IsDeleted && string.Equals(t.Code, ecrCode.Value, StringComparison.Ordinal));
+
+        // ⛔ Мертва таблиця з тим самим кодом — ЯВНА відмова з поясненням
+        // (аудит §4.4), з тієї ж причини, що й в аркуші: `SheetDef.AddTable`
+        // тримає код унікальним включно з м'яко видаленими.
+        if (existing is null
+            && sheet.Tables.Any(
+                t => t.IsDeleted && string.Equals(t.Code, ecrCode.Value, StringComparison.Ordinal)))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Код таблиці «{code}» зайнятий видаленою таблицею цього аркуша. " +
+                "Код — це ідентичність, і повторно використати його в цій версії не можна. " +
+                "Заведіть таблицю з іншим кодом або клонуйте версію.");
+        }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 

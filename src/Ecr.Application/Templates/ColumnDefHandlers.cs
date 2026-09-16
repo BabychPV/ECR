@@ -85,8 +85,31 @@ public sealed class SaveColumnDefHandler(
         var ecrCode = EcrCode.Create(code);
         var header = new LocalizedText(new Dictionary<string, string>(command.HeaderL10n, StringComparer.OrdinalIgnoreCase));
 
+        // ⛔ Не видалені (аудит 2026-09-16, §4.4). Саме тут дефект був
+        // найпомітнішим: перевірка нижче кидає «тип колонки незмінний», тож
+        // користувач, який видалив Decimal-колонку `LIMIT` і хоче завести нову
+        // String-колонку з тим самим кодом, отримував ECR-TMPL-0422 про
+        // незмінність типу МЕРТВОЇ колонки — помилку, у якій немає жодної
+        // підказки, що робити.
         var existing = table.Columns.FirstOrDefault(
-            c => string.Equals(c.Code, ecrCode.Value, StringComparison.Ordinal));
+            c => !c.IsDeleted && string.Equals(c.Code, ecrCode.Value, StringComparison.Ordinal));
+
+
+        // ⛔ Мертва сутність із тим самим кодом — ЯВНА відмова з поясненням
+        // (аудит 2026-09-16, §4.4). Код — це ідентичність, і домен тримає його
+        // унікальним включно з м'яко видаленими (TableDef.AddColumn), тож «оживлення»
+        // тут не вигадується: операції відродження в системі немає. Але й тиха
+        // гілка оновлення мертвої сутності, яка була тут доти, не годилася —
+        // вона впиралася в «тип колонки незмінний» про тип МЕРТВОЇ колонки. Тепер користувач читає, що саме сталося і що з цим робити.
+        if (existing is null && table.Columns.Any(c => c.IsDeleted && string.Equals(c.Code, ecrCode.Value, StringComparison.Ordinal)))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Код колонки «{code}» зайнятий видаленою колонкою цієї таблиці. " +
+                "Код — це ідентичність: комірки посилаються саме на нього, тому повторно " +
+                "використати його в цій версії не можна. Заведіть колонку з іншим кодом " +
+                "або клонуйте версію.");
+        }
 
         if (existing is not null && existing.DataType != command.DataType)
         {
