@@ -50,15 +50,25 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
     /// <inheritdoc />
     public async Task<PagedResult<DocumentSummary>> ListAsync(
-        int? projectId, PeriodKeyFilter period, CursorRequest page, CancellationToken ct)
+        int? projectId,
+        PeriodKeyFilter period,
+        CursorRequest page,
+        IReadOnlyCollection<int>? visibleProjectIds,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var after = Cursor.Decode(page.Cursor);
 
+        // Масив, а не `IReadOnlyCollection`: `Contains` над масивом EF
+        // перекладає в `IN (...)`, над інтерфейсом — не гарантовано.
+        var allowedProjects = visibleProjectIds?.ToArray();
+
         var rows = await db.Documents
             .AsNoTracking()
-            .Where(d => d.Id > after && (projectId == null || d.ProjectId == projectId))
+            .Where(d => d.Id > after
+                        && (projectId == null || d.ProjectId == projectId)
+                        && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)))
             .OrderBy(d => d.Id)
             .Take(page.Limit + 1)
             .Select(d => new DocumentRow(

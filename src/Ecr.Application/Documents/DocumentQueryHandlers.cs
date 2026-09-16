@@ -35,17 +35,68 @@ public sealed class ListDocumentsHandler(
                 ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
+        // ⛔ Гранти йдуть у ЗАПИТ, не лише в постфільтр (аудит 2026-09-16, §3.3).
+        // Постфільтр сам по собі давав дві діри: `TotalCount` рахувався по ВСІХ
+        // проєктах системи — користувач з грантом на один проєкт бачив, скільки
+        // документів у чужих, — а сторінка віддавала менше за `page.Limit`
+        // видимих елементів, поки `NextCursor` вказував далі в НЕфільтрованій
+        // послідовності.
+        var visibleProjects = ReadableProjects(profile);
+
         var all = await documents
-            .ListAsync(projectId, new PeriodKeyFilter(periodKey), page, ct)
+            .ListAsync(projectId, new PeriodKeyFilter(periodKey), page, visibleProjects, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Фільтр за грантами обов'язковий: перелік документів чужого
-        // проєкту — це вже відомості про те, які об'єкти звітують і як часто.
+        // ⚠ Постфільтр лишається другим рубежем: перелік документів чужого
+        // проєкту — це вже відомості про те, які об'єкти звітують і як часто, і
+        // помилка в побудові фільтра запиту не має цього відкривати.
         var visible = all.Items
             .Where(d => profile.LevelFor(ResourceKind.Project, d.ProjectId) >= GrantLevel.Read)
             .ToList();
 
-        return new PagedResult<DocumentSummary>(visible, all.NextCursor, all.TotalCount);
+        // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
+        // обробник не може перевірити, що число зі сховища враховує гранти, а
+        // «1 з 5000» розкриває, скільки документів у проєктах, до яких доступу
+        // немає. Точна кількість віддається лише тоді, коли вона справді відома
+        // з цієї сторінки: запит починався з початку послідовності й вона
+        // вичерпана. Інакше — `null`, «підрахунок недоступний» (контракт
+        // `PagedResult.TotalCount`), а не правдоподібне неправильне число.
+        var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
+
+        return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+    }
+
+    /// <summary>Проєкти, на які є грант читання (ключі <c>Project:{id}</c>).</summary>
+    /// <remarks>
+    /// Гранти в профілі вже розгорнуті <c>Project → Sheet → Table → Column</c>,
+    /// тож набір тут ТОЧНО той самий, що перевіряє
+    /// <see cref="AccessProfile.LevelFor"/> — заборони включно: рівень беремо
+    /// через <c>LevelFor</c>, а не з <c>Grants</c> напряму.
+    /// </remarks>
+    private static HashSet<int> ReadableProjects(AccessProfile profile)
+    {
+        var prefix = $"{ResourceKind.Project}:";
+        var ids = new HashSet<int>();
+
+        foreach (var key in profile.Grants.Keys)
+        {
+            if (!key.StartsWith(prefix, StringComparison.Ordinal)
+                || !int.TryParse(
+                    key.AsSpan(prefix.Length),
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var id))
+            {
+                continue;
+            }
+
+            if (profile.LevelFor(ResourceKind.Project, id) >= GrantLevel.Read)
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
     }
 
     /// <summary>Профіль користувача з перевіркою функціонального права.</summary>

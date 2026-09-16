@@ -44,6 +44,7 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
 
         var page = await store.ListAsync(
             doc1.ProjectId, new PeriodKeyFilter(doc1.PeriodKey.Value), new CursorRequest(Limit: 50),
+            visibleProjectIds: null,
             CancellationToken.None);
 
         Assert.Equal(2, page.Items.Count);
