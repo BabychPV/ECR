@@ -38,6 +38,22 @@ public sealed class GetRegistryEntriesHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Відсутній або зіпсований `asOf` — ВІДМОВА, а не `0001-01-01`
+        // (аудит 2026-09-16, §9). Параметр оголошений обов'язковим за змістом
+        // (довідники темпоральні), але `[FromQuery] DateOnly` без значення
+        // резолвиться у `default` — тобто в дату, на яку жоден темпоральний
+        // запис не чинний. Клієнт отримував порожній список і жодної підказки,
+        // що саме він забув надіслати: «довідник порожній» і «ви не передали
+        // дату» виглядали однаково.
+        if (asOf == default)
+        {
+            throw new BusinessRuleException(
+                Domain.Errors.ErrorCodes.RequestInvalid,
+                "Параметр asOf обов'язковий: довідники темпоральні, і перелік записів "
+                + "залежить від дати періоду, а не від «сьогодні».",
+                new Dictionary<string, object?> { ["parameter"] = "asOf" });
+        }
+
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)
             ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{registryCode}» не існує.");
 
