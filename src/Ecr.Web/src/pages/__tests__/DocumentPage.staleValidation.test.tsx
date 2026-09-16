@@ -74,7 +74,11 @@ function mockFetch(): void {
           messages: [
             {
               severity: 'Error',
-              ruleCode: 'ECR-VAL-0001',
+              // ⚠ Код ПРАВИЛА, не код помилки: `ValidationMessage.RuleCode` —
+              // це `ValidationRule.Code` з конфігурації (`CAP`, `BALANCE`), і
+              // сторож `Клієнт_не_згадує_кодів_яких_немає_в_каталозі`
+              // (Ecr.Architecture.Tests) слушно ловить тут вигаданий `ECR-*`.
+              ruleCode: 'BALANCE',
               rowKey: 'R1',
               columnCode: 'C1',
               message: Message202401,
@@ -88,7 +92,10 @@ function mockFetch(): void {
       // немає».
       if (url.includes('/validation')) {
         return jsonResponse(
-          { title: 'Not found', status: 404, detail: 'not validated', errorCode: 'ECR-VAL-0404' },
+          // ⚠ Саме `ECR-DOC-0404` — той код, що його справді віддає
+          // `DocumentsController.LastValidation`; вигаданий `ECR-VAL-0404`
+          // ловить архітектурний сторож каталогу кодів.
+          { title: 'Not found', status: 404, detail: 'not validated', errorCode: 'ECR-DOC-0404' },
           404,
         );
       }
