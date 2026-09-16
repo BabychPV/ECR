@@ -138,13 +138,18 @@ public static class CellValueReader
     };
 
     /// <summary>Дата; через JSON вона завжди приходить рядком.</summary>
+    /// <remarks>
+    /// ⛔ Розбір — через <see cref="CellDateParser"/>, а не голий
+    /// <c>DateTime.TryParse(…, InvariantCulture, …)</c> (аудит 2026-09-16,
+    /// §8.2): InvariantCulture читає <c>M.d.yyyy</c>, тож <c>"1.4.2024"</c>
+    /// ставало 4 січня, а не 1 квітня — тихо переставлені день і місяць у даті,
+    /// яка визначає період звітності.
+    /// </remarks>
     private static DateTime Date(object value, ColumnDef column) => value switch
     {
         DateTime date => date,
         DateTimeOffset offset => offset.UtcDateTime,
-        string text when DateTime.TryParse(
-            text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
-            out var parsed) => parsed,
+        string text when CellDateParser.TryParse(text, out var parsed) => parsed,
         _ => throw Mismatch(column, value, "дата"),
     };
 

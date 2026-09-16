@@ -99,13 +99,24 @@ public sealed class RunCalculationHandler(
         // ⛔ Поданий зріз не перераховується взагалі (ФВ-9.17) — навіть із
         // погодженням. Потреба змінити подану цифру закривається Reopen, який
         // лишає слід у робочому процесі, а не тихим перерахунком.
+        //
+        // ⛔ Умова НЕ дивиться на `approval` — і це не недогляд, а суть правила
+        // (аудит 2026-09-16, §1.1). До цього стояло `submitted && approval is
+        // null`, тож ОДНЕ погодження, видане на ОДИН закритий період, знімало
+        // захист поданих зрізів у ВСІХ періодах запиту: `periodKey: null` —
+        // це весь рік, і `targets` охоплює багато періодів одночасно. Сценарій:
+        // 202601 закритий (погодження законне), 202603 відкритий із поданими
+        // аркушами — і 202603 тихо перераховувався. `ClosedPeriodApproval`
+        // погоджує перерахунок ЗАКРИТОГО періоду; поданий зріз — інше правило
+        // й інший шлях (Reopen), і спільний nullable-параметр не може означати
+        // обидва.
         foreach (var period in targets)
         {
             var submitted = await workflow
                 .HasSubmittedSheetsAsync(projectId, new Domain.ValueObjects.PeriodKey(period.PeriodKey), ct)
                 .ConfigureAwait(false);
 
-            if (submitted && approval is null)
+            if (submitted)
             {
                 throw new BusinessRuleException(
                     "ECR-CALC-4221",

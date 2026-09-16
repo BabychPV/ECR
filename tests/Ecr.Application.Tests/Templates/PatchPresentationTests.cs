@@ -303,9 +303,62 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
             (await fresh.ColumnDefs.AsNoTracking().SingleAsync(c => c.Id == alien.ColumnDefId)).HeaderL10n.Get("en"));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-244")]
+    public async Task Падіння_аудиту_відкочує_і_зміну_і_ревізію()
+    {
+        // ⛔ Аудит 2026-09-16, §4.2. `PatchAsync` НЕ відкривав транзакції — на
+        // відміну від УСІХ сусідніх структурних обробників, які обгортають
+        // запис+аудит у `uow.ExecuteInTransactionAsync` з посиланням на Q-244
+        // саме для цього класу дефекту. Обидва raw-SQL виклики
+        // (`ApplyPresentationAsync`, `IncrementPresentationRevisionAsync`)
+        // комітилися самостійно й одразу, бо `CurrentTransaction == null`: збій
+        // після них, але до аудиту лишав ЗМІНЕНИЙ підпис і НОВИЙ ключ кешу
+        // ревізії без жодного рядка аудиту.
+        //
+        // ⚠ Доводиться саме на живій базі: транзакційність — властивість
+        // з'єднання, а не сигнатури, і жоден мок її не відтворює.
+        var version = await BareVersionAsync();
+
+        var brokenAudit = Substitute.For<Ecr.Application.Ports.IAuditWriter>();
+        brokenAudit
+            .WriteStructureChangeAsync(
+                Arg.Any<Ecr.Application.Ports.StructureChangeRecord>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException(new InvalidOperationException("аудит недоступний")));
+
+        await using var db = Context();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Handler(db, brokenAudit).PatchAsync(
+                version.VersionId, HeaderPatch(version.ColumnDefId), userId: 9, CancellationToken.None));
+
+        // ⛔ ОКРЕМИЙ контекст: той, у якому працював обробник, тримає сутності в
+        // карті ідентичності й показав би значення з пам'яті.
+        await using var fresh = Context();
+
+        // Підпис НЕ змінений: без транзакції тут стояло б «Volume, m3».
+        Assert.Equal(
+            "Jan",
+            (await fresh.ColumnDefs.AsNoTracking()
+                .SingleAsync(c => c.Id == version.ColumnDefId)).HeaderL10n.Get("en"));
+
+        // Ревізія НЕ піднята: інакше всі інстанси перечитували б структуру,
+        // щоб побачити те саме, і ключ кешу розійшовся б зі вмістом.
+        Assert.Equal(
+            0,
+            (await fresh.TemplateVersions.AsNoTracking()
+                .SingleAsync(v => v.Id == version.VersionId)).PresentationRevision);
+
+        // І журналу теж немає — цілісність в обидва боки.
+        Assert.Empty(await AuditRowsAsync(version.VersionId));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
-    private PatchPresentationHandler Handler(EcrDbContext db)
+    private PatchPresentationHandler Handler(
+        EcrDbContext db, Ecr.Application.Ports.IAuditWriter? audit = null)
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
@@ -315,7 +368,7 @@ public sealed class PatchPresentationTests(SqlServerFixture sql)
             new Repository<TemplateVersion, int>(db),
             new TemplateVersionStore(db),
             new ChangeClassifier(),
-            new AuditWriter(db),
+            audit ?? new AuditWriter(db),
             new UnitOfWork(db),
             new TestClock(Now),
             _access,

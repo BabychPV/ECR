@@ -279,7 +279,10 @@ public sealed class TestEvaluationContext : IEvaluationContext
         {
             // ⛔ Різні розмірності — #UNIT, а не спроба «через базу». Саме тут
             // щільність не стає конверсією (ФВ-16.3, ФВ-16.5).
-            if (from.Dimension != to.Dimension || to.FactorToBase == 0m)
+            // ⛔ Нульовий множник — з ОБОХ боків: при `from.FactorToBase == 0`
+            // вираз нижче згортається до константи `from.OffsetToBase`, тож
+            // будь-яке значення конвертується в те саме число без помилки.
+            if (from.Dimension != to.Dimension || from.FactorToBase == 0m || to.FactorToBase == 0m)
             {
                 return ExpressionValue.Error(ExpressionErrors.BadUnit);
             }

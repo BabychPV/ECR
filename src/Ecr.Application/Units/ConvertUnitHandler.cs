@@ -52,6 +52,18 @@ public sealed class ConvertUnitHandler(IUnitCatalog catalog)
                 new Dictionary<string, object?> { ["from"] = fromUnit, ["to"] = toUnit });
         }
 
+        // ⛔ Захист СИМЕТРИЧНИЙ. Перевіряти лише `to` було тихо неправильним
+        // числом: при `from.FactorToBase == 0` вираз `(value * 0) + offset`
+        // згортається до КОНСТАНТИ `from.OffsetToBase` незалежно від `value` —
+        // кожне вхідне значення конвертується в те саме число, без помилки, і
+        // це число потрапляє в поданий регуляторний звіт.
+        if (from.FactorToBase == 0m)
+        {
+            throw new BusinessRuleException(
+                "ECR-UOM-0422",
+                $"Одиниця {fromUnit} має нульовий множник переходу до бази: конверсія неможлива.");
+        }
+
         if (to.FactorToBase == 0m)
         {
             throw new BusinessRuleException(

@@ -111,6 +111,15 @@ public static class TemplateFunctions
     /// Округлення. **<c>MidpointRounding.AwayFromZero</c>** — саме так рахує чинна
     /// система; банківське округлення дало б інші числа у звіті.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Дробова кількість знаків — <c>#VALUE</c>, а не мовчазне відкидання:
+    /// <c>ROUND(x, 2.7)</c> написали не для того, щоб отримати два знаки. Той
+    /// самий принцип, той самий рівень — <c>MethodologyFunctions.Round</c>
+    /// відхиляв це від початку, а тут стояв голий <c>decimal.Truncate(places)</c>
+    /// без перевірки (аудит 2026-09-16, §2.5). Одна мова правил, що округлює
+    /// по-різному залежно від діалекту, — розбіжність, яку видно лише як інше
+    /// число у звіті.
+    /// </remarks>
     public static ExpressionValue Round(ExpressionValue value, ExpressionValue digits)
     {
         if (value.IsError)
@@ -133,7 +142,12 @@ public static class TemplateFunctions
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        var scale = (int)decimal.Truncate(places);
+        if (places != decimal.Truncate(places))
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        var scale = (int)places;
         if (scale is < 0 or > 28)
         {
             return ExpressionValue.Error(ExpressionErrors.BadValue);

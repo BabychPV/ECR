@@ -47,6 +47,15 @@ public static class PasswordChangeGate
 
     /// <summary>Чи дозволений маршрут із непоміненим паролем.</summary>
     /// <param name="path">Шлях запиту.</param>
+    /// <remarks>
+    /// ⛔ Порівняння — на **межі сегмента шляху**, не голим префіксом. Голий
+    /// <c>StartsWith</c> тут був дірою в безпеці: <c>/api/v1/methodologies</c>
+    /// починається на <c>/api/v1/me</c> («me» в «methodologies»), тож разовий
+    /// пароль відкривав повний CRUD над методологією розрахунків — формули,
+    /// константи, <c>publish</c>, <c>simulate</c> — ще до того, як користувач
+    /// довів, що знає власний пароль. Дефект невидимий за побудовою: жоден
+    /// маршрут не «падає», просто дозволяється зайвий.
+    /// </remarks>
     public static bool IsAllowed(string? path)
     {
         if (string.IsNullOrEmpty(path))
@@ -56,7 +65,15 @@ public static class PasswordChangeGate
 
         foreach (var allowed in Allowed)
         {
-            if (path.StartsWith(allowed, StringComparison.OrdinalIgnoreCase))
+            if (!path.StartsWith(allowed, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // Точний збіг або наступний символ — межа: підшлях (`/`), запит
+            // (`?`), фрагмент (`#`). Інакше це інший маршрут, що просто
+            // починається з тих самих літер.
+            if (path.Length == allowed.Length || path[allowed.Length] is '/' or '?' or '#')
             {
                 return true;
             }

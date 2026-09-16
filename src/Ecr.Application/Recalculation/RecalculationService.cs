@@ -48,6 +48,39 @@ public sealed class RecalculationService(
 
     private readonly HashSet<int> _deferred = [];
 
+    /// <summary>
+    /// Забирає відкладені rollup-формули **у порядку обчислення** і спорожняє
+    /// набір.
+    /// </summary>
+    /// <param name="plan">План перерахунку, зафіксований при публікації.</param>
+    /// <remarks>
+    /// ⛔ Сортування тут — не косметика (аудит 2026-09-16, §1.2). До цього
+    /// відкладені rollup брались прямо з <c>HashSet&lt;int&gt;</c> і
+    /// конкатенувались до вже відсортованого <c>affected</c> БЕЗ сортування.
+    /// <c>Evaluate()</c> пише результат кожної формули у СПІЛЬНИЙ словник
+    /// <c>values</c>, який читають наступні формули, тож порядок задає, які
+    /// числа вони прочитають. Дві взаємозалежні крос-аркушні rollup-формули в
+    /// одному проході (аркуш підсумків, що згортає два проміжні rollup-аркуші):
+    /// якщо порядок перебору hash-set поставить «нижню» першою, вона прочитає
+    /// ЗАСТАРІЛЕ значення «верхньої» — неправильне число, яке саме не
+    /// виправиться до наступної незв'язаної правки.
+    /// <para>
+    /// Порядок береться з ПУБЛІКАЦІЇ (<c>plan.EvaluationOrder</c>), той самий,
+    /// що й у <see cref="Plan"/> (крок 4): будувати топологічний порядок на
+    /// кожен запит бюджет не передбачає (ФВ-9.4).
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<int> TakeDeferredRollups(RecalculationPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        var rollups = _deferred.ToList();
+        rollups.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
+        _deferred.Clear();
+
+        return rollups;
+    }
+
     /// <summary>Визначає, ЩО і в якому порядку перераховувати.</summary>
     /// <param name="dirty">Змінені комірки.</param>
     /// <param name="plan">План перерахунку, зафіксований при публікації.</param>
@@ -314,8 +347,7 @@ public sealed class RecalculationService(
             // Відкладення має сенс на інтерактивному шляху, де людина чекає на
             // кожному Tab; цей прогін уже фоновий, і відкласти означало б не
             // порахувати ніколи — саме те, чим був увесь `A7-63`.
-            var rollups = DeferredRollups.ToList();
-            _deferred.Clear();
+            var rollups = TakeDeferredRollups(plan);
 
             targets = [.. affected, .. rollups];
         }

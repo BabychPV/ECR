@@ -73,8 +73,81 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
         Assert.Equal("Volume", cubicMetre.GetProperty("dimensionCode").GetString());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Створення_одиниці_віддає_201_Created_а_не_200_OK()
+    {
+        // ⚠ Аудит 2026-09-16, §9. Усі решта створювальних маршрутів API
+        // (`RegistriesController`, `ProjectsController`, `SecurityController`,
+        // `DocumentsController`) віддають `201`; один маршрут, що відповідає
+        // інакше, змушує клієнта тримати виняток саме на нього. Знімок
+        // контракту оновлено тим самим комітом.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        var code = $"u{Guid.NewGuid():N}"[..8];
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/v1/units", UriKind.Relative),
+            new
+            {
+                code,
+                symbolL10n = new Dictionary<string, string> { ["en"] = code },
+                nameL10n = new Dictionary<string, string> { ["en"] = code },
+                dimensionId = 1,
+                factorToBase = 2.5m,
+                offsetToBase = 0m,
+            }).ConfigureAwait(true);
+
+        Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
+
+        // Тіло відповіді лишається тим самим — це зміна СТАТУСУ, не контракту
+        // даних, і клієнт (`features/units/api.ts`) читає його так само.
+        var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement;
+
+        Assert.Equal(code, created.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Недодатний_множник_у_запиті_відхиляється_422_а_не_зберігається()
+    {
+        // ⛔ Аудит §5.2 через справжній HTTP: порожнє числове поле форми
+        // приходить нулем, а одиниця з `factorToBase = 0` згортає кожну
+        // конверсію до константи.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        var code = $"z{Guid.NewGuid():N}"[..8];
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/v1/units", UriKind.Relative),
+            new
+            {
+                code,
+                symbolL10n = new Dictionary<string, string> { ["en"] = code },
+                nameL10n = new Dictionary<string, string> { ["en"] = code },
+                dimensionId = 1,
+                factorToBase = 0m,
+                offsetToBase = 0m,
+            }).ConfigureAwait(true);
+
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.Contains("ECR-UOM-0422", body, StringComparison.Ordinal);
+    }
+
     /// <summary>Клієнт із чинним сеансом локального користувача.</summary>
-    private async Task<HttpClient> SignedInAsync(EcrApiFactory app)
+    /// <param name="app">Фабрика застосунку.</param>
+    /// <param name="permissions">
+    /// Функціональні права, які треба видати. Порожньо — користувач без прав:
+    /// перелік одиниць їх не вимагає, заведення — вимагає <c>Uom.EditCatalog</c>.
+    /// </param>
+    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, params string[] permissions)
     {
         var name = $"units_{Guid.NewGuid():N}"[..20];
 
@@ -89,6 +162,24 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
 
             db.Users.Add(user);
             await db.SaveChangesAsync().ConfigureAwait(false);
+
+            if (permissions.Length > 0)
+            {
+                var role = new Role(
+                    Ecr.Domain.ValueObjects.EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
+                    new Ecr.Domain.ValueObjects.LocalizedText(
+                        new Dictionary<string, string> { ["en"] = "Units test" }));
+                db.Roles.Add(role);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+
+                foreach (var permission in permissions)
+                {
+                    db.RolePermissions.Add(new RolePermission(role.Id, permission));
+                }
+
+                db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+                await db.SaveChangesAsync().ConfigureAwait(false);
+            }
         }
 
         var client = app.CreateClient();

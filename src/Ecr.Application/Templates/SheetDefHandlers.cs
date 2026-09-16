@@ -86,8 +86,33 @@ public sealed class SaveSheetDefHandler(
         var ecrCode = EcrCode.Create(code);
         var name = new LocalizedText(new Dictionary<string, string>(command.NameL10n, StringComparer.OrdinalIgnoreCase));
 
+        // ⛔ Шукається серед НЕ видалених (аудит 2026-09-16, §4.4). Без цього
+        // фільтра `PUT` із раніше видаленим кодом тихо потрапляв у гілку
+        // ОНОВЛЕННЯ мертвої сутності: вона лишалася `IsDeleted = true` назавжди
+        // і була невидима всюди, де фільтрація коректна
+        // (`MetadataCache.LoadAsync`, `GetTemplateStructureHandler`), тож
+        // користувач бачив «збережено» і не бачив аркуша. Операції «оживити»
+        // немає навмисно — той самий вибір, що вже зроблений у
+        // `FormulaDefHandlers.FindTarget`: повторний `PUT` заводить НОВЕ.
         var existing = version.Sheets.FirstOrDefault(
-            s => string.Equals(s.Code, ecrCode.Value, StringComparison.Ordinal));
+            s => !s.IsDeleted && string.Equals(s.Code, ecrCode.Value, StringComparison.Ordinal));
+
+        // ⛔ Мертвий аркуш із тим самим кодом — ЯВНА відмова з поясненням
+        // (аудит §4.4). Код — це ідентичність, і `TemplateVersion.AddSheet`
+        // тримає його унікальним включно з м'яко видаленими, тож «оживлення»
+        // тут не вигадується: операції відродження в системі немає. Але й тиха
+        // гілка оновлення мертвого аркуша не годилася — користувач бачив
+        // «збережено» і не бачив аркуша.
+        if (existing is null
+            && version.Sheets.Any(
+                s => s.IsDeleted && string.Equals(s.Code, ecrCode.Value, StringComparison.Ordinal)))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Код аркуша «{code}» зайнятий видаленим аркушем цієї версії. " +
+                "Код — це ідентичність, і повторно використати його в цій версії не можна. " +
+                "Заведіть аркуш з іншим кодом або клонуйте версію.");
+        }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 

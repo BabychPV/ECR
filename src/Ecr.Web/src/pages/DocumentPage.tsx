@@ -100,12 +100,41 @@ export function DocumentPage(): JSX.Element {
     retry: false,
   });
 
-  // Свіжий прогін перекриває прочитаний: після натискання «Перевірити» на
-  // екрані має бути те, що щойно порахували, а не те, що лежало в базі.
-  const [fresh, setFresh] = useState<ValidationResultResponse | null>(null);
+  /**
+   * Адреса даних, до якої СТОСУЄТЬСЯ ручний прогін перевірки.
+   *
+   * ⚠ Період — не фільтр показу, а частина адреси (коментар компонента вище),
+   * тож і результат перевірки адресний: «3 помилки» без цієї пари — це число
+   * без предмета.
+   */
+  const scope = `${String(documentId)}:${String(periodKey)}`;
+
+  /*
+   * Свіжий прогін перекриває прочитаний: після натискання «Перевірити» на
+   * екрані має бути те, що щойно порахували, а не те, що лежало в базі.
+   *
+   * ⛔ Аудит 2026-09-16 §10.7: тут лежав голий `ValidationResultResponse`, і
+   * ніщо не скидало його при зміні документа/періоду — а показувався він
+   * ПОПЕРЕД прочитаного (`fresh ?? lastValidation.data`). Оператор перевіряв
+   * 202401, бачив «3 помилки», міняв період у заголовку — `summary`/`tables`/
+   * `lastValidation` коректно перезапитувались, а «3 помилки» лишалися під
+   * періодом, який НІХТО не перевіряв. Саме той випадок, проти якого
+   * застерігає коментар до `lastValidation` вище, лише з протилежним знаком:
+   * не зелений напис під неперевіреним, а червоний.
+   *
+   * ⚠ Результат зберігається РАЗОМ з адресою, а не скидається ефектом на
+   * зміну `scope`. Різниця не стилістична: `scope` на момент ВІДПОВІДІ вже
+   * може бути іншим, ніж на момент запиту (оператор змінив період, поки
+   * перевірка йшла), і ефект-скидач тут не допоміг би — він відпрацював би
+   * ДО того, як прийде відповідь, і та все одно лягла б на новий період.
+   * Тому адресу несе сама мутація (її змінна), а показ порівнює її з поточною.
+   */
+  const [fresh, setFresh] = useState<{ scope: string; result: ValidationResultResponse } | null>(
+    null,
+  );
 
   const validate = useMutation({
-    mutationFn: () =>
+    mutationFn: (_scope: string) =>
       apiFetch<ValidationResultResponse>(
         `/api/v1/documents/${documentId}/validate`,
         {
@@ -115,8 +144,8 @@ export function DocumentPage(): JSX.Element {
           body: JSON.stringify({ periodKey } satisfies DocumentPeriodRequest),
         },
       ),
-    onSuccess: (result) => {
-      setFresh(result);
+    onSuccess: (result, requestedScope) => {
+      setFresh({ scope: requestedScope, result });
 
       const errors = result.messages.filter((message) => message.severity === 'Error');
 
@@ -134,8 +163,12 @@ export function DocumentPage(): JSX.Element {
     onError: showApiError,
   });
 
-  /** Що показувати в панелі: свіже, інакше прочитане, інакше нічого. */
-  const shownValidation = fresh ?? lastValidation.data ?? null;
+  /**
+   * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
+   * прочитане, інакше нічого.
+   */
+  const shownValidation =
+    (fresh?.scope === scope ? fresh.result : null) ?? lastValidation.data ?? null;
 
   const sheets = groupBySheet(tables.data ?? []);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
@@ -196,7 +229,12 @@ export function DocumentPage(): JSX.Element {
               value={periodKey}
               onChange={(value) => setPeriodKey(typeof value === 'number' ? value : periodKey)}
             />
-            <Button size="xs" variant="default" loading={validate.isPending} onClick={() => validate.mutate()}>
+            <Button
+              size="xs"
+              variant="default"
+              loading={validate.isPending}
+              onClick={() => validate.mutate(scope)}
+            >
               {t('document.validate')}
             </Button>
 

@@ -132,8 +132,41 @@ export function SheetActions({
    * ⚠ Сітка перечитується САМЕ на завершенні, а не на постановці в чергу:
    * оновити її одразу означало б показати старі числа під написом
    * «перераховано».
+   *
+   * ── Стан: задача РАЗОМ із адресою, для якої її поставили ───────────────
+   *
+   * ⛔ Аудит 2026-09-16 §10.6: тут жив самотній `recalcJobId`, а ефект
+   * завершення (нижче) замикався на ПОТОЧНИХ пропах `documentId`/`periodKey` —
+   * не на тих, що були активні при постановці в чергу. Компонент не
+   * перемонтовується при перемиканні аркуша/періоду (`DocumentPage.tsx`
+   * рендерить його без `key`), тож оператор, що на 202401 натиснув
+   * «Перерахувати» й перейшов на 202402, отримував три тихі наслідки:
+   * (1) кнопка на 202402 крутилася на задачі, якої там ніхто не ставив, і
+   * повторний перерахунок цього періоду був недоступний; (2) тост
+   * «перерахунок завершено» з'являвся над ЧУЖИМ періодом без жодної згадки,
+   * якого він; (3) інвалідувався кеш `['document', id, 202402]` замість
+   * `202401` — період, що справді перерахувався, лишався зі старими числами.
+   *
+   * ⚠ Стеження НЕ обривається при переході (це був би четвертий наслідок,
+   * протилежний): задача триває, і її завершення однаково має оновити кеш
+   * СВОГО періоду. Від поточного екрана залежить лише вигляд КНОПКИ.
+   *
+   * ⚠ Слот ОДИН, і це свідомо. Розблокована кнопка на іншому періоді дає
+   * оператору поставити другий перерахунок, поки перший іде, — і тоді клієнт
+   * перестає стежити за першим: його кеш оновиться не на завершенні, а
+   * звичайним `staleTime` (30 с, `App.tsx`) при повторному заході. Ціна
+   * несумірна з попередньою поведінкою, де кнопка була заблокована на ВСІХ
+   * періодах і другий перерахунок був недосяжний узагалі; черга задач на
+   * клієнті — окрема задача, не ця.
    */
-  const [recalcJobId, setRecalcJobId] = useState<string | null>(null);
+  const [recalc, setRecalc] = useState<{
+    jobId: string;
+    documentId: number;
+    sheetDefId: number;
+    periodKey: number;
+  } | null>(null);
+
+  const recalcJobId = recalc?.jobId ?? null;
 
   const recalculate = useMutation({
     mutationFn: () =>
@@ -147,7 +180,9 @@ export function SheetActions({
         sheetDefId,
       } satisfies RecalculateDocumentRequest),
     onSuccess: (job) => {
-      setRecalcJobId(job.jobId);
+      // ⚠ Адреса фіксується САМЕ ТУТ — у мить, коли задача стала в чергу, — і
+      // далі не змінюється, хай оператор ходить по періодах скільки хоче.
+      setRecalc({ jobId: job.jobId, documentId, sheetDefId, periodKey });
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані
       // (`setRecalcJobId`) — і, отже, в запиті опитування нижче — не
       // змінюється.
@@ -193,7 +228,17 @@ export function SheetActions({
     ? null
     : outcomeOf(recalcJob.data?.state, recalcJob.isError);
 
-  const recalcRunning = outcome === 'running';
+  // ⛔ §10.6: «виконується» — про ЦЕЙ екран, а не про будь-яку задачу в
+  // пам'яті компонента. Кнопка на іншому аркуші/періоді мусить бути звичайною
+  // й натискабельною: там нічого не поставлено, і заборонити його перерахунок
+  // означало б показати заблоковану кнопку без жодної причини.
+  const recalcIsHere =
+    recalc !== null &&
+    recalc.documentId === documentId &&
+    recalc.sheetDefId === sheetDefId &&
+    recalc.periodKey === periodKey;
+
+  const recalcRunning = recalcIsHere && outcome === 'running';
 
   // ⛔ Про КІНЕЦЬ повідомляється рівно один раз на задачу: опитування триває
   // кілька тактів після завершення (React Query віддає ті самі дані з кешу), і
@@ -201,22 +246,34 @@ export function SheetActions({
   const reported = useRef<string | null>(null);
 
   useEffect(() => {
-    if (recalcJobId === null || outcome === null || outcome === 'running') return;
+    if (recalc === null || outcome === null || outcome === 'running') return;
 
     // Стан прочитати не вдалося — мовчимо: задача поставлена, і про це вже
     // сказано; повідомляти про право, якого оператор не просив, нема сенсу.
     if (outcome === 'unknown') return;
-    if (reported.current === recalcJobId) return;
+    if (reported.current === recalc.jobId) return;
 
-    reported.current = recalcJobId;
+    reported.current = recalc.jobId;
 
     if (outcome === 'succeeded') {
-      showDone(t('workflow.recalcDone'));
+      // ⛔ §10.6: період — У ТЕКСТІ тосту. «Перерахунок завершено», показане
+      // над іншим періодом (оператор перейшов, поки задача йшла), стверджує
+      // неправду про те, на що людина дивиться. Нового рядка каталогу тут не
+      // заводиться — каталог живе в сіді БД, поза цим пакетом, — тому період
+      // дописується до наявного рядка тим самим `·`, яким уже підписано
+      // діалоги (`UserAccessEditor.tsx`).
+      showDone(`${t('workflow.recalcDone')} · ${String(recalc.periodKey)}`);
 
       // ⚠ Сітка перечитується САМЕ тут: оновити її на постановці в чергу
       // означало б показати старі числа під написом «перераховано».
+      //
+      // ⛔ І саме за ЗАХОПЛЕНОЮ адресою, а не за поточними пропами: інакше
+      // оновлення дістається періоду, який не перераховували, а той, що
+      // перерахувався, лишається зі старими числами назавжди (до перезаходу).
       void queryClient.invalidateQueries({ queryKey: ['table-slice'] });
-      void queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
+      void queryClient.invalidateQueries({
+        queryKey: ['document', recalc.documentId, recalc.periodKey],
+      });
 
       return;
     }
@@ -229,7 +286,7 @@ export function SheetActions({
       color: 'statusError',
       message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
     });
-  }, [recalcJobId, outcome, recalcJob.data?.error, queryClient, documentId, periodKey]);
+  }, [recalc, outcome, recalcJob.data?.error, queryClient]);
 
   const me = session.data;
 

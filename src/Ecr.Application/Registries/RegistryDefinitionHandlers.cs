@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Registries/RegistryDefinitionHandlers.cs
+// src/Ecr.Application/Registries/RegistryDefinitionHandlers.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
@@ -390,6 +390,21 @@ public sealed class SaveRegistryDefinitionHandler(
                 }
 
                 target.Update(field.NameL10n, field.Ordinal, field.IsRequired);
+
+                // ⛔ Одиниця вимірювання ЗМІНЮЄТЬСЯ і для наявного поля (аудит
+                // 2026-09-16, §4.3). `MeasureIn` викликався лише для НОВИХ
+                // полів, тож `PUT .../registries/{code}/definition` із
+                // виправленою одиницею повертав 200 і нову DefinitionVersion,
+                // аудит відображав НАМІР нового значення — а `target.UnitId`
+                // фактично не змінювався, і всі споживачі нижче (перевірки
+                // сумісності одиниць, відображення) далі брали старе, неправильне.
+                //
+                // ⚠ `UnitId` серед заморожених полів `RegistryFieldDef.Update`
+                // не перелічений, і `MeasureIn` — на відміну від
+                // `MarkKey`/`PointTo`, явно позначених «⚠ Лише під час
+                // створення» — такого обмеження не має. Тобто домен це дозволяв;
+                // обробник просто не кликав.
+                target.MeasureIn(field.UnitId);
                 continue;
             }
 

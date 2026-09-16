@@ -27,6 +27,35 @@ public sealed class RoundingTests
         Assert.Equal(decimal.Parse(expected, CultureInfo.InvariantCulture), actual);
     }
 
+    [Theory]
+    [InlineData("ROUND(1.2345, 2.7)")]
+    [InlineData("ROUND(1.2345, 0.5)")]
+    [InlineData("ROUND(1.2345, -0.5)")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void ROUND_із_дробовою_кількістю_знаків_це_помилка_а_не_тихе_відкидання(string expression)
+    {
+        // ⛔ Аудит 2026-09-16, §2.5. `MethodologyFunctions.Round` відхиляв це від
+        // початку з прямим поясненням: «Round(x, 2.7) написали не для того, щоб
+        // отримати два знаки». `TemplateFunctions.Round` робив ПРОТИЛЕЖНЕ —
+        // `(int)decimal.Truncate(places)` тихо відкидав дробову частину. Одна
+        // мова правил, що округлює по-різному залежно від діалекту, дає
+        // розбіжність, видиму лише як інше число у звіті.
+        var value = Expr.Eval(expression);
+
+        Assert.True(value.IsError, $"Очікувалась помилка, отримано {value.Value}.");
+        Assert.Equal("#VALUE", value.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Ціла_кількість_знаків_у_дробовому_записі_лишається_дозволеною()
+    {
+        // ⚠ Зворотний бік: `2.0` — це рівно два знаки, а не «дробова кількість».
+        // Заборонити й це означало б зламати вирази, де кількість знаків
+        // приходить з обчислення в decimal.
+        Assert.Equal(1.23m, Expr.Number("ROUND(1.2345, 2.0)"));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Обчислення_ведеться_в_decimal_і_не_втрачає_точності()

@@ -668,11 +668,24 @@ public sealed class PatchCellsHandler(
     }
 
     /// <summary>Значення комірки як текст — та сама умова «заповнено», що й у зіставленні правил.</summary>
+    /// <remarks>
+    /// ⛔ Обробляються ВСІ шість полів <c>CellValueData</c>, як і в
+    /// <c>Describe()</c> (аудит 2026-09-16, §3.1). Бракувало
+    /// <c>ValueDate</c>/<c>ValueUnitId</c>, і це давало два тихі дефекти
+    /// одночасно. Перший: методологія позначає Date-колонку як
+    /// <c>RequiredInput</c>/Block — <c>ValueOf()</c> завжди бачив <c>null</c>,
+    /// тож рядок БЛОКУВАВСЯ НАЗАВЖДИ (`ECR-CALC-0437` на кожній спробі), навіть
+    /// коли комірка заповнена. Другий, дзеркальний: <c>MethodologyRule.MatchJson</c>
+    /// визначає гілку за Date/Unit-колонкою — <c>matchValues</c> для неї завжди
+    /// <c>null</c>, і правило обов'язковості тихо НЕ спрацьовувало ніколи.
+    /// </remarks>
     private static string? Text(CellValueData value)
         => value.ValueString
            ?? value.ValueNumeric?.ToString(System.Globalization.CultureInfo.InvariantCulture)
            ?? value.ValueRegistryEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-           ?? value.ValueBool?.ToString();
+           ?? value.ValueBool?.ToString()
+           ?? value.ValueDate?.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+           ?? value.ValueUnitId?.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Валідація. ⚠ Блокує запис ЛИШЕ комірковий Error (R-B3, D-90):

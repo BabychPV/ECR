@@ -57,7 +57,17 @@ export function useUrlNumber(name: string): [number | null, (value: number | nul
 
   // ⚠ Нечислове значення в адресі трактується як відсутнє, а не як `NaN`:
   // адресу правлять руками, і `?periodKey=abc` не має ламати екран.
-  const parsed = raw === null ? Number.NaN : Number(raw);
+  //
+  // ⛔ Аудит 2026-09-16 §10.8: ПОРОЖНЄ значення (`?periodKey=`, а також
+  // `?periodKey=%20`) теж мусить читатися як відсутнє. `Number('')` дає `0` —
+  // скінченний і правдоподібний, — і перевірка `Number.isFinite` нижче
+  // пропускала його як справжній період. Наслідок тихий: `urlPeriod ??
+  // currentPeriodKey()` (`DocumentPage.tsx`) бачив `0`, а не `null`, тож
+  // дефолт не спрацьовував і весь екран ходив по періоду 0 — той самий
+  // симптом, що `A7-28` («валідація мовчки йшла по періоду 0, відповідаючи
+  // "помилок немає"»), лише з боку адреси.
+  const trimmed = raw === null ? null : raw.trim();
+  const parsed = trimmed === null || trimmed.length === 0 ? Number.NaN : Number(trimmed);
 
   return [Number.isFinite(parsed) ? parsed : null, set];
 }

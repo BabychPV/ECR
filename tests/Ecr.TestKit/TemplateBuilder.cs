@@ -183,6 +183,33 @@ public sealed class TemplateBuilder
         SetProperty(row, nameof(RowDef.IsDeleted), true);
     }
 
+    /// <summary>Позначає аркуш видаленим (soft delete, ФВ-7.6).</summary>
+    /// <remarks>
+    /// ⚠ Саме так це виглядає в бою: <c>DeleteSheetDefHandler</c> ставить
+    /// <c>IsDeleted = true</c> і **не каскадить на дітей** — таблиці, колонки й
+    /// формули лишаються «живими» всередині мертвого аркуша. Саме на цьому
+    /// стояла знахідка §4.1 аудиту 2026-09-16.
+    /// </remarks>
+    public static void Delete(SheetDef sheet)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        SetProperty(sheet, nameof(SheetDef.IsDeleted), true);
+    }
+
+    /// <summary>Позначає таблицю видаленою (soft delete, ФВ-7.6); без каскаду на дітей.</summary>
+    public static void Delete(TableDef table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        SetProperty(table, nameof(TableDef.IsDeleted), true);
+    }
+
+    /// <summary>Позначає колонку видаленою (soft delete, ФВ-7.6).</summary>
+    public static void Delete(ColumnDef column)
+    {
+        ArgumentNullException.ThrowIfNull(column);
+        SetProperty(column, nameof(ColumnDef.IsDeleted), true);
+    }
+
     /// <summary>Збирає знімок.</summary>
     public TemplateVersionSnapshot Build(int presentationRevision = 0)
         => new(TemplateVersionId, presentationRevision, _sheets, _columns, _rows);

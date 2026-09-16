@@ -124,13 +124,29 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
             // ⛔ Рядки ПЕРШИМИ: FK_RepRow_Snap не каскадний (DeleteBehaviorTests
             // тримає це свідомо для rpt.*), і видалення зрізу раніше за його
             // рядки впало б порушенням зовнішнього ключа.
+            //
+            // ⛔ Умова `!IsCurrent && Status != Submitted` ПОВТОРЮЄТЬСЯ у
+            // `Where` самого видалення, а не лише в матеріалізованому вище
+            // переліку id (аудит 2026-09-16, §6.2). Між вибором кандидатів і
+            // видаленням існувало вікно, у якому хтось міг зробити зріз
+            // поточним або подати його як регуляторний доказ — і завдання
+            // видаляло б його попри доменний інваріант D-71 («ніколи не
+            // видаляти поточний чи поданий зріз»), НАЗАВЖДИ, бо видалення
+            // жорстке. Перелік id лишається: він задає ПАРТІЮ (`Take`), а
+            // умова нижче — ПРАВО видалити.
             var rowsDeleted = await db.ReportRows
-                .Where(r => candidateIds.Contains(r.SnapshotId))
+                .Where(r => candidateIds.Contains(r.SnapshotId)
+                            && db.ReportSnapshots.Any(
+                                s => s.Id == r.SnapshotId
+                                     && !s.IsCurrent
+                                     && s.Status != SnapshotStatus.Submitted))
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
 
             var snapshotsDeleted = await db.ReportSnapshots
-                .Where(s => candidateIds.Contains(s.Id))
+                .Where(s => candidateIds.Contains(s.Id)
+                            && !s.IsCurrent
+                            && s.Status != SnapshotStatus.Submitted)
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
 

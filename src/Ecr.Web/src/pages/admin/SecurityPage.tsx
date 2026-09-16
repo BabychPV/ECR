@@ -432,8 +432,18 @@ export function SecurityPage(): JSX.Element {
                         size="xs"
                         aria-label={`${t('security.alerts')} · ${user.userName}`}
                         checked={user.receivesAlerts}
+                        // ⛔ Аудит 2026-09-16 §10.8: тут стояло голе
+                        // `alerts.isPending` — ОДНЕ значення однієї мутації на
+                        // весь перелік, тож перемикання адресата для одного
+                        // користувача гасило перемикачі ВСІХ решти. Адресати
+                        // алертів — це ДАНІ (`D-125`), і їх міняють саме
+                        // списком: чекати кожен запит, не розуміючи, чому поля
+                        // погасли, — рівно та поведінка, від якої список
+                        // перестає бути списком.
                         disabled={
-                          user.email === null || user.email === '' || alerts.isPending
+                          user.email === null ||
+                          user.email === '' ||
+                          (alerts.isPending && alerts.variables?.id === user.id)
                         }
                         onChange={(event) =>
                           alerts.mutate({ id: user.id, value: event.currentTarget.checked })

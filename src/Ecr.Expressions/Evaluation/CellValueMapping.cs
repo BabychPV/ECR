@@ -50,6 +50,62 @@ public static class CellValueMapping
             _ => new CellValueData { IsEmpty = true, IsCalculated = true },
         };
 
+    /// <summary>
+    /// Збережене значення комірки як «сире» значення для мови правил і для
+    /// клієнта — одне розгортання на всі шляхи.
+    /// </summary>
+    /// <param name="cell">Значення комірки; <c>null</c> — рядка немає.</param>
+    /// <remarks>
+    /// ⛔ Існує, щоб розгортання було ОДНЕ (аудит 2026-09-16, §3.2). До цього
+    /// їх було два: <c>GetTableSliceHandler.Unwrap</c> обробляв усі шість полів,
+    /// а <c>TableValidation.SliceContext</c> — ad-hoc
+    /// <c>ValueNumeric ?? ValueString</c>, тобто правила рівня рядка/таблиці/
+    /// документа бачили <c>Null</c> для КОЖНОЇ Bool- і Date-колонки. Наслідок
+    /// двобічний і однаково поганий: правило
+    /// <c>"[IncludeInReport] = false OR [Volume] &gt; 0"</c> або хибно ламалось
+    /// (Error вироджувався у Warning, маскуючи те, на що розраховує подання —
+    /// надто дозволяюче), або хибно спрацьовувало на коректних даних (блокуючи
+    /// легітимну подачу). Той самий клас значень для скоупу 0 (комірка) уже
+    /// коректно йшов через <see cref="ToExpressionValue"/> — одна мова правил
+    /// мала два шляхи, і один із них ламав Bool/Date.
+    ///
+    /// ⚠ Порядок перевірок не має значення: заповнене поле рівно одне (R-B4).
+    /// </remarks>
+    public static object? ToRuleValue(CellValueData? cell)
+    {
+        if (cell is null || cell.IsEmpty)
+        {
+            return null;
+        }
+
+        if (cell.ValueNumeric is { } number)
+        {
+            return number;
+        }
+
+        if (cell.ValueDate is { } date)
+        {
+            return date;
+        }
+
+        if (cell.ValueBool is { } flag)
+        {
+            return flag;
+        }
+
+        if (cell.ValueString is { } text)
+        {
+            return text;
+        }
+
+        if (cell.ValueRegistryEntryId is { } entry)
+        {
+            return entry;
+        }
+
+        return cell.ValueUnitId;
+    }
+
     /// <summary>Збережене значення комірки як значення виразу.</summary>
     /// <param name="cell">Значення комірки; <c>null</c> — рядка немає.</param>
     /// <param name="defaultValue">

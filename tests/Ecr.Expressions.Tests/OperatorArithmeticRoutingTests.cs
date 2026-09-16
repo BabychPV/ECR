@@ -87,4 +87,68 @@ public sealed class OperatorArithmeticRoutingTests
 
         Assert.Equal(11.774193548387096d, value.AsDouble()!.Value, 12);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.9")]
+    public void Порівняння_з_Legacy_нескінченністю_впорядковується_а_не_дає_VALUE()
+    {
+        // ⛔ Аудит 2026-09-16, §2.1. `Compare` працював через `AsNumber()`, який
+        // звужує до `decimal`, а `±∞`/`NaN` у `decimal` не подаються — тож
+        // повертав `null`, і будь-яке `<`, `<=`, `>`, `>=` над Legacy-
+        // нескінченністю тихо ставало `#VALUE`. Арифметичні оператори при цьому
+        // нескінченність зберігали коректно: дві половини одного режиму
+        // розходилися, і саме на порівнянні, яким методологія відсікає викиди
+        // за порогом.
+        var legacy = new LegacyDoubleArithmetic();
+
+        // `1/0` — це `+∞` як ЗНАЧЕННЯ (див. тест вище), і воно більше за будь-яке
+        // скінченне число.
+        Assert.True((bool)Eval("1/0 > 1000000", legacy).Value!);
+        Assert.False((bool)Eval("1/0 < 1000000", legacy).Value!);
+        Assert.True((bool)Eval("1/0 >= 1/0", legacy).Value!);
+
+        // Від'ємна нескінченність — з іншого краю.
+        Assert.True((bool)Eval("(0 - 1)/0 < 0", legacy).Value!);
+
+        // ⚠ А NaN не впорядковується ні з чим — і це саме помилка значення, не
+        // «менше»: `NaN < 1` і `NaN >= 1` в IEEE 754 обидва false, тож віддати
+        // Boolean означало б збрехати в один із двох боків.
+        Assert.True(Eval("0/0 > 1", legacy).IsError);
+        Assert.True(Eval("0/0 <= 1", legacy).IsError);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Показник_степеня_обмежений_а_не_крутить_мільйон_множень()
+    {
+        // ⛔ Аудит 2026-09-16, §2.4. Оператор `^` мав звичайний `for`-цикл O(n)
+        // БЕЗ жодної межі — на відміну від `DecimalMath.Pow`, яка обмежує
+        // швидкий цілочисельний шлях `|exponent| <= 1000`. `1.0001 ^ 5000000`
+        // не переповнює decimal (основа ≈1), тож не падало, а МОЛОТИЛО —
+        // всередині нічного масового перерахунку («мільйони викликів») одна
+        // помилково введена формула підвішувала спільний прогін.
+        // ⚠ Через `Expr.Eval` (діалект ШАБЛОНУ): у діалекті методологій `^` —
+        // це побітовий XOR, а не степінь, і парсер це прямо відхиляє.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var tooBig = Expr.Eval("1.0001 ^ 5000000");
+        sw.Stop();
+
+        Assert.True(tooBig.IsError);
+        Assert.Equal(ExpressionErrors.BadValue, tooBig.ErrorCode);
+
+        // Межа доведена не лише кодом помилки, а й тим, що відповідь приходить
+        // одразу: мутація, що прибирає перевірку, не вкладеться в цей бюджет.
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"Обчислення зайняло {sw.ElapsedMilliseconds} мс.");
+
+        // Межа саме на межі: 1000 ще рахується, 1001 — вже ні.
+        Assert.False(Expr.Eval("1.0001 ^ 1000").IsError);
+        Assert.True(Expr.Eval("1.0001 ^ 1001").IsError);
+
+        // ⚠ Звичайні показники методології лишаються точними — бінарне
+        // піднесення не «оптимізація замість правильного числа».
+        Assert.Equal(1024m, Expr.Eval("2 ^ 10").AsNumber());
+        Assert.Equal(0.001m, Expr.Eval("10 ^ (0 - 3)").AsNumber());
+        Assert.Equal(1m, Expr.Eval("7 ^ 0").AsNumber());
+    }
 }

@@ -67,8 +67,29 @@ public interface IDocumentStore
     public Task<DocumentSummary?> FindAsync(long documentId, PeriodKeyFilter period, CancellationToken ct);
 
     /// <summary>Сторінка документів проєкту.</summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
+    /// <param name="period">Період для зведеного стану аркушів.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="visibleProjectIds">
+    /// Проєкти, на які в користувача є грант читання. <c>null</c> — без
+    /// фільтра за грантами (лише для інтеграційних перевірок самого запиту).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Гранти враховуються ЗАПИТОМ, а не лише постфільтром у обробнику, і це
+    /// не оптимізація. Постфільтр давав дві діри одночасно (аудит 2026-09-16,
+    /// §3.3): <c>TotalCount</c> рахувався по ВСІХ проєктах системи — тобто
+    /// користувач з грантом на один проєкт бачив загальну кількість документів
+    /// у чужих, — і сторінка віддавала менше за <c>page.Limit</c> видимих
+    /// елементів, поки <c>NextCursor</c> вказував далі в НЕфільтрованій
+    /// послідовності: «N з TotalCount» водночас неправильне й небезпечне.
+    /// </remarks>
     public Task<PagedResult<DocumentSummary>> ListAsync(
-        int? projectId, PeriodKeyFilter period, CursorRequest page, CancellationToken ct);
+        int? projectId,
+        PeriodKeyFilter period,
+        CursorRequest page,
+        IReadOnlyCollection<int>? visibleProjectIds,
+        CancellationToken ct);
 
     /// <summary>
     /// Перевіряє склад за <c>SheetGroupRule</c> (ФВ-3.2).

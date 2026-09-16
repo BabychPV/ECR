@@ -202,8 +202,20 @@ export function PeriodAccessRuleManager({
         value={ruleId ?? ''}
         disabled={disabled}
         onChange={(event) => {
-          const value = event.currentTarget.value.trim();
-          onRuleIdChange(value.length === 0 ? null : Number(value));
+          // ⛔ Аудит 2026-09-16 §10.8: тут стояло `Number(value)`, і нечисловий
+          // ввід ставав `NaN`. Доступність кнопок нижче питає `ruleId === null`,
+          // а `NaN === null` — `false`: «Зберегти» і «Видалити» ставали
+          // активними з ідентифікатором, якого не існує, і вели в
+          // `PUT/DELETE …/period-access-rules/NaN` — адресу, на яку сервер
+          // відповідає 400/404. Кнопка обіцяла дію, яку неможливо виконати.
+          //
+          // ⚠ Вимога саме ЦІЛОГО додатного: `12.5` і `0` — теж не
+          // ідентифікатори, і пускати їх далі означало б лише відкласти ту саму
+          // відмову сервера. Нечисловий ввід стирається з поля одразу — для
+          // поля, у яке вводять ID, це чесніше за «NaN» на екрані.
+          const parsed = Number(event.currentTarget.value.trim());
+
+          onRuleIdChange(Number.isInteger(parsed) && parsed > 0 ? parsed : null);
         }}
       />
 

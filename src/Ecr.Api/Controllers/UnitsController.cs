@@ -30,8 +30,17 @@ public sealed class UnitsController(
     /// </summary>
     /// <param name="request">Код, позначення, назва, розмірність, коефіцієнти.</param>
     /// <param name="ct">Токен скасування.</param>
+    // ⚠ `201 Created`, а не `200 OK` (аудит 2026-09-16, §9): усі решта
+    // створювальних маршрутів API віддають `201` із `Location`
+    // (`RegistriesController.Create`, `ProjectsController`, `SecurityController`,
+    // `DocumentsController`). Один маршрут, що відповідає інакше, змушує
+    // клієнта тримати виняток саме на нього.
+    //
+    // ⛔ Коментар саме `//`, а не `<remarks>`: XML-doc дії потрапляє в
+    // `description` документа OpenAPI і звідти в знімок контракту — історія
+    // нашого аудиту клієнтському контракту не належить.
     [HttpPost]
-    [ProducesResponseType<UnitRef>(StatusCodes.Status200OK)]
+    [ProducesResponseType<UnitRef>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UnitRef>> Create(
@@ -45,7 +54,12 @@ public sealed class UnitsController(
                 request.DimensionId, request.FactorToBase, request.OffsetToBase, ct)
             .ConfigureAwait(false);
 
-        return Ok(new UnitRef(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase));
+        var created = new UnitRef(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
+
+        // `Location` вказує на перелік: окремого маршруту «одна одиниця» в API
+        // немає, і вигадувати його заради заголовка означало б додати
+        // ендпоінт, якого ніхто не просив.
+        return CreatedAtAction(nameof(List), null, created);
     }
 
     /// <summary>

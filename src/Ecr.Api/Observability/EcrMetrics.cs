@@ -59,13 +59,67 @@ public sealed class EcrMetrics
         _consistencyIssues = meter.CreateCounter<long>(ConsistencyIssues, "1", "Знахідки ConsistencyCheckJob");
     }
 
+    /// <summary>
+    /// Ключ у <c>HttpContext.Items</c>, яким дія повідомляє фільтру, скільки
+    /// комірок (чи формул) вона насправді торкнулася.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Через <c>HttpContext.Items</c>, а не через повернене значення:
+    /// кількість відома лише всередині дії, а міряє тривалість фільтр — і
+    /// розбирати типізовану відповідь у фільтрі означало б навчити його
+    /// формату кожного DTO.
+    /// </remarks>
+    public const string CountItemKey = "ecr.budget.count";
+
+    /// <summary>
+    /// Повідомляє фільтру бюджету, скільки комірок (чи формул) торкнулася дія.
+    /// </summary>
+    /// <param name="http">Контекст запиту.</param>
+    /// <param name="count">Кількість.</param>
+    public static void ReportCount(HttpContext http, int count)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        http.Items[CountItemKey] = count;
+    }
+
     /// <summary>Фіксує тривалість читання зрізу.</summary>
-    public void RecordCellsRead(double ms, int cellCount)
-        => _cellsRead.Record(ms, new KeyValuePair<string, object?>("cells", cellCount));
+    /// <param name="ms">Тривалість.</param>
+    /// <param name="cellCount">
+    /// Скільки комірок прочитано; <c>null</c> — кількість невідома викликачу.
+    /// </param>
+    /// <remarks>
+    /// ⛔ <c>null</c> ОМИНАЄ тег, а не підставляє нуль (аудит 2026-09-16, §9).
+    /// До цього `BudgetMetricsFilter` передавав літеральний `0` завжди, і вимір
+    /// «комірок на запит» назавжди показував нуль — тобто графік бюджету
+    /// стверджував, що система читає й пише рівно нуль комірок. Відсутній тег
+    /// видно як відсутній; нуль виглядає як факт.
+    /// </remarks>
+    public void RecordCellsRead(double ms, int? cellCount = null)
+    {
+        if (cellCount is { } cells)
+        {
+            _cellsRead.Record(ms, new KeyValuePair<string, object?>("cells", cells));
+            return;
+        }
+
+        _cellsRead.Record(ms);
+    }
 
     /// <summary>Фіксує тривалість запису.</summary>
-    public void RecordCellsWrite(double ms, int cellCount)
-        => _cellsWrite.Record(ms, new KeyValuePair<string, object?>("cells", cellCount));
+    /// <param name="ms">Тривалість.</param>
+    /// <param name="cellCount">
+    /// Скільки комірок записано; <c>null</c> — кількість невідома викликачу.
+    /// </param>
+    public void RecordCellsWrite(double ms, int? cellCount = null)
+    {
+        if (cellCount is { } cells)
+        {
+            _cellsWrite.Record(ms, new KeyValuePair<string, object?>("cells", cells));
+            return;
+        }
+
+        _cellsWrite.Record(ms);
+    }
 
     /// <summary>
     /// Фіксує повний річний перерахунок. **Бюджет — 600 с** (ПРД-13);
@@ -79,9 +133,20 @@ public sealed class EcrMetrics
 
     /// <summary>Фіксує перерахунок формул.</summary>
     /// <param name="ms">Тривалість.</param>
-    /// <param name="formulaCount">Скільки формул перераховано.</param>
-    public void RecordFormulaEvaluate(double ms, int formulaCount)
-        => _formulaEvaluate.Record(ms, new KeyValuePair<string, object?>("formulas", formulaCount));
+    /// <param name="formulaCount">
+    /// Скільки формул перераховано; <c>null</c> — кількість невідома викликачу
+    /// (див. <see cref="RecordCellsRead"/> про те, чому не нуль).
+    /// </param>
+    public void RecordFormulaEvaluate(double ms, int? formulaCount = null)
+    {
+        if (formulaCount is { } formulas)
+        {
+            _formulaEvaluate.Record(ms, new KeyValuePair<string, object?>("formulas", formulas));
+            return;
+        }
+
+        _formulaEvaluate.Record(ms);
+    }
 
     /// <summary>
     /// Фіксує побудову профілю доступу.

@@ -1371,6 +1371,36 @@ export function MethodologyModesForm({
   const [numericMode, setNumericMode] = useState(version.numericMode);
   const [calendarMode, setCalendarMode] = useState(version.calendarMode);
   const [traceLevel, setTraceLevel] = useState(version.traceLevel);
+  const [loadedFor, setLoadedFor] = useState(version.id);
+
+  /*
+   * ⛔ Аудит 2026-09-16 §10.5 (High, тиха псування даних): цього блоку не було,
+   * і локальний стан наповнювався РІВНО ОДИН раз — початковим значенням
+   * `useState` при монтуванні. Компонент рендериться з пропу
+   * `version = selected` того самого списку (`MethodologyVersionsPage.tsx`), а
+   * перемикання версії в списку МІНЯЄ ПРОП, не перемонтовуючи компонент: у
+   * `Select`-ах лишалися режими попередньої версії, візуально не відрізнити
+   * від справжніх. «Зберегти режими» надсилало їх у версію B за правильною
+   * адресою — тобто тихо перезаписувало режими B значеннями A. Ціна названа
+   * власними коментарями цього файлу: обидва перші режими «тихо змінюють УСІ
+   * числа версії, не змінивши жодної формули» (`ФВ-9.9`, `ФВ-16.11`).
+   *
+   * ⚠ Синхронізація ПРИ РЕНДЕРІ, а не в `useEffect`, — той самий взірець
+   * `loadedFor`, що вже стоїть у `PresentationEditor.tsx` і
+   * `RegistryEntryEditor.tsx`: ефект дав би зайвий рендер зі значеннями ЧУЖОЇ
+   * версії між кліком і синхронізацією, тобто той самий дефект, лише на один
+   * кадр.
+   *
+   * ⚠ Умова — саме `version.id`, а не порівняння самих режимів: інакше
+   * синхронізація затирала б власний вибір адміна (він щойно змінив Select, а
+   * проп лишився старим) на першому ж перерендері батька.
+   */
+  if (loadedFor !== version.id) {
+    setLoadedFor(version.id);
+    setNumericMode(version.numericMode);
+    setCalendarMode(version.calendarMode);
+    setTraceLevel(version.traceLevel);
+  }
 
   const save = useMutation({
     mutationFn: () =>

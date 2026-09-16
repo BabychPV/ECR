@@ -417,6 +417,38 @@ public sealed class RegistryDefinitionTests
         Assert.DoesNotContain(history, h => h.ChangeReason == "чуже");
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Одиниця_вимірювання_наявного_поля_ЗМІНЮЄТЬСЯ()
+    {
+        // ⛔ Аудит 2026-09-16, §4.3. `target.MeasureIn(...)` викликався лише для
+        // НОВИХ полів, тож виправлення одиниці наявного поля (типовий випадок:
+        // поле лімітів помилково має «кг» замість «т») проходило успішно — 200,
+        // нова DefinitionVersion, аудит навіть відображав намір нового
+        // значення — а `target.UnitId` фактично не змінювався. Усі споживачі
+        // нижче (перевірки сумісності одиниць, відображення) далі брали старе,
+        // неправильне значення без жодної помилки.
+        //
+        // ⚠ `UnitId` серед заморожених полів `RegistryFieldDef.Update` НЕ
+        // перелічений, а `MeasureIn` — на відміну від `MarkKey`/`PointTo`, явно
+        // позначених «⚠ Лише під час створення» — обмеження не має. Домен це
+        // дозволяв; обробник просто не кликав.
+        const int Kilogram = 1;
+        const int Tonne = 8;
+
+        var limit = _permits.Fields.Single(f => f.Code == "Limit");
+        limit.MeasureIn(Kilogram);
+        Assert.Equal(Kilogram, limit.UnitId);
+
+        var fields = Fields();
+        var index = fields.FindIndex(f => f.Code == "Limit");
+        fields[index] = fields[index] with { UnitId = Tonne };
+
+        await Saves().HandleAsync("PERMIT", Request(fields: fields), default);
+
+        Assert.Equal(Tonne, _permits.Fields.Single(f => f.Code == "Limit").UnitId);
+    }
+
     private GetRegistryDefinitionHandler Definitions() => new(_registries, _access, _user);
 
     private GetRegistryHistoryHandler History() => new(_registries, _auditReader, _access, _user);

@@ -29,8 +29,7 @@ public sealed class SnapshotTypeContext(TemplateVersionSnapshot snapshot) : ITyp
             return ExpressionValueType.Number;
         }
 
-        var column = snapshot.Sheets
-            .SelectMany(s => s.Tables)
+        var column = PublishChecks.LiveTables(snapshot.Sheets)
             .Where(t => reference.TableCode is null
                         || string.Equals(t.Code, reference.TableCode, StringComparison.OrdinalIgnoreCase))
             .SelectMany(t => t.Columns)

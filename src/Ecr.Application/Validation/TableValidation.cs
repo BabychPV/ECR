@@ -84,10 +84,18 @@ internal static class TableValidation
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, long> rowIds) : IValidationContext
     {
+        // ⛔ Розгортання — СПІЛЬНЕ (`CellValueMapping.ToRuleValue`), а не
+        // ad-hoc `ValueNumeric ?? ValueString` (аудит 2026-09-16, §3.2). Стара
+        // форма давала `null` для КОЖНОЇ Bool- і Date-колонки, тож правила
+        // рівня рядка/таблиці/документа — двигун за `ValidateDocumentHandler`,
+        // тобто за повною перевіркою перед Submit (ФВ-5.1) — читали порожнечу
+        // незалежно від реального значення. Рівно той дефект, від якого
+        // застерігає власний коментар цього файлу: «подання зобов'язане
+        // рахувати РІВНО те саме, що показує кнопка "Перевірити"».
         private readonly Dictionary<(long Row, int Column), object?> _values =
             cells.ToDictionary(
                 c => (c.Address.TableRowId, c.Address.ColumnDefId),
-                c => (object?)(c.Value.ValueNumeric ?? (object?)c.Value.ValueString));
+                c => Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(c.Value));
 
         private string? _currentRowKey;
 

@@ -254,13 +254,15 @@ async function gotoDocument(page: Page): Promise<void> {
 }
 
 /**
- * Вставляє значення в першу комірку grid.
+ * Вставляє значення в ПЕРШУ комірку grid.
  *
- * ⛔ Позиція вставки — завжди {rowIndex: 0, columnIndex: 0}
- * (`DocumentGrid.tsx`, `onPaste`): планувальник читає її буквально з
- * константи виклику `planPaste`, а не з поточного виділення. Фокус на сітці
- * тут потрібен лише для того, щоб подія `paste` взагалі дійшла до обробника
- * React, — не для позиціювання.
+ * ⛔ Позиція вставки — це ВИДІЛЕНА комірка (аудит 2026-09-16 §10.1,
+ * `DocumentGrid.tsx` + `selection.ts`). До того виправлення `planPaste`
+ * отримував жорстку константу `{ rowIndex: 0, columnIndex: 0 }`, і клік міг
+ * бути будь-де: вставка однаково лягала в кут таблиці. Тепер клік визначає
+ * якір, тому цей помічник клацає саме ПЕРШУ комірку тіла таблиці — інакше
+ * «вставка в першу комірку» в назві функції перестала б бути правдою, і
+ * перевірка гранта поїхала б у випадкову комірку під центром сітки.
  */
 async function pasteFirstCell(page: Page, value: string): Promise<void> {
   const grid = page.locator('revo-grid').first();
@@ -277,7 +279,11 @@ async function pasteFirstCell(page: Page, value: string): Promise<void> {
   // — той самий шлях, яким людина заходить у клітинку, і саме він реально
   // переносить фокус у shadow DOM грида (RevoGrid керує власним активним
   // станом через click, не через programmatic `.focus()` контейнера).
-  await grid.click();
+  //
+  // ⚠ `.rgCell` — клас комірки самого RevoGrid (`CELL_CLASS`), а `revogr-data`
+  // відсікає заголовки й службові колонки; Playwright пронизує тіньове дерево
+  // CSS-селектором, тож перша комірка ТІЛА досяжна напряму.
+  await grid.locator('revogr-data .rgCell').first().click();
 
   await page.evaluate(async (text) => {
     await navigator.clipboard.writeText(text);

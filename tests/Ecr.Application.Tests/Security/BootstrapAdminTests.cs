@@ -105,6 +105,39 @@ public sealed class BootstrapAdminTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.18")]
+    public void Ворота_порівнюють_на_межі_сегмента_а_не_голим_префіксом()
+    {
+        // ⛔ Це та сама діра, через яку разовий пароль відкривав методологію:
+        // «/api/v1/methodologies».StartsWith("/api/v1/me") == true, бо
+        // «methodologies» починається на «me». Голий StartsWith пускав повний
+        // CRUD над формулами й константами, разом із publish та simulate.
+        foreach (var path in new[]
+                 {
+                     "/api/v1/methodologies",
+                     "/api/v1/methodologies/7",
+                     "/api/v1/methodologies/7/publish",
+                     "/api/v1/methodologies/7/simulate",
+                     "/api/v1/methodologies?projectId=1",
+                     "/api/v1/logout-everywhere",
+                     "/api/v1/ui-strings-export",
+                 })
+        {
+            var blocked = Assert.Throws<BusinessRuleException>(
+                () => PasswordChangeGate.Ensure(mustChangePassword: true, path));
+            Assert.Equal("ECR-PWD-0428", blocked.ErrorCode);
+        }
+
+        // А справжні дозволені маршрути — разом із підшляхами, запитом і
+        // фрагментом — лишаються відкритими: інакше вхід став би колом.
+        PasswordChangeGate.Ensure(true, "/api/v1/me");
+        PasswordChangeGate.Ensure(true, "/api/v1/me?include=grants");
+        PasswordChangeGate.Ensure(true, "/api/v1/me/grants");
+        PasswordChangeGate.Ensure(true, "/api/v1/ui-strings/uk");
+        PasswordChangeGate.Ensure(true, "/api/v1/logout");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Зміна_пароля_знімає_прапорець_і_крутить_SecurityStamp()
     {
         await Ensure().HandleAsync(Password, CancellationToken.None);

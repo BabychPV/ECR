@@ -14,7 +14,7 @@ import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
-import { cellKey, confirmationOf, decide, guardOf } from './permissions';
+import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
@@ -26,6 +26,12 @@ import {
 import { createDebouncer, registerUnloadFlush } from './autosave';
 import { installEnterKeyCompat } from './keyboardCompat';
 import { cellsOfSaveError } from './saveErrors';
+import {
+  TableCornerAnchor,
+  clampSelection,
+  trackSelection,
+  type GridSelection,
+} from './selection';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -129,6 +135,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   });
   const history = useRef(new UndoStack(`${tableInstanceId}:${periodKey}`));
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
+
+  /**
+   * Поточне виділення сітки (аудит §10.1).
+   *
+   * ⛔ `ref`, а не стан: значення читають лише обробники `onPaste`/`onCopy` у
+   * момент натискання, і перемальовувати всю сітку на кожен рух виділення
+   * мишею означало б перерахувати 500×60 колонок на кожен піксель
+   * протягування.
+   */
+  const selection = useRef<GridSelection | null>(null);
   const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
 
   // ⚠ Значення, підтверджені оператором (`ФВ-2.16`, `#43`), яких сервер ще
@@ -167,11 +183,27 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       try {
         const response = await patch(buildRequest(tableInstanceId, periodKey, edits));
-        setPending(new Map());
+
+        // ⛔ Аудит 2026-09-16 §10.2 (High, тиха втрата даних): тут стояло
+        // `setPending(new Map())` — безумовне очищення ВСІХ незбережених
+        // правок, а не лише рядків ЦЬОГО патчу. `save()` кличуть чотири
+        // незалежні, несеріалізовані шляхи (автозбереження, Ctrl+S, вставка,
+        // undo/redo), і ніщо не забороняє двом запитам бути в дорозі
+        // одночасно: повільний патч рядка A, завершившись, викидав правку
+        // рядка C, яку ще НІХТО не надсилав. Той самий resolve інвалідує зріз,
+        // тож значення зникало і з екрана — без помилки, без позначки
+        // «незбережено», без відновлення.
+        //
+        // ⚠ Фільтр — той самий `touchedRowKeys`, за яким уже фільтруються
+        // `requiredInputBlocked`/`saveErrorCells` нижче: успіх патчу
+        // стосується РІВНО його рядків і нічиїх більше.
+        setPending((prev) => discardRows(prev, touchedRowKeys, (_key, edit) => edit.rowKey));
 
         // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
-        // значення, і локальна підстава більше не потрібна нікому.
-        setOverrides(new Map());
+        // значення, і локальна підстава більше не потрібна нікому — але так
+        // само лише для рядків цього патчу. Ключ тут — `rowKey:columnCode`
+        // (`cellKey`), тож рядок дістається з ключа, а не зі значення.
+        setOverrides((prev) => discardRows(prev, touchedRowKeys, (key) => rowKeyOfCellKey(key)));
 
         // Успіх означає, що серед рядків цього патчу немає жодного Block:
         // інакше сервер відхилив би весь батч (ECR-CALC-0437), а не повернув
@@ -324,6 +356,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     setPending(new Map());
     setOverrides(new Map());
     setConfirmRequest(null);
+
+    // ⚠ Виділення теж належить ЦЬОМУ зрізу: індекси рядка 50 в іншій таблиці
+    // вказують на інші дані, і вставка пішла б від чужого якоря.
+    selection.current = null;
     setWidths(readWidths(tableInstanceId));
     touchHistory();
 
@@ -474,11 +510,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       event.preventDefault();
 
+      // ⛔ Аудит 2026-09-16 §10.1: тут стояв жорсткий якір
+      // `{ rowIndex: 0, columnIndex: 0 }`. Оператор клацав рядок 50, колонку
+      // «C3», вставляв блок з Excel — і значення лягали з рядка 1, колонки 1,
+      // тихо перезаписуючи чужі, уже коректні дані; вставка при цьому
+      // виглядала «успішною». Тепер якір — той, що його справді обрала людина
+      // (`selection.ts`), а кут таблиці лишається лише як стан «нічого не
+      // обрано»: Ctrl+V одразу після завантаження не має падати в нікуди.
+      const anchor = selection.current?.anchor ?? TableCornerAnchor;
+
       const plan = planPaste(
         parseClipboard(text),
         data.rows.map((row) => row.rowKey),
         data.columns.map((column) => column.code),
-        { rowIndex: 0, columnIndex: 0 },
+        anchor,
         guardOf(data),
       );
 
@@ -677,17 +722,40 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     setConfirmRequest(null);
   }, [confirmRequest, applyEditedValue]);
 
-  /** Ctrl+C: віддає виділене у форматі, який приймає Excel. */
+  /**
+   * Ctrl+C: віддає ВИДІЛЕНЕ у форматі, який приймає Excel.
+   *
+   * ⛔ Аудит 2026-09-16 §10.1: тут стояло `data.rows.map(...)` — уся таблиця,
+   * незалежно від виділення. Ctrl+C після виділення двох комірок кладе в буфер
+   * тисячі, і вставлене далі в Excel не має нічого спільного з тим, що людина
+   * позначила.
+   *
+   * ⚠ Виділення читається з `ref`, а не питається в сітки: `getSelectedRange()`
+   * кореневого елемента віддає ОБІЦЯНКУ, а після завершення цього обробника
+   * `event.clipboardData` більше не приймає запис — чекати тут неможливо
+   * фізично (`selection.ts`).
+   *
+   * ⚠ «Нічого не виділено» лишається «уся таблиця» — свідома деградація:
+   * порожній буфер на Ctrl+C виглядав би як несправність, а в Excel Ctrl+C без
+   * виділення так само працює по всьому, що є під фокусом.
+   */
   const onCopy = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       if (data === undefined) return;
 
+      const range =
+        selection.current === null
+          ? null
+          : clampSelection(selection.current.range, data.rows.length, data.columns.length);
+
+      const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
+      const columns =
+        range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
+
       event.preventDefault();
       event.clipboardData.setData(
         'text/plain',
-        toClipboard(
-          data.rows.map((row) => data.columns.map((column) => String(row.cells[column.code] ?? ''))),
-        ),
+        toClipboard(rows.map((row) => columns.map((column) => String(row.cells[column.code] ?? '')))),
       );
     },
     [data],
@@ -761,10 +829,25 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // із порожніми залежностями спрацював би раз, до монтування вузла, і ніколи
   // більше. Callback-ref натомість викликається рівно тоді, коли вузол
   // з'являється чи зникає, незалежно від умовного рендеру.
-  const enterKeyCompatCleanup = useRef<(() => void) | null>(null);
+  //
+  // ⛔ Аудит §10.1: тим самим callback-ref підписуємось і на події ВИДІЛЕННЯ
+  // (`selection.ts`). Причина та сама, що вище: контейнер існує лише після
+  // завантаження зрізу, тож ефект із порожніми залежностями його не побачив би
+  // — а `focuscell`/`setrange` треба слухати на вузлі, до якого вони
+  // піднімаються з тіньового дерева `revo-grid`.
+  const gridListenersCleanup = useRef<(() => void)[]>([]);
   const gridContainerRef = useCallback((node: HTMLDivElement | null) => {
-    enterKeyCompatCleanup.current?.();
-    enterKeyCompatCleanup.current = node === null ? null : installEnterKeyCompat(node);
+    for (const cleanup of gridListenersCleanup.current) cleanup();
+    gridListenersCleanup.current = [];
+
+    if (node === null) return;
+
+    gridListenersCleanup.current = [
+      installEnterKeyCompat(node),
+      trackSelection(node, (next) => {
+        selection.current = next;
+      }),
+    ];
   }, []);
 
   return (
@@ -1166,6 +1249,35 @@ function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>
 
     return model;
   });
+}
+
+/**
+ * Знімає з мапи записи названих рядків — і лише їх (аудит §10.2).
+ *
+ * ⛔ Не `new Map()`. Успіх ОДНОГО патчу нічого не каже про правки, яких він не
+ * стосувався: вони або ще в дорозі іншим запитом, або ще не надіслані взагалі.
+ * Викинути їх означає втратити введене оператором без сліду — і саме це тут і
+ * відбувалося.
+ *
+ * ⚠ Нова мапа повертається лише якщо щось справді змінилося: інакше кожен
+ * успішний патч віддавав би React новий об'єкт, а з ним — новий `flags` і
+ * перерахунок усіх колонок сітки на 500×60 комірок.
+ *
+ * @param rowOf Як дістати рядок із записи мапи: `pending` тримає його в
+ * значенні (`PendingEdit.rowKey`), `overrides` — у ключі (`cellKey`).
+ */
+function discardRows<V>(
+  current: Map<string, V>,
+  rowKeys: ReadonlySet<string>,
+  rowOf: (key: string, value: V) => string,
+): Map<string, V> {
+  const next = new Map<string, V>();
+
+  for (const [key, value] of current) {
+    if (!rowKeys.has(rowOf(key, value))) next.set(key, value);
+  }
+
+  return next.size === current.size ? current : next;
 }
 
 /**

@@ -52,6 +52,40 @@ public sealed class CycleDescriptionTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Самопосилання_у_формі_яку_дає_сортувальник_теж_описується_окремо()
+    {
+        // ⛔ Аудит 2026-09-16, §2.2. Дві половини не були з'єднані: тут
+        // перевірялося `[1]` (один елемент), а `TopologicalSorter.Walk` при
+        // СПРАВЖНЬОМУ самопосиланні будує шлях `[node, node]` — два елементи
+        // (це задокументовано тестом `Самопосилання_формули_це_цикл`, що чекає
+        // `[7, 7]`). `PublishChecks`/`PublishMethodologyHandler` передають
+        // `CyclePath` прямо сюди, тож реальне самопосилання ЗАВЖДИ потрапляло в
+        // гілку «Count == 2» і давало саме те «Формули утворюють цикл: X → X»,
+        // яке цей клас мав усунути.
+        var text = CycleDescription.Describe([7, 7], _ => "Total");
+
+        Assert.Contains("Total", text, StringComparison.Ordinal);
+        Assert.Contains("власний результат", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("→", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Два_різні_вузли_з_однаковим_підписом_лишаються_циклом()
+    {
+        // ⚠ Розпізнавання йде за ІДЕНТИФІКАТОРАМИ, не за іменами: `nameOf` не
+        // зобов'язаний давати унікальні підписи, і два різні вузли з однаковою
+        // назвою — це справжній цикл. Назвати його самопосиланням означало б
+        // відправити читача шукати не ту формулу.
+        var text = CycleDescription.Describe([1, 2], _ => "Total");
+
+        Assert.Contains("Total → Total", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("власний результат", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Справжній_цикл_показує_шлях()
     {
         var names = new Dictionary<int, string> { [1] = "A", [2] = "B", [3] = "C" };

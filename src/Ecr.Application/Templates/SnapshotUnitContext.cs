@@ -70,8 +70,7 @@ public sealed class SnapshotUnitContext(
     /// проблем публікації.
     /// </remarks>
     private ColumnDef? Column(CellReferenceNode reference)
-        => snapshot.Sheets
-            .SelectMany(s => s.Tables)
+        => PublishChecks.LiveTables(snapshot.Sheets)
             .Where(t => reference.TableCode is null
                         || string.Equals(t.Code, reference.TableCode, StringComparison.OrdinalIgnoreCase))
             .SelectMany(t => t.Columns)

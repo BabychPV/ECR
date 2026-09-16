@@ -326,35 +326,13 @@ public sealed class GetTableSliceHandler(
     /// Розгортає типізоване значення в те, що піде клієнтові.
     /// </summary>
     /// <remarks>
-    /// Порядок перевірок відповідає порядку полів у <c>CellValueData</c> і не
-    /// має значення: заповнене поле рівно одне (R-B4).
+    /// ⛔ Розгортання ОДНЕ на всі шляхи —
+    /// <c>CellValueMapping.ToRuleValue</c> (аудит 2026-09-16, §3.2). Копія цієї
+    /// логіки жила тут, а друга, коротша й зламана, — у
+    /// <c>TableValidation.SliceContext</c>; розійшлися вони саме на Bool/Date, і
+    /// розбіжність була видима лише як «"Перевірити" каже одне, подання —
+    /// інше».
     /// </remarks>
     private static object? Unwrap(Domain.ValueObjects.CellValueData v)
-    {
-        if (v.ValueNumeric is { } n)
-        {
-            return n;
-        }
-        if (v.ValueString is { } s)
-        {
-            return s;
-        }
-        if (v.ValueBool is { } b)
-        {
-            return b;
-        }
-        if (v.ValueDate is { } d)
-        {
-            return d;
-        }
-        if (v.ValueRegistryEntryId is { } r)
-        {
-            return r;
-        }
-        if (v.ValueUnitId is { } u)
-        {
-            return u;
-        }
-        return null;
-    }
+        => Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(v);
 }

@@ -102,6 +102,16 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+
+               // ⛔ AsSplitQuery, а не один нероздільний запит (аудит
+               // 2026-09-16, §6.3). Чотири СЕСТРИНСЬКІ колекції
+               // (Columns/Rows/Formulas/ValidationRules) під тим самим Tables в
+               // одному запиті дають ДЕКАРТІВ ДОБУТОК замість суми: на шаблоні
+               // з десятками колонок і рядків це десятки тисяч зайвих рядків по
+               // мережі на кожну публікацію. Той самий дефект уже виправлений у
+               // `MetadataCache.LoadAsync` (окремі запити на колекцію), але не
+               // в цьому, другому шляху до тієї самої структури.
+               .AsSplitQuery()
                .FirstOrDefaultAsync(v => v.Id == templateVersionId, ct)
                .ConfigureAwait(false)
            ?? throw new NotFoundException(
@@ -121,6 +131,10 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+
+            // ⛔ Той самий декартів добуток, що й у `GetWithStructureAsync`
+            // (аудит §6.3) — і тут він дорожчий: клон читає ВСЮ структуру.
+            .AsSplitQuery()
             .FirstOrDefaultAsync(v => v.Id == sourceVersionId, ct)
             .ConfigureAwait(false)
             ?? throw new NotFoundException("ECR-TMPL-0404", $"Версії шаблону {sourceVersionId} не існує.");

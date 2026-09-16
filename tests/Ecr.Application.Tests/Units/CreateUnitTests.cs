@@ -152,6 +152,49 @@ public sealed class CreateUnitTests
         Assert.Equal("ECR-CFG-0422", error.ErrorCode);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-0.001)]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Недодатний_множник_переходу_відхиляється(double factor)
+    {
+        // ⛔ Це не перевірка форми, а захист від тихо неправильного числа:
+        // `factorToBase = 0` згортає `(value × factor) + offset` до КОНСТАНТИ,
+        // тож будь-яке значення, конвертоване з такої одиниці, дає те саме
+        // число — без помилки, і воно йде в поданий регуляторний звіт.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            "bad",
+            new Dictionary<string, string> { ["en"] = "bad" },
+            new Dictionary<string, string> { ["en"] = "Bad" },
+            dimensionId: 1,
+            factorToBase: (decimal)factor,
+            offsetToBase: 0m,
+            default));
+
+        Assert.Equal("ECR-UOM-0422", error.ErrorCode);
+
+        _units.DidNotReceive().AddUnit(Arg.Any<Unit>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Конструктор_Unit_не_приймає_недодатний_множник()
+    {
+        // Другий рубіж того самого інваріанту: навіть якщо колись з'явиться
+        // другий шлях заведення одиниці (сід, імпорт, міграція), нуль не
+        // пройде — інваріант живе в домені, а не лише в обробнику.
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Unit(
+            Ecr.Domain.ValueObjects.EcrCode.Create("bad"),
+            new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "bad" }),
+            new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Bad" }),
+            dimensionId: 1,
+            isBase: false,
+            factorToBase: 0m,
+            offsetToBase: 0m));
+    }
+
     private CreateUnitHandler Handler() => new(_units, _uow, _access, _user);
 
     private void Allow(params string[] permissions)

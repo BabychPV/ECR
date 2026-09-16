@@ -95,7 +95,7 @@ public sealed class ImportDiffBuilder
                 }
 
                 var cell = worksheet.Cell(row.Number, column.Number);
-                var incoming = Read(cell, definition, column, lookups);
+                var incoming = Read(cell, definition, lookups);
                 var existing = values.GetValueOrDefault((row.RowKey, column.ColumnDefId))?.Value;
 
                 if (Same(incoming, existing, definition))
@@ -107,7 +107,13 @@ public sealed class ImportDiffBuilder
                 // якщо права дозволяють. Записане поверх формули значення
                 // зникне при найближчому перерахунку, і користувач вирішить,
                 // що система «загубила» його правку (ECR-CELL-4221).
-                if (column.IsCalculated)
+                // ⛔ Обчислюваність береться з ЖИВОГО `ColumnDef`, а не з карти
+                // воркбука (аудит 2026-09-16, §8.1). `column.IsCalculated`
+                // зафіксовано на момент ЕКСПОРТУ; між експортом і повторним
+                // імпортом адмін міг перепублікувати шаблон і зробити раніше
+                // редаговану колонку обчислюваною — і прев'ю показувало б зміну
+                // як застосовну, а `ApplyAsync` падав би пізніше.
+                if (IsCalculated(definition))
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-4221",
@@ -155,7 +161,6 @@ public sealed class ImportDiffBuilder
     private static object? Read(
         IXLCell cell,
         ColumnDef definition,
-        ExcelColumnRef column,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> lookups)
     {
         if (cell.IsEmpty())
@@ -181,9 +186,18 @@ public sealed class ImportDiffBuilder
                 return bool.TryParse(text, out var flag) ? flag : text;
 
             case CellDataType.Date:
+                // ⛔ Розбір тексту — через `CellDateParser`, а не голий
+                // `DateTime.TryParse(…, InvariantCulture, …)` (аудит
+                // 2026-09-16, §8.2): InvariantCulture читає `M.d.yyyy`, тож
+                // `"1.4.2024"` ставало 4 СІЧНЯ, а не 1 квітня. Українець, що
+                // вводить дату в природному порядку `d.MM.yyyy` (звичне при
+                // копіюванні або ручному вводі в не-Excel-нативну Date-комірку),
+                // отримував тихо неправильну дату без попередження — а це дата
+                // виміру, що визначає період звітності. Те саме виправлено в
+                // `CellValueReader`: один розбір на обидва шляхи введення.
                 return cell.TryGetValue(out DateTime date)
                     ? date
-                    : DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+                    : Ecr.Application.Documents.CellDateParser.TryParse(text, out var parsed)
                         ? parsed
                         : text;
 
@@ -191,16 +205,44 @@ public sealed class ImportDiffBuilder
                 // Код повертається в ідентифікатор тут: далі по шляху запису
                 // код нічого не означає, а нерозпізнаний код має лишитися
                 // видимим, а не перетворитися на нуль.
-                return column.LookupRegistryDefId is { } registryId
+                //
+                // ⛔ Довідник береться з ЖИВОГО `ColumnDef`, не з карти воркбука
+                // (аудит §8.1). Застарілий `column.LookupRegistryDefId` із
+                // моменту експорту, що випадково збігся з ІНШИМ довідником у
+                // знімку, тихо резолвив введений користувачем код у сутність
+                // ЧУЖОГО довідника — без помилки, з неправильними даними в базі.
+                return definition.LookupRegistryDefId is { } registryId
                        && lookups.TryGetValue(registryId, out var entries)
                        && entries.TryGetValue(text, out var entryId)
                     ? entryId
+                    : text;
+
+            case CellDataType.Unit:
+                // ⛔ Явна гілка Unit (аудит 2026-09-16, §8.3). Unit-значення
+                // живе в `ValueUnitId` — число, — а без цієї гілки воно падало в
+                // `default` і читалося ТЕКСТОМ. Разом із такою ж прогалиною в
+                // `Same()` це давало «змінено» на КОЖНІЙ непорожній Unit-комірці
+                // кожного імпорту, навіть при повторному імпорті незмінного
+                // експорту: прев'ю засмічувалося, і довіряти йому ставало
+                // неможливо.
+                return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unitId)
+                    ? unitId
                     : text;
 
             default:
                 return text;
         }
     }
+
+    /// <summary>Чи рахує комірки цієї колонки система — за ЖИВИМ визначенням.</summary>
+    /// <remarks>
+    /// ⚠ Те саме правило, що в <c>ExcelExporter.IsCalculated</c>, і навмисно те
+    /// саме: прев'ю різниці й експорт мусять однаково відповідати на питання
+    /// «цю комірку можна редагувати». Різниця між ними — це або відхилена
+    /// правка, яку користувач вважав застосовною, або навпаки.
+    /// </remarks>
+    private static bool IsCalculated(ColumnDef column)
+        => column.DataType is CellDataType.Formula or CellDataType.Calculated || column.IsReadOnly;
 
     /// <summary>Чи збігається значення з файлу з тим, що вже записано.</summary>
     private static bool Same(object? incoming, CellValueData? existing, ColumnDef definition)
@@ -218,6 +260,13 @@ public sealed class ImportDiffBuilder
             CellDataType.Bool => incoming is bool b && existing.ValueBool == b,
             CellDataType.Date => incoming is DateTime t && existing.ValueDate == t,
             CellDataType.Lookup => incoming is long id && existing.ValueRegistryEntryId == id,
+
+            // ⛔ Unit порівнюється за `ValueUnitId` (аудит §8.3). Без цієї гілки
+            // порівняння йшло через `ValueString`, який для Unit-комірки
+            // ЗАВЖДИ `null` — тож `Same()` повертав `false` для будь-якої
+            // непорожньої Unit-комірки, і кожна з них позначалася зміненою.
+            CellDataType.Unit => incoming is int unitId && existing.ValueUnitId == unitId,
+
             _ => string.Equals(existing.ValueString, incoming as string, StringComparison.Ordinal),
         };
     }

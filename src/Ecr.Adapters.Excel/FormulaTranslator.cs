@@ -105,9 +105,36 @@ public sealed class FormulaTranslator
 
             var start = index;
 
-            while (index < text.Length && (char.IsLetterOrDigit(text[index]) || text[index] is '$' or '!' or '\'' or '.' or '_'))
+            // ⛔ Усередині ЦИТОВАНОЇ назви аркуша токен не завершується на
+            // пробілі (аудит 2026-09-16, §8.4). Токенізатор завершував його
+            // завжди, тож `'Sheet Name'!B3` розпадалося на два нерозпізнані
+            // токени і переклад повертав `null` — при тому, що прямий напрямок
+            // (`ExcelExporter`) ЦИТУЄ назви з пробілами саме тому, що вони
+            // «бувають із пробілами». Тобто експорт умів писати те, чого
+            // зворотний розбір не вмів прочитати.
+            var inQuotes = false;
+
+            while (index < text.Length)
             {
-                index++;
+                var current = text[index];
+
+                if (current == '\'')
+                {
+                    inQuotes = !inQuotes;
+                    index++;
+                    continue;
+                }
+
+                // Поза лапками токен — це літери, цифри й розділювачі посилання.
+                // У лапках — усе, крім самої лапки: назва аркуша може містити
+                // пробіли, дефіси, дужки.
+                if (inQuotes || char.IsLetterOrDigit(current) || current is '$' or '!' or '.' or '_')
+                {
+                    index++;
+                    continue;
+                }
+
+                break;
             }
 
             var token = text[start..index];

@@ -75,8 +75,29 @@ public sealed class SaveRowDefHandler(
         var rowKey = RowKey.Create(code);
         var label = new LocalizedText(new Dictionary<string, string>(command.LabelL10n, StringComparer.OrdinalIgnoreCase));
 
+        // ⛔ Не видалені (аудит 2026-09-16, §4.4) — і з тією самою причиною, що
+        // в колонці: перевірка нижче кидає «вид рядка незмінний», тобто
+        // повторне використання ключа видаленого рядка впиралося в незмінність
+        // МЕРТВОЇ сутності.
         var existing = table.Rows.FirstOrDefault(
-            r => string.Equals(r.RowKeyValue, rowKey.Value, StringComparison.Ordinal));
+            r => !r.IsDeleted && string.Equals(r.RowKeyValue, rowKey.Value, StringComparison.Ordinal));
+
+
+        // ⛔ Мертва сутність із тим самим кодом — ЯВНА відмова з поясненням
+        // (аудит 2026-09-16, §4.4). Код — це ідентичність, і домен тримає його
+        // унікальним включно з м'яко видаленими (TableDef.AddRow), тож «оживлення»
+        // тут не вигадується: операції відродження в системі немає. Але й тиха
+        // гілка оновлення мертвої сутності, яка була тут доти, не годилася —
+        // вона впиралася в «вид рядка незмінний» про вид МЕРТВОГО рядка. Тепер користувач читає, що саме сталося і що з цим робити.
+        if (existing is null && table.Rows.Any(r => r.IsDeleted && string.Equals(r.RowKeyValue, rowKey.Value, StringComparison.Ordinal)))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Ключ рядка «{code}» зайнятий видаленим рядком цієї таблиці. " +
+                "Ключ — це ідентичність: комірки посилаються саме на нього, тому повторно " +
+                "використати його в цій версії не можна. Заведіть рядок з іншим ключем " +
+                "або клонуйте версію.");
+        }
 
         if (existing is not null && existing.RowKind != command.RowKind)
         {

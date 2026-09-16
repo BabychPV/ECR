@@ -83,6 +83,27 @@ public sealed class FormulaTranslatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-4.2")]
+    public void Зворотна_трансляція_розуміє_назву_аркуша_З_ПРОБІЛОМ()
+    {
+        // ⛔ Аудит 2026-09-16, §8.4. Токенізатор завершував токен на пробілі
+        // ЗАВЖДИ, навіть у цитованому посиланні на аркуш, тож `'Sheet Name'!B3`
+        // розпадалося на два нерозпізнані токени і переклад повертав `null`. При
+        // тому прямий напрямок (`ExcelExporter`) ЦИТУЄ назви з пробілами саме
+        // тому, що вони «бувають із пробілами»: експорт писав те, чого
+        // зворотний розбір прочитати не вмів.
+        var reverse = new Dictionary<string, (string, string, string)>
+        {
+            ["'ВОДА 2026'!B3"] = ("T1", "R10", "C1"),
+        };
+
+        var expression = new FormulaTranslator().FromExcel("='Вода 2026'!B3+1", reverse);
+
+        Assert.Equal("[T1].[R10].[C1]+1", expression);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Нерозпізнана_формула_Excel_НЕ_вгадується()
     {
         // ⛔ Мовчазна здогадка створила б неправильне правило обчислення, і

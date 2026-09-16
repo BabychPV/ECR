@@ -97,8 +97,19 @@ public sealed class PiWebApiDataSourceTimeoutTests
 
         var stopwatch = Stopwatch.StartNew();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        // ⛔ Аудит 2026-09-16, §7.1: тайм-аут HttpClient тепер віддається як
+        // `BusinessRuleException` (ECR-INT-0503), а НЕ як `TaskCanceledException`.
+        // Сирий `OperationCanceledException` минав `CollectionRunner.ReadAsync`'s
+        // `catch (OperationCanceledException) { throw; }` і watchdog-перевірку
+        // в `RunAsync` (та дивиться лише на `watchdog.IsCancellationRequested`,
+        // який тут `false` — скасування прийшло від ВНУТРІШНЬОГО таймера
+        // клієнта), тож `FinishRunAsync`/`WriteCoverageAsync` не викликалися
+        // НІКОЛИ і рядок `CollectionRun` навічно лишався «Running».
+        var timeout = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
             () => sut.ReadAsync(request, CancellationToken.None));
+
+        Assert.Equal("ECR-INT-0503", timeout.ErrorCode);
+        Assert.IsNotType<OperationCanceledException>(timeout);
 
         stopwatch.Stop();
 
@@ -108,6 +119,41 @@ public sealed class PiWebApiDataSourceTimeoutTests
         Assert.True(
             stopwatch.Elapsed < TimeSpan.FromSeconds(10),
             $"мало завершитися набагато швидше за 100с-дефолт: минуло {stopwatch.Elapsed}.");
+    }
+
+    /// <summary>
+    /// Скасування ЗЗОВНІ (watchdog, зупинка сервісу) і далі летить як
+    /// скасування — інакше збирач не відрізняв би «нас зупинили» від «джерело
+    /// не відповіло».
+    /// </summary>
+    [Fact(Timeout = 15000)]
+    public async Task ReadAsync_ЗовнішнєСкасування_лишається_OperationCanceled()
+    {
+        using var handler = new NeverRespondingHandler();
+
+        // Таймаут клієнта навмисно великий: завершити виклик мусить саме
+        // ЗОВНІШНІЙ токен, а не внутрішній таймер.
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+
+        var store = Substitute.For<ICollectionStore>();
+        store.FindDataSourceAsync(1, Arg.Any<CancellationToken>()).Returns(new DataSource(
+            EcrCode.Create("PIAF"),
+            new LocalizedText(new Dictionary<string, string> { ["uk"] = "PI AF" }),
+            ExternalTransport.PiWebApi,
+            "https://pi.example",
+            "PiAf.Primary"));
+
+        var secrets = Substitute.For<ISecretProvider>();
+        secrets.Find(Arg.Any<string>()).Returns((string?)null);
+
+        var sut = new PiWebApiDataSource(http, store, secrets);
+        var request = new CollectionRequest(
+            1, 42, "tag", DateTime.UtcNow.AddHours(-1), DateTime.UtcNow, MaxPoints: 5_000);
+
+        using var external = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => sut.ReadAsync(request, external.Token));
     }
 
     /// <summary>Обробник, що ніколи сам не завершує запит — лише за скасуванням токена.</summary>

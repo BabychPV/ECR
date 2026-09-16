@@ -296,6 +296,104 @@ public sealed class PublishChecksTests
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>Прогін усіх перевірок виразів із типами й одиницями.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Зламана_формула_у_видаленій_таблиці_не_блокує_публікацію()
+    {
+        // ⛔ Аудит 2026-09-16, §4.1. `DeleteTableDefHandler` ставить
+        // `IsDeleted = true` БЕЗ каскаду на дітей, а `PublishChecks` обходив
+        // `version.Sheets.SelectMany(s => s.Tables)` без жодного фільтра — тож
+        // формули «мертвої» таблиці проганялися через перевірки й обґрунтовано
+        // відхиляли публікацію через вміст, який користувач вважає видаленим.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+
+        var live = builder.Table(sheet, "Main");
+        builder.Column(live, "Jan", isMonthColumn: true);
+        builder.Column(live, "Total");
+        builder.Row(live, "7001001", 1);
+
+        var dead = builder.Table(sheet, "Dead");
+        var deadColumn = builder.Column(dead, "Broken");
+        builder.Row(dead, "9001001", 1);
+        builder.Formula(dead, "SUM([Jan]", column: deadColumn);
+
+        var version = builder.Version();
+
+        // Поки таблиця жива — зауваження є, і це доводить, що формула справді
+        // зламана (інакше тест нижче був би зеленим ні про що).
+        Assert.NotEmpty(Run(version));
+
+        TemplateBuilder.Delete(dead);
+
+        Assert.Empty(Run(version));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Зламана_формула_у_видаленому_АРКУШІ_не_блокує_публікацію()
+    {
+        // Той самий фільтр на рівні АРКУША: `CheckRules` уже фільтрував
+        // таблиці, але не аркуші, тож видалення аркуша цілком лишало його
+        // таблиці «живими» для кожної перевірки.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+
+        var liveSheet = builder.Sheet("Water");
+        var live = builder.Table(liveSheet, "Main");
+        builder.Column(live, "Jan", isMonthColumn: true);
+        builder.Row(live, "7001001", 1);
+
+        var deadSheet = builder.Sheet("Dead");
+        var dead = builder.Table(deadSheet, "DeadTable");
+        var deadColumn = builder.Column(dead, "Broken");
+        builder.Row(dead, "9001001", 1);
+        builder.Formula(dead, "SUM([Jan]", column: deadColumn);
+
+        var version = builder.Version();
+
+        Assert.NotEmpty(Run(version));
+
+        TemplateBuilder.Delete(deadSheet);
+
+        Assert.Empty(Run(version));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Посилання_на_колонку_видаленої_таблиці_не_резолвиться_у_справжній_тип()
+    {
+        // ⛔ Другий, ДЗЕРКАЛЬНИЙ бік §4.1 — надто дозволяючий.
+        // `GetColumnType`/`GetColumnUnit` резолвили посилання через
+        // `snapshot.ColumnsById`, зібраний тією ж нефільтрованою побудовою: жива
+        // формула, що читає колонку ВИДАЛЕНОЇ таблиці, отримувала справжній тип
+        // замість помилки про мертве посилання — і публікація проходила.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+
+        var live = builder.Table(sheet, "Main");
+        var total = builder.Column(live, "Total");
+        builder.Row(live, "7001001", 1);
+
+        var dead = builder.Table(sheet, "Dead");
+        builder.Column(dead, "Ghost");
+        builder.Row(dead, "9001001", 1);
+
+        builder.Formula(live, "[Dead].[9001001].[Ghost] + 1", column: total);
+
+        var version = builder.Version();
+
+        // Поки таблиця жива, посилання резолвиться і зауважень немає.
+        Assert.Empty(Run(version));
+
+        TemplateBuilder.Delete(dead);
+
+        // А після видалення посилання мусить перестати резолвитися —
+        // `ECR-TMPL-4222`, а не тихий «справжній тип мертвої колонки».
+        var afterDelete = Run(version);
+        Assert.NotEmpty(afterDelete);
+        Assert.Contains(afterDelete, d => d.Code == ExpressionErrors.Unresolved);
+    }
+
     private IReadOnlyList<ExpressionDiagnostic> Run(
         TemplateVersion version, UnitCatalogSnapshot? catalogue = null)
     {

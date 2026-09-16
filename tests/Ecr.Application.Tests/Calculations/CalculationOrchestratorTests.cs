@@ -173,6 +173,73 @@ public sealed class CalculationOrchestratorTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Погодження_закритого_періоду_не_розблоковує_поданий_зріз_у_ІНШОМУ_періоді()
+    {
+        // ⛔ Аудит 2026-09-16, §1.1. До фіксу умова була `submitted && approval
+        // is null`, тож ОДНЕ погодження, законно видане на ОДИН закритий
+        // період, знімало захист поданих зрізів у ВСІХ періодах запиту:
+        // `periodKey: null` — це весь рік, і пакет охоплює багато періодів.
+        //
+        // Пакет: 202601 — Closed (погодження законне), 202603 — Open із
+        // поданими аркушами. Саме 202603 і перераховувався тихо.
+        const int Closed = 202601;
+        const int OpenWithSubmitted = 202603;
+
+        _periods.GetPeriodStatesAsync(Project, null, Arg.Any<CancellationToken>())
+                .Returns(new List<PeriodStateRef>
+                {
+                    new(Closed, PeriodState.Closed),
+                    new(OpenWithSubmitted, PeriodState.Open),
+                });
+
+        _workflow.HasSubmittedSheetsAsync(Project, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+                 .Returns(false);
+        _workflow.HasSubmittedSheetsAsync(
+                     Project, new PeriodKey(OpenWithSubmitted), Arg.Any<CancellationToken>())
+                 .Returns(true);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Project,
+            periodKey: null,
+            new ClosedPeriodApproval(Approver, "Помилка коефіцієнта, лист №17"),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+
+        // Відмова названа саме тим періодом, що має подані аркуші — інакше
+        // оператор шукав би причину в закритому, який погоджений законно.
+        Assert.Contains(
+            OpenWithSubmitted.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            error.Message,
+            StringComparison.Ordinal);
+
+        // І головне: прогін НЕ поставлений у чергу. Саме це й ламалося —
+        // не повідомлення, а те, що поданий період тихо перераховувався.
+        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
+            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Поданий_зріз_не_перераховується_і_З_погодженням()
+    {
+        // Те саме правило в найпростішій формі: `ClosedPeriodApproval`
+        // погоджує перерахунок ЗАКРИТОГО періоду, а не подану цифру. Шлях
+        // змінити подану цифру один — Reopen, і він лишає слід.
+        _workflow.HasSubmittedSheetsAsync(Project, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+                 .Returns(true);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Project, Period, new ClosedPeriodApproval(Approver, "Помилка коефіцієнта, лист №17"),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
+            Arg.Any<object?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.11")]
     [Trait("Requirement", "ФВ-9.11a")]
     public async Task IsCurrent_перемикається_однією_транзакцією()
