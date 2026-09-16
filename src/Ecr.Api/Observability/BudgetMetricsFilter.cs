@@ -29,8 +29,15 @@ public sealed class BudgetMetricsFilter(EcrMetrics metrics) : IAsyncActionFilter
     private static readonly Dictionary<string, (string Metric, string Operation)> Routes =
         new(StringComparer.Ordinal)
         {
-            ["Documents.Slice"] = (EcrMetrics.CellsRead, "Читання зрізу"),
-            ["Documents.PatchCells"] = (EcrMetrics.CellsWrite, "batch-PATCH"),
+            // ⛔ Ключі — РЕАЛЬНІ `Контролер.Дія` (аудит 2026-09-16, §9). Тут
+            // стояли `Documents.Slice` і `Documents.PatchCells`, яких немає:
+            // читання зрізу віддає `CellsController.GetSlice`, а пакетний
+            // запис — `CellsController.Patch`. Тобто ДВІ найгарячіші метрики
+            // бюджету (`cells_read`, `cells_write`) не спрацьовували ЖОДНОГО
+            // разу — дефект невидимий за побудовою: жоден маршрут не «падає»,
+            // просто не міряється.
+            ["Cells.GetSlice"] = (EcrMetrics.CellsRead, "Читання зрізу"),
+            ["Cells.Patch"] = (EcrMetrics.CellsWrite, "batch-PATCH"),
             ["Documents.Validate"] = (EcrMetrics.JobDuration, "Валідація документа"),
             ["Documents.Recalculate"] = (EcrMetrics.FormulaEvaluate, "Перерахунок піддерева"),
             ["Documents.Export"] = (EcrMetrics.JobDuration, "Експорт документа"),
@@ -71,24 +78,36 @@ public sealed class BudgetMetricsFilter(EcrMetrics metrics) : IAsyncActionFilter
         // якщо рахувати лише успішні.
         _ = executed;
 
-        Record(mapping, stopwatch.Elapsed);
+        // ⛔ Кількість беремо з того, хто її знає — з самої дії через
+        // `HttpContext.Items` (аудит 2026-09-16, §9). До цього тут стояв
+        // літеральний `0`, і вимір «комірок на запит» назавжди показував нуль:
+        // графік бюджету стверджував, що система читає й пише рівно нуль
+        // комірок. Дія, що кількості не повідомила, лишає `null` — тег просто
+        // не з'являється, і відсутність видно як відсутність.
+        Record(mapping, stopwatch.Elapsed, Count(context.HttpContext));
     }
 
+    /// <summary>Кількість, яку дія поклала в <c>HttpContext.Items</c>.</summary>
+    private static int? Count(HttpContext http)
+        => http.Items.TryGetValue(EcrMetrics.CountItemKey, out var value) && value is int count
+            ? count
+            : null;
+
     /// <summary>Записує вимір у потрібну метрику.</summary>
-    private void Record((string Metric, string Operation) mapping, TimeSpan elapsed)
+    private void Record((string Metric, string Operation) mapping, TimeSpan elapsed, int? count)
     {
         switch (mapping.Metric)
         {
             case EcrMetrics.CellsRead:
-                metrics.RecordCellsRead(elapsed.TotalMilliseconds, cellCount: 0);
+                metrics.RecordCellsRead(elapsed.TotalMilliseconds, count);
                 break;
 
             case EcrMetrics.CellsWrite:
-                metrics.RecordCellsWrite(elapsed.TotalMilliseconds, cellCount: 0);
+                metrics.RecordCellsWrite(elapsed.TotalMilliseconds, count);
                 break;
 
             case EcrMetrics.FormulaEvaluate:
-                metrics.RecordFormulaEvaluate(elapsed.TotalMilliseconds, formulaCount: 0);
+                metrics.RecordFormulaEvaluate(elapsed.TotalMilliseconds, count);
                 break;
 
             default:

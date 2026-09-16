@@ -33,9 +33,19 @@ public sealed class CellsController(
         // за правами з'їв би бюджет відкриття таблиці (ФВ-6.10).
         var profile = await ProfileAsync(ct).ConfigureAwait(false);
 
-        return await sliceHandler
+        var slice = await sliceHandler
             .HandleAsync(documentId, tableInstanceId, profile, currentUser.Language, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Кількість комірок — для метрики бюджету (аудит 2026-09-16, §9).
+        // `BudgetMetricsFilter` міряє тривалість, але кількість знає лише дія;
+        // доти фільтр передавав літеральний нуль, і вимір «комірок на запит»
+        // назавжди показував нуль — графік бюджету стверджував, що система
+        // читає рівно нуль комірок.
+        Observability.EcrMetrics.ReportCount(
+            HttpContext, slice.Rows.Sum(r => r.Cells.Count));
+
+        return slice;
     }
 
     /// <summary>Пакетна зміна комірок.</summary>
@@ -66,7 +76,12 @@ public sealed class CellsController(
 
         // Винятки перетворює ExceptionHandlingMiddleware — ловити їх тут не
         // треба: конфлікт baseVersion має піти клієнту як 409 із переліком.
-        return await patchHandler.HandleAsync(request, ct).ConfigureAwait(false);
+        var response = await patchHandler.HandleAsync(request, ct).ConfigureAwait(false);
+
+        // Кількість записаних комірок — у метрику бюджету (аудит §9).
+        Observability.EcrMetrics.ReportCount(HttpContext, response.AppliedCells);
+
+        return response;
     }
 
     /// <summary>Додає рядок у динамічну таблицю.</summary>
