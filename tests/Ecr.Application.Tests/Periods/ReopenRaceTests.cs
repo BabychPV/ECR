@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs
+// tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -8,6 +8,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using NSubstitute;
 using Xunit;
 
 namespace Ecr.Application.Tests.Periods;
@@ -173,6 +174,145 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
                                         .Select(p => p.ReopenReason)
                                         .FirstAsync().ConfigureAwait(true);
         Assert.Equal("перша причина", reason);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-1.10a")]
+    public async Task Reopen_бере_UPDLOCK_усередині_відкритої_транзакції()
+    {
+        // ⛔ Аудит 2026-09-16, §6.1. Тести вище доводять, що `UPDLOCK` СЕРІАЛІЗУЄ
+        // гонку — але вони самі відкривають транзакцію. `ReopenDocumentHandler`
+        // цього не робив: `WorkflowStore.LockPeriodAsync` викликався поза будь-якою
+        // явною транзакцією, а `UPDLOCK` поза транзакцією звільняється щойно
+        // завершується сам `SELECT` — задовго до `Reopen` і до `SaveChangesAsync`.
+        // Тобто коментар обіцяв взаємовиключення, а блокування не тримало нічого,
+        // і `PeriodStateJob` міг тихо перекрити щойно застосований Reopen
+        // (у `Period` немає RowVersion, тож конфлікту теж не було б).
+        //
+        // ⚠ Доводиться саме моментом виклику: декоратор сховища фіксує, чи була
+        // транзакція відкрита ТОДІ, коли рядок брали під UPDLOCK.
+        var (documentId, _) = await ArrangeAsync(PeriodState.Grace).ConfigureAwait(true);
+
+        // Аркуш має бути ПОДАНИМ: Reopen застосовний лише до поданого або
+        // затвердженого — інакше домен відхилить запит раніше, ніж дійде до
+        // того, що цей тест доводить.
+        int sheetDefId;
+        await using (var seed = CreateContext())
+        {
+            var templateVersionId = await seed.Documents
+                .Where(d => d.Id == documentId)
+                .Join(seed.Projects, d => d.ProjectId, pr => pr.Id, (_, pr) => pr.TemplateVersionId)
+                .FirstAsync()
+                .ConfigureAwait(true);
+
+            var sheet = new SheetDef(
+                templateVersionId,
+                EcrCode.Create($"S{Guid.NewGuid():N}"[..10]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Sheet" }),
+                1);
+            seed.SheetDefs.Add(sheet);
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+            sheetDefId = sheet.Id;
+
+            var state = new Ecr.Domain.Entities.Workflow.ApprovalState(documentId, sheetDefId, PeriodKeyValue);
+            state.Submit(userId: 9, Now);
+            seed.ApprovalStates.Add(state);
+            await seed.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        await using var db = CreateContext();
+        var spy = new TransactionWatchingWorkflowStore(new WorkflowStore(db), db);
+
+        var access = NSubstitute.Substitute.For<Ecr.Application.Security.IAccessDecisionService>();
+        var user = NSubstitute.Substitute.For<Ecr.Application.Common.ICurrentUser>();
+        user.UserId.Returns(9);
+        access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission(Ecr.Application.Workflow.ReopenDocumentHandler.Permission)
+                .Build());
+        access.CanReopenAsync(
+                Arg.Any<Ecr.Application.Security.AccessProfile>(), documentId, Arg.Any<int>(),
+                Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(Ecr.Application.Security.EditDecision.Allow());
+
+        var handler = new Ecr.Application.Workflow.ReopenDocumentHandler(
+            spy, access, new UnitOfWork(db), user, new TestClock(Now));
+
+        await handler
+            .HandleAsync(documentId, sheetDefId, PeriodKeyValue, "уточнення за скаргою", CancellationToken.None)
+            .ConfigureAwait(true);
+
+        Assert.True(spy.Called, "LockPeriodAsync не викликався — тест нічого не довів.");
+
+        // ⛔ Головне твердження: транзакція була ВІДКРИТА в момент блокування.
+        // Без `ExecuteInTransactionAsync` тут `null`, і `UPDLOCK` відпускався
+        // одразу після `SELECT`.
+        Assert.True(
+            spy.TransactionWasOpen,
+            "LockPeriodAsync викликано поза транзакцією: UPDLOCK звільняється одразу після SELECT.");
+    }
+
+    /// <summary>
+    /// Сховище-декоратор, що фіксує, чи була транзакція відкрита в момент
+    /// блокування періоду.
+    /// </summary>
+    private sealed class TransactionWatchingWorkflowStore(
+        Ecr.Application.Ports.IWorkflowStore inner, EcrDbContext db)
+        : Ecr.Application.Ports.IWorkflowStore
+    {
+        /// <summary>Чи викликали блокування взагалі.</summary>
+        public bool Called { get; private set; }
+
+        /// <summary>Чи була транзакція відкрита саме в цей момент.</summary>
+        public bool TransactionWasOpen { get; private set; }
+
+        public Task<Period> LockPeriodAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+        {
+            Called = true;
+            TransactionWasOpen = db.Database.CurrentTransaction is not null;
+            return inner.LockPeriodAsync(documentId, periodKey, ct);
+        }
+
+        public Task<Ecr.Domain.Entities.Workflow.ApprovalState> GetOrCreateAsync(
+            long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetOrCreateAsync(documentId, sheetDefId, periodKey, ct);
+
+        public Task<IReadOnlyList<Ecr.Domain.Entities.Workflow.ApprovalState>> GetSheetsAsync(
+            long documentId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetSheetsAsync(documentId, periodKey, ct);
+
+        public Task<long> SaveSnapshotAsync(
+            Ecr.Application.Ports.SubmissionSnapshotRecord snapshot, CancellationToken ct)
+            => inner.SaveSnapshotAsync(snapshot, ct);
+
+        public Task<IReadOnlyList<Ecr.Application.Ports.SubmissionSnapshotRecord>> GetSnapshotsAsync(
+            long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetSnapshotsAsync(documentId, sheetDefId, periodKey, ct);
+
+        public Task<bool> HasSubmittedSheetsAsync(int projectId, PeriodKey periodKey, CancellationToken ct)
+            => inner.HasSubmittedSheetsAsync(projectId, periodKey, ct);
+
+        public Task<Ecr.Domain.Entities.Workflow.ApprovalRoute?> FindRouteAsync(
+            int projectId, int templateVersionId, CancellationToken ct)
+            => inner.FindRouteAsync(projectId, templateVersionId, ct);
+
+        public Task<Ecr.Domain.Entities.Workflow.ApprovalRoute?> FindProjectRouteAsync(
+            int projectId, CancellationToken ct)
+            => inner.FindProjectRouteAsync(projectId, ct);
+
+        public Task AddRouteAsync(Ecr.Domain.Entities.Workflow.ApprovalRoute route, CancellationToken ct)
+            => inner.AddRouteAsync(route, ct);
+
+        public Task RemoveRouteAsync(Ecr.Domain.Entities.Workflow.ApprovalRoute route, CancellationToken ct)
+            => inner.RemoveRouteAsync(route, ct);
+
+        public Task RemoveStepsAsync(Ecr.Domain.Entities.Workflow.ApprovalRoute route, CancellationToken ct)
+            => inner.RemoveStepsAsync(route, ct);
+
+        public Task<bool> RoleExistsAsync(int roleId, CancellationToken ct)
+            => inner.RoleExistsAsync(roleId, ct);
     }
 
     /// <summary>Проєкт, документ і період у заданому стані.</summary>

@@ -45,6 +45,17 @@ public sealed class SubmitApproveTests
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
 
+        // ⛔ Той самий клас дефекту, що Q-243/Q-244, тільки в ТЕСТІ:
+        // `ReopenDocumentHandler` тепер виконує блокування періоду, перевірку
+        // стану й запис одним замиканням через
+        // `IUnitOfWork.ExecuteInTransactionAsync` (аудит 2026-09-16, §6.1).
+        // Без цього налаштування NSubstitute повертає typed-default
+        // (`Task.CompletedTask`) і НІКОЛИ не викликає передане замикання —
+        // тести Reopen мовчки перестали б щось доводити. Тут — виклик
+        // замикання НАПРАВДУ, тим самим `ct`, що йому передали.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         _sheets[Water] = new ApprovalState(Document, Water, Period);
         _sheets[Waste] = new ApprovalState(Document, Waste, Period);
 

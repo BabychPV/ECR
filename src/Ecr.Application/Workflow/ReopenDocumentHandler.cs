@@ -65,21 +65,36 @@ public sealed class ReopenDocumentHandler(
                 new Dictionary<string, object?> { ["reason"] = reopenDecision.Reason.ToString() });
         }
 
-        // ⚠ Період береться з UPDLOCK ДО будь-яких змін: інакше Reopen і
-        // PeriodStateJob перегоняють одне одного, і повернення застосувалося б
-        // до вже закритого періоду (ФВ-1.10a).
-        var period = await workflow.LockPeriodAsync(documentId, key, ct).ConfigureAwait(false);
-        if (period.State == PeriodState.Closed)
+        // ⛔ Блокування періоду, перевірка стану і запис — В ОДНІЙ транзакції
+        // (аудит 2026-09-16, §6.1). До цього фіксу транзакції не було зовсім, і
+        // `UPDLOCK` не давав НІЧОГО: поза явною транзакцією він звільняється
+        // щойно завершується сам `SELECT` — задовго до `Reopen` і до
+        // `SaveChangesAsync`. Коментар обіцяв взаємовиключення з
+        // `PeriodStateJob`, а блокування не трималося.
+        //
+        // Сценарій: `PeriodStateJob` читає період і вирішує закрити його; до
+        // його коміту Reopen бачить ще Open, дозволяє і комітить; задача потім
+        // комітить перехід у Closed, тихо перекриваючи Reopen — конфлікту
+        // немає, бо в `Period` немає RowVersion.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            throw new BusinessRuleException(
-                "ECR-PRD-4223",
-                $"Період {periodKey} закрито: спершу відкрийте період, потім аркуш.",
-                new Dictionary<string, object?> { ["periodState"] = period.State.ToString() });
-        }
+            // ⚠ Період береться з UPDLOCK ДО будь-яких змін (ФВ-1.10a) — тепер
+            // блокування справді тримається до кінця транзакції.
+            var period = await workflow.LockPeriodAsync(documentId, key, innerCt).ConfigureAwait(false);
+            if (period.State == PeriodState.Closed)
+            {
+                throw new BusinessRuleException(
+                    "ECR-PRD-4223",
+                    $"Період {periodKey} закрито: спершу відкрийте період, потім аркуш.",
+                    new Dictionary<string, object?> { ["periodState"] = period.State.ToString() });
+            }
 
-        var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
-        state.Reopen(userId, reason, clock.UtcNow);
+            var state = await workflow
+                .GetOrCreateAsync(documentId, sheetDefId, key, innerCt)
+                .ConfigureAwait(false);
+            state.Reopen(userId, reason, clock.UtcNow);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }

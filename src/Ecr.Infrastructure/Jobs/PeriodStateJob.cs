@@ -20,6 +20,7 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class PeriodStateJob(
     EcrDbContext db,
     PeriodStateCalculator calculator,
+    IUnitOfWork uow,
     IClock clock) : IBackgroundJob
 {
     /// <summary>Перехід, який задача має застосувати.</summary>
@@ -79,34 +80,55 @@ public sealed class PeriodStateJob(
             // (D-68).
             var zone = ResolveZone(project.TimeZoneId);
 
-            // ⚠ UPDLOCK: Reopen бере той самий рядок так само (ФВ-1.10a).
-            // Без нього задача і відкриття періоду перегоняють одне одного, і
-            // повернення застосувалося б до вже закритого періоду.
-            var periods = await db.Periods
-                .FromSql($"""
-                    SELECT * FROM doc.Period WITH (UPDLOCK, ROWLOCK)
-                     WHERE ProjectId = {project.Id}
-                    """)
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
-
-            foreach (var (period, target) in Plan(periods, utcNow, zone, calculator))
+            // ⛔ Читання під UPDLOCK і запис — В ОДНІЙ транзакції, з комітом
+            // на КОЖНИЙ проєкт (аудит 2026-09-16, §6.1). До цього фіксу
+            // транзакції не було зовсім: `UPDLOCK` поза явною транзакцією
+            // звільняється щойно завершується сам `SELECT` — задовго до
+            // `AdvanceTo` і задовго до `SaveChangesAsync`, який до цього
+            // викликався один раз ПІСЛЯ циклу по всіх активних проєктах.
+            // Тобто коментар обіцяв взаємовиключення, а блокування не
+            // тримало нічого.
+            //
+            // Сценарій: задача читає період о T1 і вирішує закрити його. До
+            // власного коміту користувач відкриває період через Reopen —
+            // бачить ще Open, дозволяє, комітить. Задача потім комітить уже
+            // обчислений перехід у Closed, тихо перекриваючи Reopen: конфлікту
+            // немає, бо в `Period` немає RowVersion.
+            //
+            // ⚠ Коміт по одному проєкту, а не один фінальний: «довгі
+            // транзакції заборонені» (D-29), а блокування, взяте на першому
+            // проєкті, трималося б до кінця прогону по всіх.
+            await uow.ExecuteInTransactionAsync(async innerCt =>
             {
-                period.AdvanceTo(target, utcNow);
-            }
+                // ⚠ UPDLOCK: Reopen бере той самий рядок так само (ФВ-1.10a).
+                // Тепер блокування справді тримається до кінця транзакції.
+                var periods = await db.Periods
+                    .FromSql($"""
+                        SELECT * FROM doc.Period WITH (UPDLOCK, ROWLOCK)
+                         WHERE ProjectId = {project.Id}
+                        """)
+                    .ToListAsync(innerCt)
+                    .ConfigureAwait(false);
 
-            // Pinned не чіпається: «пін» — рішення людини, і задача не має
-            // його скасовувати (D-77).
-            if (project.CurrentPeriodMode == CurrentPeriodMode.Auto)
-            {
-                project.SetCurrentPeriodAutomatically(calculator.SelectCurrentPeriod(periods)?.Id, utcNow);
-            }
+                foreach (var (period, target) in Plan(periods, utcNow, zone, calculator))
+                {
+                    period.AdvanceTo(target, utcNow);
+                }
+
+                // Pinned не чіпається: «пін» — рішення людини, і задача не має
+                // його скасовувати (D-77).
+                if (project.CurrentPeriodMode == CurrentPeriodMode.Auto)
+                {
+                    project.SetCurrentPeriodAutomatically(
+                        calculator.SelectCurrentPeriod(periods)?.Id, utcNow);
+                }
+
+                await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
 
             await progress.ReportAsync(
                 (i + 1) * 100 / Math.Max(1, projects.Count), project.Code, ct).ConfigureAwait(false);
         }
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Правила поясу майданчика за збереженим ідентифікатором IANA.</summary>
