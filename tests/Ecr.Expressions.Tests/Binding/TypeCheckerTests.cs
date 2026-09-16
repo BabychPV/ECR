@@ -70,6 +70,33 @@ public sealed class TypeCheckerTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Впорядкування_двох_Boolean_приймається_публікацією_І_обчислюється()
+    {
+        // ⛔ Аудит 2026-09-16, §2.3. `TypeChecker.Comparable` — `true`, коли типи
+        // збігаються, тож `[Flag1] < [Flag2]` приймався ПУБЛІКАЦІЄЮ без жодного
+        // попередження. А `Evaluator.Compare` мав впорядкування лише для
+        // Number/Text/Date і провалювався в `#VALUE` для КОЖНОГО рядка.
+        // Формула, що публікується чисто й ніколи не дає значення, — найгірший
+        // із двох варіантів; цей тест з'єднує обидві половини в одне твердження.
+        var context = new TestBindingContext();
+        context.ColumnTypes["Flag1"] = ExpressionValueType.Boolean;
+        context.ColumnTypes["Flag2"] = ExpressionValueType.Boolean;
+
+        var (type, diagnostics) = Check("[Flag1] < [Flag2]", context);
+
+        Assert.Equal(ExpressionValueType.Boolean, type);
+        Assert.Empty(diagnostics);
+
+        // Узгодження в бік «як у SQL і Excel»: FALSE < TRUE. Заборона зламала б
+        // уже опубліковані методології, які цей вираз пройшли.
+        Assert.True((bool)Expr.Eval("FALSE < TRUE").Value!);
+        Assert.False((bool)Expr.Eval("TRUE < FALSE").Value!);
+        Assert.True((bool)Expr.Eval("TRUE >= TRUE").Value!);
+        Assert.True((bool)Expr.Eval("TRUE > FALSE").Value!);
+        Assert.False((bool)Expr.Eval("FALSE >= TRUE").Value!);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Порівняння_числа_з_текстом_дає_помилку_публікації()
     {
         var context = new TestBindingContext();

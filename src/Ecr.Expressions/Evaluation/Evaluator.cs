@@ -23,6 +23,16 @@ namespace Ecr.Expressions.Evaluation;
 public sealed class Evaluator(
     Functions.FunctionRegistry functions, IEvaluationArithmetic arithmetic)
 {
+    /// <summary>Найбільший показник, який оператор <c>^</c> ще підносить.</summary>
+    /// <remarks>
+    /// ⛔ Та сама межа, що й у <see cref="Functions.DecimalMath.Pow"/>, і з тієї
+    /// самої причини (аудит 2026-09-16, §2.4): без неї `1.0001 ^ 5000000` —
+    /// цілком коректний decimal — з'їдав нічний масовий перерахунок цілком.
+    /// Показник понад тисячу в методології викидів не трапляється; помилка
+    /// вводу — трапляється.
+    /// </remarks>
+    private const int MaxIntegerExponent = 1000;
+
     /// <summary>
     /// Обчислювач із арифметикою <see cref="StrictDecimalArithmetic"/>.
     /// </summary>
@@ -282,6 +292,16 @@ public sealed class Evaluator(
     /// з еталоном після цього неможлива. Цілий показник підноситься множенням;
     /// дробовий у діалекті шаблонів не трапляється і дає <c>#VALUE</c>, а не
     /// приблизне число.
+    ///
+    /// ⛔ Показник ОБМЕЖЕНИЙ, і піднесення — бінарне, O(log n) (аудит
+    /// 2026-09-16, §2.4). До цього тут стояв звичайний <c>for</c>-цикл O(n) без
+    /// жодної межі — та сама межа <c>|exponent| &lt;= 1000</c>, яку
+    /// <see cref="Functions.DecimalMath.Pow"/> має від початку, тут була
+    /// пропущена. Формула виду <c>1.0001 ^ [ВеликаКлітинка]</c> (показник у
+    /// мільйонах — <c>decimal</c> не переповнюється, бо основа ≈1) виконувалась
+    /// би надзвичайно довго всередині нічного масового перерахунку («мільйони
+    /// викликів»): одна помилково введена формула підвішувала СПІЛЬНИЙ
+    /// перерахунок. Межа — не про точність, а про те, що звіт мусить порахуватися.
     /// </remarks>
     private static ExpressionValue Power(decimal value, decimal exponent)
     {
@@ -290,16 +310,33 @@ public sealed class Evaluator(
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
+        if (Math.Abs(exponent) > MaxIntegerExponent)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
         var power = (int)exponent;
         var negative = power < 0;
         power = Math.Abs(power);
 
-        var result = 1m;
         try
         {
-            for (var i = 0; i < power; i++)
+            // Бінарне піднесення: log₂(n) множень замість n — так само, як у
+            // `DecimalMath.PowerInt`, звідки взята й межа вище.
+            var result = 1m;
+            var factor = value;
+            while (power > 0)
             {
-                result *= value;
+                if ((power & 1) == 1)
+                {
+                    result *= factor;
+                }
+
+                power >>= 1;
+                if (power > 0)
+                {
+                    factor *= factor;
+                }
             }
 
             if (!negative)
@@ -339,12 +376,43 @@ public sealed class Evaluator(
         return ExpressionValue.Error(ExpressionErrors.BadValue);
     }
 
+    /// <summary>Впорядкування двох значень: <c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c>, <c>&gt;=</c>.</summary>
+    /// <remarks>
+    /// ⛔ Числа порівнюються через <c>AsDouble()</c>, а не <c>AsNumber()</c>
+    /// (аудит 2026-09-16, §2.1). <c>AsNumber()</c> звужує до <c>decimal</c>, а
+    /// <c>NaN</c>/±∞ у <c>decimal</c> не подаються взагалі — тож повертає
+    /// <c>null</c>. Але в <c>LegacyDoubleArithmetic</c> <c>1/0</c> дає <c>+∞</c>
+    /// як ЗНАЧЕННЯ, не помилку: це і є суть Legacy-режиму. Через звуження
+    /// порівняння з таким значенням тихо давало <c>#VALUE</c>, хоча арифметичні
+    /// оператори нескінченність зберігали коректно — дві половини одного
+    /// режиму розходились.
+    ///
+    /// ⛔ Boolean теж має впорядкування (<c>FALSE &lt; TRUE</c>), і це не
+    /// поблажливість (аудит 2026-09-16, §2.3): <c>TypeChecker.Comparable</c>
+    /// приймає <c>[Flag1] &lt; [Flag2]</c> при ПУБЛІКАЦІЇ без жодної
+    /// діагностики, а обчислення провалювалось у <c>#VALUE</c> для КОЖНОГО
+    /// рядка. Формула, що публікується без помилок і ніколи не дає числа, —
+    /// найгірший із двох варіантів; узгодження в бік «працює як у SQL і Excel»
+    /// дешевше за заборону, яка зламала б уже опубліковані методології.
+    /// </remarks>
     private static ExpressionValue Compare(ExpressionValue left, ExpressionValue right, BinaryOperator op)
     {
         int order;
-        if (left.AsNumber() is { } a && right.AsNumber() is { } b)
+        if (left.AsDouble() is { } a && right.AsDouble() is { } b)
         {
+            // ⚠ NaN не впорядковується ні з чим: `NaN < 1`, `NaN >= 1` — обидва
+            // false у IEEE 754, а `CompareTo` натомість вважає NaN меншим за
+            // все. Тут це саме помилка значення, а не «менше».
+            if (double.IsNaN(a) || double.IsNaN(b))
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadValue);
+            }
+
             order = a.CompareTo(b);
+        }
+        else if (left.Type == ExpressionValueType.Boolean && right.Type == ExpressionValueType.Boolean)
+        {
+            order = ((bool)left.Value!).CompareTo((bool)right.Value!);
         }
         else if (left.Type == ExpressionValueType.Text && right.Type == ExpressionValueType.Text)
         {
