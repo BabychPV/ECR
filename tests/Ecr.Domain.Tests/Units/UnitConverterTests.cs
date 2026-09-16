@@ -134,6 +134,34 @@ public sealed class UnitConverterTests
         Assert.Equal(0.123456789012345m, _converter.Convert(123456.789012345m, gram, tonne, null));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Нульовий_множник_вихідної_одиниці_це_відмова_а_не_константа()
+    {
+        // ⛔ Це не «майже правильне» число, а найгірший можливий різновид
+        // неправильного: `(value × 0) + offset` згортається до КОНСТАНТИ
+        // `from.OffsetToBase`, тож УСІ різні вхідні значення конвертуються в
+        // ОДНЕ І ТЕ САМЕ число, тихо, без жодної помилки.
+        //
+        // Перевірка йде через перевантаження з `UnitSpec`: конструктор `Unit`
+        // тепер сам не дає завести нуль, але знімок довідника приходить із
+        // бази, де рядок міг з'явитися до цього інваріанта — і саме там
+        // асиметричний захист давав тихе неправильне число.
+        var broken = new UnitSpec(Id: 77, Code: "broken", DimensionId: Mass, FactorToBase: 0m, OffsetToBase: 5m);
+        var kg = new UnitSpec(Id: 1, Code: "kg", DimensionId: Mass, FactorToBase: 1m, OffsetToBase: 0m);
+
+        // Доказ того, що саме ламалося: без захисту обидва різні значення
+        // дали б однакове `5` — дефект, який ніде не видно.
+        var error = Assert.Throws<DomainException>(() => _converter.Convert(2m, broken, kg, null));
+        Assert.Equal("ECR-UOM-0422", error.ErrorCode);
+        Assert.Contains("broken", error.Message, StringComparison.Ordinal);
+
+        Assert.Throws<DomainException>(() => _converter.Convert(1_000_000m, broken, kg, null));
+
+        // Дзеркальний бік уже був захищений — лишається захищеним.
+        Assert.Throws<DomainException>(() => _converter.Convert(2m, kg, broken, null));
+    }
+
     /// <summary>Одиниця для сценарію; поля, яких не торкаємось, лишаються типовими.</summary>
     private static Unit Make(
         string code, byte dimensionId, bool isBase, decimal factor, int id, decimal offset = 0m)

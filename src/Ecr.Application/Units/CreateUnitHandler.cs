@@ -38,7 +38,10 @@ public sealed class CreateUnitHandler(
     /// <param name="factorToBase">Множник переходу до базової одиниці розмірності.</param>
     /// <param name="offsetToBase">Зсув; ненульовий лише для одиниць температури.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <exception cref="BusinessRuleException">Код уже зайнято — <c>ECR-UOM-4091</c>.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Код уже зайнято — <c>ECR-UOM-4091</c>; множник переходу не додатний —
+    /// <c>ECR-UOM-0422</c>.
+    /// </exception>
     /// <exception cref="NotFoundException">Розмірності з таким ідентифікатором немає.</exception>
     public async Task<Unit> HandleAsync(
         string code,
@@ -72,6 +75,26 @@ public sealed class CreateUnitHandler(
                     ["messageKey"] = "err.ECR-UOM-4091",
                     ["code"] = unitCode.Value,
                     ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // ⛔ Нульовий (і від'ємний) множник — ВІДМОВА на вході, а не помилка
+        // десь у конверсії через пів року. `factorToBase = 0` згортає
+        // `(value × factor) + offset` до КОНСТАНТИ: кожне значення, конвертоване
+        // з цієї одиниці, дає те саме число, тихо, без жодної помилки, і йде в
+        // поданий регуляторний звіт. Порожнє числове поле форми = 0, тож це не
+        // теоретичний випадок, а типова помилка вводу.
+        if (factorToBase <= 0m)
+        {
+            throw new BusinessRuleException(
+                "ECR-UOM-0422",
+                $"Множник переходу до базової одиниці мусить бути додатним, а не {factorToBase}: "
+                + "нуль згортає конверсію до константи, від'ємний — перевертає знак величини.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-0422",
+                    ["code"] = unitCode.Value,
+                    ["factorToBase"] = factorToBase.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
 

@@ -12,9 +12,29 @@ public sealed class Unit
 {
     private Unit() { }
 
+    /// <summary>Заводить одиницю.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="factorToBase"/> ≤ 0.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ <paramref name="factorToBase"/> мусить бути додатним — це інваріант
+    /// домену, не перевірка форми. Нуль згортає конверсію `(value × factor) +
+    /// offset` до КОНСТАНТИ: кожне вхідне значення дає те саме число, тихо, без
+    /// помилки. Від'ємний множник перевертає знак величини. Нічого з цього не
+    /// «майже правильно» — це неправильні числа у звітності про викиди.
+    /// </remarks>
     public Unit(EcrCode code, LocalizedText symbol, LocalizedText name, byte dimensionId,
                 bool isBase, decimal factorToBase, decimal offsetToBase)
     {
+        if (factorToBase <= 0m)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(factorToBase),
+                factorToBase,
+                "Множник переходу до базової одиниці мусить бути додатним: нуль згортає "
+                + "конверсію до константи, від'ємний — перевертає знак величини.");
+        }
+
         Code = code.Value;
         SymbolL10n = symbol;
         NameL10n = name;
