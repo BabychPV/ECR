@@ -82,6 +82,32 @@ public sealed class CellValueReaderTests
         Assert.Equal(new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Utc), data.ValueDate);
     }
 
+    [Theory]
+    [InlineData("1.4.2024", 2024, 4, 1)]
+    [InlineData("01.04.2024", 2024, 4, 1)]
+    [InlineData("13.5.2024", 2024, 5, 13)]
+    [InlineData("2024-04-01", 2024, 4, 1)]
+    [InlineData("1/4/2024", 2024, 4, 1)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Дата_у_природному_порядку_дня_і_місяця_не_переставляється(
+        string wire, int year, int month, int day)
+    {
+        // ⛔ Аудит 2026-09-16, §8.2. `DateTime.TryParse("1.4.2024",
+        // CultureInfo.InvariantCulture, …)` повертає **4 січня 2024**, а не
+        // 1 квітня: InvariantCulture читає `M.d.yyyy`. Українець, що вводить дату
+        // в природному порядку `d.MM.yyyy` (звичне при копіюванні або ручному
+        // вводі), отримував тихо неправильну дату без попередження — а це дата
+        // виміру, яка визначає, у який період потрапить число.
+        //
+        // `13.5.2024` — контрольний випадок: 13 не може бути місяцем, тож його
+        // і старий розбір читав правильно. Якби тест складався лише з таких,
+        // він нічого не доводив би.
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Довідникова_комірка_тримає_ідентифікатор_а_не_число()
