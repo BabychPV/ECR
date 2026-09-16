@@ -494,13 +494,28 @@ function compare(operator: string, left: FormulaValue, right: FormulaValue): For
   }
 }
 
+/**
+ * Рівність за правилами СЕРВЕРА (`Evaluator.AreEqual`, `Ecr.Expressions`).
+ *
+ * ⛔ Аудит 2026-09-16 §10.8: тут стояло зведення обох боків через `numeric()`,
+ * і `"12" = 12` давало `true`. Сервер так не робить НІКОЛИ:
+ * `ExpressionValue.AsNumber()` віддає число лише для
+ * `ExpressionValueType.Number` — для тексту й булевого це завжди `null`, —
+ * тож `AreEqual` доходить до перевірки `left.Type != right.Type` і повертає
+ * `false`. Тобто підказка стверджувала рівність, якої збережений розрахунок
+ * не побачить, — а підказка, що систематично розходиться з результатом,
+ * гірша за відсутню (див. коментар на початку файлу).
+ *
+ * ⚠ Різниця типів — саме `false`, а НЕ `#VALUE`: помилку типу сервер дає лише
+ * на ВПОРЯДКУВАННІ (`Compare`), і рівність тут навмисно лишається булевою —
+ * інакше `IF(x = "", ...)` на числовій комірці почало б повертати помилку там,
+ * де раніше просто не збігалося.
+ *
+ * ⚠ Виклик доходить сюди лише коли жоден бік не помилка і не `null`:
+ * обидва випадки відсіює `compare()` вище.
+ */
 function same(left: FormulaValue, right: FormulaValue): boolean {
-  if (typeof left === 'number' || typeof right === 'number') {
-    const a = numeric(left);
-    const b = numeric(right);
-
-    return typeof a === 'number' && typeof b === 'number' && a === b;
-  }
+  if (typeof left !== typeof right) return false;
 
   return left === right;
 }

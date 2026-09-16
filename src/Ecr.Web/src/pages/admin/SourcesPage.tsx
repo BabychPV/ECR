@@ -138,7 +138,19 @@ export function SourcesPage(): JSX.Element {
                     <Button
                       size="compact-xs"
                       variant="default"
-                      loading={collect.isPending}
+                      // ⛔ Аудит 2026-09-16 §10.8: тут стояло голе
+                      // `collect.isPending` — ОДНЕ значення однієї мутації на
+                      // весь перелік. Збір одного джерела крутив спінер на
+                      // ВСІХ кнопках і — через `disabled: disabled || loading`
+                      // (`Button.mjs` Mantine) — блокував збір решти, хоча
+                      // причини серіалізувати їх немає: кожен збір — окрема
+                      // фонова задача зі власним `jobId`.
+                      //
+                      // ⚠ `collect.variables` — саме те, чим його викликали, і
+                      // React Query тримає це значення доки запит у дорозі;
+                      // окремий стан «який рядок зараз збирається» був би
+                      // другою копією того самого факту.
+                      loading={collect.isPending && collect.variables === source.id}
                       onClick={() => collect.mutate(source.id)}
                     >
                       {t('sources.collect')}

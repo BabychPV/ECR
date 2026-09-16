@@ -80,6 +80,28 @@ describe('Фільтр живе в адресі сторінки (ФВ-14.29)', 
     // `NaN` у ключі запиту дав би запит `periodKey=NaN` і 400 від сервера.
     expect(result.current[0]).toBeNull();
   });
+
+  it('ПОРОЖНІЙ параметр (`?periodKey=`) — теж відсутній, а не нуль (§10.8)', () => {
+    const { result } = renderHook(() => useUrlNumber('periodKey'), {
+      wrapper: wrapper('/?periodKey='),
+    });
+
+    // ⛔ Мутаційний доказ: `Number('')` — це `0`, і він СКІНЧЕННИЙ, тож
+    // `Number.isFinite` пропускав його як справжній період. Екран мовчки йшов
+    // по періоду 0 замість того, щоб узяти свій дефолт
+    // (`DocumentPage.tsx`: `urlPeriod ?? currentPeriodKey()`), — і сервер
+    // відповідав «помилок немає» на періоді, якого не існує (той самий
+    // `A7-28`, лише з іншого боку).
+    expect(result.current[0]).toBeNull();
+  });
+
+  it('пробіли замість значення — так само відсутній параметр', () => {
+    const { result } = renderHook(() => useUrlNumber('periodKey'), {
+      wrapper: wrapper('/?periodKey=%20%20'),
+    });
+
+    expect(result.current[0]).toBeNull();
+  });
 });
 
 describe('UI-аудит, lane 3: useUrlParamsSetter — кілька параметрів одним переходом', () => {

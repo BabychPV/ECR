@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Combobox, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { EcrApiError, apiFetch } from '@/api/client';
 import type { AffectedRolesResponse, RoleView, UserView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -86,6 +87,25 @@ export function UserAccessEditor({
     setEmail(user?.email ?? '');
   }, [user]);
 
+  /**
+   * Збереження ролей і адреси — ДВА незалежні записи, і другий може відмовити
+   * після першого.
+   *
+   * ⛔ Аудит 2026-09-16 §10.8: часткова відмова не називалася й не оновлювала
+   * кеш. `onSuccess` не виконується, коли `mutationFn` кинув, тож при відмові
+   * `PUT …/email` (а вона реальна: адреса може вже належати іншому обліковому
+   * запису) кеш `['users']`/`['user-roles', id]` лишався зі СТАРИМИ ролями,
+   * хоча сервер уже застосував нові, — а адмін бачив лише текст про пошту.
+   * Найдорожчий наслідок — повторна спроба: він «виправляв» уже збережене,
+   * дивлячись на застарілий перелік, а `PUT …/roles` тут ПОВНА заміна.
+   *
+   * ⚠ Тому: (1) інвалідація живе в `onSettled` — вона про те, що на сервері
+   * ЩОСЬ змінилося, а не про те, чи все вдалося; (2) повідомлення про часткову
+   * відмову називає обидва факти — що збережено і що ні, — і робить це
+   * наявними рядками каталогу (новий рядок живе в сіді БД, поза цим пакетом);
+   * (3) діалог НЕ закривається, бо закрити його означало б сховати те, що
+   * лишилося незбереженим.
+   */
   const save = useMutation({
     mutationFn: async () => {
       const result = await apiFetch<AffectedRolesResponse>(
@@ -93,20 +113,42 @@ export function UserAccessEditor({
         { method: 'PUT', body: JSON.stringify({ roleCodes: selected }) },
       );
 
-      await apiFetch(`/api/v1/users/${user?.id ?? 0}/email`, {
-        method: 'PUT',
-        body: JSON.stringify({ email: email.trim().length === 0 ? null : email.trim() }),
-      });
+      try {
+        await apiFetch(`/api/v1/users/${user?.id ?? 0}/email`, {
+          method: 'PUT',
+          body: JSON.stringify({ email: email.trim().length === 0 ? null : email.trim() }),
+        });
+      } catch (error) {
+        throw new PartialAccessSaveError(result.roles, error);
+      }
 
       return result;
     },
-    onSuccess: async (result) => {
+
+    // ⚠ Кеш перечитується в ОБОХ випадках: ролі вже змінено на сервері навіть
+    // тоді, коли другий запис відмовив.
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] });
       await queryClient.invalidateQueries({ queryKey: ['user-roles', user?.id] });
+    },
+    onSuccess: (result) => {
       onClose();
       showDone(t('security.accessSaved', { count: result.roles }));
     },
-    onError: showApiError,
+    onError: (error) => {
+      if (error instanceof PartialAccessSaveError) {
+        // ⚠ `statusWarning`, не `statusError`: частина роботи ЗРОБЛЕНА, і
+        // червоне «не вдалося» тут читалося б як «нічого не сталося».
+        notifications.show({
+          color: 'statusWarning',
+          message: `${t('security.accessSaved', { count: error.savedRoles })} · ${messageOf(error.cause)}`,
+        });
+
+        return;
+      }
+
+      showApiError(error);
+    },
   });
 
   return (
@@ -279,4 +321,38 @@ export function UserAccessEditor({
       </div>
     </Modal>
   );
+}
+
+/**
+ * Ролі збережено, адресу — ні (аудит §10.8).
+ *
+ * ⛔ Окремий тип, а не прапорець у повідомленні: обробник відмови мусить
+ * РОЗРІЗНЯТИ «нічого не сталося» (упав перший запис) і «половина застосована»
+ * — від цього залежить і колір, і те, чи закривати діалог. Розрізняти це за
+ * текстом означало б порівнювати рядки каталогу.
+ */
+class PartialAccessSaveError extends Error {
+  /** Скільки ролей сервер справді застосував до того, як відмовив другий запис. */
+  readonly savedRoles: number;
+
+  /** Відмова ДРУГОГО запису — її текст і показуємо людині. */
+  override readonly cause: unknown;
+
+  constructor(savedRoles: number, cause: unknown) {
+    super('partial access save');
+    this.name = 'PartialAccessSaveError';
+    this.savedRoles = savedRoles;
+    this.cause = cause;
+  }
+}
+
+/**
+ * Текст відмови так, як його назвав сервер.
+ *
+ * ⚠ Той самий вибір, що в `showApiError` (`notify.ts`): `error.message` для
+ * `EcrApiError` — це `detail ?? title`, тобто змістовна причина, а не «щось
+ * пішло не так».
+ */
+function messageOf(error: unknown): string {
+  return error instanceof EcrApiError ? error.message : String(error);
 }

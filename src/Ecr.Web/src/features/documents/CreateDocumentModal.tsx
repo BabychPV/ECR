@@ -14,6 +14,7 @@ import type {
 } from '@/api/types';
 import { groupRuleViolations } from './groupRuleViolations';
 import { localized } from '@/shared/i18n/localized';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -194,6 +195,28 @@ export function CreateDocumentModal({
           <Text size="xs" c="dimmed" mb="xs">
             {t('documents.sheetsHint')}
           </Text>
+
+          {/*
+            ⛔ Аудит 2026-09-16 §10.8: цього блоку не було, і `available =
+            structure.data?.sheets ?? []` перетворював ВІДМОВУ запиту на
+            «аркушів немає» — рівно той взірець, проти якого існує
+            `AsyncBoundary` («`data?.items ?? []` у п'ятнадцяти областях — це
+            п'ятнадцять місць, де невдалий запит перетворюється на "даних
+            немає"»). 500 чи обрив мережі давали порожній перелік чекбоксів під
+            заголовком «Аркуші», і людина робила висновок, що винна
+            конфігурація шаблону; кнопка «Save» при цьому лишалася
+            заблокованою (`sheets.length === 0`) без жодного пояснення.
+
+            ⚠ `ErrorAlert`, а не власна подача: код помилки й кореляція — те
+            саме «куди звернутись», що й на решті екранів, і другий вигляд
+            помилки означав би, що людина не знає, чого чекати. Повна
+            `AsyncBoundary` тут не потрібна — «вантажиться» вже видно по
+            порожньому переліку, а порожнього стану в цієї відповіді не буває:
+            опублікована версія без аркушів не існує.
+          */}
+          {structure.error !== null && (
+            <ErrorAlert error={structure.error} onRetry={() => void structure.refetch()} />
+          )}
 
           <Stack gap="xs">
             {available.map((sheet) => (
