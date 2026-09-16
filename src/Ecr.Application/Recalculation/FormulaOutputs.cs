@@ -31,9 +31,14 @@ public static class FormulaOutputs
         ArgumentNullException.ThrowIfNull(formula);
         ArgumentNullException.ThrowIfNull(table);
 
-        if (formula.ColumnDefId is { } ownColumn
-            && columnDefId != ownColumn
-            && formula.Scope != FormulaScope.Row)
+        // ⚠ Row-скоуп із ЯВНОЮ колонкою обчислює ОДНУ комірку, а не «весь
+        // рядок» (аудит 2026-09-16, §1.3). До фіксу тут стояло виключення
+        // `&& formula.Scope != FormulaScope.Row`, тобто `ColumnDefId` для
+        // Row-скоупу просто ігнорувався: формула звітувала, що виробляє кожну
+        // колонку свого рядка, і граф отримував ребра до формул, які з неї
+        // нічого не читають. Односторонній надлишок — зайвий перерахунок, а не
+        // неправильне число, але й не безкоштовний.
+        if (formula.ColumnDefId is { } ownColumn && columnDefId != ownColumn)
         {
             return false;
         }
