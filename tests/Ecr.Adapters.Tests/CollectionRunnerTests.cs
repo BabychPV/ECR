@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Ecr.Adapters.PiAf;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
@@ -296,6 +296,43 @@ public sealed class CollectionRunnerTests
         // Недосяжно: `Task.Delay(Infinite, ct)` завершується лише винятком
         // скасування — ніколи звичайним поверненням.
         throw new InvalidOperationException("Unreachable.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Тайм_аут_джерела_завершує_прогін_Degraded_а_не_лишає_Running()
+    {
+        // ⛔ Аудит 2026-09-16, §7.1. Тайм-аут `HttpClient` приходить як
+        // `TaskCanceledException` — тобто `OperationCanceledException`, — і сирим
+        // він минав УСІ три захисти: `ReadAsync`'s `catch
+        // (OperationCanceledException) { throw; }`, watchdog-гілку в `RunAsync`
+        // (вона перевіряє лише `watchdog.IsCancellationRequested`, який тут
+        // `false`: скасування прийшло від ВНУТРІШНЬОГО таймера клієнта) і
+        // загальний `catch (Exception)`. `RunAsync` кидав необробленим,
+        // `FinishRunAsync`/`WriteCoverageAsync` не викликалися НІКОЛИ — і рядок
+        // `CollectionRun` навічно лишався «Running» замість «Degraded».
+        //
+        // Адаптер тепер перетворює тайм-аут на `BusinessRuleException`, і
+        // збирач трактує його як звичайну відмову джерела.
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(_ => throw new BusinessRuleException(
+                "ECR-INT-0503", "PI Web API не відповів на streams/…: тайм-аут запиту."));
+
+        // Винятку немає: тайм-аут джерела — затримка, не збій задачі.
+        await world.Runner.RunAsync(
+            SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        // ⛔ Головне: прогін ЗАКРИТИЙ, і саме як «Degraded». Без фіксу цього
+        // виклику не було б узагалі.
+        await world.Store.Received().FinishRunAsync(
+            Arg.Any<long>(), "Degraded", Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+
+        // І покриття за непрочитаний діапазон не пишеться — він мусить піти в
+        // наздоганяння, а не виглядати зібраним.
+        await world.Store.DidNotReceive().WriteCoverageAsync(
+            Arg.Any<long>(), Arg.Any<int>(),
+            Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Count > 0), Arg.Any<CancellationToken>());
     }
 
     private static EntityFieldMap Map(int? sourceUnitId)

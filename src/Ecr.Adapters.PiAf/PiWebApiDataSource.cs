@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -221,6 +221,35 @@ public sealed class PiWebApiDataSource(
             {
                 // Таймаут HttpClient приходить саме так; скасування ззовні —
                 // ні, і його повторювати не можна.
+            }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // ⛔ Останню спробу теж перехоплюємо — і перетворюємо на
+                // `BusinessRuleException`, а не пускаємо `TaskCanceledException`
+                // далі (аудит 2026-09-16, §7.1). Сирий виняток минав і
+                // `CollectionRunner.ReadAsync`'s `catch
+                // (OperationCanceledException) { throw; }`, і watchdog-перевірку
+                // в `RunAsync` (та дивиться лише на
+                // `watchdog.IsCancellationRequested`, який тут `false` —
+                // скасування прийшло від ВНУТРІШНЬОГО таймера HttpClient, не від
+                // watchdog). `RunAsync` кидав необробленим, `FinishRunAsync` і
+                // `WriteCoverageAsync` не викликалися НІКОЛИ — і рядок
+                // `CollectionRun` навічно лишався «Running» замість
+                // запланованого «Degraded».
+                //
+                // ⚠ Умова `!ct.IsCancellationRequested` обов'язкова і тут: якщо
+                // скасування прийшло ЗЗОВНІ (watchdog, зупинка сервісу), воно
+                // мусить летіти як скасування — саме так збирач і відрізняє
+                // «нас зупинили» від «джерело не відповіло».
+                throw new BusinessRuleException(
+                    SourceUnavailable,
+                    $"PI Web API не відповів на {path} за {MaxAttempts} спроб: тайм-аут запиту.",
+                    new Dictionary<string, object?>
+                    {
+                        ["path"] = path,
+                        ["attempts"] = MaxAttempts,
+                        ["reason"] = "timeout",
+                    });
             }
 
             await Task.Delay(delay, ct).ConfigureAwait(false);
