@@ -155,6 +155,48 @@ public sealed class RecalculationServiceTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.5")]
+    public void Відкладені_rollup_віддаються_в_порядку_обчислення_а_не_перебору_набору()
+    {
+        // ⛔ Аудит 2026-09-16, §1.2. Дві взаємозалежні крос-аркушні rollup-
+        // формули в одному проході: R1 (`EvaluationOrder = 0`) згортає проміжний
+        // аркуш, R2 (`EvaluationOrder = 1`) читає РЕЗУЛЬТАТ R1 — аркуш
+        // підсумків над двома проміжними rollup-аркушами.
+        //
+        // R2 навмисно потрапляє в набір ПЕРШОЮ (її насіння обробляється
+        // раніше). Саме це й ламалося: `_deferred` — `HashSet<int>`, його
+        // порядок перебору = порядок вставки, і без сортування R2 обчислювалась
+        // ДО R1, читаючи застаріле значення R1 зі спільного словника `values`.
+        const int R1 = 900;
+        const int R2 = 901;
+
+        var plan = new RecalculationPlan();
+        plan.Declare(R2, evaluationOrder: 1, isCrossSheet: true);
+        plan.Declare(R1, evaluationOrder: 0, isCrossSheet: true);
+        plan.DependsOnCell(R2, Cell(2002, 21));
+        plan.DependsOnCell(R1, Cell(2001, 21));
+        plan.DependsOnFormula(R2, R1);
+
+        var dirty = new DirtySet();
+        dirty.Add(Cell(2002, 21));
+        dirty.Add(Cell(2001, 21));
+
+        var service = Service();
+        Assert.Empty(service.Plan(dirty, plan));
+
+        // Сирий набір справді має «неправильний» порядок — інакше тест
+        // доводив би сортування там, де його немає чого доводити.
+        Assert.Equal([R2, R1], service.DeferredRollups);
+
+        // А на виході — порядок обчислення з публікації: R1 перед R2.
+        Assert.Equal([R1, R2], service.TakeDeferredRollups(plan));
+
+        // Набір спорожнений: інакше та сама формула перерахувалась би двічі
+        // наступним проходом.
+        Assert.Empty(service.DeferredRollups);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.5")]
     public void Порядок_усіх_формул_детермінований_при_однакових_порядках_обчислення()
     {
         // ⚠ Порядок обчислення НЕ унікальний, а обхід словника не має
