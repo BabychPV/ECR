@@ -131,26 +131,46 @@ public sealed class PatchPresentationHandler(
         // ⚠ ПЕРЕД інкрементом ревізії: якщо запис упаде, ключ кешу не має
         // змінитися. Новий ключ на стару структуру — це те саме розходження,
         // тільки навпаки.
-        await store.ApplyPresentationAsync(templateVersionId, changes, ct).ConfigureAwait(false);
+        // ⛔ Застосування + інкремент ревізії + аудит — ОДНА транзакція (аудит
+        // 2026-09-16, §4.2). Без неї обидва raw-SQL виклики
+        // (`ApplyPresentationAsync`, `IncrementPresentationRevisionAsync`)
+        // комітилися самостійно й одразу, бо `db.Database.CurrentTransaction ==
+        // null`: падіння (або виняток у `SaveChangesAsync`) після них, але до
+        // запису аудиту лишало ЗМІНЕНИЙ вміст і НОВИЙ ключ кешу ревізії БЕЗ
+        // жодного рядка аудиту. Це рівно той дефект «зміна без відповідного
+        // рядка аудиту», який `Q-244` називає виправленим в УСІХ сусідніх
+        // структурних обробниках (`SheetDefHandlers`, `ColumnDefHandlers`,
+        // `TableDefHandlers`, `RowDefHandlers`, `FormulaDefHandlers`,
+        // `SaveValidationRuleHandler`, `SwitchRegistrySourceHandler`,
+        // `SaveRegistryDefinitionHandler`) — і лише тут він лишався.
+        var newRevision = 0;
 
-        // Інкремент — атомарний statement із OUTPUT (R-B7). Застосунок не
-        // призначає нову ревізію, а дізнається її: інстансів ≥ 2.
-        var newRevision = await store.IncrementPresentationRevisionAsync(templateVersionId, ct).ConfigureAwait(false);
-        version.ApplyPresentationRevision(newRevision);
-
-        var now = clock.UtcNow;
-        foreach (var change in changes)
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            await audit.WriteStructureChangeAsync(
-                new StructureChangeRecord(
-                    now, templateVersionId, change.EntityType, change.EntityId,
-                    ChangeClass.Presentation, "Update",
-                    OldJson: null, NewJson: change.Value, ChangeReason: null,
-                    ChangedByUserId: userId, CorrelationId: null),
-                ct).ConfigureAwait(false);
-        }
+            await store.ApplyPresentationAsync(templateVersionId, changes, innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            // Інкремент — атомарний statement із OUTPUT (R-B7). Застосунок не
+            // призначає нову ревізію, а дізнається її: інстансів ≥ 2.
+            newRevision = await store
+                .IncrementPresentationRevisionAsync(templateVersionId, innerCt)
+                .ConfigureAwait(false);
+            version.ApplyPresentationRevision(newRevision);
+
+            var now = clock.UtcNow;
+            foreach (var change in changes)
+            {
+                await audit.WriteStructureChangeAsync(
+                    new StructureChangeRecord(
+                        now, templateVersionId, change.EntityType, change.EntityId,
+                        ChangeClass.Presentation, "Update",
+                        OldJson: null, NewJson: change.Value, ChangeReason: null,
+                        ChangedByUserId: userId, CorrelationId: null),
+                    innerCt).ConfigureAwait(false);
+            }
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
         return newRevision;
     }
 
