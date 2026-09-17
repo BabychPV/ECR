@@ -19,7 +19,9 @@ public sealed class RecalculateDocumentHandler(
     IBackgroundJobScheduler jobs,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    IDocumentStore documents)
+    IDocumentStore documents,
+    IPeriodStore periods,
+    IWorkflowStore workflow)
 {
     /// <summary>Право на запуск перерахунку (`02-contracts.md` §9).</summary>
     public const string Permission = "Calculation.Recalculate";
@@ -36,10 +38,31 @@ public sealed class RecalculateDocumentHandler(
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="Errors.NotFoundException"><c>ECR-DOC-0404</c> — аркуша немає в складі документа.</exception>
+    /// <exception cref="Errors.BusinessRuleException">
+    /// <c>ECR-CALC-4221</c> — період закритий або має поданий аркуш.
+    /// </exception>
     /// <remarks>
-    /// ⚠ ЗАКРИТІ періоди АВТОМАТИЧНО не перераховуються ніколи (ФВ-9.7) —
-    /// це перевіряє <c>RunCalculationHandler</c>, якому задача передає
-    /// керування. Тут — право і чергування.
+    /// ⛔ ЗАКРИТІ періоди АВТОМАТИЧНО не перераховуються ніколи (ФВ-9.7), і
+    /// поданий зріз — узагалі ніколи (ФВ-9.17).
+    /// <para>
+    /// ⚠ Тут раніше стояло твердження, що це «перевіряє
+    /// <c>RunCalculationHandler</c>, якому задача передає керування». Воно
+    /// було НЕПРАВДИВЕ, і саме на нього спирався дефект. Жодної передачі
+    /// керування немає: цей обробник кладе <c>IRecalculationJob</c> у чергу
+    /// САМ (нижче), а задача кличе з <c>RunCalculationHandler</c> лише
+    /// <c>CompleteAsync</c> — завершення прогону, де періодів немає взагалі.
+    /// <c>RunCalculationHandler.HandleAsync</c> із його перевіркою стану
+    /// періоду на цьому маршруті не викликається НІКОЛИ, тож перерахунок
+    /// документа переписував числа закритого періоду мовчки й «успішно».
+    /// </para>
+    /// <para>
+    /// ⚠ Справжній гейт стоїть у <c>RecalculationJob</c> — на самому шляху
+    /// запису, спільному для всіх трьох маршрутів. Перевірка нижче — це
+    /// ШВИДКА ВІДМОВА заради людини: без неї користувач отримав би <c>202</c>
+    /// і <c>jobId</c>, а причину відмови побачив би хвилиною пізніше в стані
+    /// задачі. Обидві питають одне й те саме
+    /// (<c>RecalculationWritePolicy</c>), тож розійтися не можуть.
+    /// </para>
     /// </remarks>
     public async Task<string> HandleAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
@@ -72,6 +95,43 @@ public sealed class RecalculateDocumentHandler(
         {
             throw new Errors.NotFoundException(
                 "ECR-DOC-0404", $"Аркуша {targetSheetId} немає в складі документа {documentId}.");
+        }
+
+        // ⛔ Стан періоду і робочого процесу — ДО черги (ФВ-9.7, ФВ-9.17).
+        // Погодження на перерахунок закритого періоду цей маршрут не приймає
+        // взагалі: його оформлює перерахунок ПРОЄКТУ
+        // (`RunCalculationHandler` + `ClosedPeriodApproval`, причина й друга
+        // людина), і вигадувати тут другий, безпогоджувальний вхід у закритий
+        // період означало б обійти правило чотирьох очей кнопкою на документі.
+        var state = await periods
+            .FindPeriodStateAsync(documentId, periodKey.Value, ct)
+            .ConfigureAwait(false);
+
+        if (state is { } periodState)
+        {
+            var sheets = await workflow
+                .GetSheetsAsync(documentId, periodKey, ct)
+                .ConfigureAwait(false);
+
+            var submitted = sheets.Any(s =>
+                s.Status is Domain.Enums.DocumentStatus.Submitted
+                         or Domain.Enums.DocumentStatus.Approved);
+
+            var denial = Calculations.RecalculationWritePolicy.Check(
+                periodState, submitted, hasClosedPeriodApproval: false);
+
+            if (denial != Calculations.RecalculationWriteDenial.None)
+            {
+                throw new Errors.BusinessRuleException(
+                    Calculations.RecalculationWritePolicy.ErrorCode,
+                    Calculations.RecalculationWritePolicy.Explain(denial, periodKey.Value),
+                    new Dictionary<string, object?>
+                    {
+                        ["documentId"] = documentId,
+                        ["periodKey"] = periodKey.Value,
+                        ["denial"] = denial.ToString(),
+                    });
+            }
         }
 
         // ⛔ Новий перерахунок ВИТІСНЯЄ попередній над тим самим документом і

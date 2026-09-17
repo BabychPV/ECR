@@ -27,8 +27,8 @@ public static class OrphanScanPlan
     {
         ArgumentNullException.ThrowIfNull(candidates);
 
-        var toFlag = new List<long>();
-        var toClear = new List<long>();
+        var toFlag = new List<OrphanRowRef>();
+        var toClear = new List<OrphanRowRef>();
 
         foreach (var candidate in candidates)
         {
@@ -43,11 +43,11 @@ public static class OrphanScanPlan
             switch (candidate)
             {
                 case { ReferenceIsValid: false, IsOrphaned: false }:
-                    toFlag.Add(candidate.RowId);
+                    toFlag.Add(candidate.Row);
                     break;
 
                 case { ReferenceIsValid: true, IsOrphaned: true }:
-                    toClear.Add(candidate.RowId);
+                    toClear.Add(candidate.Row);
                     break;
 
                 default:
@@ -67,8 +67,32 @@ public static class OrphanScanPlan
         => state is PeriodState.Open or PeriodState.Grace;
 }
 
+/// <summary>
+/// ПОВНА адреса рядка <c>doc.TableRow</c>: ключ партиції і <c>Id</c>.
+/// </summary>
+/// <param name="PeriodKeyValue">Ключ періоду — він же ключ партиції (R-A6).</param>
+/// <param name="RowId">Рядок у межах періоду.</param>
+/// <remarks>
+/// ⛔ Окремий тип, а не голий <c>long</c>, і це не косметика. Первинний ключ
+/// <c>doc.TableRow</c> — складений <c>(PeriodKey, Id)</c>, таблиця лежить на
+/// <c>ps_ByPeriodKey</c>, і жодного індексу з <c>Id</c> попереду немає й бути
+/// не може: <c>07-partition-tables.sql</c> вирівнює КОЖЕН індекс цих таблиць
+/// по схемі партиціонування й падає (<c>THROW 50031</c>), якщо хоч один
+/// лишився поза нею. Поки план ніс самі <c>Id</c>, ПЕРІОД БУВ НЕДОСТУПНИЙ НА
+/// МІСЦІ ЗАПИСУ — і <c>OrphanScanner</c> писав <c>WHERE Id IN (…)</c>, тобто
+/// щоночі проходив ВСІ партиції таблиці, розрахованої на ~108 млн рядків на
+/// рік. Тип нижче прибирає саме цю прогалину: неможливо покласти рядок у
+/// рішення, не назвавши його періоду.
+/// <para>
+/// Той самий дефект і те саме лікування, що в <c>RowStore.TouchRowsAsync</c>
+/// (гілка <c>fix/touchrows-index</c>): нести ключ партиції у предикаті, а не
+/// заводити під <c>Id</c> окремий індекс.
+/// </para>
+/// </remarks>
+public sealed record OrphanRowRef(int PeriodKeyValue, long RowId);
+
 /// <summary>Рядок-кандидат для перевірки осиротілості.</summary>
-/// <param name="RowId">Рядок <c>doc.TableRow</c>.</param>
+/// <param name="Row">Адреса рядка: період і <c>Id</c>.</param>
 /// <param name="PeriodState">Стан періоду рядка.</param>
 /// <param name="IsOrphaned">Ознака, що зараз збережена на рядку.</param>
 /// <param name="ReferenceIsValid">
@@ -77,12 +101,28 @@ public static class OrphanScanPlan
 /// формує випадний список.
 /// </param>
 public sealed record OrphanCandidate(
-    long RowId, PeriodState PeriodState, bool IsOrphaned, bool ReferenceIsValid);
+    OrphanRowRef Row, PeriodState PeriodState, bool IsOrphaned, bool ReferenceIsValid)
+{
+    /// <summary>Рядок <c>doc.TableRow</c> у межах свого періоду.</summary>
+    public long RowId => Row.RowId;
+
+    /// <summary>Ключ періоду (він же — ключ партиції) цього рядка.</summary>
+    public int PeriodKeyValue => Row.PeriodKeyValue;
+}
 
 /// <summary>Що змінити за підсумком перевірки.</summary>
 /// <param name="ToFlag">Рядкам поставити <c>IsOrphaned</c>.</param>
 /// <param name="ToClear">Рядкам зняти ознаку і занулити <c>OrphanedAt</c>.</param>
-public sealed record OrphanScanDecision(IReadOnlyList<long> ToFlag, IReadOnlyList<long> ToClear)
+/// <remarks>
+/// ⚠ Обидва переліки несуть <see cref="OrphanRowRef"/>, а не <c>long</c>, і
+/// цілком можуть змішувати періоди: один прохід сканера бере кандидатів з
+/// УСІХ відкритих періодів одразу. Тому сховище зобов'язане групувати їх за
+/// <c>PeriodKeyValue</c> і писати по одному <c>UPDATE</c> на період — див.
+/// <see cref="OrphanRowRef"/> про те, чому один спільний <c>UPDATE</c> по
+/// самих <c>Id</c> тут коштує сканування всієї таблиці.
+/// </remarks>
+public sealed record OrphanScanDecision(
+    IReadOnlyList<OrphanRowRef> ToFlag, IReadOnlyList<OrphanRowRef> ToClear)
 {
     /// <summary>Скільки рядків буде змінено.</summary>
     public int Total => ToFlag.Count + ToClear.Count;

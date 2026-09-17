@@ -30,15 +30,15 @@ public sealed partial class ConsistencyCheckJobTests
         // не розблокувало б Submit, і користувач лишився б із помилкою,
         // причину якої вже усунуто (ФВ-8.13a).
         var flag = OrphanScanPlan.Plan(
-            [new OrphanCandidate(1, PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false)]);
+            [new OrphanCandidate(Row(1), PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false)]);
 
         var clear = OrphanScanPlan.Plan(
-            [new OrphanCandidate(1, PeriodState.Open, IsOrphaned: true, ReferenceIsValid: true)]);
+            [new OrphanCandidate(Row(1), PeriodState.Open, IsOrphaned: true, ReferenceIsValid: true)]);
 
-        Assert.Equal([1L], flag.ToFlag);
+        Assert.Equal([Row(1)], flag.ToFlag);
         Assert.Empty(flag.ToClear);
 
-        Assert.Equal([1L], clear.ToClear);
+        Assert.Equal([Row(1)], clear.ToClear);
         Assert.Empty(clear.ToFlag);
 
         // Задача робить це ОДНИМ проходом сканера, а не власною копією
@@ -53,16 +53,16 @@ public sealed partial class ConsistencyCheckJobTests
     {
         var decision = OrphanScanPlan.Plan(
         [
-            new OrphanCandidate(1, PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false),
-            new OrphanCandidate(2, PeriodState.Closed, IsOrphaned: false, ReferenceIsValid: false),
-            new OrphanCandidate(3, PeriodState.Closed, IsOrphaned: true, ReferenceIsValid: true),
+            new OrphanCandidate(Row(1), PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false),
+            new OrphanCandidate(Row(2), PeriodState.Closed, IsOrphaned: false, ReferenceIsValid: false),
+            new OrphanCandidate(Row(3), PeriodState.Closed, IsOrphaned: true, ReferenceIsValid: true),
         ]);
 
         // ⛔ Закритий період не чіпається в ОБИДВА боки: ні поставити, ні
         // зняти. Його дані вже подані й погоджені — ознака нічого не
         // розблокує і нічого не заборонить, зате перепише рядок, що входить у
         // контрольну суму зрізу подання.
-        Assert.Equal([1L], decision.ToFlag);
+        Assert.Equal([Row(1)], decision.ToFlag);
         Assert.Empty(decision.ToClear);
 
         // ⚠ Але ЗНАХІДКУ в закритому періоді записують — там вона
@@ -72,6 +72,16 @@ public sealed partial class ConsistencyCheckJobTests
         Assert.Contains("ORPHANED_CELL", source, StringComparison.Ordinal);
         Assert.DoesNotContain("PeriodState.Closed", source, StringComparison.Ordinal);
     }
+
+    /// <summary>Адреса рядка в довільному відкритому періоді.</summary>
+    /// <param name="rowId">Ідентифікатор рядка в межах періоду.</param>
+    /// <remarks>
+    /// ⚠ План несе ПАРУ <c>(PeriodKey, Id)</c>, а не самий <c>Id</c>: ключ
+    /// <c>doc.TableRow</c> складений, і <c>PeriodKey</c> — ключ партиції. Поки
+    /// план ніс самі <c>Id</c>, сховище не мало чим засікти <c>UPDATE</c> і
+    /// щоночі проходило всі партиції.
+    /// </remarks>
+    private static OrphanRowRef Row(long rowId) => new(202601, rowId);
 
     private static string Source()
         => File.ReadAllText(Path.Combine(

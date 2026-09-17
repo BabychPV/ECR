@@ -90,38 +90,49 @@ public sealed class RunCalculationHandler(
         // ⛔ ЗАКРИТІ ПЕРІОДИ автоматично не перераховуються НІКОЛИ (ФВ-9.7).
         // Це не обережність: перерахунок закритого періоду змінює числа, які
         // вже подані регулятору, і робить це без жодного сліду в самих даних.
+        //
+        // ⚠ Тут лишається лише перевірка ЯКОСТІ погодження (причина + друга
+        // людина) — рішення «чи можна писати в цей період» більше НЕ живе в
+        // тілі цього обробника, а взяте з `RecalculationWritePolicy`. Доти
+        // воно жило саме тут і тільки тут, тож два інші маршрути до задачі
+        // перерахунку (документ і нічний розклад) писали в закриті періоди
+        // мовчки: вони цього обробника не кличуть узагалі.
         var closed = targets.Where(p => p.State == PeriodState.Closed).ToList();
-        if (closed.Count > 0)
+        if (closed.Count > 0 && approval is not null)
         {
-            RequireApproval(closed.Select(p => p.PeriodKey).ToList(), approval);
+            RequireValidApproval(approval);
         }
 
         // ⛔ Поданий зріз не перераховується взагалі (ФВ-9.17) — навіть із
         // погодженням. Потреба змінити подану цифру закривається Reopen, який
         // лишає слід у робочому процесі, а не тихим перерахунком.
         //
-        // ⛔ Умова НЕ дивиться на `approval` — і це не недогляд, а суть правила
-        // (аудит 2026-09-16, §1.1). До цього стояло `submitted && approval is
-        // null`, тож ОДНЕ погодження, видане на ОДИН закритий період, знімало
-        // захист поданих зрізів у ВСІХ періодах запиту: `periodKey: null` —
-        // це весь рік, і `targets` охоплює багато періодів одночасно. Сценарій:
-        // 202601 закритий (погодження законне), 202603 відкритий із поданими
-        // аркушами — і 202603 тихо перераховувався. `ClosedPeriodApproval`
-        // погоджує перерахунок ЗАКРИТОГО періоду; поданий зріз — інше правило
-        // й інший шлях (Reopen), і спільний nullable-параметр не може означати
-        // обидва.
+        // ⛔ Правило НЕ знімається наявністю `approval` — і це не недогляд, а
+        // суть (аудит 2026-09-16, §1.1). До цього стояло `submitted && approval
+        // is null`, тож ОДНЕ погодження, видане на ОДИН закритий період,
+        // знімало захист поданих зрізів у ВСІХ періодах запиту: `periodKey:
+        // null` — це весь рік, і `targets` охоплює багато періодів одночасно.
+        // Сценарій: 202601 закритий (погодження законне), 202603 відкритий із
+        // поданими аркушами — і 202603 тихо перераховувався. Тепер цю різницю
+        // тримає сама політика: `hasClosedPeriodApproval` знімає лише
+        // `PeriodClosed`, а `SheetsSubmitted` — ніколи.
         foreach (var period in targets)
         {
             var submitted = await workflow
                 .HasSubmittedSheetsAsync(projectId, new Domain.ValueObjects.PeriodKey(period.PeriodKey), ct)
                 .ConfigureAwait(false);
 
-            if (submitted)
+            var denial = RecalculationWritePolicy.Check(period.State, submitted, approval is not null);
+            if (denial != RecalculationWriteDenial.None)
             {
                 throw new BusinessRuleException(
-                    "ECR-CALC-4221",
-                    $"Період {period.PeriodKey} має подані аркуші: перерахунок змінив би числа, "
-                    + "які вже пішли на погодження. Штатний шлях — Reopen.");
+                    RecalculationWritePolicy.ErrorCode,
+                    RecalculationWritePolicy.Explain(denial, period.PeriodKey),
+                    new Dictionary<string, object?>
+                    {
+                        ["periodKey"] = period.PeriodKey,
+                        ["denial"] = denial.ToString(),
+                    });
             }
         }
 
@@ -168,18 +179,19 @@ public sealed class RunCalculationHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>Перевіряє погодження на перерахунок закритих періодів.</summary>
-    private void RequireApproval(IReadOnlyList<int> closedKeys, ClosedPeriodApproval? approval)
+    /// <summary>
+    /// Перевіряє ЯКІСТЬ погодження на перерахунок закритих періодів.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ «Погодження є / погодження немає» тепер вирішує
+    /// <see cref="RecalculationWritePolicy"/> разом зі станом періоду; тут
+    /// лишилося те, чого чиста функція знати не може, — чи є погодження
+    /// справжнім. Розділення навмисне: політика мусить давати ту саму
+    /// відповідь усім трьом маршрутам, а перевірити «хто погодив» уміє лише
+    /// той шар, де є <c>ICurrentUser</c>.
+    /// </remarks>
+    private void RequireValidApproval(ClosedPeriodApproval approval)
     {
-        if (approval is null)
-        {
-            throw new BusinessRuleException(
-                "ECR-CALC-4221",
-                $"Закриті періоди ({string.Join(", ", closedKeys)}) не перераховуються автоматично: "
-                + "потрібне окреме погодження (ФВ-9.7).",
-                new Dictionary<string, object?> { ["closedPeriods"] = closedKeys });
-        }
-
         // ⚠ Погодження ≠ «прапорець у запиті». Причина обов'язкова, і той, хто
         // погодив, має бути іншою людиною, ніж та, що запускає: інакше
         // «окреме погодження» звелося б до зайвого поля у формі.

@@ -52,7 +52,7 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcSum decimal(38,10);
+    DECLARE @k int, @srcCount bigint, @srcSum decimal(38,10);
     DECLARE @dstCount bigint, @dstSum decimal(38,10);
     DECLARE @p1 int, @p12 int, @range nvarchar(40), @sql nvarchar(600);
     DECLARE @periods int = @ToPeriodKey - @FromPeriodKey + 1;
@@ -65,9 +65,11 @@ BEGIN
     --    архівувати «рік одного проєкту», поки інший проєкт працює в тих
     --    самих періодах, означає знищити його живі дані.
     --
-    -- ⚠ Процедура приймає @ProjectId лише для журналу прогону; ФІЗИЧНО вона
-    --    архівує період для всіх. Без цієї перевірки різниця між тим і тим
-    --    виявилася б після того, як дані зникли.
+    -- ⚠ @ProjectId — це проєкт, ЗАРАДИ якого прогін запустили; ФІЗИЧНО
+    --    процедура архівує період для всіх. Ця перевірка не дає зачепити
+    --    ЖИВИЙ проєкт, а тих, кого зачеплено законно, записує журнал (нижче).
+    --    Раніше журнал знав лише про @ProjectId — і різниця між «для одного»
+    --    і «для всіх» виявлялася після того, як дані зникли.
     ------------------------------------------------------------------------
     IF EXISTS (
         SELECT 1
@@ -117,11 +119,54 @@ BEGIN
         THROW 50013, @bounds, 1;
     END;
 
-    INSERT INTO itg.ArchiveRun (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status)
-    VALUES (@ProjectId, N'ToArchive', @FromPeriodKey, @ToPeriodKey, SYSUTCDATETIME(), N'Running');
-    SET @RunId = SCOPE_IDENTITY();
+    ------------------------------------------------------------------------
+    -- ЖУРНАЛ — на КОЖЕН зачеплений проєкт, а не лише на @ProjectId.
+    --
+    -- ⛔ Попередня версія записувала один рядок `itg.ArchiveRun` — на
+    --    @ProjectId. Фізично ж `TRUNCATE ... WITH (PARTITIONS)` звільняє
+    --    період ЦІЛКОМ (див. ЗАПОБІЖНИК 1), тож дані сусіда з тих самих
+    --    періодів теж переїжджали в `arc.*`. А `ArchiveAwareCellReader`
+    --    вирішує «читати з архіву чи з гарячої схеми» САМЕ за цим журналом:
+    --    без свого рядка сусід вважався незаархівованим, читач ішов у
+    --    звільнену гарячу партицію і повертав ПОРОЖНЬО. Без помилки, без
+    --    попередження — рік просто зникав із звітів.
+    --
+    -- ⚠ ЗАПОБІЖНИК 1 не закривав цю дірку: він пропускає проєкти зі
+    --    `Status = 4`, а «позначений заархівованим» і «фізично перенесений» —
+    --    різні стани (позначку ставить людина, перенесення робить ця
+    --    процедура після річного грейсу). Проєкт у проміжку між ними для
+    --    запобіжника невидимий, а його дані — у тій самій партиції.
+    --
+    -- ⚠ Обрано саме журналювання, а не звуження `TRUNCATE` до одного
+    --    проєкту: звузити його НЕМА ЧИМ. `pf_ByPeriodKey` партиціонує по
+    --    `PeriodKey`, і `ProjectId` у `doc.CellValue`/`doc.TableRow` навіть
+    --    не колонка — проєкт видно лише через `TableInstance → Document`.
+    --    Єдина альтернатива — `DELETE` по проєкту, а це ~108 млн рядків
+    --    через журнал транзакцій замість звільнення метаданих.
+    ------------------------------------------------------------------------
+    DECLARE @Runs TABLE (RunId bigint PRIMARY KEY, ProjectId int NOT NULL);
 
-    UPDATE doc.Project SET IsArchiving = 1 WHERE Id = @ProjectId;
+    INSERT INTO itg.ArchiveRun (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status)
+    OUTPUT inserted.Id, inserted.ProjectId INTO @Runs (RunId, ProjectId)
+    VALUES (@ProjectId, N'ToArchive', @FromPeriodKey, @ToPeriodKey, SYSUTCDATETIME(), N'Running');
+
+    -- ⚠ `RowsMoved` у супутніх прогонах лишається нулем НАВМИСНО: рядки
+    -- рахуються по партиції, а не по проєкту, і приписати сусідові чуже число
+    -- означало б вигадати звітну величину. Що саме сталося — каже примітка.
+    INSERT INTO itg.ArchiveRun
+        (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status, ErrorMessage)
+    OUTPUT inserted.Id, inserted.ProjectId INTO @Runs (RunId, ProjectId)
+    SELECT DISTINCT d.ProjectId, N'ToArchive', @FromPeriodKey, @ToPeriodKey,
+           SYSUTCDATETIME(), N'Running',
+           N'Спільна партиція: період звільнено прогоном проєкту '
+           + CAST(@ProjectId AS nvarchar(10)) + N'.'
+    FROM doc.Period AS d
+    WHERE d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+      AND d.ProjectId <> @ProjectId;
+
+    -- Позначка «архівується» — теж на всіх: дані сусіда зараз переїжджають
+    -- так само, як і свої.
+    UPDATE doc.Project SET IsArchiving = 1 WHERE Id IN (SELECT ProjectId FROM @Runs);
 
     BEGIN TRY
 
@@ -154,9 +199,9 @@ BEGIN
            SET Status = N'Completed', FinishedAt = SYSUTCDATETIME(),
                LastDonePeriodKey = @ToPeriodKey,
                ErrorMessage = N'Період уже заархівовано: джерело порожнє, архів на місці.'
-         WHERE Id = @RunId;
+         WHERE Id IN (SELECT RunId FROM @Runs);
 
-        UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+        UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
         RETURN;
     END;
 
@@ -225,15 +270,17 @@ BEGIN
             UPDATE itg.ArchiveRun
                SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), LastDonePeriodKey = @k - 1,
                    ErrorMessage = N'Checksum mismatch'
-             WHERE Id = @RunId;
+             WHERE Id IN (SELECT RunId FROM @Runs);
 
-            UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+            UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
             THROW 50010, N'Розбіжність контрольних сум при архівації.', 1;
         END;
 
         UPDATE itg.ArchiveRun
-           SET RowsMoved = RowsMoved + @srcCount, LastDonePeriodKey = @k
-         WHERE Id = @RunId;
+           SET RowsMoved = RowsMoved
+                         + CASE WHEN ProjectId = @ProjectId THEN @srcCount ELSE 0 END,
+               LastDonePeriodKey = @k
+         WHERE Id IN (SELECT RunId FROM @Runs);
 
         SET @k = @k + 1;
     END;
@@ -262,6 +309,78 @@ BEGIN
         ALTER TABLE doc.CellValue DROP CONSTRAINT FK_CellValue_Row;
         ALTER TABLE doc.TableRow  DROP CONSTRAINT FK_TableRow_Instance;
 
+        --------------------------------------------------------------------
+        -- ЗАПОБІЖНИК 3. Повторна звірка В МОМЕНТ знищення.
+        --
+        -- ⛔ Суми з кроку 1 знімалися по одній партиції за раз і до кінця
+        --    прогону встигали застаріти на години. Усе, що лягло в гарячу
+        --    схему в цьому проміжку, `TRUNCATE` знищував — а прогін звітував
+        --    `Completed`, бо звіряв стан, якого вже не існувало. Контрольна
+        --    сума, знята задовго до видалення, не доводить нічого про те, що
+        --    видаляють.
+        --
+        -- ⚠ Проміжок закритий не «уважнішим кроком 1», а МІСЦЕМ перевірки:
+        --    вона стоїть ПІСЛЯ `ALTER TABLE ... DROP CONSTRAINT`, тобто коли
+        --    транзакція вже тримає Sch-M на `doc.CellValue` і `doc.TableRow`.
+        --    Під Sch-M писати в них фізично неможливо, тож між цим `SELECT` і
+        --    `TRUNCATE` нового рядка з'явитися не може.
+        --
+        -- ⚠ `TABLOCKX` — не перестраховка. База працює під RCSI (`06`), де
+        --    читач за замовчуванням бачить ЗНІМОК і не блокує писача; на
+        --    `doc.TableInstance` Sch-M на цей момент ще немає, і без явного
+        --    блокування перевірка звіряла б застарілий знімок.
+        --
+        -- ⚠ Звіряється з `arc.*`, а не з числами кроку 1: архів — це те, що
+        --    ЗАЛИШИТЬСЯ, і питання стоїть саме так — «чи все, що зараз у
+        --    джерелі, вже лежить в архіві».
+        --------------------------------------------------------------------
+        DECLARE @gapSrcCells bigint, @gapDstCells bigint;
+        DECLARE @gapSrcSum decimal(38,10), @gapDstSum decimal(38,10);
+        DECLARE @gapSrcRows bigint, @gapDstRows bigint;
+        DECLARE @gapSrcInst bigint, @gapDstInst bigint;
+
+        SELECT @gapSrcCells = COUNT_BIG(*), @gapSrcSum = ISNULL(SUM(ValueNumeric), 0)
+        FROM doc.CellValue WITH (TABLOCKX)
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+        SELECT @gapSrcRows = COUNT_BIG(*)
+        FROM doc.TableRow WITH (TABLOCKX)
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+        SELECT @gapSrcInst = COUNT_BIG(*)
+        FROM doc.TableInstance WITH (TABLOCKX)
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+        SELECT @gapDstCells = COUNT_BIG(*), @gapDstSum = ISNULL(SUM(ValueNumeric), 0)
+        FROM arc.CellValue
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+        SELECT @gapDstRows = COUNT_BIG(*)
+        FROM arc.TableRow
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+        SELECT @gapDstInst = COUNT_BIG(*)
+        FROM arc.TableInstance
+        WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+        IF @gapSrcCells <> @gapDstCells OR @gapSrcSum <> @gapDstSum
+           OR @gapSrcRows <> @gapDstRows OR @gapSrcInst <> @gapDstInst
+        BEGIN
+            -- ⛔ `THROW` усередині транзакції: `XACT_ABORT` відкочує і зняття
+            --    ключів, і — головне — не дає дійти до `TRUNCATE`. Джерело
+            --    лишається цілим, повторний прогін перенесе його разом із
+            --    тим, що додалося (крок 1 ідемпотентний).
+            DECLARE @gapMsg nvarchar(600) =
+                N'Джерело змінилося після звірки сум: комірок '
+                + CAST(@gapSrcCells AS nvarchar(20)) + N' проти '
+                + CAST(@gapDstCells AS nvarchar(20)) + N' в архіві, рядків '
+                + CAST(@gapSrcRows AS nvarchar(20)) + N' проти '
+                + CAST(@gapDstRows AS nvarchar(20))
+                + N'. Партиції не звільнено.';
+
+            THROW 50014, @gapMsg, 1;
+        END;
+
         SET @sql = N'TRUNCATE TABLE doc.CellValue     WITH (PARTITIONS (' + @range + N'));';
         EXEC sp_executesql @sql;
         SET @sql = N'TRUNCATE TABLE doc.TableRow      WITH (PARTITIONS (' + @range + N'));';
@@ -285,16 +404,27 @@ BEGIN
         -- підняти помилку далі. Ключі й дані повернула транзакція.
         IF @@TRANCOUNT > 0 ROLLBACK;
 
+        -- ⚠ Запис у журнал знахідок — ПІСЛЯ відкату: усередині транзакції він
+        -- відкотився б разом із нею, і найдорожчий випадок (дані змінилися
+        -- під операцією) не лишив би жодного сліду.
+        IF ERROR_NUMBER() = 50014
+            INSERT INTO aud.ConsistencyIssue
+                (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
+            VALUES (SYSUTCDATETIME(), 2, N'ARCHIVE_GAP', N'Period', @FromPeriodKey,
+                    N'Джерело змінилося між звіркою сум і звільненням партиції; '
+                    + N'дані джерела збережено.');
+
         UPDATE itg.ArchiveRun
            SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), ErrorMessage = ERROR_MESSAGE()
-         WHERE Id = @RunId;
+         WHERE Id IN (SELECT RunId FROM @Runs);
 
-        UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+        UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
         THROW;
     END CATCH;
 
-    UPDATE itg.ArchiveRun SET Status = N'Completed', FinishedAt = SYSUTCDATETIME() WHERE Id = @RunId;
-    UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+    UPDATE itg.ArchiveRun SET Status = N'Completed', FinishedAt = SYSUTCDATETIME()
+     WHERE Id IN (SELECT RunId FROM @Runs);
+    UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
 END;
 GO
 
