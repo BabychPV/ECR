@@ -30,6 +30,7 @@ import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
+import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
@@ -259,7 +260,23 @@ export function AppLayout(): JSX.Element {
                 size="sm"
                 aria-label={t('nav.menu')}
               />
-              <Text fw={700}>ECR</Text>
+              {/* ⚠ Знак — оздоба (`aria-hidden`), назва поруч — текст.
+                  Зчитувач екрана має прочитати «ECR Web» рівно один раз. */}
+              <Group gap="xs" wrap="nowrap">
+                <BrandMark />
+                <Text fw={700} c="brand.8" darkHidden>
+                  ECR
+                </Text>
+                <Text fw={700} c="brand.2" lightHidden>
+                  ECR
+                </Text>
+                <Text fw={500} c="brand.5" darkHidden>
+                  Web
+                </Text>
+                <Text fw={500} c="brand.4" lightHidden>
+                  Web
+                </Text>
+              </Group>
             </Group>
 
             <Group gap="xs">
