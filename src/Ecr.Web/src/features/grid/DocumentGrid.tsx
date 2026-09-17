@@ -65,6 +65,57 @@ export interface DocumentGridProps {
 type GridRow = Record<string, unknown> & { __rowKey: string };
 
 /**
+ * Ім'я властивості моделі, під яким живе ПІДПИС рядка.
+ *
+ * ⛔ Подвійне підкреслення — та сама домовленість, що й у `__rowKey`: службове
+ * поле не має права зіткнутися з кодом колонки таблиці. Код колонки —
+ * латиниця, цифри й підкреслення (`EcrCode`), тож формально зіткнення
+ * можливе; префікс робить його неможливим на практиці й водночас читається як
+ * «це не дані».
+ *
+ * ⚠ Ця колонка НЕ входить у `slice.columns`, тому вставка з буфера
+ * (`planPaste` отримує саме `slice.columns.map(c => c.code)`), збереження
+ * (`PATCH` шле коди колонок) і стани комірок її не бачать узагалі. Це не
+ * випадковість, а причина, чому підпис зроблено окремою колонкою, а не
+ * псевдоколонкою в самому зрізі.
+ */
+const RowLabelProp = '__rowLabel';
+
+/**
+ * Підпис рядка, яким його бачить оператор.
+ *
+ * ⚠ Запасний варіант — `rowKey`, і це не вигадка: так само робить сторінка
+ * версії шаблону (`TemplateVersionPage`, `row.label ?? row.rowKey`). Порожній
+ * підпис у формі з фіксованими рядками гірший за технічний ключ: ключ
+ * принаймні дає за що зачепитися очима й що назвати в листі підтримці.
+ */
+function rowLabelOf(row: TableSliceDto['rows'][number]): string {
+  return row.label ?? row.rowKey;
+}
+
+/**
+ * Чи є в зрізі хоч один рядок із власним підписом.
+ *
+ * ⛔ Колонка підпису з'являється лише тоді, коли підписи справді є. У таблиці
+ * з динамічними рядками (`RowMode` дозволяє додавати свої) підписів немає за
+ * побудовою — `Label` там `null` на кожному рядку, — і колонка з самими
+ * технічними ключами відбирала б ширину в даних, нічого не пояснюючи.
+ */
+function hasRowLabels(slice: TableSliceDto): boolean {
+  return slice.rows.some((row) => row.label !== null && row.label.length > 0);
+}
+
+/**
+ * Ширина колонки підпису за замовчуванням.
+ *
+ * ⚠ Ширша за колонку даних (`DefaultColumnWidth`), бо несе не число, а назву
+ * показника — «Валові викиди діоксиду вуглецю» не вміщується в ширину, якої
+ * вистачає на `1 234,56`. Оператор може змінити її, і зміна зберігається тим
+ * самим механізмом, що й для решти колонок.
+ */
+const RowLabelColumnWidth = 260;
+
+/**
  * Grid-редактор документа.
  *
  * Обов'язкові можливості (`B21` §12, критерії FQ-1):
@@ -1119,7 +1170,11 @@ export function gridColumns(
   // з них замість одного на довідник.
   lookupEntriesByRegistryId: ReadonlyMap<number, readonly RegistryEntryDto[]> = new Map(),
 ): ColumnRegular[] {
-  return slice.columns.map((column) => {
+  // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
+  // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
+  // контекстний тип, який доти давав їм сам тип повернення функції, — і
+  // `model` стає `any`. Те саме значення, але мовчки без перевірок.
+  const dataColumns: ColumnRegular[] = slice.columns.map((column) => {
     // ⛔ Обов'язковість — НА СІТЦІ, ДО спроби зберегти, а не лише в момент
     // відхиленого PATCH. Дві незалежні осі зливаються в один сигнал
     // (`ColumnDto.IsRequiredByMethodology` навмисно документує це як «інша
@@ -1256,6 +1311,40 @@ export function gridColumns(
       },
     };
   });
+
+  // ⛔ Дефект, який це закриває: підпис рядка сервер РАХУЄ Й ЛОКАЛІЗУЄ
+  // (`GetTableSliceHandler`: `Label: r.Def?.LabelL10n.Get(language)`), кладе в
+  // контракт (`TableSliceDto.Label`) — а сітка документа не читала його
+  // ЖОДНОГО РАЗУ. Для форми з фіксованими рядками це означає таблицю, у якій
+  // рядки нічим не відрізняються: оператор бачить стовпчик чисел і не знає,
+  // котре з них викиди, а котре — витрата палива. Показував підпис лише
+  // адміністративний екран версії шаблону, тобто той, куди оператор не
+  // заходить.
+  //
+  // ⚠ Колонка ПЕРША і тільки для читання. Перша — бо підпис ідентифікує
+  // рядок, і місце ідентифікатора там, де око починає читати; тільки для
+  // читання — бо це не дані документа, а опис структури: правити його можна
+  // рівно там, де він заведений, у версії шаблону.
+  return hasRowLabels(slice)
+    ? [
+        {
+          prop: RowLabelProp,
+          name: t('grid.rowLabelHeader'),
+          readonly: true,
+          size: widths[RowLabelProp] ?? RowLabelColumnWidth,
+
+          // ⚠ Порожньої клітинки тут не буває: `rowLabelOf` завжди дає або
+          // підпис, або технічний ключ. `title` — щоб довгий підпис можна було
+          // прочитати цілком, не розтягуючи колонку.
+          cellTemplate: (createElement, cell) => {
+            const label = String(cell.model[RowLabelProp] ?? '');
+
+            return createElement('span', { class: 'ecr-row-label', title: label }, label);
+          },
+        },
+        ...dataColumns,
+      ]
+    : dataColumns;
 }
 
 /**
@@ -1268,6 +1357,12 @@ export function gridColumns(
 function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>): GridRow[] {
   return slice.rows.map((row) => {
     const model: GridRow = { __rowKey: row.rowKey };
+
+    // ⚠ Підпис кладеться в модель ЗАВЖДИ, а колонка для нього з'являється лише
+    // там, де є що показати (`hasRowLabels`). Умовне поле зробило б форму
+    // рядка непостійною, а `RevoGrid` читає значення за іменем властивості —
+    // відсутність поля й порожній підпис виглядали б однаково.
+    model[RowLabelProp] = rowLabelOf(row);
 
     for (const column of slice.columns) {
       const key = cellKey(row.rowKey, column.code);
