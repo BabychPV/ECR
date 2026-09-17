@@ -436,8 +436,20 @@ public static class PublishChecks
         return diagnostics;
     }
 
-    /// <summary>Версія без структури не публікується.</summary>
+    /// <summary>
+    /// Перевірки САМОЇ СТРУКТУРИ, яким не потрібен рушій виразів: версія без
+    /// жодного аркуша і обчислювана колонка без джерела значення.
+    /// </summary>
     /// <param name="version">Версія, що публікується.</param>
+    /// <param name="boundColumnIds">
+    /// Колонки, до яких прив'язаний вихід методології
+    /// (<c>cfg.CalculationBinding</c>, <b>активні</b> прив'язки). <c>null</c> —
+    /// «жодної»; це найсуворіше значення, а не пропуск перевірки, тому
+    /// замовчування нічого не послаблює. Прив'язки не належать графу версії
+    /// (<c>TableDef</c> не має навігації на них), тож єдиний спосіб дізнатися
+    /// про них — отримати перелік ззовні; обробник бере його з
+    /// <c>ICalculationBindingStore</c>.
+    /// </param>
     /// <remarks>
     /// ⛔ Цієї перевірки не було ні в домені (<see cref="TemplateVersion.Publish"/>
     /// свідомо лише перемикає стан — валідація цілісності відбувається ДО
@@ -450,23 +462,88 @@ public static class PublishChecks
     /// як і в діагностиці циклу графа, коли проблема не належить одному місцю
     /// в тексті виразу.
     /// </remarks>
-    public static IReadOnlyList<ExpressionDiagnostic> CheckStructure(TemplateVersion version)
+    public static IReadOnlyList<ExpressionDiagnostic> CheckStructure(
+        TemplateVersion version, IReadOnlySet<int>? boundColumnIds = null)
     {
         ArgumentNullException.ThrowIfNull(version);
 
-        if (version.Sheets.Any(s => !s.IsDeleted))
+        if (!version.Sheets.Any(s => !s.IsDeleted))
         {
-            return [];
+            return
+            [
+                new ExpressionDiagnostic(
+                    "ECR-TMPL-0422",
+                    $"Версію {version.Version} неможливо опублікувати: у ній немає жодного аркуша. " +
+                    "Публікація без структури не має сенсу — рахувати нічим.",
+                    0, 1),
+            ];
         }
 
-        return
-        [
-            new ExpressionDiagnostic(
-                "ECR-TMPL-0422",
-                $"Версію {version.Version} неможливо опублікувати: у ній немає жодного аркуша. " +
-                "Публікація без структури не має сенсу — рахувати нічим.",
-                0, 1),
-        ];
+        var diagnostics = new List<ExpressionDiagnostic>();
+
+        foreach (var table in LiveTables(version.Sheets))
+        {
+            CheckComputedColumns(table, boundColumnIds, diagnostics);
+        }
+
+        return diagnostics;
+    }
+
+    /// <summary>
+    /// Обчислювані колонки без джерела значення (<c>ECR-TMPL-4226</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Виявлено живим прогоном: версія з колонкою типу <c>Calculated</c>, до
+    /// якої не прив'язано НІЧОГО, публікувалася без жодного зауваження. Тип
+    /// колонки обіцяє «значення рахує система» і тим самим забороняє ручний
+    /// ввід (<c>EditDenyReason.CalculatedCell</c>) — тож оператор отримує
+    /// порожню клітинку, якої не має права заповнити, і жодного пояснення.
+    /// Перерахунок для неї теж не робить нічого: ні формули в графі
+    /// (<c>cfg.FormulaDependency</c>), ні прив'язки в
+    /// <c>RecalculationJob.BindingsAsync</c>. Дефект мовчазний рівно того
+    /// ґатунку, від якого вся ця перевірка й існує: помилка, видима лише як
+    /// порожнє місце у звіті.
+    ///
+    /// ⚠ Джерел ДВА, і обидва рівноправні: формула шаблону
+    /// (<c>CellDataType.Formula</c>) і вихід методології
+    /// (<c>CellDataType.Calculated</c> → <c>cfg.CalculationBinding</c>).
+    /// Вимагати «формулу» від колонки типу <c>Calculated</c> означало б
+    /// відхиляти нормальну конфігурацію: методологія пише в неї за посиланням і
+    /// формули шаблону не має за побудовою (<c>D-69</c>). Тому перевіряється
+    /// НАЯВНІСТЬ хоч якогось джерела, а не конкретний його вид.
+    ///
+    /// ⚠ Перевірка стоїть на ПУБЛІКАЦІЇ, а не на збереженні колонки. Порядок
+    /// роботи конфігуратора зворотний до порядку залежності: спершу заводять
+    /// колонку, і лише потім прив'язують до неї вихід методології (адреса
+    /// прив'язки — сам <c>ColumnDefId</c>, <c>UQ_CalculationBinding</c>).
+    /// Заборона на збереженні зробила б цей порядок неможливим.
+    /// </remarks>
+    private static void CheckComputedColumns(
+        TableDef table, IReadOnlySet<int>? boundColumnIds, List<ExpressionDiagnostic> diagnostics)
+    {
+        var computed = table.Formulas
+            .Where(f => !f.IsDeleted)
+            .Select(f => f.ColumnDefId)
+            .ToHashSet();
+
+        foreach (var column in table.Columns.Where(c => !c.IsDeleted && c.IsComputed))
+        {
+            if (computed.Contains(column.Id) || boundColumnIds?.Contains(column.Id) == true)
+            {
+                continue;
+            }
+
+            // Названо КОНКРЕТНУ колонку: «є помилки» змусило б конфігуратора
+            // шукати винуватця серед сотень колонок руками.
+            diagnostics.Add(new ExpressionDiagnostic(
+                ExpressionErrors.CalculatedWithoutSource,
+                $"Колонка {table.Code}.{column.Code} має тип {column.DataType}, тобто мусить "
+                + "обчислюватися, але обчислювати її нічим: ні формули шаблону, ні прив'язки "
+                + "виходу методології. В опублікованій формі це порожня клітинка, яку оператор "
+                + "не має права заповнити.",
+                0,
+                1));
+        }
     }
 
     /// <summary>

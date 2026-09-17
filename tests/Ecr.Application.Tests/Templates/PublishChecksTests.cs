@@ -87,6 +87,97 @@ public sealed class PublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Колонка_Calculated_без_жодного_джерела_відхиляє_публікацію()
+    {
+        // ⛔ Виявлено живим прогоном: колонка типу `Calculated` публікувалася
+        // БЕЗ джерела значення. Тип каже «це рахує система», а рахувати нічим:
+        // прив'язки методології (`cfg.CalculationBinding`) немає, формули
+        // шаблону теж. Оператор отримує порожню клітинку, яку йому НЕ дають
+        // заповнити (`EditDenyReason.CalculatedCell`), і жодного пояснення;
+        // перерахунок для неї не робить нічого — мовчки, без помилки.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        builder.Column(table, "Jan", isMonthColumn: true);
+        builder.Column(table, "Emission", CellDataType.Calculated);
+        builder.Row(table, "7001001", 1);
+
+        var version = builder.Version();
+
+        // ⚠ Решта перевірок мовчить, і це не «все гаразд»: формул у версії
+        // немає, тож `Run` і `CheckRules` тут безпредметні. Якби перевірка
+        // колонок не стояла окремо, версія публікувалася б.
+        Assert.Empty(Run(version));
+        Assert.Empty(PublishChecks.CheckRules(version));
+
+        var diagnostic = Assert.Single(PublishChecks.CheckStructure(version));
+
+        Assert.Equal("ECR-TMPL-4226", diagnostic.Code);
+
+        // Відмова називає КОНКРЕТНУ колонку: «є помилки» змусило б
+        // конфігуратора шукати винуватця серед сотень колонок руками.
+        Assert.Contains("Emission", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Та_сама_колонка_з_прив_язкою_методології_публікацію_не_блокує()
+    {
+        // ⚠ Друга половина, без якої перша нічого не означає: перевірка не
+        // забороняє тип `Calculated`, вона вимагає ДЖЕРЕЛО. Колонка цього типу
+        // формули шаблону не має за побудовою (`D-69`) — значення пише
+        // методологія за посиланням, і саме прив'язка робить конфігурацію
+        // повною.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        builder.Column(table, "Jan", isMonthColumn: true);
+        var bound = builder.Column(table, "Emission", CellDataType.Calculated);
+        builder.Row(table, "7001001", 1);
+
+        var version = builder.Version();
+
+        Assert.Empty(PublishChecks.CheckStructure(version, new HashSet<int> { bound.Id }));
+
+        // ⛔ І та сама версія з прив'язкою на ІНШУ колонку лишається
+        // відхиленою: інакше тест був би зеленим і від «будь-яка прив'язка в
+        // версії пробачає будь-яку колонку».
+        Assert.Single(PublishChecks.CheckStructure(version, new HashSet<int> { bound.Id + 1000 }));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Колонка_Formula_без_формули_шаблону_відхиляє_публікацію()
+    {
+        // ⚠ Той самий дефект з іншого боку: для типу `Formula` джерелом є
+        // формула шаблону, і її відсутність так само лишає оператора з
+        // порожньою клітинкою, якої не можна заповнити.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var jan = builder.Column(table, "Jan", isMonthColumn: true);
+        var total = builder.Column(table, "Total", CellDataType.Formula);
+        builder.Row(table, "7001001", 1);
+
+        var version = builder.Version();
+
+        var diagnostic = Assert.Single(PublishChecks.CheckStructure(version));
+        Assert.Equal("ECR-TMPL-4226", diagnostic.Code);
+        Assert.Contains("Total", diagnostic.Message, StringComparison.Ordinal);
+
+        // Формула на цю ж колонку знімає зауваження — і це доводить, що
+        // перевірка дивиться саме на джерело, а не на тип колонки.
+        builder.Formula(table, "SUM([Jan])", column: total);
+
+        Assert.Empty(PublishChecks.CheckStructure(version));
+
+        // ⚠ `jan` лишається звичайною колонкою: якби перевірка вимагала
+        // джерело від УСІХ колонок, зауваження було б і тут.
+        Assert.False(jan.IsComputed);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Синтаксична_помилка_у_виразі_дає_зауваження()
     {
         var fixture = Structure();

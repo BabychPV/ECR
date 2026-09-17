@@ -244,6 +244,7 @@ public sealed class ValidateExpressionTests(SqlServerFixture sql)
             new Repository<TemplateVersion, int>(db),
             new TemplateVersionStore(db),
             engine ?? new RealFormulaEngine(),
+            new CalculationBindingStore(db),
             new MetadataCache(memory, db),
             new UnitCatalog(db),
             _access,
