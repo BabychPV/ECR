@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
 import { loadCatalog } from '@/shared/i18n';
 import { RegistriesPage } from '../RegistriesPage';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 4: «Creating a registry with an invalid code (spaces/
@@ -138,7 +139,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <RegistriesPage />

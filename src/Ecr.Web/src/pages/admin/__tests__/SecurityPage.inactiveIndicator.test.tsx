@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
+import { withTestDefaults } from '@/test/render';
 
 /**
  * UX-аудит `SecurityPage`, знахідка 2/3: неактивні ролі й користувачі
@@ -149,7 +150,7 @@ function renderTab(tab: 'roles' | 'users') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
-    <MantineProvider theme={theme}>
+    <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[`/admin/security?tab=${tab}`]}>
           <SecurityPage />

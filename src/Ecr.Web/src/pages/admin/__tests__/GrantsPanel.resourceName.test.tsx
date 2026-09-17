@@ -7,6 +7,7 @@ import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { GrantsPanel } from '@/pages/admin/GrantsPanel';
 import type { RoleView } from '@/api/types';
+import { withTestDefaults } from '@/test/render';
 
 /**
  * Колонка розв'язаної назви ресурсу в переліку грантів (`Q-299`).
@@ -154,7 +155,7 @@ function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
-    <MantineProvider theme={theme}>
+    <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={client}>
         <GrantsPanel roles={Roles} />
       </QueryClientProvider>

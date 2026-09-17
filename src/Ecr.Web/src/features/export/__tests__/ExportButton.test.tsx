@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { ExportButton } from '../ExportButton';
+import { testTheme } from '@/test/render';
 
 /**
  * Стеження за задачею експорту (Q-234).
@@ -96,7 +97,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <ExportButton documentId={1} periodKey={202601} language="en" />
       </QueryClientProvider>

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import { MantineProvider, TextInput } from '@mantine/core';
 import { ExpressionEditor } from '../ExpressionEditor';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 5: «Formula dialog silently wipes the "Code" field the
@@ -102,7 +103,7 @@ function FormulaDialog(): JSX.Element {
 describe('ExpressionEditor: правка виразу не стирає інші поля форми (lane5)', () => {
   it('редагування виразу ПІСЛЯ введення коду лишає код на місці', async () => {
     render(
-      <MantineProvider>
+      <MantineProvider theme={testTheme}>
         <FormulaDialog />
       </MantineProvider>,
     );

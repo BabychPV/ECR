@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
+import { withTestDefaults } from '@/test/render';
 
 /**
  * UI-аудит, lane 1: `lane1-zero-permission-role-no-warning.md` — роль без
@@ -118,7 +119,7 @@ function renderRoles() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
-    <MantineProvider theme={theme}>
+    <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/admin/security?tab=roles']}>
           <SecurityPage />

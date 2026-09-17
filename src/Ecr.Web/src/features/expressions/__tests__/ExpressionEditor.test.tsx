@@ -3,6 +3,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { ExpressionEditor } from '../ExpressionEditor';
 import type { ExpressionValidationDto } from '@/api/types';
+import { testTheme } from '@/test/render';
 
 /**
  * Застаріла перевірка при швидкому наборі (`Q-253`).
@@ -102,7 +103,7 @@ describe('ExpressionEditor: перевірка при введенні не по
     const onValidated = vi.fn();
 
     const { rerender } = render(
-      <MantineProvider>
+      <MantineProvider theme={testTheme}>
         <ExpressionEditor
           value="A"
           onChange={() => {}}
@@ -131,7 +132,7 @@ describe('ExpressionEditor: перевірка при введенні не по
     // наборі; тут він уже пішов, і саме тому цей сценарій — найгірший:
     // запит для "A" вже в польоті, коли текст став "AB").
     rerender(
-      <MantineProvider>
+      <MantineProvider theme={testTheme}>
         <ExpressionEditor
           value="AB"
           onChange={() => {}}

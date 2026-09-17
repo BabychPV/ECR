@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит-пас 5, дві незалежні знахідки на одній сторінці:
@@ -82,7 +83,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/snapshots']}>
         <QueryClientProvider client={client}>
           <SnapshotsPage />

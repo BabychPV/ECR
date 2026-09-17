@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
+import { withTestDefaults } from '@/test/render';
 
 /**
  * Таблиця користувачів (`Q-286`): заголовок «State» стояв над колонкою, що
@@ -112,7 +113,7 @@ function renderUsersTab() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
-    <MantineProvider theme={theme}>
+    <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/admin/security?tab=users']}>
           <SecurityPage />

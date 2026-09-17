@@ -8,6 +8,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
+import { withTestDefaults } from '@/test/render';
 
 /**
  * Живий дефект, знайдений першоособовим UX-проходом (створення документа,
@@ -100,7 +101,7 @@ function show() {
 
   return render(
     <StrictMode>
-      <MantineProvider theme={theme}>
+      <MantineProvider theme={withTestDefaults(theme)}>
         <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={['/admin/security?tab=roles']}>
             <SecurityPage />

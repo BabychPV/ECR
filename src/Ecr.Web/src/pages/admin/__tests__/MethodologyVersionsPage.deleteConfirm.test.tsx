@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { loadCatalog } from '@/shared/i18n';
+import { testTheme } from '@/test/render';
 
 /**
  * Видалення формули чернетки без підтвердження (UX-аудит, `ФВ-9.15`).
@@ -157,7 +158,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/admin/methodologies/1/versions']}>
           <Routes>

@@ -4,6 +4,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { testTheme } from '@/test/render';
 
 /**
  * Директива "пошук колонки за назвою замість голого ColumnDefId", панель
@@ -139,7 +140,7 @@ async function show(): Promise<void> {
   const { MethodologyBindingsPanel } = await import('../MethodologyContentPanels');
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MethodologyBindingsPanel methodologyId={1} editable />
       </QueryClientProvider>
