@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ColumnRegular } from '@revolist/revogrid';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
+import type { Debouncer } from '../autosave';
 import { DocumentGrid } from '../DocumentGrid';
 
 /**
@@ -31,6 +32,44 @@ import { DocumentGrid } from '../DocumentGrid';
  * «зберігається».
  */
 type CellProps = { class?: string; 'data-cell-state'?: string };
+
+/**
+ * ⛔ Дебаунс автозбереження в ЦЬОМУ файлі не планує нічого — і це не
+ * послаблення перевірки, а відновлення того, що файл про себе й каже вище:
+ * «порядок їхнього завершення задає ТЕСТ, а не випадок».
+ *
+ * ⛔ Чому попередня версія була неправильна. Сценарій нижче звертається до
+ * запитів за НОМЕРОМ (`settle(0)`, `settle(1)`, `inFlight[2]`): номер — це і є
+ * спосіб сказати «повільний A» чи «швидкий B». Справжній `createDebouncer` тим
+ * часом ставив `setTimeout` на 500 мс РЕАЛЬНОГО часу після кожної правки, і
+ * під повним набором (де файл легко чекає своєї черги довше за півсекунди) цей
+ * таймер устигав спрацювати посеред сценарію й дописати в `inFlight` зайвий
+ * патч. Далі номери означали вже не те, що написано: `settle(1)` завершував не
+ * «швидкий B», а автозбереження.
+ *
+ * ⚠ Саме так і виглядало падіння «expected 1 but got 3»: у журналі опинялися
+ * три запити — явне збереження (`r1`,`r2`), чужий автозбережений `r3` із
+ * таймера ПОПЕРЕДНЬОГО тесту (це виправлено в `DocumentGrid.tsx`: дебаунс
+ * скасовується при розмонтуванні) і власне автозбереження цього тесту
+ * (`r1`,`r2`). Останнє — КОРЕКТНА поведінка продукту, тож прибрати його можна
+ * лише тут, у тесті, і жодна перевірка від цього не слабшає.
+ *
+ * ⚠ Сам дебаунс без нагляду не лишається: його тримають `autosave.test.ts`
+ * (таймер як такий) і `DocumentGrid.autosaveUnmount.test.tsx` — і те, що він
+ * спрацьовує на змонтованому гріді, і те, що не переживає розмонтування. Тут
+ * перевіряється ІНШЕ — обробник УСПІХУ патчу.
+ */
+vi.mock('../autosave', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../autosave')>();
+
+  return {
+    ...actual,
+    createDebouncer: (): Debouncer => ({
+      trigger: () => {},
+      cancel: () => {},
+    }),
+  };
+});
 
 vi.mock('@revolist/react-datagrid', () => ({
   RevoGrid: (props: {
@@ -187,9 +226,26 @@ function stateOf(rowKey: string): string {
   return screen.getByTestId(`state-${rowKey}`).textContent ?? '';
 }
 
-async function clickSave(): Promise<void> {
+/**
+ * Явне збереження оператором — `Ctrl+S`.
+ *
+ * ⛔ Не кнопка «Зберегти», і причина не стилістична. Mantine вимикає кнопку на
+ * `loading={isPending}`, а `isPending` істинний, доки в дорозі є ХОЧ ОДИН
+ * запит. Тобто другий клік по ній у цьому сценарії — тихий no-op: він не
+ * створює другого збереження, а просто нічого не робить. Сценарій §10.2 весь
+ * побудований на ДВОХ одночасних запитах, тож кнопкою його не відтворити в
+ * принципі.
+ *
+ * ⛔ Попередня версія файлу все-таки клікала кнопку — і «другим запитом»
+ * насправді ставало не те, що клікнули, а 500-мс автозбереження, яке встигало
+ * спрацювати всередині `waitFor`. Тобто тест і спирався на годинник машини, і
+ * називав цей запит чужим ім'ям. `Ctrl+S` (`onKeyDown` у `DocumentGrid.tsx`)
+ * НЕ дивиться на `isPending` — це один із чотирьох незалежних шляхів, названих
+ * у преамбулі, і саме він робить сценарій детермінованим без очікування часу.
+ */
+async function pressCtrlS(): Promise<void> {
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: /grid\.save/ }));
+    fireEvent.keyDown(screen.getByTestId('revogrid-stub'), { key: 's', ctrlKey: true });
     await Promise.resolve();
   });
 }
@@ -207,13 +263,13 @@ describe('DocumentGrid: успіх одного збереження не вик
 
     // Правка A: рядок r1, збереження ПОВІЛЬНЕ — лишається в дорозі.
     fireEvent.click(screen.getByRole('button', { name: 'edit-r1' }));
-    await clickSave();
+    await pressCtrlS();
     await waitFor(() => expect(inFlight).toHaveLength(1));
     expect(inFlight[0]?.rowKeys).toEqual(['r1']);
 
     // Правка B: рядок r2, окреме збереження — теж у дорозі, завершиться ПЕРШИМ.
     fireEvent.click(screen.getByRole('button', { name: 'edit-r2' }));
-    await clickSave();
+    await pressCtrlS();
     await waitFor(() => expect(inFlight).toHaveLength(2));
 
     // B завершується: обидва рядки цього патчу коректно перестають бути dirty.
@@ -234,7 +290,7 @@ describe('DocumentGrid: успіх одного збереження не вик
     await waitFor(() => expect(stateOf('r3')).toBe('dirty'));
 
     // ⚠ І воно справді ще надсилається: наступне збереження несе саме r3.
-    await clickSave();
+    await pressCtrlS();
     await waitFor(() => expect(inFlight).toHaveLength(3));
     expect(inFlight[2]?.rowKeys).toEqual(['r3']);
   });
@@ -250,7 +306,7 @@ describe('DocumentGrid: успіх одного збереження не вик
     await waitFor(() => expect(stateOf('r1')).toBe('dirty'));
     expect(stateOf('r2')).toBe('dirty');
 
-    await clickSave();
+    await pressCtrlS();
     await waitFor(() => expect(inFlight).toHaveLength(1));
     expect(inFlight[0]?.rowKeys).toEqual(['r1', 'r2']);
 
