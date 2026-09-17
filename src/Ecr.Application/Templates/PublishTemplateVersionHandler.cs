@@ -17,6 +17,7 @@ public sealed class PublishTemplateVersionHandler(
     IRepository<Domain.Entities.Configuration.TemplateVersion, int> versions,
     ITemplateVersionStore versionStore,
     IFormulaEngine formulaEngine,
+    ICalculationBindingStore calculationBindings,
     IMetadataCache metadataCache,
     IUnitCatalog unitCatalog,
     Security.IAccessDecisionService access,
@@ -109,7 +110,17 @@ public sealed class PublishTemplateVersionHandler(
         // кодом `204`, і ні домен, ні сервер цього не бачили (директива №09
         // §6.5, `S-09`). `TemplateVersion.Publish` навмисно не перевіряє це
         // сама — валідація цілісності відбувається до виклику (ФВ-2.9).
-        diagnostics = [.. diagnostics, .. PublishChecks.CheckStructure(version)];
+        //
+        // ⛔ Прив'язки методологій БЕРУТЬСЯ ТУТ і передаються явно: вони не
+        // належать графу версії (`TableDef` не має навігації на
+        // `cfg.CalculationBinding`), тож без цього виклику перевірка
+        // `ECR-TMPL-4226` вважала б неприв'язаною кожну колонку типу
+        // `Calculated` — тобто відхиляла б нормальну конфігурацію.
+        var boundColumnIds = await calculationBindings
+            .ListBoundColumnIdsAsync(templateVersionId, ct)
+            .ConfigureAwait(false);
+
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckStructure(version, boundColumnIds)];
 
         if (diagnostics.Count > 0)
         {
