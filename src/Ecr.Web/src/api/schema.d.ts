@@ -11428,6 +11428,13 @@ export interface components {
             /** @description Який вихід розійшовся. */
             outputCode: string;
             /**
+             * Format: int32
+             * @description Чия саме це величина; `null` — вихід без речовини.
+             *     ⛔ Поля не було, і без нього звіт не можна було прочитати: розбіжності
+             *     десяти речовин одного виходу виглядали як десять однакових рядків.
+             */
+            substanceEntryId: null | number;
+            /**
              * Format: double
              * @description Допуск порівняння; нуль означає точний збіг.
              */

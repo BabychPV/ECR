@@ -24,6 +24,10 @@ public sealed class MethodologyPublishTests
     private const int VersionId = 51;
     private const int PreviousVersionId = 50;
     private const long CodEntry = 901;
+
+    /// <summary>Друга речовина того самого виходу.</summary>
+    private const int NoxEntry = 902;
+
     private const int TonneUnit = 8;
 
     private static readonly DateTime Now = new(2026, 2, 10, 12, 0, 0, DateTimeKind.Utc);
@@ -387,6 +391,59 @@ public sealed class MethodologyPublishTests
         Assert.True(_version.IsPublished);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-13.7")]
+    public async Task Розбіжність_ДРУГОЇ_речовини_відхиляє_публікацію()
+    {
+        // ⛔ Це та сама вада, через яку золотий набір був гіршим за відсутній.
+        // Звірка брала `FirstOrDefault(v => v.OutputCode == code)` зі списку,
+        // який іде ПО ОДНОМУ РЯДКУ НА (речовина × вихід), — отже міряла лише
+        // ПЕРШУ речовину. Друга й далі могли бути якими завгодно, і версія
+        // публікувалася зеленою: «на золотому наборі жодне число не змінилося»
+        // було правдою рівно про одну речовину з N.
+        //
+        // Тут `tons` для речовини 901 збігається з очікуванням до останнього
+        // знака, а для 902 відрізняється у 5 разів.
+        _module.ExecuteAsync(Arg.Any<CalculationInput>(), Arg.Any<CancellationToken>())
+               .Returns(call => TwoSubstances(call.Arg<CalculationInput>(), 0.912688m, 4.563440m));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+
+        // ⚠ Відмова називає РЕЧОВИНУ, вихід і обидва числа. Сама лічба
+        // («знайдено проблем — 1») відправила б методолога перебирати всі
+        // речовини набору руками, щоб дізнатися, яка саме розійшлася.
+        Assert.Contains("902", error.Message, StringComparison.Ordinal);
+        Assert.Contains("tons", error.Message, StringComparison.Ordinal);
+        Assert.Contains("4.563440", error.Message, StringComparison.Ordinal);
+        Assert.Contains("0.912688", error.Message, StringComparison.Ordinal);
+
+        // ⚠ І та сама розбіжність лежить у `details` структурно — клієнт
+        // перелічує її, не розбираючи текст повідомлення.
+        Assert.NotNull(error.Details);
+        Assert.True(error.Details!.ContainsKey("goldenSet"));
+
+        Assert.False(_version.IsPublished);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-13.7")]
+    public async Task Збіг_УСІХ_речовин_публікацію_пропускає()
+    {
+        // ⛔ Друга половина того самого правила, і без неї перша нічого не
+        // варта: сторож, який відхиляє все підряд, зелений із хибної причини.
+        // Дві речовини, обидві в межах допуску — версія публікується.
+        _module.ExecuteAsync(Arg.Any<CalculationInput>(), Arg.Any<CancellationToken>())
+               .Returns(call => TwoSubstances(call.Arg<CalculationInput>(), 0.912688m, 0.912688m));
+
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+
+        Assert.True(_version.IsPublished);
+    }
+
     /// <summary>Профіль із небезпечним правом публікації методології.</summary>
     private static AccessProfile Profile() => new()
     {
@@ -416,6 +473,20 @@ public sealed class MethodologyPublishTests
         new(input.DocumentId, input.SourceRowKey,
             [new CalculationOutputValue(
                 input.Methodology.MethodologyVersionId, (int)CodEntry, "tons", tons, TonneUnit)],
+            []);
+
+    /// <summary>
+    /// Той самий вихід для ДВОХ речовин — форма, яку віддає реальний рушій:
+    /// список результатів іде по одному рядку на (речовина × вихід).
+    /// </summary>
+    private static CalculationOutput TwoSubstances(CalculationInput input, decimal cod, decimal nox) =>
+        new(input.DocumentId, input.SourceRowKey,
+            [
+                new CalculationOutputValue(
+                    input.Methodology.MethodologyVersionId, (int)CodEntry, "tons", cod, TonneUnit),
+                new CalculationOutputValue(
+                    input.Methodology.MethodologyVersionId, NoxEntry, "tons", nox, TonneUnit),
+            ],
             []);
 
     private static List<MethodologyTestCase> TestCases() =>

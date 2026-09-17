@@ -7640,6 +7640,14 @@
             "description": "Який вихід розійшовся.",
             "type": "string"
           },
+          "substanceEntryId": {
+            "description": "Чия саме це величина; `null` — вихід без речовини.\n⛔ Поля не було, і без нього звіт не можна було прочитати: розбіжності\nдесяти речовин одного виходу виглядали як десять однакових рядків.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "tolerance": {
             "description": "Допуск порівняння; нуль означає точний збіг.",
             "format": "double",
@@ -7648,6 +7656,7 @@
         },
         "required": [
           "outputCode",
+          "substanceEntryId",
           "actual",
           "expected",
           "tolerance"

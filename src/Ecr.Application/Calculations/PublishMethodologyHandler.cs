@@ -85,10 +85,19 @@ public sealed class PublishMethodologyHandler(
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
         var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
-        var greenTest = await IsGreenAsync(methodology, version, testCases, ct).ConfigureAwait(false);
+        var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
+        var greenTest = GoldenSet.IsGreen(verdicts);
 
         var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
             .ConfigureAwait(false);
+
+        // ⛔ Відмова через золотий набір називає КОЖНУ розбіжність поіменно:
+        // випадок, вихід, речовину й обидва числа. Домен теж її не пропустить
+        // (`MethodologyVersion.Publish`), але сказати він може лише «без
+        // зеленого тесту заборонено» — сутність не бачить ні результатів, ні
+        // очікувань. Методолог, який отримав саму лічбу, перебирає речовини
+        // руками, доки не знайде ту, що розійшлася.
+        RejectRedGoldenSet(version, verdicts, greenTest);
 
         // Чотири очі, причина, зелений тест і незайнята дата — усе в домені:
         // правило, розкидане по обробниках, забудеться на другому виклику.
@@ -543,8 +552,52 @@ public sealed class PublishMethodologyHandler(
     /// <param name="Root">Корінь дерева для перевірки типів; <c>null</c> — не розібралося.</param>
     private sealed record FormulaResolution(List<int> Edges, Ecr.Expressions.Ast.AstNode? Root);
 
-    /// <summary>Чи зійшовся золотий набір у межах допуску.</summary>
-    private async Task<bool> IsGreenAsync(
+    /// <summary>
+    /// Відхиляє публікацію переліком розбіжностей золотого набору
+    /// (<c>ECR-CALC-0422</c>, <c>ФВ-9.12</c>).
+    /// </summary>
+    /// <param name="version">Версія, яку публікують.</param>
+    /// <param name="verdicts">Вердикти всіх випадків набору.</param>
+    /// <param name="greenTest">Чи зійшовся набір цілком.</param>
+    /// <remarks>
+    /// ⚠ Розбіжності йдуть і текстом, і в <c>details</c>: текст читає людина,
+    /// а перелічити їх на екрані клієнт має зі структури, не розбираючи
+    /// повідомлення на частини.
+    /// </remarks>
+    private static void RejectRedGoldenSet(
+        MethodologyVersion version, IReadOnlyList<TestCaseVerdict> verdicts, bool greenTest)
+    {
+        if (greenTest)
+        {
+            return;
+        }
+
+        // ⛔ Порожній набір і червоний набір — різні причини відмови, і
+        // зводити їх до одного тексту не можна: у першому випадку виправляти
+        // треба не формулу, а відсутність тестів (`ФВ-9.12`).
+        if (verdicts.Count == 0)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Публікацію версії {version.Version} відхилено: золотого набору немає жодного "
+                + "випадку. «Тестів немає, отже все гаразд» зробило б публікацію без перевірки "
+                + "схожою на публікацію з перевіркою (ФВ-9.12).");
+        }
+
+        var divergences = GoldenSet.Divergences(verdicts);
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Публікацію версії {version.Version} відхилено: на золотому наборі розійшлося "
+            + $"величин — {divergences.Count}. {string.Join("; ", divergences)}.",
+            new Dictionary<string, object?>
+            {
+                ["goldenSet"] = verdicts.Where(v => !v.IsGreen).ToList(),
+            });
+    }
+
+    /// <summary>Вердикти золотого набору — по одному на випадок.</summary>
+    private async Task<IReadOnlyList<TestCaseVerdict>> JudgeAsync(
         Methodology methodology,
         MethodologyVersion version,
         IReadOnlyList<MethodologyTestCase> testCases,
@@ -566,7 +619,7 @@ public sealed class PublishMethodologyHandler(
             verdicts.Add(GoldenSet.Judge(testCase, output));
         }
 
-        return GoldenSet.IsGreen(verdicts);
+        return verdicts;
     }
 
     /// <summary>Diff результатів між новою версією і попередньою чинною.</summary>
