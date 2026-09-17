@@ -23,6 +23,15 @@
  */
 
 :root {
+  /*
+   * ⚠ Поверхня й текст сітки — ТІ САМІ значення, що `themeSurface` у
+   * `theme.ts` (звіряється в `contrast.test.ts`). Тут вони потрібні окремими
+   * змінними, бо RevoGrid — веб-компонент із власним CSS, і перебити його
+   * можна лише своїм правилом, а не токеном Mantine.
+   */
+  --ecr-grid-surface: #ffffff;
+  --ecr-grid-text: #000000;
+
   --ecr-cell-dirty-bg: #fff8e1;
   --ecr-cell-dirty-line: #8a6100;
   --ecr-cell-read-only-bg: #f5f5f5;
@@ -46,6 +55,9 @@
  * яка несе інформацію, була майже невидима. Знайшов розрахунок, не око.
  */
 :root[data-mantine-color-scheme='dark'] {
+  --ecr-grid-surface: #242424;
+  --ecr-grid-text: #c9c9c9;
+
   --ecr-cell-dirty-bg: #3a3320;
   --ecr-cell-dirty-line: #ffd24d;
   --ecr-cell-read-only-bg: #2a2a2a;
@@ -235,3 +247,101 @@
 :root[data-mantine-color-scheme='dark'] .ecr-cell-save-error::before {
   color: #f07369;
 }
+
+/*
+ * ── RevoGrid: світлі значення пакета проти темної теми застосунку ─────────
+ *
+ * ⛔ Виміряно в браузері на живому документі, не припущено: у темній темі
+ * введене оператором число мало контраст **1.35 : 1**, тобто було фактично
+ * невидиме, а обчислене (якого змінити не можна) — 19.6 : 1. Причина в двох
+ * рядках `revo-grid-style.css` пакета:
+ *
+ *   revo-grid[theme=compact] revogr-data .rgCell          { color: rgba(0,0,0,0.87) }
+ *   revo-grid[theme=compact] revogr-data .rgCell.disabled { background-color: #f7f7f7 }
+ *
+ * Перший фарбує текст майже чорним поверх нашої темної поверхні `#242424`.
+ * Другий підкладає СВІТЛИЙ фон під readonly-комірку — і саме тому обчислена
+ * читалася: вона випадково отримала світлу заливку в темній темі. Результат
+ * був вивернутий рівно навпаки: видно те, чого не змінити, і не видно того,
+ * що щойно ввели.
+ *
+ * ⛔ Другий, тихіший наслідок того самого `.rgCell.disabled`: його
+ * специфічність (0,3,2) перебивала `.ecr-cell--read-only` / `--calculated`
+ * (0,1,0), тож заливка СТАНУ на readonly-комірках не діяла взагалі — обидва
+ * стани зливалися в один сірий в обох темах, попри всю роботу з розведення
+ * палітри за ΔE00 (`theme.ts`, `D-144`).
+ *
+ * ⚠ Чому `:root` і `[theme]` у селекторах, а не просто `revo-grid .rgCell`.
+ * Стилі Stencil вставляються в `<head>` під час виконання, і їх порядок
+ * відносно нашого бандла не гарантований — тобто «однакова специфічність,
+ * виграє пізніший» тут не працює. Кожне правило нижче мусить вигравати
+ * специфічністю СТРОГО: `:root`(1) + `[theme]`(1) + клас(и) проти
+ * `[theme=compact]`(1) + `.rgCell`(1) у пакета.
+ *
+ * ⛔ Жодного літерала кольору тут немає навмисно: усе через ті самі змінні,
+ * що й решта файлу. Заміна плейсхолдерної палітри на фірмову
+ * (`docs/build/CUSTOMER-QUESTIONS.md` — кольори замовника НЕ відомі) не
+ * потребує дотику до цих правил.
+ */
+:root revo-grid[theme] revogr-data .rgCell {
+  color: var(--ecr-grid-text);
+}
+
+/*
+ * Заливка readonly-комірки — наш токен, не `#f7f7f7` пакета. Це фолбек:
+ * майже завжди поверх нього ляже заливка конкретного стану (правила нижче),
+ * але комірка, якій RevoGrid поставив `disabled` без нашого стану, теж не
+ * повинна світитися білим у темній темі.
+ */
+:root revo-grid[theme] revogr-data .rgCell.disabled {
+  background-color: var(--ecr-cell-read-only-bg);
+}
+
+/*
+ * ⚠ Заливки станів повторені тут із вищою специфічністю, а не перенесені:
+ * правила `.ecr-cell--*` нижче лишаються джерелом ФОРМИ (межа, штрихування,
+ * маркер) і працюють скрізь, де сітки немає (`/_kitchen-sink`, знімки).
+ * Тут — рівно те, що потрібно, щоб пережити `.rgCell.disabled`.
+ */
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell.ecr-cell--dirty {
+  background-color: var(--ecr-cell-dirty-bg);
+}
+
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell.ecr-cell--read-only {
+  background-color: var(--ecr-cell-read-only-bg);
+}
+
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell.ecr-cell--calculated {
+  background-color: var(--ecr-cell-calculated-bg);
+}
+
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell.ecr-cell--orphaned {
+  background-color: var(--ecr-cell-orphaned-bg);
+}
+
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell.ecr-cell--rounded {
+  background-color: var(--ecr-cell-rounded-bg);
+}
+
+/*
+ * ⛔ Редактор комірки — окремий дефект того самого кореня, і його НЕ видно з
+ * жодного стану: `revogr-edit` — накладка ПОРУЧ із коміркою, не всередині
+ * неї, тож класи стану на неї не діють, а пакет задає їй `background-color:
+ * #fff` намертво (`revogr-edit-style.css`). У темній темі успадкований
+ * `#c9c9c9` на цьому білому давав **1.66 : 1** — тобто оператор не бачив
+ * власного введення саме тоді, коли друкував його.
+ *
+ * ⚠ `input` окремо, бо колір тексту поля браузер бере з UA-стилю
+ * (`color: fieldtext`), а не успадковує — без цього правила поле лишилося б
+ * із системним кольором на нашому фоні.
+ */
+:root revo-grid[theme] revogr-edit {
+  background-color: var(--ecr-grid-surface);
+  color: var(--ecr-grid-text);
+}
+
+:root revo-grid[theme] revogr-edit input {
+  background-color: var(--ecr-grid-surface);
+  color: var(--ecr-grid-text);
+}
+
