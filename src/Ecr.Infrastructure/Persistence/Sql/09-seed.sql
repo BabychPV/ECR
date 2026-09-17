@@ -1683,6 +1683,11 @@ USING (VALUES
     (N'expr.expectedCloseBracket',             N'en', N'Expected "]".', 1),
     (N'expr.rowKeyExpected',                   N'en', N'A row key was expected after ":".', 1),
     (N'expr.expectedCloseBracketAfterRange',   N'en', N'Expected "]" after the range.', 1),
+    -- Межа глибини вкладеності. ⚠ Рядок каталогу тут такий самий звичайний, як
+    -- у решти синтаксичних відмов, і це суть фіксу: перевищення глибини — це
+    -- ПОВІДОМЛЕННЯ в редакторі формул, а не смерть процесу від
+    -- StackOverflowException, якого в .NET не перехоплює жоден catch.
+    (N'expr.nestingTooDeep',                   N'en', N'The expression is nested deeper than {max} levels.', 1),
 
     -- /admin/health (`Q-304`): статуси перевірок будувалися одразу готовим
     -- українським реченням (`HealthCheckResult.Description`) — не через

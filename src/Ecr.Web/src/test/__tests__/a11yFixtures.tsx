@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+﻿import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { vi, beforeEach, afterEach } from 'vitest';
 import type { JSX, ReactNode } from 'react';
@@ -118,6 +118,103 @@ export const FullAccessPermissions: readonly string[] = [
   'System.ManageLocalization',
 ];
 
+/**
+ * Непорожній зріз таблиці — КОМІРКИ, а не порожня сітка (`ФВ-14.16`).
+ *
+ * ⛔ До цього тут повертався `{ columns: [], rows: [] }`, і це була сліпа
+ * пляма гейта, а не економія: `DocumentGrid` на порожньому зрізі показує
+ * порожній стан (`emptiness.ts`) і НЕ рендерить жодної комірки. Тобто гейт
+ * доступності проганявся над сторінкою документа, де самого документа немає —
+ * і клас дефектів «комірка виглядає не так» був для нього невидимий за
+ * побудовою. Виміряний дефект темної теми (текст `rgba(0,0,0,0.87)` на фоні
+ * `#242424`, 1.35:1) проїхав саме тут.
+ *
+ * ⚠ Зріз навмисно містить ЧОТИРИ різні стани комірки одночасно: звичайну
+ * редаговану (`C1`/`r1`), обчислену (`C2` — `CalculatedCell` у
+ * `cellPermissions`), readonly-колонку (`C3`) і осиротілий рядок (`r2`). Один
+ * рядок «щоб було» перевіряв би лише найпростіший випадок, а дефект жив саме
+ * у різниці між станами.
+ *
+ * ⚠ Контраст axe в jsdom НЕ рахує (`test/a11y.ts`: правило `color-contrast`
+ * потребує `<canvas>`), тому гейтом саме на контраст лишається
+ * `features/grid/__tests__/gridCellContrast.test.ts`. Цей зріз закриває іншу
+ * половину: усе, що axe таки вміє — імена, ролі, `aria-*`, заголовки
+ * таблиці, — тепер має на чому спрацювати.
+ */
+export const DocumentSliceFixture = {
+  cellConfirmations: {} as Record<string, string>,
+  cellPermissions: { 'r1:C2': 'CalculatedCell', 'r2:C2': 'CalculatedCell' },
+  periodKey: 202601,
+  tableInstanceId: 1,
+  columns: [
+    {
+      code: 'C1',
+      dataType: 'Decimal',
+      defaultValue: null,
+      displayFormat: null,
+      header: 'Fuel burned',
+      id: 1,
+      isReadOnly: false,
+      isRequired: false,
+      isRequiredByMethodology: false,
+      lookupRegistryDefId: null,
+      ordinal: 0,
+      unitId: null,
+      unitSymbol: 't',
+    },
+    {
+      code: 'C2',
+      dataType: 'Decimal',
+      defaultValue: null,
+      displayFormat: null,
+      header: 'Emissions',
+      id: 2,
+      isReadOnly: false,
+      isRequired: false,
+      isRequiredByMethodology: false,
+      lookupRegistryDefId: null,
+      ordinal: 1,
+      unitId: null,
+      unitSymbol: 't',
+    },
+    {
+      code: 'C3',
+      dataType: 'String',
+      defaultValue: null,
+      displayFormat: null,
+      header: 'Source',
+      id: 3,
+      isReadOnly: true,
+      isRequired: false,
+      isRequiredByMethodology: false,
+      lookupRegistryDefId: null,
+      ordinal: 2,
+      unitId: null,
+      unitSymbol: null,
+    },
+  ],
+  rows: [
+    {
+      cells: { C1: 182.5, C2: 365, C3: 'Boiler A' },
+      isOrphaned: false,
+      label: null,
+      ordinal: 0,
+      rowKey: 'r1',
+      rowKind: 'Item',
+      rowVersion: 'v1',
+    },
+    {
+      cells: { C1: 12, C2: 24, C3: 'Boiler B' },
+      isOrphaned: true,
+      label: null,
+      ordinal: 1,
+      rowKey: 'r2',
+      rowKind: 'Item',
+      rowVersion: 'v1',
+    },
+  ],
+};
+
 /** Один непорожній документ для `DocumentPage` (`ФВ-14.16`). */
 export const DocumentTableFixture = {
   allowsDynamicRows: false,
@@ -211,9 +308,10 @@ export function emptyBodyFor(url: string): unknown {
 
   if (url.includes('/calculation-results')) return [];
 
-  if (/\/tables\/[^/?]+/.test(url)) {
-    return { cellPermissions: {}, columns: [], periodKey: 0, rows: [], tableInstanceId: 1 };
-  }
+  // ⛔ НЕ порожній зріз — див. `DocumentSliceFixture`: порожній означав, що
+  // сітка ніколи не рендерила жодної комірки, і гейт доступності перевіряв
+  // сторінку документа без документа.
+  if (/\/tables\/[^/?]+/.test(url)) return DocumentSliceFixture;
 
   if (url.includes('/tables')) return [DocumentTableFixture];
 
@@ -241,7 +339,103 @@ export function emptyBodyFor(url: string): unknown {
  * лише винесена сюди, щоб чотири розбиті файли викликали ОДИН і той самий
  * код, а не чотири копії, що можуть розійтися.
  */
+/**
+ * Ширина/висота для jsdom, щоб віртуалізована сітка взагалі намалювала рядки.
+ *
+ * ⛔ Без цього непорожній зріз (`DocumentSliceFixture`) не дає нічого:
+ * RevoGrid віртуалізує рядки за РОЗМІРОМ вікна перегляду, а jsdom не рахує
+ * розкладки і повертає нулі. Виміряно тут-таки: з порожніми розмірами
+ * `revogr-data` лишається порожнім вузлом, і axe бачить сітку без жодної
+ * комірки — рівно та сліпа пляма, через яку дефект контрасту й проїхав.
+ *
+ * ⚠ Висота з `ResizeObserver` (2400) НЕ дорівнює `clientHeight` (600)
+ * навмисно: `revogr-viewport-scroll.componentDidLoad` віднімає від розміру
+ * `contentRect` висоту шапки й підвалу, читаючи їх `clientHeight`. Рівні
+ * значення дали б від'ємний розмір вікна перегляду — і знову жодного рядка,
+ * але вже з виглядом «стаб є, отже все гаразд».
+ */
+const ViewportWidth = 900;
+const ViewportHeight = 600;
+const ObservedHeight = 2400;
+
+/** Ставить розміри елементів і «живий» `ResizeObserver` на час файлу тестів. */
+export function registerGridLayout(): void {
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  const savedRect = HTMLElement.prototype.getBoundingClientRect;
+  const savedObserver = globalThis.ResizeObserver;
+
+  beforeEach(() => {
+    for (const [prop, value] of [
+      ['clientWidth', ViewportWidth],
+      ['clientHeight', ViewportHeight],
+      ['offsetWidth', ViewportWidth],
+      ['offsetHeight', ViewportHeight],
+    ] as const) {
+      saved.set(prop, Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
+      Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, value });
+    }
+
+    HTMLElement.prototype.getBoundingClientRect = function rect(): DOMRect {
+      return {
+        x: 0,
+        y: 0,
+        width: ViewportWidth,
+        height: ViewportHeight,
+        top: 0,
+        left: 0,
+        right: ViewportWidth,
+        bottom: ViewportHeight,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+
+    // ⚠ Заглушка з `test/setup.ts` НІКОЛИ не викликає колбек — саме тому
+    // сітка й не дізнавалася свого розміру. Тут колбек викликається один раз
+    // одразу після `observe`, як це робить справжній браузер.
+    globalThis.ResizeObserver = class {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element): void {
+        setTimeout(() => {
+          this.callback(
+            [
+              {
+                target,
+                contentRect: { width: ViewportWidth, height: ObservedHeight },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
+        }, 0);
+      }
+
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+  });
+
+  afterEach(() => {
+    for (const [prop, descriptor] of saved) {
+      if (descriptor === undefined) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
+      else Object.defineProperty(HTMLElement.prototype, prop, descriptor);
+    }
+    saved.clear();
+
+    HTMLElement.prototype.getBoundingClientRect = savedRect;
+    globalThis.ResizeObserver = savedObserver;
+  });
+}
+
 export function registerA11yFetchMock(): void {
+  // ⛔ Розміри ставляться разом із заглушкою мережі, а не окремим викликом у
+  // кожному з чотирьох файлів: непорожній зріз без розмірів не малює жодної
+  // комірки, тобто половина без половини не працює зовсім.
+  registerGridLayout();
+
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',

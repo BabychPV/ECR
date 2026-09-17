@@ -362,6 +362,23 @@ describe('theme.ts і cell-states.css не розходяться', () => {
     expect(cssVar(`--ecr-cell-${slug}-line`, 'dark')).toBe(token.dark.line);
   });
 
+  /**
+   * ⛔ Поверхня й текст сітки продубльовані в CSS із тієї самої причини, що й
+   * заливки станів: CSS не читає TypeScript. Але ціна розходження тут вища —
+   * саме цими змінними перебивається світлий за замовчуванням CSS RevoGrid
+   * (`cell-states.css`, блок «RevoGrid: світлі значення пакета проти темної
+   * теми»). Розійдись вони з `themeSurface`, і перевірка контрасту комірки
+   * рахувала б контраст проти фону, якого на екрані немає, — тобто рівно той
+   * дефект, який вона й має ловити.
+   */
+  it.each(['light', 'dark'] as const)(
+    'ФВ-14.11: поверхня і текст сітки збігаються з `themeSurface` (%s)',
+    (scheme) => {
+      expect(cssVar('--ecr-grid-surface', scheme)).toBe(themeSurface[scheme].body);
+      expect(cssVar('--ecr-grid-text', scheme)).toBe(themeSurface[scheme].text);
+    },
+  );
+
   it('кожен стан має власний клас у CSS', () => {
     for (const name of names) {
       expect(css).toContain(`.ecr-cell--${kebab(name)}`);
