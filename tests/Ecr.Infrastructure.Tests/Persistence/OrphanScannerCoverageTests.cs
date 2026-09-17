@@ -85,6 +85,47 @@ public sealed class OrphanScannerCoverageTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Підсумок_прогону_відрізняє_оглянуте_від_зміненого()
+    {
+        // ⛔ Доти прохід повертав саме́ лише число змінених рядків, і три різні
+        // стани давали однаковий нуль: «оглянув усе, міняти не було чого»,
+        // «оглянув шматок і вичерпав бюджет», «не оглянув нічого, бо не
+        // запустився». Перший — здорова система, третій — сканер, що стоїть;
+        // у журналі вони були нерозрізненні.
+        var seed = await SeedAsync(periodKey: 202605, orphaned: false);
+
+        await using var scan = Context();
+        var scanner = new OrphanScanner(scan, new RegistryResolver(), Clock);
+
+        var summary = await scanner.ScanAllAsync(CancellationToken.None);
+
+        // ⚠ Головне твердження: прохід звітує про ОГЛЯНУТЕ, а не лише про
+        // змінене. Без цього поля «нуль» не має значення.
+        Assert.True(
+            summary.ExaminedRows > 0,
+            $"прохід мусить звітувати про оглянуті рядки; отримано {summary.ExaminedRows}");
+
+        // ⚠ І про замикання обходу — саме за ним видно, що сканер ВСТИГАЄ за
+        // зростанням таблиці. Бюджет тут за замовчуванням (500 000), а
+        // засіяно 21 000, тож одна ніч мусить дійти до кінця набору.
+        Assert.True(summary.CycleCompleted, "обхід мусив дійти до кінця набору за один прогін");
+        Assert.True(summary.CyclesCompleted > 0, "замкнутий обхід мусить порахуватися");
+
+        // ⚠ І змінене теж рахується — засіяні рядки посилаються на запис,
+        // нечинний у своєму періоді, тож ознака мусить з'явитися. Без цього
+        // твердження тест був би зеленим і на сканері, який «оглядає», нічого
+        // не роблячи.
+        Assert.True(summary.Changed > 0, "прохід мусив поставити ознаку хоч одному рядку");
+        Assert.True(
+            summary.ExaminedRows >= summary.Changed,
+            "оглянутих не може бути менше за змінених");
+
+        Assert.Equal(202605, seed.PeriodKey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-7.7")]
     public async Task Послідовні_прогони_беруть_наступні_рядки_а_не_ті_самі()
     {

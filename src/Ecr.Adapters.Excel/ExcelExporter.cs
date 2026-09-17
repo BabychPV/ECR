@@ -56,7 +56,13 @@ public sealed class ExcelExporter(
         {
             throw new NotFoundException(
                 "ECR-DOC-0404",
-                $"Документа {documentId} за період {options.PeriodKey} не існує або він порожній.");
+                $"Документа {documentId} за період {options.PeriodKey} не існує або він порожній.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.periodEmpty",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["periodKey"] = options.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var snapshot = await metadata

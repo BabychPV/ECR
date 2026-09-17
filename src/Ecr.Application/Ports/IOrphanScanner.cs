@@ -9,8 +9,14 @@ namespace Ecr.Application.Ports;
 /// </summary>
 public interface IOrphanScanner
 {
-    /// <summary>Повний прохід. Повертає кількість змінених рядків.</summary>
-    public Task<int> ScanAllAsync(CancellationToken ct);
+    /// <summary>Один нічний прохід за курсором.</summary>
+    /// <remarks>
+    /// ⚠ Повертає ПІДСУМОК, а не саме́ число змінених рядків. Число нічого не
+    /// каже про покриття: «нічого не змінив» і «нічого не оглянув» дають один
+    /// і той самий нуль, а це протилежні стани системи. Див.
+    /// <see cref="Registries.OrphanScanSummary"/>.
+    /// </remarks>
+    public Task<Registries.OrphanScanSummary> ScanAllAsync(CancellationToken ct);
 
     /// <summary>
     /// Точковий перерахунок після зміни вікна дії запису. **Знімає** ознаку

@@ -104,7 +104,14 @@ public sealed class ConsistencyCheckJob(
         // нормою, вона перестає працювати як сигнал.
         run.Complete(
             issues.Count == 0 ? "Succeeded" : "Degraded",
-            $"{{\"issues\":{issues.Count},\"orphanFlagsChanged\":{rescanned}}}",
+            // ⚠ Поруч зі «скільки ознак змінено» пишеться «скільки рядків
+            // оглянуто» і «скільки повних обходів набору зроблено». Саме лише
+            // `orphanFlagsChanged` описує однаковим нулем і здорову систему, і
+            // сканер, що стоїть; деталі прогону — єдине місце, де цю різницю
+            // взагалі можна побачити постфактум.
+            $"{{\"issues\":{issues.Count},\"orphanFlagsChanged\":{rescanned.Changed},"
+            + $"\"orphanRowsExamined\":{rescanned.ExaminedRows},"
+            + $"\"orphanScanCycles\":{rescanned.CyclesCompleted}}}",
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

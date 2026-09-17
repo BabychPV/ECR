@@ -40,7 +40,13 @@ public sealed class CreateRowHandler(
         {
             throw new Errors.NotFoundException(
                 "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.");
+                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
+                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
