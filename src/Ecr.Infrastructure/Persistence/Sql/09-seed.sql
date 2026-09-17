@@ -377,6 +377,22 @@ USING (VALUES
     (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
     (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
     (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
+    -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
+    -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
+    -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
+    -- `err.<код>`: останню читає `LocalizedTitleAsync` для ЗАГОЛОВКА, і збіг
+    -- надрукував би той самий текст двічі — заголовком і подробицею.
+    -- Приватна область: сітка доступна лише після входу.
+    (N'err.ECR-AUTH-0401.anonymousWrite',    N'en', N'An anonymous request cannot change data: sign in again.', 1),
+    (N'err.ECR-ROW-0409.fixedRowMode',       N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so an arbitrary key is not accepted.', 1),
+    (N'err.ECR-ROW-0409.dynamicRowLimit',    N'en', N'Creating {adding} row(s) would exceed the dynamic-row limit of table "{tableCode}": {existing} existing + {adding} new > {max}.', 1),
+    (N'err.ECR-ROW-0409.rowKeysExist',       N'en', N'Rows with these keys already exist.', 1),
+    (N'err.ECR-CELL-0409.batchStale',        N'en', N'The batch was rejected: {rowCount} row(s) changed since you loaded them.', 1),
+    (N'err.ECR-ACCS-0403.deniedCells',       N'en', N'Cells you may not edit in this batch: {deniedCount}. Reason for the first: {reason}.', 1),
+    (N'err.ECR-CELL-0422.validationBlocked', N'en', N'Validation rejected the save: {cellCount} cell(s) with an error.', 1),
+    (N'err.ECR-CELL-0422.unknownColumn',     N'en', N'There is no column "{columnCode}" in this template version.', 1),
+    (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
+    (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
 
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),

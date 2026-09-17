@@ -124,8 +124,33 @@ public sealed class PatchCellsHandler(
     private async Task<RequestContext> LoadContextAsync(PatchCellsRequest request, CancellationToken ct)
     {
         var periodKey = new PeriodKey(request.PeriodKey);
+
+        // ⛔ Кожна відмова цього обробника несе `messageKey` — ключ каталогу
+        // `sys_ecr.UiString`, який резолвить
+        // `ExceptionHandlingMiddleware.ResolveGenericMessageAsync` мовою
+        // користувача (`Q-314`). Українське речення поруч ЛИШАЄТЬСЯ: воно —
+        // запасний варіант, коли ключа в каталозі немає, і саме його бачить
+        // журнал сервера. Мови продукту — `en`/`ru`/`kz`, української серед
+        // них немає, тож без ключа `Detail` їхав двомовним поруч із уже
+        // локалізованим `Title` (`D-95`).
+        //
+        // ⚠ Ключі мають СУФІКС (`err.<код>.<що саме>`), а не форму рівно
+        // `err.<код>`: останню читає `LocalizedTitleAsync` для ЗАГОЛОВКА, і
+        // збіг зробив би заголовок і подробицю одним і тим самим реченням,
+        // надрукованим двічі. Суфікс потрібен і сам по собі — на одному коді
+        // тут висить до трьох різних відмов (`ECR-ROW-0409`).
+        //
+        // ⚠ Числа їдуть у `Details` РЯДКАМИ: `ResolveGenericMessageAsync`
+        // підставляє лише поля типу `string` (решта — структура для клієнта,
+        // не текст), тож `int` тихо лишився б незаміненим плейсхолдером.
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не може змінювати дані.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401",
+                         "Анонімний запит не може змінювати дані.",
+                         new Dictionary<string, object?>
+                         {
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
+                         });
 
         // 1. Структура зі знімка метаданих — без звернення до БД (D-16).
         //    Потрібна, щоб резолвити коди колонок у ColumnDefId; вигадувати
@@ -136,6 +161,14 @@ public sealed class PatchCellsHandler(
         var table = snapshot.Sheets
             .SelectMany(sh => sh.Tables)
             .FirstOrDefault(t => t.Id == instance.TableDefId)
+            // ⛔ ЄДИНА відмова цього обробника БЕЗ `messageKey`, і це рішення,
+            // а не пропуск. Сюди неможливо потрапити діями оператора: екземпляр
+            // таблиці вже розв'язаний (`ResolveTableInstanceAsync`), і те, що
+            // його `TableDefId` відсутній у знімку ВЛАСНОЇ версії шаблону, —
+            // розходження метаданих із даними, тобто зламаний інваріант. Текст
+            // тут називає два внутрішні ідентифікатори й адресований тому, хто
+            // читає журнал сервера; перекладати його на мову оператора означало
+            // б пообіцяти, що з цим можна щось зробити зі сторони інтерфейсу.
             ?? throw new NotFoundException(
                 "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
         // ⚠ У мапі — сам ColumnDef, а не лише Id. Значення розбирається за
@@ -213,7 +246,17 @@ public sealed class PatchCellsHandler(
                     "ECR-ROW-0409",
                     $"Таблиця {table.Code} має RowMode = {table.RowMode}: рядки задані шаблоном, "
                     + $"довільний ключ не приймається. Неприпустимі ключі: {string.Join(", ", invalidKeys)}.",
-                    new Dictionary<string, object?> { ["rowKeys"] = invalidKeys });
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-ROW-0409.fixedRowMode",
+                        ["tableCode"] = table.Code,
+                        ["rowMode"] = table.RowMode.ToString(),
+                        // ⚠ Самі ключі лишаються СПИСКОМ і в шаблон каталогу не
+                        // підставляються: перелік довільної довжини в реченні
+                        // читається гірше за той самий перелік, який клієнт
+                        // отримує структурою і показує списком.
+                        ["rowKeys"] = invalidKeys,
+                    });
             }
         }
 
@@ -227,7 +270,14 @@ public sealed class PatchCellsHandler(
                 "ECR-ROW-0409",
                 $"Створення {creations.Count} рядків перевищило б межу динамічних рядків таблиці "
                 + $"{table.Code}: {context.RowIds.Count} наявних + {creations.Count} нових > {maxRows}.",
-                new Dictionary<string, object?> { ["existing"] = context.RowIds.Count, ["adding"] = creations.Count, ["max"] = maxRows });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.dynamicRowLimit",
+                    ["tableCode"] = table.Code,
+                    ["existing"] = context.RowIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["adding"] = creations.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = maxRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var duplicates = creations.Where(r => context.Versions.ContainsKey(r.RowKey)).Select(r => r.RowKey).ToList();
@@ -236,7 +286,11 @@ public sealed class PatchCellsHandler(
             throw new BusinessRuleException(
                 "ECR-ROW-0409",
                 $"Рядки з такими ключами вже існують: {string.Join(", ", duplicates)}.",
-                new Dictionary<string, object?> { ["rowKeys"] = duplicates });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.rowKeysExist",
+                    ["rowKeys"] = duplicates,
+                });
         }
     }
 
@@ -278,10 +332,17 @@ public sealed class PatchCellsHandler(
 
         if (conflicts.Count > 0)
         {
+            var staleRows = conflicts.Select(c => c.RowKey).Distinct().Count();
+
             throw new ConcurrencyConflictException(
                 "ECR-CELL-0409",
-                $"Батч відхилено: рядків із розбіжністю версії — {conflicts.Select(c => c.RowKey).Distinct().Count()}.",
-                new Dictionary<string, object?> { ["conflicts"] = conflicts });
+                $"Батч відхилено: рядків із розбіжністю версії — {staleRows}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                    ["rowCount"] = staleRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["conflicts"] = conflicts,
+                });
         }
     }
 
@@ -380,7 +441,12 @@ public sealed class PatchCellsHandler(
                 $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
                 new Dictionary<string, object?>
                 {
-                    ["deniedCount"] = denied.Count,
+                    ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
+                    ["deniedCount"] = denied.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    // ⚠ У шаблон каталогу йде `reason` (ім'я `EditDenyReason`),
+                    // а НЕ `detail`: подробиця рішення сама буває готовим
+                    // українським реченням, і підставити її означало б лише
+                    // перенести двомовність усередину локалізованого тексту.
                     ["reason"] = first.Reason.ToString(),
                     ["detail"] = first.Detail
                 });
@@ -751,6 +817,8 @@ public sealed class PatchCellsHandler(
                 $"Валідація відхилила запис: комірок із помилкою — {blocking.Count}.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-CELL-0422.validationBlocked",
+                    ["cellCount"] = blocking.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["cells"] = blocking
                         .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
                         .ToList(),
@@ -760,12 +828,16 @@ public sealed class PatchCellsHandler(
         var blockingRequiredInputs = requiredInputMessages.Where(m => m.BlocksSave).ToList();
         if (blockingRequiredInputs.Count > 0)
         {
+            var affectedRows = blockingRequiredInputs.Select(m => m.RowKey).Distinct().Count();
+
             throw new BusinessRuleException(
                 "ECR-CALC-0437",
                 $"Не заповнено обов'язкові вхідні колонки методології: рядків із помилкою — "
-                + $"{blockingRequiredInputs.Select(m => m.RowKey).Distinct().Count()}.",
+                + $"{affectedRows}.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-CALC-0437.requiredInputs",
+                    ["rowCount"] = affectedRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["cells"] = blockingRequiredInputs
                         .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
                         .ToList(),
@@ -835,7 +907,12 @@ public sealed class PatchCellsHandler(
         throw new BusinessRuleException(
             ErrorCodes.CellRegistryEntryMissing,
             $"Посилання на неіснуючий запис довідника: комірок — {missing.Count}.",
-            new Dictionary<string, object?> { ["cells"] = missing });
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
+                ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["cells"] = missing,
+            });
     }
 
     /// <summary>
@@ -975,6 +1052,13 @@ public sealed class PatchCellsHandler(
                 $"Батч відхилено: рядків із розбіжністю версії — {staleRowIds.Count}.",
                 new Dictionary<string, object?>
                 {
+                    // ⚠ Той самий ключ, що й у швидкому шляху
+                    // (`EnsureNoVersionConflicts`): для користувача це та сама
+                    // відмова, і два тексти на неї означали б, що та сама
+                    // причина читається по-різному залежно від того, чия правка
+                    // встигла раніше.
+                    ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                    ["rowCount"] = staleRowIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["conflicts"] = staleRowIds
                         .Select(id => new CellConflictDto(
                             changes.RowKeyById.GetValueOrDefault(id, string.Empty),
@@ -1206,7 +1290,11 @@ public sealed class PatchCellsHandler(
             : throw new BusinessRuleException(
                 "ECR-CELL-0422",
                 $"Колонки «{code}» немає в цій версії шаблону.",
-                new Dictionary<string, object?> { ["columnCode"] = code });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0422.unknownColumn",
+                    ["columnCode"] = code,
+                });
 
     /// <summary>Записи аудиту для застосованого батчу.</summary>
     /// <remarks>
@@ -1285,5 +1373,15 @@ public sealed class PatchCellsHandler(
         => map.TryGetValue(columnCode, out var id)
             ? id
             : throw new BusinessRuleException(
-                "ECR-CELL-0422", $"Колонки з кодом '{columnCode}' немає в структурі версії.");
+                "ECR-CELL-0422",
+                $"Колонки з кодом '{columnCode}' немає в структурі версії.",
+                // ⚠ Той самий ключ, що й у <see cref="ColumnOf"/>: для
+                // користувача це одна відмова («такої колонки тут немає»), і
+                // те, що шляхів резолву коду колонки два, — наша внутрішня
+                // справа, а не два різні тексти для нього.
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0422.unknownColumn",
+                    ["columnCode"] = columnCode,
+                });
 }
