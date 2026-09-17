@@ -102,7 +102,13 @@ public sealed class ExcelImporter(
         {
             throw new NotFoundException(
                 "ECR-DOC-0404",
-                $"Документа {documentId} за період {map.PeriodKey} не існує або він порожній.");
+                $"Документа {documentId} за період {map.PeriodKey} не існує або він порожній.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.periodEmpty",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["periodKey"] = map.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var validInstances = instances.ToDictionary(i => i.TableInstanceId, i => i.TableDefId);

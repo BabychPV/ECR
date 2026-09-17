@@ -36,8 +36,17 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
                 project.TemplateVersionId, instance.PeriodKeyValue))
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
+        // ⚠ Ідентифікатор їде в `Details` РЯДКОМ: `ResolveGenericMessageAsync`
+        // підставляє лише поля типу `string`, тож `long` лишився б у тексті
+        // незаміненим плейсхолдером (`Q-341`).
         return found ?? throw new NotFoundException(
-            "ECR-DOC-0404", $"Екземпляра таблиці {tableInstanceId} не знайдено.");
+            "ECR-DOC-0404",
+            $"Екземпляра таблиці {tableInstanceId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
 
     /// <inheritdoc />

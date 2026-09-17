@@ -240,7 +240,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
         return found ?? throw new Ecr.Application.Errors.NotFoundException(
-            "ECR-DOC-0404", $"Документ {documentId} не знайдено.");
+            "ECR-DOC-0404",
+            $"Документ {documentId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
 
     /// <inheritdoc />

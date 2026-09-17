@@ -62,7 +62,13 @@ public sealed class DownloadExportHandler(
         var book = await exports.FindAsync(exportId, ct).ConfigureAwait(false)
                    ?? throw new NotFoundException(
                        "ECR-DOC-0404",
-                       "Книги немає або строк її життя вийшов: побудуйте експорт заново.");
+                       "Книги немає або строк її життя вийшов: побудуйте експорт заново.",
+                       new Dictionary<string, object?>
+                       {
+                           // ⚠ Без підстановок: `exportId` — внутрішній ключ
+                           // задачі, і користувачеві він нічого не каже.
+                           ["messageKey"] = "err.ECR-DOC-0404.exportExpired",
+                       });
 
         var read = await access.CanReadDocumentAsync(profile, book.DocumentId, ct).ConfigureAwait(false);
         if (!read.IsAllowed)
