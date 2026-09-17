@@ -1015,7 +1015,7 @@ public sealed class PatchCellsHandler(
                     context.UserId, isLateEdit, changes.ExpectedRowVersions),
                 innerCt).ConfigureAwait(false);
 
-            await rowStore.TouchRowsAsync(changes.Touched, now, innerCt).ConfigureAwait(false);
+            await rowStore.TouchRowsAsync(changes.Touched, context.PeriodKey, now, innerCt).ConfigureAwait(false);
 
             // ⛔ Документ теж «торкається» (`H-23d`). До цього рядка `ModifiedAt` і
             // `ModifiedByUserId` документа назавжди лишалися моментом створення:
