@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
   <String Id="ProductName" Value="ECR Web" />
-  <String Id="Manufacturer" Value="ECR" />
+  <String Id="Manufacturer" Value="ECR Web" />
   <String Id="FeatureMain" Value="ECR Web application service" />
   <String Id="ServiceDisplayName" Value="ECR Web API" />
   <String Id="ServiceDescription"
