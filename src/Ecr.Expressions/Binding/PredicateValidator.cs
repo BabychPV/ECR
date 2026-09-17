@@ -30,7 +30,7 @@ public static class PredicateValidator
 
         foreach (var predicate in FindPredicates(root))
         {
-            CheckCondition(predicate, diagnostics, depth: 0);
+            CheckCondition(predicate, diagnostics);
         }
     }
 
@@ -50,7 +50,24 @@ public static class PredicateValidator
         }
     }
 
-    private static void CheckCondition(AstNode node, List<ExpressionDiagnostic> diagnostics, int depth)
+    /// <summary>Перевіряє одну умову предиката згори вниз.</summary>
+    /// <remarks>
+    /// ⛔ Раніше цей метод мав ще й параметр <c>depth</c>: його передавали як
+    /// <c>depth: 0</c>, збільшували на <c>depth + 1</c> у рекурсивній гілці — і
+    /// НЕ ЧИТАЛИ ЖОДНОГО РАЗУ. Це гірше за відсутність межі: код виглядав
+    /// обмеженим, і саме тому ніхто не шукав справжню межу там, де її бракувало
+    /// (<see cref="Parsing.Parser"/>, рекурсивний спуск без жодного лічильника —
+    /// <c>StackOverflowException</c>, який у .NET не перехоплюється і валить
+    /// увесь процес).
+    ///
+    /// ⚠ Параметр ПРИБРАНО, а не доведено до діла, і це свідомий вибір місця
+    /// для межі. Дерево сюди приходить рівно з одного джерела — парсера, — а він
+    /// тепер обмежує глибину сам (<see cref="Parsing.Parser.MaxRecursionDepth"/>),
+    /// тобто рекурсія тут обмежена вже на вході. Другий лічильник з власним
+    /// числом означав би дві різні правди про те, який вираз занадто глибокий,
+    /// і жодного місця, де це написано один раз.
+    /// </remarks>
+    private static void CheckCondition(AstNode node, List<ExpressionDiagnostic> diagnostics)
     {
         switch (node)
         {
@@ -89,7 +106,7 @@ public static class PredicateValidator
             default:
                 foreach (var child in Children(node))
                 {
-                    CheckCondition(child, diagnostics, depth + 1);
+                    CheckCondition(child, diagnostics);
                 }
 
                 return;

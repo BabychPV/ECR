@@ -19,6 +19,52 @@ namespace Ecr.Expressions.Parsing;
 /// </remarks>
 public sealed class Parser
 {
+    /// <summary>
+    /// Бюджет рекурсії розбору: скільки вкладених спусків парсер робить,
+    /// перш ніж відмовити.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це межа ДОСТУПНОСТІ, а не чистоти мови. Парсер — рекурсивного спуску,
+    /// і один рівень вкладеності дужок коштує 12 кадрів стека (увесь ланцюг
+    /// <c>ParseExpression → … → ParsePrimary</c>). Замір на цій самій збірці
+    /// (окремий процес, стандартний стек 1 МБ): <c>"("×N + "1" + ")"×N</c>
+    /// кладе процес уже на <c>N ≈ 606</c> — не «на 10^5», як здавалося із
+    /// заявки. <c>StackOverflowException</c> у .NET **не перехоплюється**
+    /// (<c>try/catch</c> його не бачить, процес завершує CLR): один запит
+    /// <c>POST /api/v1/expressions/validate</c> від будь-якого автентифікованого
+    /// користувача вбивав сеанси ВСІХ інших разом зі своїм.
+    ///
+    /// ⚠ Одиниця тут — СПУСК, а не «рівень дужок», і це не педантизм. Межу
+    /// довелося зробити такою, щоб її можна було перевірити механічно:
+    /// <c>ParserRecursionCoverageTests</c> викидає з графа викликів кожен
+    /// метод, який заходить у <c>EnterNesting</c> ПЕРЕД своїм першим
+    /// рекурсивним викликом, і вимагає ациклічного залишку. Сторож усередині
+    /// <c>if</c> зробив би таку перевірку брехливою: метод виглядав би
+    /// обмеженим, а гілка повз <c>if</c> — ні (саме так перша редакція цього
+    /// фіксу пропустила <c>2^2^2…</c>, і саме на цьому мутаційний прогін її
+    /// спіймав). Тому чотири сторожі стоять беззастережно, першими рядками
+    /// своїх методів.
+    ///
+    /// ⚠ Сторожів рівно три — <c>ParseExpression</c>, <c>ParseNot</c>,
+    /// <c>ParseUnary</c>, — і цей набір ПЕРЕВІРЕНИЙ на мінімальність, а не
+    /// обраний: четвертий (у <c>ParsePower</c>) чернетка мала й прибрала, бо
+    /// мутаційний прогін показав, що без нього не ламається нічого.
+    ///
+    /// ⚠ Перерахунок в одиниці користувача: один рівень дужок коштує 3 спуски
+    /// (по одному на кожного сторожа), тож 192 — це рівно 63 рівні вкладеності.
+    /// Обидва запаси виміряні, а не вгадані:
+    /// <list type="bullet">
+    /// <item>вниз — найглибша справжня формула корпусу коштує 9 спусків
+    /// (<c>CONVERT(([Jan] + [Feb] + [Mar]) * [Density], 'kg', 't')</c>), тобто
+    /// запас понад двадцятикратний; <c>ExpressionDepthGuardTests</c> міряє це
+    /// поведінкою самого сторожа, а не оком;</item>
+    /// <item>вгору — 63 рівні × 12 кадрів ≈ 756 кадрів ≈ 110 КБ стека:
+    /// приблизно дев'ятикратний запас до стандартного 1 МБ і безпечно навіть
+    /// на потоці зі стеком 256 КБ (це теж тест, а не припущення).</item>
+    /// </list>
+    /// </remarks>
+    public const int MaxRecursionDepth = 192;
+
     private static readonly FunctionRegistry Functions = new();
 
     /// <summary>Один параметр підстановки для ключа каталогу (`Q-303`).</summary>
@@ -98,7 +144,26 @@ public sealed class Parser
 
     // ——— рівні пріоритету, від найслабшого до найсильнішого (02b §2) ———
 
-    private static AstNode ParseExpression(State s) => ParseTernary(s);
+    /// <summary>
+    /// Вхід у ВКЛАДЕНИЙ вираз — і єдине місце, крізь яке проходять чотири з
+    /// семи рекурсивних ребер граматики (дужки, аргументи функції, гілки
+    /// тернарного оператора, предикат <c>[WHERE …]</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Решта трьох ребер (<c>NOT NOT …</c>, <c>- - …</c>, <c>a^b^c</c>) сюди
+    /// НЕ заходять — вони замикаються нижче за <see cref="ParseExpression"/>, —
+    /// і тому кожне з них стереже себе саме. Сторож на одному шляху — це не
+    /// сторож: перевірка <c>ParserRecursionCoverageTests</c> прибирає з графа
+    /// викликів усі методи з <c>EnterNesting</c> і вимагає, щоб залишок був
+    /// ациклічним.
+    /// </remarks>
+    private static AstNode ParseExpression(State s)
+    {
+        s.EnterNesting();
+        var node = ParseTernary(s);
+        s.LeaveNesting();
+        return node;
+    }
 
     private static AstNode ParseTernary(State s)
     {
@@ -147,17 +212,29 @@ public sealed class Parser
     /// унарним мінусом, що суперечить її ж EBNF. Реалізовано за EBNF: він
     /// детальніший і розводить два різні унарні рівні.
     /// </remarks>
+    /// <remarks>
+    /// ⚠ Власний <c>EnterNesting</c>, а не покладання на
+    /// <see cref="ParseExpression"/>: ланцюг <c>NOT NOT NOT …</c> замикається
+    /// ТУТ і до <see cref="ParseExpression"/> не доходить жодного разу.
+    /// </remarks>
     private static AstNode ParseNot(State s)
     {
+        s.EnterNesting();
+        AstNode node;
+
         if (s.Current.Type == TokenType.Not || (s.Current.Type == TokenType.Bang && !s.IsFormulaRef))
         {
             var position = s.Current.Position;
             s.Advance();
-            var operand = ParseNot(s);
-            return new UnaryNode(UnaryOperator.Not, operand) { Position = position };
+            node = new UnaryNode(UnaryOperator.Not, ParseNot(s)) { Position = position };
+        }
+        else
+        {
+            node = ParseComparison(s);
         }
 
-        return ParseComparison(s);
+        s.LeaveNesting();
+        return node;
     }
 
     private static AstNode ParseComparison(State s)
@@ -255,16 +332,25 @@ public sealed class Parser
     /// </remarks>
     private static AstNode ParseUnary(State s)
     {
+        // ⚠ Те саме, що в ParseNot: `- - - …` — окреме рекурсивне ребро, яке
+        // не проходить крізь ParseExpression.
+        s.EnterNesting();
+        AstNode node;
+
         if (s.Current.Type is TokenType.Minus or TokenType.Plus)
         {
             var position = s.Current.Position;
             var op = s.Current.Type == TokenType.Minus ? UnaryOperator.Negate : UnaryOperator.Plus;
             s.Advance();
-            var operand = ParseUnary(s);
-            return new UnaryNode(op, operand) { Position = position };
+            node = new UnaryNode(op, ParseUnary(s)) { Position = position };
+        }
+        else
+        {
+            node = ParsePower(s);
         }
 
-        return ParsePower(s);
+        s.LeaveNesting();
+        return node;
     }
 
     /// <summary>
@@ -272,6 +358,17 @@ public sealed class Parser
     /// діалекті шаблонів.
     /// </summary>
     /// <remarks>
+    /// ⚠ Власного <c>EnterNesting</c> тут НЕМАЄ, і це перевірений факт, а не
+    /// недогляд. Степінь правоасоціативний, тому <c>2^2^2^…</c> — не цикл
+    /// <c>while</c>, а рекурсія <c>ParsePower → ParseUnary → ParsePower</c>;
+    /// вона обов'язково проходить крізь <see cref="ParseUnary"/>, який стереже
+    /// себе беззастережно. Четвертий сторож тут стояв у чернетці цього фіксу і
+    /// був прибраний саме тому, що мутаційний прогін не зміг довести його
+    /// потрібність: він нічого не ловив, лише додавав ще одне число в
+    /// арифметику межі. Обмеженість цього шляху доводить
+    /// <c>ExpressionDepthGuardTests</c> (ребро <c>power</c>), а те, що жодного
+    /// шляху не забуто взагалі, — <c>ParserRecursionCoverageTests</c>.
+    ///
     /// ⛔ У діалекті методологій <c>^</c> заборонений (<c>ECR-CALC-0431</c>,
     /// директива №05 §4). Причина не в чистоті мови: у NCalc 1.3.8 це
     /// **XOR**, і `2^3` там дорівнює 1. Прийняти вираз означало б порахувати
@@ -305,6 +402,7 @@ public sealed class Parser
         }
 
         s.Advance();
+
         var right = ParseUnary(s);
         return new BinaryNode(BinaryOperator.Power, left, right) { Position = left.Position };
     }
@@ -819,8 +917,55 @@ public sealed class Parser
         List<ExpressionDiagnostic> diagnostics)
     {
         private int _index;
+        private int _depth;
 
         public ExpressionDialect Dialect => dialect;
+
+        /// <summary>
+        /// Заходить на рівень вкладеності глибше; вичерпаний бюджет — відмова.
+        /// </summary>
+        /// <remarks>
+        /// ⛔ Відмова тут — ЗВИЧАЙНА діагностика плюс <see cref="ParseAbort"/>,
+        /// той самий механізм, яким парсер уже відповідає на «зайвий текст» чи
+        /// «невідома лексема». Інакше й бути не може: <c>Parse</c> зобов'язаний
+        /// повернути результат, а не впасти (див. його ж XML-doc), і саме тому
+        /// глибина мусить перевірятися ДО рекурсії. Перевірка «постфактум»
+        /// неможлива в принципі: до неї вже не доходить черга —
+        /// <c>StackOverflowException</c> у .NET не перехоплюється жодним
+        /// <c>catch</c>, і процес завершує CLR.
+        ///
+        /// ⚠ <see cref="ParseAbort"/>, а не «записати діагностику й розбирати
+        /// далі» (як робить <c>ParsePower</c> на <c>^</c>): продовження означало
+        /// б наступний крок рекурсії, тобто рівно те, від чого ми боронимось.
+        /// </remarks>
+        public void EnterNesting()
+        {
+            if (++_depth <= MaxRecursionDepth)
+            {
+                return;
+            }
+
+            // ⚠ У повідомленні — рівні ДУЖОК, а не спуски: число межі має
+            // означати те саме, що бачить автор формули. Ділення на 3 — той
+            // самий перерахунок, що описаний у MaxRecursionDepth.
+            var levels = (MaxRecursionDepth / 3) - 1;
+
+            Error(
+                "expr.nestingTooDeep",
+                Param("max", levels.ToString(CultureInfo.InvariantCulture)),
+                $"The expression is nested deeper than {levels} levels.");
+
+            throw new ParseAbort();
+        }
+
+        /// <summary>Повертається на рівень вище після успішного розбору вкладеного виразу.</summary>
+        /// <remarks>
+        /// ⚠ Парного <c>finally</c> свідомо немає: єдиний спосіб не дійти сюди —
+        /// <see cref="ParseAbort"/>, після якого <c>State</c> більше не
+        /// вживається взагалі (розбір завершено). <c>try/finally</c> на кожному
+        /// рівні рекурсії коштував би більше, ніж дає.
+        /// </remarks>
+        public void LeaveNesting() => _depth--;
 
         /// <summary>
         /// Синтаксичні відмінності діалекту і режиму розбору: значення <c>^</c>,

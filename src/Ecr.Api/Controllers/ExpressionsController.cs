@@ -15,6 +15,29 @@ public sealed class ExpressionsController(
     ValidateExpressionHandler validate,
     GetExpressionMetadataHandler metadata) : ControllerBase
 {
+    /// <summary>
+    /// Стеля тіла запиту на перевірку виразу — 64 КіБ.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це ДРУГА лінія, а не фікс. Фікс — межа глибини в
+    /// <see cref="Ecr.Expressions.Parsing.Parser.MaxRecursionDepth"/>: саме
+    /// вона прибирає <c>StackOverflowException</c>, який у .NET не
+    /// перехоплюється і валить процес. Але сторож глибини стоїть ПІСЛЯ
+    /// лексера, а лексер будує по лексемі на символ: тіло в сотні мегабайтів
+    /// дужок обертається сотнями мільйонів лексем і кладе процес пам'яттю, ще
+    /// не дійшовши до парсера. Дві різні смерті — дві різні межі.
+    ///
+    /// ⚠ 64 КіБ — це приблизно тисячократний запас: найдовша формула корпусу
+    /// має 55 символів. Ціна помилки несиметрична: надто мала стеля зламала б
+    /// легітимну роботу, надто велика лише лишає вікно вужчим, ніж могло бути.
+    ///
+    /// ⚠ Саме ОБМЕЖЕННЯ виконує ASP.NET Core, не ми; тест
+    /// <c>ExpressionEndpointLimitsTests</c> фіксує, що ендпоінт його ОГОЛОШУЄ
+    /// і з яким числом — більшого юніт-тест тут довести не може, і вдавати
+    /// протилежне не варто.
+    /// </remarks>
+    public const int MaxExpressionBodyBytes = 64 * 1024;
+
     /// <summary>Перевіряє вираз так само, як це зробить публікація.</summary>
     /// <param name="request">Вираз, діалект і місце в структурі.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -28,6 +51,7 @@ public sealed class ExpressionsController(
     /// події, і однаковий код зробив би їх нерозрізнюваними.
     /// </remarks>
     [HttpPost("validate")]
+    [RequestSizeLimit(MaxExpressionBodyBytes)]
     [ProducesResponseType<ExpressionValidationDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Validate(
