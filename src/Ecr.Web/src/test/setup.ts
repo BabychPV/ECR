@@ -48,4 +48,23 @@ if (typeof window !== 'undefined') {
   if (window.HTMLElement !== undefined && window.HTMLElement.prototype.scrollIntoView === undefined) {
     window.HTMLElement.prototype.scrollIntoView = function scrollIntoView(): void {};
   }
+
+  /*
+   * ⛔ `window.scrollTo` в jsdom Є, але не працює: він одразу віддає в
+   * virtualConsole `Error: Not implemented: window.scrollTo`. Тому перевірка
+   * `=== undefined`, як у заглушках вище, тут НЕ спрацювала б — саме тому
+   * метод підмінюється беззастережно, а не за умовою.
+   *
+   * ⚠ Викликає його не наш код, а `react-router`: `RouterProvider` скидає
+   * прокрутку на початок сторінки в layout-ефекті на кожну навігацію. Тобто
+   * будь-який тест, що монтує реальний роутер (`AppLayout.prefetch`), друкує
+   * у stderr чужу помилку зі стеком `react-dom` — і її читають як збій
+   * власного коду, хоча тест міг падати зовсім з іншої причини.
+   *
+   * ⚠ Заглушка — саме порожня, а не «запам'ятай позицію»: у jsdom немає
+   * розкладки, тож прокручувати нічого, і жодне місце в цьому коді не читає
+   * `scrollX`/`scrollY`. Записувати позицію означало б завести неперевірений
+   * код, що вдає браузерну поведінку, якої тут не існує.
+   */
+  window.scrollTo = function scrollTo(): void {};
 }
