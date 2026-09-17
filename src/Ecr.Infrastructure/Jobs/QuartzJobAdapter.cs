@@ -95,6 +95,16 @@ public sealed partial class QuartzJobAdapter(
 
         await StartAsync(progress, jobId, typeName!, clock, context.CancellationToken).ConfigureAwait(false);
 
+        // ⛔ Биття серця на весь час виконання. Прибирання на старті
+        // (`IJobProgressStore.FailStaleAsync`) відрізняє покинуту задачу від
+        // чужої живої саме за ним; без биття довга задача, яка не звітує
+        // відсотків (імпорт великого файлу), через п'ять хвилин виглядала б
+        // покинутою — і перезапуск сусіднього інстанса вбивав би її так само,
+        // як до виправлення. Насос живе в СВОЄМУ scope: `DbContext` scoped і
+        // не потокобезпечний, а задача в цю мить користується своїм.
+        using var heartbeatStop = new CancellationTokenSource();
+        var heartbeat = HeartbeatLoopAsync(jobId, heartbeatStop.Token);
+
         try
         {
             await job.ExecuteAsync(
@@ -147,6 +157,69 @@ public sealed partial class QuartzJobAdapter(
             // IBackgroundJobScheduler.RestartAsync не мав би що перезапускати
             // — Quartz прибрав би задачу сам одразу після цього прогону.
             throw new JobExecutionException(ex, refireImmediately: false);
+        }
+        finally
+        {
+            // ⚠ Саме `finally`, а не зупинка в кожній гілці: гілок чотири
+            // (успіх, скасування, ретрай, остаточний провал), і та, яку
+            // забули б додати п'ятою, лишила б насос бити по задачі, що вже
+            // завершилася. Пізнє биття саме по собі нешкідливе
+            // (`HeartbeatAsync` фільтрує за станом), але вічний таймер на
+            // кожен прогін — це витік.
+            await StopHeartbeatAsync(heartbeatStop, heartbeat).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Зупиняє насос биття і дочікується його завершення.</summary>
+    private static async Task StopHeartbeatAsync(CancellationTokenSource stop, Task loop)
+    {
+        await stop.CancelAsync().ConfigureAwait(false);
+        await loop.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Поки задача виконується — підтверджує сховищу, що вона жива.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Цикл НЕ кидає: його дочікуються у <c>finally</c>, і виняток звідти
+    /// підмінив би справжню причину провалу задачі биттям серця. Пропущений
+    /// удар не є втратою — межа застарілості
+    /// (<see cref="IJobProgressStore.StaleAfter"/>) удесятеро більша за
+    /// інтервал, тож збій БД мусить тривати п'ять хвилин поспіль, щоб
+    /// вплинути хоч на щось. Помилка не ковтається мовчки: вона йде в лог.
+    /// </remarks>
+    private async Task HeartbeatLoopAsync(string jobId, CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(IJobProgressStore.HeartbeatInterval);
+
+        // ⚠ Зупинка через Dispose, а не через токен у WaitForNextTickAsync:
+        // токен змусив би метод кинути OperationCanceledException рівно в
+        // `finally`, а Dispose просто повертає false — цикл виходить негайно
+        // й тихо, не чекаючи решти тридцяти секунд.
+        using var stop = ct.Register(timer.Dispose);
+
+        while (await timer.WaitForNextTickAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            try
+            {
+                using var scope = services.CreateScope();
+
+                var store = scope.ServiceProvider.GetService<IJobProgressStore>();
+                if (store is null)
+                {
+                    return;
+                }
+
+                await store.HeartbeatAsync(
+                        jobId,
+                        scope.ServiceProvider.GetRequiredService<IClock>().UtcNow,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                LogHeartbeatFailed(logger, jobId, ex);
+            }
         }
     }
 
@@ -251,6 +324,11 @@ public sealed partial class QuartzJobAdapter(
         Level = LogLevel.Information,
         Message = "Задача {JobId} ({TypeName}) пропущена: інший інстанс уже виконує її зараз.")]
     private static partial void LogJobSkippedElsewhere(ILogger logger, string jobId, string typeName);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Не вдалося записати биття серця задачі {JobId}; наступна спроба за інтервал.")]
+    private static partial void LogHeartbeatFailed(ILogger logger, string jobId, Exception exception);
 }
 
 /// <summary>Прогрес, що пишеться у сховище.</summary>
