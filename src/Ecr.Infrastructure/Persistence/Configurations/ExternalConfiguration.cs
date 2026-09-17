@@ -348,6 +348,33 @@ public sealed class MaintenanceRunConfiguration : IEntityTypeConfiguration<Maint
     }
 }
 
+/// <summary>Конфігурація <see cref="ScanCursor"/>.</summary>
+/// <remarks>
+/// ⚠ Індексу немає навмисно, і це не забутий рядок: таблиця має рівно стільки
+/// рядків, скільки в системі відновлюваних сканувань (одиниці), і читається
+/// вона завжди за первинним ключем. Індекс тут коштував би супроводу, не
+/// даючи жодного плану, якого не дає <c>PK</c>.
+/// </remarks>
+public sealed class ScanCursorConfiguration : IEntityTypeConfiguration<ScanCursor>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<ScanCursor> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("ScanCursor", "itg");
+
+        // Ключ — код сканування: курсор на кожне сканування рівно один, і саме
+        // це має тримати база, а не домовленість у коді.
+        builder.HasKey(x => x.ScanCode).HasName("PK_ScanCursor");
+        builder.Property(x => x.ScanCode).HasMaxLength(64);
+        builder.Property(x => x.PeriodKeyValue).HasColumnName("PeriodKey");
+        builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.LastCycleCompletedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.CyclesCompleted).HasDefaultValue(0);
+    }
+}
+
 /// <summary>Конфігурація <see cref="JobProgress"/>.</summary>
 public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgress>
 {

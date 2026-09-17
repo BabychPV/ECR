@@ -133,6 +133,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     public DbSet<NotificationOutboxItem> NotificationOutbox => Set<NotificationOutboxItem>();
     public DbSet<JobProgress> JobProgresses => Set<JobProgress>();
 
+    /// <summary>Позиції відновлюваних сканувань (див. <see cref="ScanCursor"/>).</summary>
+    public DbSet<ScanCursor> ScanCursors => Set<ScanCursor>();
+
     // doc — індекс фільтрів
     public DbSet<DocumentIndexValue> DocumentIndexValues => Set<DocumentIndexValue>();
 
