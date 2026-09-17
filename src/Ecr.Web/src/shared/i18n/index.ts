@@ -1,4 +1,4 @@
-﻿import { apiFetchIfChanged } from '@/api/client';
+﻿import { apiFetchIfChanged, setRequestLanguageTag } from '@/api/client';
 import type { UiStringCatalog } from '@/api/types';
 
 /**
@@ -150,11 +150,27 @@ function applyDocumentLanguage(): void {
   if (document.documentElement.lang !== tag) document.documentElement.lang = tag;
 }
 
+/**
+ * Оголошує транспорту мову, якою просити серверні тексти.
+ *
+ * ⛔ Без цього рядка вибір мови в застосунку на сервер НЕ ПОТРАПЛЯВ: мова
+ * користувача живе лише в `localStorage`, у профілі її немає, а claim
+ * `ecr:lang`, який читає сервер, ніхто не записує. Тобто відмови приходили
+ * мовою СИСТЕМИ користувача, а не тією, яку він обрав у шапці.
+ *
+ * ⚠ Напрямок один: i18n знає про транспорт, транспорт про i18n — ні.
+ * Зворотний імпорт дав би цикл, бо каталог сам ходить через `apiFetch`.
+ */
+function applyRequestLanguage(): void {
+  setRequestLanguageTag(languageTag(current));
+}
+
 /** Позначає, що вміст каталогу змінився. */
 function bumpCatalog(): void {
   // ⛔ ДО розсилки підписникам, не після: див. пункт 2 у коментарі вище —
   // інакше перший рендер нової мови встигав би відбутися зі старим `lang`.
   applyDocumentLanguage();
+  applyRequestLanguage();
 
   catalogVersion += 1;
   for (const listener of catalogListeners) listener();
@@ -182,6 +198,12 @@ export function catalogSnapshot(): number {
 
 const loaded = new Map<string, Catalog>();
 let current: Language = DefaultLanguage;
+
+// ⚠ Початкова мова оголошується транспортові одразу, а не чекає на перший
+// `bumpCatalog`. Інакше запити, зроблені ДО завантаження каталогу — а це,
+// зокрема, сам вхід у систему, — ішли б без заголовка, і відмова на формі
+// входу приходила б не тією мовою, що решта застосунку.
+applyRequestLanguage();
 
 /**
  * Ключі каталогу (`lang:scope`), у яких останнє завантаження закінчилося
