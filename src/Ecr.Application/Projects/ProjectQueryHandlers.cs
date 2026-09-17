@@ -428,7 +428,8 @@ public sealed class ActivateProjectHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     Domain.Services.PeriodStateCalculator periodStates,
-    IClock clock)
+    IClock clock,
+    Periods.PeriodCalendarMaterializer calendar)
 {
     /// <summary>Право на активацію.</summary>
     public const string Permission = "Project.Manage";
@@ -475,11 +476,61 @@ public sealed class ActivateProjectHandler(
                 $"Активувати можна лише чернетку; проєкт у стані {project.Status}.");
         }
 
-        if (project.Periods.Count == 0)
+        // ⛔ КАЛЕНДАР ДОБУДОВУЄТЬСЯ ТУТ, а не покладається на те, що хтось до
+        // цього відкрив екран періодів. Так було не завжди, і попередній
+        // коментар нижче це чесно визнавав: «межі періодів уже пораховані
+        // календарем (побічний ефект `GET …/periods`)». Тобто щойно створений
+        // проєкт активувати було НЕМОЖЛИВО — `BuildPeriodCalendarHandler`
+        // викликався рівно з одного місця, з читання календаря, і без цього
+        // читання `project.Periods` лишався порожнім. Відмова при цьому звучала
+        // як «У проєкті немає жодного періоду: активувати нічого», тобто
+        // звинувачувала дані, а не називала справжню причину — не зроблено
+        // кроку, про який ніде не написано. Порядок виклику двох маршрутів не
+        // може бути частиною контракту, якої в контракті немає.
+        //
+        var created = await calendar.MaterializeAsync(project, ct).ConfigureAwait(false);
+
+        if (created.Count > 0)
         {
+            // ⛔ ЗБЕРЕЖЕННЯ ТУТ — вимушене, і ціна назвала себе сама. Нижче
+            // `SetCurrentPeriodAutomatically` записує ІДЕНТИФІКАТОР періоду, а
+            // `Period.Id` призначає база (`Entity<int>`, identity). Щойно
+            // побудований період до збереження має `Id = 0`, тож без цього
+            // рядка активація новоствореного проєкту прописала б поточним
+            // періодом нуль — мовчки, без жодної помилки.
+            //
+            // ⚠ Отже транзакція таки ділиться надвоє, і це свідомий розмін.
+            // Проміжний стан — «календар є, проєкт ще чернетка» — рівно той
+            // самий, що існував і досі (його лишав `GET …/periods`), він
+            // безпечний і самовиправний: календар ідемпотентний, повторна
+            // активація доведе справу до кінця.
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
+        // ⚠ Об'єднання ЯВНЕ: `MaterializeAsync` кладе нові періоди у сховище, а
+        // не в колекцію агрегата (див. його ⚠). Порахувати стани по
+        // `project.Periods` означало б не побачити щойно створених — активація
+        // пройшла б, а періоди лишилися б у стані за замовчуванням.
+        //
+        // ⛔ Із відсіванням за ключем періоду, а не `Distinct()`. EF МОЖЕ
+        // підтягнути щойно додані рядки в навігаційну колекцію агрегата сам
+        // (fixup), і тоді конкатенація дала б кожен новий період двічі.
+        // `Distinct()` тут не рятує, а шкодить: `Entity<int>` порівнюється за
+        // `Id`, а в нових періодів він однаковий (нуль) рівно доти, доки їх не
+        // збережено, — усі вони злилися б в один. `PeriodKeyValue` унікальний
+        // у межах проєкту за побудовою календаря, тому відсіваємо саме за ним.
+        var allPeriods = created.Count == 0
+            ? project.Periods
+            : [.. project.Periods.Concat(created).DistinctBy(p => p.PeriodKeyValue)];
+
+        if (allPeriods.Count == 0)
+        {
+            // ⚠ Тепер це справді про дані, а не про пропущений крок: календар
+            // щойно збудовано, і він не дав жодного періоду.
             throw new BusinessRuleException(
                 ErrorCodes.ProjectActivationInvalid,
-                "У проєкті немає жодного періоду: активувати нічого.");
+                $"Календар проєкту {projectId} не дав жодного періоду: "
+                + "перевірте періодичність, звітний рік і політику зсувів.");
         }
 
         var now = clock.UtcNow;
@@ -492,12 +543,11 @@ public sealed class ActivateProjectHandler(
         // тому, що тут немає ні черги, ні гонки: перехід лягає тією ж
         // транзакцією, що й сама активація.
         //
-        // ⚠ Межі періодів уже пораховані календарем (`PeriodCalendar`,
-        // побічний ефект `GET …/periods`), інакше активації не було б на чому
-        // спрацювати — вона вимагає непорожнього календаря.
+        // ⚠ Межі періодів пораховані календарем щойно вище, у цій самій
+        // транзакції — а не побічним ефектом чужого маршруту.
         var zone = Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo();
 
-        foreach (var (period, target) in periodStates.Plan(project.Periods, now, zone))
+        foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone))
         {
             period.AdvanceTo(target, now);
         }
@@ -509,7 +559,7 @@ public sealed class ActivateProjectHandler(
         if (project.CurrentPeriodMode == Domain.Enums.CurrentPeriodMode.Auto)
         {
             project.SetCurrentPeriodAutomatically(
-                periodStates.SelectCurrentPeriod(project.Periods)?.Id, now);
+                periodStates.SelectCurrentPeriod(allPeriods)?.Id, now);
         }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
