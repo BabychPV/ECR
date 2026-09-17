@@ -148,7 +148,7 @@ public sealed class OrphanScanner(EcrDbContext db, RegistryResolver resolver, IC
                     && resolver.IsSelectable(entry, asOf));
 
                 return new OrphanCandidate(
-                    group.Key.RowId,
+                    new OrphanRowRef(group.Key.PeriodKeyValue, group.Key.RowId),
                     stateByPeriod[group.Key.PeriodKeyValue],
                     group.First().IsOrphaned,
                     allValid);
@@ -170,12 +170,40 @@ public sealed class OrphanScanner(EcrDbContext db, RegistryResolver resolver, IC
         // `SetProperty`-вирази нижче тримають ТОЙ САМИЙ інваріант, що описує
         // `TableRow.SetOrphaned` («`OrphanedAt` нульується разом з ознакою») —
         // звіряй їх із визначенням там, коли міняєш один із двох.
+        //
+        // ⛔ І ПО ОДНОМУ `UPDATE` НА ПЕРІОД, а не по одному на весь прохід. Так
+        // було не завжди: раніше тут стояло `Where(r => decision.ToFlag
+        // .Contains(r.Id))` — без `PeriodKey`. Первинний ключ `doc.TableRow` —
+        // складений `(PeriodKey, Id)`, таблиця лежить на `ps_ByPeriodKey`, і
+        // жодного індексу з `Id` попереду немає й бути не може:
+        // `07-partition-tables.sql` вирівнює кожен індекс цих таблиць по схемі
+        // партиціонування й падає (`THROW 50031`), якщо хоч один лишився поза
+        // нею. Тобто предикату не було чим засікатися, і кожен із двох
+        // `UPDATE` щоночі проходив УСІ партиції таблиці, розрахованої на
+        // ~108 млн рядків на рік.
+        //
+        // Заміряно на окремій базі, 4.8 млн рядків / 24 партиції (`sqlcmd`,
+        // той самий стенд, що й для `RowStore.TouchRowsAsync`), 500 `Id`
+        // одного періоду:
+        //   було:  Index Scan (UQ_TableRow_Key), scan count 25, 28 844 читання
+        //   стало: Clustered Index Seek (PK_TableRow) з RangePartitionNew,
+        //          scan count 0, 1 500 читань
+        //
+        // Період тепер несе сам план (`OrphanRowRef`), і саме тому група
+        // нижче — законна: рішення одного проходу ЗМІШУЄ періоди (кандидати
+        // беруться з усіх відкритих одразу), тож звести все до одного
+        // `PeriodKey` у `WHERE` неможливо. Кілька запитів із засічкою дешевші
+        // за один зі скануванням: N тут — кількість відкритих періодів
+        // (одиниці), а не кількість партицій таблиці.
         var now = clock.UtcNow;
 
-        if (decision.ToFlag.Count > 0)
+        foreach (var byPeriod in decision.ToFlag.GroupBy(r => r.PeriodKeyValue))
         {
+            var periodKey = byPeriod.Key;
+            var rowIds = byPeriod.Select(r => r.RowId).ToList();
+
             await db.TableRows
-                .Where(r => decision.ToFlag.Contains(r.Id))
+                .Where(r => r.PeriodKeyValue == periodKey && rowIds.Contains(r.Id))
                 .ExecuteUpdateAsync(
                     s => s.SetProperty(r => r.IsOrphaned, true)
                           .SetProperty(r => r.OrphanedAt, now),
@@ -183,13 +211,16 @@ public sealed class OrphanScanner(EcrDbContext db, RegistryResolver resolver, IC
                 .ConfigureAwait(false);
         }
 
-        if (decision.ToClear.Count > 0)
+        foreach (var byPeriod in decision.ToClear.GroupBy(r => r.PeriodKeyValue))
         {
+            var periodKey = byPeriod.Key;
+            var rowIds = byPeriod.Select(r => r.RowId).ToList();
+
             // ⚠ OrphanedAt зануляється разом із ознакою. Лишити його означало б
             // мати рядок, який «колись був осиротілим» і виглядає як осиротілий
             // у будь-якому звіті, що дивиться на дату, а не на прапорець.
             await db.TableRows
-                .Where(r => decision.ToClear.Contains(r.Id))
+                .Where(r => r.PeriodKeyValue == periodKey && rowIds.Contains(r.Id))
                 .ExecuteUpdateAsync(
                     s => s.SetProperty(r => r.IsOrphaned, false)
                           .SetProperty(r => r.OrphanedAt, (DateTime?)null),
