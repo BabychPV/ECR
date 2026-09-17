@@ -106,6 +106,64 @@ public sealed class ActivateProjectTests
         Assert.Equal(ProjectStatus.Draft, project.Status);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Активація_щойно_створеного_проєкту_будує_календар_сама()
+    {
+        // ⛔ Проєкт БЕЗ жодного періоду — саме таким його лишає створення.
+        // Доти календар будувався РІВНО в одному місці: `GET …/periods`.
+        // Отже новостворений проєкт активувати було неможливо, а відмова
+        // звучала «У проєкті немає жодного періоду: активувати нічого» —
+        // звинувачувала дані замість того, щоб назвати пропущений крок, про
+        // який ніде не написано.
+        var project = ProjectBuilder.Project(timeZoneId: "UTC");
+        _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
+        _periods.GetPolicyAsync(project.PeriodPolicyId, Arg.Any<CancellationToken>())
+            .Returns(ProjectBuilder.Policy());
+
+        var added = new List<Period>();
+        _periods.When(p => p.AddRange(Arg.Any<IEnumerable<Period>>()))
+            .Do(call => added.AddRange(call.Arg<IEnumerable<Period>>()));
+
+        await Handler().HandleAsync(project.Id, CancellationToken.None);
+
+        Assert.Equal(ProjectStatus.Active, project.Status);
+        Assert.NotEmpty(added);
+
+        // Календар не просто створено — його періоди пройшли ті самі переходи,
+        // що й у вже наявного проєкту: активація не лишає їх `Scheduled`.
+        Assert.Contains(added, p => p.State == PeriodState.Open);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Календар_зберігається_ДО_призначення_поточного_періоду()
+    {
+        // ⛔ Порядок тут — не стиль. `Period.Id` призначає база, тож до
+        // збереження він нуль; призначити поточним період із нульовим
+        // ідентифікатором означало б записати в проєкт неіснуюче посилання
+        // мовчки, без жодної помилки.
+        var project = ProjectBuilder.Project(timeZoneId: "UTC");
+        _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
+        _periods.GetPolicyAsync(project.PeriodPolicyId, Arg.Any<CancellationToken>())
+            .Returns(ProjectBuilder.Policy());
+
+        await Handler().HandleAsync(project.Id, CancellationToken.None);
+
+        // ⚠ Перевіряється саме ПОРЯДОК, а не значення `CurrentPeriodId`:
+        // ідентифікатор роздає база, якої в цьому тесті немає, тож тут він
+        // лишиться нулем і при правильному коді. Довести можна рівно те, що
+        // календар потрапляє в окреме збереження ДО того, як хтось питає в
+        // періодів ідентифікатори, — і саме це робить значення ненульовим у
+        // проді.
+        Received.InOrder(() =>
+        {
+            _periods.AddRange(Arg.Any<IEnumerable<Period>>());
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+        });
+    }
+
     /// <summary>Проєкт-чернетка з побудованим календарем 2026 року.</summary>
     private Project Arrange()
     {
@@ -118,9 +176,23 @@ public sealed class ActivateProjectTests
 
         _periods.FindProjectAsync(project.Id, Arg.Any<CancellationToken>()).Returns(project);
 
+        // ⚠ Політика потрібна навіть тут, де календар уже побудований:
+        // активація тепер сама добудовує календар (і перераховує межі наявних
+        // періодів), тож без політики їй нема з чим працювати. Створених
+        // періодів це не додасть — календар ідемпотентний.
+        _periods.GetPolicyAsync(project.PeriodPolicyId, Arg.Any<CancellationToken>())
+            .Returns(policy);
+
         return project;
     }
 
     private ActivateProjectHandler Handler()
-        => new(_periods, _access, _user, _uow, new PeriodStateCalculator(), _clock);
+        => new(
+            _periods,
+            _access,
+            _user,
+            _uow,
+            new PeriodStateCalculator(),
+            _clock,
+            new Application.Periods.PeriodCalendarMaterializer(_periods));
 }

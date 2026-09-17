@@ -146,7 +146,13 @@ public sealed class ErrorFamilyTests
         _periods.FindProjectAsync(404, Arg.Any<CancellationToken>()).Returns((Project?)null);
 
         var handler = new ActivateProjectHandler(
-            _periods, _access, _user, _uow, new Ecr.Domain.Services.PeriodStateCalculator(), _clock);
+            _periods,
+            _access,
+            _user,
+            _uow,
+            new Ecr.Domain.Services.PeriodStateCalculator(),
+            _clock,
+            new Application.Periods.PeriodCalendarMaterializer(_periods));
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
             () => handler.HandleAsync(projectId: 404, CancellationToken.None));
