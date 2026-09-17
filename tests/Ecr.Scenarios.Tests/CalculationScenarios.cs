@@ -625,7 +625,35 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         var admin = await Provisioning.AdministratorAsync(
             app, "S25", ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Calculation.Recalculate", "System.ViewHealth"]);
 
-        (admin, _, var documentId, var periodKey) = await DataEntryScenarios.ArrangeDocumentAsync(app, admin, "S25");
+        (admin, var projectId, var documentId, _) = await DataEntryScenarios.ArrangeDocumentAsync(app, admin, "S25");
+
+        // ⛔ Період береться ЗАПИСУВАНИЙ (`Open`/`Grace`), а не «перший у
+        // переліку», як робить `ArrangeDocumentAsync`. Перший — це січень, і
+        // він закритий; доти сценарій ставив у чергу перерахунок ЗАКРИТОГО
+        // періоду й отримував `202`, бо гейту стану періоду на маршруті
+        // документа не існувало взагалі. Тепер маршрут відмовляє `422`
+        // (`ECR-CALC-4221`), і сценарій мусить перевіряти свій предмет —
+        // видимість кінцевого стану задачі — на періоді, у який перерахунок
+        // законний. Той самий добір уже стоїть у `Повний_перерахунок_…` нижче.
+        var calendar = await admin.Client.GetAsync(
+            new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, calendar.StatusCode);
+        var periods = (await calendar.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("periods");
+
+        var writable = periods.EnumerateArray().FirstOrDefault(
+            p => string.Equals(p.GetProperty("state").GetString(), "Open", StringComparison.Ordinal))
+            is { ValueKind: JsonValueKind.Object } open
+            ? open
+            : periods.EnumerateArray().FirstOrDefault(
+                p => string.Equals(p.GetProperty("state").GetString(), "Grace", StringComparison.Ordinal));
+
+        Assert.True(
+            writable.ValueKind == JsonValueKind.Object,
+            "жоден період проєкту не приймає запису (потрібен Open або Grace); стани: "
+            + string.Join(", ", periods.EnumerateArray().Select(
+                p => $"{p.GetProperty("periodKey").GetInt32()}={p.GetProperty("state").GetString()}")));
+
+        var periodKey = writable.GetProperty("periodKey").GetInt32();
 
         var recalc = await admin.Client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{documentId}/recalculate", UriKind.Relative), new { periodKey });
