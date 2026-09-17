@@ -31,8 +31,29 @@ public sealed class ConcurrencyConflictException(string errorCode, string messag
     : EcrException(errorCode, message, details);
 
 /// <summary>Сутність не знайдена. HTTP 404.</summary>
-public sealed class NotFoundException(string errorCode, string message)
-    : EcrException(errorCode, message);
+/// <remarks>
+/// ⚠ <paramref name="details"/> з'явився пізніше за сам тип (`Q-341`), і це не
+/// вирівнювання сигнатур із сусідами заради симетрії. Подробиця відмови
+/// локалізується РІВНО тоді, коли виняток несе <c>Details["messageKey"]</c>
+/// (<c>ExceptionHandlingMiddleware.ResolveGenericMessageAsync</c>). Доки
+/// параметра не було, у 404 не існувало місця, куди покласти ключ, тож КОЖЕН
+/// «не знайдено» доїжджав користувачеві готовим українським реченням
+/// незалежно від мови інтерфейсу — мови, якої серед мов продукту
+/// (<c>en</c>/<c>ru</c>/<c>kz</c>) немає взагалі.
+///
+/// ⚠ Параметр НЕОБОВ'ЯЗКОВИЙ: жоден із наявних кидків не переписується
+/// механічно. Речення українською лишається запасним шляхом — резолвер
+/// повертається до нього, коли ключа немає в каталозі.
+/// </remarks>
+/// <param name="errorCode">Код помилки.</param>
+/// <param name="message">Запасне речення (показується, коли ключа немає).</param>
+/// <param name="details">
+/// <c>messageKey</c> плюс сирі підстановки рядками; решта полів їде клієнтові
+/// структурою.
+/// </param>
+public sealed class NotFoundException(
+    string errorCode, string message, IReadOnlyDictionary<string, object?>? details = null)
+    : EcrException(errorCode, message, details);
 
 /// <summary>
 /// Зовнішнє джерело відмовило в АВТЕНТИФІКАЦІЇ (<c>401</c>/<c>403</c>).

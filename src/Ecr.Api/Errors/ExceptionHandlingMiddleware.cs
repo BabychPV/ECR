@@ -334,8 +334,12 @@ public sealed partial class ExceptionHandlingMiddleware(
     private static (int Status, string Code, string Message, IReadOnlyDictionary<string, object?>? Details) Map(
         Exception exception) => exception switch
     {
+        // ⛔ `e.Details`, а не `null`. Раніше тут стояла жорстка `null` — і
+        // навіть якби 404 ніс `messageKey`, до `LocalizedDetailAsync` він не
+        // доїхав би: подробиця відкидалася рівно тут, на один рядок раніше за
+        // єдине місце, яке її читає (`Q-341`).
         NotFoundException e =>
-            (StatusCodes.Status404NotFound, e.ErrorCode, e.Message, null),
+            (StatusCodes.Status404NotFound, e.ErrorCode, e.Message, e.Details),
 
         // 401 і 403 розрізняє КОД, а не тип винятку: «не увійшов» і «увійшов,
         // але не має права» — різні відповіді, і клієнт мусить їх розрізняти,

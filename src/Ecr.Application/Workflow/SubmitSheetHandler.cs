@@ -62,7 +62,14 @@ public sealed class SubmitSheetHandler(
         if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
-                "ECR-DOC-0404", $"Аркуша {sheetDefId} немає в складі документа {documentId}.");
+                "ECR-DOC-0404",
+                $"Аркуша {sheetDefId} немає в складі документа {documentId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.sheetNotInDocument",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
