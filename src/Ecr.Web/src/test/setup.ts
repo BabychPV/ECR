@@ -67,4 +67,68 @@ if (typeof window !== 'undefined') {
    * код, що вдає браузерну поведінку, якої тут не існує.
    */
   window.scrollTo = function scrollTo(): void {};
+
+  /*
+   * ⛔ КОРІНЬ «повільного Mantine в jsdom». Один рендер випадного блоку
+   * `Combobox` коштував ~35 СЕКУНД процесорного часу — і це не рендер, не
+   * позиціювання і не обсяг даних, а взаємна рекурсія між jsdom і його
+   * власним добирачем селекторів `nwsapi`.
+   *
+   * ⛔ Механізм, прочитаний у `nwsapi/src/nwsapi.js` і підтверджений
+   * профілем. `nwsapi` не вміє станових псевдокласів (`:modal`,
+   * `:fullscreen`, …) і питає про них «нативну» реалізацію:
+   *
+   *     isModal(node)      -> matchesNative(node, ':modal') || isFullscreen(node)
+   *     isFullscreen(node) -> matchesNative(node, ':fullscreen') || …
+   *     matchesNative      -> _matches || node.matches || …
+   *
+   * У браузері `node.matches` справді нативний. У jsdom `Element.matches`
+   * реалізований ЧЕРЕЗ `nwsapi` — тобто `matchesNative` повертається туди,
+   * звідки вийшов, і кожен рівень породжує наступні. Профіль однієї такої
+   * перевірки: `:modal` — 56 632 виклики, `:fullscreen` — 82 349 579,
+   * глибина вкладеності 2 910, 33.9 с ЧИСТОГО CPU (`cpuUsage`), із них уся
+   * верхівка — `nwsapi.matches`/`Element.matches`. Жодного таймера,
+   * `requestAnimationFrame` чи мікрозадачі при цьому не створюється, тому
+   * ззовні це виглядає як «тест підвис».
+   *
+   * ⚠ Питає про це не наш код і не Mantine, а `tabbable` усередині пастки
+   * фокуса: будь-який змонтований випадний блок/діалог перевіряє, чи він не
+   * всередині модального вікна. Тому ціна виникала САМЕ тоді, коли Mantine
+   * тримав випадний блок у DOM (`keepMounted`, дефолт `Combobox`) — і саме
+   * це раніше сприйняли за «повільний рендер Mantine».
+   *
+   * ⚠ Відповідь `false` — не спрощення, а єдиний правдивий стан цього
+   * середовища: у jsdom немає ні повноекранного режиму, ні модальних
+   * діалогів (`showModal` не реалізовано), ні «картинка в картинці», ні
+   * показаних popover. `nwsapi` дійшов би рівно до `false` — просто через
+   * 82 мільйони викликів.
+   *
+   * ⚠ Селектор порівнюється ТОЧНО, а не «містить». `div, :modal` мусить
+   * лишитися на розборі `nwsapi`: відповісти `false` за цілий складений
+   * селектор було б неправильно. Точний збіг покриває всі виклики
+   * `tabbable` і не бере на себе чужих рішень.
+   *
+   * ⚠ `:open`/`:closed` у списку не за виміром, а за читанням джерела:
+   * `isOpen`/`isClosed` спершу перевіряють `details`/`dialog`, а для будь-
+   * якого іншого елемента падають у той самий `matchesNative` — тобто в ту
+   * саму рекурсію. Вони просто ще нікого тут не зачепили.
+   */
+  const DEAD_STATE_PSEUDO = new Set([
+    ':fullscreen',
+    ':modal',
+    ':picture-in-picture',
+    ':popover-open',
+    ':open',
+    ':closed',
+  ]);
+
+  const nwsapiMatches = window.Element.prototype.matches;
+
+  window.Element.prototype.matches = function matches(this: Element, selectors: string): boolean {
+    if (DEAD_STATE_PSEUDO.has(selectors)) {
+      return false;
+    }
+
+    return nwsapiMatches.call(this, selectors);
+  };
 }
