@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { loadCatalog } from '@/shared/i18n';
 import { RegistriesPage } from '../RegistriesPage';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит-пас 8, lane4, два незалежні пункти на одній сторінці:
@@ -139,7 +140,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/admin/registries?code=UNITS']}>
           <RegistriesPage />

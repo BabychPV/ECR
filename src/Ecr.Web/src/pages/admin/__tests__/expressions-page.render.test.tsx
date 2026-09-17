@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
+import { testTheme } from '@/test/render';
 
 /**
  * Q-275 (побічна знахідка Q-274): `GET /api/v1/templates/{id}/versions` —
@@ -44,7 +46,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <ExpressionsPage />
       </QueryClientProvider>
@@ -91,6 +93,25 @@ describe('ExpressionsPage і пагінована відповідь версі�
       // `template-versions` вирішувався, `.map` на об'єкті падав
       // `TypeError`, і саме це мало зʼявитися тут.
       show();
+
+      // ⛔ Список треба ВІДКРИТИ. Раніше цього рядка не було, і тест
+      // знаходив опцію лише тому, що Mantine `Combobox` за замовчуванням
+      // тримає випадний блок змонтованим (`keepMounted: true`) навіть
+      // закритим. Тобто тест стверджував про текст, якого користувач НЕ
+      // бачить, — і тримався на побічному ефекті бібліотеки.
+      //
+      // ⚠ Тема тестів (`@/test/render`) цей дефолт знімає: змонтований
+      // floating-елемент коштує в jsdom ~40с на компонент, і саме він
+      // робив гейт `client` нестабільним. Клік повертає перевірці той
+      // самий сенс, але через дію, яку справді виконує людина.
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole(
+          'textbox',
+          { name: /expressions\.templateVersion/ },
+          { timeout: 60_000 },
+        ),
+      );
 
       expect(
         await screen.findByText('1.0.0.0 · Published', {}, { timeout: 400_000 }),

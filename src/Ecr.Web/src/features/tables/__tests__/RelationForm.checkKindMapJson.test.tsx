@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { RelationForm } from '../RelationForm';
 import { emptyDraft, type RelationDraft } from '../relation';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит-пас 8, lane7, п.12: форма зв'язку таблиць показувала «Column mapping»
@@ -35,7 +36,7 @@ function Harness(): JSX.Element {
 
 function show(): void {
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <Harness />
     </MantineProvider>,
   );

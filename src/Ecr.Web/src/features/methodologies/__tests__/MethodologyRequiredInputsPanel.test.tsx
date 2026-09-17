@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MethodologyRequiredInputsPanel } from '@/features/methodologies/MethodologyContentPanels';
 import { loadCatalog } from '@/shared/i18n';
+import { testTheme } from '@/test/render';
 
 /**
  * Обов'язкові вхідні колонки методології — конфігуратор (директива
@@ -85,7 +86,7 @@ function show(editable: boolean): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MethodologyRequiredInputsPanel methodologyId={1} versionId={10} editable={editable} />
       </QueryClientProvider>

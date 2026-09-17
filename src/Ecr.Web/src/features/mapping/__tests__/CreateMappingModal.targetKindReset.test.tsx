@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CreateMappingModal } from '@/features/mapping/CreateMappingModal';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит 2026-09-16, §10.4: `targetId` не очищався при зміні `targetKind`.
@@ -90,7 +91,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <CreateMappingModal
           sourceEntityId={5}
