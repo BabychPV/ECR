@@ -147,9 +147,13 @@ public sealed class OrphanScanTests
         Assert.False(_resolver.IsSelectable(permit, PeriodEnd));
 
         var decision = OrphanScanPlan.Plan(
-            [new OrphanCandidate(Row1, PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false)]);
+            [new OrphanCandidate(Row(Row1), PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false)]);
 
-        Assert.Equal([Row1], decision.ToFlag);
+        // ⚠ У рішенні — ПОВНА адреса рядка, з ключем партиції. Самого `Id`
+        // недостатньо: `doc.TableRow` має складений ключ `(PeriodKey, Id)`,
+        // і план, що ніс самі `Id`, змушував сховище писати `WHERE Id IN (…)`
+        // — прохід по всіх партиціях щоночі.
+        Assert.Equal([new OrphanRowRef(Period, Row1)], decision.ToFlag);
         Assert.Empty(decision.ToClear);
     }
 
@@ -200,12 +204,12 @@ public sealed class OrphanScanTests
         Assert.True(_resolver.IsSelectable(permit, PeriodEnd));
 
         var decision = OrphanScanPlan.Plan(
-            [new OrphanCandidate(Row1, PeriodState.Open, IsOrphaned: true, ReferenceIsValid: true)]);
+            [new OrphanCandidate(Row(Row1), PeriodState.Open, IsOrphaned: true, ReferenceIsValid: true)]);
 
         // ⚠ Ось половина механізму, без якої решта — пастка: виправлення
         // довідника не розблокувало б Submit, і користувач лишився б із
         // помилкою, причину якої вже усунуто.
-        Assert.Equal([Row1], decision.ToClear);
+        Assert.Equal([new OrphanRowRef(Period, Row1)], decision.ToClear);
         Assert.Empty(decision.ToFlag);
 
         // І симетрично: коли стан збігається з дійсністю, не пишеться нічого.
@@ -213,8 +217,8 @@ public sealed class OrphanScanTests
         // чужої відкритої форми.
         var unchanged = OrphanScanPlan.Plan(
         [
-            new OrphanCandidate(Row1, PeriodState.Open, IsOrphaned: true, ReferenceIsValid: false),
-            new OrphanCandidate(1002, PeriodState.Open, IsOrphaned: false, ReferenceIsValid: true),
+            new OrphanCandidate(Row(Row1), PeriodState.Open, IsOrphaned: true, ReferenceIsValid: false),
+            new OrphanCandidate(Row(1002), PeriodState.Open, IsOrphaned: false, ReferenceIsValid: true),
         ]);
 
         Assert.Equal(0, unchanged.Total);
@@ -246,18 +250,29 @@ public sealed class OrphanScanTests
     {
         var decision = OrphanScanPlan.Plan(
         [
-            new OrphanCandidate(1001, PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false),
-            new OrphanCandidate(1002, PeriodState.Grace, IsOrphaned: false, ReferenceIsValid: false),
-            new OrphanCandidate(1003, PeriodState.Closed, IsOrphaned: false, ReferenceIsValid: false),
-            new OrphanCandidate(1004, PeriodState.Closed, IsOrphaned: true, ReferenceIsValid: true),
-            new OrphanCandidate(1005, PeriodState.Scheduled, IsOrphaned: false, ReferenceIsValid: false),
+            // ⚠ Періоди РІЗНІ навмисно: один прохід сканера бере кандидатів з
+            // усіх відкритих періодів одразу, і рішення зобов'язане донести
+            // період кожного рядка до сховища окремо — саме з нього сховище
+            // будує предикат на ключ партиції.
+            new OrphanCandidate(
+                new OrphanRowRef(202602, 1001), PeriodState.Open, IsOrphaned: false, ReferenceIsValid: false),
+            new OrphanCandidate(
+                new OrphanRowRef(202603, 1002), PeriodState.Grace, IsOrphaned: false, ReferenceIsValid: false),
+            new OrphanCandidate(
+                new OrphanRowRef(202601, 1003), PeriodState.Closed, IsOrphaned: false, ReferenceIsValid: false),
+            new OrphanCandidate(
+                new OrphanRowRef(202601, 1004), PeriodState.Closed, IsOrphaned: true, ReferenceIsValid: true),
+            new OrphanCandidate(
+                new OrphanRowRef(202604, 1005), PeriodState.Scheduled, IsOrphaned: false, ReferenceIsValid: false),
         ]);
 
         // ⛔ Закритий період не чіпається в ОБИДВА боки: ні поставити, ні
         // зняти. Його дані вже подані й погоджені — ознака нічого не
         // розблокує і нічого не заборонить, зате перепише рядок, що входить
         // у контрольну суму зрізу подання.
-        Assert.Equal([1001L, 1002L], decision.ToFlag);
+        Assert.Equal(
+            [new OrphanRowRef(202602, 1001), new OrphanRowRef(202603, 1002)],
+            decision.ToFlag);
         Assert.Empty(decision.ToClear);
 
         Assert.True(OrphanScanPlan.IsScannable(PeriodState.Open));
@@ -271,6 +286,14 @@ public sealed class OrphanScanTests
 
     private SetEntryValidityHandler Handler()
         => new(_registries, _scanner, _uow, _audit, _access, _user, _clock);
+
+    /// <summary>Адреса рядка в періоді цієї фікстури.</summary>
+    /// <param name="rowId">Ідентифікатор рядка в межах періоду.</param>
+    /// <remarks>
+    /// Кандидат несе ПАРУ <c>(PeriodKey, Id)</c>, бо саме такий первинний ключ
+    /// у <c>doc.TableRow</c> і саме <c>PeriodKey</c> — ключ партиції.
+    /// </remarks>
+    private static OrphanRowRef Row(long rowId) => new(Period, rowId);
 
     /// <summary>
     /// Довідник одиниць для зрізу.

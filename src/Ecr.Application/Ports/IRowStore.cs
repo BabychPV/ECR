@@ -111,8 +111,18 @@ public interface IRowStore
     /// оптимістичне блокування <b>тихо</b>: наступний запис зі застарілою
     /// <c>baseVersion</c> пройде як коректний, і чужа правка зникне без сліду
     /// (B04 §2.4).
+    ///
+    /// ⚠ <c>periodKey</c> тут не для адресації, а тому що це ключ партиції:
+    /// кластерний ключ <c>doc.TableRow</c> — <c>(PeriodKey, Id)</c>, і без
+    /// <c>PeriodKey</c> у <c>WHERE</c> запит не має чим засікатися й іде по
+    /// ВСІХ партиціях. Те саме міркування, що вже зафіксоване в
+    /// <c>NormalizedCellStore.PeriodKeyOf</c>: усі рядки одного
+    /// <c>TableInstance</c> лежать в одній партиції, тож період у виклику
+    /// завжди відомий, і не передати його — це віддати сканування там, де
+    /// доступний пошук.
     /// </remarks>
-    public Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct);
+    public Task TouchRowsAsync(
+        IReadOnlyList<long> rowIds, PeriodKey periodKey, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
     /// Збережені ознаки «осиротілості» рядків: <c>TableRow.Id</c> → <c>IsOrphaned</c>.

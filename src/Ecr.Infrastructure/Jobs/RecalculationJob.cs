@@ -118,6 +118,28 @@ public sealed class RecalculationJob(
             for (var i = 0; i < documentIds.Count; i++)
             {
                 var documentId = documentIds[i];
+                var docRequest = request with { DocumentId = documentId };
+
+                // ⛔⛔ ГЕЙТ СТАНУ ПЕРІОДУ — ТУТ, на самому шляху запису, а не
+                // на HTTP-вході. До цього фіксу його на цьому шляху не було
+                // ЗОВСІМ, хоча `RecalculateDocumentHandler` у власному
+                // коментарі стверджував протилежне: мовляв, стан періоду
+                // перевіряє `RunCalculationHandler`, «якому задача передає
+                // керування». Передачі не існувало — задача кличе з нього лише
+                // `CompleteAsync` (завершення прогону, де періодів немає
+                // взагалі), а `RecalculationService` не мав перевірки стану
+                // періоду жодної. Отже ФВ-9.7 тримався рівно на одному з трьох
+                // маршрутів (перерахунок ПРОЄКТУ), а маршрут документа й нічний
+                // розклад переписували числа закритих і поданих періодів мовчки
+                // й «успішно».
+                //
+                // ⚠ Гейт свідомо стоїть у ЗАДАЧІ, а не тільки в обробниках: усі
+                // три маршрути сходяться саме тут, і перевірка на кожному вході
+                // окремо — це знову три копії рішення, які розійдуться.
+                // Обробник документа перевіряє те саме ще й до черги, але це
+                // швидка відмова заради людини (422 замість «jobId, який
+                // нічого не зробить»), а не другий гейт.
+                var refused = await RefusedPeriodsAsync(docRequest, ct).ConfigureAwait(false);
 
                 // ⚠ Один документ — той самий діапазон 0…100, що й завжди
                 // (i=0, Count=1 дає floor=0, ceiling=100): жодна наявна
@@ -148,8 +170,7 @@ public sealed class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                var docRequest = request with { DocumentId = documentId };
-                var cells = await FormulasAsync(docRequest, ct).ConfigureAwait(false);
+                var cells = await FormulasAsync(docRequest, refused, ct).ConfigureAwait(false);
 
                 await progress
                     .ReportAsync(
@@ -165,7 +186,7 @@ public sealed class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                var bindings = await BindingsAsync(docRequest, ct).ConfigureAwait(false);
+                var bindings = await BindingsAsync(docRequest, refused, ct).ConfigureAwait(false);
 
                 // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно
                 // стали актуальними.
@@ -243,7 +264,8 @@ public sealed class RecalculationJob(
     /// порахував би лютий зі старого січня, а потім січень — правильно, але
     /// вже нікому.
     /// </remarks>
-    private async Task<int> FormulasAsync(RecalculationRequest request, CancellationToken ct)
+    private async Task<int> FormulasAsync(
+        RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
         // ⚠ Періоди беруться з ЕКЗЕМПЛЯРІВ таблиць, а не з `request.PeriodKey`:
         // той може бути `null` — «повний рік», — і `new PeriodKey(0)` тоді
@@ -274,7 +296,14 @@ public sealed class RecalculationJob(
 
         var written = 0;
 
-        foreach (var scope in scopes.OrderBy(s => s.PeriodKeyValue))
+        // ⛔ Періоди, у які писати не можна, ВИЛУЧАЮТЬСЯ зі скоупу запису
+        // (ФВ-9.7, ФВ-9.17). Для явно названого періоду сюди вже не доходить
+        // — `RefusedPeriodsAsync` відмовив винятком; це фільтр для прогону «на
+        // весь рік» (нічний розклад, `PeriodKey = null`), де відмовляти цілим
+        // прогоном не можна: у будь-якому році після січня є закриті періоди,
+        // і нічний перерахунок перестав би працювати назавжди.
+        foreach (var scope in scopes.Where(s => !refused.Contains(s.PeriodKeyValue))
+                                    .OrderBy(s => s.PeriodKeyValue))
         {
             written += await formulas
                 .RecalculateAllAsync(
@@ -292,7 +321,7 @@ public sealed class RecalculationJob(
     /// опис розгортається в екземпляри цього документа й періоду.
     /// </remarks>
     private async Task<List<CalculationBindingRef>> BindingsAsync(
-        RecalculationRequest request, CancellationToken ct)
+        RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
         // ⚠ Q-331: методологія прив'язана до `TableDefId`, тобто до конкретної
         // таблиці — і, транзитивно, до аркуша, якому та таблиця належить
@@ -312,7 +341,14 @@ public sealed class RecalculationJob(
                 db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == bindingSheetId));
         }
 
+        // ⛔ Той самий гейт і для МЕТОДОЛОГІЙ: їхній результат лягає в
+        // `calc.CalculationResult` для екземпляра таблиці конкретного періоду,
+        // тож екземпляр закритого періоду мусить випасти зі списку прив'язок,
+        // а не лише з фази формул. Прибрати фільтр тут — і прогін «на весь
+        // рік» знову перерахував би методології закритого січня.
+        var refusedKeys = refused.ToList();
         var instances = await instancesQuery
+            .Where(i => !refusedKeys.Contains(i.PeriodKeyValue))
             .Take(MaxBindings)
             .Select(i => new InstanceRow(i.Id, i.TableDefId))
             .ToListAsync(ct)
@@ -339,6 +375,105 @@ public sealed class RecalculationJob(
                 .Select(b => new CalculationBindingRef(i.Id, b.MethodologyId)))
             .Distinct()
             .ToList();
+    }
+
+    /// <summary>
+    /// Періоди документа, у які цей прогін писати НЕ МАЄ ПРАВА (ФВ-9.7, ФВ-9.17).
+    /// </summary>
+    /// <param name="request">Завдання; <c>PeriodKey = null</c> — увесь рік.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ключі періодів, у які запис заборонений.</returns>
+    /// <exception cref="Ecr.Application.Errors.BusinessRuleException">
+    /// <c>ECR-CALC-4221</c> — завдання назвало КОНКРЕТНИЙ період, і писати в
+    /// нього не можна.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Дві різні поведінки, і різниця не косметична.
+    /// <list type="bullet">
+    /// <item>
+    /// Період названий ЯВНО (кнопка «Перерахувати» на документі) — ВИНЯТОК.
+    /// Тихо не зробити нічого й повернути «успішно» означало б показати
+    /// людині «перераховано» там, де не перераховано нічого; цей самий клас
+    /// мовчазної відмови в цьому файлі вже ловили (Q-331).
+    /// </item>
+    /// <item>
+    /// Період не названий (<c>PeriodKey = null</c> — нічний розклад,
+    /// перерахунок проєкту за весь рік) — ВИЛУЧЕННЯ зі скоупу. Запит не
+    /// називав закритого періоду: він сказав «усе, що можна перерахувати».
+    /// Відмовити цілим прогоном означало б зупинити нічний перерахунок
+    /// назавжди, щойно закриється перший період року.
+    /// </item>
+    /// </list>
+    ///
+    /// ⚠ Правило — НЕ тут, а в <see cref="RecalculationWritePolicy"/>: тут
+    /// лише збирання фактів у гранулярності задачі. Саме роздвоєння правила
+    /// (одна копія в <c>RunCalculationHandler</c> і жодної на цьому шляху) і
+    /// було дефектом.
+    ///
+    /// ⚠ Подані аркуші рахуються ЗА ДОКУМЕНТОМ, а не за проєктом, як у
+    /// <c>IWorkflowStore.HasSubmittedSheetsAsync</c>: прогін тут звужений до
+    /// одного документа, і блокувати його через поданий аркуш СУСІДНЬОГО
+    /// документа того ж проєкту було б ширше за правило (ФВ-9.17 — про зріз,
+    /// а зріз належить аркушу документа).
+    /// </remarks>
+    private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
+        RecalculationRequest request, CancellationToken ct)
+    {
+        var states = await db.Periods
+            .AsNoTracking()
+            .Where(p => db.Documents.Any(d => d.Id == request.DocumentId && d.ProjectId == p.ProjectId)
+                        && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey))
+            .Select(p => new PeriodStateRow(p.PeriodKeyValue, p.State))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var submitted = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(s => s.DocumentId == request.DocumentId
+                        && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
+                        && (s.Status == Domain.Enums.DocumentStatus.Submitted
+                            || s.Status == Domain.Enums.DocumentStatus.Approved))
+            .Select(s => s.PeriodKey)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var submittedKeys = submitted.ToHashSet();
+        var approved = request.ApprovedBy is not null;
+        var refused = new HashSet<int>();
+
+        foreach (var period in states)
+        {
+            var denial = RecalculationWritePolicy.Check(
+                period.State, submittedKeys.Contains(period.PeriodKeyValue), approved);
+
+            if (denial == RecalculationWriteDenial.None)
+            {
+                continue;
+            }
+
+            refused.Add(period.PeriodKeyValue);
+
+            if (request.PeriodKey == period.PeriodKeyValue)
+            {
+                throw new Ecr.Application.Errors.BusinessRuleException(
+                    RecalculationWritePolicy.ErrorCode,
+                    RecalculationWritePolicy.Explain(denial, period.PeriodKeyValue),
+                    new Dictionary<string, object?>
+                    {
+                        ["documentId"] = request.DocumentId,
+                        ["periodKey"] = period.PeriodKeyValue,
+                        ["denial"] = denial.ToString(),
+                    });
+            }
+        }
+
+        // ⚠ Період, рядка якого в `doc.Period` немає, у відмову НЕ потрапляє:
+        // «стану не знайшли» — це не «стан заборонний». Такий випадок падає
+        // нижче своїм власним повідомленням (`RecalculationService.PeriodOf`,
+        // `ECR-PRD-0404`), і підміняти його чужим кодом означало б сховати
+        // справжню причину за правдоподібною.
+        return refused;
     }
 
     /// <summary>Усі документи проєкту — для перерахунку «на весь проєкт».</summary>
@@ -406,6 +541,9 @@ public sealed class RecalculationJob(
     /// <summary>Документ і період, для яких рахуються формули шаблону.</summary>
     private sealed record ScopeRow(long DocumentId, int PeriodKeyValue);
 
+    /// <summary>Стан одного періоду — для гейту запису.</summary>
+    private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
+
     /// <summary>Прогрес однієї фази: шкала зсунута й стиснута, повідомлення назване.</summary>
     /// <param name="inner">Канал прогресу задачі.</param>
     /// <param name="floor">Скільки відсотків уже пройдено до цієї фази.</param>
@@ -459,6 +597,17 @@ public sealed class RecalculationJob(
 /// <param name="DocumentId">Документ; нуль — усі документи проєкту.</param>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік.</param>
 /// <param name="TriggeredByUserId">Хто запустив; <c>null</c> — за розкладом.</param>
+/// <param name="ApprovedBy">
+/// Хто погодив перерахунок ЗАКРИТОГО періоду; <c>null</c> — погодження немає.
+/// ⛔ Поле заведене разом із гейтом стану періоду і не є декорацією:
+/// <c>RunCalculationHandler</c> уже клав у payload <c>approvedBy</c>, і воно
+/// тихо зникало при розборі, бо в цьому записі його не існувало. Без нього
+/// гейт нижче відмовляв би й законно погодженому перерахунку — тобто ламав би
+/// єдиний штатний шлях виправити закритий період (ФВ-9.7).
+/// ⚠ Саме <c>ApprovedBy</c>, а не <c>ApprovedByUserId</c>: ім'я мусить збігтися
+/// з тим, що кладе в чергу обробник, інакше JSON не зв'яжеться і поле знову
+/// буде мовчазним нулем.
+/// </param>
 /// <param name="SheetDefId">
 /// Аркуш; <c>null</c> — увесь документ (поведінка до Q-331). Звужує лише те, ЩО
 /// ЗАПИСУЄТЬСЯ (формули й методології, чиї цілі належать таблицям цього
@@ -469,4 +618,9 @@ public sealed class RecalculationJob(
 /// тихо неправильне число замість «кнопка ширша за назву» (Q-327).
 /// </param>
 public sealed record RecalculationRequest(
-    int ProjectId, long DocumentId, int? PeriodKey, int? TriggeredByUserId, int? SheetDefId = null);
+    int ProjectId,
+    long DocumentId,
+    int? PeriodKey,
+    int? TriggeredByUserId,
+    int? SheetDefId = null,
+    int? ApprovedBy = null);

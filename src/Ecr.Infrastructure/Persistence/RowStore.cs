@@ -250,8 +250,26 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     /// не збігся б НІКОЛИ, бо захоплення саме цю версію вже й змінило.
     ///
     /// ⚠ Додати сюди звірку «про всяк випадок» = зламати запис: див. рядок вище.
+    ///
+    /// ⛔ А ось <c>PeriodKey</c> у фільтрі — обов'язковий, і його відсутність
+    /// БУЛА недоглядом. Кластерний ключ <c>doc.TableRow</c> — <c>(PeriodKey,
+    /// Id)</c>, таблиця лежить на <c>ps_ByPeriodKey</c>, і жодного індексу з
+    /// <c>Id</c> попереду немає й бути не може: <c>07-partition-tables.sql</c>
+    /// вирівнює КОЖЕН індекс цих таблиць по схемі партиціонування й падає
+    /// (<c>THROW 50031</c>), якщо хоч один лишився поза нею. Тобто «додати
+    /// індекс під <c>Id</c>» тут не варіант у принципі — невирівняний індекс
+    /// заборонений розгортанням, бо ламає <c>SWITCH PARTITION</c> архівації
+    /// (<c>D-23</c>), а вирівняний однаково не дав би засічки без ключа
+    /// партиції.
+    ///
+    /// Заміряно на 4.8 млн рядків / 24 партиції: без <c>PeriodKey</c> —
+    /// <c>Index Scan</c>, scan count 25, 34 308 логічних читань; із ним —
+    /// <c>Clustered Index Seek</c> з <c>RangePartitionNew</c>, 60 читань.
+    /// І це всередині транзакції запису, під блокуваннями, на найгарячішому
+    /// шляху системи.
     /// </remarks>
-    public async Task TouchRowsAsync(IReadOnlyList<long> rowIds, DateTime utcNow, CancellationToken ct)
+    public async Task TouchRowsAsync(
+        IReadOnlyList<long> rowIds, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rowIds);
         if (rowIds.Count == 0)
@@ -260,7 +278,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
         }
 
         await db.TableRows
-            .Where(r => rowIds.Contains(r.Id))
+            .Where(r => r.PeriodKeyValue == periodKey.Value && rowIds.Contains(r.Id))
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.ModifiedAt, utcNow), ct)
             .ConfigureAwait(false);
     }
