@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -21,8 +20,12 @@ import { testTheme } from '@/test/render';
  * блокував збереження: `(1 + 2))` зберігався як є з видимим лише
  * непідписаним підкресленням у Monaco.
  *
- * ⚠ `Select` (`@mantine/core`) зависає під jsdom (`Q-299`) — заглушено
- * стандартним стабом. Monaco мокнуто тим самим прийомом, що й
+ * ✎ `Select` тут був заглушений як «той, що зависає під jsdom» (`Q-299`).
+ * Причина зависання знайдена й усунена (рекурсія jsdom ↔ nwsapi на станових
+ * псевдокласах — коментар у `src/test/setup.ts`), заглушку прибрано: жодне
+ * твердження цього файлу `Select` не торкалося.
+ *
+ * ⚠ Monaco мокнуто тим самим прийомом, що й
  * `ExpressionEditor.staleOnChange.test.tsx`: тестовий гачок
  * `__typeIntoEditor` викликає САМЕ ТОЙ `onDidChangeModelContent`-слухач,
  * що реєструє компонент.
@@ -37,42 +40,6 @@ vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
   MethodologyModesForm: () => null,
 }));
 
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 let changeHandler: (() => void) | null = null;
 let currentValue = '';

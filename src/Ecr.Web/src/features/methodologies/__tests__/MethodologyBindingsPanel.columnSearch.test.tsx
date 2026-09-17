@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -13,45 +12,11 @@ import { testTheme } from '@/test/render';
  * голим `ColumnDefId` замінено на `Select searchable`, наповнений `GET
  * /api/v1/column-defs/search`.
  *
- * ⛔ Той самий, уже задокументований у трьох місцях обхід зависання
- * `Select`/`MultiSelect` під jsdom: заглушка легким `<select>`.
+ * ✎ Тут стояв «той самий обхід зависання `Select` під jsdom» — заглушка
+ * легким `<select>`. Причина зависання знайдена й усунена (рекурсія
+ * jsdom ↔ nwsapi на станових псевдокласах — коментар у `src/test/setup.ts`),
+ * тож тест працює зі справжнім `Select searchable`.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 const Strings: Record<string, string> = {
   'methodologies.bindings': 'Bindings',
@@ -159,12 +124,12 @@ describe('MethodologyBindingsPanel: вибір колонки за назвою 
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add binding' }));
 
-    const select = await screen.findByLabelText('Column');
-    await waitFor(() => {
-      expect((select as HTMLSelectElement).querySelectorAll('option').length).toBeGreaterThan(1);
-    });
+    // Колонка обирається за назвою — це і є предмет директиви.
+    fireEvent.click(await screen.findByLabelText('Column'));
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Volume extracted (VOL) · SHEET/TBL' }),
+    );
 
-    fireEvent.change(select, { target: { value: '42' } });
     fireEvent.change(screen.getByLabelText('Output'), { target: { value: 'OUT1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 

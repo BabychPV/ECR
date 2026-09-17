@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, within, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -21,62 +20,14 @@ import { withTestDefaults } from '@/test/render';
  */
 
 /**
- * ⛔ `Select`/`MultiSelect` (`@mantine/core`) під jsdom «зависають» —
- * відтворюваний факт, задокументований уже ДВІЧІ в цьому репозиторії
- * (`approval-route-editor.test.tsx`, `user-access-editor.test.tsx`: жоден
- * наявний тест не рендерить їх напряму саме тому). Перевірено емпірично і
- * тут: реальний клік по `Select` (навіть із поліфілом `scrollIntoView` у
- * `src/test/setup.ts`) не падає й не кидає винятку — він просто НЕ встигає
- * розкрити список опцій за розумний час (спостережено ~166с на ОДИН клік в
- * ізоляції; попередній варіант цього файлу йшов у таймаут навіть на
- * 400000мс під паралельним навантаженням повного прогону — `npm test`
- * підтвердив це: `Test timed out in 400000ms` на обох тестах). Це не баг
- * цієї картки — це та сама причина, яку вже обійшли двічі, і обходимо так
- * само: заглушуємо `Select` легким `<select>`, що приймає ті самі проп-и
- * (`data`/`value`/`onChange`/`label`/`aria-label`/`placeholder`) і
- * керується звичайним `fireEvent.change`, без порталу й без floating-ui.
- *
- * ⚠ Предмет ЦІЄЇ картки — колонка розв'язаної назви — не залежить від
- * СПРАВЖНЬОГО вигляду випадного списку: заглушник не бере участі в
- * перевірці, лише дає спосіб обрати роль, і не чіпає `NumberInput`/`Switch`/
- * `Button`, які під jsdom так не зависають.
+ * ✎ Тут стояв «~166с на ОДИН клік по `Select`» і заглушка всього
+ * `@mantine/core`. Вимір був правдивий, а пояснення — ні: справа не в
+ * Mantine чи floating-ui, а у взаємній рекурсії jsdom ↔ nwsapi на станових
+ * псевдокласах (`:modal`/`:fullscreen`), яку запускає пастка фокуса
+ * випадного списку. Обрив рекурсії живе в `src/test/setup.ts`; той самий
+ * клік тепер коштує мілісекунди, тож заглушку прибрано і роль обирається у
+ * справжньому `Select`.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 const SeededStrings: Record<string, string> = {
   'security.role': 'Role',
@@ -164,15 +115,18 @@ function renderPanel() {
 }
 
 /**
- * Обирає роль через заглушений `<select>` (див. `vi.mock('@mantine/core')`
- * вище) — звичайний `fireEvent.change`, без відкриття справжнього спливного
- * списку.
+ * Обирає роль у справжньому `Select`: клік по полю розкриває список, клік по
+ * опції обирає її.
+ *
+ * ⚠ Опції рендеряться в порталі поза деревом панелі — звідси `screen`.
  */
-function selectRole(name: string): void {
-  const role = Roles.find((r) => r.code === name);
-  if (!role) throw new Error(`Немає такої ролі в фікстурі: ${name}`);
+async function selectRole(name: string): Promise<void> {
+  if (!Roles.some((r) => r.code === name)) {
+    throw new Error(`Немає такої ролі в фікстурі: ${name}`);
+  }
 
-  fireEvent.change(screen.getByLabelText('Role'), { target: { value: String(role.id) } });
+  fireEvent.click(screen.getByLabelText('Role'));
+  fireEvent.click(await screen.findByRole('option', { name }));
 }
 
 describe('GrantsPanel: колонка розв\'язаної назви ресурсу (Q-299)', () => {
@@ -183,7 +137,7 @@ describe('GrantsPanel: колонка розв\'язаної назви ресу
     renderPanel();
 
     await screen.findByLabelText('Role');
-    selectRole('Auditor');
+    await selectRole('Auditor');
 
     // Ресурс, який резолвер знайшов: код видно поряд із числовим id.
     // ⚠ `findByText` сам кидає виняток, якщо елемента немає — додаткове
@@ -216,7 +170,7 @@ describe('GrantsPanel: колонка розв\'язаної назви ресу
     renderPanel();
 
     await screen.findByLabelText('Role');
-    selectRole('Auditor');
+    await selectRole('Auditor');
 
     await screen.findByText('BS');
 

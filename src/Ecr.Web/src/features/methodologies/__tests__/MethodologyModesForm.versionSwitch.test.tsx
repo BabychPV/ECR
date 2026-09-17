@@ -25,37 +25,12 @@ import { testTheme } from '@/test/render';
  * коду: обидва перші режими «тихо змінюють УСІ числа версії, не змінивши
  * жодної формули» (`ФВ-9.9`, `ФВ-16.11`).
  *
- * ⚠ `Select` Mantine підмінено легким `<select>` — той самий прийом і та сама
- * причина, що в `CreateMappingModal.targetKindReset` (`D1-12`). Форвардяться
- * рівно `label`/`value`/`onChange`/`data`, тобто перевіряється справжній стан
- * компонента, а не імітація.
+ * ✎ Тут `Select` підмінявся легким `<select>` «з тієї самої причини, що в
+ * `CreateMappingModal.targetKindReset`» — тобто через нібито зависання
+ * Mantine під jsdom. Причина зависання знайдена й усунена (рекурсія
+ * jsdom ↔ nwsapi на станових псевдокласах — коментар у `src/test/setup.ts`),
+ * тож режими читаються й міняються у справжніх `Select`-ах.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubSelect(props: {
-    label?: string;
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    data?: readonly { value: string; label: string }[];
-  }): JSX.Element {
-    return (
-      <select
-        aria-label={props.label ?? ''}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.currentTarget.value || null)}
-      >
-        {(props.data ?? []).map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 function version(
   id: number,
@@ -128,8 +103,21 @@ function show(): { switchToB: () => void } {
   return { switchToB: () => view.rerender(<Harness selected={VersionB} />) };
 }
 
+/**
+ * Показане значення поля. У Mantine `Select` підпис опції збігається з її
+ * значенням для всіх трьох режимів (`Legacy`/`Strict`, `Actual`/`Fixed365`/
+ * `Fixed360`, `Off`/`ErrorsOnly`/`Full`), тож це те саме твердження, що й
+ * читання `value` у попереднього заглушеного `<select>`.
+ */
 function valueOf(label: string): string {
-  return (screen.getByLabelText(label) as HTMLSelectElement).value;
+  return (screen.getByLabelText(label) as HTMLInputElement).value;
+}
+
+/** Обирає опцію в справжньому `Select`: розкрити список і клацнути опцію. */
+async function pick(label: string, option: string): Promise<void> {
+  fireEvent.click(screen.getByLabelText(label));
+  // ⚠ Опції рендеряться в порталі поза формою — звідси `screen`.
+  fireEvent.click(await screen.findByRole('option', { name: option }));
 }
 
 afterEach(() => {
@@ -178,7 +166,7 @@ describe('MethodologyModesForm: перемикання версії перема
     const { switchToB } = show();
 
     switchToB();
-    fireEvent.change(screen.getByLabelText(TraceLabel), { target: { value: 'ErrorsOnly' } });
+    await pick(TraceLabel, 'ErrorsOnly');
 
     // ⚠ Зворотний бік фіксу: синхронізація мусить спрацювати РІВНО на зміну
     // версії, а не на кожен рендер — інакше вона затирала б власний вибір

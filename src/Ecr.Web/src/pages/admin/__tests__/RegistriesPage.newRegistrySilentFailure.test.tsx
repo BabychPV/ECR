@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -15,47 +14,12 @@ import { testTheme } from '@/test/render';
  * (`docs/build/audit-drafts/lane4-new-registry-invalid-code-silent-
  * failure.md`, severity High).
  *
- * ⛔ `Select` (`@mantine/core`) — довідник-пікер у шапці сторінки —
- * зависає під jsdom (відтворюваний факт, `Q-299`). Заглушено легким
- * `<select>` тим самим встановленим прийомом, що й `GrantsPanel.
- * resourceName.test.tsx`/`ColumnEditor.registryLookup.test.tsx`.
+ * ✎ Тут довідник-пікер у шапці (`Select`) був заглушений легким `<select>`
+ * як «той, що зависає під jsdom» (`Q-299`). Причина зависання знайдена й
+ * усунена (рекурсія jsdom ↔ nwsapi на станових псевдокласах — коментар у
+ * `src/test/setup.ts`); справжній `Select` рендериться тут без жодної зміни
+ * тверджень.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 vi.mock('@mantine/notifications', () => ({ notifications: { show: vi.fn() } }));
 
