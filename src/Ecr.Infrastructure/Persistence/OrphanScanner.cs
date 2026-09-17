@@ -58,6 +58,26 @@ public sealed class OrphanScanner : IOrphanScanner
     /// </remarks>
     private const int EntryChunkSize = 1_000;
 
+    /// <summary>Скільки рядків добирає свої посилання одним запитом.</summary>
+    /// <remarks>
+    /// ⚠ Порція рядків, а не порція комірок, і саме тому окрема константа: цей
+    /// запит засікається по <c>(PeriodKey, TableRowId)</c>, тобто його ціна
+    /// пропорційна кількості РЯДКІВ у переліку, а не кількості їхніх комірок.
+    /// </remarks>
+    private const int RowChunkSize = 500;
+
+    /// <summary>
+    /// Стеля посилань на довідник в ОДНОМУ рядку — запобіжник добору.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Стеля тут не ділить роботу на порції: вона ловить неможливе. Посилань
+    /// у рядку не більше, ніж колонок у таблиці; тисяча колонок — це вже не
+    /// форма звітності, а зіпсовані дані. Перевищення кидає виняток, а не
+    /// мовчки відрізає хвіст: відрізаний хвіст означав би рівно той дефект,
+    /// який добір і лікує, — рішення по ЧАСТИНІ посилань рядка.
+    /// </remarks>
+    private const int MaxRowReferences = 1_000;
+
     private readonly EcrDbContext _db;
     private readonly RegistryResolver _resolver;
     private readonly IClock _clock;
@@ -267,7 +287,11 @@ public sealed class OrphanScanner : IOrphanScanner
     /// </summary>
     /// <param name="scope">Періоди, що перевіряються.</param>
     /// <param name="after">Позиція, ПІСЛЯ якої брати рядки.</param>
-    /// <param name="registryEntryId">Звузити до одного запису довідника.</param>
+    /// <param name="registryEntryId">
+    /// Звузити ВИБІРКУ РЯДКІВ до тих, що посилаються на цей запис довідника.
+    /// Ознака при цьому все одно рахується по ВСІХ посиланнях відібраних
+    /// рядків — див. <see cref="CompleteRowReferencesAsync"/>.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ ПАЧКА ЗАВЖДИ ЗАКІНЧУЄТЬСЯ НА МЕЖІ РЯДКА. Читання бере комірки
@@ -338,6 +362,27 @@ public sealed class OrphanScanner : IOrphanScanner
             references = TrimTrailingRow(references);
         }
 
+        var last = references[^1];
+
+        // ⛔ ФІЛЬТР ОБИРАЄ РЯДКИ, А НЕ ВИРІШУЄ ЗА НИХ. Так було не завжди: до
+        // цієї правки звужений фільтром перелік ішов в угруповання ЯК Є — отже,
+        // правило «осиротілий, якщо ХОЧ ОДНЕ посилання нечинне» бачило рівно
+        // ОДНЕ посилання рядка, те саме, по якому йшов перерахунок. Рядок, що
+        // посилається і на щойно полагоджений запис A, і на досі нечинний B,
+        // діставав `allValid = true` й потрапляв у `ToClear`: ознаку знімали,
+        // хоч B лишався зламаним, і `Submit` переставав блокувати форму з
+        // посиланням на запис довідника, що більше не діє. Дефекту не видно на
+        // рядку з ОДНИМ посиланням — а саме такі рядки й перевіряли тести, бо
+        // там «усі» і «те одне» збігаються.
+        //
+        // ⚠ Нічний прохід (`registryEntryId == null`) добору не потребує: він
+        // і так читає ВСІ посилання рядків підряд, і межа пачки вже стоїть на
+        // межі рядка (див. `TrimTrailingRow`).
+        if (registryEntryId is not null)
+        {
+            references = await CompleteRowReferencesAsync(references, ct).ConfigureAwait(false);
+        }
+
         var entryById = await EntriesAsync(references, ct).ConfigureAwait(false);
 
         // ⚠ Рядок осиротілий, якщо ХОЧ ОДНЕ його посилання нечинне. Саме «хоч
@@ -361,9 +406,99 @@ public sealed class OrphanScanner : IOrphanScanner
             })
             .ToList();
 
-        var last = references[^1];
-
         return new CandidateBatch(rows, new OrphanRowRef(last.PeriodKeyValue, last.RowId), isLast);
+    }
+
+    /// <summary>
+    /// Добирає ПОВНИЙ набір посилань для рядків, які обрав фільтр по запису.
+    /// </summary>
+    /// <param name="selected">
+    /// Посилання, відібрані фільтром: по одному на рядок (фільтр звужує до
+    /// одного запису довідника), уже обрізані по межі рядка.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Усі посилання ТИХ САМИХ рядків, ознака <c>IsOrphaned</c> — та,
+    /// що вже прочитана разом із рядком.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Порція рядків дала більше посилань, ніж дозволяє
+    /// <see cref="MaxRowReferences"/> на рядок.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ ПЕРЕЛІКОМ КЛЮЧІВ, А НЕ ДІАПАЗОНОМ «від першого рядка пачки до
+    /// останнього». Діапазон виглядає природніше — пачка й так упорядкована по
+    /// кластерному ключу, — але між першим і останнім рядком пачки лежать
+    /// рядки, які на цей запис НЕ посилаються, і їх там може бути скільки
+    /// завгодно: посилання на один запис довідника розкидані по всьому набору.
+    /// Це перетворило б точковий перерахунок на прохід усією таблицею
+    /// (~108 млн рядків на рік) — на СИНХРОННОМУ шляху HTTP-запиту
+    /// <c>POST …/entries/{id}/validity</c>. Перелік ключів засікається по
+    /// <c>PK_CellValue (PeriodKey, TableRowId, ColumnDefId)</c> рівно в потрібні
+    /// рядки, а порціями він іде з тієї ж причини, що й у
+    /// <see cref="EntriesAsync"/>: щоб довжина <c>IN</c> не залежала від обсягу
+    /// пачки.
+    ///
+    /// ⚠ Рядки групуються за періодом, бо <c>doc.CellValue</c> лежить на тій
+    /// самій схемі партиціонування, що й <c>doc.TableRow</c>: предикат без
+    /// <c>PeriodKey</c> не має чим засікатися й проходить усі партиції — той
+    /// самий дефект, що описаний у <see cref="ApplyAsync"/>.
+    ///
+    /// ⚠ Повторного читання <c>doc.TableRow</c> тут немає навмисно: єдине, що
+    /// добирається, — це посилання, а <c>IsOrphaned</c> уже прочитано разом із
+    /// рядком у вибірці кандидатів. Другий join заради вже відомого поля
+    /// коштував би ще одного проходу по <c>doc.TableRow</c>.
+    /// </remarks>
+    private async Task<List<CellReference>> CompleteRowReferencesAsync(
+        List<CellReference> selected, CancellationToken ct)
+    {
+        var orphanedByRow = new Dictionary<(int PeriodKeyValue, long RowId), bool>();
+        foreach (var reference in selected)
+        {
+            orphanedByRow[(reference.PeriodKeyValue, reference.RowId)] = reference.IsOrphaned;
+        }
+
+        var complete = new List<CellReference>(selected.Count);
+
+        foreach (var byPeriod in orphanedByRow.Keys.GroupBy(k => k.PeriodKeyValue))
+        {
+            var periodKey = byPeriod.Key;
+
+            foreach (var chunk in byPeriod.Select(k => k.RowId).Chunk(RowChunkSize))
+            {
+                var rowIds = chunk;
+                var ceiling = rowIds.Length * MaxRowReferences;
+
+                var cells = await _db.CellValues
+                    .AsNoTracking()
+                    .Where(c => c.PeriodKeyValue == periodKey
+                                && rowIds.Contains(c.TableRowId)
+                                && c.ValueRegistryEntryId != null)
+                    .OrderBy(c => c.TableRowId)
+                    .ThenBy(c => c.ColumnDefId)
+                    .Select(c => new RowEntryRef(c.TableRowId, c.ValueRegistryEntryId!.Value))
+                    .Take(ceiling + 1)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+                if (cells.Count > ceiling)
+                {
+                    throw new InvalidOperationException(
+                        $"Період {periodKey}: {rowIds.Length} рядк(ів) дали понад {ceiling} посилань "
+                        + $"на довідник, тобто більше за {MaxRowReferences} на рядок — "
+                        + "добір не може гарантувати повний набір посилань рядка.");
+                }
+
+                foreach (var cell in cells)
+                {
+                    complete.Add(new CellReference(
+                        cell.RowId,
+                        periodKey,
+                        orphanedByRow[(periodKey, cell.RowId)],
+                        cell.RegistryEntryId));
+                }
+            }
+        }
+
+        return complete;
     }
 
     /// <summary>
@@ -537,4 +672,13 @@ public sealed class OrphanScanner : IOrphanScanner
     /// </remarks>
     private sealed record CellReference(
         long RowId, int PeriodKeyValue, bool IsOrphaned, long RegistryEntryId);
+
+    /// <summary>Посилання рядка на запис довідника в межах одного періоду.</summary>
+    /// <remarks>
+    /// Період тут не повторюється в кожному елементі: добір іде ПО ОДНОМУ
+    /// періоду за раз (див. <see cref="CompleteRowReferencesAsync"/>), тож він
+    /// відомий на місці виклику. Тип названий, а не анонімний, з тієї ж
+    /// причини, що й <see cref="CellReference"/> (`D1-08`).
+    /// </remarks>
+    private sealed record RowEntryRef(long RowId, long RegistryEntryId);
 }
