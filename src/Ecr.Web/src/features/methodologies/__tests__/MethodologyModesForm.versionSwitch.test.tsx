@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { MethodologyDraftVersionDto } from '@/api/types';
 import { MethodologyModesForm } from '@/features/methodologies/MethodologyContentPanels';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит 2026-09-16, §10.5 (High, тиха псування даних): форма режимів
@@ -111,7 +112,7 @@ function show(): { switchToB: () => void } {
 
   function Harness({ selected }: { selected: MethodologyDraftVersionDto }): JSX.Element {
     return (
-      <MantineProvider>
+      <MantineProvider theme={testTheme}>
         <QueryClientProvider client={client}>
           <MethodologyModesForm methodologyId={7} version={selected} editable />
         </QueryClientProvider>

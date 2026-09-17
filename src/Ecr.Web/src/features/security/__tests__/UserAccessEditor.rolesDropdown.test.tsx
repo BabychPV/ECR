@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RoleView, UserView } from '@/api/types';
 import { UserAccessEditor } from '@/features/security/UserAccessEditor';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 1 (`lane1-roles-dropdown-traps-clicks.md`): жодне з
@@ -93,7 +94,7 @@ function show(onClose: () => void): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <UserAccessEditor user={user} roles={roles} onClose={onClose} />
       </QueryClientProvider>

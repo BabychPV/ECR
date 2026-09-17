@@ -6,6 +6,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RegistryDefDto } from '@/api/types';
 import { RegistryEntryEditor } from '@/features/registries/RegistryEntryEditor';
+import { testTheme } from '@/test/render';
 
 /**
  * Живий дефект, знайдений першоособовим UX-проходом (створення документа,
@@ -54,7 +55,7 @@ function show() {
 
   return render(
     <StrictMode>
-      <MantineProvider>
+      <MantineProvider theme={testTheme}>
         <QueryClientProvider client={client}>
           <RegistryEntryEditor registry={Registry} entry={null} opened onClose={() => {}} />
         </QueryClientProvider>

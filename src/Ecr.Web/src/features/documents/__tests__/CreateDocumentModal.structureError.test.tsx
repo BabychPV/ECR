@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит 2026-09-16, §10.8: невдалий запит структури шаблону показувався як
@@ -139,7 +140,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <MemoryRouter>
         <QueryClientProvider client={client}>
           <CreateDocumentModal opened onClose={() => {}} />

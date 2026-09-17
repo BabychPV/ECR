@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 2 (Q-337): «Grace until»/«Range» на сторінці Periods не
@@ -122,7 +123,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/admin/periods?projectId=7']}>
         <QueryClientProvider client={client}>
           <PeriodsPage />

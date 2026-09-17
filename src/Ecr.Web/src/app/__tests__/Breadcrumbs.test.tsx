@@ -8,6 +8,7 @@ import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom';
 import { Breadcrumbs, buildCrumbChain, type CrumbMatch } from '@/app/Breadcrumbs';
 import { queryKeys } from '@/api/queryKeys';
 import { routes } from '@/app/routes';
+import { testTheme } from '@/test/render';
 
 /**
  * Breadcrumbs (`PR nav-arch #3`).
@@ -31,7 +32,7 @@ function client(): QueryClient {
 
 function show(router: ReturnType<typeof createMemoryRouter>, queryClient: QueryClient): void {
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>

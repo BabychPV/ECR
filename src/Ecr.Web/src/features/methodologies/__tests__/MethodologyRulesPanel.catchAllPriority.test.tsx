@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MethodologyRulesPanel } from '@/features/methodologies/MethodologyContentPanels';
 import type { MethodologyRuleDto } from '@/api/types';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 5: `lane5-row-rule-catchall-priority-not-warned.md` —
@@ -53,7 +54,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MethodologyRulesPanel methodologyId={1} versionId={1} editable />
       </QueryClientProvider>

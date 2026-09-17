@@ -11,6 +11,7 @@ import type {
 } from '@/api/types';
 import { loadCatalog } from '@/shared/i18n';
 import { SnapshotsPage } from '../SnapshotsPage';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 6: «Report snapshots list does not refresh after a
@@ -198,7 +199,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <SnapshotsPage />

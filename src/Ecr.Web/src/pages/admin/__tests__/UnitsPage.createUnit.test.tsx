@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
 import { UnitsPage } from '../UnitsPage';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 4: «Units page is entirely read-only — no way to create,
@@ -151,7 +152,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <UnitsPage />
       </QueryClientProvider>
