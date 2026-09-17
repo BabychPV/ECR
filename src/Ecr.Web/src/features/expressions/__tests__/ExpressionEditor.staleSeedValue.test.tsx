@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { ExpressionEditor } from '../ExpressionEditor';
@@ -27,16 +27,36 @@ import { ExpressionEditor } from '../ExpressionEditor';
  * сам тест. Це і є «чанк іде довше за запит»: `await import('./monaco')`
  * усередині ефекту лишається нерозв'язаним рівно доти, доки тест не скаже
  * інакше, — так само, як його тримав би повільний канал.
+ *
+ * ⛔ «Канал» і стан фальшивого редактора — ПО ОДНОМУ НА ТЕСТ, і це умова
+ * доказу, а не охайність. Обидва тести пишуть у `state.value` (другий
+ * дописує туди пробіл) і обидва відкривають канал; одна спільна обіцянка на
+ * весь файл означала б, що доказ лишається доказом лише в тому порядку, у
+ * якому тести написані. На зворотному порядку перший тест бачив у
+ * `state.value` хвіст другого (`AssertionError: expected 'SUM(C1:C12) * 1000 '
+ * to be ''`), а канал був уже відкритий ДО монтування — тобто гонки, яку тест
+ * називає своєю темою, не відбувалося взагалі. `vi.resetModules()` тут
+ * обов'язковий разом зі скиданням: без нього `../monaco` лишається в реєстрі
+ * з першого тесту, фабрика більше не виконується, і новий «канал» ніхто не
+ * чекає.
  */
 const hoisted = vi.hoisted(() => {
-  let open = (): void => {};
-  const chunk = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-
   const state = { value: '', changeHandler: null as (() => void) | null };
 
-  return { chunk, openChunk: () => open(), state };
+  let open = (): void => {};
+  let chunk = Promise.resolve();
+
+  const reset = (): void => {
+    state.value = '';
+    state.changeHandler = null;
+    chunk = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+  };
+
+  reset();
+
+  return { chunk: () => chunk, openChunk: () => open(), state, reset };
 });
 
 vi.mock('../api', async (importOriginal) => {
@@ -54,7 +74,7 @@ vi.mock('../api', async (importOriginal) => {
 vi.mock('../monaco', async () => {
   // ⛔ Саме тут живе гонка: доки тест не відкриє «канал», динамічний імпорт
   // редактора не завершується.
-  await hoisted.chunk;
+  await hoisted.chunk();
 
   const model = { getValue: () => hoisted.state.value, dispose: () => {} };
 
@@ -112,6 +132,13 @@ function FormulaDialog(): JSX.Element {
 }
 
 describe('ExpressionEditor: текст, що прийшов до завантаження Monaco, не губиться (§10.3)', () => {
+  beforeEach(() => {
+    // Спершу реєстр, потім стан: `resetModules` лише викидає `../monaco` з
+    // кешу, а чекати новий тест буде ту обіцянку, яку заведе `reset`.
+    vi.resetModules();
+    hoisted.reset();
+  });
+
   it('редактор показує формулу, а не порожнечу, з якою його змонтували', async () => {
     render(
       <MantineProvider>
