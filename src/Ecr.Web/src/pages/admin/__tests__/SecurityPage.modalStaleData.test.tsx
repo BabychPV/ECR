@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { SecurityPage } from '@/pages/admin/SecurityPage';
+import { withTestDefaults } from '@/test/render';
 
 /**
  * Аудит-пас 5: скидання чернетки «New role»/«New user» жило ЛИШЕ в
@@ -77,7 +78,7 @@ function show() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
-    <MantineProvider theme={theme}>
+    <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={['/admin/security?tab=roles']}>
           <SecurityPage />

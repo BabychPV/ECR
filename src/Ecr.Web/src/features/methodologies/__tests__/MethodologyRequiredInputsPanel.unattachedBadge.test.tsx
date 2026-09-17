@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { testTheme } from '@/test/render';
 
 /**
  * UI-аудит, lane 5 (`Q-337`): коли прив'язку (`CalculationBinding`)
@@ -75,7 +76,7 @@ async function show(): Promise<void> {
   const { MethodologyRequiredInputsPanel } = await import('../MethodologyContentPanels');
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <MethodologyRequiredInputsPanel methodologyId={1} versionId={10} editable={false} />
       </QueryClientProvider>

@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentsPage } from '@/pages/DocumentsPage';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит-пас 5: колонка «Project» показувала голий числовий `projectId` —
@@ -67,7 +68,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/']}>
         <QueryClientProvider client={client}>
           <DocumentsPage />

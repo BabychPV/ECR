@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RoleView, UserView } from '@/api/types';
 import { UserAccessEditor } from '@/features/security/UserAccessEditor';
+import { testTheme } from '@/test/render';
 
 /**
  * Ролі наявного користувача (`Q-254`).
@@ -62,7 +63,7 @@ function show(): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <UserAccessEditor user={user} roles={roles} onClose={() => {}} />
       </QueryClientProvider>

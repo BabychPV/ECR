@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
+import { testTheme } from '@/test/render';
 
 /**
  * Q-274: `GET /api/v1/templates/{id}/versions` — курсорний ендпоінт
@@ -58,7 +59,7 @@ function show() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <CreateProjectModal opened onClose={() => {}} onCreated={async () => {}} />
       </QueryClientProvider>
