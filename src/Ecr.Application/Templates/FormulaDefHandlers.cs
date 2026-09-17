@@ -261,12 +261,24 @@ public sealed class SaveFormulaDefHandler(
             return;
         }
 
+        // ⚠ `messageKey` — не прикраса: без нього подробиця відмови доїхала б
+        // до конфігуратора українською незалежно від мови його інтерфейсу
+        // (мови продукту — `en`/`ru`/`kz`). Українське речення поруч лишається
+        // запасним варіантом і тим, що бачить журнал сервера. Підстановки
+        // йдуть РЯДКАМИ: `ResolveGenericMessageAsync` підставляє лише `string`.
         throw new BusinessRuleException(
             ErrorCodes.ComputationOnManualColumn,
             $"Колонка {table.Code}.{column.Code} має тип {column.DataType}: це колонка ручного "
             + "вводу, і формула на ній мовчки затирала б введене оператором при найближчому "
             + "перерахунку. Змініть тип колонки на Formula (тип незмінний — потрібна нова "
-            + "колонка) або приберіть формулу.");
+            + "колонка) або приберіть формулу.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-4227.formulaOnManualColumn",
+                ["tableCode"] = table.Code,
+                ["columnCode"] = column.Code,
+                ["dataType"] = column.DataType.ToString(),
+            });
     }
 
     /// <summary>

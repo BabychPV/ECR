@@ -898,12 +898,21 @@ public sealed class SaveCalculationBindingHandler(
             return;
         }
 
+        // ⚠ `messageKey` — див. той самий аргумент у `FormulaDefHandlers`:
+        // мови продукту `en`/`ru`/`kz`, і без ключа подробиця відмови їхала б
+        // конфігураторові українською. Українське речення лишається запасним.
         throw new BusinessRuleException(
             Domain.Errors.ErrorCodes.ComputationOnManualColumn,
             $"Колонка {column.Code} має тип {column.DataType}: це колонка ручного вводу. "
             + "Оператор правитиме її руками, а у звіт піде результат методології — і жоден "
             + "екран не покаже, що числа розійшлися. Прив'яжіть вихід до колонки типу "
-            + "Calculated (тип незмінний — потрібна нова колонка).");
+            + "Calculated (тип незмінний — потрібна нова колонка).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-4227.bindingOnManualColumn",
+                ["columnCode"] = column.Code,
+                ["dataType"] = column.DataType.ToString(),
+            });
     }
 }
 
