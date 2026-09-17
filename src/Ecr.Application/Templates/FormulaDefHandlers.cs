@@ -90,7 +90,8 @@ public sealed class SaveFormulaDefHandler(
     /// <returns>Збережена формула.</returns>
     /// <exception cref="NotFoundException">Версії, таблиці, колонки чи рядка немає.</exception>
     /// <exception cref="BusinessRuleException">
-    /// Область не <c>Column</c>/<c>Row</c> (<c>ECR-TMPL-0422</c>).
+    /// Область не <c>Column</c>/<c>Row</c> (<c>ECR-TMPL-0422</c>) або колонка
+    /// формули не обчислювана (<c>ECR-TMPL-4227</c>).
     /// </exception>
     /// <exception cref="DomainException">
     /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>).
@@ -117,6 +118,8 @@ public sealed class SaveFormulaDefHandler(
         version.EnsureStructurallyMutable();
 
         var (table, existing, resolvedId) = FindTarget(version, tableDefId, scope, target);
+
+        RequireComputedColumn(table, scope, resolvedId);
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -197,6 +200,73 @@ public sealed class SaveFormulaDefHandler(
             ErrorCodes.TemplateInvalid,
             $"Область формули {scope} тут не приймається: адресується лише Column або Row " +
             "(Cell поєднує обидві адреси одразу — для нього немає єдиної адреси).");
+    }
+
+    /// <summary>
+    /// Колонка, яку рахує формула, мусить бути ОБЧИСЛЮВАНОЮ
+    /// (<c>ECR-TMPL-4227</c>).
+    /// </summary>
+    /// <param name="table">Таблиця цілі.</param>
+    /// <param name="scope">Область формули.</param>
+    /// <param name="resolvedId">Колонка при <c>Column</c>; рядок при <c>Row</c>.</param>
+    /// <remarks>
+    /// ⛔ Дефект тихої втрати даних оператора. <c>ColumnDef.IsComputed</c> —
+    /// це не опис формули, а ТИП колонки, і саме його читає
+    /// <c>EditRules.CanEdit</c> (<c>ColumnIsComputed</c> →
+    /// <c>EditDenyReason.CalculatedCell</c>). Формула на колонці типу
+    /// <c>Decimal</c> лишає цей прапорець хибним: оператор заходить у комірку
+    /// на законних підставах, уводить число, бачить його — а найближчий
+    /// перерахунок кладе туди свій результат
+    /// (<c>RecalculationService.Targets</c> для <c>Column</c> пише В КОЖЕН
+    /// рядок колонки і типу не питає). Ні помилки, ні попередження; єдиний
+    /// слід — рядок аудиту з автором «система».
+    ///
+    /// ⚠ Межа — ЗБЕРЕЖЕННЯ формули, а не публікація, і це навмисно ІНШИЙ
+    /// висновок, ніж у дзеркальної перевірки <c>ECR-TMPL-4226</c>
+    /// («обчислювана колонка без джерела»). Там публікація — єдина можлива
+    /// межа: колонку заводять ПЕРШОЮ, а прив'язують до неї вихід методології
+    /// другим кроком, тож заборона на збереженні зробила б нормальний порядок
+    /// роботи неможливим. Тут порядок зворотний і жодного «потім» немає:
+    /// колонка вже існує (інакше <see cref="FindTarget"/> дав би 404), а її
+    /// <c>DataType</c> НЕЗМІННИЙ після створення
+    /// (<c>SaveColumnDefHandler</c>: «Заведіть нову колонку або клонуйте
+    /// версію», <c>ECR-TMPL-0422</c>). Отже всі факти вже на столі в момент
+    /// збереження, і жоден наступний крок цю формулу не узаконить — відкласти
+    /// відмову до публікації означало б лише дати конфігураторові піти далі з
+    /// формулою, яку доведеться видаляти.
+    ///
+    /// ⚠ Лише <c>Column</c>. Рядкова формула без <c>ColumnDefId</c> пише в УСІ
+    /// колонки свого рядка (той самий <c>Targets</c>), тож вимога
+    /// «обчислювані всі» зробила б рядок підсумку неможливим у будь-якій
+    /// реальній таблиці. Це не менший дефект, але він потребує іншого
+    /// рішення, а не цього гейта.
+    ///
+    /// ⚠ Перевірка живе тут, а НЕ в <see cref="FindTarget"/>, хоч колонку
+    /// знаходить саме він: <c>DeleteFormulaDefHandler</c> ходить через ту
+    /// саму адресацію, і спільна перевірка зробила б успадковану формулу на
+    /// <c>Decimal</c>-колонці невиправною — її не можна було б ані
+    /// перезаписати, ані прибрати.
+    /// </remarks>
+    /// <exception cref="BusinessRuleException">Колонка не обчислювана.</exception>
+    private static void RequireComputedColumn(TableDef table, FormulaScope scope, int resolvedId)
+    {
+        if (scope != FormulaScope.Column)
+        {
+            return;
+        }
+
+        var column = table.Columns.First(c => c.Id == resolvedId);
+        if (column.IsComputed)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.ComputationOnManualColumn,
+            $"Колонка {table.Code}.{column.Code} має тип {column.DataType}: це колонка ручного "
+            + "вводу, і формула на ній мовчки затирала б введене оператором при найближчому "
+            + "перерахунку. Змініть тип колонки на Formula (тип незмінний — потрібна нова "
+            + "колонка) або приберіть формулу.");
     }
 
     /// <summary>

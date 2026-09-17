@@ -46,19 +46,25 @@ public interface ICalculationBindingStore
         int methodologyId, CancellationToken ct);
 
     /// <summary>
-    /// Таблиця, якій належить колонка; <c>null</c> — колонки немає або її видалено.
+    /// Колонка-приймач так, як її бачить прив'язка; <c>null</c> — колонки
+    /// немає або її видалено.
     /// </summary>
     /// <param name="columnDefId">Колонка-приймач.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Ідентифікатор таблиці або <c>null</c>.</returns>
+    /// <returns>Таблиця, код і тип колонки — або <c>null</c>.</returns>
     /// <remarks>
     /// ⛔ <c>TableDefId</c> прив'язки НЕ приймається ззовні, а виводиться тут.
     /// Обидва поля вже є в рядку, і розійтися вони можуть лише мовчки:
     /// <c>RecalculationJob.BindingsAsync</c> шукає екземпляри таблиці за
     /// <c>TableDefId</c>, а значення кладе в колонку — прив'язка з чужим
     /// <c>TableDefId</c> просто не спрацювала б, не давши жодної помилки.
+    ///
+    /// ⚠ Метод віддає РЯДОК, а не самий <c>TableDefId</c> (як робив
+    /// <c>FindTableOfColumnAsync</c> до <c>ECR-TMPL-4227</c>): тип колонки
+    /// потрібен на тому самому шляху й у той самий момент, а другий запит про
+    /// ту саму колонку був би другою правдою про неї.
     /// </remarks>
-    public Task<int?> FindTableOfColumnAsync(int columnDefId, CancellationToken ct);
+    public Task<BoundColumnRef?> FindColumnAsync(int columnDefId, CancellationToken ct);
 
     /// <summary>
     /// Коди колонок кожної з названих таблиць — для публікаційної перевірки
@@ -73,7 +79,7 @@ public interface ICalculationBindingStore
     /// </returns>
     /// <remarks>
     /// ⚠ Видалені колонки виключені з тієї самої причини, що й у
-    /// <see cref="FindTableOfColumnAsync"/>: <c>CalculationInputBuilder</c>
+    /// <see cref="FindColumnAsync"/>: <c>CalculationInputBuilder</c>
     /// будує аргументи з живого знімка структури, і м'яко видалену колонку
     /// туди не візьме.
     /// </remarks>
@@ -108,3 +114,12 @@ public interface ICalculationBindingStore
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);
 }
+
+/// <summary>Колонка-приймач прив'язки: усе, що про неї треба знати на запису.</summary>
+/// <param name="TableDefId">Таблиця, якій належить колонка.</param>
+/// <param name="Code">Код колонки — для діагностики, яка називає винуватця.</param>
+/// <param name="DataType">
+/// Тип колонки. Прив'язати вихід методології можна лише до ОБЧИСЛЮВАНОЇ
+/// (<c>ColumnDef.IsComputed</c>) — інакше <c>ECR-TMPL-4227</c>.
+/// </param>
+public sealed record BoundColumnRef(int TableDefId, string Code, Ecr.Domain.Enums.CellDataType DataType);

@@ -997,6 +997,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// <param name="app">Піднятий застосунок — лише для тексту помилки з асерцій.</param>
     /// <param name="extraNumericColumns">Додаткові числові колонки понад <c>A</c>.</param>
     /// <param name="formulaColumn">Колонка типу <c>Formula</c> і вираз на ній.</param>
+    /// <param name="calculatedColumns">Колонки типу <c>Calculated</c> — приймачі виходів методологій.</param>
     /// <remarks>
     /// ⛔ Це не «фікстура зручності». До `W5` такого шляху не існувало в API
     /// взагалі, і саме тому `S-13`…`S-21`, `S-25`, `S-28` доводили
@@ -1008,7 +1009,8 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     private static async Task<TemplateStructure> BuildTemplateStructureAsync(
         HttpClient client, string prefix, string rowMode, string? validationExpression, EcrApiFactory app,
         IReadOnlyList<string>? extraNumericColumns = null,
-        (string Code, string Expression)? formulaColumn = null)
+        (string Code, string Expression)? formulaColumn = null,
+        IReadOnlyList<string>? calculatedColumns = null)
     {
         var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(client, prefix);
 
@@ -1084,6 +1086,39 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                     unitId = (int?)null,
                 });
             Assert.True(addExtra.StatusCode == HttpStatusCode.OK, $"колонка {code}: {addExtra.StatusCode}: {app.ErrorsText}");
+        }
+
+        // ⛔ Колонки-ПРИЙМАЧІ виходу методології — тип `Calculated`, з тієї ж
+        // причини, з якої колонка-формула нижче має тип `Formula`: саме тип
+        // робить колонку обчислюваною (`ColumnDef.IsComputed`) і забороняє
+        // ручний ввід. На `Decimal` оператор правив би в гріді число, якого у
+        // звіті вже не буде — туди йде `calc.CalculationResult`. Прив'язку до
+        // такої колонки сервер більше не приймає (`ECR-TMPL-4227`).
+        foreach (var code in calculatedColumns ?? [])
+        {
+            ordinal++;
+            var addCalculated = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/tables/{tableDefId}/columns/{code}", UriKind.Relative),
+                new
+                {
+                    headerL10n = new Dictionary<string, string> { ["en"] = code },
+                    ordinal,
+                    dataType = "Calculated",
+                    isRequired = false,
+                    isReadOnly = false,
+                    isHidden = false,
+                    precision = (byte?)null,
+                    scale = (byte?)null,
+                    defaultValue = (string?)null,
+                    displayFormat = (string?)null,
+                    styleId = (int?)null,
+                    lookupRegistryDefId = (int?)null,
+                    lookupFilter = (string?)null,
+                    unitId = (int?)null,
+                });
+            Assert.True(
+                addCalculated.StatusCode == HttpStatusCode.OK,
+                $"колонка {code}: {addCalculated.StatusCode}: {app.ErrorsText}");
         }
 
         // ⛔ Колонка-формула і сама формула — ДО публікації, і це не порядок
@@ -1203,6 +1238,10 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// <param name="extraNumericColumns">
     /// Додаткові числові колонки понад <c>A</c>; <c>null</c> — жодної.
     /// </param>
+    /// <param name="calculatedColumns">
+    /// Колонки типу <c>Calculated</c> — приймачі виходів методологій
+    /// (<c>ECR-TMPL-4227</c> не дає прив'язати вихід до колонки ручного вводу).
+    /// </param>
     /// <param name="formulaColumn">
     /// Колонка типу <c>Formula</c> разом із виразом, збереженим на ній через
     /// <c>PUT …/formulas/column/{columnDefId}</c> (`W5.3`); <c>null</c> —
@@ -1216,10 +1255,12 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         EcrApiFactory app, Provisioning.Administrator admin, string prefix,
         string? validationExpression = null, string rowMode = "Fixed",
         IReadOnlyList<string>? extraNumericColumns = null,
-        (string Code, string Expression)? formulaColumn = null)
+        (string Code, string Expression)? formulaColumn = null,
+        IReadOnlyList<string>? calculatedColumns = null)
     {
         var structure = await BuildTemplateStructureAsync(
-            admin.Client, prefix, rowMode, validationExpression, app, extraNumericColumns, formulaColumn);
+            admin.Client, prefix, rowMode, validationExpression, app,
+            extraNumericColumns, formulaColumn, calculatedColumns);
 
         var policiesResponse = await admin.Client.GetAsync(
             new Uri("/api/v1/projects/period-policies", UriKind.Relative));
