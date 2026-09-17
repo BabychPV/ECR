@@ -351,6 +351,15 @@ USING (VALUES
     (N'err.ECR-AUTH-0423', N'en', N'The account is locked.', 0),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
+
+    -- ⛔ ECR-TMPL-4227 — два різні входи в один стан, тому два ключі: формула
+    -- шаблону і прив'язка виходу методології. Текст мусить називати КОНКРЕТНУ
+    -- колонку і що з нею робити: «тип колонки незмінний» — це не деталь, а
+    -- єдина дія, яка лишається конфігураторові.
+    (N'err.ECR-TMPL-4227.formulaOnManualColumn', N'en',
+     N'Column {tableCode}.{columnCode} is {dataType}, a manual-entry column: a formula on it would silently overwrite what the operator typed at the next recalculation. Create a Formula column (the type cannot be changed) or remove the formula.', 1),
+    (N'err.ECR-TMPL-4227.bindingOnManualColumn', N'en',
+     N'Column {columnCode} is {dataType}, a manual-entry column. The operator edits it by hand while the report takes the methodology result, and no screen shows that the two disagree. Bind the output to a Calculated column (the type cannot be changed).', 1),
     -- ⛔ Q-30x: EcrCode.Create (Ecr.Domain — без доступу до IUiStringCatalog)
     -- будує лише ключ + підстановку `{code}`, не готове речення; це
     -- речення резолвить ExceptionHandlingMiddleware.LocalizedDetailAsync.

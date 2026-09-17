@@ -51,11 +51,11 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     /// але значення нікуди покласти — <c>GetTableSliceHandler</c> м'яко видалених
     /// колонок не віддає.
     /// </remarks>
-    public async Task<int?> FindTableOfColumnAsync(int columnDefId, CancellationToken ct)
+    public async Task<BoundColumnRef?> FindColumnAsync(int columnDefId, CancellationToken ct)
         => await db.ColumnDefs
             .AsNoTracking()
             .Where(c => c.Id == columnDefId && !c.IsDeleted)
-            .Select(c => (int?)c.TableDefId)
+            .Select(c => new BoundColumnRef(c.TableDefId, c.Code, c.DataType))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

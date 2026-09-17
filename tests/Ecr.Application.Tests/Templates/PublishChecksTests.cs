@@ -87,14 +87,21 @@ public sealed class PublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Колонка_Calculated_без_жодного_джерела_відхиляє_публікацію()
+    public void Колонка_Calculated_без_прив_язки_публікацію_НЕ_блокує()
     {
-        // ⛔ Виявлено живим прогоном: колонка типу `Calculated` публікувалася
-        // БЕЗ джерела значення. Тип каже «це рахує система», а рахувати нічим:
-        // прив'язки методології (`cfg.CalculationBinding`) немає, формули
-        // шаблону теж. Оператор отримує порожню клітинку, яку йому НЕ дають
-        // заповнити (`EditDenyReason.CalculatedCell`), і жодного пояснення;
-        // перерахунок для неї не робить нічого — мовчки, без помилки.
+        // ⛔ Це твердження ЗМІНЕНО, і причина важливіша за саму зміну. Спершу
+        // перевірка вимагала джерело від БУДЬ-ЯКОЇ обчислюваної колонки, і
+        // `Calculated` без прив'язки публікацію відхиляла. Це виявилося
+        // занадто суворо: джерело `Calculated`-колонки живе ПОЗА версією
+        // шаблону (`cfg.CalculationBinding`), і заводить його ІНША людина —
+        // методолог — уже після публікації, бо доти методологію немає до чого
+        // прив'язувати.
+        //
+        // ⚠ Знайдено падінням, а не міркуванням:
+        // `CalculationOrchestratorConcurrencyScenarios` заводить дві
+        // `Calculated`-колонки, публікує версію й лише потім створює
+        // методології та прив'язує їх. Це штатний порядок ролей, і перевірка
+        // його забороняла.
         var builder = new TemplateBuilder { TemplateVersionId = 1 };
         var sheet = builder.Sheet("Water");
         var table = builder.Table(sheet, "Main");
@@ -104,35 +111,29 @@ public sealed class PublishChecksTests
 
         var version = builder.Version();
 
-        // ⚠ Решта перевірок мовчить, і це не «все гаразд»: формул у версії
-        // немає, тож `Run` і `CheckRules` тут безпредметні. Якби перевірка
-        // колонок не стояла окремо, версія публікувалася б.
         Assert.Empty(Run(version));
         Assert.Empty(PublishChecks.CheckRules(version));
 
-        var diagnostic = Assert.Single(PublishChecks.CheckStructure(version));
-
-        Assert.Equal("ECR-TMPL-4226", diagnostic.Code);
-
-        // Відмова називає КОНКРЕТНУ колонку: «є помилки» змусило б
-        // конфігуратора шукати винуватця серед сотень колонок руками.
-        Assert.Contains("Emission", diagnostic.Message, StringComparison.Ordinal);
+        // ⚠ Ціна цього рішення названа прямо: така колонка в опублікованій
+        // формі лишається порожньою клітинкою, яку оператор не має права
+        // заповнити. Ловити це має інша перевірка — не на публікації
+        // структури, а там, де вже видно ОБИДВІ половини конфігурації.
+        Assert.Empty(PublishChecks.CheckStructure(version));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Та_сама_колонка_з_прив_язкою_методології_публікацію_не_блокує()
+    public void Прив_язка_методології_на_колонку_Formula_знімає_зауваження()
     {
         // ⚠ Друга половина, без якої перша нічого не означає: перевірка не
-        // забороняє тип `Calculated`, вона вимагає ДЖЕРЕЛО. Колонка цього типу
-        // формули шаблону не має за побудовою (`D-69`) — значення пише
-        // методологія за посиланням, і саме прив'язка робить конфігурацію
-        // повною.
+        // забороняє тип колонки, вона вимагає ДЖЕРЕЛО — і приймає джерело
+        // будь-якого з двох видів. Прив'язка методології на `Formula`-колонку
+        // законна (значення пише методологія), і зауваження має зникнути.
         var builder = new TemplateBuilder { TemplateVersionId = 1 };
         var sheet = builder.Sheet("Water");
         var table = builder.Table(sheet, "Main");
         builder.Column(table, "Jan", isMonthColumn: true);
-        var bound = builder.Column(table, "Emission", CellDataType.Calculated);
+        var bound = builder.Column(table, "Total", CellDataType.Formula);
         builder.Row(table, "7001001", 1);
 
         var version = builder.Version();
