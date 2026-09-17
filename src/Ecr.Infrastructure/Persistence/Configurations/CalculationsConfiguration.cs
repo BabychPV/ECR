@@ -439,6 +439,33 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         builder.Property(x => x.FinishedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.ErrorMessage).HasMaxLength(2000);
 
+        // ⛔ Унікальний ФІЛЬТРОВАНИЙ індекс — той самий прийом, що вже тримає
+        // «поточний зріз» у `UX_ReportSnapshot_Current`. Доти інваріант
+        // «актуальний прогін на область — щонайбільше один» не тримало НІЩО:
+        // ні блокування, ні `rowversion`, ні індекс. `SwitchCurrentRunAsync`
+        // знімає актуальність зі старих прогонів за ЗНІМКОМ, прочитаним на
+        // початку власної транзакції, тож два одночасні завершення прогонів
+        // одного проєкту й періоду одне одного не бачать і комітяться обидва.
+        //
+        // ⚠ Помилка не падала, а брехала: `ReadCurrentAsync` добирає
+        // результати підзапитом `EXISTS (… Status = 'Current')` і при двох
+        // актуальних прогонах повертає їх ОБ'ЄДНАННЯ — кожне число документа
+        // двічі, за двома різними версіями методології. Звіт при цьому
+        // будується й не кидає нічого.
+        //
+        // ⚠ Область — ПАРА «проєкт × період», а не сам проєкт: перерахунки
+        // різних періодів ідуть паралельно, і кожен має власний актуальний
+        // прогін. `PeriodKey IS NULL` (річний прогін) — теж окрема область, і
+        // SQL Server дає це задарма: в унікальному індексі NULL рівний NULL.
+        //
+        // ⚠ Фільтр по `Status`, а не індекс по всій таблиці: знятих з
+        // актуальності прогонів накопичуються мільйони, і вони мусять
+        // співіснувати з чинним (ЗБР-1, «нічого не затирається»).
+        builder.HasIndex(x => new { x.ProjectId, x.PeriodKey })
+               .IsUnique()
+               .HasFilter("[Status] = 'Current'")
+               .HasDatabaseName("UX_CalculationRun_Current");
+
         builder.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                .HasConstraintName("FK_CR_Project");
     }
