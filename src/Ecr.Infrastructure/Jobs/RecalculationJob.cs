@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Calculations;
@@ -170,7 +171,14 @@ public sealed class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                var cells = await FormulasAsync(docRequest, refused, ct).ConfigureAwait(false);
+                // ⛔ Періоди, у які цей прогін МАЄ ПРАВО писати, рахуються ОДИН
+                // раз і обслуговують ОБИДВА конвеєри. Раніше фаза формул
+                // вираховувала їх у себе всередині, а фаза методологій не
+                // вираховувала взагалі — саме звідти й узявся `PeriodKey(0)`
+                // нижче (див. коментар біля виклику оркестратора).
+                var periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
+
+                var cells = await FormulasAsync(docRequest, periods, ct).ConfigureAwait(false);
 
                 await progress
                     .ReportAsync(
@@ -186,7 +194,7 @@ public sealed class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                var bindings = await BindingsAsync(docRequest, refused, ct).ConfigureAwait(false);
+                var bindingsByPeriod = await BindingsAsync(docRequest, periods, ct).ConfigureAwait(false);
 
                 // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно
                 // стали актуальними.
@@ -205,17 +213,84 @@ public sealed class RecalculationJob(
                 // запис нижче — `ModuleProfile.Record` акумулює за кодом
                 // модуля, тож повторний виклик на кожен документ саме те, для
                 // чого метод і існує.
-                var profile = await orchestrator
-                    .RunAsync(
-                        run.Id,
-                        documentId,
-                        new PeriodKey(request.PeriodKey ?? 0),
-                        bindings,
-                        new PhaseProgress(progress, formulaCeiling, ceiling, "jobs.phaseMethodologies"),
-                        ct)
-                    .ConfigureAwait(false);
+                //
+                // ⛔⛔ ПОПЕРІОДНО, а не одним викликом на весь прогін. Раніше
+                // тут стояло `new PeriodKey(request.PeriodKey ?? 0)`: один
+                // ключ на весь документ. Для прогону «на весь рік»
+                // (`PeriodKey = null` — нічний розклад,
+                // `NightlyRecalculationScheduling`) періоду в завданні немає за
+                // побудовою, і `?? 0` давав `PeriodKey(0)` — ключ, який НЕ є
+                // періодом (`PeriodKey.IsValid` — false, `A7-28`).
+                // `CalculationOrchestrator.PeriodDateAsync` шукав межі такого
+                // періоду, не знаходив і кидав `ECR-PRD-0404`. Отже нічний
+                // повний перерахунок падав для БУДЬ-ЯКОГО проєкту з активними
+                // прив'язками методологій — і, судячи з коду, падав завжди:
+                // задача за розкладом, яка ніколи не працювала саме для того
+                // випадку, заради якого існує. Порожній список прив'язок
+                // рятував лише тому, що оркестратор виходить на
+                // `bindings.Count == 0` ДО обчислення дати.
+                //
+                // ⛔ Правильна одиниця тут — ПЕРІОД, а не документ, і це не
+                // судження про зручність, а вимога: версія методології
+                // резолвиться ЗА ДАТОЮ ПЕРІОДУ (ФВ-9.3, `MethodologyResolver`),
+                // тож рік — це потенційно різні версії в різних місяцях.
+                // Порахувати весь рік з одним ключем означало б застосувати
+                // до грудня редакцію методології, чинну в січні, — тихо
+                // неправильне число в регульованому звіті. Той самий принцип,
+                // що вже діє у фазі формул («періоди беруться з ЕКЗЕМПЛЯРІВ
+                // таблиць, а не з `request.PeriodKey`») і в моделі даних:
+                // `calc.CalculationResult` партиціонований ВЛАСНИМ
+                // `PeriodKey`, а `CalculationRun.PeriodKey` — nullable саме
+                // тому, що один прогін має право накрити весь рік.
+                //
+                // ⚠ Названий період дає рівно ОДИН виклик із тим самим ключем,
+                // що й раніше: маршрут кнопки «Перерахувати» не змінюється ні
+                // на крок. І саме тому список періодів для методологій — НЕ
+                // той самий, що для формул. Названий період лишається в ньому
+                // НАВІТЬ тоді, коли екземплярів таблиць у ньому немає: так цей
+                // код поводився завжди (оркестратор отримував ключ завдання й
+                // повертався на порожніх прив'язках), і на це спирається
+                // `DocumentId_нуль_перераховує_УСІ_документи_проєкту` —
+                // документ без жодного екземпляра мусить бути ВИДИМО
+                // перерахованим, а не мовчки пропущеним. Вивести й цей випадок
+                // з екземплярів означало б замість дефекту річного прогону
+                // завести дефект «документ тихо випав із прогону».
+                //
+                // ⛔ Для прогону БЕЗ названого періоду такого запасного ключа
+                // не існує за визначенням — там єдине джерело правди про
+                // періоди це екземпляри таблиць. Підставити туди нуль і був
+                // початковий дефект.
+                var methodologyPeriods = request.PeriodKey is { } namedPeriod
+                    ? (IReadOnlyList<int>)[namedPeriod]
+                    : periods;
 
-                totalProfile.Merge(profile);
+                for (var p = 0; p < methodologyPeriods.Count; p++)
+                {
+                    var period = methodologyPeriods[p];
+
+                    // Смуга прогресу фази методологій ділиться порівну між
+                    // періодами — так само, як уся шкала ділиться між
+                    // документами вище.
+                    var periodFloor =
+                        formulaCeiling + ((ceiling - formulaCeiling) * p / methodologyPeriods.Count);
+                    var periodCeiling =
+                        formulaCeiling + ((ceiling - formulaCeiling) * (p + 1) / methodologyPeriods.Count);
+
+                    var profile = await orchestrator
+                        .RunAsync(
+                            run.Id,
+                            documentId,
+                            new PeriodKey(period),
+                            bindingsByPeriod.TryGetValue(period, out var periodBindings)
+                                ? periodBindings
+                                : [],
+                            new PhaseProgress(
+                                progress, periodFloor, periodCeiling, "jobs.phaseMethodologies"),
+                            ct)
+                        .ConfigureAwait(false);
+
+                    totalProfile.Merge(profile);
+                }
             }
 
             // Завершення — прикладний сценарій: профіль і перемикання
@@ -259,23 +334,70 @@ public sealed class RecalculationJob(
     /// введення даних, не потрапляє в нього ніколи — і залишалася б
     /// непорахованою нескінченно.
     ///
-    /// ⚠ Періоди перебираються ЗА ЗРОСТАННЯМ. Формула шаблону має право
-    /// читати попередній період (<c>[Period:-1]</c>), і зворотний порядок
-    /// порахував би лютий зі старого січня, а потім січень — правильно, але
-    /// вже нікому.
+    /// ⚠ Періоди приходять готовим списком із <see cref="ScopePeriodsAsync"/>
+    /// — уже відфільтровані гейтом запису й упорядковані ЗА ЗРОСТАННЯМ.
+    /// Формула шаблону має право читати попередній період
+    /// (<c>[Period:-1]</c>), і зворотний порядок порахував би лютий зі старого
+    /// січня, а потім січень — правильно, але вже нікому.
     /// </remarks>
+    /// <param name="request">Завдання перерахунку.</param>
+    /// <param name="periods">Періоди в скоупі запису, за зростанням.</param>
+    /// <param name="ct">Токен скасування.</param>
     private async Task<int> FormulasAsync(
+        RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct)
+    {
+        var written = 0;
+
+        foreach (var period in periods)
+        {
+            written += await formulas
+                .RecalculateAllAsync(
+                    request.DocumentId, new PeriodKey(period), ct, request.SheetDefId)
+                .ConfigureAwait(false);
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// Періоди документа, у які цей прогін має право писати, ЗА ЗРОСТАННЯМ.
+    /// </summary>
+    /// <param name="request">Завдання; <c>PeriodKey = null</c> — увесь рік.</param>
+    /// <param name="refused">Періоди, у які запис заборонений (ФВ-9.7, ФВ-9.17).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ключі періодів; порожньо — записувати нема куди.</returns>
+    /// <remarks>
+    /// ⚠ Періоди беруться з ЕКЗЕМПЛЯРІВ таблиць, а не з <c>request.PeriodKey</c>:
+    /// той може бути <c>null</c> — «повний рік», — і <c>new PeriodKey(0)</c> тоді
+    /// виглядав би як звичайний період, у якому просто нічого немає
+    /// (<c>A7-28</c>, <c>PeriodKey.IsValid</c>).
+    ///
+    /// ⛔ Метод спільний для ОБОХ конвеєрів (формули шаблону й методології), і
+    /// саме в цьому суть виправлення: доти цей розрахунок жив усередині фази
+    /// формул, а фаза методологій не робила його взагалі — і тому єдина на всі
+    /// періоди отримувала ключ із завдання, тобто нуль для річного прогону.
+    /// Одне джерело скоупу означає, що обидві фази не можуть розійтися в тому,
+    /// які періоди прогін вважає своїми.
+    ///
+    /// ⚠ Q-331: коли <c>SheetDefId</c> заданий, скоуп звужується до періодів, у
+    /// яких є ХОЧ ОДНА таблиця ЦЬОГО аркуша — період, де аркуш порожній,
+    /// однаково не запише жодної комірки; фільтр лише економить прогони, що
+    /// напевно нічого не запишуть.
+    ///
+    /// ⛔ Періоди, у які писати не можна, ВИЛУЧАЮТЬСЯ зі скоупу запису
+    /// (ФВ-9.7, ФВ-9.17). Для явно названого періоду сюди вже не доходить —
+    /// <see cref="RefusedPeriodsAsync"/> відмовив винятком; це фільтр для
+    /// прогону «на весь рік» (нічний розклад, <c>PeriodKey = null</c>), де
+    /// відмовляти цілим прогоном не можна: у будь-якому році після січня є
+    /// закриті періоди, і нічний перерахунок перестав би працювати назавжди.
+    ///
+    /// ⚠ ЗА ЗРОСТАННЯМ, і це не косметика. Формула шаблону має право читати
+    /// попередній період (<c>[Period:-1]</c>), і зворотний порядок порахував
+    /// би лютий зі старого січня, а потім січень — правильно, але вже нікому.
+    /// </remarks>
+    private async Task<IReadOnlyList<int>> ScopePeriodsAsync(
         RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
-        // ⚠ Періоди беруться з ЕКЗЕМПЛЯРІВ таблиць, а не з `request.PeriodKey`:
-        // той може бути `null` — «повний рік», — і `new PeriodKey(0)` тоді
-        // виглядав би як звичайний період, у якому просто нічого немає
-        // (`A7-28`, `PeriodKey.IsValid`).
-        //
-        // ⚠ Q-331: коли `SheetDefId` заданий, скоуп звужується до періодів, у
-        // яких є ХОЧ ОДНА таблиця ЦЬОГО аркуша — період, де аркуш порожній,
-        // однаково не запише жодної комірки; фільтр лише економить прогони, що
-        // напевно нічого не запишуть.
         var scopesQuery = db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
@@ -288,40 +410,36 @@ public sealed class RecalculationJob(
         }
 
         var scopes = await scopesQuery
-            .Select(i => new ScopeRow(i.DocumentId, i.PeriodKeyValue))
+            .Select(i => i.PeriodKeyValue)
             .Distinct()
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var written = 0;
-
-        // ⛔ Періоди, у які писати не можна, ВИЛУЧАЮТЬСЯ зі скоупу запису
-        // (ФВ-9.7, ФВ-9.17). Для явно названого періоду сюди вже не доходить
-        // — `RefusedPeriodsAsync` відмовив винятком; це фільтр для прогону «на
-        // весь рік» (нічний розклад, `PeriodKey = null`), де відмовляти цілим
-        // прогоном не можна: у будь-якому році після січня є закриті періоди,
-        // і нічний перерахунок перестав би працювати назавжди.
-        foreach (var scope in scopes.Where(s => !refused.Contains(s.PeriodKeyValue))
-                                    .OrderBy(s => s.PeriodKeyValue))
-        {
-            written += await formulas
-                .RecalculateAllAsync(
-                    scope.DocumentId, new PeriodKey(scope.PeriodKeyValue), ct, request.SheetDefId)
-                .ConfigureAwait(false);
-        }
-
-        return written;
+        return [.. scopes.Where(key => !refused.Contains(key)).OrderBy(key => key)];
     }
 
-    /// <summary>Прив'язки методологій до таблиць документа.</summary>
+    /// <summary>Прив'язки методологій до таблиць документа, РОЗКЛАДЕНІ ЗА ПЕРІОДАМИ.</summary>
+    /// <param name="request">Завдання перерахунку.</param>
+    /// <param name="periods">Періоди в скоупі запису, за зростанням.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Прив'язки за ключем періоду; періоду без прив'язок у мапі немає.</returns>
     /// <remarks>
     /// Прив'язка живе в <c>cfg.CalculationBinding</c> і посилається на
     /// <c>TableDefId</c> — опис таблиці. Прогін працює з ЕКЗЕМПЛЯРАМИ, тому
     /// опис розгортається в екземпляри цього документа й періоду.
+    ///
+    /// ⛔ Саме МАПА ЗА ПЕРІОДАМИ, а не один плаский список. Плаский список був
+    /// половиною дефекту річного прогону: він чесно містив екземпляри всіх
+    /// місяців року, але віддавався оркестраторові разом з ОДНИМ ключем
+    /// періоду — і той різнорідний набір рахувався так, ніби весь належить
+    /// одному періоду. Версія методології резолвиться за датою періоду
+    /// (ФВ-9.3), а входи (<c>CalculationInputBuilder</c>) читаються зрізом
+    /// періоду, тож «період прив'язки» — не метадані, а частина самого
+    /// розрахунку.
     /// </remarks>
-    private async Task<List<CalculationBindingRef>> BindingsAsync(
-        RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
+    private async Task<IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>> BindingsAsync(
+        RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct)
     {
         // ⚠ Q-331: методологія прив'язана до `TableDefId`, тобто до конкретної
         // таблиці — і, транзитивно, до аркуша, якому та таблиця належить
@@ -330,10 +448,19 @@ public sealed class RecalculationJob(
         // `calc.CalculationResult` для таблиці цього аркуша, а вхідні дані
         // (`CalculationInputBuilder`) читає з `doc.CellValue` без огляду на
         // те, прив'язку якого аркуша перераховує цей прогін.
+        // ⛔ Той самий гейт і для МЕТОДОЛОГІЙ: їхній результат лягає в
+        // `calc.CalculationResult` для екземпляра таблиці конкретного періоду,
+        // тож екземпляр закритого періоду мусить випасти зі списку прив'язок,
+        // а не лише з фази формул. Тепер це не окремий фільтр, а наслідок
+        // спільного скоупу: `periods` уже пройшли `ScopePeriodsAsync`, тобто
+        // закритого січня в них немає. Дві копії фільтра, які колись стояли
+        // тут і у фазі формул, розійтися більше не можуть.
+        var scopeKeys = periods.ToList();
+
         var instancesQuery = db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey));
+                        && scopeKeys.Contains(i.PeriodKeyValue));
 
         if (request.SheetDefId is { } bindingSheetId)
         {
@@ -341,22 +468,15 @@ public sealed class RecalculationJob(
                 db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == bindingSheetId));
         }
 
-        // ⛔ Той самий гейт і для МЕТОДОЛОГІЙ: їхній результат лягає в
-        // `calc.CalculationResult` для екземпляра таблиці конкретного періоду,
-        // тож екземпляр закритого періоду мусить випасти зі списку прив'язок,
-        // а не лише з фази формул. Прибрати фільтр тут — і прогін «на весь
-        // рік» знову перерахував би методології закритого січня.
-        var refusedKeys = refused.ToList();
         var instances = await instancesQuery
-            .Where(i => !refusedKeys.Contains(i.PeriodKeyValue))
             .Take(MaxBindings)
-            .Select(i => new InstanceRow(i.Id, i.TableDefId))
+            .Select(i => new InstanceRow(i.Id, i.TableDefId, i.PeriodKeyValue))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         if (instances.Count == 0)
         {
-            return [];
+            return ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty;
         }
 
         var tableDefIds = instances.Select(i => i.TableDefId).Distinct().ToList();
@@ -369,12 +489,20 @@ public sealed class RecalculationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⚠ `Distinct` — усередині групи періоду, а не над плоским набором:
+        // однакова пара (екземпляр, методологія) неможлива в двох періодах,
+        // бо екземпляр належить рівно одному періоду, але робити `Distinct`
+        // після групування чесніше — воно тоді означає рівно те, що написано.
         return instances
             .SelectMany(i => bindings
                 .Where(b => b.TableDefId == i.TableDefId)
-                .Select(b => new CalculationBindingRef(i.Id, b.MethodologyId)))
-            .Distinct()
-            .ToList();
+                .Select(b => new PeriodBindingRow(
+                    i.PeriodKeyValue, new CalculationBindingRef(i.Id, b.MethodologyId))))
+            .GroupBy(row => row.PeriodKeyValue)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<CalculationBindingRef>)
+                    [.. group.Select(row => row.Binding).Distinct()]);
     }
 
     /// <summary>
@@ -532,14 +660,22 @@ public sealed class RecalculationJob(
                    "Завдання перерахунку не розбирається: невідома форма payload.");
     }
 
-    /// <summary>Екземпляр таблиці документа.</summary>
-    private sealed record InstanceRow(long Id, int TableDefId);
+    /// <summary>Екземпляр таблиці документа разом із періодом, якому він належить.</summary>
+    /// <remarks>
+    /// ⚠ <paramref name="PeriodKeyValue"/> доданий не для зручності: без нього
+    /// прив'язки не можна розкласти за періодами, а саме плаский набір
+    /// прив'язок з одним спільним ключем періоду й був дефектом річного прогону.
+    /// </remarks>
+    /// <param name="Id">Ідентифікатор екземпляра.</param>
+    /// <param name="TableDefId">Опис таблиці.</param>
+    /// <param name="PeriodKeyValue">Період екземпляра.</param>
+    private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue);
 
     /// <summary>Прив'язка методології до опису таблиці.</summary>
     private sealed record BindingRow(int TableDefId, int MethodologyId);
 
-    /// <summary>Документ і період, для яких рахуються формули шаблону.</summary>
-    private sealed record ScopeRow(long DocumentId, int PeriodKeyValue);
+    /// <summary>Прив'язка разом із періодом, у якому вона рахується.</summary>
+    private sealed record PeriodBindingRow(int PeriodKeyValue, CalculationBindingRef Binding);
 
     /// <summary>Стан одного періоду — для гейту запису.</summary>
     private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
