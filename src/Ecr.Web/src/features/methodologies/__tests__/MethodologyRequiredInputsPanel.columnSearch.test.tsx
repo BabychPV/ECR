@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -14,48 +13,11 @@ import { testTheme } from '@/test/render';
  * /api/v1/column-defs/search`, той самий прийом, що вибір довідника в
  * `ColumnEditor.tsx`.
  *
- * ⛔ `Select`/`MultiSelect` (`@mantine/core`) під jsdom «зависають» —
- * відтворюваний факт, уже задокументований кілька разів у цьому репозиторії
- * (`ColumnEditor.registryLookup.test.tsx` та інші). Обхід — той самий:
- * заглушуємо `Select` легким `<select>`, керованим звичайним
- * `fireEvent.change`, без порталу й без floating-ui.
+ * ✎ Тут стояла заглушка `Select` легким `<select>` — нібито тому, що
+ * справжній «зависає під jsdom». Причина зависання знайдена й усунена
+ * (рекурсія jsdom ↔ nwsapi на станових псевдокласах — коментар у
+ * `src/test/setup.ts`), тож тест працює зі справжнім `Select searchable`.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 const Strings: Record<string, string> = {
   'methodologies.requiredInputs': 'Required input columns',
@@ -162,12 +124,11 @@ describe('MethodologyRequiredInputsPanel: вибір колонки за наз�
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add required input' }));
 
-    const select = await screen.findByLabelText('Column');
-    await waitFor(() => {
-      expect((select as HTMLSelectElement).querySelectorAll('option').length).toBeGreaterThan(1);
-    });
-
-    fireEvent.change(select, { target: { value: '42' } });
+    // Колонка обирається за назвою — це і є предмет директиви.
+    fireEvent.click(await screen.findByLabelText('Column'));
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Volume extracted (VOL) · SHEET/TBL' }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(puts).toHaveLength(1));

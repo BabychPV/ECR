@@ -1,6 +1,5 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RoleView, UserView } from '@/api/types';
@@ -15,35 +14,11 @@ import { testTheme } from '@/test/render';
  * до збереження, і жодного натяку, чому обліковий запис і далі нічого не
  * бачить, немає.
  *
- * ⚠ `MultiSelect` (`@mantine/core`) під jsdom «зависає» — той самий
- * прийом заміни на стаб-контрол, що й у `UserAccessEditor.clearRoles.
- * test.tsx`.
+ * ✎ Тут `MultiSelect` підмінявся стаб-контролом із двома кнопками — нібито
+ * тому, що справжній «зависає під jsdom». Причина зависання знайдена й
+ * усунена: взаємна рекурсія jsdom ↔ nwsapi на станових псевдокласах
+ * (коментар у `src/test/setup.ts`). Роль обирається у справжньому списку.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubMultiSelect(props: {
-    label?: string;
-    value?: string[];
-    onChange?: (value: string[]) => void;
-  }): JSX.Element {
-    return (
-      <div>
-        <div aria-label={props.label} data-testid="roles-value">
-          {(props.value ?? []).join(',')}
-        </div>
-        <button type="button" onClick={() => props.onChange?.(['EmptyRole'])}>
-          select empty-role
-        </button>
-        <button type="button" onClick={() => props.onChange?.(['GrantingRole'])}>
-          select granting-role
-        </button>
-      </div>
-    );
-  }
-
-  return { ...actual, MultiSelect: StubMultiSelect };
-});
 
 const user: UserView = {
   id: 7,
@@ -100,16 +75,35 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const RolesLabel = '⟦security.roles⟧';
+
+/** Обрані ролі так, як їх показує `MultiSelect` — «пігулками» над полем. */
+function selectedRoles(): string[] {
+  return Array.from(document.querySelectorAll('.mantine-Pill-label')).map(
+    (pill) => pill.textContent ?? '',
+  );
+}
+
+/**
+ * Обирає роль у справжньому списку.
+ *
+ * ⚠ Поле береться ДО розкриття списку: щойно список відкрито, підпис «ролі»
+ * мають два елементи, і `getByLabelText` стає неоднозначним.
+ */
+async function pickRole(code: string): Promise<void> {
+  const field = await screen.findByLabelText(RolesLabel);
+  expect(selectedRoles()).toEqual([]);
+
+  fireEvent.click(field);
+  fireEvent.click(screen.getByRole('option', { name: code }));
+}
+
 describe('UserAccessEditor: попередження, коли обрані ролі нічого не дають (lane1)', () => {
   it('обрана роль без жодного права показує попередження «grants nothing»', async () => {
     respond([]);
     show();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('roles-value').textContent).toBe('');
-    });
-
-    screen.getByText('select empty-role').click();
+    await pickRole('EmptyRole');
 
     // ⛔ Мутаційний доказ: попередження з'являється РІВНО тоді, коли всі
     // обрані ролі порожні на права.
@@ -120,14 +114,10 @@ describe('UserAccessEditor: попередження, коли обрані ро
     respond([]);
     show();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('roles-value').textContent).toBe('');
-    });
-
-    screen.getByText('select granting-role').click();
+    await pickRole('GrantingRole');
 
     await waitFor(() => {
-      expect(screen.getByTestId('roles-value').textContent).toBe('GrantingRole');
+      expect(selectedRoles()).toEqual(['GrantingRole']);
     });
 
     // ⛔ І РІВНО НЕ з'являється, коли обрана роль щось дає — інакше

@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -19,28 +18,19 @@ import { testTheme } from '@/test/render';
  * повторна спроба: адмін «виправляє» те, що вже збережено, дивлячись на
  * застарілий перелік.
  *
- * ⚠ `MultiSelect` підмінено легким заглушником — та сама причина й той самий
- * прийом, що в `UserAccessEditor.rolesDropdown.test.tsx` (під jsdom справжній
- * зависає).
+ * ✎ Тут `MultiSelect` підмінявся легким заглушником — нібито тому, що
+ * справжній «зависає під jsdom». Причина зависання знайдена й усунена:
+ * взаємна рекурсія jsdom ↔ nwsapi на станових псевдокласах (коментар у
+ * `src/test/setup.ts`). Заглушник прибрано; перелік ролей читається з самого
+ * компонента — «пігулками» над полем.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
 
-  function StubMultiSelect(props: {
-    value?: string[];
-    onChange?: (value: string[]) => void;
-    rightSection?: React.ReactNode;
-  }): JSX.Element {
-    return (
-      <div>
-        <div data-testid="roles-value">{(props.value ?? []).join(',')}</div>
-        {props.rightSection}
-      </div>
-    );
-  }
-
-  return { ...actual, MultiSelect: StubMultiSelect };
-});
+/** Обрані ролі так, як їх показує `MultiSelect` — «пігулками» над полем. */
+function selectedRoles(): string[] {
+  return Array.from(document.querySelectorAll('.mantine-Pill-label')).map(
+    (pill) => pill.textContent ?? '',
+  );
+}
 
 const user: UserView = {
   id: 7,
@@ -162,7 +152,7 @@ describe('UserAccessEditor: часткова відмова двоетапног
     mockServer();
     const { invalidated } = show();
 
-    await waitFor(() => expect(screen.getByTestId('roles-value').textContent).toBe('DataEntry'));
+    await waitFor(() => expect(selectedRoles()).toEqual(['DataEntry']));
 
     fireEvent.change(screen.getByLabelText(/security\.email/), {
       target: { value: 'ivanov@example.com' },
@@ -182,7 +172,7 @@ describe('UserAccessEditor: часткова відмова двоетапног
     mockServer();
     show();
 
-    await waitFor(() => expect(screen.getByTestId('roles-value').textContent).toBe('DataEntry'));
+    await waitFor(() => expect(selectedRoles()).toEqual(['DataEntry']));
 
     fireEvent.change(screen.getByLabelText(/security\.email/), {
       target: { value: 'ivanov@example.com' },
@@ -202,7 +192,7 @@ describe('UserAccessEditor: часткова відмова двоетапног
     mockServer();
     const { closed } = show();
 
-    await waitFor(() => expect(screen.getByTestId('roles-value').textContent).toBe('DataEntry'));
+    await waitFor(() => expect(selectedRoles()).toEqual(['DataEntry']));
 
     fireEvent.click(screen.getByRole('button', { name: '⟦common.save⟧' }));
     await waitFor(() => expect(shown.length).toBeGreaterThan(0));

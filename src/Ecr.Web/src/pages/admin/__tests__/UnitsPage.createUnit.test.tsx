@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -15,45 +14,12 @@ import { testTheme } from '@/test/render';
  * мав шляху додати одиницю виміру — той самий клас дефекту, що вже
  * виправлений для довідників (`Q-200`).
  *
- * ⚠ `Select` (`@mantine/core`) зависає під jsdom (`Q-299`) — заглушено
- * стандартним стабом.
+ * ✎ Тут стояла заглушка всього `@mantine/core`, що підміняла `Select`
+ * саморобним `<select>` — нібито через «зависання `Select` під jsdom»
+ * (`Q-299`). Причина була інша й уже усунена: рекурсія jsdom ↔ nwsapi на
+ * станових псевдокласах (коментар у `src/test/setup.ts`). Тест працює з
+ * тим самим `Select`, яким користується людина.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 const SeededStrings: Record<string, string> = {
   'units.title': 'Units of measure',
@@ -180,7 +146,8 @@ describe('UnitsPage: заведення нової одиниці виміру (
     fireEvent.change(within(dialog).getByLabelText('Code'), { target: { value: 'g' } });
     fireEvent.change(within(dialog).getByLabelText('Symbol'), { target: { value: 'g' } });
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Gram' } });
-    fireEvent.change(within(dialog).getByLabelText('Dimension'), { target: { value: '1' } });
+    fireEvent.click(within(dialog).getByLabelText('Dimension'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Mass' }));
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'New unit' }));
 

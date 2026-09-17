@@ -1,6 +1,5 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RoleView, UserView } from '@/api/types';
@@ -15,49 +14,14 @@ import { testTheme } from '@/test/render';
  * роль замість збереження). Єдиний робочий спосіб закрити список, лишившись
  * у діалозі, був `Tab` (blur).
  *
- * ⚠ Той самий відтворюваний факт, що й в інших тестах цього файлу:
- * `MultiSelect` під jsdom «зависає» (floating-ui/portal-позиціонування
- * потребують реального layout), тож підмінено легким заглушником, що
- * форвардить рівно ті пропси, від яких залежить фікс: `dropdownOpened`,
- * `onDropdownOpen`/`onDropdownClose`, `rightSection`, `onChange`. Саму
- * логіку показу/приховування дропдауна (`Combobox.Chevron` для шеврону,
- * `role="listbox"`/`role="option"` для реальних опцій) НЕ підмінено — вона
- * рендериться напряму з некомпрометованого `@mantine/core`, тож перевіряє
- * справжню поведінку `stopPropagation`/capture-обробників, доданих у
- * `UserAccessEditor.tsx`.
+ * ✎ Тут `MultiSelect` підмінявся заглушником, що САМ малював свій
+ * «дропдаун» (`roles-dropdown-state`, власна `role="listbox"`), — нібито
+ * тому, що справжній «зависає під jsdom». Причина зависання знайдена й
+ * усунена: взаємна рекурсія jsdom ↔ nwsapi на станових псевдокласах
+ * (коментар у `src/test/setup.ts`). Тепер відкритість списку читається з
+ * САМОГО компонента — за наявністю видимих `role="option"`, — тож тест
+ * нарешті перевіряє ту поведінку, заради якої написаний, а не імітацію.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubMultiSelect(props: {
-    label?: string;
-    value?: string[];
-    onChange?: (value: string[]) => void;
-    dropdownOpened?: boolean;
-    onDropdownOpen?: () => void;
-    rightSection?: React.ReactNode;
-  }): JSX.Element {
-    return (
-      <div>
-        <div data-testid="roles-value">{(props.value ?? []).join(',')}</div>
-        <div data-testid="roles-dropdown-state">{props.dropdownOpened ? 'open' : 'closed'}</div>
-        <button type="button" onClick={() => props.onDropdownOpen?.()}>
-          open roles dropdown
-        </button>
-        {props.rightSection}
-        {props.dropdownOpened && (
-          <div role="listbox">
-            <button type="button" role="option" onClick={() => props.onChange?.(['DataEntry'])}>
-              DataEntry
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return { ...actual, MultiSelect: StubMultiSelect };
-});
 
 const user: UserView = {
   id: 7,
@@ -102,12 +66,42 @@ function show(onClose: () => void): void {
   );
 }
 
-async function openRolesDropdown(): Promise<void> {
-  await waitFor(() => {
-    expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('closed');
-  });
-  fireEvent.click(screen.getByText('open roles dropdown'));
-  expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('open');
+const RolesLabel = '⟦security.roles⟧';
+
+/**
+ * Чи розкритий список ролей. Читається з самого `MultiSelect`: доки список
+ * закритий, Mantine ховає випадний блок, і жодної ВИДИМОЇ `role="option"` у
+ * дереві немає (перевірено: `queryAllByRole('option', { hidden: true })`
+ * теж порожній).
+ */
+function rolesDropdownState(): 'open' | 'closed' {
+  return screen.queryAllByRole('option').length > 0 ? 'open' : 'closed';
+}
+
+/**
+ * Обрані ролі так, як їх показує сам `MultiSelect` — «пігулками» над полем.
+ * Це те саме твердження, що читав `data-testid="roles-value"` заглушника,
+ * але з реального дерева компонента.
+ */
+function selectedRoles(): string[] {
+  return Array.from(document.querySelectorAll('.mantine-Pill-label')).map(
+    (pill) => pill.textContent ?? '',
+  );
+}
+
+/**
+ * ⚠ Повертає саме поле пошуку: щойно список розкрито, підпис «ролі» мають
+ * ДВА елементи (видиме поле й приховане поле значення), і `getByLabelText`
+ * після відкриття вже неоднозначний.
+ */
+async function openRolesDropdown(): Promise<HTMLElement> {
+  const field = await screen.findByLabelText(RolesLabel);
+  expect(rolesDropdownState()).toBe('closed');
+
+  fireEvent.click(field);
+  expect(rolesDropdownState()).toBe('open');
+
+  return field;
 }
 
 afterEach(() => {
@@ -119,23 +113,22 @@ describe('UserAccessEditor: відкритий список ролей не бл
     respond(['DataEntry']);
     const onClose = vi.fn();
     show(onClose);
-    await openRolesDropdown();
+    const rolesField = await openRolesDropdown();
 
     // ⛔ Мутаційний доказ (RED до фіксу): без `closeOnEscape={!rolesOpened}`
     // на `Modal` цей самий `Escape` викликав би `onClose` (Modal's власний
     // window-level capture-listener).
-    fireEvent.keyDown(screen.getByText('open roles dropdown'), { key: 'Escape' });
+    fireEvent.keyDown(rolesField, { key: 'Escape' });
 
-    expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('closed');
+    expect(rolesDropdownState()).toBe('closed');
     expect(onClose).not.toHaveBeenCalled();
   });
 
   it('шеврон мультиселекту перемикає (toggle) список — відкриває і закриває', async () => {
     respond(['DataEntry']);
     show(() => {});
-    await waitFor(() => {
-      expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('closed');
-    });
+    await screen.findByLabelText(RolesLabel);
+    expect(rolesDropdownState()).toBe('closed');
 
     const toggle = screen.getByTestId('roles-dropdown-toggle');
 
@@ -143,10 +136,10 @@ describe('UserAccessEditor: відкритий список ролей не бл
     // викликає лише `openDropdown()` — без власного toggle-обробника цей
     // клік не міняв би стан узагалі, якщо він уже відкритий.
     fireEvent.click(toggle);
-    expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('open');
+    expect(rolesDropdownState()).toBe('open');
 
     fireEvent.click(toggle);
-    expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('closed');
+    expect(rolesDropdownState()).toBe('closed');
   });
 
   it('клік по реальній опції (role="option") всередині дропдауна проходить як звичайно', async () => {
@@ -154,11 +147,15 @@ describe('UserAccessEditor: відкритий список ролей не бл
     show(() => {});
     await openRolesDropdown();
 
+    // Роль `DataEntry` вже призначена (відповідь сервера вище), тож клік по
+    // її опції — це зняття вибору.
+    expect(selectedRoles()).toEqual(['DataEntry']);
+
     fireEvent.click(screen.getByRole('option', { name: 'DataEntry' }));
 
-    // Клік усередині `role="listbox"` НЕ мав бути перехоплений
+    // Клік усередині випадного блоку НЕ мав бути перехоплений
     // capture-обробником — `onChange` мультиселекту спрацював як зазвичай.
-    expect(screen.getByTestId('roles-value').textContent).toBe('DataEntry');
+    expect(selectedRoles()).toEqual([]);
   });
 
   it('клік по Cancel, поки список відкритий, лише закриває список і НЕ скасовує діалог', async () => {
@@ -173,7 +170,7 @@ describe('UserAccessEditor: відкритий список ролей не бл
     // поверх кнопки, — жодного разу не робив «просто закрий список».
     fireEvent.click(screen.getByRole('button', { name: '⟦common.cancel⟧' }));
 
-    expect(screen.getByTestId('roles-dropdown-state').textContent).toBe('closed');
+    expect(rolesDropdownState()).toBe('closed');
     expect(onClose).not.toHaveBeenCalled();
 
     // Другий клік, коли список уже закритий, працює як звичайна кнопка.

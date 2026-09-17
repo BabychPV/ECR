@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -25,45 +24,11 @@ import { testTheme } from '@/test/render';
  * порожнім, і сторінка лишалася на «зрізів іще нема» назавжди без
  * жодного опитування.
  *
- * ⚠ `Select` (`@mantine/core`) зависає під jsdom (`Q-299`) — заглушено
- * стандартним стабом (проєкт-пікер у шапці, вибір звіту в модалці).
+ * ✎ Обидва `Select` (проєкт-пікер у шапці й вибір звіту в модалці) були
+ * заглушені як «ті, що зависають під jsdom» (`Q-299`). Причина зависання
+ * знайдена й усунена (рекурсія jsdom ↔ nwsapi на станових псевдокласах —
+ * коментар у `src/test/setup.ts`), тож обидва обираються по-справжньому.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 const SeededStrings: Record<string, string> = {
   'snapshots.title': 'Report snapshots',
@@ -105,7 +70,10 @@ const reportDef = {
   code: 'IEC',
   isActive: true,
   isRegulatory: true,
-  nameL10n: { en: 'Industrial Environmental Control (quarterly)' },
+  // ⚠ Форма з сервера — `{ values: { <мова>: … } }` (`shared/i18n/localized.ts`),
+  // а не плаский `{ en: … }`: заглушений `<select>` підпису опції не читав,
+  // тож хибна форма фікстури лишалася непоміченою.
+  nameL10n: { values: { en: 'Industrial Environmental Control (quarterly)' } },
   versions: [
     {
       id: 1,
@@ -223,16 +191,20 @@ describe('SnapshotsPage: список оновлюється після заве
     await screen.findByText('No snapshots built yet');
 
     // Кнопка «Build snapshot» заблокована, доки не обрано проєкт.
-    fireEvent.change(await screen.findByLabelText('Project'), {
-      target: { value: '1' },
-    });
+    fireEvent.click(await screen.findByLabelText('Project'));
+    fireEvent.click(await screen.findByRole('option', { name: 'AUDIT_SMOKE_PRJ' }));
 
     fireEvent.click(await screen.findByRole('button', { name: 'Build snapshot' }));
 
     const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Report code'), {
-      target: { value: 'IEC' },
-    });
+    // ⚠ Опції випадного списку рендеряться в порталі ПОЗА `dialog` — звідси
+    // `screen` для опції й `within(dialog)` лише для самого поля.
+    fireEvent.click(within(dialog).getByLabelText('Report code'));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Industrial Environmental Control (quarterly) (IEC)',
+      }),
+    );
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Build snapshot' }));
 

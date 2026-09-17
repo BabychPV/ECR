@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -21,35 +20,12 @@ import { testTheme } from '@/test/render';
  * додати роль назад. Єдиний вихід був «Cancel», що відкидав УСІ зміни
  * сеансу (включно з правкою email).
  *
- * ⚠ `MultiSelect` (`@mantine/core`) під jsdom «зависає» — той самий
- * відтворюваний факт, що й `Select` (`Q-299`, `GrantsPanel.resourceName.
- * test.tsx`, `ColumnEditor.registryLookup.test.tsx`). Стаб тут — кнопка
- * «очистити ролі», що напряму викликає `onChange([])`: цього досить, щоб
- * відтворити ТОЧНО той самий виклик, що й зняття останнього чіпа
- * мишкою/клавіатурою в реальному компоненті, без порталу й floating-ui.
+ * ✎ Тут `MultiSelect` підмінявся кнопкою «очистити ролі», що напряму
+ * викликала `onChange([])` — нібито тому, що справжній «зависає під jsdom»
+ * (`Q-299`). Причина зависання знайдена й усунена: взаємна рекурсія
+ * jsdom ↔ nwsapi на станових псевдокласах (коментар у `src/test/setup.ts`).
+ * Роль тепер знімається тим самим хрестиком на «пігулці», що й мишкою.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubMultiSelect(props: {
-    label?: string;
-    value?: string[];
-    onChange?: (value: string[]) => void;
-  }): JSX.Element {
-    return (
-      <div>
-        <div aria-label={props.label} data-testid="roles-value">
-          {(props.value ?? []).join(',')}
-        </div>
-        <button type="button" onClick={() => props.onChange?.([])}>
-          {`${props.label ?? 'roles'} — clear all`}
-        </button>
-      </div>
-    );
-  }
-
-  return { ...actual, MultiSelect: StubMultiSelect };
-});
 
 const user: UserView = {
   id: 7,
@@ -98,6 +74,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const RolesLabel = '⟦security.roles⟧';
+
+/** Обрані ролі так, як їх показує `MultiSelect` — «пігулками» над полем. */
+function selectedRoles(): string[] {
+  return Array.from(document.querySelectorAll('.mantine-Pill-label')).map(
+    (pill) => pill.textContent ?? '',
+  );
+}
+
+/** Хрестики зняття ролі на самих «пігулках». */
+function roleRemoveButtons(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('.mantine-Pill-remove'));
+}
+
 describe('UserAccessEditor: очищення всіх ролей не ховає контроль вибору (lane1)', () => {
   it('зняття останньої ролі лишає MultiSelect на місці, поряд із попередженням', async () => {
     respond(['DataEntry']);
@@ -105,24 +95,26 @@ describe('UserAccessEditor: очищення всіх ролей не ховає
 
     // Дочекатися завантаження призначених ролей.
     await waitFor(() => {
-      expect(screen.getByTestId('roles-value').textContent).toBe('DataEntry');
+      expect(selectedRoles()).toEqual(['DataEntry']);
     });
 
-    // Адмін знімає останню роль — саме та дія з репро аудиту.
-    fireEvent.click(screen.getByText(/clear all/));
+    // Адмін знімає останню роль — саме та дія з репро аудиту, зроблена тим
+    // самим хрестиком на «пігулці», що й мишкою в браузері.
+    fireEvent.click(roleRemoveButtons()[0] as HTMLElement);
 
     // ⛔ Мутаційний доказ (RED на невиправленому коді): до фіксу цей клік
     // прибирав `MultiSelect` із DOM ЦІЛКОМ (замінений на нередаговуваний
     // текст) — цей запит кинув би виняток «not found».
-    expect(screen.getByTestId('roles-value')).toBeDefined();
-    expect(screen.getByTestId('roles-value').textContent).toBe('');
+    const rolesField = screen.getByLabelText(RolesLabel);
+    expect(rolesField).toBeDefined();
+    expect(selectedRoles()).toEqual([]);
 
     // Попередження показується ПОРЯД, не ЗАМІСТЬ контролю.
     expect(screen.getByText('⟦security.noRolesTitle⟧')).toBeDefined();
 
-    // Контроль лишається інтерактивним — можна клікнути ще раз, нічого не
-    // впало.
-    fireEvent.click(screen.getByText(/clear all/));
-    expect(screen.getByTestId('roles-value')).toBeDefined();
+    // Контроль лишається інтерактивним — клік розкриває список ролей, тобто
+    // роль СПРАВДІ можна додати назад, а не лише «поле ще в DOM».
+    fireEvent.click(rolesField);
+    expect(screen.getByRole('option', { name: 'DataEntry' })).toBeDefined();
   });
 });

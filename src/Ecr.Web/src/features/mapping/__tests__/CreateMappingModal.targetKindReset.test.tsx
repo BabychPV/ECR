@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -16,57 +15,12 @@ import { testTheme } from '@/test/render';
  * реєстрових полів воно ніколи не перевірялось, і може випадково збігтися з
  * непов'язаною сутністю: мапінг тихо вказує на неправильну ціль.
  *
- * ⚠ `Select` і `NumberInput` Mantine підмінені легкими заглушниками — той
- * самий прийом і та сама причина, що в `UserAccessEditor.rolesDropdown`
- * (`D1-12`: справжні поля Mantine у jsdom потребують реального layout).
- * Заглушники форвардять РІВНО ті пропси, від яких залежить фікс: `value` і
- * `onChange`, — тобто перевіряється справжній обробник `onChange` компонента,
- * не його імітація.
+ * ✎ Тут `Select` і `NumberInput` підмінялися легкими заглушниками — нібито
+ * тому, що «справжні поля Mantine у jsdom потребують реального layout».
+ * Причина була інша й уже усунена: взаємна рекурсія jsdom ↔ nwsapi на
+ * станових псевдокласах (коментар у `src/test/setup.ts`). Тепер форма
+ * заповнюється у справжніх компонентах — тих самих, що бачить людина.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubSelect(props: {
-    label?: string;
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    data?: readonly { value: string; label: string }[];
-  }): JSX.Element {
-    return (
-      <select
-        aria-label={props.label ?? ''}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.currentTarget.value || null)}
-      >
-        <option value="">—</option>
-        {(props.data ?? []).map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  function StubNumberInput(props: {
-    label?: string;
-    value?: number | '';
-    onChange?: (value: number | string) => void;
-  }): JSX.Element {
-    return (
-      <input
-        aria-label={props.label ?? ''}
-        value={props.value ?? ''}
-        onChange={(event) => {
-          const raw = event.currentTarget.value;
-          props.onChange?.(raw === '' ? '' : Number(raw));
-        }}
-      />
-    );
-  }
-
-  return { ...actual, Select: StubSelect, NumberInput: StubNumberInput };
-});
 
 /** Тіла запитів `POST /entity-field-maps`, у порядку надсилання. */
 const sent: Record<string, unknown>[] = [];
@@ -109,6 +63,18 @@ const FieldLabel = '⟦mapping.createField⟧';
 const KindLabel = '⟦mapping.createKind⟧';
 const TargetIdLabel = '⟦mapping.createTargetId⟧';
 
+/**
+ * Перемикає вид цілі у справжньому `Select`.
+ *
+ * ⚠ Опції рендеряться в порталі поза модалкою — звідси `screen`.
+ */
+async function pickKind(option: string): Promise<void> {
+  fireEvent.click(screen.getByLabelText(KindLabel));
+  fireEvent.click(await screen.findByRole('option', { name: option }));
+}
+
+const RegistryFieldOption = '⟦mapping.createKindRegistry⟧';
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -122,7 +88,7 @@ describe('CreateMappingModal: зміна виду цілі скидає ID (§10
     fireEvent.change(screen.getByLabelText(TargetIdLabel), { target: { value: '42' } });
 
     // Перемикання виду цілі — рівно та дія, після якої дефект спрацьовував.
-    fireEvent.change(screen.getByLabelText(KindLabel), { target: { value: 'RegistryField' } });
+    await pickKind(RegistryFieldOption);
 
     // ⛔ Мутаційний доказ (RED до фіксу): поле лишалося з `42`, і саме це
     // число йшло в `targetRegistryFieldDefId`.
@@ -139,7 +105,7 @@ describe('CreateMappingModal: зміна виду цілі скидає ID (§10
     const submit = screen.getByRole('button', { name: '⟦mapping.createSubmit⟧' });
     expect(submit).not.toHaveProperty('disabled', true);
 
-    fireEvent.change(screen.getByLabelText(KindLabel), { target: { value: 'RegistryField' } });
+    await pickKind(RegistryFieldOption);
 
     // ⛔ `canSubmit` дивиться лише на `targetId !== ''` — до фіксу кнопка
     // лишалася активною, і запит із чужим ID можна було відправити одним
@@ -154,7 +120,7 @@ describe('CreateMappingModal: зміна виду цілі скидає ID (§10
 
     fireEvent.change(screen.getByLabelText(FieldLabel), { target: { value: 'Flare_01_CO' } });
     fireEvent.change(screen.getByLabelText(TargetIdLabel), { target: { value: '42' } });
-    fireEvent.change(screen.getByLabelText(KindLabel), { target: { value: 'RegistryField' } });
+    await pickKind(RegistryFieldOption);
     fireEvent.change(screen.getByLabelText(TargetIdLabel), { target: { value: '7' } });
     fireEvent.click(screen.getByRole('button', { name: '⟦mapping.createSubmit⟧' }));
 
