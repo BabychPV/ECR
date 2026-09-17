@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RoleView, UserView } from '@/api/types';
 import { UserAccessEditor } from '@/features/security/UserAccessEditor';
+import { testTheme } from '@/test/render';
 
 /**
  * Аудит 2026-09-16, §10.8: двоетапне збереження (ролі → пошта) не повідомляло
@@ -136,7 +137,7 @@ function show(): Harness {
   let closes = 0;
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <UserAccessEditor
           user={user}

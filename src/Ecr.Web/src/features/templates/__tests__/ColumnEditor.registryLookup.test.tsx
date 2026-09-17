@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
 import { emptyColumnDraft, type ColumnDraft } from '../column';
+import { testTheme } from '@/test/render';
 
 /**
  * Директива registry-lookup, PR A3: колонку `Lookup` конфігурували сирим
@@ -107,7 +108,7 @@ async function show(draft: ColumnDraft, onChange: (next: ColumnDraft) => void): 
   const { ColumnEditor } = await import('../ColumnEditor');
 
   render(
-    <MantineProvider>
+    <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <ColumnEditor
           draft={draft}
