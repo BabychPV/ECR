@@ -14,7 +14,8 @@ public sealed class BuildPeriodCalendarHandler(
     IUnitOfWork uow,
     IClock clock,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    PeriodCalendarMaterializer materializer)
 {
     /// <summary>Створює періоди, яких ще немає.</summary>
     /// <param name="projectId">Проєкт.</param>
@@ -51,31 +52,11 @@ public sealed class BuildPeriodCalendarHandler(
                 "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.");
         }
 
-        var policy = await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false);
-
-        // ⚠ Межі рахуються опівночі В ПОЯСІ МАЙДАНЧИКА і лише потім переводяться
-        // в UTC (D-68). Невідомий ідентифікатор поясу — виняток, а не мовчазний
-        // UTC: зсув на кілька годин ніхто б не помітив, поки період не закрився
-        // б «не тоді».
-        var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
-
-        // Ідемпотентність забезпечує сам календар: він СТВОРЮЄ лише ті періоди,
-        // яких ще немає, і перераховує межі наявних. Повторний виклик після
-        // зміни меж проєкту добудує хвіст, а не подвоїть наявне.
-        //
-        // ⛔ T6/#36: `CustomPeriodCount` передається ЯВНО, а не через параметр
-        // за замовчуванням. До цього виклик завжди йшов з `customCount = 0`, і
-        // `PeriodKind.Custom` був недосяжний через API: `CountFor` кидав
-        // `ECR-PRD-4224` для БУДЬ-ЯКОГО Custom-проєкту на першому ж
-        // `GET …/periods`, незалежно від того, що ввів користувач при
-        // створенні.
-        var created = PeriodCalendar.Build(
-            project, policy, zone, project.Periods, project.CustomPeriodCount ?? 0);
-
-        if (created.Count > 0)
-        {
-            periods.AddRange(created);
-        }
+        // ⚠ Сама побудова живе в `PeriodCalendarMaterializer`, бо той самий
+        // календар потрібен і активації проєкту, у якої ІНШЕ право. Тут
+        // лишилося рівно те, що специфічне для цього маршруту: перевірка прав
+        // вище і збереження нижче.
+        var created = await materializer.MaterializeAsync(project, ct).ConfigureAwait(false);
 
         // ⛔ Зберігаємо ЗАВЖДИ, а не лише коли щось створено. До `A7-26` тут
         // стояло дострокове повернення при `created.Count == 0` — і перераховані

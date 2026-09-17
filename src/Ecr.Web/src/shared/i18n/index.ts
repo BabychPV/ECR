@@ -1,4 +1,4 @@
-﻿import { apiFetchIfChanged } from '@/api/client';
+﻿import { apiFetchIfChanged, setRequestLanguageTag } from '@/api/client';
 import type { UiStringCatalog } from '@/api/types';
 
 /**
@@ -76,6 +76,37 @@ function languageTag(lang: Language): string {
 }
 
 /**
+ * Зворотна відповідність: тег BCP-47 → внутрішній код мови.
+ *
+ * ⛔ Дефект, який це закриває, — ДЗЕРКАЛЬНИЙ до `languageTag`. Назовні (у
+ * `<html lang>`) `kz` уже віддається як `kk`; усередину ж браузерна перевага
+ * приходила БЕЗ перекладу. Браузер із казахською оголошує `kk-KZ`, і
+ * `preferredLanguage()` брала перші дві літери — `kk`. Коду `kk` у реєстрі
+ * `sys_ecr.Language` немає (там історично `kz`), тож `loadCatalog('kk', …)`
+ * ішов по неіснуючий каталог, і користувач із казахським браузером, який ще
+ * жодного разу не перемикав мову вручну, отримував англійську. Тобто вибір
+ * «за перевагами браузера» мовчки не працював саме для тієї мови, заради якої
+ * розбіжність кодів і виникла.
+ *
+ * ⚠ Будується З `LanguageTagOverrides`, а не пишеться другим літералом: дві
+ * рукописні копії однієї відповідності розійшлися б непомітно — обидві
+ * виглядали б правдоподібно (той самий аргумент, що в коментарі вище).
+ *
+ * ⚠ Як і `LanguageTagOverrides`, це НЕ перелік дозволених мов: невідомий тег
+ * проходить як є, інакше четверта мова з реєстру вимагала б перезбирання
+ * клієнта — рівно те, що заборонено вимогою «додавання мови — запис у реєстр,
+ * не збірка клієнта».
+ */
+const LanguageCodeOverrides: Record<string, string> = Object.fromEntries(
+  Object.entries(LanguageTagOverrides).map(([code, tag]) => [tag, code]),
+);
+
+/** Внутрішній код мови для тега BCP-47 (мови браузера). */
+function languageCode(tag: string): Language {
+  return LanguageCodeOverrides[tag] ?? tag;
+}
+
+/**
  * Приводить `<html lang>` до активної мови.
  *
  * ⛔ Дефект, який це закриває: `index.html` оголошував мову документа
@@ -119,11 +150,27 @@ function applyDocumentLanguage(): void {
   if (document.documentElement.lang !== tag) document.documentElement.lang = tag;
 }
 
+/**
+ * Оголошує транспорту мову, якою просити серверні тексти.
+ *
+ * ⛔ Без цього рядка вибір мови в застосунку на сервер НЕ ПОТРАПЛЯВ: мова
+ * користувача живе лише в `localStorage`, у профілі її немає, а claim
+ * `ecr:lang`, який читає сервер, ніхто не записує. Тобто відмови приходили
+ * мовою СИСТЕМИ користувача, а не тією, яку він обрав у шапці.
+ *
+ * ⚠ Напрямок один: i18n знає про транспорт, транспорт про i18n — ні.
+ * Зворотний імпорт дав би цикл, бо каталог сам ходить через `apiFetch`.
+ */
+function applyRequestLanguage(): void {
+  setRequestLanguageTag(languageTag(current));
+}
+
 /** Позначає, що вміст каталогу змінився. */
 function bumpCatalog(): void {
   // ⛔ ДО розсилки підписникам, не після: див. пункт 2 у коментарі вище —
   // інакше перший рендер нової мови встигав би відбутися зі старим `lang`.
   applyDocumentLanguage();
+  applyRequestLanguage();
 
   catalogVersion += 1;
   for (const listener of catalogListeners) listener();
@@ -151,6 +198,12 @@ export function catalogSnapshot(): number {
 
 const loaded = new Map<string, Catalog>();
 let current: Language = DefaultLanguage;
+
+// ⚠ Початкова мова оголошується транспортові одразу, а не чекає на перший
+// `bumpCatalog`. Інакше запити, зроблені ДО завантаження каталогу — а це,
+// зокрема, сам вхід у систему, — ішли б без заголовка, і відмова на формі
+// входу приходила б не тією мовою, що решта застосунку.
+applyRequestLanguage();
 
 /**
  * Ключі каталогу (`lang:scope`), у яких останнє завантаження закінчилося
@@ -234,8 +287,12 @@ export function preferredLanguage(): Language {
   if (stored !== null && stored.length > 0) return stored;
 
   const browser = typeof navigator === 'undefined' ? '' : (navigator.language ?? '');
+  if (browser.length < 2) return DefaultLanguage;
 
-  return browser.length >= 2 ? browser.slice(0, 2).toLowerCase() : DefaultLanguage;
+  // ⚠ `languageCode`, а не сам зріз: браузер надсилає ТЕГ BCP-47 (`kk-KZ`), а
+  // решта модуля оперує внутрішніми кодами реєстру (`kz`). Без переведення
+  // мова браузера потрапляла б у `loadCatalog` як код, якого в реєстрі немає.
+  return languageCode(browser.slice(0, 2).toLowerCase());
 }
 
 /** Запам'ятовує вибір мови. */

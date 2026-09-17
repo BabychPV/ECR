@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using Ecr.Api.Middleware;
 using Ecr.Application.Common;
+using Ecr.Application.Localization;
 
 namespace Ecr.Api.Auth;
 
@@ -91,11 +92,19 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
                 return FallbackLanguage;
             }
 
-            // Беремо перший тег без ваги: "ru-RU,ru;q=0.9,en;q=0.8" → "ru".
+            // Беремо перший тег без ваги: "ru-RU,ru;q=0.9,en;q=0.8" → "ru-RU".
             var first = accept.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                               .FirstOrDefault();
-            var tag = first?.Split(';')[0].Split('-')[0].Trim();
-            return string.IsNullOrWhiteSpace(tag) ? FallbackLanguage : tag.ToLowerInvariant();
+            var tag = first?.Split(';')[0].Trim();
+
+            // ⚠ `LanguageCodes.FromTag`, а не зріз до первинного субтега: у
+            // заголовку приходить ТЕГ BCP-47, а каталог і реєстр
+            // (`sys_ecr.Language`) оперують внутрішніми КОДАМИ. Для казахської
+            // це різні рядки — тег `kk`, код `kz`, — тож без переведення
+            // анонімний запит із казахського браузера просив каталог мовою,
+            // якої в реєстрі немає, і мовчки отримував мову за замовчуванням.
+            var code = LanguageCodes.FromTag(tag);
+            return string.IsNullOrEmpty(code) ? FallbackLanguage : code;
         }
     }
 

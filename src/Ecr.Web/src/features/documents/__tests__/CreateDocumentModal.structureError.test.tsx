@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -20,39 +19,13 @@ import { testTheme } from '@/test/render';
  * а не збій. Кнопка «Save» при цьому лишалася заблокованою (`sheets.length ===
  * 0`) без жодного пояснення чому.
  *
- * ⚠ `Select` Mantine підмінено: дійти до переліку аркушів у jsdom через ДВА
- * справжні `Select` неможливо — клік по опції такого списку тут висить
- * назавжди (задокументовано в `CreateDocumentModal.checkboxSource.test.tsx`).
- * Підмінюється лише спосіб обрати значення; уся логіка запиту структури й
- * показу результату — справжня.
+ * ✎ Тут стояло: «клік по опції справжнього `Select` висить назавжди», і
+ * `Select` підмінявся саморобним `<select>`. Спостереження було правдиве,
+ * пояснення — ні: висів не Mantine, а взаємна рекурсія jsdom ↔ nwsapi на
+ * станових псевдокласах, яку запускає пастка фокуса випадного списку
+ * (коментар у `src/test/setup.ts`). Рекурсію обірвано — версія обирається у
+ * справжньому `Select`.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubSelect(props: {
-    label?: string;
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    data?: readonly { value: string; label: string }[];
-  }): JSX.Element {
-    return (
-      <select
-        aria-label={props.label ?? ''}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.currentTarget.value || null)}
-      >
-        <option value="">—</option>
-        {(props.data ?? []).map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 /** Чи відповідати на запит структури відмовою. */
 let structureFails = true;
@@ -150,12 +123,15 @@ function show(): void {
   );
 }
 
-/** Обирає опубліковану версію шаблону — саме після цього йде запит структури. */
+/**
+ * Обирає опубліковану версію шаблону — саме після цього йде запит структури.
+ *
+ * ⚠ Опції випадного списку Mantine рендеряться в порталі поза модалкою, тому
+ * шукаються через `screen`.
+ */
 async function pickVersion(): Promise<void> {
-  const select = await screen.findByLabelText('⟦documents.version⟧');
-  await waitFor(() => expect(select.querySelectorAll('option')).toHaveLength(2));
-
-  fireEvent.change(select, { target: { value: '5' } });
+  fireEvent.click(await screen.findByLabelText('⟦documents.version⟧'));
+  fireEvent.click(await screen.findByRole('option', { name: 'AIR · 1.0' }));
 }
 
 afterEach(() => {

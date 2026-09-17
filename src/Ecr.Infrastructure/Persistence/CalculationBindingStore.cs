@@ -84,5 +84,34 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ З'єднання йде через <c>ColumnDef → TableDef → SheetDef</c>, бо
+    /// <c>cfg.CalculationBinding</c> власного <c>TemplateVersionId</c> не має.
+    /// Вибірка за самим <c>TableDefId</c> прив'язки була б коротшою і хибною:
+    /// адреса значення — колонка, і саме її належність версії питають.
+    /// </remarks>
+    public async Task<IReadOnlySet<int>> ListBoundColumnIdsAsync(
+        int templateVersionId, CancellationToken ct)
+    {
+        var ids = await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking()
+                    on binding.ColumnDefId equals column.Id
+                join table in db.TableDefs.AsNoTracking()
+                    on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking()
+                    on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == templateVersionId
+                select column.Id)
+            .Distinct()
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return ids.ToHashSet();
+    }
+
+    /// <inheritdoc />
     public void Add(CalculationBinding binding) => db.CalculationBindings.Add(binding);
 }

@@ -99,6 +99,12 @@ public static class ErrorCodes
     public const string RequiredNotCovered = "ECR-TMPL-4225";
 
     /// <summary>
+    /// Обчислювана колонка без джерела значення: ні формули шаблону, ні
+    /// прив'язки методології (<c>cfg.CalculationBinding</c>).
+    /// </summary>
+    public const string CalculatedWithoutSource = "ECR-TMPL-4226";
+
+    /// <summary>
     /// <c>Breaking</c>-зміна у версії з документами (ФВ-7.4).
     /// </summary>
     /// <remarks>

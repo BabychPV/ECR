@@ -844,6 +844,12 @@ USING (VALUES
     -- у яку просто нема куди вводити (директива №09 `W8` п.2, `S-13`).
     (N'grid.emptyFixedTable',            N'en', N'This table has no rows for the selected period', 1),
     (N'grid.emptyFixedTableHint',        N'en', N'Rows of a fixed table come from the template: the version in force for this period defines none.', 1),
+
+    -- ⛔ Заголовок колонки підпису рядка. Підпис сервер рахував і локалізував
+    -- давно (`TableSliceDto.Label`), але сітка документа його не показувала
+    -- взагалі: у формі з фіксованими рядками оператор бачив стовпчики чисел
+    -- без жодної ознаки, котрий рядок що означає.
+    (N'grid.rowLabelHeader',             N'en', N'Row', 1),
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),

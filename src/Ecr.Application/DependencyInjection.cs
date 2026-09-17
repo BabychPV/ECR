@@ -142,6 +142,7 @@ public static class DependencyInjection
         services.AddScoped<Projects.CloneProjectHandler>();
 
         // Періоди (модуль 3.4)
+        services.AddScoped<Periods.PeriodCalendarMaterializer>();
         services.AddScoped<Periods.BuildPeriodCalendarHandler>();
         services.AddScoped<Periods.SetCurrentPeriodHandler>();
         services.AddScoped<Periods.ReopenPeriodHandler>();

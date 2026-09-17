@@ -1,4 +1,3 @@
-import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -13,54 +12,14 @@ import { testTheme } from '@/test/render';
  * напам'ять, узятий десь поза цим екраном. Тепер це вибір зі списку
  * довідників за назвою й кодом.
  *
- * ⛔ `Select`/`MultiSelect` (`@mantine/core`) під jsdom «зависають» —
- * відтворюваний факт, уже задокументований тричі в цьому репозиторії
- * (`approval-route-editor.test.tsx`, `user-access-editor.test.tsx`,
- * `GrantsPanel.resourceName.test.tsx`): жоден із них не рендерить `Select`
- * напряму саме тому. Емпірично відтворено й тут (окремим ізольованим
- * `_debug_bareselect`-тестом — голий `<Select searchable>` без жодного
- * зв'язку з `ColumnEditor` чи `useQuery` зависав так само, до власного
- * ліміту 30000мс). Обхід — той самий, що й у трьох попередніх місцях:
- * заглушуємо `Select` легким `<select>` з тими самими проп-ами
- * (`data`/`value`/`onChange`/`label`), керованим звичайним
- * `fireEvent.change`, без порталу й без floating-ui.
+ * ✎ Тут `Select` підмінявся саморобним `<select>` — нібито тому, що
+ * справжній «зависає під jsdom» (`Q-299`). Причина зависання знайдена й
+ * усунена: взаємна рекурсія jsdom ↔ nwsapi на станових псевдокласах
+ * (коментар у `src/test/setup.ts`). Тест працює зі справжнім `Select`.
+ *
+ * ⚠ Випадний список Mantine рендериться в порталі поза деревом форми, тому
+ * опції шукаються через `screen`, а не через `within(...)`.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  type StubOption = { value: string; label: string };
-  type StubSelectProps = {
-    data?: (string | StubOption)[];
-    value?: string | null;
-    onChange?: (value: string | null) => void;
-    label?: string;
-    placeholder?: string;
-    'aria-label'?: string;
-  };
-
-  function StubSelect(props: StubSelectProps): JSX.Element {
-    const options = (props.data ?? []).map((item) =>
-      typeof item === 'string' ? { value: item, label: item } : item,
-    );
-
-    return (
-      <select
-        aria-label={props['aria-label'] ?? props.label ?? props.placeholder}
-        value={props.value ?? ''}
-        onChange={(event) => props.onChange?.(event.target.value === '' ? null : event.target.value)}
-      >
-        <option value="" />
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  return { ...actual, Select: StubSelect };
-});
 
 const SeededStrings: Record<string, string> = {
   'columns.lookupRegistryDefId': 'Registry',
@@ -70,9 +29,15 @@ const SeededStrings: Record<string, string> = {
   'columns.save': 'Save',
 };
 
+/**
+ * ⚠ `nameL10n` — це `{ values: { <мова>: … } }`, як його віддає сервер
+ * (`shared/i18n/localized.ts`), а не плаский `{ en: … }`. Поки `Select` був
+ * заглушений, тест не читав підпису опції взагалі, і хибна форма фікстури
+ * лишалася непоміченою: справжній компонент малював « (PERMITS)» без назви.
+ */
 const registries = [
-  { id: 7, code: 'PERMITS', nameL10n: { en: 'Permits' }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
-  { id: 12, code: 'UNITS', nameL10n: { en: 'Measurement units' }, fields: [], isHierarchical: false, isTemporal: false, sourceKind: 'Master' },
+  { id: 7, code: 'PERMITS', nameL10n: { values: { en: 'Permits' } }, fields: [], isHierarchical: false, isTemporal: true, sourceKind: 'Master' },
+  { id: 12, code: 'UNITS', nameL10n: { values: { en: 'Measurement units' } }, fields: [], isHierarchical: false, isTemporal: false, sourceKind: 'Master' },
 ];
 
 function mockFetch(): void {
@@ -135,12 +100,11 @@ describe('ColumnEditor: вибір довідника за назвою (ауд�
 
     await show(draft, onChange);
 
-    const select = await screen.findByLabelText('Registry');
-    await waitFor(() => {
-      expect((select as HTMLSelectElement).querySelectorAll('option').length).toBeGreaterThan(1);
-    });
+    fireEvent.click(await screen.findByLabelText('Registry'));
 
-    fireEvent.change(select, { target: { value: '7' } });
+    // Довідник обирається за назвою й кодом, а не за сирим числом — саме
+    // це предмет картки.
+    fireEvent.click(await screen.findByRole('option', { name: 'Permits (PERMITS)' }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ lookupRegistryDefId: 7 }));
   }, 60000);
@@ -152,7 +116,7 @@ describe('ColumnEditor: вибір довідника за назвою (ауд�
 
     const select = await screen.findByLabelText('Registry');
     await waitFor(() => {
-      expect((select as HTMLSelectElement).value).toBe('12');
+      expect((select as HTMLInputElement).value).toBe('Measurement units (UNITS)');
     });
   }, 60000);
 });

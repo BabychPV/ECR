@@ -80,6 +80,30 @@ public interface ICalculationBindingStore
     public Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> ListColumnCodesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
 
+    /// <summary>
+    /// Колонки ВЕРСІЇ шаблону, до яких прив'язаний активний вихід методології —
+    /// для публікаційної перевірки «обчислювана колонка має джерело»
+    /// (<c>ECR-TMPL-4226</c>).
+    /// </summary>
+    /// <param name="templateVersionId">Версія, що публікується.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатори колонок; порожня множина — прив'язок немає.</returns>
+    /// <remarks>
+    /// ⛔ Питання ставиться саме ВЕРСІЇ, а не методології: публікація не знає
+    /// наперед, які методології хтось прив'язав до її колонок, і перебирати їх
+    /// через <see cref="ListAsync"/> означало б спершу дізнатися перелік
+    /// методологій — якого нізвідки взяти.
+    ///
+    /// ⚠ Лише <c>IsActive</c>: вимкнена прив'язка нічого не рахує
+    /// (<c>RecalculationJob</c> її не бере), тож для колонки вона — не джерело.
+    ///
+    /// ⚠ <c>cfg.CalculationBinding</c> не має власного <c>TemplateVersionId</c>:
+    /// версія дістається через <c>ColumnDef → TableDef → SheetDef</c> — так
+    /// само, як для <c>cfg.TableRelationDef</c>.
+    /// </remarks>
+    public Task<IReadOnlySet<int>> ListBoundColumnIdsAsync(
+        int templateVersionId, CancellationToken ct);
+
     /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);
