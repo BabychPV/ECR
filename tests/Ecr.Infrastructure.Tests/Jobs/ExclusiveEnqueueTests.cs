@@ -97,4 +97,30 @@ public sealed class ExclusiveEnqueueTests
         Assert.Contains(november, keys, StringComparer.Ordinal);
         Assert.Contains(december, keys, StringComparer.Ordinal);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Ідентифікатор_задачі_лягає_в_URL_без_кодування()
+    {
+        // ⛔ Ідентифікатор задачі — це СЕГМЕНТ ШЛЯХУ в `GET /api/v1/jobs/{jobId}`.
+        // Доти роздільником тут стояв `#`, а він в URL починає ФРАГМЕНТ: усе
+        // після нього до сервера не доїжджає взагалі. Клієнт застосунку
+        // рятував себе сам (`encodeURIComponent` у всіх дев'яти місцях), тому
+        // з інтерфейсу дефект був невидимий — але `tools/smoke.ps1`, єдина
+        // перевірка продукту «як у користувача», падала на кроці 17:
+        // `GET /api/v1/jobs/IRecalculationJob#doc1-p202609#46fec230…` повертав
+        // 404. Шістнадцять кроків до нього проходили.
+        var (jobs, _) = await SchedulerAsync();
+
+        var jobId = await jobs.EnqueueExclusiveAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.TargetOf(700, new PeriodKey(202609)),
+            new { DocumentId = 700L },
+            CancellationToken.None);
+
+        // ⚠ Твердження — не «немає ґратки», а сильніше й точніше: рядок
+        // ПРОХОДИТЬ кодування незміненим. Перелік заборонених символів
+        // довелося б доповнювати щоразу, коли хтось вигадає новий роздільник;
+        // тотожність із власним закодованим виглядом ловить будь-який із них.
+        Assert.Equal(jobId, Uri.EscapeDataString(jobId));
+    }
 }
