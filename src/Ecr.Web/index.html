@@ -1,5 +1,17 @@
 <!doctype html>
-<html lang="uk">
+<!--
+  ⛔ Тут стояло `lang="uk"`. Українською інтерфейсу НЕМАЄ: це робоча мова
+  команди, а не мова продукту — реєстр `sys_ecr.Language` знає лише
+  `en`/`ru`/`kz`. Документ оголошував читалці мову, якою в ньому немає жодного
+  слова.
+
+  ⚠ Це значення діє лише до запуску скрипта. Далі атрибут веде шар i18n
+  (`src/shared/i18n/index.ts`, `applyDocumentLanguage`), приводячи його до
+  активної мови інтерфейсу; `en` тут — мова за замовчуванням
+  (`DefaultLanguage`) того ж модуля, щоб перший кадр не суперечив першому
+  оновленню.
+-->
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
