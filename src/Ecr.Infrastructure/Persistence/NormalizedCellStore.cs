@@ -1,7 +1,9 @@
 using System.Data;
 using System.Globalization;
 using System.Text;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -242,6 +244,7 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         if (ambient is not null)
         {
             var joined = (SqlTransaction)ambient.GetDbTransaction();
+            await ClaimRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
             await DeleteAsync(connection, joined, changes.Deletes, ct).ConfigureAwait(false);
             await UpsertAsync(connection, joined, changes.Upserts, ct).ConfigureAwait(false);
             await TouchRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
@@ -253,12 +256,156 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         // store так, що страждає вся база, а не лише цей запит (D-29).
         await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
+        await ClaimRowsAsync(connection, tx, changes, ct).ConfigureAwait(false);
         await DeleteAsync(connection, tx, changes.Deletes, ct).ConfigureAwait(false);
         await UpsertAsync(connection, tx, changes.Upserts, ct).ConfigureAwait(false);
         await TouchRowsAsync(connection, tx, changes, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Захоплює рядки батчу під заявлену <c>RowVersion</c> — ОДНИМ запитом на
+    /// чанк, ПЕРШОЮ дією транзакції.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Тихе загублене оновлення (lost update) на сітці документа. До цього
+    /// методу оптимістичне блокування трималося на порівнянні <b>в пам'яті
+    /// C#</b> (<c>PatchCellsHandler.EnsureNoVersionConflicts</c>), яке
+    /// виконувалось ПОЗА транзакцією запису, а самі записи не несли предиката
+    /// на <c>RowVersion</c> взагалі: <c>MERGE doc.CellValue WITH (HOLDLOCK)</c>
+    /// звіряв лише адресу комірки, <c>TouchRowsAsync</c> нижче — лише <c>Id</c>.
+    /// Тобто між «прочитали версію» і «записали» лишалося вікно, у яке
+    /// вміщався ВЕСЬ чужий батч: двоє аналітиків правлять ту саму комірку,
+    /// обидва отримують <c>200</c>, другий мовчки затирає першого, а рядок
+    /// аудиту стверджує перехід (<c>OldValue</c> → <c>NewValue</c>), якого
+    /// ніколи не було. <c>HOLDLOCK</c> цього не закривав і закрити не міг: він
+    /// стереже ДІАПАЗОН КЛЮЧІВ <c>doc.CellValue</c>, а змінюваний стан, за яким
+    /// звіряються, лежить у <c>doc.TableRow.RowVersion</c>.
+    ///
+    /// ⚠ Звірка й запис — ОДИН <c>UPDATE</c>, а не «прочитати й порівняти»:
+    /// повторне читання версії всередині транзакції дало б рівно те саме вікно,
+    /// лише вужче. <c>UPDATE</c> бере блокування оновлення, читає ОСТАННЮ
+    /// закомічену версію навіть під RCSI і в тій самій операції або захоплює
+    /// рядок, або не знаходить його — третього стану немає.
+    ///
+    /// ⚠ Захоплення йде ПЕРШИМ, до <c>DELETE</c>/<c>MERGE</c>: на конфлікті
+    /// транзакція відкочується, не написавши жодної комірки, і ексклюзивне
+    /// блокування захоплених рядків тримається до кінця батчу — тож паралельний
+    /// письменник у ті самі рядки чекає, а не проскакує повз.
+    ///
+    /// ⚠ Заразом це і є «дотик» рядка (<c>ModifiedAt</c>), тому
+    /// <see cref="TouchRowsAsync"/> нижче захоплені рядки вже не чіпає: другий
+    /// <c>UPDATE</c> по тих самих рядках коштував би зайвого проходу на шляху,
+    /// чий бюджет — p95 150 мс на 100 комірок.
+    ///
+    /// ⚠ <c>OUTPUT … INTO</c>, а не голий <c>OUTPUT</c>: голий недоступний, щойно
+    /// на таблиці з'явиться тригер або каскадний зовнішній ключ, і зламався б
+    /// не тут, а в проді на першій такій зміні схеми.
+    /// </remarks>
+    /// <exception cref="ConcurrencyConflictException">
+    /// Версія хоч одного рядка змінилася між читанням і записом —
+    /// <c>ECR-CELL-0409</c>; <c>Details</c> несе
+    /// <see cref="CellChangeSet.StaleRowIdsDetail"/> з переліком
+    /// <c>TableRow.Id</c>.
+    /// </exception>
+    private static async Task ClaimRowsAsync(
+        SqlConnection connection, SqlTransaction tx, CellChangeSet changes, CancellationToken ct)
+    {
+        var expected = changes.ExpectedRowVersions;
+        if (expected is null || expected.Count == 0)
+        {
+            return;
+        }
+
+        var periodKey = PeriodKeyOf(changes);
+
+        // ⚠ Порядок за Id — сталий порядок захоплення блокувань. Два батчі, що
+        // перетинаються рядками, інакше беруть їх у порядку словника (тобто в
+        // порядку ключів рядків клієнта) і складаються у взаємне блокування.
+        var claims = expected.OrderBy(pair => pair.Key).ToArray();
+        var stale = new List<long>();
+
+        foreach (var chunk in claims.Chunk(MergeChunkSize))
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = tx;
+
+            var values = new StringBuilder();
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                if (i > 0)
+                {
+                    values.Append(',');
+                }
+
+                values.Append(CultureInfo.InvariantCulture, $"(@i{i},@v{i})");
+                command.Parameters.AddWithValue($"@i{i}", chunk[i].Key);
+
+                // ⚠ Саме binary(8): `rowversion` має рівно цю ширину, і без
+                // явного типу провайдер вивів би `varbinary` іншої довжини —
+                // порівняння тихо не збіглося б НІКОЛИ, тобто кожен запис
+                // ставав би конфліктом.
+                var version = command.Parameters.Add($"@v{i}", SqlDbType.Binary, 8);
+                version.Value = Convert.FromBase64String(chunk[i].Value);
+            }
+
+            var periodFilter = periodKey is null ? string.Empty : "WHERE r.PeriodKey = @pk";
+            if (periodKey is not null)
+            {
+                command.Parameters.AddWithValue("@pk", periodKey.Value);
+            }
+
+            command.CommandText = $"""
+                DECLARE @claimed TABLE (Id bigint PRIMARY KEY);
+                UPDATE r SET ModifiedAt = SYSUTCDATETIME()
+                OUTPUT inserted.Id INTO @claimed (Id)
+                FROM doc.TableRow AS r
+                INNER JOIN (VALUES {values}) AS source (Id, RowVersion)
+                    ON r.Id = source.Id AND r.RowVersion = source.RowVersion
+                {periodFilter};
+                SELECT Id FROM @claimed;
+                """;
+
+            var claimed = new HashSet<long>();
+            await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    claimed.Add(reader.GetInt64(0));
+                }
+            }
+
+            // Не захопили — отже, версія вже інша (або рядка не стало). Обидва
+            // випадки для автора батчу означають одне: те, від чого він
+            // відштовхувався, більше не є правдою.
+            stale.AddRange(chunk.Where(pair => !claimed.Contains(pair.Key)).Select(pair => pair.Key));
+        }
+
+        if (stale.Count > 0)
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.CellConflict,
+                $"Версія рядка змінилася між читанням і записом: рядків — {stale.Count}.",
+                new Dictionary<string, object?> { [CellChangeSet.StaleRowIdsDetail] = stale });
+        }
+    }
+
+    /// <summary>
+    /// Період батчу — ключ партиції; <c>null</c>, якщо батч не несе жодної
+    /// адреси.
+    /// </summary>
+    /// <remarks>
+    /// Усі комірки одного <c>TableInstance</c> лежать в одній партиції, і без
+    /// <c>PeriodKey</c> у <c>WHERE</c> запит по <c>doc.TableRow</c> сканував би
+    /// всі 25.
+    /// </remarks>
+    private static int? PeriodKeyOf(CellChangeSet changes)
+        => changes.Upserts.Count > 0
+            ? changes.Upserts[0].Address.PeriodKey.Value
+            : changes.Deletes.Count > 0
+                ? changes.Deletes[0].PeriodKey.Value
+                : null;
 
     private static async Task DeleteAsync(
         SqlConnection connection, SqlTransaction tx, IReadOnlyList<CellAddress> deletes, CancellationToken ct)
@@ -385,24 +532,30 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     /// Без цього «дотику» оптимістичне блокування тихо не працює: два
     /// користувачі правлять одні й ті самі комірки, обидва бачать незмінений
     /// <c>RowVersion</c>, і другий перезаписує першого (B04 §2.4).
+    ///
+    /// ⚠ Рядки, вже захоплені <see cref="ClaimRowsAsync"/>, сюди не
+    /// потрапляють: той <c>UPDATE</c> підняв їм <c>ModifiedAt</c> ЗАРАЗОМ зі
+    /// звіркою версії, і повторити його означало б зайвий прохід по тих самих
+    /// рядках на шляху з бюджетом p95 150 мс на 100 комірок. Лишаються ті, чиєї
+    /// версії ніхто не заявляв — насамперед ЩОЙНО СТВОРЕНІ рядки батчу: у них
+    /// версії від чого відштовхуватись не було, а «дотик» потрібен так само.
     /// </remarks>
     private static async Task TouchRowsAsync(
         SqlConnection connection, SqlTransaction tx, CellChangeSet changes, CancellationToken ct)
     {
-        if (changes.TouchedRowIds.Count == 0)
+        var claimed = changes.ExpectedRowVersions;
+        IReadOnlyList<long> pending = claimed is null || claimed.Count == 0
+            ? changes.TouchedRowIds
+            : [.. changes.TouchedRowIds.Where(id => !claimed.ContainsKey(id))];
+
+        if (pending.Count == 0)
         {
             return;
         }
 
-        // Період беремо з адрес батчу: усі комірки одного TableInstance лежать
-        // в одній партиції, і без PeriodKey у WHERE оновлення сканувало б усі.
-        var periodKey = changes.Upserts.Count > 0
-            ? changes.Upserts[0].Address.PeriodKey.Value
-            : changes.Deletes.Count > 0
-                ? changes.Deletes[0].PeriodKey.Value
-                : (int?)null;
+        var periodKey = PeriodKeyOf(changes);
 
-        foreach (var chunk in changes.TouchedRowIds.Chunk(MergeChunkSize))
+        foreach (var chunk in pending.Chunk(MergeChunkSize))
         {
             await using var command = connection.CreateCommand();
             command.Transaction = tx;

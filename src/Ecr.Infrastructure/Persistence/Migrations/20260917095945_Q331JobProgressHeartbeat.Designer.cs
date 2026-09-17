@@ -4,6 +4,7 @@ using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    partial class EcrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917095945_Q331JobProgressHeartbeat")]
+    partial class Q331JobProgressHeartbeat
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -151,11 +154,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "PeriodKey")
-                        .IsUnique()
-                        .HasDatabaseName("UX_CalculationRun_Current")
-                        .HasFilter("[Status] = 'Current'");
 
                     b.ToTable("CalculationRun", "calc");
                 });

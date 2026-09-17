@@ -100,11 +100,21 @@ public sealed class PatchCellsHandler(
         List<PatchRow> Updates);
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
+    /// <param name="Upserts">Комірки для запису або оновлення.</param>
+    /// <param name="Deletes">Комірки для видалення.</param>
+    /// <param name="Touched">Рядки, яким треба підняти <c>ModifiedAt</c>.</param>
+    /// <param name="RowKeyById">Зворотна мапа <c>TableRow.Id</c> → <c>RowKey</c>.</param>
+    /// <param name="ExpectedRowVersions">
+    /// <c>TableRow.Id</c> → <c>baseVersion</c>, заявлена клієнтом. Їде в
+    /// сховище, щоб звірка версії сталася ТИМ САМИМ запитом, що й запис
+    /// (<see cref="CellChangeSet.ExpectedRowVersions"/>).
+    /// </param>
     private sealed record CellChangeLists(
         List<CellRecord> Upserts,
         List<CellAddress> Deletes,
         List<long> Touched,
-        Dictionary<long, string> RowKeyById);
+        Dictionary<long, string> RowKeyById,
+        Dictionary<long, string> ExpectedRowVersions);
 
     /// <summary>
     /// Розв'язує особу користувача, структуру таблиці зі знімка метаданих і
@@ -231,6 +241,18 @@ public sealed class PatchCellsHandler(
     }
 
     /// <summary>Перевіряє версії рядків, що оновлюються, проти поточного стану.</summary>
+    /// <remarks>
+    /// ⛔ Це ШВИДКИЙ ШЛЯХ, а не гарантія. Порівняння відбувається в пам'яті C#
+    /// і за багато кроків до запису — між ним і <see cref="PersistChangesAsync"/>
+    /// чужий батч встигає закомітитись цілком. Саме тому окрема, АТОМАРНА
+    /// звірка живе всередині транзакції запису
+    /// (<see cref="CellChangeSet.ExpectedRowVersions"/>); доки її не було, цей
+    /// метод створював враження оптимістичного блокування, не даючи його.
+    ///
+    /// ⚠ Цінність саме тут — у ПОВНОТІ відповіді: перелічуються ВСІ розбіжні
+    /// рядки з ключем, колонкою і чинною версією, чого запит-захоплення
+    /// (`UPDATE … WHERE RowVersion = …`) сказати вже не може.
+    /// </remarks>
     private void EnsureNoVersionConflicts(RequestContext context)
     {
         // 4. Конфлікти версій. Збираємо ВСІ, а не падаємо на першому:
@@ -379,6 +401,14 @@ public sealed class PatchCellsHandler(
         var deletes = new List<CellAddress>();
         var touched = new List<long>();
 
+        // ⛔ Заявлена клієнтом версія збирається ТУТ і їде далі в сховище, бо
+        // порівняння у <see cref="EnsureNoVersionConflicts"/> саме по собі
+        // нічого не гарантує: воно робиться в пам'яті C# і ЗАДОВГО до запису.
+        // Між ним і `PersistChangesAsync` чужий батч встигає закомітитись
+        // цілком — це і був тихий lost update, через який обидва аналітики
+        // діставали `200`, а перша правка зникала без сліду.
+        var expectedRowVersions = new Dictionary<long, string>();
+
         // ⛔ Зворотна мапа `TableRow.Id` → `RowKey` збирається ТУТ, а не в
         // аудиті: рядок, який щойно створили, у `rowIds` не потрапляє ніколи
         // (та мапа прочитана до вставки), а саме його ключ і треба записати.
@@ -418,10 +448,15 @@ public sealed class PatchCellsHandler(
                 continue;
             }
             touched.Add(id);
+
+            // ⚠ `BaseVersion` тут не може бути null за побудовою: `Updates` —
+            // це рівно ті рядки, які `LoadContextAsync` відібрав за
+            // `BaseVersion is not null` (null означає намір СТВОРИТИ, R-B2).
+            expectedRowVersions[id] = row.BaseVersion!;
             Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes);
         }
 
-        return new CellChangeLists(upserts, deletes, touched, rowKeyById);
+        return new CellChangeLists(upserts, deletes, touched, rowKeyById, expectedRowVersions);
     }
 
     /// <summary>
@@ -848,7 +883,33 @@ public sealed class PatchCellsHandler(
     /// немає.
     /// </summary>
     /// <remarks>
-    /// ⛔ Q-243 (критичний, аудит цілісності). До цієї правки коментар вище
+    /// ⛔ Тихе загублене оновлення (lost update). Транзакція тут була, але
+    /// перевірка версії до неї не входила: <see cref="EnsureNoVersionConflicts"/>
+    /// порівнювала <c>baseVersion</c> у пам'яті C# за багато кроків ДО цього
+    /// блоку, а самі записи не несли предиката на <c>RowVersion</c> —
+    /// <c>MERGE doc.CellValue WITH (HOLDLOCK)</c> звіряв лише адресу комірки,
+    /// <c>RowStore.TouchRowsAsync</c> — лише <c>Id</c>. У вікно між перевіркою
+    /// і записом уміщався ВЕСЬ чужий батч: двоє правлять ту саму комірку,
+    /// обидва отримують <c>200</c>, другий мовчки затирає першого, а рядок
+    /// аудиту стверджує перехід, якого не було. Перевірка, відірвана від
+    /// запису, перевіркою не є.
+    ///
+    /// ⚠ Фікс: заявлені версії їдуть у сховище
+    /// (<see cref="CellChangeSet.ExpectedRowVersions"/>), і звірка стає ПЕРШОЮ
+    /// дією ЦІЄЇ транзакції — одним <c>UPDATE … WHERE RowVersion = …</c>, який
+    /// або захоплює рядок, або не знаходить його
+    /// (<c>NormalizedCellStore.ClaimRowsAsync</c>). Розбіжність відкочує весь
+    /// батч і доїжджає сюди тим самим <c>ECR-CELL-0409</c>, що й перевірка
+    /// «до запису».
+    ///
+    /// ⚠ <see cref="EnsureNoVersionConflicts"/> лишається — але вже як швидкий
+    /// шлях, а не як гарантія: вона дешево відхиляє звичайний випадок
+    /// (клієнт відкрив сітку вчора) і, на відміну від сховища, знає
+    /// <c>RowKey</c>, колонку й нову версію, тобто складає клієнтові повний
+    /// перелік розбіжностей. Прибрати її означало б зробити типову відмову
+    /// біднішою заради симетрії.
+    ///
+    /// ⛔ Q-243 (критичний, аудит цілісності). До тієї правки коментар вище
     /// був НЕПРАВДОЮ: чотири кроки нижче були чотирма незалежними,
     /// самостійно закомміченими одиницями — <c>cellStore.ApplyAsync</c> сам
     /// відкривав і комітив ВЛАСНУ <c>SqlTransaction</c> (`NormalizedCellStore`),
@@ -888,7 +949,57 @@ public sealed class PatchCellsHandler(
     /// <c>Ecr.Api</c>. Звідси <c>ExecuteInTransactionAsync</c> замість пари
     /// Begin/Commit — див. коментар порту в <c>IUnitOfWork.cs</c>.
     /// </remarks>
-    private Task PersistChangesAsync(
+    private async Task PersistChangesAsync(
+        PatchCellsRequest request,
+        RequestContext context,
+        CellChangeLists changes,
+        DateTime now,
+        bool isLateEdit,
+        IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        CancellationToken ct)
+    {
+        try
+        {
+            await PersistCoreAsync(request, context, changes, now, isLateEdit, previous, ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException ex) when (StaleRowIds(ex) is { Count: > 0 } staleRowIds)
+        {
+            // ⛔ Не проковтування: батч уже відкочено сховищем, і тут лише
+            // перекладається АДРЕСАЦІЯ відмови. Сховище знає `TableRow.Id`,
+            // клієнт — `RowKey`, і без цього перекладу гонка доїжджала б
+            // клієнтові з тим самим `ECR-CELL-0409`, але з порожнім
+            // `conflicts` — тобто сітка показала б «конфлікт», не сказавши, у
+            // якому рядку.
+            throw new ConcurrencyConflictException(
+                ErrorCodes.CellConflict,
+                $"Батч відхилено: рядків із розбіжністю версії — {staleRowIds.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["conflicts"] = staleRowIds
+                        .Select(id => new CellConflictDto(
+                            changes.RowKeyById.GetValueOrDefault(id, string.Empty),
+                            // ⚠ `*` — той самий маркер «розійшовся весь рядок»,
+                            // що й у `EnsureNoVersionConflicts`: чия саме правка
+                            // виграла, звідси не видно, і вигадувати колонку
+                            // означало б назвати клієнтові неправду.
+                            "*", null, null, "", clock.UtcNow, ""))
+                        .ToList(),
+                });
+        }
+    }
+
+    /// <summary>
+    /// Перелік <c>TableRow.Id</c>, чия версія розійшлася, якщо конфлікт прийшов
+    /// зі сховища; <c>null</c> — конфлікт іншого походження.
+    /// </summary>
+    private static IReadOnlyList<long>? StaleRowIds(ConcurrencyConflictException ex)
+        => ex.Details is not null
+           && ex.Details.TryGetValue(CellChangeSet.StaleRowIdsDetail, out var value)
+            ? value as IReadOnlyList<long>
+            : null;
+
+    /// <summary>Сама транзакція: значення, «дотик» рядків, «дотик» документа й аудит.</summary>
+    private Task PersistCoreAsync(
         PatchCellsRequest request,
         RequestContext context,
         CellChangeLists changes,
@@ -899,7 +1010,9 @@ public sealed class PatchCellsHandler(
         => uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await cellStore.ApplyAsync(
-                new CellChangeSet(request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched, context.UserId, isLateEdit),
+                new CellChangeSet(
+                    request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
+                    context.UserId, isLateEdit, changes.ExpectedRowVersions),
                 innerCt).ConfigureAwait(false);
 
             await rowStore.TouchRowsAsync(changes.Touched, now, innerCt).ConfigureAwait(false);

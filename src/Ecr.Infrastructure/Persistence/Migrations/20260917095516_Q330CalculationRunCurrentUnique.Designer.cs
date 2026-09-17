@@ -4,6 +4,7 @@ using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    partial class EcrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917095516_Q330CalculationRunCurrentUnique")]
+    partial class Q330CalculationRunCurrentUnique
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2856,9 +2859,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(2000)")
                         .HasColumnName("Error");
 
-                    b.Property<DateTime?>("HeartbeatAt")
-                        .HasColumnType("datetime2(3)");
-
                     b.Property<string>("JobCode")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -2886,9 +2886,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("JobId")
                         .HasName("PK_JobProgress");
-
-                    b.HasIndex("State", "HeartbeatAt")
-                        .HasDatabaseName("IX_JobProgress_Stale");
 
                     b.ToTable("JobProgress", "itg");
                 });

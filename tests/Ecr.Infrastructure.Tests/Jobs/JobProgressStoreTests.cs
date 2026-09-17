@@ -1,5 +1,6 @@
 ﻿using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Jobs;
@@ -95,5 +96,148 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
         var store = new JobProgressStore(db);
 
         Assert.Null(await store.FindAsync($"missing-{Guid.NewGuid():N}", CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.7")]
+    public async Task Прибирання_на_старті_валить_покинуті_задачі_і_НЕ_чіпає_живі_чужого_інстанса()
+    {
+        // ⛔ Саме цей дефект ловить тест. `FailStaleAsync` не мала предиката
+        // застарілості й валила КОЖНУ задачу в стані `Running`/`Queued` — а
+        // інстанс у розгортанні не один (ціль — 100 одночасних користувачів).
+        // Перезапуск інстанса B позначав `Failed` перерахунки, експорти й
+        // імпорти, які в цю саму мить виконував інстанс A: користувач бачив
+        // провал задачі, яка насправді успішно доробила до кінця.
+        //
+        // Розрізняє їх биття серця: живу задачу веде процес, що її виконує, і
+        // він оновлює `HeartbeatAt`; задачу процесу, який упав, не оновлює
+        // ніхто, і її биття застигає.
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+
+        var alive = $"alive-{Guid.NewGuid():N}";
+        var abandoned = $"abandoned-{Guid.NewGuid():N}";
+
+        // Задача «чужого» інстанса, що ЗАРАЗ виконується: биття свіже.
+        await store.StartAsync(alive, "recalculation", Now, CancellationToken.None);
+
+        // Задача процесу, який упав годину тому: биття застигло тоді ж.
+        await store.StartAsync(abandoned, "excel-import", Now.AddHours(-1), CancellationToken.None);
+
+        var failed = await store.FailStaleAsync(
+            "Застосунок перезапущено.", Now.AddMinutes(1), CancellationToken.None);
+
+        var aliveStatus = await store.FindAsync(alive, CancellationToken.None);
+        var abandonedStatus = await store.FindAsync(abandoned, CancellationToken.None);
+
+        Assert.NotNull(aliveStatus);
+        Assert.NotNull(abandonedStatus);
+
+        // Жива задача переживає перезапуск СУСІДНЬОГО інстанса.
+        Assert.Equal("Running", aliveStatus.State);
+        Assert.Null(aliveStatus.Error);
+
+        // Покинута — таки валиться: заради цього метод і існує.
+        Assert.Equal("Failed", abandonedStatus.State);
+        Assert.Equal("Застосунок перезапущено.", abandonedStatus.Error);
+
+        // ⚠ Лічильник теж мусить бути чесним: він іде в лог старту, і
+        // завищене число означало б розслідування задач, яких не валили.
+        Assert.True(failed >= 1, $"Очікували щонайменше одну покинуту задачу, отримали {failed}.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.7")]
+    public async Task Задача_що_стартувала_ПІД_ЧАС_прибирання_не_валиться()
+    {
+        // ⚠ Нова межа, яку легко проґавити, лагодячи попередню: задача, яку
+        // інстанс A щойно поставив у чергу й запустив, поки інстанс B уже
+        // рахує, кого валити. Її биття молодше за поріг — і предикат мусить
+        // це бачити, інакше виправлення просто звужує вікно замість закрити.
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+
+        var justStarted = $"justborn-{Guid.NewGuid():N}";
+        var sweepAt = Now.AddMinutes(1);
+
+        await store.QueueAsync(justStarted, "excel-export", sweepAt, CancellationToken.None);
+        await store.StartAsync(justStarted, "excel-export", sweepAt, CancellationToken.None);
+
+        await store.FailStaleAsync("Застосунок перезапущено.", sweepAt, CancellationToken.None);
+
+        var status = await store.FindAsync(justStarted, CancellationToken.None);
+
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.State);
+        Assert.Null(status.Error);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.7")]
+    public async Task Биття_серця_рятує_довгу_мовчазну_задачу_від_прибирання()
+    {
+        // ⛔ Без цього биття виправлення нагородило б новим дефектом замість
+        // старого: довгий імпорт, який годину не повідомляє відсотків, мав би
+        // застигле `HeartbeatAt` і його зачистили б як покинутий. Биття веде
+        // процес-власник (`QuartzJobAdapter`), і воно НЕ прогрес: `UpdatedAt`
+        // і `Percent` воно не чіпає, інакше стрічка «останні задачі»
+        // перетасовувалася б від самого факту, що задача ще жива.
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+
+        var slow = $"slow-{Guid.NewGuid():N}";
+
+        await store.StartAsync(slow, "excel-import", Now.AddHours(-1), CancellationToken.None);
+        await store.ReportAsync(slow, 30, "Читання", Now.AddHours(-1), CancellationToken.None);
+
+        // Власник живий і б'є — рівно перед прибиранням.
+        await store.HeartbeatAsync(slow, Now.AddMinutes(1), CancellationToken.None);
+
+        await store.FailStaleAsync(
+            "Застосунок перезапущено.", Now.AddMinutes(1), CancellationToken.None);
+
+        var status = await store.FindAsync(slow, CancellationToken.None);
+
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.State);
+
+        // Биття — не прогрес: відсоток лишився тим, що повідомила сама задача.
+        Assert.Equal(30, status.Percent);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.7")]
+    public async Task Биття_НЕ_воскрешає_вже_завершену_задачу()
+    {
+        // ⚠ Насос биття зупиняється у `finally`, тобто вже після того, як
+        // гілка встигла записати завершення. Удар, що розминувся з `Finish`
+        // на мілісекунди, не сміє повернути задачі ознаку життя: інакше
+        // завершена задача виглядала б живою для будь-якої майбутньої
+        // перевірки за биттям.
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+
+        var done = $"done-{Guid.NewGuid():N}";
+
+        await store.StartAsync(done, "collection", Now.AddHours(-1), CancellationToken.None);
+        await store.FinishAsync(done, "Succeeded", null, Now.AddHours(-1), CancellationToken.None);
+
+        await store.HeartbeatAsync(done, Now.AddMinutes(1), CancellationToken.None);
+
+        var heartbeat = await db.JobProgresses
+            .AsNoTracking()
+            .Where(p => p.JobId == done)
+            .Select(p => p.HeartbeatAt)
+            .SingleAsync(CancellationToken.None);
+
+        Assert.Equal(Now.AddHours(-1), heartbeat);
     }
 }

@@ -128,27 +128,77 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public Task HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct)
+        // ⚠ Точковий UPDATE, а не завантаження сутності: биття трапляється
+        // кожні 30 секунд на КОЖНУ активну задачу, і читати заради нього цілий
+        // рядок означало б платити двома запитами за один запис одного поля.
+        //
+        // ⚠ Фільтр за станом обов'язковий: биття, яке спізнилося й прийшло
+        // після `FinishAsync`, інакше воскресило б ознаку життя на вже
+        // завершеній задачі.
+        => db.JobProgresses
+            .Where(p => p.JobId == jobId && (p.State == "Running" || p.State == "Queued"))
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.HeartbeatAt, utcNow), ct);
+
+    /// <inheritdoc />
     public async Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct)
     {
-        // ⛔ Завантажуються сутності, а не масовий UPDATE: `Finish` — доменний
-        // метод, і обходити його прямим SQL означало б повторити його правила
-        // (обнулення `Message`, запис `Error`) другим місцем, яке одного дня
-        // розійдеться з першим.
-        var stale = await db.JobProgresses
-            .Where(p => p.State == "Running" || p.State == "Queued")
+        // ⛔ Поріг рахується ОДИН раз, до вибірки. Обчислення його всередині
+        // циклу зробило б межу рухомою: задача, що почалася поки прибирання
+        // йде, могла б потрапити під пізніший, зсунутий поріг.
+        var threshold = utcNow - IJobProgressStore.StaleAfter;
+
+        // ⛔ Раніше тут не було предиката взагалі — валився КОЖЕН рядок
+        // `Running`/`Queued`. Інстанс не один, і перезапуск сусіда вбивав
+        // чужу живу роботу. Покинута задача — це та, чиє биття застигло:
+        // процес, який упав, не пише нічого.
+        //
+        // ⚠ `HeartbeatAt == null` — рядок старший за міграцію, що додала
+        // колонку. Процес, який його створив, зупинявся заради розгортання
+        // цієї ж міграції, тож він гарантовано мертвий.
+        var candidates = await db.JobProgresses
+            .AsNoTracking()
+            .Where(p => (p.State == "Running" || p.State == "Queued")
+                        && (p.HeartbeatAt == null || p.HeartbeatAt < threshold))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        foreach (var entry in stale)
+        var failed = 0;
+
+        foreach (var entry in candidates)
         {
+            // ⛔ `Finish` — доменний метод, і правила завершення (запис
+            // `Error`, поведінка `Percent`) лишаються ЛИШЕ в ньому: тут він
+            // викликається на відчепленій сутності саме щоб обчислити значення,
+            // а не щоб продублювати логіку в SQL.
             entry.Finish("Failed", reason, utcNow);
+
+            // ⛔ Умова застарілості ПОВТОРЮЄТЬСЯ в WHERE запису, і це не
+            // надмірність. Між вибіркою вище й записом сюди задачу могли
+            // перезапустити вручну (`RestartAsync`) або її власник міг
+            // прокинутися й ударити — тоді рядок уже не застарілий, і
+            // беззастережний UPDATE відтворив би той самий дефект у
+            // мікроскопічному вікні. SQL Server перевіряє цю умову й пише
+            // атомарно, тож вікна не лишається зовсім.
+            var affected = await db.JobProgresses
+                .Where(p => p.JobId == entry.JobId
+                            && (p.State == "Running" || p.State == "Queued")
+                            && (p.HeartbeatAt == null || p.HeartbeatAt < threshold))
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(p => p.State, entry.State)
+                        .SetProperty(p => p.Error, entry.Error)
+                        .SetProperty(p => p.Percent, entry.Percent)
+                        .SetProperty(p => p.UpdatedAt, entry.UpdatedAt),
+                    ct)
+                .ConfigureAwait(false);
+
+            failed += affected;
         }
 
-        if (stale.Count > 0)
-        {
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-
-        return stale.Count;
+        // ⚠ Повертається кількість РЕАЛЬНО записаних рядків, а не розмір
+        // вибірки: число йде в лог старту, і завищене означало б розслідування
+        // задач, яких ніхто не валив.
+        return failed;
     }
 }

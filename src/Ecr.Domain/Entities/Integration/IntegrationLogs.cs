@@ -343,6 +343,7 @@ public sealed class JobProgress
         JobCode = jobCode;
         StartedAt = utcNow;
         UpdatedAt = utcNow;
+        HeartbeatAt = utcNow;
         State = "Running";
         CreatedByUserId = createdByUserId;
     }
@@ -358,6 +359,41 @@ public sealed class JobProgress
 
     /// <summary>Хто поставив задачу; <c>null</c> — системна (Q-156).</summary>
     public int? CreatedByUserId { get; private set; }
+
+    /// <summary>
+    /// Коли процес-власник востаннє підтвердив, що задача ЖИВА.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Колонка існує тому, що прибирання на старті (<c>FailStaleAsync</c>)
+    /// раніше не мало ЖОДНОГО предиката застарілості й валило кожен рядок у
+    /// стані <c>Running</c>/<c>Queued</c>. Інстанс у розгортанні не один
+    /// (ціль — 100 одночасних користувачів), тож перезапуск інстанса B
+    /// позначав <c>Failed</c> перерахунки й імпорти, які в цю саму мить
+    /// виконував інстанс A. Мертвий процес нічого не пише — і тільки це
+    /// відрізняє покинуту задачу від чужої живої.
+    ///
+    /// ⚠ Окремо від <see cref="UpdatedAt"/> НАВМИСНО. <c>UpdatedAt</c> — це
+    /// «коли стан востаннє ЗМІНИВСЯ», і за ним упорядкована стрічка останніх
+    /// задач; якби биття писалося туди, задача пересувалася б угору списку від
+    /// самого факту, що вона ще жива, без жодної нової інформації для читача.
+    ///
+    /// ⚠ <c>null</c> — рядок, створений до появи цієї колонки. Такий процес
+    /// уже точно не існує (він зупинявся, щоб розгорнути цю міграцію), тож
+    /// <c>null</c> читається як «биття не було ніколи» = покинута.
+    /// </remarks>
+    public DateTime? HeartbeatAt { get; private set; }
+
+    /// <summary>
+    /// Підтверджує, що задача досі виконується.
+    /// </summary>
+    /// <param name="utcNow">Момент биття в UTC.</param>
+    /// <remarks>
+    /// ⚠ НЕ чіпає ні <see cref="Percent"/>, ні <see cref="Message"/>, ні
+    /// <see cref="UpdatedAt"/>: биття — це ознака життя, а не прогрес. Довгий
+    /// імпорт, який годину не повідомляє відсотків, лишається живим саме
+    /// завдяки цьому, і при цьому не вдає, ніби щось порахував.
+    /// </remarks>
+    public void Heartbeat(DateTime utcNow) => HeartbeatAt = utcNow;
 
     /// <summary>
     /// Ставить стан «у черзі».
@@ -376,6 +412,12 @@ public sealed class JobProgress
         Message = null;
         Error = null;
         UpdatedAt = utcNow;
+
+        // ⚠ Биття оновлюється і тут. Задача в черзі ще не має власника, який
+        // би його оновлював, але щойно поставлена в чергу задача — ЖИВА, і
+        // прибирання, що йде паралельно на сусідньому інстансі, не сміє її
+        // забрати. Те саме стосується ручного перезапуску (`RestartAsync`).
+        HeartbeatAt = utcNow;
     }
 
     /// <summary>Ставить стан «виконується».</summary>
@@ -388,6 +430,7 @@ public sealed class JobProgress
         Error = null;
         StartedAt = utcNow;
         UpdatedAt = utcNow;
+        HeartbeatAt = utcNow;
     }
 
     /// <summary>Оновлює прогрес.</summary>
@@ -399,6 +442,10 @@ public sealed class JobProgress
         Percent = Math.Clamp(percent, 0, 100);
         Message = message;
         UpdatedAt = utcNow;
+
+        // Повідомлення прогресу — теж доказ життя, і найдешевший: задача, що
+        // регулярно звітує, не потребує окремого биття взагалі.
+        HeartbeatAt = utcNow;
     }
 
     /// <summary>Фіксує завершення задачі.</summary>
