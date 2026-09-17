@@ -66,7 +66,7 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
             // реальний збій (недоступна база, дедлок, обрив з'єднання).
             var scanner = Substitute.For<IOrphanScanner>();
             scanner.ScanAllAsync(Arg.Any<CancellationToken>())
-                .Returns<Task<int>>(_ => throw new InvalidOperationException(reason));
+                .Returns<Task<Ecr.Application.Registries.OrphanScanSummary>>(_ => throw new InvalidOperationException(reason));
 
             var job = new ConsistencyCheckJob(
                 db, scanner, new TestClock(now), Substitute.For<IConsistencyMetrics>());
@@ -124,7 +124,7 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
             {
                 var scanner = Substitute.For<IOrphanScanner>();
                 scanner.ScanAllAsync(Arg.Any<CancellationToken>())
-                    .Returns<Task<int>>(_ => throw new InvalidOperationException(reason));
+                    .Returns<Task<Ecr.Application.Registries.OrphanScanSummary>>(_ => throw new InvalidOperationException(reason));
 
                 var failing = new ConsistencyCheckJob(
                     db, scanner, clock, Substitute.For<IConsistencyMetrics>());
