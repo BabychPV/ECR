@@ -57,10 +57,44 @@ public sealed record CellRecord(CellAddress Address, int TableDefId, CellValueDa
 /// <c>RowVersion</c> не зміниться і оптимістичне блокування тихо не працює (B04 §2.4).</param>
 /// <param name="ChangedByUserId">Автор зміни (R-A2).</param>
 /// <param name="IsLateEdit">Зміна в стані <c>Grace</c> або після <c>Reopen</c> (D-70).</param>
+/// <param name="ExpectedRowVersions">
+/// <c>TableRow.Id</c> → <c>RowVersion</c> у Base64, від якої відштовхується
+/// автор батчу. Реалізація зобов'язана звірити версію <b>тим самим запитом</b>,
+/// що й пише — див. нижче. <c>null</c> або порожньо = звіряти нічого.
+/// </param>
+/// <remarks>
+/// ⛔ <paramref name="ExpectedRowVersions"/> заведено по сліду тихого
+/// загубленого оновлення на сітці документа. До нього звірка <c>baseVersion</c>
+/// жила ТІЛЬКИ в пам'яті C# (<c>PatchCellsHandler.EnsureNoVersionConflicts</c>)
+/// і виконувалась ПОЗА транзакцією запису, а сам запис не ніс жодного предиката
+/// на <c>RowVersion</c>. Між читанням версії й записом лишалося вікно, у яке
+/// вміщався ВЕСЬ чужий батч: обидва аналітики діставали <c>200</c>, другий
+/// мовчки затирав першого, і рядок аудиту стверджував перехід значення, якого
+/// ніколи не було. Перевірка, відірвана від запису, не є перевіркою.
+///
+/// ⚠ <c>null</c> — це не «дозволено затирати», а «автор батчу версії не
+/// заявляв»: так пише <c>RecalculationService</c>, чиє джерело істини — формули,
+/// а не чиясь відкрита сітка. Робити звірку обов'язковою означало б вимагати
+/// версію там, де її нема кому назвати.
+/// </remarks>
 public sealed record CellChangeSet(
     long TableInstanceId,
     IReadOnlyList<CellRecord> Upserts,
     IReadOnlyList<CellAddress> Deletes,
     IReadOnlyList<long> TouchedRowIds,
     int ChangedByUserId,
-    bool IsLateEdit);
+    bool IsLateEdit,
+    IReadOnlyDictionary<long, string>? ExpectedRowVersions = null)
+{
+    /// <summary>
+    /// Ключ у <c>Details</c> конфлікту: перелік <c>TableRow.Id</c>, чия версія
+    /// змінилася між читанням і записом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Константа живе тут, а не в <c>Ecr.Infrastructure</c>: кидає конфлікт
+    /// сховище, а перекладає його на <c>RowKey</c> прикладний шар, і залежність
+    /// іде лише всередину. Рядковий літерал у двох місцях розійшовся б до
+    /// першої правки одного з них.
+    /// </remarks>
+    public const string StaleRowIdsDetail = "staleRowIds";
+}
