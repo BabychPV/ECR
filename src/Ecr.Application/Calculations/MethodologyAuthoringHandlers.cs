@@ -434,7 +434,7 @@ public sealed class SaveMethodologyRequiredInputHandler(
     /// searchable dropdown (`Q-332`), клієнт лише ПРОПОНУЄ реальні id — сервер
     /// має перевіряти сам, а не покладатись на те, що клієнт чесний. Перевірка
     /// — та сама, що вже `SaveCalculationBindingHandler` (той самий
-    /// `ECR-TMPL-0404`, той самий `FindTableOfColumnAsync`): існування
+    /// `ECR-TMPL-0404`, той самий `FindColumnAsync`): існування
     /// колонки, а НЕ наявність активної прив'язки цієї методології — вимогу
     /// свідомо можна додати ДО прив'язки (нижче в UI лишається лише
     /// попередження, не блокування).
@@ -452,7 +452,11 @@ public sealed class SaveMethodologyRequiredInputHandler(
             ?? throw new NotFoundException(
                 "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
 
-        _ = await bindings.FindTableOfColumnAsync(columnDefId, ct).ConfigureAwait(false)
+        // ⚠ Лише ІСНУВАННЯ колонки. Тип тут НЕ перевіряється, і це не пропуск:
+        // обов'язковий ВХІД методології — це, як правило, саме колонка ручного
+        // вводу, тож вимога `IsComputed` (`ECR-TMPL-4227`, яка стоїть на
+        // колонці-ПРИЙМАЧІ) відхиляла б нормальну конфігурацію.
+        _ = await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-TMPL-0404",
                 $"Колонки {columnDefId} не існує або її видалено: обов'язковий вхід нема до чого прив'язати.");
@@ -813,7 +817,9 @@ public sealed class SaveCalculationBindingHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Записану прив'язку.</returns>
     /// <exception cref="NotFoundException">Методології або колонки немає.</exception>
-    /// <exception cref="BusinessRuleException">Порожній предикат.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Порожній предикат або колонка-приймач не обчислювана (<c>ECR-TMPL-4227</c>).
+    /// </exception>
     public async Task<CalculationBindingDto> HandleAsync(
         int methodologyId,
         int columnDefId,
@@ -830,10 +836,14 @@ public sealed class SaveCalculationBindingHandler(
             ?? throw new NotFoundException(
                 "ECR-CALC-0404", $"Методології {methodologyId} не існує.");
 
-        var tableDefId = await bindings.FindTableOfColumnAsync(columnDefId, ct).ConfigureAwait(false)
+        var column = await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-TMPL-0404",
                 $"Колонки {columnDefId} не існує або її видалено: прив'язати вихід нема до чого.");
+
+        RequireComputedColumn(column);
+
+        var tableDefId = column.TableDefId;
 
         var existing = await bindings
             .FindAsync(columnDefId, methodologyId, code.Value, ct)
@@ -858,6 +868,51 @@ public sealed class SaveCalculationBindingHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return MethodologyAuthoringMap.Binding(binding);
+    }
+
+    /// <summary>
+    /// Колонка-приймач мусить бути ОБЧИСЛЮВАНОЮ (<c>ECR-TMPL-4227</c>).
+    /// </summary>
+    /// <param name="column">Колонка, до якої прив'язується вихід.</param>
+    /// <remarks>
+    /// ⛔ Колонка ручного вводу (наприклад <c>Decimal</c>) лишає
+    /// <c>ColumnDef.IsComputed</c> хибним, тож <c>EditRules.CanEdit</c> пускає
+    /// оператора всередину. Далі на одну колонку існують ДВІ правди: число,
+    /// яке оператор увів і бачить у гріді (<c>doc.CellValue</c>), і число, яке
+    /// порахувала методологія (<c>calc.CalculationResult</c>). Перезапису тут
+    /// немає — ці сховища різні (<c>RecalculationJob</c>), — але у звіт іде
+    /// друге (<c>ReportDefHandlers</c>, <c>RowSource = "CalculationResults"</c>),
+    /// а оператор працює з першим, і розбіжності не показує жоден екран.
+    ///
+    /// ⚠ Приймається будь-яка обчислювана, не лише <c>Calculated</c>: правило
+    /// одне — «ціль обчислення оголошена обчислюваною». Чи має саме
+    /// <c>Formula</c>-колонка приймати ще й вихід методології (два автори
+    /// одного числа) — окреме питання, і вирішувати його мовчки, у складі
+    /// цього фіксу, означало б відхилити конфігурації, яких ніхто не міряв.
+    /// </remarks>
+    /// <exception cref="BusinessRuleException">Колонка не обчислювана.</exception>
+    private static void RequireComputedColumn(BoundColumnRef column)
+    {
+        if (column.DataType is CellDataType.Formula or CellDataType.Calculated)
+        {
+            return;
+        }
+
+        // ⚠ `messageKey` — див. той самий аргумент у `FormulaDefHandlers`:
+        // мови продукту `en`/`ru`/`kz`, і без ключа подробиця відмови їхала б
+        // конфігураторові українською. Українське речення лишається запасним.
+        throw new BusinessRuleException(
+            Domain.Errors.ErrorCodes.ComputationOnManualColumn,
+            $"Колонка {column.Code} має тип {column.DataType}: це колонка ручного вводу. "
+            + "Оператор правитиме її руками, а у звіт піде результат методології — і жоден "
+            + "екран не покаже, що числа розійшлися. Прив'яжіть вихід до колонки типу "
+            + "Calculated (тип незмінний — потрібна нова колонка).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-4227.bindingOnManualColumn",
+                ["columnCode"] = column.Code,
+                ["dataType"] = column.DataType.ToString(),
+            });
     }
 }
 

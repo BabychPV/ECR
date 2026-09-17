@@ -63,10 +63,10 @@ public sealed class SaveMethodologyRequiredInputHandlerTests
     public async Task Колонки_що_не_існує_відхиляється_ECR_TMPL_0404()
     {
         // ⛔ Мутаційний доказ: без перевірки в `SaveMethodologyRequiredInputHandler`
-        // (`bindings.FindTableOfColumnAsync`) цей виклик пройшов би успішно —
+        // (`bindings.FindColumnAsync`) цей виклик пройшов би успішно —
         // рівно та поведінка, що й до фіксу.
-        _bindings.FindTableOfColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
-            .Returns((int?)null);
+        _bindings.FindColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
+            .Returns((BoundColumnRef?)null);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync(
@@ -81,8 +81,11 @@ public sealed class SaveMethodologyRequiredInputHandlerTests
     {
         // Колонка РЕАЛЬНА (таблиця 3), але прив'язок методології ще немає
         // взагалі — методологію ще проєктують, вимогу можна додати наперед.
-        _bindings.FindTableOfColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
-            .Returns((int?)3);
+        // ⚠ Тип `Decimal` навмисно: обов'язковий ВХІД методології — це колонка
+        // ручного вводу, і перевірка `ECR-TMPL-4227` (колонка-ПРИЙМАЧ) сюди не
+        // поширюється.
+        _bindings.FindColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
+            .Returns(new BoundColumnRef(3, "Manual", CellDataType.Decimal));
         _bindings.ListAsync(MethodologyId, Arg.Any<CancellationToken>())
             .Returns((IReadOnlyList<CalculationBinding>)[]);
         _drafts.FindRequiredInputAsync(VersionId, ColumnDefId, Arg.Any<CancellationToken>())
@@ -99,8 +102,8 @@ public sealed class SaveMethodologyRequiredInputHandlerTests
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Колонка_з_активною_прив_язкою_позначається_як_прив_язана()
     {
-        _bindings.FindTableOfColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
-            .Returns((int?)3);
+        _bindings.FindColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
+            .Returns(new BoundColumnRef(3, "Manual", CellDataType.Decimal));
         _bindings.ListAsync(MethodologyId, Arg.Any<CancellationToken>())
             .Returns((IReadOnlyList<CalculationBinding>)
                 [new CalculationBinding(3, ColumnDefId, MethodologyId, "OUT1", "{}")]);

@@ -1,5 +1,6 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
+using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -98,6 +99,59 @@ public sealed class CascadeRecalculationTests
         // ⚠ Автор — система (SystemUserId = 0), не той, хто правив вхідну
         // комірку: підставити людину означало б записати в аудит, що вона
         // власноруч ввела число, якого не вводила.
+        Assert.Equal(0, change.ChangedByUserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Формула_на_НЕобчислюваній_колонці_мовчки_затирає_введене_оператором()
+    {
+        // ⛔ ЦІНА дефекту, який лагодить `ECR-TMPL-4227`, — у чистому вигляді.
+        // Колонка `Total` має тип `Decimal`, тобто НЕ обчислювана: `EditRules`
+        // дістає `ColumnIsComputed = false` і пускає оператора всередину. Він
+        // уводить 999, бачить 999 на екрані — а найближчий перерахунок кладе
+        // туди 15 (`[Jan] + [Feb]`) і йде далі. Ні помилки, ні попередження:
+        // число оператора зникає, і єдиний слід — рядок аудиту з автором
+        // «система».
+        //
+        // ⚠ Цей тест ЗЕЛЕНИЙ і до фіксу, і після: фікс стоїть на межі
+        // КОНФІГУРАЦІЇ (`SaveFormulaDefHandler`), а не в рушії. Рушій і далі
+        // пише в колонку, яку йому назвали формулою, — і саме тому таку
+        // конфігурацію більше не можна завести. Твердження тут не «код
+        // виправлено», а «ось що втрачається, якщо його завести».
+        Arrange(jan: 10m, feb: 5m, operatorTotal: 999m);
+
+        // Ланка перша: тип колонки → дозвіл оператора. Без неї це був би
+        // тест про перерахунок, а не про втрату.
+        var totalColumn = _table.Columns.Single(c => c.Id == _totalId);
+        Assert.False(totalColumn.IsComputed);
+
+        var profile = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Manage)
+            .Build();
+
+        Assert.Equal(
+            EditDenyReason.None,
+            EditRules.CanEdit(profile, AccessBuilder.Cell(computed: totalColumn.IsComputed)).Reason);
+
+        // Ланка друга: перерахунок пише в ту саму колонку.
+        var written = await Service().RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        Assert.Equal(1, written);
+
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(_totalId, upsert.Address.ColumnDefId);
+        Assert.Equal(15m, upsert.Value.ValueNumeric);
+
+        // ⛔ ГОЛОВНЕ: у журналі стоїть саме ЗАМІНА введеного числа, а не
+        // заповнення порожньої комірки. `999 → 15` рукою системи — це і є
+        // тиха втрата даних оператора.
+        var call = _audit.ReceivedCalls()
+            .Single(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteCellChangesAsync));
+        var change = Assert.Single((IReadOnlyList<CellChangeRecord>)call.GetArguments()[0]!);
+
+        Assert.Equal("999", change.OldValue);
+        Assert.Equal("15", change.NewValue);
         Assert.Equal(0, change.ChangedByUserId);
     }
 
@@ -518,7 +572,13 @@ public sealed class CascadeRecalculationTests
     /// <c>false</c> — граф залежностей формули порожній: саме так виглядає
     /// формула, додана в шаблон після того, як дані вже введені.
     /// </param>
-    private void Arrange(decimal jan, decimal feb, bool withDependencies = true)
+    /// <param name="operatorTotal">
+    /// Значення, яке оператор УЖЕ ввів у колонку підсумку руками
+    /// (<c>IsCalculated = false</c>); <c>null</c> — комірка порожня. Колонка
+    /// має тип <c>Decimal</c>, тож ручний ввід у неї дозволений — саме на
+    /// цьому й тримається сценарій тихої втрати.
+    /// </param>
+    private void Arrange(decimal jan, decimal feb, bool withDependencies = true, decimal? operatorTotal = null)
     {
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("Water");
@@ -564,28 +624,33 @@ public sealed class CascadeRecalculationTests
                 [TableInstance] = new Dictionary<string, long> { ["7001001"] = 1001 },
             });
 
-        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(
-        [
-            new CellRecord(
-                new CellAddress(Period, 1001, _janId), _table.Id,
-                new CellValueData { ValueNumeric = jan }),
-            new CellRecord(
-                new CellAddress(Period, 1001, _febId), _table.Id,
-                new CellValueData { ValueNumeric = feb }),
-        ]);
+        // ⚠ Зріз складається один раз і віддається обома формами читання:
+        // введене оператором значення підсумку має бути видиме і там, і там,
+        // інакше «затирання» не відрізнялося б від запису в порожню комірку.
+        var slice = new List<CellRecord>
+        {
+            new(new CellAddress(Period, 1001, _janId), _table.Id, new CellValueData { ValueNumeric = jan }),
+            new(new CellAddress(Period, 1001, _febId), _table.Id, new CellValueData { ValueNumeric = feb }),
+        };
+
+        if (operatorTotal is { } entered)
+        {
+            // ⛔ `IsCalculated` НЕ виставлено: це число ввела людина. Саме за
+            // цією ознакою його й можна було б відрізнити — якби хтось дивився.
+            var manual = new CellValueData { ValueNumeric = entered };
+            var address = new CellAddress(Period, 1001, _totalId);
+            slice.Add(new CellRecord(address, _table.Id, manual));
+
+            _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+                .Returns(new Dictionary<CellAddress, CellValueData> { [address] = manual });
+        }
+
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>()).Returns(slice);
 
         _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
-                [TableInstance] =
-                [
-                    new CellRecord(
-                        new CellAddress(Period, 1001, _janId), _table.Id,
-                        new CellValueData { ValueNumeric = jan }),
-                    new CellRecord(
-                        new CellAddress(Period, 1001, _febId), _table.Id,
-                        new CellValueData { ValueNumeric = feb }),
-                ],
+                [TableInstance] = slice,
             });
 
         // ⚠ Граф — саме той, який зберігає публікація: формула підсумку

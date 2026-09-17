@@ -378,6 +378,21 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         var address =
             $"/api/v1/methodologies/{methodologyId}/bindings/{structure.ResultColumnId}/EMISSION";
 
+        // ⛔ Спершу — відмова. Колонка `A` має тип `Decimal`, тобто ручного
+        // вводу: оператор правитиме її в гріді, а у звіт піде результат
+        // методології (`calc.CalculationResult`), і жоден екран не покаже, що
+        // числа розійшлися. Перевірка йде НАСКРІЗЬ, тим самим HTTP-шляхом
+        // (`ECR-TMPL-4227`), а не лише в обробнику.
+        var rejected = await admin.Client.PutAsJsonAsync(
+            new Uri(
+                $"/api/v1/methodologies/{methodologyId}/bindings/{structure.ManualColumnId}/EMISSION",
+                UriKind.Relative),
+            new { matchJson = "{}", isActive = true });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
+        var rejectedBody = await rejected.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-TMPL-4227", rejectedBody.GetProperty("errorCode").GetString());
+
         var first = await admin.Client.PutAsJsonAsync(
             new Uri(address, UriKind.Relative),
             new { matchJson = "{}", isActive = true });
@@ -907,9 +922,10 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
     /// <param name="TemplateVersionId">Версія-чернетка шаблону.</param>
     /// <param name="SheetDefId">Аркуш; він же входить у склад документа.</param>
     /// <param name="TableDefId">Таблиця з фіксованими рядками.</param>
-    /// <param name="ResultColumnId">Колонка-приймач результату методології.</param>
+    /// <param name="ResultColumnId">Колонка-приймач результату методології (тип <c>Calculated</c>).</param>
+    /// <param name="ManualColumnId">Колонка ручного вводу <c>A</c> (тип <c>Decimal</c>).</param>
     private sealed record Structure(
-        int TemplateVersionId, int SheetDefId, int TableDefId, int ResultColumnId);
+        int TemplateVersionId, int SheetDefId, int TableDefId, int ResultColumnId, int ManualColumnId);
 
     /// <summary>Готовий стенд: структура, документ із числом і два користувачі.</summary>
     /// <param name="App">
@@ -987,6 +1003,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         var tableId = (await table.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
         var resultColumnId = 0;
+        var manualColumnId = 0;
         foreach (var code in new[] { "A", "B", "EMISSION" })
         {
             var column = await client.PutAsJsonAsync(
@@ -995,7 +1012,17 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
                 {
                     headerL10n = new Dictionary<string, string> { ["en"] = code },
                     ordinal = (int?)null,
-                    dataType = "Decimal",
+
+                    // ⚠ `EMISSION` — колонка-ПРИЙМАЧ виходу методології, тож
+                    // `Calculated`, а не `Decimal` (`ECR-TMPL-4227`). До цієї
+                    // перевірки фікстура описувала саме дефектну конфігурацію:
+                    // приймач лишався колонкою ручного вводу, тобто оператор
+                    // мав право правити в гріді число, якого у звіті вже не
+                    // буде — у звіт іде `calc.CalculationResult`. `A` і `B` —
+                    // ВХОДИ, вони ручного вводу й лишаються `Decimal`.
+                    dataType = string.Equals(code, "EMISSION", StringComparison.Ordinal)
+                        ? "Calculated"
+                        : "Decimal",
                     isRequired = false,
                     isReadOnly = false,
                     isHidden = false,
@@ -1014,9 +1041,13 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             {
                 resultColumnId = (await column.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
             }
+            else if (string.Equals(code, "A", StringComparison.Ordinal))
+            {
+                manualColumnId = (await column.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+            }
         }
 
-        return new Structure(versionId, sheetId, tableId, resultColumnId);
+        return new Structure(versionId, sheetId, tableId, resultColumnId, manualColumnId);
     }
 
     /// <summary>Повний стенд: структура, проєкт, документ і записані вхідні числа.</summary>
