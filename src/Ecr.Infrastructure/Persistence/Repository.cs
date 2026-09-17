@@ -35,14 +35,58 @@ public sealed class Repository<T, TId>(EcrDbContext db) : IRepository<T, TId>
     /// каталогом, а число в коментарі — ні. За збігом стежить сторож
     /// <c>ContractIntegrityTests</c>.
     /// </remarks>
-    private static readonly Dictionary<Type, string> NotFoundCodes = new()
+    private static readonly Dictionary<Type, NotFoundText> NotFoundTexts = new()
     {
-        [typeof(Domain.Entities.Configuration.Template)] = "ECR-TMPL-0404",
-        [typeof(Domain.Entities.Configuration.TemplateVersion)] = "ECR-TMPL-0404",
-        [typeof(Domain.Entities.Documents.Document)] = "ECR-DOC-0404",
-        [typeof(Domain.Entities.Documents.TableRow)] = "ECR-ROW-0404",
-        [typeof(Domain.Entities.Dictionaries.RegistryEntry)] = "ECR-REG-0404",
+        [typeof(Domain.Entities.Configuration.Template)] =
+            new("ECR-TMPL-0404", "err.ECR-TMPL-0404.template", "шаблон", "templateId"),
+        [typeof(Domain.Entities.Configuration.TemplateVersion)] =
+            new("ECR-TMPL-0404", "err.ECR-TMPL-0404.templateVersion", "версію шаблону", "versionId"),
+
+        // ⚠ Ключ і плейсхолдер тут НЕ нові: `err.ECR-DOC-0404.document` уже
+        // заведений і вже вживається — той самий факт («документа немає»)
+        // мусить читатися однаково, яким би шляхом код до нього не дійшов.
+        [typeof(Domain.Entities.Documents.Document)] =
+            new("ECR-DOC-0404", "err.ECR-DOC-0404.document", "документ", "documentId"),
+        [typeof(Domain.Entities.Documents.TableRow)] =
+            new("ECR-ROW-0404", "err.ECR-ROW-0404.tableRow", "рядок таблиці", "rowId"),
+        [typeof(Domain.Entities.Dictionaries.RegistryEntry)] =
+            new("ECR-REG-0404", "err.ECR-REG-0404.registryEntry", "запис довідника", "entryId"),
     };
+
+    /// <summary>Як розповісти про відсутню сутність людині.</summary>
+    /// <param name="Code">Код каталогу помилок.</param>
+    /// <param name="MessageKey">Ключ рядка інтерфейсу для локалізованої подробиці.</param>
+    /// <param name="Subject">
+    /// Назва сутності у ЗНАХІДНОМУ відмінку для запасного українського
+    /// речення («не знайдено <b>версію шаблону</b>»).
+    /// </param>
+    /// <param name="IdParameter">
+    /// Ім'я плейсхолдера ідентифікатора в шаблоні каталогу. ⚠ Не спільне
+    /// <c>{id}</c>: для документа ключ уже існує й уже вживає
+    /// <c>{documentId}</c>, а підставляти в чужий шаблон інше ім'я означало б
+    /// лишити плейсхолдер незаміненим просто в тексті для користувача.
+    /// </param>
+    /// <remarks>
+    /// ⛔ Два нові поля з'явилися через дефект, видимий лише на екрані
+    /// користувача. Повідомлення будувалося як
+    /// <c>$"{typeof(T).Name} з ідентифікатором {id} не знайдено."</c> — тобто
+    /// клієнтові їхало ІМ'Я КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
+    /// не знайдено». Для оператора це не назва нічого: у продукті немає
+    /// сутності «TemplateVersion», є «версія шаблону». Локалізувати таке
+    /// речення було б гірше, ніж лишити: переклад показав би внутрішнє ім'я
+    /// типу під виглядом тексту для людини.
+    ///
+    /// ⚠ Ключ окремий для КОЖНОГО типу, хоч код помилки в двох із них
+    /// спільний (<c>ECR-TMPL-0404</c> у шаблона й версії). Один ключ на код
+    /// повернув би ту саму ваду з іншого боку: «не знайдено шаблон», коли
+    /// насправді немає версії, — і людина шукала б не те.
+    ///
+    /// ⚠ Запасне українське речення лишається: його бачить журнал сервера, і
+    /// воно ж спрацьовує, якщо ключа в каталозі немає
+    /// (<c>ResolveGenericMessageAsync</c>).
+    /// </remarks>
+    private sealed record NotFoundText(
+        string Code, string MessageKey, string Subject, string IdParameter);
 
     /// <inheritdoc />
     public async Task<T?> FindAsync(TId id, CancellationToken ct)
@@ -55,14 +99,33 @@ public sealed class Repository<T, TId>(EcrDbContext db) : IRepository<T, TId>
     /// <c>NullReferenceException</c> десятьма рядками нижче немає сенсу.
     /// </remarks>
     public async Task<T> GetAsync(TId id, CancellationToken ct)
-        => await FindAsync(id, ct).ConfigureAwait(false)
-           ?? throw new NotFoundException(
-               NotFoundCodes.TryGetValue(typeof(T), out var code)
-                   ? code
-                   : throw new InvalidOperationException(
-                       $"Для {typeof(T).Name} немає коду «не знайдено» в каталозі. " +
-                       "Додайте код у 02-contracts.md §7 або використайте спеціалізований порт."),
-               $"{typeof(T).Name} з ідентифікатором {id} не знайдено.");
+    {
+        var found = await FindAsync(id, ct).ConfigureAwait(false);
+        if (found is not null)
+        {
+            return found;
+        }
+
+        if (!NotFoundTexts.TryGetValue(typeof(T), out var text))
+        {
+            throw new InvalidOperationException(
+                $"Для {typeof(T).Name} немає коду «не знайдено» в каталозі. "
+                + "Додайте код у 02-contracts.md §7 або використайте спеціалізований порт.");
+        }
+
+        // ⚠ Ідентифікатор іде в `Details` РЯДКОМ: `ResolveGenericMessageAsync`
+        // підставляє в шаблон каталогу лише поля типу `string`, тож `TId`
+        // (найчастіше `int`/`long`) мовчки лишився б незаміненим
+        // плейсхолдером `{id}` просто в тексті для користувача.
+        throw new NotFoundException(
+            text.Code,
+            $"Не знайдено {text.Subject} з ідентифікатором {id}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = text.MessageKey,
+                [text.IdParameter] = id?.ToString() ?? string.Empty,
+            });
+    }
 
     /// <inheritdoc />
     public void Add(T entity) => db.Set<T>().Add(entity);

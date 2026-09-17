@@ -417,6 +417,17 @@ USING (VALUES
     (N'err.ECR-DOC-0404.periodEmpty',        N'en', N'Document {documentId} for period {periodKey} does not exist or is empty.', 1),
     (N'err.ECR-DOC-0404.exportExpired',      N'en', N'The workbook is gone or has expired: build the export again.', 1),
 
+    -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
+    -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
+    -- не знайдено». Для оператора це не назва нічого — у продукті немає
+    -- сутності «TemplateVersion», є «версія шаблону». Ключ окремий на КОЖЕН
+    -- тип, хоч код у двох із них спільний: один ключ на код сказав би «не
+    -- знайдено шаблон» там, де немає ВЕРСІЇ, і людина шукала б не те.
+    (N'err.ECR-TMPL-0404.template',          N'en', N'Template {templateId} was not found.', 1),
+    (N'err.ECR-TMPL-0404.templateVersion',   N'en', N'Template version {versionId} was not found.', 1),
+    (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
+    (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
+
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),
     (N'nav.menu',                        N'en', N'Menu', 1),
