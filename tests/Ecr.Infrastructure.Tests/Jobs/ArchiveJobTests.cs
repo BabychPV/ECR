@@ -248,6 +248,101 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Архівація_одного_проєкту_не_робить_рік_сусіда_нечитним()
+    {
+        // Два проєкти в ОДНОМУ періоді — тобто в одній партиції. Це не
+        // екзотика: `pf_ByPeriodKey` не знає про проєкти взагалі, тож будь-які
+        // два проєкти з однаковою гранулярністю ділять партиції завжди.
+        var a = await DocumentAsync(202703);
+        await CellAsync(a, 11m);
+
+        var b = await DocumentAsync(202703);
+        await CellAsync(b, 22m);
+
+        // Архівують рік ПРОЄКТУ A. Обидва вже позначені заархівованими людиною
+        // (`POST /projects/{id}/archive`), але фізично переносять зараз лише A:
+        // у B, наприклад, ще не сплив річний грейс.
+        await ArchiveAsync(a.ProjectId, 202703, 202703);
+
+        await using var db = sql.CreateContext();
+        var reader = new Ecr.Infrastructure.Persistence.ArchiveAwareCellReader(db);
+
+        // ⛔ Рік B фізично знищено в гарячій схемі тим самим
+        // `TRUNCATE … WITH (PARTITIONS)` — журнал же знав лише про A, тож
+        // читач вважав рік B незаархівованим і йшов у порожню гарячу схему.
+        // Ні помилки, ні попередження: звіт за торішній рік просто порожній.
+        var cells = await reader
+            .ReadAsync(b.ProjectId, b.TableInstanceId, b.PeriodKey, default);
+
+        Assert.Equal(22m, Assert.Single(cells).Value.ValueNumeric);
+
+        // І це саме журнальний факт, а не випадковість вибірки: прогін, що
+        // звільнив партицію, мусить бути записаний і на B.
+        Assert.True(await reader.IsArchivedAsync(b.ProjectId, b.PeriodKey, default));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Запис_у_проміжку_між_звіркою_і_TRUNCATE_не_дає_звітувати_Completed()
+    {
+        var doc = await DocumentAsync(202704);
+        await CellAsync(doc, 5m);
+
+        var before = await CountAsync("doc.CellValue", doc.PeriodKey.Value);
+
+        // ⚠ Проміжок відтворюється тригером на журналі прогону: процедура
+        // оновлює `itg.ArchiveRun` РІВНО після того, як зняла й звірила суми
+        // партиції, і задовго до `TRUNCATE`. Тобто рядок лягає в гарячу схему
+        // точно в тому вікні, яке в бою займає звичайний запис сусіднього
+        // проєкту, що ділить ту саму партицію.
+        //
+        // ⛔ Тригер саме тут, а не на `arc.CellValue`: на таблиці з clustered
+        // columnstore SQL Server тригерів не дозволяє взагалі.
+        await ExecuteAsync($"""
+            CREATE TRIGGER itg.TR_ArchiveGapWrite ON itg.ArchiveRun AFTER UPDATE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted
+                            WHERE Status = N'Running'
+                              AND LastDonePeriodKey = {doc.PeriodKey.Value})
+                   AND NOT EXISTS (SELECT 1 FROM doc.CellValue
+                                    WHERE PeriodKey = {doc.PeriodKey.Value}
+                                      AND TableRowId = {doc.RowIds[1]}
+                                      AND ColumnDefId = {doc.ColumnDefIds[2]})
+                    INSERT INTO doc.CellValue
+                        (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric,
+                         IsCalculated, IsEmpty)
+                    VALUES ({doc.PeriodKey.Value}, {doc.RowIds[1]}, {doc.ColumnDefIds[2]},
+                            {doc.TableDefId}, 9, 0, 0);
+            END
+            """);
+
+        try
+        {
+            await Assert.ThrowsAsync<SqlException>(
+                () => ArchiveAsync(doc.ProjectId, 202704, 202704));
+        }
+        finally
+        {
+            // ⚠ Тригер знімається в `finally`, а не після асертів: лишений на
+            // місці, він підкидав би рядки в КОЖНУ наступну архівацію, і
+            // падав би не той тест, який щось зламав.
+            await ExecuteAsync("DROP TRIGGER itg.TR_ArchiveGapWrite;");
+        }
+
+        // ⛔ Дані, що лягли в проміжку, на місці — разом з усім, що було до
+        // них. Прогін, який знищив непереневірене й звітував `Completed`,
+        // гірший за прогін, що не відпрацював: про другий дізнаються одразу.
+        Assert.Equal(before + 1, await CountAsync("doc.CellValue", doc.PeriodKey.Value));
+
+        var run = await LastRunAsync(doc.ProjectId);
+        Assert.Equal("Failed", run.Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public void Діапазон_партицій_для_квартального_проєкту_охоплює_чотири_а_не_дванадцять()
     {
         // ⛔ Діапазон виводиться з PeriodKind, а не жорстко YYYY01…YYYY12.
