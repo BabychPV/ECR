@@ -221,7 +221,14 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             {
                 headerL10n = new Dictionary<string, string> { ["en"] = "C" },
                 ordinal = 1,
-                dataType = "Decimal",
+
+                // ⛔ `Formula`, а не `Decimal`. До `ECR-TMPL-4227` цей сценарій
+                // клав формулу на колонку РУЧНОГО ВВОДУ — і сервер приймав:
+                // `ColumnDef.IsComputed` лишався хибним, `EditRules` пускав
+                // оператора в комірку, а перерахунок затирав уведене ним число
+                // мовчки. Тип колонки незмінний після створення, тож
+                // виправляти це «потім» не було б чим.
+                dataType = "Formula",
                 isRequired = false,
                 isReadOnly = false,
                 isHidden = false,
@@ -236,6 +243,42 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             });
         Assert.True(addColumn.StatusCode == HttpStatusCode.OK, $"{addColumn.StatusCode}: {app.ErrorsText}");
         var columnId = (await addColumn.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        // ⛔ Колонка ручного вводу поруч — і формула на ній відхиляється
+        // НАСКРІЗЬ, через той самий HTTP-шлях, яким її й заводять
+        // (`ECR-TMPL-4227`). Це і є доказ того, що гейт стоїть у продукті, а
+        // не лише в обробнику.
+        var addManual = await admin.Client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/columns/M", UriKind.Relative),
+            new
+            {
+                headerL10n = new Dictionary<string, string> { ["en"] = "M" },
+                ordinal = 2,
+                dataType = "Decimal",
+                isRequired = false,
+                isReadOnly = false,
+                isHidden = false,
+                precision = (byte?)null,
+                scale = (byte?)null,
+                defaultValue = (string?)null,
+                displayFormat = (string?)null,
+                styleId = (int?)null,
+                lookupRegistryDefId = (int?)null,
+                lookupFilter = (string?)null,
+                unitId = (int?)null,
+            });
+        Assert.True(addManual.StatusCode == HttpStatusCode.OK, $"{addManual.StatusCode}: {app.ErrorsText}");
+        var manualColumnId = (await addManual.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+
+        var rejectedFormula = await admin.Client.PutAsJsonAsync(
+            new Uri(
+                $"/api/v1/template-versions/{versionId}/tables/{tableId}/formulas/column/{manualColumnId}",
+                UriKind.Relative),
+            new { dialect = "Template", expression = "A + B" });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, rejectedFormula.StatusCode);
+        var rejectedBody = await rejectedFormula.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-TMPL-4227", rejectedBody.GetProperty("errorCode").GetString());
 
         var saveFormula = await admin.Client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/tables/{tableId}/formulas/column/{columnId}", UriKind.Relative),
@@ -464,7 +507,11 @@ public sealed class StructureScenarios(SqlServerFixture sql)
             {
                 headerL10n = new Dictionary<string, string> { ["en"] = "C" },
                 ordinal = 1,
-                dataType = "Decimal",
+
+                // ⚠ `Formula`, а не `Decimal` (`ECR-TMPL-4227`): інакше запис
+                // формули відмовив би ЩЕ ДО публікації, і сценарій доводив би
+                // зовсім не те, що перевіряє публікація.
+                dataType = "Formula",
                 isRequired = false,
                 isReadOnly = false,
                 isHidden = false,

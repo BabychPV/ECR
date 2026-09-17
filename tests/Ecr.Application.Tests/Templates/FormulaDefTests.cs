@@ -47,6 +47,7 @@ public sealed class FormulaDefTests
 
     private readonly TableDef _table;
     private readonly ColumnDef _column;
+    private readonly ColumnDef _manualColumn;
     private readonly RowDef _row;
 
     public FormulaDefTests()
@@ -68,9 +69,20 @@ public sealed class FormulaDefTests
         SetId(_table, 10);
         sheet.AddTable(_table);
 
-        _column = new ColumnDef(_table.Id, EcrCode.Create("Total"), Text("Total"), 0, CellDataType.Decimal);
+        // ⚠ Тип ЗМІНЕНО з `Decimal` на `Formula` разом із `ECR-TMPL-4227`, і це
+        // не послаблення тестів, а виправлення фікстури: колонка, на яку тут
+        // скрізь пишеться формула, і в бою мусить бути обчислюваною. `Decimal`
+        // стояв тут тому, що обробник типу не питав, — тобто фікстура описувала
+        // саме ту конфігурацію, яку цей зріз тепер відхиляє. Жодне твердження
+        // нижче не змінилося.
+        _column = new ColumnDef(_table.Id, EcrCode.Create("Total"), Text("Total"), 0, CellDataType.Formula);
         SetId(_column, 100);
         _table.AddColumn(_column);
+
+        // Колонка ручного вводу — ціль перевірки `ECR-TMPL-4227`.
+        _manualColumn = new ColumnDef(_table.Id, EcrCode.Create("Manual"), Text("Manual"), 1, CellDataType.Decimal);
+        SetId(_manualColumn, 101);
+        _table.AddColumn(_manualColumn);
 
         _row = new RowDef(_table.Id, RowKey.Create("7001001"), 0, Text("7001001"), RowKind.Item);
         SetId(_row, 200);
@@ -250,6 +262,91 @@ public sealed class FormulaDefTests
             () => Delete().HandleAsync(1, _table.Id, FormulaScope.Column, target, CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0409", error.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Формула_колонки_на_НЕобчислюваній_колонці_відхиляється()
+    {
+        // ⛔ Дефект тихої втрати даних. Колонка типу `Decimal` не обчислювана,
+        // тож `EditRules` дає `ColumnIsComputed = false` і пускає оператора
+        // всередину: він уводить число, бачить його — а найближчий перерахунок
+        // мовчки кладе туди результат формули
+        // (`CascadeRecalculationTests.Формула_на_НЕобчислюваній_колонці_…`
+        // показує саме заміну, а не заповнення порожнього).
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
+            1, _table.Id, FormulaScope.Column,
+            _manualColumn.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Command(), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.ComputationOnManualColumn, error.ErrorCode);
+
+        // Діагностика називає КОНКРЕТНУ колонку і її тип: «формулу не можна»
+        // змусило б конфігуратора гадати, яку саме з сотень колонок він узяв.
+        Assert.Contains("Manual", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Decimal", error.Message, StringComparison.Ordinal);
+
+        Assert.Empty(_table.Formulas);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Колонка_типу_Calculated_формулу_приймає()
+    {
+        // ⚠ Правило — «ціль обчислення мусить бути ОБЧИСЛЮВАНОЮ», а не «мусить
+        // мати тип Formula». `Calculated` — теж обчислювана (`IsComputed`), і
+        // вимагати від неї саме `Formula` означало б відхиляти конфігурацію,
+        // де ту саму колонку заповнює вихід методології (`D-69`).
+        var calculated = new ColumnDef(
+            _table.Id, EcrCode.Create("Calc"), Text("Calc"), 2, CellDataType.Calculated);
+        SetId(calculated, 102);
+        _table.AddColumn(calculated);
+
+        var saved = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Column,
+            calculated.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Command(), CancellationToken.None);
+
+        Assert.Equal(calculated.Id, saved.ColumnDefId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Формула_РЯДКА_типів_колонок_не_перевіряє()
+    {
+        // ⚠ Свідоме звуження, а не пропуск. Рядкова формула без
+        // `ColumnDefId` пише в УСІ колонки свого рядка
+        // (`RecalculationService.Targets`), тож вимога «кожна колонка таблиці
+        // обчислювана» зробила б рядок підсумку неможливим у будь-якій
+        // реальній таблиці. Ця частина дефекту названа в описі PR і
+        // залишається відкритою: вона потребує іншого рішення, а не того
+        // самого гейта.
+        var saved = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Row, _row.RowKeyValue, Command("[Total]"), CancellationToken.None);
+
+        Assert.Equal(_row.Id, saved.RowDefId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Видалення_успадкованої_формули_з_НЕобчислюваної_колонки_не_блокується()
+    {
+        // ⛔ Шлях виходу для конфігурацій, заведених ДО цієї перевірки. Гейт
+        // стоїть лише на записі: якби він стояв і на видаленні, успадкована
+        // формула на `Decimal`-колонці стала б невиправною — її не можна було б
+        // ані перезаписати, ані прибрати.
+        var legacy = new FormulaDef(
+            _table.Id, FormulaScope.Column, "[Jan] + [Feb]", ExpressionDialect.Template);
+        SetId(legacy, 300);
+        legacy.AssignColumn(_manualColumn.Id);
+        _table.AddFormula(legacy);
+
+        await Delete().HandleAsync(
+            1, _table.Id, FormulaScope.Column,
+            _manualColumn.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            CancellationToken.None);
+
+        Assert.True(Assert.Single(_table.Formulas).IsDeleted);
     }
 
     [Fact]

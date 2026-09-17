@@ -72,7 +72,7 @@ public sealed class CalculationOrchestratorConcurrencyScenarios(SqlServerFixture
             app, "Q249Pub", ["Calculation.Publish", "Calculation.View"]);
 
         var doc = await DataEntryScenarios.ArrangeRealDocumentAsync(
-            app, admin, "Q249", extraNumericColumns: ["OUT1", "OUT2"]);
+            app, admin, "Q249", calculatedColumns: ["OUT1", "OUT2"]);
         admin = doc.Admin;
 
         var tableInstanceId = await TableInstanceAsync(app, admin.Client, doc.DocumentId, doc.PeriodKey);
