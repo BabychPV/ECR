@@ -9,6 +9,23 @@ import '@testing-library/react';
 if (typeof window !== 'undefined') {
   if (window.matchMedia === undefined) {
     Object.defineProperty(window, 'matchMedia', {
+      /*
+       * ⛔ `configurable: true` — НЕ косметика. Без нього властивість
+       * невидалима, і `vi.stubGlobal('matchMedia', …)` падає з
+       * `TypeError: Cannot redefine property: matchMedia`.
+       *
+       * ⚠ У пулі `forks`/`threads` це не проявлялося: там `globalThis` —
+       * це глобал Node, куди vitest КОПІЮЄ ключі вікна jsdom (копії
+       * налаштовні), тож `stubGlobal` редагував копію, а не цю властивість.
+       * У `vmThreads` `globalThis` І Є вікном jsdom — тож stub б'ється
+       * прямо сюди. Єдиний файл, який це ламало:
+       * `src/app/__tests__/useRouteTransitionFocus.test.tsx`.
+       *
+       * ⚠ Заглушка від цього не слабшає: значення те саме, поведінка та
+       * сама; змінюється лише те, чи можна її підмінити зверху — а
+       * підміняти її тести й так уже мали право в чинному пулі.
+       */
+      configurable: true,
       writable: true,
       value: (query: string) => ({
         matches: false,
