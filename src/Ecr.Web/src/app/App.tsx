@@ -6,6 +6,7 @@ import { RouterProvider } from 'react-router-dom';
 import { applyDensity, density } from '@/shared/theme/preferences';
 import { theme } from '@/shared/theme/theme';
 import { router } from './router';
+import { NewVersionBanner } from './staleVersion';
 
 import '@/shared/theme/motion.css';
 import '@/shared/theme/cell-states.css';
@@ -44,6 +45,16 @@ export function App(): JSX.Element {
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <QueryClientProvider client={queryClient}>
         <Notifications position="top-right" />
+
+        {/*
+         * ⚠ Банер «встановлено нову версію» (`DAT-08`) — ПОЗА
+         * `RouterProvider`: відмова завантаження чанка стається і без
+         * переходу (прогрів за наведенням, `useRoutePrefetch.ts`), тож
+         * прив'язувати банер до маршруту означало б не показати його саме в
+         * тому випадку, який трапляється першим.
+         */}
+        <NewVersionBanner />
+
         <RouterProvider router={router} />
       </QueryClientProvider>
     </MantineProvider>

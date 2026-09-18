@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 import { loadCatalog } from '@/shared/i18n';
 import { NotFoundPage } from '@/app/NotFoundPage';
 import { router } from '@/app/router';
@@ -90,7 +90,15 @@ describe('router — каталог маршрутів застосунку', ()
     const root = router.routes.find((route) => route.path === '/');
     expect(root).toBeDefined();
 
-    const catchAll = root?.children?.find((route) => route.path === '*');
+    // ⚠ Пошук по ВСІХ нащадках, а не лише по прямих дітях: з `D14-11` між
+    // `AppLayout` і його маршрутами стоїть безшляховий маршрут-обгортка з
+    // `errorElement` (`withRenderErrorBoundary`, `router.tsx`). Перевірка й
+    // далі про те саме — що пастка `*` живе в реальному дереві, — просто
+    // більше не залежить від того, скільки рівнів угорі над нею.
+    const descendants = (routes: RouteObject[]): RouteObject[] =>
+      routes.flatMap((route) => [route, ...descendants(route.children ?? [])]);
+
+    const catchAll = descendants(root?.children ?? []).find((route) => route.path === '*');
     expect(catchAll, 'router.tsx має втратити path: "*" серед дітей кореня "/"').toBeDefined();
   });
 });

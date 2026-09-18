@@ -1,9 +1,10 @@
 ﻿import { Suspense, createElement, lazy, type JSX } from 'react';
 import { Loader, Center } from '@mantine/core';
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
 import { NotFoundPage } from './NotFoundPage';
+import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
   AuditPage,
@@ -104,6 +105,30 @@ function guarded(handle: RouteHandle, element: JSX.Element): JSX.Element {
   return <RouteGuard handle={handle}>{element}</RouteGuard>;
 }
 
+/**
+ * Межа помилки рендера для ВСІХ дочірніх маршрутів `AppLayout` (`D14-11`).
+ *
+ * ⚠ Це ОДИН безшляховий маршрут-обгортка, а не `errorElement` на кожному з
+ * 22 листків. Різниця не косметична: обгортка покриває дітей ЗА ПОБУДОВОЮ —
+ * новий маршрут, доданий у масив нижче, захищений, навіть якщо автор про цю
+ * межу не знав. Перелік із 22 повторень цієї властивості не має: один
+ * пропущений рядок — і саме той маршрут падає так само, як падав увесь
+ * застосунок до цієї зміни, і помітити це можна лише живим переходом.
+ *
+ * ⚠ Обгортка стоїть ПІД `AppLayout`, а не на ньому: React Router підставляє
+ * `errorElement` замість вмісту ТОГО маршруту, що його оголосив. На корені
+ * `/` це знесло б разом із помилкою й навігацію, і шапку — тобто дало б ту
+ * саму втрату застосунку, від якої `D14-11` і рятує. Тут же
+ * `RouteErrorPage` малюється в `<Outlet/>` каркаса: меню й шапка живі, падає
+ * лише вміст.
+ *
+ * ⚠ У безшляхового маршруту немає власного `element` — React Router рендерить
+ * `<Outlet/>` за замовчуванням, тож зайвого рівня в дереві не з'являється.
+ */
+export function withRenderErrorBoundary(children: RouteObject[]): RouteObject[] {
+  return [{ errorElement: <RouteErrorPage />, children }];
+}
+
 const devRoutes = import.meta.env.DEV
   ? [
       {
@@ -127,7 +152,7 @@ export const router = createBrowserRouter([
   {
     path: '/',
     element: <AppLayout />,
-    children: [
+    children: withRenderErrorBoundary([
       // ⚠ Шлях і `handle` кожного маршруту нижче беруться з реєстру
       // (`./routes`) — єдиного місця, де ці рядки набираються руками.
       // `index: true` — виняток: домашній маршрут не має власного сегмента,
@@ -306,6 +331,6 @@ export const router = createBrowserRouter([
       // розробницький дефолтний екран («Unexpected Application Error!») —
       // знайдено живим переходом на неіснуючу адресу, не тестом.
       { path: '*', element: <NotFoundPage /> },
-    ],
+    ]),
   },
 ]);
