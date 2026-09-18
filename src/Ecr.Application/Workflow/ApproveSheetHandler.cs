@@ -43,6 +43,36 @@ public sealed class ApproveSheetHandler(
                 new Dictionary<string, object?> { ["reason"] = decision.Reason.ToString() });
         }
 
+        // ⛔ `DAT-06`. Стан аркуша, запис у аудит і перерахунок статусу зрізу —
+        // ОДНИМ комітом. Транзакції тут не було зовсім, і це не «на всяк
+        // випадок»: `IAuditWriter` пише сирим `INSERT` по тому самому
+        // підключенню й поза транзакцією комітить одразу
+        // (`AuditWriter.CreateCommand`). Тобто `ApprovalStepPassed` лягав у
+        // `aud.SecurityEvent` ОКРЕМИМ комітом, ще до `SaveChangesAsync`, —
+        // і будь-який збій нижче лишав у журналі підпис під кроком, якого не
+        // сталося. Проміжні підписи заводять саме заради відповідальності
+        // (див. коментар нижче), і журнал, що розходиться зі станом, її не
+        // фіксує, а підробляє.
+        //
+        // ⚠ `ExecuteInTransactionAsync` приєднується до вже відкритої
+        // зовнішньої транзакції (`UnitOfWork.cs:174-178`), тож це обгортка, а
+        // не переробка.
+        await uow.ExecuteInTransactionAsync(
+            innerCt => ApproveCoreAsync(documentId, sheetDefId, periodKey, key, approved, reason, userId, innerCt),
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Зміна стану, аудит проміжного кроку і статус зрізу — під транзакцією.</summary>
+    private async Task ApproveCoreAsync(
+        long documentId,
+        int sheetDefId,
+        int periodKey,
+        PeriodKey key,
+        bool approved,
+        string? reason,
+        int userId,
+        CancellationToken ct)
+    {
         var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
         var now = clock.UtcNow;
 

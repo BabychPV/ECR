@@ -90,40 +90,81 @@ public sealed class CreateDocumentHandler(
                 new Dictionary<string, object?> { ["violations"] = violations });
         }
 
-        // BusinessKey складається зі значень колонок IsBusinessKey. До появи
-        // даних значень ще немає, тому ключ будується з проєкту і версії —
-        // унікальність у межах проєкту тримає індекс, а не домовленість.
-        var businessKey = await documents
-            .NextBusinessKeyAsync(projectId, templateVersionId, ct).ConfigureAwait(false);
-
         var now = clock.UtcNow;
-        var document = new Document(projectId, businessKey, userId, now);
 
-        // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
-        // технічного ключа тут не змінюється (директива "людське ім'я
-        // документа"). Порожній перелік мов (об'єкт `{}`) трактується так
-        // само, як відсутність імені — надсилати його як щось відмінне від
-        // null означало б давати другий спосіб сказати те саме.
-        if (name is { Count: > 0 })
+        for (var attempt = 0; ; attempt++)
         {
-            document.SetName(new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
+            // BusinessKey складається зі значень колонок IsBusinessKey. До появи
+            // даних значень ще немає, тому ключ будується з проєкту і версії —
+            // унікальність у межах проєкту тримає індекс, а не домовленість.
+            var businessKey = await documents
+                .NextBusinessKeyAsync(projectId, templateVersionId, ct).ConfigureAwait(false);
+
+            var document = new Document(projectId, businessKey, userId, now);
+
+            // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
+            // технічного ключа тут не змінюється (директива "людське ім'я
+            // документа"). Порожній перелік мов (об'єкт `{}`) трактується так
+            // само, як відсутність імені — надсилати його як щось відмінне від
+            // null означало б давати другий спосіб сказати те саме.
+            if (name is { Count: > 0 })
+            {
+                document.SetName(new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
+            }
+
+            // ⛔ Статус документа НЕ ставиться — його не існує (D-93). Робочий стан
+            // з'явиться у wf.ApprovalState при першому Submit, і буде він на
+            // аркуш × період, а не на документ цілком.
+            foreach (var sheetDefId in sheetDefIds.Distinct())
+            {
+                document.IncludeSheet(sheetDefId);
+            }
+
+            // ⚠ TableInstance створюються ЛІНИВО, при першому записі в період, а
+            // не одразу на всі дванадцять: більшість документів заповнюють не всі
+            // періоди, і дванадцятикратна порожня структура коштувала б місця й
+            // часу на кожному зрізі.
+            await documents.AddAsync(document, ct).ConfigureAwait(false);
+
+            try
+            {
+                await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+            catch (ConcurrencyConflictException e)
+                when (string.Equals(e.ErrorCode, DuplicateKeyCode, StringComparison.Ordinal)
+                      && attempt < MaxKeyRetries)
+            {
+                // ⛔ `DAT-09`. Ключ підбирається запитом `COUNT` + «чи
+                // вільний» — знімком, який два одночасні `POST` бачать
+                // однаковим. Переможений гонитви за `UQ_Document` не має
+                // причини відмовляти користувачеві: його документ законний,
+                // зайнятий лише НОМЕР. Тому — ще спроба з новим ключем
+                // (`DocumentStore.AddAsync` відчіплює програшну сутність, і
+                // `NextBusinessKeyAsync` із другого виклику розкидує номери,
+                // щоб сусідні програвші не зійшлися на тому самому знову).
+                //
+                // ⚠ Спроб скінченна кількість, і після них `409` таки їде
+                // клієнтові. Нескінченний повтор перетворив би зайнятий
+                // діапазон номерів на нескінченний цикл під навантаженням —
+                // відмова, яку видно, краща за запит, який не завершується.
+                continue;
+            }
+
+            return document.Id;
         }
-
-        // ⛔ Статус документа НЕ ставиться — його не існує (D-93). Робочий стан
-        // з'явиться у wf.ApprovalState при першому Submit, і буде він на
-        // аркуш × період, а не на документ цілком.
-        foreach (var sheetDefId in sheetDefIds.Distinct())
-        {
-            document.IncludeSheet(sheetDefId);
-        }
-
-        // ⚠ TableInstance створюються ЛІНИВО, при першому записі в період, а
-        // не одразу на всі дванадцять: більшість документів заповнюють не всі
-        // періоди, і дванадцятикратна порожня структура коштувала б місця й
-        // часу на кожному зрізі.
-        await documents.AddAsync(document, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return document.Id;
     }
+
+    /// <summary>
+    /// Конфлікт унікального ключа документа — той самий код, що його кидає
+    /// <c>DocumentStore.NextBusinessKeyAsync</c>, коли вільного номера немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Літерал, а не <c>ErrorCodes.DocumentSubmitted</c>: константа
+    /// називається за іншою подією того ж коду, і читати тут її ім'я означало б
+    /// читати неправду. Розбіжність назви — окремий борг каталогу.
+    /// </remarks>
+    private const string DuplicateKeyCode = "ECR-DOC-0409";
+
+    /// <summary>Скільки разів пробувати ще раз після програної гонитви за ключем.</summary>
+    private const int MaxKeyRetries = 3;
 }

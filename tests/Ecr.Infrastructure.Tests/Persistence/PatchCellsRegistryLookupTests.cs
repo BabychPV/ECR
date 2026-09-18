@@ -115,8 +115,17 @@ public sealed class PatchCellsRegistryLookupTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
+        // ⛔ Рішення на КОЖНУ пару (рядок, колонка) зрізу — саме так поводиться
+        // справжній `AccessDecisionService.CanEditSliceAsync` (`:280-295`:
+        // подвійний цикл по рядках і колонках, без пропусків). Тут стояв
+        // ПОРОЖНІЙ словник, і тест проходив лише тому, що обробник трактував
+        // відсутність рішення як дозвіл (`DAT-04`). Предмет цього файлу — не
+        // права, тож передумова тепер названа явно, а не отримана з дефекту.
         access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
-              .Returns(new Dictionary<CellAddress, EditDecision>());
+              .Returns(doc.RowIds
+                  .SelectMany(rowId => doc.ColumnDefIds
+                      .Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))
+                  .ToDictionary(address => address, _ => EditDecision.Allow()));
         access.CanCreateRowsAsync(
                   Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
               .Returns(new Dictionary<string, NewRowAccess>());

@@ -10,6 +10,8 @@ using Ecr.Adapters.PiAf;
 using Ecr.Adapters.Sql;
 using Ecr.Api.Health;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Net.Http.Headers;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -119,6 +121,35 @@ builder.Services.AddOpenApi(options =>
 // ⚠ Теги розділяють перевірки за призначенням: /health/live не має права
 // торкатися БД — його опитує оркестратор, і повільна база не привід
 // перезапускати процес, який працює.
+/*
+ * Стиснення відповідей (`RD-01`, `DIRECTIVE-14-ARCH.md` §3.4).
+ *
+ * ⛔ Його не було взагалі: `AddResponseCompression` у `src` — нуль збігів. Зріз
+ * 500×60 — це 0.8–3 МБ JSON, і він їхав мережею як є; SPA-бандл теж.
+ *
+ * ⚠ `EnableForHttps = true` — свідоме рішення, а не недогляд. Стиснення поверх
+ * TLS відкриває BREACH лише тоді, коли тіло відповіді містить СЕКРЕТ і
+ * водночас відбитий у ньому вміст запиту. Тут ні того, ні того: токена
+ * підробки запиту в тілі немає (cookie `HttpOnly` + `SameSite=Strict`), а
+ * відповіді — дані документів того, кому вони й так належать за грантом.
+ * Тому вимикати стиснення на HTTPS означало б платити мегабайтами за загрозу,
+ * якої в цій моделі немає.
+ *
+ * ⚠ Brotli на `Fastest`: на рівні за замовчуванням (`Optimal`) процесор
+ * коштує більше, ніж економія на мережі всередині майданчика.
+ */
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+
+builder.Services.Configure<BrotliCompressionProviderOptions>(
+    options => options.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(
+    options => options.Level = System.IO.Compression.CompressionLevel.Fastest);
+
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
@@ -135,14 +166,50 @@ await app.RunEcrStartupSequenceAsync();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+// ⚠ ПЕРЕД `UseStaticFiles`: інакше бандл і зріз їхали б нестисненими (`RD-01`).
+app.UseResponseCompression();
+
+/*
+ * Заголовки кешу для SPA (`DAT-08`, серверна половина).
+ *
+ * ⛔ Їх не було, і це не питання швидкості, а **білого екрана**. Усі сторінки
+ * клієнта — ліниві чанки з хешем у назві. Після оновлення MSI відкрита вкладка
+ * просить чанк, якого на диску вже немає: `import()` відхиляється, і
+ * застосунок зникає — невідрізнимо від дефекту продукту.
+ *
+ * Тому дві різні політики:
+ *   `/assets/*` — ім'я містить хеш вмісту, отже файл незмінний назавжди;
+ *   `index.html` (зокрема з фолбека нижче) — `no-cache`, бо саме він знає,
+ *   які хеші чинні СЬОГОДНІ. Закешований `index.html` і був би тією вкладкою,
+ *   що вічно просить старий чанк.
+ *
+ * ⚠ Клієнтська половина (`vite:preloadError` → «встановлено нову версію») —
+ * окремо, у `src/Ecr.Web`: сервер не може знати, що в чужій вкладці відкрито.
+ */
+var staticFileOptions = new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        var path = context.Context.Request.Path.Value ?? string.Empty;
+
+        // ⚠ Заголовок пишеться рядком, а не через `CacheControlHeaderValue`:
+        // директива `immutable` не має власної властивості в типізованому
+        // заголовку, і через `Extensions` вона задається як пара «ім'я=значення»,
+        // тобто не тим, чим є. Рядок тут — точніший, а не лінивіший.
+        context.Context.Response.Headers[HeaderNames.CacheControl] =
+            path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase)
+                ? "public, max-age=31536000, immutable"
+                : "no-cache";
+    },
+};
+
 // ⚠ Веб-клієнт (src/Ecr.Web, збирається в wwwroot інсталятором —
 // tools/build-msi.ps1) НЕ вимагає автентифікації сам по собі: сторінку
 // логіну (index.html, JS/CSS) має бути можливо завантажити ДО логіну,
 // інакше завантажити її неможливо взагалі. API нижче захищене окремо,
 // незалежно від цього виклику. У dev/тестах wwwroot не існує — middleware
-// просто нічого не знаходить, без винятку (перевірено: 60/60 Ecr.Api.Tests
-// без wwwroot проходять як і раніше).
-app.UseStaticFiles();
+// просто нічого не знаходить, без винятку.
+app.UseStaticFiles(staticFileOptions);
 
 app.UseAuthentication();
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації

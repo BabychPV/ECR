@@ -1,4 +1,4 @@
-using Ecr.Application.Documents;
+﻿using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Errors;
@@ -86,6 +86,11 @@ public sealed class CellsController(
                     ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⚠ Звірка періоду з тіла з періодом екземпляра таблиці — в ОБРОБНИКУ
+        // (`PatchCellsHandler.LoadContextAsync`, `DAT-04`), а не тут: його
+        // кличе не лише HTTP (`ExcelImporter.ApplyAsync` ходить напряму), і в
+        // контролері правило захищало б один шлях із двох.
 
         // Винятки перетворює ExceptionHandlingMiddleware — ловити їх тут не
         // треба: конфлікт baseVersion має піти клієнту як 409 із переліком.

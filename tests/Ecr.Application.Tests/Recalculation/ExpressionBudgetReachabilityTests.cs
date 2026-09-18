@@ -256,6 +256,15 @@ public sealed class ExpressionBudgetReachabilityTests
         periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
             .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
+        // ⛔ `DAT-02` п. 4 (`S-04`): запис і аудит перерахунку йдуть через
+        // `IUnitOfWork.ExecuteInTransactionAsync`. Без цього налаштування
+        // NSubstitute повертає typed-default і НІКОЛИ не викликає замикання —
+        // `written` лишався б правильним (він рахується ДО запису), а
+        // `Applied()` порожнім, тобто половина тверджень цього класу мовчки
+        // перестала б щось доводити.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
             _audit, new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)), _uow);

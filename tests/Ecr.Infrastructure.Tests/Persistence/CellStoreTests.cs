@@ -233,6 +233,68 @@ public sealed class CellStoreTests(SqlServerFixture sql)
             () => new BulkCellLoader(sql.ConnectionString, 1000).LoadAsync([record], CancellationToken.None));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-3.8")]
+    public async Task Задовгий_рядок_валить_запис_у_СУБД_а_не_лягає_огризком()
+    {
+        // ⛔ `DAT-03`, другий рубіж. Перший — домен
+        // (`ColumnDef.ValidateValue`), і його перевіряє
+        // `ColumnDefValidationTests`. Тут — що буде, якщо його ОБІЙТИ: виклик
+        // сховища напряму, повз усю прикладну перевірку. До виправлення
+        // `AddNullable` ставив параметру `Size = 1000`, тож
+        // `Microsoft.Data.SqlClient` обрізав значення НА КЛІЄНТІ, ще до
+        // відправки. СУБД бачила рівно 1000 припустимих символів, скаржитись
+        // їй було ні на що — і в `doc.CellValue` тихо лягав огризок.
+        // Виміряно мутацією: з цим самим викликом і 1001 символом на вході
+        // виняток не кидався ЗОВСІМ, а `MAX(LEN(ValueString))` у базі
+        // дорівнював рівно 1000.
+        //
+        // ⚠ Саме тому цей тест перевіряє ДВІ речі, а не одну: що виняток є І
+        // що рядка в базі немає. Без другого твердження він лишався б зеленим
+        // на системі, яка кидає виняток уже ПІСЛЯ часткового запису.
+        var (doc, store) = await ArrangeAsync();
+        var ct = CancellationToken.None;
+
+        // Перша колонка будівника — String (`TestDocumentBuilder:86`).
+        var address = new CellAddress(doc.PeriodKey, doc.RowIds[0], doc.ColumnDefIds[0]);
+        var tooLong = new string('я', 1001);
+
+        var error = await Assert.ThrowsAnyAsync<Exception>(
+            () => store.ApplyAsync(new CellChangeSet(
+                doc.TableInstanceId,
+                [new CellRecord(address, doc.TableDefId, new CellValueData { ValueString = tooLong })],
+                [], [doc.RowIds[0]], 1, false), ct));
+
+        // ⚠ Причина названа прямо, а не «щось упало»: без цього тест лишився б
+        // зеленим і на винятку з зовсім іншої причини — наприклад, якби
+        // обірвалося підключення. SQL Server відповідає 2628 («String or
+        // binary data would be truncated in table … column …») або 8152 у
+        // старому режимі сумісності.
+        var sqlError = error as SqlException ?? error.InnerException as SqlException;
+        Assert.True(sqlError is not null, $"Виняток не від СУБД: {error}");
+        Assert.True(
+            sqlError!.Number is 2628 or 8152,
+            $"Очікували помилку усічення (2628/8152), отримали {sqlError.Number}: {sqlError.Message}");
+
+        // ⛔ І в базі НІЧОГО: ні огризка, ні порожнього рядка комірки.
+        Assert.Equal(0, await CountCellsAsync(doc, address, ct));
+
+        // ⚠ Контроль межі: рівно 1000 символів той самий шлях приймає цілком і
+        // читає без утрат. Інакше «падає на 1001» могло б означати «падає на
+        // будь-якому тексті», і тест доводив би зламане сховище, а не межу.
+        var atLimit = new string('я', 1000);
+        await store.ApplyAsync(new CellChangeSet(
+            doc.TableInstanceId,
+            [new CellRecord(address, doc.TableDefId, new CellValueData { ValueString = atLimit })],
+            [], [doc.RowIds[0]], 1, false), ct);
+
+        var read = await store.ReadCellsAsync([address], ct);
+        Assert.Equal(atLimit, read[address].ValueString);
+        Assert.Equal(1000, read[address].ValueString!.Length);
+    }
+
     /// <summary>
     /// Створює другу таблицю з колонкою і повертає її <c>ColumnDefId</c>.
     /// </summary>

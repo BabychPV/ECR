@@ -16,8 +16,40 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     private const byte RequiresOne = 1;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ `DAT-09`. Перед додаванням відчіплюється ПОПЕРЕДНІЙ документ, що
+    /// лишився в трекері як <c>Added</c>. Це рівно шлях повтору після
+    /// програної гонитви за <c>UQ_Document</c>: невдалий <c>SaveChanges</c>
+    /// НЕ прибирає сутність із трекера, тож наступний <c>SaveChanges</c> у
+    /// тому самому запиті повторив би ТОЙ САМИЙ конфліктний <c>INSERT</c> із
+    /// тим самим ключем — скільки б ключів обробник не підбирав.
+    ///
+    /// ⚠ Аркуші складу відчіплюються ЯВНО: EF не відчіплює залежних разом із
+    /// принципалом, і вони лишилися б <c>Added</c> із посиланням на сутність,
+    /// якої в трекері вже немає (помилка зовнішнього ключа замість
+    /// повторної вставки).
+    ///
+    /// ⚠ Область — один HTTP-запит (сховище <c>Scoped</c>), і в ньому
+    /// створюється РІВНО один документ. Тому «попередній доданий документ»
+    /// не може бути чиєюсь чужою незбереженою роботою.
+    /// </remarks>
     public Task AddAsync(Document document, CancellationToken ct)
     {
+        foreach (var stale in db.ChangeTracker.Entries<Document>()
+                     .Where(e => e.State == EntityState.Added)
+                     .ToList())
+        {
+            // ⚠ Знімок списку, а не сам список: відчеплення аркуша тягне
+            // fixup EF, який ВИЛУЧАЄ його з навігації принципала — обхід
+            // по живій колекції падає «Collection was modified».
+            foreach (var sheet in stale.Entity.Sheets.ToList())
+            {
+                db.Entry(sheet).State = EntityState.Detached;
+            }
+
+            stale.State = EntityState.Detached;
+        }
+
         db.Documents.Add(document);
         return Task.CompletedTask;
     }
@@ -180,6 +212,27 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ `DAT-09`. <c>COUNT</c> + перевірка «чи вільний» — це TOCTOU: два
+    /// одночасні <c>POST</c> у той самий проєкт бачать той самий стан бази і
+    /// повертаються з ОДНАКОВИМ ключем. Унікальність тримає індекс, тож один
+    /// із них програє на <c>UQ_Document</c>; переможеному
+    /// <c>CreateDocumentHandler</c> дає ще кілька спроб.
+    ///
+    /// ⛔ Але самого повтору мало: сховище живе один HTTP-запит, тож ДРУГИЙ
+    /// виклик цього методу в межах одного запиту — це за визначенням повтор
+    /// після програшу. Усі програвші читають той самий (уже новий) <c>COUNT</c>
+    /// і без розкиду зійшлися б на тому самому номері ще раз — і так щоразу,
+    /// доки не скінчаться спроби. Тому з другого виклику початок пошуку
+    /// зсувається випадково, і розкид росте з кожною спробою: десять
+    /// одночасних створень розходяться за один-два повтори, а не
+    /// вишиковуються в чергу довжиною в десять.
+    ///
+    /// ⚠ Перший виклик лишається строго послідовним (<c>COUNT + 1</c>):
+    /// звичайне, неконкурентне створення документа отримує той самий
+    /// впізнаваний номер, що й до цієї правки. Дірки в нумерації з'являються
+    /// лише там, де без них був би <c>500</c> або відмова.
+    /// </remarks>
     public async Task<string> NextBusinessKeyAsync(
         int projectId, int templateVersionId, CancellationToken ct)
     {
@@ -191,7 +244,16 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .CountAsync(d => d.ProjectId == projectId, ct)
             .ConfigureAwait(false);
 
-        for (var attempt = used + 1; attempt < used + MaxKeyAttempts; attempt++)
+        // ⚠ Розкид на повторі — від ОДИНИЦІ, не від нуля: нульовий зсув
+        // повернув би рівно той номер, на якому запит щойно програв, тобто
+        // повтор без зсуву. Верхня межа росте з кожним повтором, щоб
+        // розійшлися й ті, хто програв двічі.
+        var retry = _keyRequests++;
+        var spread = retry == 0
+            ? 0
+            : System.Random.Shared.Next(1, Math.Min(MaxKeySpread, KeySpreadStep << (retry - 1)) + 1);
+
+        for (var attempt = used + 1 + spread; attempt < used + spread + MaxKeyAttempts; attempt++)
         {
             var candidate = string.Create(
                 CultureInfo.InvariantCulture, $"P{projectId}-V{templateVersionId}-{attempt:D4}");
@@ -251,22 +313,52 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ Документ береться ВІДСТЕЖУВАНИМ: «дотик» — це зміна сутності, і
-    /// зберегти її має той самий <c>SaveChanges</c>, що й дані, які його
-    /// викликали. З <c>AsNoTracking</c> виклик компілювався б і не робив
-    /// нічого — рівно той вид дефекту, від якого весь `H-23`.
+    /// ⛔ `DAT-01`. Раніше документ брався ВІДСТЕЖУВАНИМ, і «дотик» їхав у
+    /// базу звичайним <c>SaveChanges</c> — тобто
+    /// <c>UPDATE doc.Document … WHERE RowVersion = @rv</c>, бо
+    /// <c>RowVersion</c> оголошено <c>IsRowVersion()</c>
+    /// (<c>DocumentConfiguration.cs:165</c>). Наслідок: два оператори, що
+    /// пишуть у РІЗНІ таблиці одного документа, конфліктували на порожньому
+    /// місці. Другий <c>PATCH</c> чекав X-замка на рядку документа, після
+    /// коміту першого отримував 0 оновлених рядків →
+    /// <c>DbUpdateConcurrencyException</c> → <c>ECR-CELL-0409</c>, і його
+    /// транзакція відкочувалася ЦІЛКОМ. Рядок документа був точкою
+    /// серіалізації всіх операторів документа.
     ///
-    /// ⚠ Документа немає — тихо нічого. Зміна комірок неіснуючого документа
-    /// відхиляється раніше, зовнішнім ключем; кидати ще й тут означало б
-    /// повідомляти про ту саму помилку двічі й різними словами.
+    /// ⛔ Тому тут <c>ExecuteUpdateAsync</c> БЕЗ читання і БЕЗ предиката
+    /// версії: «дотик» — це не правка документа, за яку хтось змагається, а
+    /// відмітка часу. <c>RowVersion</c> документа лишається чинним для
+    /// СПРАВЖНІХ правок документа (склад аркушів, ім'я) — його не прибрано.
+    ///
+    /// ⚠ Вікно <see cref="TouchWindowSeconds"/>: якщо документ уже позначено
+    /// щойно, оператор не бере X-замок на його рядок узагалі — 0 оновлених
+    /// рядків тут НЕ помилка, а саме те, чого ми хочемо. Дата зміни при цьому
+    /// не бреше більш ніж на це вікно.
+    ///
+    /// ⚠ Документа немає — тихо нічого (0 рядків). Зміна комірок неіснуючого
+    /// документа відхиляється раніше, зовнішнім ключем; кидати ще й тут
+    /// означало б повідомляти про ту саму помилку двічі й різними словами.
+    ///
+    /// ⚠ <c>ExecuteUpdateAsync</c> приєднується до вже відкритої
+    /// ambient-транзакції того самого <c>DbContext</c> (`Q-243`), тобто на
+    /// гарячому шляху (<c>PatchCellsHandler</c>) «дотик» і далі комітиться
+    /// разом із даними. Поза транзакцією (<c>CreateRowHandler</c>) він
+    /// автокомітний — рівно як сусідній <c>RowStore.TouchRowsAsync</c>, який
+    /// у тому самому обробнику вже виконався до цього рядка.
     /// </remarks>
-    public async Task TouchAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct)
+    public Task TouchAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct)
     {
-        var document = await db.Documents
-            .FirstOrDefaultAsync(d => d.Id == documentId, ct)
-            .ConfigureAwait(false);
+        // Поріг рахується ДО виразу: `utcNow.AddSeconds(-5)` усередині дерева
+        // виразів EF довелося б перекладати в SQL, а тут це просто константа.
+        var threshold = utcNow.AddSeconds(-TouchWindowSeconds);
 
-        document?.Touch(userId, utcNow);
+        return db.Documents
+            .Where(d => d.Id == documentId && d.ModifiedAt < threshold)
+            .ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(d => d.ModifiedAt, utcNow)
+                    .SetProperty(d => d.ModifiedByUserId, userId),
+                ct);
     }
 
     /// <summary>Стан аркушів за період; порожньо, якщо період не вказано.</summary>
@@ -358,4 +450,32 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
     /// <summary>Скільки номерів перебирати, шукаючи вільний ключ.</summary>
     private const int MaxKeyAttempts = 1000;
+
+    /// <summary>Базовий розкид номера на першому повторі (`DAT-09`).</summary>
+    private const int KeySpreadStep = 32;
+
+    /// <summary>Стеля розкиду: далі номер уже нічого не каже людині.</summary>
+    private const int MaxKeySpread = 256;
+
+    /// <summary>
+    /// Скільки разів у цьому запиті вже просили ключ (`DAT-09`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Поле екземпляра, а не статичне: сховище <c>Scoped</c>, тобто один
+    /// екземпляр на HTTP-запит. Статичний лічильник розкидував би номери й
+    /// там, де жодної гонитви немає.
+    /// </remarks>
+    private int _keyRequests;
+
+    /// <summary>
+    /// Вікно «дотику» документа в секундах (`DAT-01`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Компроміс названий прямо: дата зміни документа може відставати від
+    /// правди щонайбільше на ці секунди. Платня за це — відсутність X-замка
+    /// на рядку документа в переважній більшості <c>PATCH</c>, тобто
+    /// відсутність точки, де всі оператори документа стають у чергу один за
+    /// одним.
+    /// </remarks>
+    private const int TouchWindowSeconds = 5;
 }

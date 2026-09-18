@@ -357,7 +357,7 @@ public sealed class RecalculationService(
             return 0;
         }
 
-        var values = await LoadValuesAsync(instance, ct).ConfigureAwait(false);
+        var (values, stored) = await LoadValuesAsync(instance, ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -395,7 +395,7 @@ public sealed class RecalculationService(
                 byInstance[target] = sink = [];
             }
 
-            Evaluate(owner.Table, owner.Formula, rows, periodKey, context, values, sink);
+            Evaluate(owner.Table, owner.Formula, rows, periodKey, context, values, stored, sink);
         }
 
         var written = byInstance.Values.Sum(list => list.Count);
@@ -432,43 +432,86 @@ public sealed class RecalculationService(
         // ⚠ Один запис на екземпляр: перерахунок торкається десятків комірок,
         // і окрема транзакція на кожну перетворила б фонову задачу на джерело
         // блокувань саме тоді, коли документ активно правлять.
-        foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
+        //
+        // ⛔ Директива №14 частина 3, `DAT-02` п. 4 (він же `S-04`). До цього
+        // тіло циклу давало ТРИ незалежні коміти на кожен екземпляр:
+        // `ApplyAsync` комітив власною короткою транзакцією (ambient не було —
+        // `NormalizedCellStore.ApplyAsync:257`), `WriteCellChangesAsync` писав
+        // аудит поза нею, а `SaveChanges` закривав усе наприкінці. Збій між
+        // ними лишав змінені числа БЕЗ рядка аудиту — тобто похідне значення,
+        // яке ніхто не пояснить, і це рівно той стан, через який аудит сюди
+        // взагалі заводили. Тепер `ApplyAsync` бачить ambient-транзакцію і
+        // приєднується до неї (`NormalizedCellStore.ApplyAsync:243-252`):
+        // значення й аудит лягають ОДНИМ комітом або не лягають зовсім.
+        await uow.ExecuteInTransactionAsync(async token =>
         {
-            // ⚠ Старі значення читаються ДО запису — після `ApplyAsync` їх уже
-            // немає ніде, а саме вони й становлять половину запису аудиту
-            // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
-            var previous = await cellStore
-                .ReadCellsAsync([.. records.Select(r => r.Address)], ct)
-                .ConfigureAwait(false);
+            foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
+            {
+                // ⚠ Старі значення читаються ДО запису — після `ApplyAsync` їх уже
+                // немає ніде, а саме вони й становлять половину запису аудиту
+                // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
+                var previous = await cellStore
+                    .ReadCellsAsync([.. records.Select(r => r.Address)], token)
+                    .ConfigureAwait(false);
 
-            await cellStore.ApplyAsync(
-                new CellChangeSet(
-                    target,
-                    records,
-                    Deletes: [],
-                    TouchedRowIds: [.. records.Select(u => u.Address.TableRowId).Distinct()],
-                    ChangedByUserId: SystemUserId,
-                    isLateEdit),
-                ct).ConfigureAwait(false);
+                await cellStore.ApplyAsync(
+                    new CellChangeSet(
+                        target,
+                        records,
+                        Deletes: [],
 
-            var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(target, out var found)
-                ? found
-                : new Dictionary<long, string>();
+                        // ⛔ `D14-07` (директива №14 частина 3, `DAT-02` п. 3).
+                        // Доти сюди йшли ВСІ рядки батчу, і `TouchRowsAsync`
+                        // піднімав `RowVersion` кожному — включно з рядками,
+                        // де перерахунок нічого не змінив. Наслідок бачив не
+                        // перерахунок, а людина: її сітка тримала версії,
+                        // видані попереднім `PATCH`, фонова задача підміняла
+                        // їх усі, і наступне автозбереження діставало
+                        // `ECR-CELL-0409` на порожньому місці.
+                        //
+                        // ⚠ `RowVersion` стереже ВВЕДЕНЕ: два оператори за
+                        // одну комірку. Обчислена колонка має тип `Formula`,
+                        // писати в неї руками сервер відмовляє
+                        // (`ECR-CELL-4221`), тож конкурувати за неї нема кому,
+                        // і версія рядка про неї нічого не каже. Перевірено
+                        // перед зміною: `RowVersion` не входить у жоден
+                        // `ETag` (у зрізу таблиці `ETag` немає взагалі), а
+                        // єдиний його споживач — `baseVersion` оптимістичного
+                        // блокування (`PatchCellsHandler`, `useCellPatch.ts`).
+                        // Гонку двох перерахунків одного документа закриває
+                        // `MI-02` (черга з виключністю на ціль), а не версія
+                        // рядка: вона її й не закривала — обидва прогони
+                        // однаково пишуть без `ExpectedRowVersions`.
+                        TouchedRowIds: [],
+                        ChangedByUserId: SystemUserId,
+                        isLateEdit),
+                    token).ConfigureAwait(false);
 
-            await audit.WriteCellChangesAsync(
-                [.. records.Select(r => new CellChangeRecord(
-                    now, r.Address, instance.DocumentId,
-                    RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
-                    OldValue: Was(previous, r.Address),
-                    NewValue: Describe(r.Value),
-                    SystemUserId,
-                    Origin: "Recalculation",
-                    isLateEdit,
-                    CorrelationId: null))],
-                ct).ConfigureAwait(false);
-        }
+                var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(target, out var found)
+                    ? found
+                    : new Dictionary<long, string>();
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `records`, тобто по
+                // тому, що ПІШЛО в `upserts`. Фільтр незміненого стоїть в
+                // `Evaluate` — до того, як комірка потрапить у цей список, —
+                // саме тому, щоб журнал і сховище не могли розійтися: другого
+                // переліку, який довелося б тримати в тому самому стані, тут
+                // немає.
+                await audit.WriteCellChangesAsync(
+                    [.. records.Select(r => new CellChangeRecord(
+                        now, r.Address, instance.DocumentId,
+                        RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
+                        OldValue: Was(previous, r.Address),
+                        NewValue: Describe(r.Value),
+                        SystemUserId,
+                        Origin: "Recalculation",
+                        isLateEdit,
+                        CorrelationId: null))],
+                    token).ConfigureAwait(false);
+            }
+
+            await uow.SaveChangesAsync(token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return written;
     }
@@ -487,6 +530,7 @@ public sealed class RecalculationService(
         PeriodKey periodKey,
         SliceEvaluationContext context,
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
+        IReadOnlyDictionary<CellKey, CellValueData> stored,
         List<CellRecord> upserts)
     {
         var parsed = formulaEngine.Parse(formula.Expression, formula.Dialect);
@@ -525,7 +569,27 @@ public sealed class RecalculationService(
                 continue;
             }
 
-            values[new CellKey(0, table.Id, rowKey, columnDefId)] = result.Value;
+            var key = new CellKey(0, table.Id, rowKey, columnDefId);
+
+            // ⚠ Значення контексту оновлюється ЗАВЖДИ, навіть коли запису не
+            // буде: наступна формула читає його зі спільного словника, і
+            // «нічого не змінилось» для сховища не означає «нічого не класти»
+            // для каскаду. Різниця тут нульова за побудовою (значення те
+            // саме), але залежність порядку — ні, і покласти цей рядок після
+            // `continue` означало б завести її наново.
+            values[key] = result.Value;
+
+            // ⛔ Директива №14 частина 3, `DAT-02` п. 1. Незмінене не
+            // пишеться. Колонкова формула віддає ціль у КОЖНОМУ рядку
+            // (`Targets` нижче), тож без цієї перевірки правка однієї комірки
+            // давала до 500 рядків `MERGE`, стільки ж рядків аудиту, де
+            // `старе = нове`, і — до п. 3 — стільки ж піднятих `RowVersion`.
+            // Порівняння винесене в `CellValueComparison.AreEqual` і
+            // перевірене окремо: саме воно вирішує, що таке «те саме».
+            if (CellValueComparison.AreEqual(stored.GetValueOrDefault(key), data))
+            {
+                continue;
+            }
 
             upserts.Add(new CellRecord(
                 new CellAddress(periodKey, rowId, columnDefId), table.Id, data));
@@ -585,13 +649,27 @@ public sealed class RecalculationService(
     /// сталася правка: формула цього аркуша має право читати сусідню таблицю,
     /// і без її значень результат був би тихо іншим.
     /// </remarks>
-    private async Task<Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>> LoadValuesAsync(
+    private async Task<(
+        Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> Values,
+        Dictionary<CellKey, CellValueData> Stored)> LoadValuesAsync(
         TableInstanceRef instance, CancellationToken ct)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
+
+        // ⛔ Директива №14 частина 3, `DAT-02` п. 1: щоб не писати незмінене,
+        // потрібне саме ЗБЕРЕЖЕНЕ значення комірки, а не його подання як
+        // значення виразу. `FromCellValue` втрачає рівно те, за чим тут
+        // доведеться відрізняти: явну порожнечу (`IsEmpty`) від відсутньої
+        // комірки і обчислене число від уведеного людиною (`IsCalculated`).
+        // Другого походу в базу це не коштує — обидві мапи наповнює той самий
+        // прохід по вже прочитаному зрізу.
+        //
+        // ⚠ Лише ПОТОЧНИЙ період (`offset: 0`): писати перерахунок може тільки
+        // в нього, і порівнювати з чимось із минулого місяця не було б із чим.
+        var stored = new Dictionary<CellKey, CellValueData>();
         var periodKey = new PeriodKey(instance.PeriodKey);
 
-        await LoadPeriodAsync(values, instance.DocumentId, periodKey, offset: 0, ct).ConfigureAwait(false);
+        await LoadPeriodAsync(values, stored, instance.DocumentId, periodKey, offset: 0, ct).ConfigureAwait(false);
 
         // ⛔ Попередній період завантажується, коли він існує. `[Period:-1]` у
         // січні — це `null` за визначенням (`02b` §3.2), а не помилка: січень
@@ -600,15 +678,26 @@ public sealed class RecalculationService(
         if (periodKey.Sequence > 1)
         {
             var previous = new PeriodKey(periodKey.Value - 1);
-            await LoadPeriodAsync(values, instance.DocumentId, previous, offset: -1, ct).ConfigureAwait(false);
+            await LoadPeriodAsync(values, stored: null, instance.DocumentId, previous, offset: -1, ct)
+                .ConfigureAwait(false);
         }
 
-        return values;
+        return (values, stored);
     }
 
     /// <summary>Значення всіх таблиць документа за один період.</summary>
+    /// <param name="values">Значення як входи виразів.</param>
+    /// <param name="stored">
+    /// Ті самі комірки в тому вигляді, у якому вони лежать у базі; <c>null</c>
+    /// — не збирати (суміжний період, у який перерахунок не пише).
+    /// </param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="offset">Зсув періоду відносно поточного.</param>
+    /// <param name="ct">Токен скасування.</param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
+        Dictionary<CellKey, CellValueData>? stored,
         long documentId,
         PeriodKey periodKey,
         int offset,
@@ -642,8 +731,13 @@ public sealed class RecalculationService(
                     continue;
                 }
 
-                values[new CellKey(offset, table.TableDefId, rowKey, cell.Address.ColumnDefId)] =
-                    FromCellValue(cell.Value);
+                var key = new CellKey(offset, table.TableDefId, rowKey, cell.Address.ColumnDefId);
+                values[key] = FromCellValue(cell.Value);
+
+                if (stored is not null)
+                {
+                    stored[key] = cell.Value;
+                }
             }
         }
     }

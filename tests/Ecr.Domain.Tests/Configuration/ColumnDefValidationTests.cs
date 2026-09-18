@@ -131,4 +131,36 @@ public sealed class ColumnDefValidationTests
         Assert.Null(narrow.ValidateValue(new CellValueData { ValueNumeric = 123.45m }));
         Assert.Equal("ECR-CELL-0422", narrow.ValidateValue(new CellValueData { ValueNumeric = 1234.56m }));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.8")]
+    public void Рядок_довший_за_стовпець_відхиляється_а_не_обрізається()
+    {
+        // ⛔ `DAT-03`. Межу `nvarchar(1000)` не перевіряв НІХТО: ані домен, ані
+        // прикладний шар. Її «тримав» третій аргумент
+        // `SqlParameter` у `NormalizedCellStore.AddNullable` — а він не
+        // перевіряє, він ОБРІЗАЄ на клієнті. Наслідок: `200 OK`, огризок у
+        // базі й той самий огризок в аудиті.
+        var column = Column(CellDataType.String, "Note");
+
+        // Рівно межа — припустимо: правило про «довше», а не «біля межі».
+        var atLimit = new string('я', ColumnDef.MaxStringLength);
+        Assert.Null(column.ValidateValue(new CellValueData { ValueString = atLimit }));
+
+        // Один символ понад межу — відмова.
+        var overLimit = new string('я', ColumnDef.MaxStringLength + 1);
+        Assert.Equal("ECR-CELL-0422", column.ValidateValue(new CellValueData { ValueString = overLimit }));
+
+        // ⚠ Значення НЕ мутувало: домен відмовляє, а не «виправляє». Обрізати
+        // й прийняти — це рівно той дефект, який тут закривається, тільки
+        // переїхавши на рівень вище.
+        Assert.Equal(ColumnDef.MaxStringLength + 1, overLimit.Length);
+
+        // ⚠ Константа звірена з описом стовпця (`CellValueConfiguration:40`,
+        // `HasMaxLength(1000)`). Розбіжність між ними означала б, що домен
+        // пускає те, чого не приймає база, — тобто міняє тиху втрату на
+        // гучний збій на бойовому записі.
+        Assert.Equal(1000, ColumnDef.MaxStringLength);
+    }
 }
