@@ -592,9 +592,35 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         parameter.Value = value.HasValue ? value.Value : DBNull.Value;
     }
 
+    /// <summary>Рядковий параметр без власної стелі довжини.</summary>
+    /// <remarks>
+    /// ⛔ <c>DAT-03</c>. Тут стояло <c>Parameters.Add(name, type, 1000)</c>, і
+    /// саме цей третій аргумент робив утрату даних ТИХОЮ:
+    /// <c>SqlParameter</c> із заданим <c>Size</c> обрізає довше значення на
+    /// клієнті, ще до відправки. СУБД отримувала рівно 1000 припустимих
+    /// символів, тож <c>nvarchar(1000)</c> не мав на що скаржитись. Виміряно
+    /// мутацією: <c>ApplyAsync</c> з 1001 символом проходив БЕЗ винятку, а в
+    /// <c>doc.CellValue</c> лишався рядок рівно на 1000 символів.
+    ///
+    /// ⚠ На шляху <c>PATCH</c> користувач при цьому отримував не <c>200</c>,
+    /// а <c>500</c>: <c>AuditWriter</c> пише <c>NewValue</c> без <c>Size</c>,
+    /// тож ПОВНЕ значення впиралося в <c>aud.CellChange.NewValue</c> і валило
+    /// батч помилкою 2628 — з текстом про журнал аудиту, а не про завеликий
+    /// ввід. Тобто тихе обрізання тут було прикрите гучним збоєм не за
+    /// адресою; межу тепер тримає домен, до цього рядка задовге значення не
+    /// доходить узагалі.
+    ///
+    /// ⚠ <c>Size = -1</c> (<c>nvarchar(max)</c>) НЕ розширює стовпець і не
+    /// дозволяє писати довше: він лише знімає мовчазне обрізання на клієнті,
+    /// тож задовге значення доїжджає до СУБД і падає помилкою усічення.
+    /// Межу тримає домен (<see
+    /// cref="Ecr.Domain.Entities.Configuration.ColumnDef.MaxStringLength"/>),
+    /// а це — другий рубіж на випадок, коли перевірку обійшли: гучна відмова
+    /// замість тихого огризка.
+    /// </remarks>
     private static void AddNullable(SqlCommand command, string name, string? value, SqlDbType type)
     {
-        var parameter = command.Parameters.Add(name, type, 1000);
+        var parameter = command.Parameters.Add(name, type, -1);
         parameter.Value = (object?)value ?? DBNull.Value;
     }
 }

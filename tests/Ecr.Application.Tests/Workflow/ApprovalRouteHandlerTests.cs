@@ -160,6 +160,18 @@ public sealed class ApprovalRouteHandlerTests
         var uow = Substitute.For<IUnitOfWork>();
         var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
 
+        // ⛔ Той самий клас дефекту в ТЕСТІ, що вже описаний у конструкторі
+        // `SubmitApproveTests`. `ApproveSheetHandler` тепер виконує зміну
+        // стану, аудит і статус зрізу одним замиканням через
+        // `IUnitOfWork.ExecuteInTransactionAsync` (`DAT-06`). Без цього
+        // налаштування NSubstitute повертає typed-default
+        // (`Task.CompletedTask`) і НІКОЛИ не викликає передане замикання —
+        // тест мовчки перестав би щось доводити (виміряно: падав на
+        // `Assert.Single(events)` з порожньою колекцією). Тут — виклик
+        // замикання НАПРАВДУ, тим самим `ct`, що йому передали.
+        uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+           .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         var now = new DateTime(2026, 3, 10, 9, 0, 0, DateTimeKind.Utc);
         clock.UtcNow.Returns(now);
 

@@ -239,6 +239,157 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         Assert.Equal("ECR-ROW-0409", conflict.GetProperty("errorCode").GetString());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-3.8")]
+    public async Task Рядок_довший_за_1000_символів_відхиляється_422_і_в_базу_не_потрапляє()
+    {
+        // ⛔ `DAT-03`, шлях користувача. До виправлення цей самий запит давав
+        // `500 ECR-SYS-0500` — і це не те, чого чекала директива («200 OK і
+        // огризок»), тому названо тут дослівно, виміряно мутацією.
+        // `NormalizedCellStore.AddNullable` задавав параметру `Size = 1000`,
+        // тож у `doc.CellValue` значення обрізалося МОВЧКИ; але наступним
+        // кроком того самого батчу `AuditWriter` пише `NewValue` БЕЗ `Size`,
+        // і ПОВНЕ значення впиралося в `aud.CellChange.NewValue` (теж
+        // `nvarchar(1000)`) — помилка 2628, відкат, `500`.
+        //
+        // ⚠ Тобто симптом був гірший за обидва очікувані: тиха втрата в
+        // сховищі, прикрита збоєм, який називає журнал аудиту замість
+        // завеликого вводу. Для оператора це «система зламалася», а не
+        // «текст задовгий», — і виправити свій ввід він з такої відповіді не
+        // може. Цей тест фіксує обидві половини: відмова тепер на межі, з
+        // кодом про ДАНІ, і в базі порожньо.
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        var textColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .First();
+
+        var rowKey = $"LEN{Guid.NewGuid():N}"[..12];
+        var tooLong = new string('я', 1001);
+
+        var rejected = await client.PatchAsJsonAsync(patchUri, new
+        {
+            tableInstanceId = scenario.Document.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows = new[]
+            {
+                new
+                {
+                    rowKey,
+                    baseVersion = (string?)null,
+                    cells = new object[] { new { columnCode = textColumn, value = (object)tooLong } },
+                },
+            },
+        }).ConfigureAwait(true);
+
+        var body = await rejected.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(
+            rejected.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"PATCH із 1001 символом: очікували 422, отримали {rejected.StatusCode}\n{body}\n{app.ErrorsText}");
+
+        // ⚠ Код відмови названий: `422` сам по собі буває і від сусідніх
+        // перевірок (невідома колонка, тип), і тест, який дивиться лише на
+        // статус, лишався б зеленим, якби запит відхилили з іншої причини.
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-CELL-0422", problem.GetProperty("errorCode").GetString());
+
+        // ⚠ `messageKey` перевіряється теж, і це не формальність: саме за ним
+        // `ExceptionHandlingMiddleware.ResolveGenericMessageAsync` бере текст
+        // із `sys_ecr.UiString` мовою користувача (`Q-314`). Ключа, який казав
+        // би саме «текст задовгий», у каталозі (`09-seed.sql`) НЕМАЄ —
+        // редагувати сід у цій зміні не можна, тож відмова їде під наявним
+        // спільним ключем перевірки, а сама комірка названа в `cells`.
+        Assert.Equal(
+            "err.ECR-CELL-0422.validationBlocked",
+            problem.GetProperty("messageKey").GetString());
+
+        // ⚠ І колонка названа поіменно — інакше клієнт знав би, що «щось у
+        // батчі не так», але не яка саме клітинка.
+        //
+        // ⛔ А от `rowKey` тут `null`, і це зафіксовано як Є, а не обійдено:
+        // `PatchCellsHandler` бере ключ рядка з мапи `byRowId`, а рядок цього
+        // батчу щойно СТВОРЮЄТЬСЯ і в ній його ще немає. Тобто на шляху
+        // «новий рядок + погане значення» відмова називає колонку, але не
+        // рядок. Це не в межах `DAT-03` (файл обробника — чужий), тож тут
+        // лише закріплено поточну поведінку, щоб її зміну було видно.
+        var cell = problem.GetProperty("cells").EnumerateArray().Single();
+        Assert.Equal(textColumn, cell.GetProperty("columnCode").GetString());
+        Assert.Equal(JsonValueKind.Null, cell.GetProperty("rowKey").ValueKind);
+
+        // ⛔ І головне: у базі НІЧОГО. Це те твердження, яке падало до
+        // виправлення, — тоді тут лежав огризок на 1000 символів.
+        await using (var db = scenario.Builder.CreateContext())
+        {
+            var stored = await db.CellValues
+                .AsNoTracking()
+                .CountAsync(c => c.ColumnDefId == scenario.Document.ColumnDefIds[0]
+                                 && c.PeriodKeyValue == scenario.PeriodKey)
+                .ConfigureAwait(true);
+
+            Assert.Equal(0, stored);
+        }
+
+        // ⚠ Контроль межі: рівно 1000 символів приймаються, доїжджають до бази
+        // цілими і читаються назад БЕЗ утрати. Без цієї половини тест доводив
+        // би лише «текст не пишеться», а не «межа там, де стовпець».
+        //
+        // ⛔ Ключ рядка тут ІНШИЙ, і це не косметика. Відхилений батч вище
+        // усе одно СТВОРИВ рядок: `PatchCellsHandler` кличе `CreateRowsAsync`
+        // всередині `BuildCellChangesAsync`, тобто ДО відмов — це окремий
+        // дефект `DAT-04`, і він не в межах цієї зміни. Повторний `PATCH` із
+        // тим самим ключем і `baseVersion = null` через це впирається в
+        // `ECR-ROW-0409` (виміряно прогоном). Обходити чужий дефект мовчки не
+        // можна, тож він названий тут прямо.
+        var atLimit = new string('я', 1000);
+        var secondRow = $"LEN{Guid.NewGuid():N}"[..12];
+
+        var accepted = await client.PatchAsJsonAsync(patchUri, new
+        {
+            tableInstanceId = scenario.Document.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows = new[]
+            {
+                new
+                {
+                    rowKey = secondRow,
+                    baseVersion = (string?)null,
+                    cells = new object[] { new { columnCode = textColumn, value = (object)atLimit } },
+                },
+            },
+        }).ConfigureAwait(true);
+
+        Assert.True(
+            accepted.StatusCode == HttpStatusCode.OK,
+            $"PATCH із 1000 символами: {accepted.StatusCode}\n"
+            + $"{await accepted.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        var row = await ReadRowAsync(client, sliceUri, secondRow, app).ConfigureAwait(true);
+        var readBack = row.GetProperty("cells").GetProperty(textColumn).GetString();
+
+        Assert.Equal(1000, readBack!.Length);
+        Assert.Equal(atLimit, readBack);
+    }
+
     /// <summary>Рядок зрізу за ключем; відсутність рядка — падіння з поясненням.</summary>
     private static async Task<JsonElement> ReadRowAsync(
         HttpClient client, Uri sliceUri, string rowKey, EcrApiFactory app)
