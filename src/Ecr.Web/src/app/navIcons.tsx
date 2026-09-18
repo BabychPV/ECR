@@ -188,6 +188,17 @@ function AuditIcon(): JSX.Element {
   );
 }
 
+/** Consistency issues — трикутник попередження з окликом. */
+function ConsistencyIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M12 4 21 19.5H3L12 4Z" />
+      <path d="M12 10v4" />
+      <path d="M12 17h.01" />
+    </Icon>
+  );
+}
+
 /** Interface texts — репліка з рядками тексту (каталог рядків). */
 function UiStringsIcon(): JSX.Element {
   return (
@@ -237,6 +248,7 @@ export const navIcons: Record<string, () => JSX.Element> = {
   jobs: JobsIcon,
   snapshots: SnapshotsIcon,
   audit: AuditIcon,
+  consistency: ConsistencyIcon,
   uiStrings: UiStringsIcon,
   health: HealthIcon,
   myGroups: MyGroupsIcon,

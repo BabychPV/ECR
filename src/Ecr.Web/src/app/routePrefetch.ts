@@ -113,6 +113,11 @@ export const AuditPage = lazy(AuditPageLoader);
 const UnitsPageLoader = async () => ({ default: (await import('@/pages/admin/UnitsPage')).UnitsPage });
 export const UnitsPage = lazy(UnitsPageLoader);
 
+const ConsistencyIssuesPageLoader = async () => ({
+  default: (await import('@/pages/admin/ConsistencyIssuesPage')).ConsistencyIssuesPage,
+});
+export const ConsistencyIssuesPage = lazy(ConsistencyIssuesPageLoader);
+
 const UiStringsPageLoader = async () => ({
   default: (await import('@/pages/admin/UiStringsPage')).UiStringsPage,
 });
@@ -154,6 +159,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminSnapshots.id]: SnapshotsPageLoader,
   [routes.adminAudit.id]: AuditPageLoader,
   [routes.adminUnits.id]: UnitsPageLoader,
+  [routes.adminConsistency.id]: ConsistencyIssuesPageLoader,
   [routes.adminUiStrings.id]: UiStringsPageLoader,
   [routes.adminHealth.id]: HealthPageLoader,
 };

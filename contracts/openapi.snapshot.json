@@ -1012,6 +1012,77 @@
         ],
         "type": "object"
       },
+      "ConsistencyIssueView": {
+        "description": "Знахідка перевірки узгодженості, як її бачить читач.",
+        "properties": {
+          "detectedAt": {
+            "description": "Момент виявлення в UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "entityId": {
+            "description": "Ідентифікатор зачепленої сутності.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "entityType": {
+            "description": "Тип зачепленої сутності: `doc.CellValue`, `doc.TableRow`…",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор рядка журналу.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "message": {
+            "description": "Текст знахідки, як його записала задача.",
+            "type": "string"
+          },
+          "resolvedAt": {
+            "description": "Момент, коли знахідку закрили; `null` — вона ще актуальна.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "resolvedByUserId": {
+            "description": "Хто закрив; `null` — ніхто.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ruleCode": {
+            "description": "Код правила: `ORPHANED_CELL`, `BROKEN_FK`, `ARCHIVE_CHECKSUM`.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Вага: 1 інформація, 2 попередження, 3 помилка.",
+            "format": "uint8",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "detectedAt",
+          "severity",
+          "ruleCode",
+          "entityType",
+          "entityId",
+          "message",
+          "resolvedAt",
+          "resolvedByUserId"
+        ],
+        "type": "object"
+      },
       "ConstantKind": {
         "description": "Природа значення константи методології (директива ПК-1 №05, поправка 2-біс).",
         "enum": [
@@ -3652,6 +3723,39 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/CellChangeView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfConsistencyIssueView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/ConsistencyIssueView"
             },
             "type": "array"
           },
@@ -8469,6 +8573,108 @@
         "summary": "Пошук колонок. Право `Template.View`.",
         "tags": [
           "ColumnDefs"
+        ]
+      }
+    },
+    "/api/v1/consistency/issues": {
+      "get": {
+        "description": "⛔ До цього ендпоінта `aud.ConsistencyIssue` не читав НІХТО —\nні сервер, ні клієнт. З продукту було видно лише кількість за типом\n(лічильник `ecr.consistency.issues`), тобто «є 12 знахідок\n`BROKEN_FK`» без жодного способу дізнатися, де саме.\n\n⚠ Пагінація курсорна: таблиця росте від кожного нічного прогону, і\nстеля одного проходу — тисяча знахідок.\n\n⚠ `message` у відповіді — український текст, який записала сама\nзадача. Він НЕ локалізується: каталог рядків існує для відмов API\n(`err.*`), не для цього журналу.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ruleCode",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "openOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Знахідки перевірки узгодженості. Право `System.ViewHealth`.",
+        "tags": [
+          "Consistency"
         ]
       }
     },
@@ -18445,6 +18651,9 @@
     },
     {
       "name": "ColumnDefs"
+    },
+    {
+      "name": "Consistency"
     },
     {
       "name": "Documents"

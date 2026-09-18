@@ -595,6 +595,18 @@ export type CellChangeView = Schemas['CellChangeView'];
 export type CellChangePage = Schemas['PagedResultOfCellChangeView'];
 
 /**
+ * Знахідка перевірки узгодженості (`aud.ConsistencyIssue`).
+ *
+ * ⚠ `message` приходить УКРАЇНСЬКОЮ і не локалізується: каталог рядків
+ * існує для відмов API (`err.*`), не для цього журналу. Екран показує його
+ * як є — і це свідоме рішення, а не пропуск.
+ */
+export type ConsistencyIssue = Schemas['ConsistencyIssueView'];
+
+/** Сторінка журналу знахідок. */
+export type ConsistencyIssuePage = Schemas['PagedResultOfConsistencyIssueView'];
+
+/**
  * Колонка у структурі шаблону — з **усіма** мовами заголовка.
  *
  * ⚠ Не `ColumnDto`: та описує колонку в зрізі документа і несе один

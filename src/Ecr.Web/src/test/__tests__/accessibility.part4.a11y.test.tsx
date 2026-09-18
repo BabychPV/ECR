@@ -6,6 +6,7 @@ import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
 import { Shell, Themes, registerA11yFetchMock } from '@/test/__tests__/a11yFixtures';
 import { AuditPage } from '@/pages/admin/AuditPage';
+import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { UnitsPage } from '@/pages/admin/UnitsPage';
 import { UiStringsPage } from '@/pages/admin/UiStringsPage';
 import { HealthPage } from '@/pages/admin/HealthPage';
@@ -22,6 +23,7 @@ import { KitchenSinkPage } from '@/pages/KitchenSinkPage';
  */
 const Pages: [string, () => JSX.Element][] = [
   ['/admin/audit', AuditPage],
+  ['/admin/consistency', ConsistencyIssuesPage],
   ['/admin/units', UnitsPage],
   ['/admin/ui-strings', UiStringsPage],
   ['/admin/health', HealthPage],

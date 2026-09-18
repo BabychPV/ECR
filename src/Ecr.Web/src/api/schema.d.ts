@@ -165,6 +165,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consistency/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Знахідки перевірки узгодженості. Право `System.ViewHealth`.
+         * @description ⛔ До цього ендпоінта `aud.ConsistencyIssue` не читав НІХТО —
+         *     ні сервер, ні клієнт. З продукту було видно лише кількість за типом
+         *     (лічильник `ecr.consistency.issues`), тобто «є 12 знахідок
+         *     `BROKEN_FK`» без жодного способу дізнатися, де саме.
+         *
+         *     ⚠ Пагінація курсорна: таблиця росте від кожного нічного прогону, і
+         *     стеля одного проходу — тисяча знахідок.
+         *
+         *     ⚠ `message` у відповіді — український текст, який записала сама
+         *     задача. Він НЕ локалізується: каталог рядків існує для відмов API
+         *     (`err.*`), не для цього журналу.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    ruleCode?: string;
+                    openOnly?: boolean;
+                    limit?: number;
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfConsistencyIssueView"];
+                        "text/json": components["schemas"]["PagedResultOfConsistencyIssueView"];
+                        "text/plain": components["schemas"]["PagedResultOfConsistencyIssueView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -8299,6 +8377,45 @@ export interface components {
             unitId: null | number;
             unitSymbol: null | string;
         };
+        /** @description Знахідка перевірки узгодженості, як її бачить читач. */
+        ConsistencyIssueView: {
+            /**
+             * Format: date-time
+             * @description Момент виявлення в UTC.
+             */
+            detectedAt: string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор зачепленої сутності.
+             */
+            entityId: null | number;
+            /** @description Тип зачепленої сутності: `doc.CellValue`, `doc.TableRow`… */
+            entityType: null | string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор рядка журналу.
+             */
+            id: number;
+            /** @description Текст знахідки, як його записала задача. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description Момент, коли знахідку закрили; `null` — вона ще актуальна.
+             */
+            resolvedAt: null | string;
+            /**
+             * Format: int32
+             * @description Хто закрив; `null` — ніхто.
+             */
+            resolvedByUserId: null | number;
+            /** @description Код правила: `ORPHANED_CELL`, `BROKEN_FK`, `ARCHIVE_CHECKSUM`. */
+            ruleCode: string;
+            /**
+             * Format: uint8
+             * @description Вага: 1 інформація, 2 попередження, 3 помилка.
+             */
+            severity: number;
+        };
         /**
          * @description Природа значення константи методології (директива ПК-1 №05, поправка 2-біс).
          * @enum {unknown}
@@ -9520,6 +9637,19 @@ export interface components {
         PagedResultOfCellChangeView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["CellChangeView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfConsistencyIssueView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["ConsistencyIssueView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
