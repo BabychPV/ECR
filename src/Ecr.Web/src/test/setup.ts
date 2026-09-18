@@ -49,6 +49,37 @@ if (typeof window !== 'undefined') {
   }
 
   /*
+   * ⛔ `IntersectionObserver` у jsdom НЕМАЄ зовсім, а `SheetTables.tsx` монтує
+   * сітки документа саме за ним. Без заглушки кожен тест, що рендерить таблиці
+   * аркуша, падав би на `ReferenceError`, тобто не на своїй причині.
+   *
+   * ⛔ Заглушка НАВМИСНО інертна: вона нікого не повідомляє про перетин
+   * НІКОЛИ. Це не спрощення, а єдиний правдивий стан цього середовища — у
+   * jsdom немає розкладки взагалі (`getBoundingClientRect` завжди нулі), тож
+   * «що видно» тут не визначено, і будь-яка відповідь була б вигадкою.
+   *
+   * ⛔ І це саме та вигадка, якої не можна допускати ЗІ ЗНАКОМ «видно все»:
+   * заглушка, що одразу рапортує перетин кожного спостережуваного вузла,
+   * зробила б зеленим тест «сітки монтуються ліниво», довівши рівно
+   * протилежне — що вони монтуються всі й одразу. Тест, якому потрібна ПОДІЯ
+   * перетину, підміняє цей клас своїм (`vi.stubGlobal`) і сам вирішує, хто
+   * саме з'явився, — див. `features/grid/__tests__/SheetTables.lazy.test.tsx`.
+   */
+  if (globalThis.IntersectionObserver === undefined) {
+    globalThis.IntersectionObserver = class {
+      readonly root = null;
+      readonly rootMargin = '';
+      readonly thresholds: readonly number[] = [];
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+  }
+
+  /*
    * ⛔ `Q-299`: jsdom НЕ реалізує `Element.prototype.scrollIntoView` (немає
    * навіть заглушки, на відміну від `ResizeObserver`/`matchMedia` вище).
    * Mantine `Combobox` (усе, що на ньому стоїть — `Select`, `Autocomplete`,
