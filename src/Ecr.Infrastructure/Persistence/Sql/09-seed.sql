@@ -428,6 +428,116 @@ USING (VALUES
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 
+    -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
+    --
+    -- ⛔ Це рівно та форма ключа, яку читає
+    -- `ExceptionHandlingMiddleware.LocalizedTitleAsync`, і ЄДИНА, яку він
+    -- читає. Ключа немає — заголовком плашки їде сам код. Замір до цього
+    -- запису: 76 кодів у `ErrorCodes.cs` проти 11 заголовків тут, тобто для
+    -- 65 кодів `ErrorAlert.tsx` малював першим рядком «ECR-CALC-0437», а
+    -- людське речення йшло під ним подробицею. Це майже кожна відмова
+    -- продукту. Сторож на розрив — `ErrorTitleCatalogTests`.
+    --
+    -- ⚠ Заголовок — КОРОТКА називна фраза і НЕ має плейсхолдерів: у момент
+    -- резолву заголовка підстановок немає взагалі (`LocalizedTitleAsync`
+    -- бере текст як є, без `Format`). Конкретику несе `Detail` — заголовок
+    -- її не повторює.
+    --
+    -- ⚠ Область — приватна скрізь, крім `ECR-SYS-*`: решта кодів
+    -- породжується лише на екранах за входом, а 500 і архівація трапляються
+    -- і на публічних шляхах (`GET /ui-strings`, `/health`), тобто їхній
+    -- заголовок мусить бути в публічному зрізі, як і `err.ECR-AUTH-0401`.
+    --
+    -- ⚠ `ru`/`kz` тут немає НАВМИСНО (ФВ-14.9): переклади — дані реєстру,
+    -- і незаведена мова підміняється мовою за замовчуванням.
+
+    -- Доступ і облікові записи.
+    (N'err.ECR-ACCS-0403',  N'en', N'Access denied', 1),
+    (N'err.ECR-SEC-0404',   N'en', N'User or role not found', 1),
+    (N'err.ECR-USR-0422',   N'en', N'Invalid account data', 1),
+    (N'err.ECR-REQ-0422',   N'en', N'Invalid request parameter', 1),
+    (N'err.ECR-SIM-0403',   N'en', N'Simulation session is read-only', 1),
+    (N'err.ECR-SIM-0422',   N'en', N'Invalid simulation request', 1),
+
+    -- Шаблони і схема.
+    (N'err.ECR-TMPL-0404',  N'en', N'Template not found', 1),
+    (N'err.ECR-TMPL-0409',  N'en', N'The template version is published', 1),
+    (N'err.ECR-TMPL-0422',  N'en', N'The template does not pass validation', 1),
+    (N'err.ECR-TMPL-4221',  N'en', N'Cycle in the formula graph', 1),
+    (N'err.ECR-TMPL-4222',  N'en', N'Unresolved reference', 1),
+    (N'err.ECR-TMPL-4223',  N'en', N'Incompatible units', 1),
+    (N'err.ECR-TMPL-4224',  N'en', N'Conflicting validation rules', 1),
+    (N'err.ECR-TMPL-4225',  N'en', N'A required column is not covered', 1),
+    (N'err.ECR-TMPL-4226',  N'en', N'Computed column without a source', 1),
+    (N'err.ECR-TMPL-4227',  N'en', N'Computation on a manual-entry column', 1),
+    (N'err.ECR-SCHM-0409',  N'en', N'Breaking change in a version with documents', 1),
+    (N'err.ECR-SCHM-0422',  N'en', N'A migration strategy is required', 1),
+
+    -- Документи, рядки, комірки.
+    (N'err.ECR-DOC-0404',   N'en', N'Document not found', 1),
+    (N'err.ECR-DOC-0409',   N'en', N'The document is submitted', 1),
+    (N'err.ECR-DOC-0422',   N'en', N'Invalid document composition', 1),
+    (N'err.ECR-ROW-0404',   N'en', N'Row not found', 1),
+    (N'err.ECR-ROW-0409',   N'en', N'Row key conflict', 1),
+    (N'err.ECR-CELL-0409',  N'en', N'Edit conflict', 1),
+    (N'err.ECR-CELL-0422',  N'en', N'Invalid cell value', 1),
+    (N'err.ECR-CELL-4221',  N'en', N'The cell is computed', 1),
+    (N'err.ECR-CELL-4222',  N'en', N'Value out of range', 1),
+    (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry', 1),
+    (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
+
+    -- Періоди і проєкти.
+    (N'err.ECR-PRD-0409',   N'en', N'The period is closed', 1),
+    (N'err.ECR-PRD-0404',   N'en', N'Period not found', 1),
+    (N'err.ECR-PRD-0422',   N'en', N'The period is outside the project', 1),
+    (N'err.ECR-PRD-4223',   N'en', N'Reopen is blocked by a closed period', 1),
+    (N'err.ECR-PRD-4224',   N'en', N'Invalid period sequence', 1),
+    (N'err.ECR-PRD-4225',   N'en', N'Invalid period policy', 1),
+    (N'err.ECR-PRD-4091',   N'en', N'The period policy code is taken', 1),
+    (N'err.ECR-PRJ-0404',   N'en', N'Project not found', 1),
+    (N'err.ECR-PRJ-0422',   N'en', N'The project cannot be activated', 1),
+    (N'err.ECR-CFG-4221',   N'en', N'Invalid project time zone', 1),
+
+    -- Реєстри і одиниці.
+    (N'err.ECR-REG-0404',   N'en', N'Registry entry not found', 1),
+    (N'err.ECR-REG-0422',   N'en', N'The registry source cannot be switched in an open period', 1),
+    (N'err.ECR-UOM-0404',   N'en', N'Unit not found', 1),
+    (N'err.ECR-UOM-0422',   N'en', N'Incompatible unit dimensions', 1),
+    (N'err.ECR-UOM-4221',   N'en', N'Contextual conversion coefficient', 1),
+
+    -- Розрахунки і методології.
+    (N'err.ECR-CALC-0404',  N'en', N'Methodology version not found', 1),
+    (N'err.ECR-CALC-0409',  N'en', N'A second pair of eyes is required', 1),
+    (N'err.ECR-CALC-0422',  N'en', N'The methodology version cannot be published', 1),
+    (N'err.ECR-CALC-0431',  N'en', N'Unsupported operator in a formula', 1),
+    (N'err.ECR-CALC-0432',  N'en', N'Undeclared formula argument', 1),
+    (N'err.ECR-CALC-0433',  N'en', N'Extension function in Legacy mode', 1),
+    (N'err.ECR-CALC-0437',  N'en', N'Required methodology inputs are empty', 1),
+    (N'err.ECR-CALC-0438',  N'en', N'Formula argument has no matching column', 1),
+    (N'err.ECR-CALC-4221',  N'en', N'Recalculation of a closed period', 1),
+
+    -- Імпорт та інтеграція.
+    (N'err.ECR-IMP-0422',   N'en', N'The workbook does not match the template', 1),
+    (N'err.ECR-INT-0404',   N'en', N'Source entity not found', 1),
+    (N'err.ECR-INT-0405',   N'en', N'Mapping target not found', 1),
+    (N'err.ECR-INT-0422',   N'en', N'The source unit of measure changed', 1),
+    (N'err.ECR-INT-0502',   N'en', N'The data source refused authentication', 1),
+    (N'err.ECR-INT-0503',   N'en', N'The data source is unavailable', 1),
+
+    -- Звіти.
+    (N'err.ECR-RPT-0404',   N'en', N'Report not found', 1),
+    (N'err.ECR-RPT-0409',   N'en', N'Already published: a new version is needed', 1),
+    (N'err.ECR-RPT-4091',   N'en', N'The report code is taken', 1),
+    (N'err.ECR-RPT-0422',   N'en', N'Invalid report definition', 1),
+
+    -- ⚠ Системні. Подробиця для 500 стала й беззмістовна НАВМИСНО (ФВ-6.11),
+    -- тому й заголовок тут загальний — але саме тут сирий код найгірший:
+    -- людина, яка бачить «ECR-SYS-0500» першим рядком, не має жодної підказки,
+    -- що сталося і що робити. Область публічна: 500 і архівація трапляються
+    -- і до входу (`GET /ui-strings`, `/health`).
+    (N'err.ECR-SYS-0500',   N'en', N'Internal error', 0),
+    (N'err.ECR-SYS-0503',   N'en', N'The system is archiving', 0),
+
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),
     (N'nav.menu',                        N'en', N'Menu', 1),
