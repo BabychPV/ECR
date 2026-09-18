@@ -58,6 +58,25 @@ public sealed class DynamicPredicateTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Вкладений_предикат_відхиляється_при_публікації()
+    {
+        // ⛔ Сторож над РІЗНИЦЕЮ МІЖ N² І Nᵏ. Предикат обчислюється над кожним
+        // рядком таблиці, тож предикат усередині предиката — це N рядків на
+        // кожен із N, і так на кожен рівень вкладення; глибину парсер пускає до
+        // 192 (`Parser.MaxRecursionDepth`). Один рівень уже виміряний:
+        // тридцять предикатних агрегатів над таблицею на 471 рядок — 16.8 с і
+        // 5.4 ГБ (`ExpressionBudgetReachabilityTests`). Бюджет обчислення
+        // (`Evaluator.MaxEvaluationSteps`) обмежує ЦІНУ, а ця заборона
+        // обмежує ПОРЯДОК зростання; зняти її означало б зробити другу
+        // безпредметною.
+        var diagnostics = Validate(
+            "SUM([Items].[WHERE [Items].[WHERE [WasteType] = 'W-01'].[Amount] > 1].[Amount])");
+
+        Assert.Contains(diagnostics, d => d.Code == "ECR-TMPL-0422");
+        Assert.Contains(diagnostics, d => d.Message.Contains("Вкладений предикат", StringComparison.Ordinal));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Крос_періодне_посилання_у_предикаті_відхиляється()
     {
         var diagnostics = Validate("SUM([Items].[WHERE [Period:-1].[Items].[r1].[Amount] > 1].[Amount])");
