@@ -214,6 +214,38 @@ public sealed class Evaluator(
             : [ExpressionValue.Error(ExpressionErrors.BudgetExceeded)];
     }
 
+    /// <summary>
+    /// Обчислює вузол як ОДНЕ значення — і це єдине місце, де обчислювач
+    /// спускається вглиб.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ **Сторож глибини стоїть ТУТ і більше ніде, і цей набір перевірений на
+    /// мінімальність, а не вгаданий.** Кожне рекурсивне ребро обчислювача —
+    /// обидві гілки <see cref="Binary"/>, <see cref="Unary"/>,
+    /// <see cref="Conditional"/>, аргументи функції через
+    /// <see cref="TemplateCall"/>/<see cref="MethodologyCall"/>, гілки
+    /// <see cref="If"/>/<see cref="Ifs"/>, запасна гілка <c>IFERROR</c> —
+    /// замикається назад саме сюди, прямо або через
+    /// <see cref="EvaluateGroup"/>. Тому один беззастережний сторож на вході
+    /// розриває КОЖЕН цикл у графі викликів. Що інших циклів не лишилося,
+    /// доводить не око, а <c>EvaluatorRecursionCoverageTests</c>: він будує
+    /// граф із тексту цього файла, викидає з нього цей метод і вимагає
+    /// ациклічного залишку — так само, як <c>ParserRecursionCoverageTests</c>
+    /// робить для парсера.
+    ///
+    /// ⛔ Жодна з двох наявних меж цього не ловила, і саме тому потрібна третя.
+    /// Плаский ланцюг <c>1+1+…+1</c> розбирається ЦИКЛОМ
+    /// (<c>ParseAdditive</c>), тож <see cref="Parsing.Parser.MaxRecursionDepth"/>
+    /// мовчить — а дерево виходить лівим гребенем глибиною в кількість
+    /// доданків. Коштує він ~2000 кроків із дозволених 20 000, тож
+    /// <see cref="MaxEvaluationSteps"/> мовчить теж. Мовчали обидві, а процес
+    /// помирав (<see cref="EvaluationBudget.MaxNestingDepth"/>).
+    ///
+    /// ⚠ Відмова — ЗНАЧЕННЯ <c>#BUDGET</c>, а не виняток, і не окремий код.
+    /// Причина та сама, що й у вичерпаного бюджету кроків
+    /// (<see cref="ExpressionErrors.BudgetExceeded"/>): вираз правильний, але
+    /// завеликий для одного обчислення, і дія автора одна — розбити формулу.
+    /// </remarks>
     private ExpressionValue EvaluateScalar(
         AstNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
@@ -225,18 +257,35 @@ public sealed class Evaluator(
             return ExpressionValue.Error(ExpressionErrors.BudgetExceeded);
         }
 
-        return node switch
+        if (!budget.EnterNesting())
         {
-            LiteralNode literal => Literal(literal),
-            UnaryNode unary => Unary(unary, context, dialect, budget),
-            BinaryNode binary => Binary(binary, context, dialect, budget),
-            ConditionalNode conditional => Conditional(conditional, context, dialect, budget),
-            FunctionNode function => Function(function, context, dialect, budget),
-            SymbolReferenceNode symbol => Symbol(symbol, context),
-            PeriodPropertyNode period => Period(period, context),
-            CellReferenceNode reference => Evaluate(reference, context, dialect, budget),
-            _ => ExpressionValue.Error(ExpressionErrors.BadValue),
-        };
+            return ExpressionValue.Error(ExpressionErrors.BudgetExceeded);
+        }
+
+        try
+        {
+            return node switch
+            {
+                LiteralNode literal => Literal(literal),
+                UnaryNode unary => Unary(unary, context, dialect, budget),
+                BinaryNode binary => Binary(binary, context, dialect, budget),
+                ConditionalNode conditional => Conditional(conditional, context, dialect, budget),
+                FunctionNode function => Function(function, context, dialect, budget),
+                SymbolReferenceNode symbol => Symbol(symbol, context),
+                PeriodPropertyNode period => Period(period, context),
+                CellReferenceNode reference => Evaluate(reference, context, dialect, budget),
+                _ => ExpressionValue.Error(ExpressionErrors.BadValue),
+            };
+        }
+        finally
+        {
+            // ⚠ Саме `finally`, а не рядок після `switch`: рівень мусить
+            // звільнятися й тоді, коли обчислення виходить звідси винятком.
+            // Загублений вихід перетворив би межу ГЛИБИНИ на межу РОЗМІРУ —
+            // двісті сусідніх аргументів `SUM` почали б відхилятися як
+            // «занадто вкладені». У чернетці сторожа парсера така помилка була.
+            budget.LeaveNesting();
+        }
     }
 
     private static ExpressionValue Literal(LiteralNode node)
