@@ -77,16 +77,54 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
     }
 
     /// <summary>
-    /// Дублікат унікального коду ролі/проєкту/запису довідника — у чисту
-    /// доменну відмову. <c>null</c>, якщо серед доданих сутностей немає
+    /// Дублікат унікального ключа проєкту/запису довідника/документа — у чисту
+    /// відмову з кодом. <c>null</c>, якщо серед доданих сутностей немає
     /// жодної з відомих (виклик мусить перекинути оригінальний виняток).
     /// </summary>
-    private static BusinessRuleException? TryMapDuplicateKey(DbUpdateException ex)
+    /// <remarks>
+    /// ⚠ Тип результату — <see cref="EcrException"/>, а не
+    /// <c>BusinessRuleException</c>: статус відповіді задає ТИП винятку
+    /// (<c>ExceptionHandlingMiddleware.Map</c>), і «хтось випередив» — це
+    /// <c>409</c>, а не <c>422</c>. Звужувати тип назад означало б або
+    /// повернути документу «дані невірні», або заводити для нього точковий
+    /// арм у middleware — тобто описувати те саме двічі.
+    /// </remarks>
+    private static EcrException? TryMapDuplicateKey(DbUpdateException ex)
     {
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)
             {
+                case Domain.Entities.Documents.Document document:
+                    // ⛔ `DAT-09`. `DocumentStore.NextBusinessKeyAsync` підбирає
+                    // номер запитом `COUNT` + «чи вільний» — TOCTOU: два
+                    // одночасні `POST /documents` в один проєкт отримують
+                    // ОДНАКОВИЙ ключ, перший комітиться, другий падає на
+                    // `UQ_Document`. Цієї гілки тут не було, тож виняток ішов
+                    // повз обидві сусідні і доїжджав до
+                    // `ExceptionHandlingMiddleware` голим `500 ECR-SYS-0500`.
+                    //
+                    // ⚠ `ConcurrencyConflictException`, а не
+                    // `BusinessRuleException`: у середнього `BusinessRuleException`
+                    // арм у middleware — `422` («дані невірні»), а тут дані
+                    // правильні, просто хтось випередив. `409` — і код це
+                    // повторює (`ECR-DOC-0409`, той самий, що вже кидає
+                    // `NextBusinessKeyAsync`, коли вільного номера не лишилось:
+                    // одна подія — один код).
+                    //
+                    // ⚠ Нормальний шлях сюди не доходить: `CreateDocumentHandler`
+                    // ловить цей самий виняток і пробує ще з новим ключем.
+                    // Клієнт бачить `409` лише тоді, коли гонитва програна і
+                    // всіма повторами.
+                    return new ConcurrencyConflictException(
+                        "ECR-DOC-0409",
+                        $"Документ із ключем «{document.BusinessKey}» у цьому проєкті вже створено.",
+                        new Dictionary<string, object?>
+                        {
+                            ["businessKey"] = document.BusinessKey,
+                            ["projectId"] = document.ProjectId,
+                        });
+
                 case Domain.Entities.Documents.Project project:
                     return new BusinessRuleException(
                         ErrorCodes.ProjectDuplicate, $"Проєкт із кодом «{project.Code}» уже існує.",
