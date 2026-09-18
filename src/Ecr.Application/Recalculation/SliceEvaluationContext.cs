@@ -27,8 +27,19 @@ namespace Ecr.Application.Recalculation;
 /// що»: це діалект ШАБЛОНУ (<c>ФВ-9.1</c>), а не методології. Формула
 /// шаблону, яка дістає константу методології, перестає бути формулою шаблону.
 /// </remarks>
-public sealed class SliceEvaluationContext : IEvaluationContext
+public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
 {
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Без цієї властивості бюджет обчислювача був би сліпий саме там, де
+    /// дорого: <see cref="EvaluatePredicate"/> нижче обчислює умову НАД КОЖНИМ
+    /// рядком таблиці власним викликом обчислювача, і той заводив би собі
+    /// свіжий бюджет на кожен рядок. Предикат, який нічого не відібрав, при
+    /// цьому повертає порожню групу — нуль значень, — тобто зовнішній бюджет не
+    /// побачив би ані сканування, ані його ціни.
+    /// </remarks>
+    public EvaluationBudget? Budget { get; set; }
+
     private readonly ReferenceResolver _resolver;
     private readonly RangeExpander _expander = new();
     private readonly Dictionary<int, TableDef> _tables;

@@ -113,4 +113,29 @@ public static class ExpressionErrors
     /// від легітимного <c>null</c> (<c>MethodologyEvaluationContext.GetConstant</c>).
     /// </remarks>
     public const string ArgumentNotFound = "#ARG";
+
+    /// <summary>
+    /// Обчислення вичерпало бюджет кроків
+    /// (<see cref="Evaluation.EvaluationBudget"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Помилка-ЗНАЧЕННЯ, а не виняток і не код <c>ECR-CALC-*</c>, — і це
+    /// головне рішення тут. Обчислення однієї комірки живе всередині прогону
+    /// над сотнями формул (<c>RecalculationService.RunAsync</c>,
+    /// <c>CalculationOrchestrator</c>). Кинути звідси виняток означало б, що
+    /// ОДНА заважка формула зриває ввесь нічний перерахунок — тобто рівно той
+    /// наслідок, проти якого бюджет і заводиться. Поруч уже живуть
+    /// <see cref="DivideByZero"/> і <see cref="BadReference"/>: вони лишаються
+    /// в комірці, прогін іде далі, і решта чисел рахується.
+    ///
+    /// ⚠ Окремий код, а не <see cref="BadValue"/>: <c>#VALUE</c> означає «типи
+    /// не зійшлися», і правильна дія на нього — виправити типи. Тут вираз
+    /// правильний, а завеликий, і правильна дія інша: звузити діапазон або
+    /// розбити формулу. Один код на два стани не дав би відповісти, що робити.
+    ///
+    /// ⚠ Заголовка <c>err.*</c> цей код не має і не потребує: родина <c>#…</c>
+    /// не проходить через <c>ExceptionHandlingMiddleware</c> —
+    /// це вміст комірки, як <c>#REF</c>, а не відповідь <c>problem+json</c>.
+    /// </remarks>
+    public const string BudgetExceeded = "#BUDGET";
 }

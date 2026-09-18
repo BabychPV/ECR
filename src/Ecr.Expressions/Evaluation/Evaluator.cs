@@ -34,6 +34,54 @@ public sealed class Evaluator(
     private const int MaxIntegerExponent = 1000;
 
     /// <summary>
+    /// Скільки КРОКІВ дозволено одному обчисленню виразу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ **Число виведене із заміру, а не з обережності**
+    /// (<c>ExpressionEvaluationBudgetTests</c>, стенд
+    /// <c>ExpressionBudgetReachabilityTests</c> у <c>Ecr.Application.Tests</c>).
+    /// До цієї межі вираз, припустимий за ВСІМА наявними правилами — парсер,
+    /// тайп-чекер, юніт-чекер, whitelist функцій, межа глибини
+    /// <see cref="Parsing.Parser.MaxRecursionDepth"/>, межа довжини виразу в
+    /// 2000 символів (<c>cfg.FormulaDef.Expression</c>) — обчислювався
+    /// **16.8 секунди з 5.4 ГБ алокацій** на ОДНУ колонкову формулу над ОДНІЄЮ
+    /// таблицею за ОДИН період. Вираз: тридцять предикатних агрегатів
+    /// (<c>SUM([Items].[WHERE [WasteType] = 'W-01'].[Amount])</c>) через <c>+</c>,
+    /// 1587 символів; таблиця — 471 рядок, тобто **найважча таблиця чинного
+    /// `.xlsm`** (<c>Ecr.DataGen.DistributionProfile.MaxRowsPerTable</c>), а не
+    /// вигаданий обсяг. Зростання квадратичне: ті самі тридцять агрегатів на
+    /// 30 рядках дають 48 мс, на 471 — 16 820 мс (у 15.7 раза більше рядків,
+    /// у 348 разів більше часу).
+    ///
+    /// ⚠ **Запас над чинними формами — названий числом, а не словом.**
+    /// Заміряно тим самим лічильником (<c>EvaluationBudgetTests</c>), таблиця —
+    /// ті самі 471 рядок:
+    /// <list type="bullet">
+    /// <item>посилання на комірку (<c>[Amount]</c>) — <b>1</b> крок;</item>
+    /// <item>агрегат над діапазоном усієї таблиці — <b>472</b> кроки
+    /// (запас <b>42×</b>);</item>
+    /// <item>предикатний агрегат над усією таблицею — <b>2 356</b> кроків
+    /// (запас <b>8.5×</b>);</item>
+    /// <item>дванадцять складених агрегатів над діапазоном — <b>5 675</b>
+    /// кроків (запас <b>3.5×</b>);</item>
+    /// <item>тридцять складених ПРЕДИКАТНИХ агрегатів — ~70 000 кроків, тобто
+    /// саме те, що межа зупиняє.</item>
+    /// </list>
+    /// Корпус на це й розрахований: на ~10 000 формул чинного шаблону припадає
+    /// 245 викликів <c>SUM</c> (<c>docs/reference/as-is/01-as-is-overview.md</c>
+    /// §3.1) — агрегати поодинокі, а не складені по тридцять в один вираз.
+    ///
+    /// ⚠ **Межа — НА ВИКЛИК**, і це не спрощення: <c>reference/backend/B18</c>
+    /// §14.7 формулює вимогу дослівно так («ліміти часу і пам'яті **на
+    /// виклик**»). Вартість прогону над таблицею — це кількість рядків, помножена
+    /// на ціну одного виклику, і обмежує її окремий механізм поверхом вище
+    /// (<c>CalculationOrchestrator</c>, токен скасування). Межа тут не робить
+    /// довге обчислення миттєвим — вона робить ціну ОДНОГО виклику скінченною і
+    /// незалежною від розміру таблиці.
+    /// </remarks>
+    public const int MaxEvaluationSteps = 20_000;
+
+    /// <summary>
     /// Обчислювач із арифметикою <see cref="StrictDecimalArithmetic"/>.
     /// </summary>
     /// <param name="functions">Каталог функцій діалекту шаблонів.</param>
@@ -72,13 +120,58 @@ public sealed class Evaluator(
     /// <param name="dialect">
     /// Діалект — визначає, за яким каталогом викликаються функції.
     /// </param>
+    /// <remarks>
+    /// ⛔ Бюджет (<see cref="MaxEvaluationSteps"/>) заводиться ТУТ, на вході в
+    /// обчислення, і живе рівно до виходу. Поле обчислювача було б помилкою:
+    /// обчислювач один на застосунок і працює з багатьох потоків одразу — див.
+    /// <see cref="WithArithmetic"/>.
+    ///
+    /// ⚠ Якщо контекст уже НЕСЕ бюджет (<see cref="IBudgetedEvaluationContext"/>),
+    /// свіжий не заводиться: це вкладене обчислення — умова предиката над
+    /// черговим рядком, — і воно мусить витрачати бюджет зовнішнього. Інакше
+    /// сканування таблиці всередині <c>Read</c> було б для бюджету невидиме, і
+    /// межа не ловила б саме той випадок, заради якого заведена.
+    /// </remarks>
     public ExpressionValue Evaluate(
         AstNode node, IEvaluationContext context, ExpressionDialect dialect)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(context);
 
-        var values = EvaluateGroup(node, context, dialect);
+        if (context is not IBudgetedEvaluationContext budgeted)
+        {
+            return Evaluate(node, context, dialect, new EvaluationBudget(MaxEvaluationSteps));
+        }
+
+        if (budgeted.Budget is { } inherited)
+        {
+            return Evaluate(node, context, dialect, inherited);
+        }
+
+        budgeted.Budget = new EvaluationBudget(MaxEvaluationSteps);
+        try
+        {
+            return Evaluate(node, context, dialect, budgeted.Budget);
+        }
+        finally
+        {
+            budgeted.Budget = null;
+        }
+    }
+
+    /// <summary>Обчислює вираз у контексті під заданим бюджетом.</summary>
+    /// <param name="node">Корінь дерева.</param>
+    /// <param name="context">Джерело даних.</param>
+    /// <param name="dialect">Діалект.</param>
+    /// <param name="budget">Бюджет кроків; спільний на все обчислення.</param>
+    public ExpressionValue Evaluate(
+        AstNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(budget);
+
+        var values = EvaluateGroup(node, context, dialect, budget);
 
         // Скалярна позиція, а в неї потрапив діапазон: одного значення немає.
         // Порожній діапазон дає null, кілька значень — #VALUE, бо мовчки взяти
@@ -94,28 +187,57 @@ public sealed class Evaluator(
     /// <summary>
     /// Обчислює вузол як ГРУПУ значень: посилання-діапазон дає їх багато.
     /// </summary>
+    /// <remarks>
+    /// ⛔ Саме тут списується ОСНОВНА вартість, і саме тому — за <b>кількістю
+    /// значень</b>, які повернув <c>Read</c>, а не за одним кроком на вузол.
+    /// Вузол <c>[Main].[r0000:r0470].[Amount]</c> у дереві один, а коштує 471
+    /// прочитану комірку плюс розкриття діапазону; рахувати його за одиницю
+    /// означало б, що бюджет не бачить рівно того, що дорого.
+    /// </remarks>
     private IReadOnlyList<ExpressionValue> EvaluateGroup(
-        AstNode node, IEvaluationContext context, ExpressionDialect dialect)
-        => node switch
+        AstNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
+    {
+        if (node is not CellReferenceNode reference)
         {
-            CellReferenceNode reference => context.Read(reference),
-            _ => [EvaluateScalar(node, context, dialect)],
-        };
+            return [EvaluateScalar(node, context, dialect, budget)];
+        }
+
+        if (budget.IsExhausted)
+        {
+            return [ExpressionValue.Error(ExpressionErrors.BudgetExceeded)];
+        }
+
+        var values = context.Read(reference);
+
+        return budget.TryConsume(values.Count)
+            ? values
+            : [ExpressionValue.Error(ExpressionErrors.BudgetExceeded)];
+    }
 
     private ExpressionValue EvaluateScalar(
-        AstNode node, IEvaluationContext context, ExpressionDialect dialect)
-        => node switch
+        AstNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
+    {
+        // ⚠ Один крок на КОЖЕН вузол, а не лише на читання: вираз без жодного
+        // посилання теж має скінченну ціну, і бюджет, сліпий до неї, лишив би
+        // відкритим шлях, який ми просто не здогадалися виміряти.
+        if (!budget.TryConsume())
+        {
+            return ExpressionValue.Error(ExpressionErrors.BudgetExceeded);
+        }
+
+        return node switch
         {
             LiteralNode literal => Literal(literal),
-            UnaryNode unary => Unary(unary, context, dialect),
-            BinaryNode binary => Binary(binary, context, dialect),
-            ConditionalNode conditional => Conditional(conditional, context, dialect),
-            FunctionNode function => Function(function, context, dialect),
+            UnaryNode unary => Unary(unary, context, dialect, budget),
+            BinaryNode binary => Binary(binary, context, dialect, budget),
+            ConditionalNode conditional => Conditional(conditional, context, dialect, budget),
+            FunctionNode function => Function(function, context, dialect, budget),
             SymbolReferenceNode symbol => Symbol(symbol, context),
             PeriodPropertyNode period => Period(period, context),
-            CellReferenceNode reference => Evaluate(reference, context, dialect),
+            CellReferenceNode reference => Evaluate(reference, context, dialect, budget),
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
+    }
 
     private static ExpressionValue Literal(LiteralNode node)
         => node.Type switch
@@ -128,9 +250,9 @@ public sealed class Evaluator(
         };
 
     private ExpressionValue Unary(
-        UnaryNode node, IEvaluationContext context, ExpressionDialect dialect)
+        UnaryNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
-        var operand = EvaluateScalar(node.Operand, context, dialect);
+        var operand = EvaluateScalar(node.Operand, context, dialect, budget);
         if (operand.IsError)
         {
             return operand;
@@ -164,10 +286,10 @@ public sealed class Evaluator(
     }
 
     private ExpressionValue Binary(
-        BinaryNode node, IEvaluationContext context, ExpressionDialect dialect)
+        BinaryNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
-        var left = EvaluateScalar(node.Left, context, dialect);
-        var right = EvaluateScalar(node.Right, context, dialect);
+        var left = EvaluateScalar(node.Left, context, dialect, budget);
+        var right = EvaluateScalar(node.Right, context, dialect, budget);
 
         // Помилка поширюється через операції: #DIV/0 + 1 = #DIV/0.
         // Перехопити її можна лише IFERROR (02b §6.4).
@@ -469,9 +591,9 @@ public sealed class Evaluator(
     }
 
     private ExpressionValue Conditional(
-        ConditionalNode node, IEvaluationContext context, ExpressionDialect dialect)
+        ConditionalNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
-        var condition = EvaluateScalar(node.Condition, context, dialect);
+        var condition = EvaluateScalar(node.Condition, context, dialect, budget);
         if (condition.IsError)
         {
             return condition;
@@ -490,32 +612,43 @@ public sealed class Evaluator(
         // Обчислюється ЛИШЕ обрана гілка: інакше `x = 0 ? 0 : 1/x` давав би
         // #DIV/0 саме тоді, коли автор виразу від нього захищався.
         return (bool)condition.Value!
-            ? EvaluateScalar(node.WhenTrue, context, dialect)
-            : EvaluateScalar(node.WhenFalse, context, dialect);
+            ? EvaluateScalar(node.WhenTrue, context, dialect, budget)
+            : EvaluateScalar(node.WhenFalse, context, dialect, budget);
     }
 
     private ExpressionValue Function(
-        FunctionNode node, IEvaluationContext context, ExpressionDialect dialect)
+        FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
         => dialect == ExpressionDialect.Methodology
-            ? MethodologyCall(node, context)
-            : TemplateCall(node, context);
+            ? MethodologyCall(node, context, budget)
+            : TemplateCall(node, context, budget);
 
-    private ExpressionValue TemplateCall(FunctionNode node, IEvaluationContext context)
+    private ExpressionValue TemplateCall(
+        FunctionNode node, IEvaluationContext context, EvaluationBudget budget)
     {
         // IFERROR обчислює запасну гілку тільки за потреби — інакше вона могла б
         // сама впасти й перетворити перехоплення на нову помилку.
         if (node.Name.Equals("IFERROR", StringComparison.OrdinalIgnoreCase) && node.Arguments.Count == 2)
         {
-            var value = Evaluate(node.Arguments[0], context, ExpressionDialect.Template);
+            var value = Evaluate(node.Arguments[0], context, ExpressionDialect.Template, budget);
+
+            // ⛔ Вичерпаний бюджет НЕ перехоплюється через IFERROR: інакше
+            // `IFERROR(<заважкий вираз>; 0)` давав би нуль, тобто виглядав би
+            // як пораховане число, — і формула, яку зупинила межа, мовчки
+            // потрапляла б у звіт з підробленим результатом.
+            if (string.Equals(value.ErrorCode, ExpressionErrors.BudgetExceeded, StringComparison.Ordinal))
+            {
+                return value;
+            }
+
             return value.IsError
-                ? Evaluate(node.Arguments[1], context, ExpressionDialect.Template)
+                ? Evaluate(node.Arguments[1], context, ExpressionDialect.Template, budget)
                 : value;
         }
 
         var groups = new List<IReadOnlyList<ExpressionValue>>(node.Arguments.Count);
         foreach (var argument in node.Arguments)
         {
-            groups.Add(EvaluateGroup(argument, context, ExpressionDialect.Template));
+            groups.Add(EvaluateGroup(argument, context, ExpressionDialect.Template, budget));
         }
 
         return functions.Invoke(node.Name, groups, context);
@@ -535,22 +668,23 @@ public sealed class Evaluator(
     /// ділення на нуль. Порахувати обидві гілки означало б отримати
     /// нескінченність саме там, де автор від неї захищався.
     /// </remarks>
-    private ExpressionValue MethodologyCall(FunctionNode node, IEvaluationContext context)
+    private ExpressionValue MethodologyCall(
+        FunctionNode node, IEvaluationContext context, EvaluationBudget budget)
     {
         if (string.Equals(node.Name, "if", StringComparison.Ordinal))
         {
-            return If(node.Arguments, context);
+            return If(node.Arguments, context, budget);
         }
 
         if (string.Equals(node.Name, "ifs", StringComparison.Ordinal))
         {
-            return Ifs(node.Arguments, context);
+            return Ifs(node.Arguments, context, budget);
         }
 
         var args = new List<ExpressionValue>(node.Arguments.Count);
         foreach (var argument in node.Arguments)
         {
-            args.Add(EvaluateScalar(argument, context, ExpressionDialect.Methodology));
+            args.Add(EvaluateScalar(argument, context, ExpressionDialect.Methodology, budget));
         }
 
         return Functions.MethodologyFunctions.Invoke(node.Name, args, arithmetic, context);
@@ -564,14 +698,15 @@ public sealed class Evaluator(
     /// <c>'Сверхнорматив'</c>. Тому тип результату в каталозі — <c>Null</c>
     /// («тип обраної гілки»), а не <c>Number</c>.
     /// </remarks>
-    private ExpressionValue If(IReadOnlyList<AstNode> args, IEvaluationContext context)
+    private ExpressionValue If(
+        IReadOnlyList<AstNode> args, IEvaluationContext context, EvaluationBudget budget)
     {
         if (args.Count != 3)
         {
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        var condition = EvaluateScalar(args[0], context, ExpressionDialect.Methodology);
+        var condition = EvaluateScalar(args[0], context, ExpressionDialect.Methodology, budget);
         if (Branch(condition) is not { } taken)
         {
             return condition.IsError || condition.IsNull
@@ -579,7 +714,7 @@ public sealed class Evaluator(
                 : ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        return EvaluateScalar(args[taken ? 1 : 2], context, ExpressionDialect.Methodology);
+        return EvaluateScalar(args[taken ? 1 : 2], context, ExpressionDialect.Methodology, budget);
     }
 
     /// <summary>
@@ -595,7 +730,8 @@ public sealed class Evaluator(
     /// Нуль тут виглядав би як виміряне значення і потрапив би в підсумок
     /// звіту як реальний.
     /// </remarks>
-    private ExpressionValue Ifs(IReadOnlyList<AstNode> args, IEvaluationContext context)
+    private ExpressionValue Ifs(
+        IReadOnlyList<AstNode> args, IEvaluationContext context, EvaluationBudget budget)
     {
         if (args.Count < 2)
         {
@@ -605,7 +741,7 @@ public sealed class Evaluator(
         var pairs = args.Count / 2;
         for (var i = 0; i < pairs; i++)
         {
-            var condition = EvaluateScalar(args[i * 2], context, ExpressionDialect.Methodology);
+            var condition = EvaluateScalar(args[i * 2], context, ExpressionDialect.Methodology, budget);
             if (Branch(condition) is not { } taken)
             {
                 return condition.IsError || condition.IsNull
@@ -615,13 +751,13 @@ public sealed class Evaluator(
 
             if (taken)
             {
-                return EvaluateScalar(args[(i * 2) + 1], context, ExpressionDialect.Methodology);
+                return EvaluateScalar(args[(i * 2) + 1], context, ExpressionDialect.Methodology, budget);
             }
         }
 
         // Непарна кількість аргументів — останній типовий.
         return args.Count % 2 == 1
-            ? EvaluateScalar(args[^1], context, ExpressionDialect.Methodology)
+            ? EvaluateScalar(args[^1], context, ExpressionDialect.Methodology, budget)
             : ExpressionValue.Null;
     }
 
