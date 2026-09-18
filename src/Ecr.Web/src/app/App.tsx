@@ -3,6 +3,7 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
+import { applySliceCachePolicy } from '@/features/grid/sliceCache';
 import { applyDensity, density } from '@/shared/theme/preferences';
 import { theme } from '@/shared/theme/theme';
 import { router } from './router';
@@ -25,6 +26,26 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+/**
+ * Політика кешу для зрізів таблиць (`CL-02`, `DIRECTIVE-14-ARCH.md` §3.5).
+ *
+ * ⛔ `refetchOnWindowFocus` за замовчуванням увімкнений, і на цьому екрані він
+ * коштує дорожче, ніж будь-де: оператор звіряє числа з Excel, повертається до
+ * вкладки через 31 с — і КОЖЕН змонтований зріз (до 91 на аркуші)
+ * перезапитується одночасно найважчим запитом системи. За ті 31 с у
+ * документі, який він сам і тримає відкритим, не змінилося нічого.
+ *
+ * ⚠ `staleTime` 5 хв замість глобальних 30 с — про те саме: зріз змінюють
+ * рівно три події (власне збереження, імпорт, перерахунок), і кожна з них уже
+ * ЯВНО інвалідує кеш (`sliceCache.ts`). Час тут нічого не стереже.
+ *
+ * ⚠ `setQueryDefaults`, а не опції в `useQuery`: `DocumentGrid.tsx` у цьому
+ * пакеті недоторканний (рядок плану `D14-12`), а дефолти за префіксом ключа —
+ * штатний механізм TanStack Query і діють на всі зрізи одразу, включно з тими,
+ * що з'являться пізніше.
+ */
+applySliceCachePolicy(queryClient);
 
 /*
  * ⛔ Щільність застосовується ДО першого рендера, а не в `useEffect`.

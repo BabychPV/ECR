@@ -1,5 +1,6 @@
-import type { ColumnDto, TableSliceDto } from '@/api/types';
+import type { ColumnDto, RowDto, TableSliceDto } from '@/api/types';
 import { cellKey, decide } from './permissions';
+import { rowIndexOf } from './rowIndex';
 
 /**
  * Стан комірки (`ФВ-14.18`, `D-128`).
@@ -70,10 +71,19 @@ export function cellStateOf(
   // ЖОДНОГО сигналу в самій комірці (єдині натяки — бейдж статусу аркуша і
   // зниклий тулбар імпорту, обидва ПОЗА сіткою).
   gridReadOnly = false,
+
+  // ⛔ `CL-03`: тут стояв `slice.rows.find(...)` — лінійний пошук на КОЖНУ
+  // видиму комірку КОЖНОГО перемальовування. На 500×60 це 500 порівнянь на
+  // комірку, і платить за них найгарячіший колбек сітки (`cellProperties`).
+  //
+  // ⚠ Мапа мемоїзована за масивом `slice.rows` (`rowIndex.ts`), тож виклик
+  // без цього параметра нічого не будує заново. Параметр лишений явним для
+  // того, хто вже тримає мапу згори (`DocumentGrid` після `CL-04`).
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
 ): CellStateName | null {
   const key = cellKey(rowKey, column.code);
   const decision = decide(slice, rowKey, column);
-  const row = slice.rows.find((candidate) => candidate.rowKey === rowKey);
+  const row = rows.get(rowKey);
 
   const active: Record<CellStateName, boolean> = {
     orphaned: row?.isOrphaned === true,

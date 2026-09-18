@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ImportApplyRequest, ImportPreview } from '@/api/types';
+import { invalidateSlices } from '@/features/grid/sliceCache';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -58,7 +59,12 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
     onSuccess: async () => {
       // Зрізи таблиць перечитуються цілком: імпорт зачіпає рядки, яких немає
       // на екрані, і часткове оновлення показало б половину змін.
-      await queryClient.invalidateQueries({ queryKey: ['table-slice'] });
+      //
+      // ⛔ `CL-02`: але «цілком» — це таблиці ЦЬОГО документа в ЦЬОМУ періоді,
+      // а не збіг за префіксом `['table-slice']`, під який підпадав кожен
+      // змонтований зріз застосунку. Решта зрізів позначаються застарілими
+      // без жодного запиту — вони перечитаються, коли їх покажуть.
+      await invalidateSlices(queryClient, { documentId, periodKey });
       await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
 
       setPreview(null);
