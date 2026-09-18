@@ -76,7 +76,11 @@ public sealed class StyleDef : Entity<int>
             throw new DomainException(
                 "ECR-CFG-0422",
                 $"Горизонтальне вирівнювання «{horizontalAlign}» невідоме: 0..3 (Left/Center/Right/Justify).",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.styleAlign" });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CFG-0422.horizontalAlign",
+                    ["value"] = horizontalAlign,
+                });
         }
 
         if (verticalAlign is > 2)
@@ -84,7 +88,11 @@ public sealed class StyleDef : Entity<int>
             throw new DomainException(
                 "ECR-CFG-0422",
                 $"Вертикальне вирівнювання «{verticalAlign}» невідоме: 0..2 (Top/Center/Bottom).",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.styleAlign" });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CFG-0422.verticalAlign",
+                    ["value"] = verticalAlign,
+                });
         }
 
         FontName = string.IsNullOrWhiteSpace(fontName) ? null : fontName.Trim();

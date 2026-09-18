@@ -65,7 +65,7 @@ public sealed class RoleDuplicateCodeTests(SqlServerFixture sql)
         // ExceptionHandlingMiddleware.LocalizedDetailAsync резолвить це
         // ЛИШЕ коли Details несе цей ключ.
         Assert.NotNull(thrown.Details);
-        Assert.Equal("err.ECR-SEC-0409", thrown.Details!["messageKey"]);
+        Assert.Equal("err.ECR-SEC-0409.roleCodeTaken", thrown.Details!["messageKey"]);
         Assert.Equal(code, thrown.Details["code"]);
     }
 

@@ -51,7 +51,7 @@ public readonly partial record struct EcrCode
                 // код валідує КОЖНЕ поле «код» у застосунку (роль, проєкт,
                 // методологія, шаблон, довідник), і жоден із цих викликів не
                 // має доступу до каталогу рядків у Domain-шарі.
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422", ["code"] = value });
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.invalidCode", ["code"] = value });
 
     public static bool TryCreate(string? value, out EcrCode code)
     {

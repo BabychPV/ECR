@@ -211,7 +211,7 @@ public sealed class ErrorFamilyTests
         // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
         // сирим українським реченням незалежно від мови інтерфейсу.
         Assert.NotNull(error.Details);
-        Assert.Equal("err.ECR-USR-0409", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-USR-0409.userNameTaken", error.Details!["messageKey"]);
         Assert.Equal("ivanov", error.Details["userName"]);
     }
 

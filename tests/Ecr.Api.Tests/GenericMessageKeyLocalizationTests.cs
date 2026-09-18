@@ -28,7 +28,7 @@ namespace Ecr.Api.Tests;
 /// клієнта як є, незалежно від обраної мови інтерфейсу — виявлено живим
 /// аудитом (repro: `New role` з кодом, що містить дефіс). Тепер
 /// <c>EcrCode.Create</c> несе лише <c>Details["messageKey"] =
-/// "err.ECR-CFG-0422"</c> і <c>Details["code"] = value</c> — структуровані
+/// "err.ECR-CFG-0422.invalidCode"</c> і <c>Details["code"] = value</c> — структуровані
 /// дані, не готовий текст — а це саме той шлях, який тут перевіряється.
 /// </remarks>
 public sealed class GenericMessageKeyLocalizationTests
@@ -40,14 +40,14 @@ public sealed class GenericMessageKeyLocalizationTests
         var catalog = new FakeUiStringCatalog()
             .Add(
                 "en",
-                "err.ECR-CFG-0422",
+                "err.ECR-CFG-0422.invalidCode",
                 "The code \"{code}\" is invalid.",
                 UiStringScope.Public);
 
         var problem = await ProblemAsync(catalog, "en", () => throw new DomainException(
             "ECR-CFG-0422",
             "Код «LANE1-ZERO» недопустимий: дозволені латинські літери, цифри й підкреслення.",
-            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422", ["code"] = "LANE1-ZERO" }));
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.invalidCode", ["code"] = "LANE1-ZERO" }));
 
         var detail = problem.GetProperty("detail").GetString();
 
@@ -66,7 +66,7 @@ public sealed class GenericMessageKeyLocalizationTests
     public async Task Без_Details_подробиця_лишається_сирим_українським_реченням()
     {
         var catalog = new FakeUiStringCatalog()
-            .Add("en", "err.ECR-CFG-0422", "The code \"{code}\" is invalid.", UiStringScope.Public);
+            .Add("en", "err.ECR-CFG-0422.invalidCode", "The code \"{code}\" is invalid.", UiStringScope.Public);
 
         var problem = await ProblemAsync(catalog, "en", () => throw new DomainException(
             "ECR-CFG-0422",
@@ -88,7 +88,7 @@ public sealed class GenericMessageKeyLocalizationTests
         var problem = await ProblemAsync(catalog, "en", () => throw new DomainException(
             "ECR-CFG-0422",
             "Код «X» недопустимий.",
-            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422", ["code"] = "X" }));
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.invalidCode", ["code"] = "X" }));
 
         var detail = problem.GetProperty("detail").GetString();
 
@@ -106,12 +106,12 @@ public sealed class GenericMessageKeyLocalizationTests
     public async Task CreateUserHandler_дублікат_імені_користувача_каталожною_мовою()
     {
         var catalog = new FakeUiStringCatalog()
-            .Add("en", "err.ECR-USR-0409", "A user named \"{userName}\" already exists.", UiStringScope.Private);
+            .Add("en", "err.ECR-USR-0409.userNameTaken", "A user named \"{userName}\" already exists.", UiStringScope.Private);
 
         const string userName = "bootstrap";
         var problem = await ProblemAsync(catalog, "en", () => throw new BusinessRuleException(
             "ECR-USR-0409", $"Користувач з іменем «{userName}» уже існує.",
-            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0409", ["userName"] = userName }));
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0409.userNameTaken", ["userName"] = userName }));
 
         var detail = problem.GetProperty("detail").GetString();
 

@@ -144,16 +144,15 @@ public sealed partial class ErrorTitleCatalogTests
     /// плейсхолдером червоніє одразу, а ключ, який плейсхолдер утратив,
     /// зобов'язаний із переліку зникнути.
     /// </remarks>
-    private static readonly string[] TitlesDoublingAsDetail =
-    [
-        "err.ECR-CFG-0422",  // EcrCode.Create — {code}
-        "err.ECR-PRJ-0409",  // UnitOfWork — {code}
-        "err.ECR-REG-0409",  // UnitOfWork, UpsertRegistryEntryHandler — {code}, {id}
-        "err.ECR-REG-4091",  // CreateRegistryHandler — {code}, {id}
-        "err.ECR-SEC-0409",  // UserStore — {code}
-        "err.ECR-UOM-4091",  // CreateUnitHandler — {code}, {id}
-        "err.ECR-USR-0409",  // RoleAndUserHandlers — {userName}
-    ];
+    /// <remarks>
+    /// ⛔ ПОРОЖНІЙ, і це вже факт, а не намір: сім ключів, які тут стояли,
+    /// перейменовані на суфіксовану форму (<c>err.&lt;код&gt;.&lt;що саме&gt;</c>)
+    /// у сіді І у восьми кидках <c>src/</c>, а під <c>err.&lt;код&gt;</c>
+    /// заведено коротку називну фразу без підстановок. Перелік лишається як
+    /// ФОРМА — див. <c>TitlesNotSeeded</c>: новий заголовок із плейсхолдером
+    /// називається тут поіменно з причиною, а не послаблює регулярку.
+    /// </remarks>
+    private static readonly string[] TitlesDoublingAsDetail = [];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -191,6 +190,77 @@ public sealed partial class ErrorTitleCatalogTests
             "У TitlesDoublingAsDetail названі ключі, у яких плейсхолдера вже немає — прибери їх звідти: "
             + string.Join(", ", healed));
     }
+
+    /// <summary>
+    /// Кожен ключ <c>err.*</c>, названий у <c>src/</c>, заведено в сіді.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ЧОГО НЕ ЛОВИВ ЖОДЕН СТОРОЖ ДО ЦЬОГО. Перевірка заголовків дивиться
+    /// в один бік: чи є в сіді рядок під кожен КОД. Ключ, який кидає код, вона
+    /// не бачить узагалі, тож вигаданий або застарілий <c>messageKey</c>
+    /// проходив мовчки: <c>LocalizedDetailAsync</c> не знаходить ключа й
+    /// повертає сире речення з <c>DomainException</c> — українське, незалежно
+    /// від мови інтерфейсу. Нічого не ламається, нічого не логується.
+    ///
+    /// ⚠ Перший же прогін знайшов живий дефект:
+    /// <c>StyleDef.SetAppearance</c> кидав <c>err.ECR-CFG-0422.styleAlign</c>,
+    /// якого в сіді не було ЖОДНОГО РАЗУ. Тепер там два ключі
+    /// (<c>horizontalAlign</c> / <c>verticalAlign</c>) — діапазони різні.
+    ///
+    /// ⚠ Перевірка по ЛІТЕРАЛАХ, а не по <c>Details["messageKey"] = …</c>:
+    /// <c>Repository.NotFoundTexts</c> тримає ключі в таблиці й підставляє їх
+    /// змінною, тож вужча регулярка пропустила б п'ять ключів.
+    /// Голий префікс <c>UiStringResolver.ErrorKeyPrefix = "err."</c> під
+    /// регулярку не підпадає: після крапки вимагається хоча б один символ.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "ФВ-14.9a")]
+    public void Кожен_messageKey_із_коду_заведено_в_сіді()
+    {
+        var seeded = SeededKeys();
+        var thrown = ThrownKeys();
+
+        // ⛔ Регулярка, яка перестала збігатися, дала б порожні множини і ЗЕЛЕНЕ.
+        Assert.NotEmpty(seeded);
+        Assert.NotEmpty(thrown);
+
+        var missing = thrown
+            .Where(key => !seeded.Contains(key.Key))
+            .OrderBy(key => key.Key, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            $"Ключі, які кидає src/, але яких немає в {SeedFile}:"
+            + Environment.NewLine
+            + string.Join(
+                Environment.NewLine,
+                missing.Select(key =>
+                    $"  {key.Key} ({key.Path}): LocalizedDetailAsync ключа не знайде і поверне "
+                    + "сире речення з винятку — українське, незалежно від мови інтерфейсу. "
+                    + $"Додай рядок (N'{key.Key}', N'{DefaultLanguage}', N'<речення>', <0|1>) у {SeedFile} "
+                    + "або виправ ключ у кидку.")));
+    }
+
+    /// <summary>Усі ключі <c>err.*</c>, заведені сідом (будь-якою формою).</summary>
+    private static HashSet<string> SeededKeys()
+    {
+        var text = File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
+
+        return SeedKey().Matches(text)
+            .Select(m => m.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>Усі ключі <c>err.*</c>, названі літералом у production-джерелах.</summary>
+    private static List<(string Key, string Path)> ThrownKeys()
+        => SourceTree.Production()
+            .SelectMany(file => ThrownKey().Matches(file.Text)
+                .Select(m => (Key: m.Groups[1].Value, file.Path)))
+            .DistinctBy(key => key.Key, StringComparer.Ordinal)
+            .ToList();
 
     /// <summary>Коди з <c>ErrorCodes.cs</c>.</summary>
     /// <remarks>
@@ -233,6 +303,17 @@ public sealed partial class ErrorTitleCatalogTests
 
     [GeneratedRegex(@"public const string \w+\s*=\s*""(ECR-[A-Z]{3,4}-\d{4})""")]
     private static partial Regex Constant();
+
+    /// <summary>Ключ сіду будь-якої форми: <c>N'err.…'</c> у першій колонці рядка.</summary>
+    [GeneratedRegex(@"\(\s*N'(err\.[^']+)'\s*,\s*N'")]
+    private static partial Regex SeedKey();
+
+    /// <summary>
+    /// Літерал <c>"err.…"</c> у джерелі. Після крапки вимагається хоча б один
+    /// символ — інакше сюди потрапив би сам префікс <c>"err."</c>.
+    /// </summary>
+    [GeneratedRegex(@"""(err\.[^""]+)""")]
+    private static partial Regex ThrownKey();
 
     /// <summary>
     /// Рядок сіду <c>(N'err.ECR-…', N'en', N'…', 0|1)</c> — БЕЗ суфікса в ключі.
