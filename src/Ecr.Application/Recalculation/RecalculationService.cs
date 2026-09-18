@@ -357,7 +357,70 @@ public sealed class RecalculationService(
             return 0;
         }
 
-        var (values, stored) = await LoadValuesAsync(instance, ct).ConfigureAwait(false);
+        // ⛔ Директива №14 частина 3, `CAL-03`. Розбір винесено СЮДИ з
+        // `Evaluate` не заради економії: класифікатор рядкової локальності
+        // працює з AST, і робити другий `Parse` заради одного прапорця означало
+        // б розбирати кожну формулу двічі на кожен прогін.
+        var parsed = new Dictionary<int, Ecr.Expressions.Parsing.ParsedExpression>();
+        var rowLocal = new HashSet<int>();
+        var tablesWithNonLocalTarget = new HashSet<int>();
+
+        // ⚠ `CAL-02`: цілі, які читають комірки, але про які граф залежностей
+        // мовчить. Для них звужувати читання нема за чим — див.
+        // `RecalculationReadScope.Compute`.
+        var knownReads = RecalculationReadScope.FormulasWithStoredCellEdges(dependencies);
+        var unknownReads = new List<int>();
+
+        foreach (var formulaId in targets)
+        {
+            if (!formulas.TryGetValue(formulaId, out var owner))
+            {
+                continue;
+            }
+
+            var result = formulaEngine.Parse(owner.Formula.Expression, owner.Formula.Dialect);
+            if (result.Expression is null)
+            {
+                // Непридатний вираз не проходить публікацію; якщо він тут — це
+                // розбіжність між збереженим і чинним, і мовчки писати нуль було
+                // б гірше, ніж не писати нічого.
+                continue;
+            }
+
+            parsed[formulaId] = result.Expression;
+
+            if (!knownReads.Contains(formulaId)
+                && RecalculationReadScope.MentionsCells(result.Expression.Root))
+            {
+                unknownReads.Add(formulaId);
+            }
+
+            if (RowLocalFormulaClassifier.IsRowLocal(owner.Formula, result.Expression.Root))
+            {
+                rowLocal.Add(formulaId);
+            }
+            else
+            {
+                tablesWithNonLocalTarget.Add(owner.Table.Id);
+            }
+        }
+
+        // ⛔ `CAL-02`: читається ЗАМИКАННЯ, а не документ. Скоуп рахується після
+        // вибору цілей — саме цілі й визначають, що потрібно прочитати.
+        var scope = RecalculationReadScope.Compute(
+            dependencies,
+            targets,
+            formulas.ToDictionary(pair => pair.Key, pair => pair.Value.Table.Id),
+            unknownReads);
+
+        // ⛔ `CAL-03`: брудні рядки інкрементного прогону. Повний прогін
+        // (`dirty is null`) не звужується — там цілі беруться з плану, а не з
+        // насіння, і «брудних рядків» не існує за побудовою.
+        var dirtyRows = dirty is null
+            ? null
+            : new HashSet<long>(dirty.Seeds.Select(seed => seed.TableRowId));
+
+        var (values, stored) = await LoadValuesAsync(instance, scope, ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -390,12 +453,35 @@ public sealed class RecalculationService(
                 continue;
             }
 
+            if (!parsed.TryGetValue(formulaId, out var expression))
+            {
+                continue;
+            }
+
             if (!byInstance.TryGetValue(target, out var sink))
             {
                 byInstance[target] = sink = [];
             }
 
-            Evaluate(owner.Table, owner.Formula, rows, periodKey, context, values, stored, sink);
+            // ⛔ `CAL-03`, і саме тут проходить межа безпеки. Рядкове звуження
+            // застосовується лише тоді, коли в цю таблицю в ЦЬОМУ прогоні
+            // не пише жодна НЕлокальна ціль. Тоді й тільки тоді твердження
+            // «усе, що може змінитися в таблиці, лежить у брудних рядках»
+            // доводиться індукцією: базу дає насіння (брудні комірки), крок —
+            // рядково-локальна формула, яка читає лише свій рядок і пише лише
+            // в нього. Варіант із накопиченням «рядків, куди вже записали»
+            // виглядав би розумнішим, але спирався б на порядок обчислення
+            // цілей, а він тут не єдиний: відкладені rollup дописуються в
+            // кінець списку ОКРЕМО відсортованою пачкою (`targets` вище).
+            var rowFilter = dirtyRows is not null
+                            && rowLocal.Contains(formulaId)
+                            && !tablesWithNonLocalTarget.Contains(owner.Table.Id)
+                ? dirtyRows
+                : null;
+
+            Evaluate(
+                owner.Table, owner.Formula, expression, rows, rowFilter,
+                periodKey, context, values, stored, sink);
         }
 
         var written = byInstance.Values.Sum(list => list.Count);
@@ -526,23 +612,16 @@ public sealed class RecalculationService(
     private void Evaluate(
         Domain.Entities.Configuration.TableDef table,
         Domain.Entities.Configuration.FormulaDef formula,
+        Ecr.Expressions.Parsing.ParsedExpression parsed,
         IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlySet<long>? rowFilter,
         PeriodKey periodKey,
         SliceEvaluationContext context,
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         IReadOnlyDictionary<CellKey, CellValueData> stored,
         List<CellRecord> upserts)
     {
-        var parsed = formulaEngine.Parse(formula.Expression, formula.Dialect);
-        if (parsed.Expression is null)
-        {
-            // Непридатний вираз не проходить публікацію; якщо він тут — це
-            // розбіжність між збереженим і чинним, і мовчки писати нуль було б
-            // гірше, ніж не писати нічого.
-            return;
-        }
-
-        foreach (var (rowKey, columnDefId) in Targets(table, formula, rowIds))
+        foreach (var (rowKey, columnDefId) in Targets(table, formula, rowIds, rowFilter))
         {
             if (!rowIds.TryGetValue(rowKey, out var rowId))
             {
@@ -553,7 +632,7 @@ public sealed class RecalculationService(
             context.CurrentRowKey = rowKey;
             context.CurrentColumnDefId = columnDefId;
 
-            var result = formulaEngine.Evaluate(parsed.Expression, context);
+            var result = formulaEngine.Evaluate(parsed, context);
 
             // ⛔ Помилка обчислення НЕ записується як значення. `#REF` у
             // комірці — це не число, і покласти його в `ValueNumeric`
@@ -601,19 +680,39 @@ public sealed class RecalculationService(
     /// ⚠ Область формули визначає ціль однозначно (<c>CK_Formula_Scope</c>):
     /// колонкова рахує свою колонку в кожному рядку, рядкова — свій рядок у
     /// кожній колонці, комірочна — рівно одну комірку.
+    ///
+    /// ⛔ <paramref name="rowFilter"/> — директива №14 частина 3, <c>CAL-03</c>.
+    /// Звужується ЛИШЕ колонкова область: саме вона віддавала кожен
+    /// <c>rowIds.Keys</c>, тобто рівно стільки обчислень, скільки рядків у
+    /// таблиці. Рядкова й комірочна області й так дають по одному рядку, і
+    /// фільтрувати їх означало б додати шлях, яким формула може НЕ порахуватися,
+    /// нічого не вигравши.
     /// </remarks>
+    /// <param name="table">Таблиця формули.</param>
+    /// <param name="formula">Формула.</param>
+    /// <param name="rowIds">Ключ рядка → ідентифікатор рядка в екземплярі.</param>
+    /// <param name="rowFilter">
+    /// Рядки, які треба порахувати; <c>null</c> — усі (повний прогін або
+    /// формула, яку класифікатор не визнав рядково-локальною).
+    /// </param>
     private static IEnumerable<(string RowKey, int ColumnDefId)> Targets(
         Domain.Entities.Configuration.TableDef table,
         Domain.Entities.Configuration.FormulaDef formula,
-        IReadOnlyDictionary<string, long> rowIds)
+        IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlySet<long>? rowFilter)
     {
         var rowKey = FormulaOutputs.RowKeyOf(table, formula);
 
         switch (formula.Scope)
         {
             case Domain.Enums.FormulaScope.Column when formula.ColumnDefId is { } columnId:
-                foreach (var key in rowIds.Keys)
+                foreach (var (key, rowId) in rowIds)
                 {
+                    if (rowFilter is not null && !rowFilter.Contains(rowId))
+                    {
+                        continue;
+                    }
+
                     yield return (key, columnId);
                 }
 
@@ -643,16 +742,23 @@ public sealed class RecalculationService(
         }
     }
 
-    /// <summary>Значення всіх таблиць документа за поточний і суміжні періоди.</summary>
+    /// <summary>Значення таблиць із замикання читання за поточний і суміжні періоди.</summary>
     /// <remarks>
-    /// ⚠ Читаються ВСІ таблиці документа за період, а не лише та, у якій
-    /// сталася правка: формула цього аркуша має право читати сусідню таблицю,
-    /// і без її значень результат був би тихо іншим.
+    /// ⛔ Директива №14 частина 3, <c>CAL-02</c>. Доти читалися ВСІ таблиці
+    /// документа (у великому шаблоні ~90) × усі рядки × усі комірки, і
+    /// попередній період — завжди, коли <c>Sequence &gt; 1</c>. Формула цього
+    /// аркуша справді має право читати сусідню таблицю — але ті таблиці, які
+    /// вона читає, перелічені в <c>cfg.FormulaDependency</c> поіменно, і
+    /// читати решту документа «щоб напевно» означало платити за весь документ
+    /// на кожне автозбереження.
     /// </remarks>
+    /// <param name="instance">Екземпляр таблиці — джерело документа й періоду.</param>
+    /// <param name="scope">Замикання читання: що саме потрібно цьому прогону.</param>
+    /// <param name="ct">Токен скасування.</param>
     private async Task<(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> Values,
         Dictionary<CellKey, CellValueData> Stored)> LoadValuesAsync(
-        TableInstanceRef instance, CancellationToken ct)
+        TableInstanceRef instance, RecalculationReadScope scope, CancellationToken ct)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
 
@@ -669,16 +775,28 @@ public sealed class RecalculationService(
         var stored = new Dictionary<CellKey, CellValueData>();
         var periodKey = new PeriodKey(instance.PeriodKey);
 
-        await LoadPeriodAsync(values, stored, instance.DocumentId, periodKey, offset: 0, ct).ConfigureAwait(false);
+        await LoadPeriodAsync(
+                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Попередній період завантажується, коли він існує. `[Period:-1]` у
         // січні — це `null` за визначенням (`02b` §3.2), а не помилка: січень
         // не має попереднього місяця. Але в лютому це реальні числа, і
         // прочитати їх як порожнечу означало б тихо занизити результат.
-        if (periodKey.Sequence > 1)
+        //
+        // ⛔ `CAL-02`: і лише тоді, коли серед цілей є формула з посиланням на
+        // інший період. Ознака не вигадана — вона вже в моделі залежності:
+        // `DependencyExtractor` пише крос-періодному посиланню
+        // `DependsOnKind = 3` і ненульовий `PeriodOffset`
+        // (`DependencyExtractor.cs:124-125`). Доти другий прохід читання
+        // виконувався БЕЗУМОВНО з лютого й далі — тобто одинадцять місяців
+        // на рік документ читався двічі заради значень, яких жодна формула не
+        // запитувала.
+        if (scope.ReadsOtherPeriod && periodKey.Sequence > 1)
         {
             var previous = new PeriodKey(periodKey.Value - 1);
-            await LoadPeriodAsync(values, stored: null, instance.DocumentId, previous, offset: -1, ct)
+            await LoadPeriodAsync(
+                    values, stored: null, instance.DocumentId, previous, offset: -1, scope.TableDefIds, ct)
                 .ConfigureAwait(false);
         }
 
@@ -694,6 +812,10 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="offset">Зсув періоду відносно поточного.</param>
+    /// <param name="tableDefIds">
+    /// Замикання читання (<c>CAL-02</c>): екземпляри решти таблиць документа в
+    /// пакетні запити не потрапляють. <c>null</c> — читати весь документ.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
@@ -701,9 +823,23 @@ public sealed class RecalculationService(
         long documentId,
         PeriodKey periodKey,
         int offset,
+        IReadOnlySet<int>? tableDefIds,
         CancellationToken ct)
     {
-        var instances = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var all = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
+        // ⛔ `CAL-02`. Фільтр стоїть ДО обох пакетних запитів, а не після них:
+        // сенс рядка саме в тому, скільки комірок віддає база, а не скільки з
+        // відданих потім знадобилось.
+        IReadOnlyList<TableInstanceRef> instances = tableDefIds is null
+            ? all
+            : [.. all.Where(t => tableDefIds.Contains(t.TableDefId))];
+
+        if (instances.Count == 0)
+        {
+            return;
+        }
+
         var instanceIds = instances.Select(t => t.TableInstanceId).ToList();
 
         // ⛔ Q-166 (аудит фази 2, продуктивність): той самий випадок, що й у
