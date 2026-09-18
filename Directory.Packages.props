@@ -38,6 +38,12 @@
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.11" />
     <PackageVersion Include="Microsoft.AspNetCore.Diagnostics.HealthChecks" Version="10.0.11" />
+
+    <!-- MIT, як і решта ASP.NET Core. Кільце ключів DataProtection у БД
+         (`MI-01`): без нього ключі локальні для машини й облікового запису —
+         cookie одного інстанса другий не розшифрує, а під сервісною обліковкою
+         без профілю вони ще й ефемерні, тобто рестарт служби розлогінює всіх. -->
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.11" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.0.0" />
   </ItemGroup>
 

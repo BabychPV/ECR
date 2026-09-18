@@ -1,5 +1,9 @@
+using System.Security.Cryptography.X509Certificates;
+using Ecr.Api.Health;
+using Ecr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.DataProtection;
 
 namespace Ecr.Api.Auth;
 
@@ -36,11 +40,26 @@ public static class AuthenticationSetup
     /// </remarks>
     public const string MustChangePasswordClaim = "ecr:mustchg";
 
+    /// <summary>
+    /// Відбиток сертифіката, яким шифруються ключі кільця (`MI-01`, `D14-08`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий ключ, а не `Kestrel:Endpoints:Https`, і це судження, а не
+    /// недогляд: кроку «Транспорт» у майстрі ще немає (`W0.1`), а прив'язатися
+    /// до того, чого немає, означало б написати читання неіснуючої форми
+    /// конфігурації й назвати це підтримкою. Коли `W0.1` заведе транспорт,
+    /// цей рядок отримає значення з того самого відбитка — заміна одного
+    /// рядка, не переробка.
+    /// </remarks>
+    public const string CertificateThumbprintKey = "Auth:DataProtection:CertificateThumbprint";
+
     /// <summary>Налаштовує схеми автентифікації.</summary>
     public static IServiceCollection AddEcrAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
+
+        AddEcrDataProtection(services, configuration);
 
         var cookieName = configuration["Auth:CookieName"] ?? "ecr.session";
         var requireHttps = configuration.GetValue("Auth:RequireHttps", defaultValue: true);
@@ -87,5 +106,73 @@ public static class AuthenticationSetup
 
         services.AddAuthorization();
         return services;
+    }
+
+    /// <summary>
+    /// Спільне кільце ключів DataProtection у базі (`MI-01`, `D-32`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Три виклики, і кожен закриває свою відмову, а не «налаштовує
+    /// бібліотеку»:
+    /// <list type="bullet">
+    /// <item><c>SetApplicationName</c> — без нього ім'я застосунку береться з
+    /// <c>IHostEnvironment.ApplicationName</c> і входить у ланцюжок призначення
+    /// ключа. Два інстанси з різним іменем процесу (служба й той самий код під
+    /// консоллю) мають РІЗНИЙ ланцюжок — спільна таблиця ключів їх не
+    /// порятує.</item>
+    /// <item><c>PersistKeysToDbContext</c> — без нього ключі лежать у профілі
+    /// облікового запису; під сервісною обліковкою без завантаженого профілю
+    /// вони ефемерні, і рестарт служби розлогінює всіх навіть на ОДНОМУ
+    /// інстансі.</item>
+    /// <item><c>ProtectKeysWithCertificate</c> — лише коли відбиток заданий.
+    /// Інакше ключі лежать у таблиці відкрито, і саме це показує
+    /// <c>/health/db</c>: тихий незахищений режим — те, чого директива прямо
+    /// не хоче.</item>
+    /// </list>
+    ///
+    /// ⚠ Відбиток заданий, а сертифіката немає — це відмова старту, а не
+    /// відкат до незахищеного режиму. Мовчазний відкат дав би систему, яка
+    /// вважає себе захищеною, і адміністратор дізнався б про це не з health, а
+    /// з аудиту.
+    /// </remarks>
+    private static void AddEcrDataProtection(IServiceCollection services, IConfiguration configuration)
+    {
+        var builder = services.AddDataProtection()
+            .SetApplicationName("Ecr")
+            .PersistKeysToDbContext<EcrDbContext>();
+
+        var thumbprint = configuration[CertificateThumbprintKey];
+        if (string.IsNullOrWhiteSpace(thumbprint))
+        {
+            services.AddSingleton(DataProtectionKeyProtection.Unprotected);
+            return;
+        }
+
+        builder.ProtectKeysWithCertificate(FindCertificate(thumbprint));
+        services.AddSingleton(DataProtectionKeyProtection.ProtectedBy(thumbprint));
+    }
+
+    /// <summary>Сертифікат за відбитком у <c>LocalMachine\My</c> (`D14-08`).</summary>
+    private static X509Certificate2 FindCertificate(string thumbprint)
+    {
+        // Пробіли й нерозривні пробіли: відбиток зазвичай копіюють із вікна
+        // сертифіката Windows, де він надрукований групами по два символи.
+        var normalized = new string(thumbprint.Where(char.IsLetterOrDigit).ToArray());
+
+        using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
+
+        var found = store.Certificates
+            .Find(X509FindType.FindByThumbprint, normalized, validOnly: false);
+
+        if (found.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"{CertificateThumbprintKey} = '{thumbprint}': сертифіката з таким відбитком немає в "
+                + "LocalMachine\\My. Або постав сертифікат, або прибери ключ — тоді ключі кільця "
+                + "лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.");
+        }
+
+        return found[0];
     }
 }

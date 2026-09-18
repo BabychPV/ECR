@@ -19,6 +19,9 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Data.SqlClient" />
+    <!-- MI-01: DbSet<DataProtectionKey> оголошений в EcrDbContext, тому пакет
+         потрібен саме тут; Ecr.Api бачить його транзитивно. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.Extensions.Caching.SqlServer" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Quartz" />

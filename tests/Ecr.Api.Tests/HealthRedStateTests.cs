@@ -200,7 +200,8 @@ public sealed class HealthRedStateTests
             broken,
             Substitute.For<IClock>(),
             Substitute.For<IUiStringCatalog>(),
-            Substitute.For<ICurrentUser>());
+            Substitute.For<ICurrentUser>(),
+            DataProtectionKeyProtection.Unprotected);
 
         var result = await check.CheckHealthAsync(Context, CancellationToken.None);
 
