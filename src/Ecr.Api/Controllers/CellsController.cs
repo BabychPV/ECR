@@ -71,7 +71,20 @@ public sealed class CellsController(
 
         if (owner.DocumentId != documentId)
         {
-            return NotFound(new { errorCode = "ECR-DOC-0404" });
+            // ⛔ Кидок, а не `NotFound(new { errorCode })`: анонімний об'єкт —
+            // звичайний JSON, тож `ExceptionHandlingMiddleware` його не бачить
+            // і в тілі не лишається ні `title`, ні `detail`. Клієнт показував
+            // би «HTTP 404» (`UI-WALKTHROUGH.md`, F4, той самий дефект, що в
+            // `DocumentsController`). Речення в каталозі вже є.
+            throw new Ecr.Application.Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляр таблиці {request.TableInstanceId} не належить документу {documentId}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
+                    ["tableInstanceId"] = request.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // Винятки перетворює ExceptionHandlingMiddleware — ловити їх тут не

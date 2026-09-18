@@ -456,6 +456,11 @@ USING (VALUES
     (N'err.ECR-DOC-0404.sheetNotInDocument', N'en', N'Sheet {sheetDefId} is not part of document {documentId}.', 1),
     (N'err.ECR-DOC-0404.periodEmpty',        N'en', N'Document {documentId} for period {periodKey} does not exist or is empty.', 1),
     (N'err.ECR-DOC-0404.exportExpired',      N'en', N'The workbook is gone or has expired: build the export again.', 1),
+    -- ⚠ «Ще не перевіряли» — окреме речення, а не `periodEmpty`. Той самий код
+    -- відповіді означає тут інше: документ є, період є, просто перевірку ще не
+    -- запускали. Підставити сюди «does not exist or is empty» означало б
+    -- повідомити неправду про дані (`DocumentsController.LastValidation`).
+    (N'err.ECR-DOC-0404.notValidated',        N'en', N'Document {documentId} has not been validated for period {periodKey} yet.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -1594,7 +1599,7 @@ USING (VALUES
     (N'tables.noRelations',              N'en', N'This version has no table relations', 1),
     (N'tables.noRelationsHint',          N'en', N'Add one when a table must take its numbers from another; otherwise leave it empty.', 1),
     (N'tables.readOnly',                 N'en', N'Published version: relations are frozen', 1),
-    (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it (ФВ-7.1).', 1),
+    (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.', 1),
     (N'tables.relationCode',             N'en', N'Code', 1),
     (N'tables.relationCodeHint',         N'en', N'The address of the relation in the API. It cannot be renamed later.', 1),
     (N'tables.relationKind',             N'en', N'Kind', 1),

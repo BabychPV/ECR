@@ -49,10 +49,20 @@ public sealed class DocumentsController(
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
-        if (!page.IsValid)
-        {
-            return BadRequest(new { error = $"limit поза межами 1..{CursorRequest.MaxLimit}" });
-        }
+
+        // ⛔ Перевірки `page.IsValid` тут БІЛЬШЕ НЕМАЄ, і це не послаблення.
+        // Той самий `page` перевіряє `ListDocumentsHandler` — і перевіряє
+        // ПРАВИЛЬНО: `BusinessRuleException(ErrorCodes.RequestInvalid, …)`,
+        // тобто `problem+json` із кодом `ECR-REQ-0422`, який клієнт уміє
+        // розрізнити, і з реченням із каталогу
+        // (`err.ECR-REQ-0422.pageSizeOutOfRange`).
+        //
+        // ⚠ Тут же стояв `BadRequest(new { error = "limit поза межами 1..N" })`
+        // — звичайний JSON повз `ExceptionHandlingMiddleware`, українське
+        // речення БЕЗ коду помилки, і він ПЕРЕХОПЛЮВАВ правильну відмову,
+        // до якої справа просто не доходила (`UI-WALKTHROUGH.md`, F1/F4).
+        // Дві перевірки того самого — це не подвійна надійність, а гарантія,
+        // що працює гірша з двох.
 
         // ⛔ Зведений стан рахується запитом по wf.ApprovalState і лише коли
         // вказано період: без періоду «стан документа» не визначений — аркуші
@@ -84,8 +94,27 @@ public sealed class DocumentsController(
     {
         var document = await getDocument.HandleAsync(id, periodKey, ct).ConfigureAwait(false);
 
+        // ⛔ Кидок, а не `NotFound(new { errorCode })` — і це знайдено проходом
+        // інтерфейсу як користувач (`docs/build/UI-WALKTHROUGH.md`, F4).
+        // Анонімний об'єкт — це звичайний JSON, а не `application/problem+json`:
+        // `ExceptionHandlingMiddleware` такої відповіді не бачить жодним боком,
+        // тож у тілі немає ні `title`, ні `detail`. Клієнт підставляв свій
+        // запасний варіант (`api/client.ts`, `problemOf`: `HTTP ${status}`), а
+        // `EcrApiError` (`detail ?? title`) робив із нього ще й текст — звідси
+        // «HTTP 404» ДВІЧІ на екрані при живому `errorCode`.
+        //
+        // ⚠ Речення в каталозі було весь час: `err.ECR-DOC-0404.document` =
+        // «Document {documentId} was not found.» Механізм справний — до цього
+        // шляху його просто не довели.
         return document is null
-            ? NotFound(new { errorCode = "ECR-DOC-0404" })
+            ? throw new Ecr.Application.Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {id} не знайдено.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
             : Ok(document);
     }
 
@@ -153,8 +182,24 @@ public sealed class DocumentsController(
             .HandleAsync(id, PeriodKey.Parse(periodKey), ct)
             .ConfigureAwait(false);
 
+        // ⛔ Той самий дефект, що в `Get` вище (F4), і те саме лікування. Код
+        // відповіді лишається `404` — саме на нього спирається клієнт, щоб
+        // відрізнити «ще не перевіряли» від «перевірили, зауважень немає».
+        // Змінюється лише те, що в тілі: `problem+json` із поясненням замість
+        // голого `errorCode`, з якого клієнт міг зібрати хіба «HTTP 404».
+        //
+        // ⚠ Ключ ОКРЕМИЙ (`notValidated`), а не `periodEmpty`: той самий код
+        // означає тут інше — документ є, період є, перевірку ще не запускали.
         return messages is null
-            ? NotFound(new { errorCode = "ECR-DOC-0404" })
+            ? throw new Ecr.Application.Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {id} за період {periodKey} ще не перевіряли.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.notValidated",
+                    ["documentId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["periodKey"] = periodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
             : Ok(new ValidationResultResponse(
                 id,
                 periodKey,
