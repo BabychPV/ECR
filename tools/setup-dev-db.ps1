@@ -49,7 +49,14 @@ param(
     #
     # ⛔ Це рішення РОЗГОРТАННЯ, а не схеми: у замовника каталог свій, і
     # жодного шляху в `Sql/*.sql` не зашито (`Q-029`).
-    [string] $DataPath = $(if (Test-Path 'H:\') { 'H:\EcrData' } else { '' })
+    [string] $DataPath = $(if (Test-Path 'H:\') { 'H:\EcrData' } else { '' }),
+
+    # ⚠ Скільки вільного місця вимагати на диску даних. `-1` — обчислити за
+    # профілем файлових груп (див. `Get-RequiredFreeGb` нижче); `0` — не
+    # перевіряти взагалі. Параметр існує не заради тесту самої перевірки, а
+    # тому, що профіль задають ПІСЛЯ створення бази (позначка
+    # `Ecr_SmallFiles`), і той, хто знає свій профіль, знає число краще.
+    [double] $RequireFreeGb = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -131,6 +138,87 @@ function Invoke-Script {
 
     Write-Host "  $Name"
     Invoke-Sql -Db $Database -File $path
+}
+
+# ⛔ Вільне місце перевіряється ПЕРШИМ — раніше за `dotnet ef`, раніше за
+# `CREATE DATABASE`. Причина не в акуратності, а в тому, що брак місця тут
+# **не схожий на брак місця**. 2026-09-18 стенди вибрали диск даних до
+# 0.15 ГБ із 293, і та сама причина дала три різні «дефекти продукту»:
+#
+#   1. `sqlcmd` віддав `Msg 5149 … operating system error 112 (There is not
+#      enough space on the disk.)`, а назовні поїхало «крок 1 — розгортання
+#      не пройшло»;
+#   2. заміри гейта спотворилися втричі (читання p95 642 мс проти 240);
+#   3. `keyboardPath.spec.ts` тричі поспіль дав «кільце фокуса невидиме —
+#      різниця 0.00 %», і це читалося як детермінована зв'язаність наборів,
+#      хоча зонд усередині виміру показував, що кільце намальоване.
+#
+# На третій із них пішли години, і жоден із трьох не вказував на диск. Один
+# рядок на старті коштує дешевше за будь-яку з тих гіпотез.
+#
+# ⚠ Міряється диск КЛІЄНТА. Для віддаленого інстансу це була б неправда, тож
+# там перевірка мовчки пропускається — краще не перевірити, ніж збрехати.
+function Get-RequiredFreeGb {
+    # Повний профіль `01-filegroups.sql`: 4096 + 4096 + 4096 + 2048 МБ файлів
+    # груп = 14 ГБ, плюс `.mdf`/`.ldf` і запас на приріст під час прогону.
+    # Зменшений профіль (Express або позначка `Ecr_SmallFiles`) — 4 × 64 МБ.
+    #
+    # ⚠ Позначку `Ecr_SmallFiles` тут знати НЕМОЖЛИВО: вона ставиться на вже
+    # створену базу. Тому за нею не вгадуємо — беремо повний профіль і
+    # називаємо це в повідомленні, щоб число можна було перевірити.
+    $edition = (& sqlcmd -S $Server -E -C -b -h -1 -W `
+            -Q "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('EngineEdition') AS int);" 2>&1 |
+        Where-Object { $_ -match '^\s*\d+\s*$' } | Select-Object -First 1)
+
+    if ($LASTEXITCODE -eq 0 -and "$edition".Trim() -eq '4') { return 1.0 }   # 4 = Express
+
+    return 15.5
+}
+
+$serverHost = ($Server -split '\\')[0]
+$isLocalServer = $serverHost -in @('localhost', '.', '(local)', '127.0.0.1', $env:COMPUTERNAME)
+
+if ($isLocalServer) {
+    if ($RequireFreeGb -ge 0) { $needGb = [double] $RequireFreeGb } else { $needGb = Get-RequiredFreeGb }
+
+    if ($needGb -gt 0) {
+        # Куди насправді ляжуть файли: наш `-DataPath`, інакше типовий каталог
+        # інстансу — його знає лише сервер, тому питаємо сервер, а не вгадуємо.
+        $target = $DataPath
+        if (-not $target) {
+            $target = (& sqlcmd -S $Server -E -C -b -h -1 -W `
+                    -Q "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260));" 2>&1 |
+                Where-Object { $_ -match ':' } | Select-Object -First 1)
+        }
+
+        $drive = $null
+        if ($target) { $drive = (Split-Path -Qualifier "$target".Trim()).TrimEnd(':') }
+
+        if ($drive) {
+            $free = (Get-PSDrive -Name $drive -ErrorAction SilentlyContinue).Free
+            if ($null -ne $free) {
+                $freeGb = [math]::Round($free / 1GB, 1)
+                Write-Host ("Диск даних {0}: вільно {1} ГБ, потрібно {2} ГБ" -f $drive, $freeGb, $needGb)
+
+                if ($freeGb -lt $needGb) {
+                    throw @"
+Замало місця на диску даних SQL Server ${drive}: вільно $freeGb ГБ, потрібно $needGb ГБ.
+
+Це НЕ дефект розгортання і не дефект продукту. Без цієї перевірки далі було б
+'sqlcmd повернув 1 на 01-filegroups.sql' (насправді Msg 5149, operating system
+error 112), а прогони на такому стенді ще й дали б спотворені заміри.
+
+Що робити:
+  * прибрати бази тестів (їх відтворює SqlServerFixture, нічого цінного немає):
+    sqlcmd -S $Server -E -Q "SELECT name FROM sys.databases WHERE name LIKE 'EcrTest[_]%';"
+  * прибрати стенди, що лишилися від обірваних прогонів (кожен ~14 ГБ);
+  * або вказати інший диск: -DataPath <шлях>;
+  * або, якщо профіль буде зменшений, зняти перевірку: -RequireFreeGb 0.
+"@
+                }
+            }
+        }
+    }
 }
 
 Write-Host 'Генерую migration.sql…'
