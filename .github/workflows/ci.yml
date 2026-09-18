@@ -33,6 +33,15 @@ on:
     branches: [ main ]
   pull_request:
 
+  # ⚠ Розклад потрібен РІВНО одному завданню — `shuffle` (у кінці файла).
+  # Решта гейтів його ігнорує: вони прив'язані до змін, а не до годинника,
+  # і нічний прогін того самого коду нічого не додав би.
+  schedule:
+    - cron: '17 2 * * *'
+
+  # Щоб перемішаний прогін можна було попросити руками, не чекаючи ночі.
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -231,3 +240,49 @@ jobs:
         env:
           ECR_A11Y_THEME: ${{ matrix.theme }}
         run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Доступність клієнта'
+
+  # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
+  # мерж (`continue-on-error`), бо його призначення інше: показати, що набір
+  # зелений ПО СУТІ, а не тому, що штатний порядок випадково влаштовує
+  # кожен тест.
+  #
+  # ⚠ Привід конкретний. 2026-09-18 прогін із `--sequence.shuffle` знайшов
+  # ДВІ залежності від порядку, і одна з них вивела на дефект ПРОДУКТУ:
+  # `RouteAnnouncer` тримав пам'ять про оголошений заголовок у модульній
+  # змінній, яку ніщо не скидало, тож після перемонтування області читалка
+  # екрана мовчала. Обидві були невидимі рівно стільки, скільки існували, —
+  # штатний порядок їх не зачіпав.
+  #
+  # ⚠ Сід ВИПАДКОВИЙ на кожен прогін, а не сталий. Сталий сід перевіряв би
+  # один-єдиний порядок і з часом став би просто другою копією штатного;
+  # випадковий щоночі бере новий, і залежність рано чи пізно спливає.
+  # Сід друкується в лог — саме ним падіння відтворюється локально:
+  # `npx vitest run --sequence.shuffle --sequence.seed=<сід>`.
+  #
+  # ⛔ Лише за розкладом і вручну, НЕ на кожен PR: перемішаний прогін
+  # червоніє випадково за побудовою, і в обов'язкових гейтах він навчив би
+  # перезапускати червоне замість читати його.
+  shuffle:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Ecr.Web/package-lock.json
+
+      - name: npm ci
+        working-directory: src/Ecr.Web
+        run: npm ci
+
+      - name: Набір у перемішаному порядку
+        working-directory: src/Ecr.Web
+        run: |
+          SEED=$RANDOM
+          echo "Сід перемішування: $SEED"
+          echo "Відтворити локально: npx vitest run --sequence.shuffle --sequence.seed=$SEED"
+          npx vitest run --sequence.shuffle --sequence.seed=$SEED
