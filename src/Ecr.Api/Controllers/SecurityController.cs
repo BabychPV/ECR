@@ -148,11 +148,12 @@ public sealed class SecurityController(
     public async Task<IActionResult> ListUsers(
         [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
     {
+        // ⛔ Перевірка `page.IsValid` переїхала в `ListUsersHandler`: тут стояв
+        // `BadRequest(new { error = "limit поза межами 1..N" })` — звичайний
+        // JSON повз `ExceptionHandlingMiddleware`, українське речення і жодного
+        // коду помилки. Обробник кидає `ECR-REQ-0422` з реченням із каталогу,
+        // і контролер лишається тим, чим має бути, — делегуванням.
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
-        if (!page.IsValid)
-        {
-            return BadRequest(new { error = $"limit поза межами 1..{CursorRequest.MaxLimit}" });
-        }
 
         // ⛔ Хеш пароля і сіль не покидають сховище: у проєкції UserView їх
         // немає за побудовою, а не «не додали» (ФВ-6.11).

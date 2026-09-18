@@ -408,6 +408,24 @@ public sealed class ListUsersHandler(IUserStore users, IAccessDecisionService ac
     {
         ArgumentNullException.ThrowIfNull(page);
 
+        // ⛔ Розмір сторінки перевіряється ТУТ, а не в контролері. Там стояв
+        // `BadRequest(new { error = "limit поза межами 1..N" })` — звичайний
+        // JSON повз `ExceptionHandlingMiddleware`, українське речення і жодного
+        // коду помилки, тобто клієнтові не було чого розрізняти
+        // (`02-contracts.md` §7, `UI-WALKTHROUGH.md` F1/F4). Той самий сценарій
+        // у `ListDocumentsHandler` уже вирішено саме так.
+        if (!page.IsValid)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange",
+                    ["max"] = CursorRequest.MaxLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
 
