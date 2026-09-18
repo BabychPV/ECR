@@ -1,6 +1,6 @@
-import { useState, type JSX } from 'react';
+import { Profiler, useState, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -399,5 +399,143 @@ describe('Breadcrumbs — Q-305: «Cannot update a component while rendering a d
     expect(updateInRenderCalls).toEqual([]);
 
     consoleErrorSpy.mockRestore();
+  });
+});
+
+/**
+ * Обгортка, що рахує КОМІТИ піддерева `<Breadcrumbs/>` (`React.Profiler`
+ * викликає `onRender` рівно раз на кожен коміт цього піддерева).
+ *
+ * ⚠ Коміти, а не виклики функції компонента: саме коміт — це «крихти
+ * перемалювалися». Рендер, який React відкинув, нічого не показав, і
+ * рахувати його як оновлення означало б міряти не те, що перевіряється.
+ */
+function CountingCrumbs({ onCommit }: { onCommit: () => void }): JSX.Element {
+  return (
+    <Profiler id="breadcrumbs" onRender={onCommit}>
+      <Breadcrumbs />
+    </Profiler>
+  );
+}
+
+function countingRegistryRouter(initialPath: string, onCommit: () => void) {
+  return createMemoryRouter(
+    [
+      {
+        path: '/',
+        element: <Layout />,
+        children: [
+          {
+            path: 'admin',
+            element: <Layout />,
+            children: [
+              {
+                path: 'registries/:code/definition',
+                element: <CountingCrumbs onCommit={onCommit} />,
+                handle: routes.adminRegistryDefinition.handle,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    { initialEntries: [initialPath] },
+  );
+}
+
+describe('Breadcrumbs — підписка на QueryCache не перериває рендер сторінки', () => {
+  /**
+   * ⛔ Це — доказ виправлення livelock'а рендера, описаного над
+   * `useCacheVersion` (`Breadcrumbs.tsx`). Дефект був видимий лише на живому
+   * стенді: `e2e/screenshots.spec.ts` під роллю `admin` не дочікувався
+   * заголовка `/admin/units` за 30 с, бо кожен `useQuery`/`useMutation`
+   * сторінки, створюючи свій `QueryObserver` ПІД ЧАС рендера, будив цю
+   * підписку, а та мікрозадачею замовляла новий стан — і React починав рендер
+   * піддерева спочатку. Жоден із 1800+ тестів цього не бачив: у jsdom не
+   * існує ані конкурентних зрізів по 5 мс, ані піддерева, що в них не
+   * вкладається.
+   *
+   * ⚠ Тому перевіряється не час (він у jsdom нічого не доводить), а ПРИЧИНА:
+   * подія кешу, яка НЕ змінює жодної крихти, не повинна коштувати жодного
+   * перемальовування крихт узагалі.
+   *
+   * Мутаційна перевірка (RED → GREEN, проведена перед комітом): якщо в
+   * `useCacheVersion` прибрати порівняння відбитків (`if (next ===
+   * painted.current) return;`) — тобто повернути безумовний `setVersion`, як
+   * було до цього виправлення, — перший тест нижче падає
+   * (`expect(commits).toBe(0)` бачить 1). Другий тест при цьому лишається
+   * зеленим — саме тому їх ДВА: він падає на протилежній мутації (прибрати
+   * підписку зовсім), і жоден із них не можна задовольнити, вимкнувши
+   * механізм.
+   */
+  it('чужий запит, що з’явився в кеші, НЕ перемальовує крихти', async () => {
+    const queryClient = client();
+    queryClient.setQueryData(queryKeys.registries.definition('EMISSIONS'), {
+      code: 'EMISSIONS',
+      id: 1,
+      dataRevision: 1,
+      definitionVersion: 1,
+      fields: [],
+      isTemporal: false,
+      mappings: [],
+      nameL10n: { values: { en: 'Emissions Registry' } },
+      relations: [],
+      rules: [],
+      sourceKind: 'Manual',
+    });
+
+    let commits = 0;
+    show(
+      countingRegistryRouter('/admin/registries/EMISSIONS/definition', () => {
+        commits += 1;
+      }),
+      queryClient,
+    );
+
+    await screen.findByText('Emissions Registry');
+
+    // Далі рахуємо лише те, що спричинить подія кешу.
+    commits = 0;
+
+    // ⚠ Той самий шлях сповіщення (`QueryCache.notify`), яким будить підписку
+    // будь-який `useQuery` чужої сторінки, що вперше монтується для нового
+    // ключа: `build()` → `add()` → `notify('added')`, далі `notify('updated')`.
+    // `act` з асинхронним колбеком дає мікрозадачі, у яку відкладено
+    // `setVersion`, гарантовано відпрацювати.
+    await act(async () => {
+      queryClient.setQueryData(['документи-іншої-сторінки'], { items: [] });
+    });
+
+    expect(commits).toBe(0);
+  });
+
+  it('запит, від якого залежить крихта, доїхав — крихта оновлюється', async () => {
+    const queryClient = client();
+
+    show(registryRouter('/admin/registries/EMISSIONS/definition'), queryClient);
+
+    // Кеш холодний і жодного запиту не йде — статичний підпис із реєстру.
+    expect(screen.getByText('⟦registries.constructor⟧')).toBeDefined();
+
+    await act(async () => {
+      queryClient.setQueryData(queryKeys.registries.definition('EMISSIONS'), {
+        code: 'EMISSIONS',
+        id: 1,
+        dataRevision: 1,
+        definitionVersion: 1,
+        fields: [],
+        isTemporal: false,
+        mappings: [],
+        nameL10n: { values: { en: 'Emissions Registry' } },
+        relations: [],
+        rules: [],
+        sourceKind: 'Manual',
+      });
+    });
+
+    // ⛔ Саме заради ЦЬОГО підписка й існує: без неї крихта, що застала кеш
+    // холодним, лишилася б статичним підписом (або вічним `Skeleton`) назавжди.
+    expect(screen.getByText('Emissions Registry')).toBeDefined();
+    expect(screen.queryByText('⟦registries.constructor⟧')).toBeNull();
   });
 });
