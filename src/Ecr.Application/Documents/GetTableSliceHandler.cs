@@ -2,6 +2,7 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Calculations;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Ecr.Application.Documents;
 
@@ -9,6 +10,20 @@ namespace Ecr.Application.Documents;
 /// Зріз таблиці для grid. **Найважчий регулярний запит системи**: бюджет
 /// p95 1.5 с на 500×60, з яких 600 мс — вибірка з SQL (tz/08 §8.2).
 /// </summary>
+/// <param name="rowStore">Рядки екземпляра таблиці.</param>
+/// <param name="cellStore">Значення комірок.</param>
+/// <param name="metadata">Знімок структури версії шаблону.</param>
+/// <param name="units">Довідник одиниць.</param>
+/// <param name="access">Рішення доступу.</param>
+/// <param name="methodologies">Конфігурація методологій.</param>
+/// <param name="periods">Періоди документа.</param>
+/// <param name="styles">Каталог стилів версії.</param>
+/// <param name="memory">
+/// Сховище кешу <c>RD-04</c>. У контейнері розв'язується завжди
+/// (<c>Ecr.Infrastructure/DependencyInjection.cs:96</c>); значення за
+/// замовчуванням існує лише заради тестів, що конструюють обробник вручну, і
+/// вимикає кеш, а не підміняє його тихою заглушкою.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -17,8 +32,21 @@ public sealed class GetTableSliceHandler(
     IAccessDecisionService access,
     IMethodologyStore methodologies,
     IPeriodStore periods,
-    IStyleCatalog styles)
+    IStyleCatalog styles,
+    IMemoryCache? memory = null)
 {
+    private readonly MethodologyRequiredColumnsCache _required = new(memory);
+
+    /// <summary>
+    /// Кеш позначки «обов'язкове за методологією».
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Відкритий заради <c>IsEnabled</c>: тест мусить мати змогу довести, що
+    /// в зібраному контейнері кеш справді ввімкнений, а не мовчки вимкнувся
+    /// разом із прискоренням, заради якого існує.
+    /// </remarks>
+    public MethodologyRequiredColumnsCache RequiredColumnsCache => _required;
+
     /// <summary>Читає зріз.</summary>
     public async Task<TableSliceDto> HandleAsync(long documentId, long tableInstanceId,
                                                  AccessProfile profile, string language, CancellationToken ct)
@@ -238,10 +266,20 @@ public sealed class GetTableSliceHandler(
     /// ⚠ Немає меж періоду (`FindPeriodBoundsAsync` повернув <c>null</c>) —
     /// порожній набір, а не відмова: сітку показати треба навіть тоді, коли
     /// не вдалося визначити межі періоду, просто без позначки методології.
+    ///
+    /// ⛔ <b>`RD-04`.</b> Тут було <b>три запити на кожну прив'язану
+    /// методологію</b> — <c>3N</c> звернень у найгарячішому читанні системи.
+    /// Тепер добір чинної версії і вміст версії йдуть через
+    /// <see cref="MethodologyRequiredColumnsCache"/>, і в теплому стані число
+    /// звернень <b>не залежить від <c>N</c></b>: лишається рівно одне —
+    /// склад прив'язок, який кешувати не можна (він і є ключем кешу).
     /// </remarks>
     private async Task<HashSet<int>> RequiredByMethodologyColumnIdsAsync(
         int tableDefId, long documentId, int periodKey, CancellationToken ct)
     {
+        // ⚠ Цей запит лишається на кожен зріз навмисно: увімкнення чи зняття
+        // прив'язки (`cfg.CalculationBinding`) мусить бути видно негайно, і
+        // саме склад прив'язок входить у ключ кешу нижче.
         var methodologyIds = await methodologies
             .GetMethodologyIdsBoundToTableAsync(tableDefId, ct).ConfigureAwait(false);
 
@@ -256,47 +294,90 @@ public sealed class GetTableSliceHandler(
             return [];
         }
 
+        var versionIds = await _required.CurrentVersionIdsAsync(
+            tableDefId, bounds.PeriodEnd, methodologyIds,
+            token => CurrentVersionIdsAsync(methodologyIds, bounds.PeriodEnd, token), ct)
+            .ConfigureAwait(false);
+
         var result = new HashSet<int>();
+
+        foreach (var versionId in versionIds)
+        {
+            var columns = await _required.RequiredColumnIdsAsync(
+                versionId, token => RequiredColumnIdsOfVersionAsync(versionId, token), ct)
+                .ConfigureAwait(false);
+
+            result.UnionWith(columns);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Версії методологій, чинні на <paramref name="periodEnd"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кешується <b>окремо</b> від вмісту версії і з коротким терміном
+    /// життя: відповідь тут змінює публікація нової версії
+    /// (<c>MethodologyVersion.Publish</c>) і виведення з обігу
+    /// (<c>MethodologyVersion.Deprecate</c>), не змінивши жодного байта в уже
+    /// опублікованій. Плутати ці дві гарантії — значить кешувати назавжди те,
+    /// що назавжди кешувати не можна.
+    /// </remarks>
+    private async Task<IReadOnlyList<int>> CurrentVersionIdsAsync(
+        IReadOnlyList<int> methodologyIds, DateOnly periodEnd, CancellationToken ct)
+    {
+        var ids = new List<int>(methodologyIds.Count);
 
         foreach (var methodologyId in methodologyIds)
         {
             var versions = await methodologies.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
 
             var version = versions
-                .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= bounds.PeriodEnd)
+                .Where(v => v.EffectiveFrom is not null && v.EffectiveFrom <= periodEnd)
                 .OrderByDescending(
                     v => new MethodologyVersionKey(v.EffectiveFrom, v.Version, v.Id),
                     MethodologyVersionKey.Currency)
                 .FirstOrDefault();
 
-            if (version is null)
+            if (version is not null)
             {
-                continue;
-            }
-
-            // ⚠ Версія без ЖОДНОГО правила прив'язки ніколи не потрапляє в
-            // gate `PatchCellsHandler.ResolveApplicableAsync` (`rules.Count == 0`
-            // → методологія пропускається цілком, незалежно від вимог) — тобто
-            // її обов'язкові входи НІКОЛИ насправді не enforced. Позначати тут
-            // колонку зірочкою за вимогою, яка ніколи не спрацює, означало б
-            // брехати оператору. Той самий предикат «застосовність», без
-            // самого зіставлення рядка (воно тут не потрібне).
-            var rules = await methodologies.GetRulesAsync(version.Id, ct).ConfigureAwait(false);
-            if (rules.Count == 0)
-            {
-                continue;
-            }
-
-            var requiredInputs = await methodologies
-                .GetRequiredInputsAsync(version.Id, ct).ConfigureAwait(false);
-
-            foreach (var input in requiredInputs)
-            {
-                result.Add(input.ColumnDefId);
+                ids.Add(version.Id);
             }
         }
 
-        return result;
+        return ids;
+    }
+
+    /// <summary>
+    /// Обов'язкові вхідні колонки однієї <b>опублікованої</b> версії.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Версія без ЖОДНОГО правила прив'язки ніколи не потрапляє в gate
+    /// <c>PatchCellsHandler.ResolveApplicableAsync</c> (<c>rules.Count == 0</c>
+    /// → методологія пропускається цілком, незалежно від вимог) — тобто її
+    /// обов'язкові входи НІКОЛИ насправді не enforced. Позначати тут колонку
+    /// зірочкою за вимогою, яка ніколи не спрацює, означало б брехати
+    /// операторові. Той самий предикат «застосовність», без самого зіставлення
+    /// рядка (воно тут не потрібне).
+    ///
+    /// ⛔ Порожній набір через «немає правил» кешується так само, як
+    /// непорожній, і це навмисно: це теж незмінна властивість опублікованої
+    /// версії, а не тимчасова відсутність відповіді.
+    /// </remarks>
+    private async Task<IReadOnlySet<int>> RequiredColumnIdsOfVersionAsync(
+        int methodologyVersionId, CancellationToken ct)
+    {
+        var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        if (rules.Count == 0)
+        {
+            return new HashSet<int>();
+        }
+
+        var requiredInputs = await methodologies
+            .GetRequiredInputsAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        return requiredInputs.Select(i => i.ColumnDefId).ToHashSet();
     }
 
     /// <summary>Позначення одиниці колонки; <c>null</c> — колонка безрозмірна.</summary>
