@@ -14,7 +14,8 @@ namespace Ecr.Infrastructure.Caching;
 /// правка створює новий ключ, а не псує старий. Це прибирає когерентність кешу
 /// між інстансами як клас проблеми — і саме тому ≥2 інстанси тут дешеві (D-16).
 /// </remarks>
-public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetadataCache
+public sealed class MetadataCache(
+    IMemoryCache memory, EcrDbContext db, CacheLifetimes? lifetimes = null) : IMetadataCache
 {
     /// <summary>
     /// Стеля життя запису.
@@ -33,8 +34,13 @@ public sealed class MetadataCache(IMemoryCache memory, EcrDbContext db) : IMetad
     /// сесія редагування версії шаблону триває порівнянно з користувацькою
     /// сесією, для якої <see cref="AccessProfileCache"/> уже бере ті самі
     /// 30 хв.
+    ///
+    /// ⚠ 30 хв — це ДЕФОЛТ, а не константа: значення береться з
+    /// <c>Cache:MetadataSlidingMinutes</c> (`S-13`). Ключ був у
+    /// <c>appsettings.json</c> без читача, тобто виставлені там 240 хв не
+    /// діяли.
     /// </remarks>
-    private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(30);
+    private TimeSpan Lifetime => (lifetimes ?? CacheLifetimes.Default).Metadata;
 
     /// <inheritdoc />
     public async Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct)
