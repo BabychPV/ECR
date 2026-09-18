@@ -51,6 +51,23 @@ export function DocumentsPage(): JSX.Element {
   const projectCodeOf = (projectId: number): string =>
     projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
 
+  /**
+   * ⛔ UI-walkthrough F3: посилання було зібране як `/documents/${id}` — без
+   * періоду. `DocumentPage.tsx` бере `urlPeriod ?? currentPeriodKey()`, тобто
+   * без параметра відкриває ПОТОЧНИЙ місяць, а не той період, який людина
+   * щойно обрала тут і про який ішлося. Вимога записана в самому
+   * `DocumentPage.tsx`: «⛔ Період і аркуш — в адресі (`ФВ-14.29`). Посилання
+   * на документ без них відкриває інший період і інший аркуш, ніж той, про
+   * який ішлося.»
+   *
+   * ⚠ Сьогодні наслідок НЕВИДИМИЙ: період стенда (`202609`) випадково
+   * дорівнює поточному місяцю, тож підстановка дає ту саму цифру. Тому тест
+   * на цю поведінку мусить задавати період ЯВНО і ВІДМІННИЙ від поточного —
+   * інакше він зелений і без фіксу.
+   */
+  const documentHref = (documentId: number): string =>
+    `/documents/${documentId}` + (periodKey === null ? '' : `?periodKey=${periodKey}`);
+
   return (
     <>
       <PageHeader
@@ -128,25 +145,39 @@ export function DocumentsPage(): JSX.Element {
                           лишатися видимим завжди. */}
                       {name.length > 0 ? (
                         <Stack gap="xs">
-                          <Link to={`/documents/${document.id}`}>{name}</Link>
+                          <Link to={documentHref(document.id)}>{name}</Link>
                           <Text size="xs" c="dimmed">
                             {document.businessKey}
                           </Text>
                         </Stack>
                       ) : (
-                        <Link to={`/documents/${document.id}`}>{document.businessKey}</Link>
+                        <Link to={documentHref(document.id)}>{document.businessKey}</Link>
                       )}
                     </Table.Td>
                     <Table.Td>{projectCodeOf(document.projectId)}</Table.Td>
                     <Table.Td>{document.sheetCount}</Table.Td>
                     <Table.Td>
-                      <Group gap="xs">
-                        {Object.entries(document.sheetStates).map(([sheet, state]) => (
-                          <Badge key={sheet} size="sm" variant="light">
-                            {sheet}: {state}
-                          </Badge>
-                        ))}
-                      </Group>
+                      {/* ⛔ UI-walkthrough F6: за період, якого немає в
+                          календарі (`/?periodKey=190001`), клітинка була
+                          ПОРОЖНЯ — і ніщо не відрізняло «за цей період станів
+                          немає» від «не завантажилося». Порожнеча в таблиці
+                          читається двояко; видима позначка відсутності —
+                          читається однозначно.
+
+                          ⚠ Символ, а не рядок каталогу, навмисно: «—» однакове
+                          в усіх мовах і не потребує перекладу, тож позначка
+                          не залежить від рядка, якого в каталозі ще немає. */}
+                      {Object.keys(document.sheetStates).length === 0 ? (
+                        <Text c="dimmed">—</Text>
+                      ) : (
+                        <Group gap="xs">
+                          {Object.entries(document.sheetStates).map(([sheet, state]) => (
+                            <Badge key={sheet} size="sm" variant="light">
+                              {sheet}: {state}
+                            </Badge>
+                          ))}
+                        </Group>
+                      )}
                     </Table.Td>
                   </Table.Tr>
                   );
