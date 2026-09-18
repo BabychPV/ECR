@@ -175,6 +175,35 @@ public sealed class SubmitSheetHandler(
                 });
         }
 
+        // ⛔ `DAT-06`. Зріз, стан аркуша й проведення в звітність — ОДНИМ
+        // комітом. Доти їх було три: `WorkflowStore.SaveSnapshotAsync` кличе
+        // `SaveChangesAsync` сам (йому потрібен `IDENTITY` зрізу), далі
+        // `ReportSnapshotSync.MarkSubmittedAsync` пише своє, і аж наприкінці
+        // йшов `uow.SaveChangesAsync`. Збій між ними лишав у базі рівно той
+        // стан, якого не має бути ніколи: зріз подання є, а аркуш не поданий —
+        // або навпаки. Обидві половини — «доказ того, що пішло регуляторові»
+        // (`ФВ-9.17`), і нарізно вони не доказ, а розбіжність.
+        //
+        // ⚠ `SaveSnapshotAsync` усередині транзакції лишається як був: його
+        // `SaveChangesAsync` тепер лише матеріалізує `IDENTITY`, не комітячи.
+        // `ExecuteInTransactionAsync` приєднується до зовнішньої транзакції
+        // (`UnitOfWork.cs:174-178`), тож це обгортка, а не переробка.
+        await uow.ExecuteInTransactionAsync(
+            innerCt => SubmitCoreAsync(documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, innerCt),
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Зріз, стан аркуша й проведення в звітність — усе під транзакцією.</summary>
+    private async Task SubmitCoreAsync(
+        long documentId,
+        int sheetDefId,
+        int periodKey,
+        PeriodKey key,
+        int userId,
+        int templateVersionId,
+        IReadOnlyList<TableInstanceRef> instances,
+        CancellationToken ct)
+    {
         var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
         // ⚠ Іммутабельний зріз створюється ДО зміни стану: якщо зріз не
