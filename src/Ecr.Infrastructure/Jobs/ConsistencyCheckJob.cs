@@ -80,6 +80,9 @@ public sealed class ConsistencyCheckJob(
         await progress.ReportKeyAsync(60, "jobs.consistencyArchiveCheck", ct).ConfigureAwait(false);
         issues.AddRange(await ArchiveChecksumsAsync(ct).ConfigureAwait(false));
 
+        await progress.ReportKeyAsync(70, "jobs.consistencyUnboundCalculated", ct).ConfigureAwait(false);
+        issues.AddRange(await UnboundCalculatedColumnsAsync(ct).ConfigureAwait(false));
+
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
         // половина функції, а пастка — виправлення довідника не розблокувало б
@@ -227,6 +230,109 @@ public sealed class ConsistencyCheckJob(
     }
 
     /// <summary>
+    /// Колонки типу <c>Calculated</c>, до яких не веде жодна ЧИННА прив'язка
+    /// виходу методології (<c>cfg.CalculationBinding</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це та сама діра, яку залишив по собі `#284`, і місце перевірки тут —
+    /// не зручність, а єдиний чесний варіант. `#276` поставив вимогу «джерело
+    /// для будь-якої обчислюваної колонки» на ПУБЛІКАЦІЮ СТРУКТУРИ, і `#284`
+    /// звузив її до <c>Formula</c>, бо джерело <c>Calculated</c>-колонки живе
+    /// ПОЗА версією шаблону і заводить його ІНША людина — методолог — уже
+    /// після публікації. Ціна звуження була названа прямо: така колонка
+    /// публікується, і в опублікованій формі це порожня клітинка, яку оператор
+    /// не має права заповнити (<c>EditDenyReason.CalculatedCell</c>), і про яку
+    /// не говорить ніхто.
+    ///
+    /// ⛔ Чому не повернути це в жоден ГЕЙТ життєвого циклу. Виміряно по
+    /// наявних сценаріях, а не з міркувань:
+    /// <list type="bullet">
+    /// <item>публікація МЕТОДОЛОГІЇ —
+    /// <c>CalculationOrchestratorConcurrencyScenarios.ArrangeMethodologyAsync</c>
+    /// прив'язує вихід (крок 170) і лише потім публікує версію (крок 172), по
+    /// одній методології за раз; на публікації першої друга
+    /// <c>Calculated</c>-колонка ще не прив'язана — гейт відхилив би штатний
+    /// порядок. До того ж методологія бачить лише ті таблиці, куди прив'язана
+    /// САМА: колонку, якої не торкнулася жодна методологія, там не видно
+    /// взагалі — тобто рівно той випадок, заради якого перевірка й потрібна;</item>
+    /// <item>активація ПРОЄКТУ й відкриття періоду —
+    /// <c>DataEntryScenarios.ArrangeRealDocumentAsync</c> активує проєкт
+    /// (крок 1290) і створює документ (крок 1308) ДО того, як з'явиться хоч
+    /// одна прив'язка; періоди ж відкриває <c>PeriodStateJob</c> за розкладом,
+    /// а фонова задача нікому не може відмовити.</item>
+    /// </list>
+    /// Отже «<c>Calculated</c> без прив'язки» — законний ПЕРЕХІДНИЙ стан на
+    /// КОЖНОМУ переході життєвого циклу, і жорсткий гейт там означав би втретє
+    /// зіткнутися з тим самим порядком ролей.
+    ///
+    /// ⚠ Тому знахідка, а не відмова — і саме тут вона має сенс: ця задача
+    /// єдина в системі бачить УСЮ конфігурацію одразу, обидві її половини
+    /// (структуру версії й прив'язки), не будучи прив'язаною до чийогось
+    /// кроку. Запис у <c>aud.ConsistencyIssue</c> переживає прогін і
+    /// зіставляється за трійкою <c>(RuleCode, EntityType, EntityId)</c>, тож
+    /// повторні проходи не плодять копій, а адміністратор дістає перевірку на
+    /// вимогу через <c>POST /api/v1/jobs/{jobId}/restart</c>.
+    ///
+    /// ⚠ Лише версії НЕ заархівованих проєктів. Перевіряти всі версії підряд
+    /// означало б щоночі доповідати про чернетки, які ще пишуть, і про
+    /// виведені з обігу версії, яких уже ніхто не відкриє: журнал, у якому
+    /// знахідка — норма, перестає бути сигналом (ФВ-7.7). Порожня клітинка
+    /// шкодить рівно там, де за версією працює живий проєкт.
+    ///
+    /// ⚠ Лише <c>IsActive</c>-прив'язки — те саме звуження, що й у
+    /// <c>ICalculationBindingStore.ListBoundColumnIdsAsync</c>: вимкнену
+    /// прив'язку <c>RecalculationJob.BindingsAsync</c> не бере, тож джерелом
+    /// для колонки вона не є. Тип <c>Formula</c> сюди не входить навмисно —
+    /// його джерело перевіряє публікація структури (<c>ECR-TMPL-4226</c>), і
+    /// друга перевірка того самого стану доповідала б про вже відхилене.
+    /// </remarks>
+    private async Task<List<ConsistencyIssue>> UnboundCalculatedColumnsAsync(CancellationToken ct)
+    {
+        var liveVersions = db.Projects
+            .AsNoTracking()
+            .Where(p => p.Status != ProjectStatus.Archived)
+            .Select(p => p.TemplateVersionId);
+
+        var query =
+            from column in db.ColumnDefs.AsNoTracking()
+            join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+            join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+            where column.DataType == CellDataType.Calculated
+                  && !column.IsDeleted && !table.IsDeleted && !sheet.IsDeleted
+                  && liveVersions.Contains(sheet.TemplateVersionId)
+                  && !db.CalculationBindings.Any(b => b.ColumnDefId == column.Id && b.IsActive)
+            select new UnboundColumnRow(column.Id, table.Code, column.Code, sheet.TemplateVersionId);
+
+        var found = await query.Take(MaxIssues).ToListAsync(ct).ConfigureAwait(false);
+
+        return found.ConvertAll(f => new ConsistencyIssue(
+            "UNBOUND_CALCULATED_COLUMN",
+            // ⚠ Вага 2, як і в осиротілої комірки: дані не зіпсовані — їх
+            // просто НЕМАЄ там, де форма обіцяє число. Вага 3 стоїть за
+            // станами, де система суперечить сама собі (розбіжність сум
+            // архіву, порушений FK), а тут конфігурація ще не добудована.
+            Severity: 2,
+            "cfg.ColumnDef",
+            f.ColumnDefId,
+            // Названо КОНКРЕТНУ колонку і рівно ту дію, яка лишається: шукати
+            // винуватця серед сотень колонок версії руками — не діагностика.
+            // ⚠ Подвійні дужки в маршруті — літерали `{id}`/`{outputCode}`:
+            // саме так виглядає шлях, який має відкрити методолог.
+            string.Format(
+                CultureInfo.InvariantCulture,
+                "Колонка {0}.{1} (версія шаблону {2}) має тип Calculated, тобто значення для неї "
+                + "пише методологія, але жодної чинної прив'язки виходу до неї немає: перерахунок "
+                + "для цієї колонки не робить нічого — мовчки, без помилки, — і оператор бачить "
+                + "порожню клітинку, яку не має права заповнити. Прив'яжіть вихід методології до "
+                + "цієї колонки (PUT /api/v1/methodologies/{{id}}/bindings/{3}/{{outputCode}}) або "
+                + "увімкніть наявну прив'язку, якщо її вимкнено.",
+                f.TableCode,
+                f.ColumnCode,
+                f.TemplateVersionId,
+                f.ColumnDefId)));
+    }
+
+    /// <summary>
     /// Записує знахідки, не плодячи дублікатів.
     /// </summary>
     /// <remarks>
@@ -316,4 +422,7 @@ public sealed class ConsistencyCheckJob(
     private sealed record BrokenRow(int PeriodKey, long RowId, long TableInstanceId);
 
     private sealed record ArchiveRow(long Id, string Status, string? SourceJson, string? TargetJson);
+
+    private sealed record UnboundColumnRow(
+        int ColumnDefId, string TableCode, string ColumnCode, int TemplateVersionId);
 }

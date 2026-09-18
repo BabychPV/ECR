@@ -1904,6 +1904,7 @@ USING (VALUES
     (N'jobs.consistencyOrphanedCells',            N'en', N'Orphaned cells', 1),
     (N'jobs.consistencyBrokenRefs',                N'en', N'Broken references', 1),
     (N'jobs.consistencyArchiveCheck',              N'en', N'Archive reconciliation', 1),
+    (N'jobs.consistencyUnboundCalculated',         N'en', N'Calculated columns without a binding', 1),
     (N'jobs.consistencyRecalcOrphaned',            N'en', N'Recalculating IsOrphaned', 1),
     (N'jobs.consistencyIssuesFound',               N'en', N'Issues found: {count}', 1),
     (N'jobs.exportReadingDocument',                N'en', N'Reading document', 1),

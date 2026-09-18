@@ -1,5 +1,9 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
@@ -156,6 +160,108 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
         var issue = await FindIssueAsync("ARCHIVE_CHECKSUM", "itg.ArchiveRun", runId);
         Assert.NotNull(issue);
         Assert.Equal(3, issue.Value.Severity);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Виявляє_колонку_Calculated_без_жодної_прив_язки()
+    {
+        // ⛔ Діра, яку лишив по собі `#284`. `#276` вимагав джерело від БУДЬ-ЯКОЇ
+        // обчислюваної колонки на ПУБЛІКАЦІЇ СТРУКТУРИ; `#284` звузив вимогу до
+        // `Formula`, бо джерело `Calculated`-колонки живе поза версією шаблону і
+        // заводить його методолог уже ПІСЛЯ публікації. Відтоді
+        // `Calculated`-колонку, яка так і не отримала прив'язки, не перевіряло
+        // НІЩО: оператор бачить порожню клітинку, яку не має права заповнити.
+        //
+        // ⚠ Мутаційний доказ: заміни в `ConsistencyCheckJob` анти-джойн
+        // `!db.CalculationBindings.Any(...)` на `db.CalculationBindings.Any(...)`
+        // — або прибери виклик `UnboundCalculatedColumnsAsync` із `RunAsync` —
+        // і цей тест почервоніє на `Assert.NotNull`.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, tableCode, columnCode) = await AddCalculatedColumnAsync(builder, doc);
+
+        await RunJobAsync();
+
+        var issue = await FindIssueAsync("UNBOUND_CALCULATED_COLUMN", "cfg.ColumnDef", columnId);
+
+        Assert.NotNull(issue);
+        Assert.Equal(2, issue.Value.Severity);
+
+        // ⚠ Названо КОНКРЕТНУ колонку у формі `{tableCode}.{columnCode}`:
+        // «у версії є проблеми» змусило б конфігуратора шукати винуватця серед
+        // сотень колонок руками — саме те, чого уникає `ECR-TMPL-4227`.
+        Assert.Contains($"{tableCode}.{columnCode}", issue.Value.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонка_Calculated_із_чинною_прив_язкою_знахідки_не_дає()
+    {
+        // ⚠ Друга половина, без якої перша нічого не означає: перевірка не
+        // доповідає про ТИП колонки, вона доповідає про відсутність ДЖЕРЕЛА.
+        // Без цього тесту та сама зелень вийшла б і з перевірки «будь-яка
+        // Calculated-колонка — знахідка», тобто з перевірки, що доповідає про
+        // кожну правильно налаштовану колонку в системі.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, _, _) = await AddCalculatedColumnAsync(builder, doc);
+
+        await using (var db = builder.CreateContext())
+        {
+            var methodology = new Methodology(
+                EcrCode.Create($"M{columnId}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Bound methodology" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            db.CalculationBindings.Add(new CalculationBinding(
+                doc.TableDefId, columnId, methodology.Id, "OUT", "{}"));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await RunJobAsync();
+
+        Assert.Null(await FindIssueAsync("UNBOUND_CALCULATED_COLUMN", "cfg.ColumnDef", columnId));
+    }
+
+    /// <summary>
+    /// Додає в таблицю документа колонку типу <c>Calculated</c> і повертає її
+    /// ідентифікатор разом із кодами таблиці й колонки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Будівник заводить лише <c>String</c>/<c>Decimal</c>: тип
+    /// <c>Calculated</c> потрібен саме цій перевірці, і додавати його в
+    /// будівник означало б змінити структуру, на яку спираються всі інші
+    /// тести колекції.
+    /// </remarks>
+    private static async Task<(int ColumnId, string TableCode, string ColumnCode)> AddCalculatedColumnAsync(
+        TestDocumentBuilder builder, TestDocument doc)
+    {
+        await using var db = builder.CreateContext();
+
+        var tableCode = await db.TableDefs
+            .Where(t => t.Id == doc.TableDefId)
+            .Select(t => t.Code)
+            .SingleAsync(CancellationToken.None);
+
+        var columnCode = $"OUT{doc.TableDefId}";
+
+        var column = new ColumnDef(
+            doc.TableDefId,
+            EcrCode.Create(columnCode),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Methodology output" }),
+            99,
+            CellDataType.Calculated);
+
+        db.ColumnDefs.Add(column);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        return (column.Id, tableCode, columnCode);
     }
 
     private Task RunJobAsync() => RunJobAsync(Substitute.For<IConsistencyMetrics>());
