@@ -1,4 +1,4 @@
-using Ecr.Application.Common;
+﻿using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -156,6 +156,35 @@ public sealed class PatchCellsHandler(
         //    Потрібна, щоб резолвити коди колонок у ColumnDefId; вигадувати
         //    їх не можна, це частина первинного ключа комірки.
         var instance = await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
+
+        // ⛔ Період із ТІЛА звіряється з періодом екземпляра таблиці
+        // (`DIRECTIVE-14-ARCH.md`, `DAT-04`). Не звірявся ніде: розбіжність
+        // доїжджала до порушення зовнішнього ключа, і назовні виходив голий
+        // `500` — помилка в запиті виглядала як збій сервера, а клієнт не мав
+        // чого розрізняти (`02-contracts.md` §7).
+        //
+        // ⚠ Перевірка ТУТ, а не в `CellsController`, хоч директива називає
+        // контролер: обробника кличе не лише HTTP (`ExcelImporter.ApplyAsync`
+        // ходить у нього напряму), а екземпляр таблиці належить рівно одному
+        // періоду. У контролері правило захищало б один шлях із двох.
+        //
+        // ⚠ Випадок не теоретичний: період і аркуш живуть в адресі
+        // (`ФВ-14.29`), тож застаріла вкладка з попереднім періодом надсилає
+        // рівно таку пару.
+        if (instance.PeriodKey != request.PeriodKey)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Період {request.PeriodKey} не збігається з періодом {instance.PeriodKey} екземпляра таблиці {request.TableInstanceId}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.periodMismatch",
+                    ["periodKey"] = request.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["expectedPeriodKey"] = instance.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["tableInstanceId"] = request.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         var table = snapshot.Sheets
@@ -386,9 +415,33 @@ public sealed class PatchCellsHandler(
             // Перевіряємо лише ті адреси, які справді змінюються: рішення
             // приходять на весь зріз, але відхиляти батч через заборонену
             // комірку, якої ніхто не чіпав, було б неправильно.
-            denied.AddRange(addresses
-                .Where(a => decisions.TryGetValue(a, out var d) && !d.IsAllowed)
-                .Select(a => decisions[a]));
+            //
+            // ⛔ Немає рішення — ВІДМОВА, так само як для створень нижче
+            // (`DIRECTIVE-14-ARCH.md`, `DAT-04`; `S-15` частини 1). Тут стояло
+            // `decisions.TryGetValue(a, out var d) && !d.IsAllowed`: адреса,
+            // якої обчислювач не повернув, ПРОХОДИЛА як дозволена — тобто в
+            // одному методі жили дві протилежні політики замовчування, і
+            // небезпечніша з них припадала на оновлення, тобто на гарячий шлях.
+            //
+            // ⚠ Мовчазна відсутність рішення — не теоретична: `CanEditSliceAsync`
+            // будує словник із рядків, прочитаних ОКРЕМИМ запитом, і рядок,
+            // створений паралельним запитом між тими двома читаннями, у
+            // словник не потрапляє.
+            foreach (var address in addresses)
+            {
+                if (!decisions.TryGetValue(address, out var decision))
+                {
+                    denied.Add(EditDecision.Deny(
+                        EditDenyReason.NoGrant,
+                        $"Рішення про доступ на комірку рядка {address.TableRowId} не отримано."));
+                    continue;
+                }
+
+                if (!decision.IsAllowed)
+                {
+                    denied.Add(decision);
+                }
+            }
         }
 
         if (context.Creations.Count > 0)

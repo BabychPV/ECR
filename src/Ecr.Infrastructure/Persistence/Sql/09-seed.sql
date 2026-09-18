@@ -413,6 +413,11 @@ USING (VALUES
     -- уже заведений нижче. Ключ із підстановкою `{max}` — рівно та форма, що й
     -- `auditWindowTooWide` вище (`Q-341`).
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'en', N'The page size must be between 1 and {max}.', 1),
+    -- ⚠ Період у ТІЛІ запису комірок проти періоду екземпляра таблиці
+    -- (`DAT-04`). Без цієї відмови розбіжність доїжджала до порушення
+    -- зовнішнього ключа і виходила назовні голим `500` — тобто дефект даних
+    -- виглядав як збій сервера.
+    (N'err.ECR-REQ-0422.periodMismatch',     N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.', 1),
     (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
     -- ⚠ Збір із SQL-джерела, яке не є PI (`ФВ-11.8`, транспорт `Sql`). Усі
     -- чотири подробиці кажуть, ЩО саме поправити: ключ налаштування, поле
