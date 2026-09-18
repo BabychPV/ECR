@@ -159,11 +159,36 @@ public static class AuthenticationSetup
         // сертифіката Windows, де він надрукований групами по два символи.
         var normalized = new string(thumbprint.Where(char.IsLetterOrDigit).ToArray());
 
-        using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
-        store.Open(OpenFlags.ReadOnly);
+        X509Certificate2Collection found;
 
-        var found = store.Certificates
-            .Find(X509FindType.FindByThumbprint, normalized, validOnly: false);
+        // ⛔ Недосяжне сховище — той самий наслідок, що й відсутній сертифікат:
+        // налаштований захист застосувати НЕМОЖЛИВО. Тому й відмова та сама, а
+        // не сирий `CryptographicException` із конвеєра старту.
+        //
+        // ⚠ Знайдено гейтом, не міркуванням: на Linux-раннері CI
+        // `LocalMachine\My` не відкривається взагалі, і тест «заданий, але
+        // відсутній відбиток валить старт» падав — не тому, що продукт не
+        // валив старт, а тому, що валив його ІНШИМ винятком. Локально на
+        // Windows цього не видно.
+        try
+        {
+            using var store = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+            store.Open(OpenFlags.ReadOnly);
+
+            found = store.Certificates
+                .Find(X509FindType.FindByThumbprint, normalized, validOnly: false);
+        }
+        catch (Exception unreachable) when (unreachable is System.Security.Cryptography.CryptographicException
+                                                         or PlatformNotSupportedException
+                                                         or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException(
+                $"{CertificateThumbprintKey} = '{thumbprint}': сховище LocalMachine\\My недоступне "
+                + $"({unreachable.GetType().Name}: {unreachable.Message}). Або зроби його доступним "
+                + "обліковому запису служби, або прибери ключ — тоді ключі кільця лежатимуть у "
+                + "sec.DataProtectionKey відкрито, і /health/db про це скаже.",
+                unreachable);
+        }
 
         if (found.Count == 0)
         {
