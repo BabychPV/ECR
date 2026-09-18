@@ -399,8 +399,17 @@ export function DocumentPage(): JSX.Element {
 
       {/* ⛔ Числа методологій — окремо від сітки, і це `D-69`: у комірку
           вони не потрапляють ніколи, а приходять у документ посиланням через
-          прив'язку. Доти це число не показував жоден екран. */}
-      <CalculationResultsPanel documentId={documentId} periodKey={periodKey} />
+          прив'язку. Доти це число не показував жоден екран.
+
+          ⚠ Під правом `Calculation.View`, як і сусідні дії вище. Панель
+          стояла БЕЗУМОВНО, і оператор без цього права бачив на ВЛАСНОМУ
+          документі плашку `403 Calculation.View` — там, де решта недоступного
+          просто не малюється. Знайдено проходом інтерфейсу як користувач
+          (`docs/build/UI-WALKTHROUGH.md`, F2): жоден компонентний тест цього
+          не бачив, бо кожен із них монтує панель напряму. */}
+      {can(session.data, 'Calculation.View') && (
+        <CalculationResultsPanel documentId={documentId} periodKey={periodKey} />
+      )}
     </Stack>
       )}
     </AsyncBoundary>
