@@ -479,7 +479,7 @@ public sealed class CreateUserHandler(
                 // той самий клас дефекту, що ECR-AUTH-0403 до Q-300, тепер
                 // через узагальнений шлях (ExceptionHandlingMiddleware,
                 // messageKey), а не точковий арм на цей один код.
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0409", ["userName"] = userName });
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0409.userNameTaken", ["userName"] = userName });
         }
 
         // ⛔ Ролі перевіряються ТУТ і ДО створення чого-небудь. Сховище

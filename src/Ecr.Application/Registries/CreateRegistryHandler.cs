@@ -70,7 +70,7 @@ public sealed class CreateRegistryHandler(
                 + "код — те, чим на нього посилаються поля-довідники і колонки шаблону.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-REG-4091",
+                    ["messageKey"] = "err.ECR-REG-4091.registryCodeTaken",
                     ["code"] = registryCode.Value,
                     ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });

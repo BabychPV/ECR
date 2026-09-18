@@ -172,7 +172,7 @@ public sealed class UpsertRegistryEntryHandler(
                 // українським реченням незалежно від мови інтерфейсу.
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-REG-0409",
+                    ["messageKey"] = "err.ECR-REG-0409.entryCodeTaken",
                     ["code"] = code.Value,
                     ["id"] = duplicate.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });

@@ -357,7 +357,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 // сирим українським реченням незалежно від мови інтерфейсу —
                 // узагальнений шлях ExceptionHandlingMiddleware, не точковий
                 // арм на цей один код.
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409", ["code"] = role.Code });
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409.roleCodeTaken", ["code"] = role.Code });
         }
 
         foreach (var code in permissionCodes.Distinct(StringComparer.Ordinal))

@@ -84,7 +84,7 @@ public sealed class CreateUnitTests
 
         Assert.Equal("ECR-UOM-4091", error.ErrorCode);
         Assert.NotNull(error.Details);
-        Assert.Equal("err.ECR-UOM-4091", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-UOM-4091.unitCodeTaken", error.Details!["messageKey"]);
         Assert.Equal("lb", error.Details["code"]);
 
         _units.DidNotReceive().AddUnit(Arg.Any<Unit>());

@@ -96,7 +96,7 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                         // українським реченням незалежно від мови інтерфейсу.
                         new Dictionary<string, object?>
                         {
-                            ["messageKey"] = "err.ECR-PRJ-0409", ["code"] = project.Code,
+                            ["messageKey"] = "err.ECR-PRJ-0409.projectCodeTaken", ["code"] = project.Code,
                         });
 
                 case Domain.Entities.Dictionaries.RegistryEntry registryEntry:
@@ -110,7 +110,7 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                         $"Запис із кодом «{registryEntry.Code}» у цьому довіднику вже існує.",
                         new Dictionary<string, object?>
                         {
-                            ["messageKey"] = "err.ECR-REG-0409", ["code"] = registryEntry.Code,
+                            ["messageKey"] = "err.ECR-REG-0409.entryCodeTaken", ["code"] = registryEntry.Code,
                         });
             }
         }
