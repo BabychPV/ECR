@@ -136,6 +136,50 @@ const methodologies = {
 };
 
 /**
+ * Домен `table-slice`: зрізи таблиць документа — найважчий регулярний запит
+ * системи (`GET /documents/{id}/tables/{id}`, бюджет p95 1.5 с на 500×60).
+ *
+ * ⛔ Перший елемент тут — `'table-slice'`, а не `'documents'`, і це не
+ * недогляд. Ключ у такому вигляді вже лежить у кеші (`DocumentGrid.tsx`
+ * будує його рядковим літералом), і будь-яка «краща» форма розвела б
+ * `useQuery` з `invalidateQueries` мовчки — рівно той дефект, заради якого ця
+ * фабрика існує. Перевести сам `DocumentGrid` на фабрику — наступний крок
+ * (`CL-04`/`D14-12` правлять той самий файл), тому до нього ключ тут
+ * ПОВТОРЮЄ чинний, а не виправляє його.
+ */
+const slices = {
+  /** Префікс усіх зрізів — для політики кешу і для «позначити застарілими». */
+  all: () => ['table-slice'] as const,
+
+  /**
+   * Зріз одного екземпляра таблиці.
+   *
+   * ⚠ Період — у ключі, хоча `tableInstanceId` уже визначає його однозначно
+   * (екземпляр існує на кожен період окремо, `R-A6`). Так само його тримає
+   * `DocumentGrid`, і саме за ним адресується інвалідація по періоду.
+   */
+  one: (tableInstanceId: number, periodKey: number) =>
+    ['table-slice', tableInstanceId, periodKey] as const,
+};
+
+/** Чи належить ключ домену зрізів. */
+export function isSliceKey(key: readonly unknown[]): boolean {
+  return key.length >= 1 && key[0] === 'table-slice';
+}
+
+/** Адреса зрізу з ключа; `null` — ключ не того домену або неповний. */
+export function sliceAddressOf(
+  key: readonly unknown[],
+): { tableInstanceId: number; periodKey: number } | null {
+  if (!isSliceKey(key) || key.length < 3) return null;
+
+  const [, tableInstanceId, periodKey] = key;
+  if (typeof tableInstanceId !== 'number' || typeof periodKey !== 'number') return null;
+
+  return { tableInstanceId, periodKey };
+}
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -149,4 +193,5 @@ export const queryKeys = {
   templates,
   registries,
   methodologies,
+  slices,
 };

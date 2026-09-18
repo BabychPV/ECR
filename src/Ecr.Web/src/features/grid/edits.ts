@@ -1,6 +1,7 @@
-import type { TableSliceDto } from '@/api/types';
+import type { RowDto, TableSliceDto } from '@/api/types';
 import { parseNumber } from './clipboard';
 import { decide } from './permissions';
+import { columnIndexOf, rowIndexOf } from './rowIndex';
 import type { CellEdit } from './undo';
 import type { PendingEdit } from './useCellPatch';
 
@@ -39,15 +40,23 @@ export interface CapturedEdit {
  * відкривається: fill-handle і програмна правка проходять іншим шляхом, і
  * саме через них у сітку потрапляло б значення, яке сервер відхилить.
  */
-export function captureEdit(slice: TableSliceDto, signal: EditSignal): CapturedEdit | null {
+export function captureEdit(
+  slice: TableSliceDto,
+  signal: EditSignal,
+
+  // ⚠ `CL-03`: мапа замість двох лінійних пошуків (рядок і колонка). Обидва
+  // виклики мемоїзовані за самими масивами зрізу (`rowIndex.ts`), тож
+  // викликач, який нічого не передає, не платить за побудову.
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): CapturedEdit | null {
   if (signal.columnCode.length === 0 || signal.rowKey.length === 0) return null;
 
-  const column = slice.columns.find((candidate) => candidate.code === signal.columnCode);
+  const column = columnIndexOf(slice).get(signal.columnCode);
   if (column === undefined) return null;
 
   if (!decide(slice, signal.rowKey, column).editable) return null;
 
-  const row = slice.rows.find((candidate) => candidate.rowKey === signal.rowKey);
+  const row = rows.get(signal.rowKey);
   if (row === undefined) return null;
 
   const after = coerce(signal.raw, column.dataType);
@@ -66,9 +75,21 @@ export function captureEdit(slice: TableSliceDto, signal: EditSignal): CapturedE
   };
 }
 
-/** Поточне значення комірки; `null` — не заповнювали. */
-export function valueOf(slice: TableSliceDto, rowKey: string, columnCode: string): unknown {
-  return slice.rows.find((row) => row.rowKey === rowKey)?.cells[columnCode] ?? null;
+/**
+ * Поточне значення комірки; `null` — не заповнювали.
+ *
+ * ⛔ `CL-03`, найдорожче з трьох місць: знімок undo для вставки кличе цю
+ * функцію на КОЖНУ з 30 000 комірок буфера, і кожен виклик був
+ * `slice.rows.find(...)` по 500 рядках — до 15 млн порівнянь у синхронному
+ * `onPaste`, тобто вкладка, яка не відповідає, доки вставка не добіжить.
+ */
+export function valueOf(
+  slice: TableSliceDto,
+  rowKey: string,
+  columnCode: string,
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): unknown {
+  return rows.get(rowKey)?.cells[columnCode] ?? null;
 }
 
 /**

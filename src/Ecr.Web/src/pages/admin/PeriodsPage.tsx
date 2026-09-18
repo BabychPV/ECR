@@ -26,6 +26,7 @@ import type {
   ReopenPeriodRequest,
   SetCurrentPeriodRequest,
 } from '@/api/types';
+import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
@@ -312,10 +313,15 @@ export function PeriodsPage(): JSX.Element {
     if (recalcOutcome === 'succeeded') {
       showDone(t('workflow.recalcDone'));
 
-      // ⚠ Сітки документів проєкту перечитуються САМЕ тут, а не на постановці
-      // в чергу: раніше означало б показати старі числа під написом
-      // «перераховано».
-      void queryClient.invalidateQueries({ queryKey: ['table-slice'] });
+      // ⚠ Кеш сіток скидається САМЕ тут, а не на постановці в чергу: раніше
+      // означало б показати старі числа під написом «перераховано».
+      //
+      // ⛔ `CL-02`: але БЕЗ перезапиту. Перерахунок проєкту йде по всіх
+      // періодах (`periodKey: null` у запиті), тож звузити намір нема по
+      // чому — а от запитувати нема чого: це адміністративний екран, жодної
+      // сітки на ньому не змонтовано. Позначені застарілими зрізи прочитають
+      // свіже самі, коли документ відкриють.
+      void markSlicesStale(queryClient);
       void queryClient.invalidateQueries({ queryKey: ['document'] });
 
       return;

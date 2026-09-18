@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
-import type { PatchCell, PatchCellsRequest, PatchCellsResponse } from '@/api/types';
+import { queryKeys } from '@/api/queryKeys';
+import type {
+  PatchCell,
+  PatchCellsRequest,
+  PatchCellsResponse,
+  TableSliceDto,
+} from '@/api/types';
+import { applyPatchToSlice } from './sliceApply';
 
 /** Накопичена зміна однієї комірки. */
 export interface PendingEdit {
@@ -124,8 +131,37 @@ export function useCellPatch(documentId: number): {
         // самим собою, який неможливо пояснити користувачеві.
         versions.current = { ...versions.current, ...response.rowVersions };
 
-        await queryClient.invalidateQueries({
-          queryKey: ['table-slice', request.tableInstanceId, request.periodKey],
+        // ⛔ `CL-01`: тут стояв `invalidateQueries` зрізу — після КОЖНОГО
+        // успішного збереження, тобто автозбереження коштувало `PATCH` плюс
+        // найважчий `GET` системи. І мети він не досягав: перерахунок
+        // асинхронний, тож відповідь на перезапит приходила здебільшого
+        // РАНІШЕ за нього, зі старими обчисленими значеннями.
+        //
+        // ⚠ Тепер відповідь застосовується локально (`sliceApply.ts`):
+        // власні значення оператора, нові `rowVersions`, округлення вставки —
+        // усе це вже є в запиті й відповіді, і жодного запиту не потрібно.
+        // Обчислені колонки принесе перерахунок; стежити за ним клієнт зможе,
+        // коли `PatchCellsResponse` понесе ідентифікатор задачі (контракт
+        // його не має — друга половина `CL-01` заблокована серверною зміною).
+        queryClient.setQueryData<TableSliceDto>(
+          queryKeys.slices.one(request.tableInstanceId, request.periodKey),
+          (slice) => (slice === undefined ? slice : applyPatchToSlice(slice, request, response)),
+        );
+
+        // ⚠ І зріз позначається застарілим — БЕЗ запиту (`refetchType:
+        // 'none'`). Судження, яке варто назвати вголос: локальне застосування
+        // не знає обчислених колонок, а `staleTime` зрізів — 5 хв (`CL-02`),
+        // тож без цього рядка результат перерахунку не з'явився б до
+        // перезаходу. Так він з'явиться при наступному монтуванні сітки
+        // (перемикання аркуша), не коштуючи жодного запиту зараз. Повноцінне
+        // рішення — стеження за задачею — чекає на ідентифікатор у
+        // `PatchCellsResponse`.
+        //
+        // ⛔ Саме ПІСЛЯ `setQueryData`: успішний запис у кеш скидає позначку
+        // `isInvalidated`, тож зворотний порядок нічого б не позначив.
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
+          refetchType: 'none',
         });
 
         // ⚠ «Збережено» показується ТИМЧАСОВО, а не назавжди: індикатор, який

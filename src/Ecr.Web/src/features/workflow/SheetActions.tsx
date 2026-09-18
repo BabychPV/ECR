@@ -11,6 +11,7 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
+import { invalidateSlices } from '@/features/grid/sliceCache';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -372,7 +373,17 @@ export function SheetActions({
       // ⛔ І саме за ЗАХОПЛЕНОЮ адресою, а не за поточними пропами: інакше
       // оновлення дістається періоду, який не перераховували, а той, що
       // перерахувався, лишається зі старими числами назавжди (до перезаходу).
-      void queryClient.invalidateQueries({ queryKey: ['table-slice'] });
+      //
+      // ⛔ `CL-02`: і саме зрізи ЦЬОГО аркуша, а не збіг за префіксом
+      // `['table-slice']` — під нього підпадав кожен змонтований зріз (до 91
+      // на аркуші), і всі вони йшли одночасно найважчим запитом системи.
+      // Зрізи поза аркушем позначаються застарілими без запиту.
+      void invalidateSlices(queryClient, {
+        documentId: recalc.documentId,
+        periodKey: recalc.periodKey,
+        sheetDefId: recalc.sheetDefId,
+      });
+
       void queryClient.invalidateQueries({
         queryKey: ['document', recalc.documentId, recalc.periodKey],
       });

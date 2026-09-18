@@ -115,5 +115,37 @@ export function lookupCellDisplay(
   const id = currentEntryId(value as LookupCellValue);
   if (id === null) return '';
 
-  return entries.find((entry) => entry.id === id)?.display ?? String(id);
+  return displayIndexOf(entries).get(id) ?? String(id);
+}
+
+/**
+ * Показ записів довідника за ідентифікатором (`CL-03`).
+ *
+ * ⛔ Тут стояв `entries.find(...)` — на КОЖНУ `Lookup`-комірку кожного
+ * перемальовування (`cellTemplate` у `gridColumns`). Довідник замовника — це
+ * тисячі записів (`RegistriesController` віддає до 50 000 однією відповіддю),
+ * тобто колонка на 500 рядків коштувала мільйони порівнянь за кадр.
+ *
+ * ⚠ Мемоїзація — за самим масивом записів: він приходить із кеша TanStack
+ * Query за кодом довідника й лишається тим самим об'єктом між рендерами, доки
+ * довідник не перечитали. `WeakMap` тримає мапу рівно доти, доки живий масив.
+ */
+const displayCache = new WeakMap<readonly RegistryEntryDto[], ReadonlyMap<number, string>>();
+
+function displayIndexOf(entries: readonly RegistryEntryDto[]): ReadonlyMap<number, string> {
+  const known = displayCache.get(entries);
+  if (known !== undefined) return known;
+
+  const index = new Map<number, string>();
+
+  // ⚠ Перший запис виграє — та сама поведінка, що й у `find()`: дублікат
+  // ідентифікатора в довіднику неможливий, але поведінка не має мінятися
+  // разом зі швидкістю.
+  for (const entry of entries) {
+    if (!index.has(entry.id)) index.set(entry.id, entry.display);
+  }
+
+  displayCache.set(entries, index);
+
+  return index;
 }
