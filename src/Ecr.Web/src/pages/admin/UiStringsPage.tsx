@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Group, Select, Table, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -26,7 +26,41 @@ import { DefaultLanguage, t } from '@/shared/i18n';
  * ⚠ Будь-який запис піднімає `Revision` каталогу, тобто `ETag`. Клієнти
  * перечитають рядки при наступному відкритті — не миттєво, і це навмисно:
  * розсилати зміну підпису всім відкритим вкладкам немає для чого.
+ *
+ * ⛔ F10 (`docs/build/UI-WALKTHROUGH.md`): екран малював **увесь** каталог
+ * однією таблицею — 1340 рядків, висота сторінки 50 730 px, і жодного
+ * підсумку, скільки їх узагалі. Тепер рядки домальовуються ПОРЦІЯМИ за
+ * прокруткою (`RowsPerChunk`), а лічильник біля фільтра каже «стільки з
+ * стількох».
+ *
+ * ⚠ Прийом той самий, що вже працює для сіток документа
+ * (`features/grid/SheetTables.tsx`): `IntersectionObserver` на маячку в кінці
+ * списку, новий спостерігач на кожну порцію (інакше маячок, що лишився у
+ * видимій області, більше не повідомить про себе), і повна деградація в
+ * «намалювати все» там, де `IntersectionObserver` відсутній.
+ *
+ * ⚠ Сторінок (пагінації) тут НЕМА і навмисно: каталог приходить ОДНИМ
+ * документом (`GET /ui-strings/{lang}` віддає `strings` цілком), тож сторінки
+ * на клієнті не зменшили б ані запиту, ані пам'яті — лише додали б людині
+ * кроків. Дорого тут саме малювання, і прибирається саме воно.
  */
+/**
+ * Скільки рядків домальовується за один крок прокрутки.
+ *
+ * ⚠ Сто, а не двадцять: рядок тут — три комірки тексту й кнопка, і порція,
+ * менша за екран, означала б, що маячок лишається видимим після кожного кроку
+ * і список «дотягується» серією тактів замість одного.
+ */
+export const RowsPerChunk = 100;
+
+/**
+ * Наскільки раніше за появу маячка в екрані домальовувати наступну порцію.
+ *
+ * ⚠ Те саме число й та сама причина, що в `SheetTables.tsx`: запас приблизно
+ * на третину екрана, щоб людина не бачила кінця списку, доки він росте.
+ */
+const LoadAheadMargin = '200px 0px';
+
 export function UiStringsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const languages = useLanguages();
@@ -95,6 +129,64 @@ export function UiStringsPage(): JSX.Element {
 
   const isDefault = lang === DefaultLanguage;
 
+  /** Скільки рядків зараз намальовано. */
+  const [shown, setShown] = useState(RowsPerChunk);
+
+  /*
+   * ⛔ Порція скидається на зміні фільтра або мови. Без цього людина, яка
+   * догорнула до тисячного рядка й після цього ввела фільтр на п'ять
+   * збігів, лишалася б із лічильником «1000 з 5»: `shown` більший за
+   * список — це не «показано більше», це просто бреше.
+   */
+  useEffect(() => {
+    setShown(RowsPerChunk);
+  }, [filter, lang]);
+
+  const visible = keys.slice(0, shown);
+
+  /** Маячок у кінці списку; його появу й ловить спостерігач. */
+  const sentinel = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (shown >= keys.length) return;
+
+    /*
+     * ⚠ Немає `IntersectionObserver` (дуже старий браузер) — малюємо все, як
+     * і до цієї картки. Свідома деградація до ПОПЕРЕДНЬОЇ, робочої поведінки:
+     * сторінка лишається придатною, просто дорогою.
+     */
+    if (typeof IntersectionObserver === 'undefined') {
+      setShown(keys.length);
+
+      return;
+    }
+
+    const node = sentinel.current;
+    if (node === null) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+
+        setShown((previous) => previous + RowsPerChunk);
+      },
+      { rootMargin: LoadAheadMargin },
+    );
+
+    observer.observe(node);
+
+    /*
+     * ⚠ Спостерігач створюється НАНОВО на кожну порцію — і це не
+     * марнотратство. Маячок не рухається з DOM, він лише з'їжджає нижче;
+     * спостерігач, який уже повідомив про його перетин, мовчатиме про той
+     * самий елемент, доки той не вийде з області й не зайде знову. Новий
+     * спостерігач при першому ж такті повідомляє про ПОТОЧНИЙ перетин — тобто
+     * сам добирає наступну порцію, якщо маячок і досі видно (коротка сторінка,
+     * велике вікно).
+     */
+    return () => observer.disconnect();
+  }, [shown, keys.length]);
+
   return (
     <>
       <PageHeader
@@ -121,6 +213,15 @@ export function UiStringsPage(): JSX.Element {
               value={filter}
               onChange={(event) => setFilter(event.currentTarget.value)}
             />
+
+            {/* ⛔ F10: підсумок «намальовано з усього». Нового рядка каталогу
+                тут не заводиться — каталог живе в сіді БД, поза цим пакетом
+                (`D-95`), — тож підпис числовий і тому однаковий усіма мовами.
+                Число праворуч і є відповідь на питання «скільки їх узагалі»,
+                якої на екрані не було зовсім. */}
+            <Text size="xs" c="dimmed" data-testid="ui-strings-count">
+              {`${String(visible.length)} / ${String(keys.length)}`}
+            </Text>
           </Group>
         }
       />
@@ -149,7 +250,7 @@ export function UiStringsPage(): JSX.Element {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {keys.map((key) => {
+              {visible.map((key) => {
                 const value = strings[key] ?? '';
                 const source = original[key] ?? '';
 
@@ -226,6 +327,23 @@ export function UiStringsPage(): JSX.Element {
                   </Table.Tr>
                 );
               })}
+
+              {/* ⛔ Маячок — ОСТАННІМ РЯДКОМ таблиці, а не сусіднім блоком:
+                  `<div>` між `<tbody>` і `</table>` браузер викидає з таблиці
+                  в попередній вузол (foster parenting), і спостерігач стежив
+                  би за елементом, що стоїть НЕ там, де здається в коді.
+                  Порожній рядок не малює нічого видимого — його робота вся в
+                  тому, щоб потрапити в область видимості.
+
+                  ⚠ Рядок є ЛИШЕ доки є що домальовувати: інакше він лишався б
+                  порожнім хвостом смугастої таблиці назавжди. */}
+              {shown < keys.length && (
+                <Table.Tr data-testid="ui-strings-sentinel">
+                  <Table.Td colSpan={4}>
+                    <div ref={sentinel} aria-hidden="true" />
+                  </Table.Td>
+                </Table.Tr>
+              )}
             </Table.Tbody>
           </Table>
         )}

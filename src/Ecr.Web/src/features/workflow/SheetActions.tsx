@@ -5,12 +5,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type {
   ApproveSheetRequest,
+  DocumentSummary,
   JobStatus,
   RecalculateDocumentRequest,
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { can, useSession } from '@/shared/session/useSession';
+import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { outcomeOf, pollInterval } from './jobFollow';
@@ -29,6 +30,99 @@ export interface SheetActionsProps {
   /** Поточний стан аркуша за цей період. */
   state: string;
 }
+
+/**
+ * Рівні гранта — **дзеркало** `Ecr.Domain.Enums.GrantLevel`, у тому самому
+ * порядку зростання (`None`=0 … `Manage`=5).
+ *
+ * ⛔ Порядок і є правилом: `EditRules.CanSubmit` вимагає `>= Submit` (3), а
+ * `EditRules.CanApprove` — `>= Approve` (4). Переставити тут два імені —
+ * означає показати кнопку тому, кому сервер відмовить, і сховати в того, хто
+ * має право.
+ */
+const GrantOrder = ['None', 'Read', 'Write', 'Submit', 'Approve', 'Manage'] as const;
+
+/** Назва рівня гранта, як її віддає `/api/v1/me` (`GetCurrentUserHandler`). */
+export type GrantLevelName = (typeof GrantOrder)[number];
+
+/**
+ * Ефективний рівень гранта для дій робочого процесу над аркушем.
+ *
+ * ⛔ Це ТОЧНЕ дзеркало `EditRules.Effective` для трьох рішень — `CanSubmit`,
+ * `CanApprove`, `CanReopen`, — і саме тому воно взагалі можливе на клієнті.
+ * Усі три приходять із `AccessDecisionService` з `columnDefId: 0`, а
+ * `BuildContextAsync` при `columnDefId == 0` НЕ читає метадані шаблону й лишає
+ * `tableDefId = 0`. Тобто ланцюг ресурсів для них — рівно
+ * `Project:{id} → Sheet:{id} → Table:0 → Column:0`, а перших двох достатньо:
+ * грантів на `Table:0`/`Column:0` не буває, бо нуль — не ідентифікатор.
+ *
+ * ⚠ Для КОМІРОК такого дзеркала немає й бути не може (`features/grid/permissions.ts`:
+ * «клієнт не повторює правил доступу») — там у ланцюг входять справжні
+ * `Table`/`Column`, обчислюваність колонки, вікна доступу й стан рядка, і
+ * сервер тому віддає готові рішення зрізом. Тут же сервер рішення не віддає
+ * зовсім, а `/api/v1/me` віддає `grants`/`denies` саме для того, щоб не
+ * показувати кнопку, яка дасть 403 (`GetCurrentUserHandler`, `useSession`).
+ *
+ * ⚠ Невідома назва рівня — це `None`, а не «пропустимо»: розширення
+ * серверного переліку не має відкривати кнопку мовчки.
+ *
+ * @param me Профіль із `/api/v1/me`.
+ * @param projectId Проєкт документа; `null` — ще невідомий.
+ * @param sheetDefId Аркуш.
+ */
+export function effectiveGrant(
+  me: MeDto | undefined,
+  projectId: number | null,
+  sheetDefId: number,
+): GrantLevelName {
+  if (me === undefined || projectId === null) return 'None';
+
+  /*
+   * ⚠ `denies`/`grants` беруться ЗАХИЩЕНО, хоч у типі вони обов'язкові.
+   * Профіль приходить мережею: старіший сервер, обрізаний проксі або заглушка
+   * в тесті дають об'єкт без цих полів — і падіння тут знесло б усю шапку
+   * документа через межу помилок, замість того щоб просто не показати кнопку.
+   * Відсутнє поле = немає гранта = `None`: відмова закрита, а не відкрита.
+   */
+  const denies: readonly string[] = me.denies ?? [];
+  const grants: Readonly<Record<string, string>> = me.grants ?? {};
+
+  // Від найширшого до найдрібнішого — той самий масив, що в `EditRules.Effective`.
+  const scopes = [`Project:${projectId}`, `Sheet:${sheetDefId}`, 'Table:0', 'Column:0'];
+
+  // Заборона перемагає на будь-якому рівні (ФВ-6.6).
+  if (scopes.some((scope) => denies.includes(scope))) return 'None';
+
+  // Дозвіл — з найдрібнішого ОГОЛОШЕНОГО рівня: грант на аркуш перекриває
+  // грант на проєкт, і саме так права звужують точково.
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    const level: string | undefined = grants[scopes[i] ?? ''];
+    if (level === undefined) continue;
+
+    return (GrantOrder as readonly string[]).includes(level) ? (level as GrantLevelName) : 'None';
+  }
+
+  return 'None';
+}
+
+/** Чи дотягує наявний рівень до потрібного. */
+export function meetsGrant(actual: GrantLevelName, required: GrantLevelName): boolean {
+  return GrantOrder.indexOf(actual) >= GrantOrder.indexOf(required);
+}
+
+/**
+ * Поріг рівня, з якого СЕРВЕР приймає дію.
+ *
+ * ⛔ `reject` — теж `Approve`, і це не описка: відхилення йде тим самим
+ * `POST /documents/{id}/approve` з `approved: false`, тобто через
+ * `ApproveSheetHandler` → `CanApproveAsync` → `EditRules.CanApprove`. Порогів
+ * у сервера два, а не три.
+ */
+const RequiredGrant: Readonly<Record<'submit' | 'approve' | 'reject', GrantLevelName>> = {
+  submit: 'Submit',
+  approve: 'Approve',
+  reject: 'Approve',
+};
 
 /**
  * Робочий процес аркуша: подати, затвердити, відхилити, повернути, перерахувати.
@@ -50,6 +144,14 @@ export interface SheetActionsProps {
  * погодження рахує сервер (`IAccessDecisionService.CanApproveAsync`), і
  * клієнт його не відтворює: друга реалізація правил доступу розійшлася б із
  * першою і показувала б дозвіл там, де сервер відмовляє.
+ *
+ * ⚠ «Право» тут — це і функціональне право (`permissions`, напр.
+ * `Calculation.Recalculate`), і РІВЕНЬ ГРАНТА на ресурс (`grants`/`denies`):
+ * робочий процес сервер закриває саме рівнем, а не іменованим правом — див.
+ * `effectiveGrant` нижче. Клієнт відтворює рівно ту частину рішення, яка
+ * НЕ залежить від бази (гранти вже в `/api/v1/me`); решта — стан періоду,
+ * помилки валідації, черга кроку маршруту — лишається за сервером, і кнопка,
+ * яка через них відмовить, показує причину відмовою, а не зникненням.
  */
 export function SheetActions({
   documentId,
@@ -290,6 +392,43 @@ export function SheetActions({
 
   const me = session.data;
 
+  /*
+   * ⛔ F9 (`docs/build/UI-WALKTHROUGH.md`). До цього «Submit», «Approve» і
+   * «Reject» показувалися ЛИШЕ за станом аркуша, тоді як сусідні
+   * «Recalculate» і «Return for edits» — ще й за правом. Наслідок зі знімка
+   * `07-document-open.png`: оператор із грантом `Write` на проєкт бачив синю
+   * кнопку «Submit», а сервер на неї відповідає `ECR-ACCS-0403`
+   * (`EditRules.CanSubmit`: поріг `GrantLevel.Submit`).
+   *
+   * ⚠ Проєкт береться з УЖЕ прочитаного кеша, а не новим запитом: `DocumentPage`
+   * тримає `['document', id, periodKey]` (той самий ключ, що інвалідує `refresh`
+   * вище) і рендерить цей компонент лише всередині власного `AsyncBoundary`,
+   * тобто коли `DocumentSummary` вже є. Порожній кеш — це `null`, тобто
+   * `None`, тобто кнопки немає: відмова закрита, а не відкрита.
+   */
+  const summary = queryClient.getQueryData<DocumentSummary>([
+    'document',
+    documentId,
+    periodKey,
+  ]);
+
+  const grant = effectiveGrant(me, summary?.projectId ?? null, sheetDefId);
+
+  /**
+   * Чи пропустить сервер дію робочого процесу цієї людини.
+   *
+   * ⚠ Симуляція відмовляється ПЕРШОЮ — так само, як у сервера: `CanSubmit`,
+   * `CanApprove` і `CanReopen` починаються з `profile.IsSimulation` →
+   * `SimulationReadOnly`. Адміністратор, який дивиться чужими правами
+   * (`ФВ-6.16a`), не пише від чужого імені.
+   */
+  const mayWorkflow = (action: 'submit' | 'approve' | 'reject'): boolean =>
+    me !== undefined && !me.isSimulation && meetsGrant(grant, RequiredGrant[action]);
+
+  const canSubmit = isAllowed('submit', state) && mayWorkflow('submit');
+  const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
+  const canReject = isAllowed('reject', state) && mayWorkflow('reject');
+
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН
   // пласкій `Group`, що несе Period/Validate/Import/Export і — до цього
@@ -308,9 +447,9 @@ export function SheetActions({
   // застосувала для лан 1-7.
   const hasAnyAction =
     can(me, 'Calculation.Recalculate') ||
-    isAllowed('submit', state) ||
-    isAllowed('approve', state) ||
-    isAllowed('reject', state) ||
+    canSubmit ||
+    canApprove ||
+    canReject ||
     (isAllowed('reopen', state) && can(me, 'Document.Reopen'));
 
   return (
@@ -355,7 +494,7 @@ export function SheetActions({
         </Tooltip>
       )}
 
-      {isAllowed('submit', state) && (
+      {canSubmit && (
         <Button size="xs" loading={submit.isPending} onClick={() => submit.mutate()}>
           {t('document.submit')}
         </Button>
@@ -365,7 +504,7 @@ export function SheetActions({
           «Затвердити» без «Відхилити» перетворює погодження на формальність:
           єдиний спосіб не затвердити — не натиснути нічого, і аркуш висить
           у `Submitted` без жодного сліду причини. */}
-      {isAllowed('approve', state) && (
+      {canApprove && (
         <Button
           size="xs"
           color="green"
@@ -376,7 +515,7 @@ export function SheetActions({
         </Button>
       )}
 
-      {isAllowed('reject', state) && (
+      {canReject && (
         <Button size="xs" color="statusError" variant="light" onClick={() => setAsking('reject')}>
           {t('workflow.reject')}
         </Button>
@@ -384,7 +523,16 @@ export function SheetActions({
 
       {/* ⚠ Повернення в роботу — окреме небезпечне право (`ФВ-6.12`): воно
           дає змогу змінити вже подані числа. Тому і кнопка окрема, і
-          причина обов'язкова. */}
+          причина обов'язкова.
+
+          ⚠ Тут навмисно ЛИШЕ право, без порога гранта, хоч сервер перевіряє
+          обидва (`ReopenDocumentHandler`: `profile.Has("Document.Reopen")`,
+          далі `CanReopenAsync` → `EditRules.CanReopen` з порогом
+          `GrantLevel.Approve`). Це не та розбіжність, про яку F9: кнопка вже
+          закрита правом, і вужчою за сервер вона не стає. Довести її до
+          другої умови — окремий крок: `e2e/security.spec.ts` проводить
+          `Document.Reopen` як штатну дію для приведення аркуша в `Draft`
+          (`makeSheetEditable`), і зміна порога тут зачіпає той прохід. */}
       {isAllowed('reopen', state) && can(me, 'Document.Reopen') && (
         <Button size="xs" variant="light" onClick={() => setAsking('reopen')}>
           {t('workflow.reopen')}
