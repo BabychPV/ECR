@@ -22,7 +22,7 @@ namespace Ecr.TestKit;
 /// Різниця істотна: «не заповнювали» може мати дефолт, «свідомо лишили
 /// порожнім» — ні.
 /// </remarks>
-public sealed class TestEvaluationContext : IEvaluationContext
+public sealed class TestEvaluationContext : IBudgetedEvaluationContext
 {
     private readonly Evaluator _evaluator;
 
@@ -33,6 +33,14 @@ public sealed class TestEvaluationContext : IEvaluationContext
         Period = new PeriodContext(
             new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31), CalendarMode.Actual, 2026, 1);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий сенс, що і в <c>SliceEvaluationContext</c>: умова предиката
+    /// обчислюється тут над КОЖНИМ рядком окремим викликом обчислювача, і без
+    /// позиченого бюджету зовнішнє обчислення не бачило б цієї роботи.
+    /// </remarks>
+    public EvaluationBudget? Budget { get; set; }
 
     /// <summary>Значення комірок: <c>sheet|table|row|column</c> → значення.</summary>
     public Dictionary<string, ExpressionValue> Cells { get; } = new(StringComparer.Ordinal);
