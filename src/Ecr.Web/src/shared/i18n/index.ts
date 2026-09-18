@@ -174,6 +174,10 @@ function bumpCatalog(): void {
 
   catalogVersion += 1;
   for (const listener of catalogListeners) listener();
+
+  // ⚠ Каталог щойно змінився — відлік «він відстоявся» починається наново,
+  // інакше скарга могла б надрукуватись рівно між двома сповіщеннями.
+  scheduleMissingFlush();
 }
 
 /** Підписує слухача на зміни каталогу; повертає відписку. */
@@ -344,6 +348,21 @@ function isLatestRequest(scope: Scope, requestId: number): boolean {
  * ті самі.
  */
 export async function loadCatalog(lang: Language, scope: Scope): Promise<void> {
+  // ⚠ Лічильник живих завантажень — сигнал для `report()` нижче: доки він не
+  // нуль, «ключа немає» означає лише «каталог ще їде», а не прогалину.
+  // Зростає ДО першого `await`, спадає в `finally` — тобто на будь-якому
+  // виході, включно з винятком.
+  loadsInFlight += 1;
+
+  try {
+    await loadCatalogInto(lang, scope);
+  } finally {
+    loadsInFlight -= 1;
+    scheduleMissingFlush();
+  }
+}
+
+async function loadCatalogInto(lang: Language, scope: Scope): Promise<void> {
   const cacheKey = `${lang}:${scope}`;
   // ⚠ Номер береться ОДРАЗУ, до будь-якого `await`: якщо після цього виклику
   // стартує ще один `loadCatalog` для тієї ж області, він видасть собі більший
@@ -480,6 +499,39 @@ const Missing = { open: '⟦', close: '⟧' } as const;
 const reported = new Set<string>();
 
 /**
+ * Ключі, яких не знайшлося, але про які ще рано скаржитись (UI-прохід, F11).
+ *
+ * ⛔ Попередження було НЕПРАВДИВИМ на кожному холодному відкритті застосунку:
+ * `useRouteTransitionFocus` рахує `document.title` з ланцюжка крихт — тобто
+ * кличе `t('nav.*')` — у ПЕРШОМУ ж рендері `AppLayout`, ще ДО перевірки
+ * `catalogReady` і задовго до того, як приватний каталог доїде. Усі 18 ключів
+ * `nav.*` у каталозі є, підписи на екрані правильні — а в консолі лежала
+ * скарга на кожен маршрут, який встиг відкритися першим. Шум такого роду не
+ * нейтральний: він маскує справжні прогалини, заради яких ця скарга й існує.
+ *
+ * ⚠ Тому скарга не глушиться, а ВІДКЛАДАЄТЬСЯ. Рішення «є прогалина чи ні»
+ * ухвалюється не в момент промаху, а коли каталог відстоявся, і тоді ключ
+ * перевіряється ЩЕ РАЗ: знайшовся — мовчимо, не знайшовся — скаржимось тим
+ * самим текстом, що й раніше.
+ */
+const pendingReports = new Set<string>();
+
+/** Живі виклики `loadCatalog` — доки їх більше нуля, каталог «ще їде». */
+let loadsInFlight = 0;
+
+/**
+ * Скільки чекати без змін каталогу, перш ніж вважати промах прогалиною.
+ *
+ * ⚠ Таймер потрібен саме для проміжку «рендер уже був — ефект, що замовляє
+ * каталог, ще не виконався»: у ньому `loadsInFlight` законно нуль, і жоден
+ * інший сигнал про майбутнє завантаження не існує. Далі ним керує вже
+ * лічильник: `flushMissingReports` не друкує нічого, поки є живий запит.
+ */
+const CatalogSettleMs = 1_000;
+
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
  * Повертає переклад за ключем із завантаженого каталогу.
  *
  * ⚠ Ланцюг запасних варіантів: мова → мова за замовчуванням → **позначений
@@ -512,21 +564,68 @@ export function t(key: string, params?: Record<string, string | number>): string
 }
 
 /**
- * Скаржиться в консоль — лише в режимі розробки і лише раз на ключ.
+ * Бере ключ на замітку — лише в режимі розробки і лише раз на ключ.
  *
  * ⚠ У збірці для розгортання мовчить: користувачеві консоль не показують, а
  * шум у ній заважає діагностувати справжні помилки.
+ *
+ * ⚠ Сама скарга — у `flushMissingReports`, і причина відкладення описана над
+ * `pendingReports`.
  */
 function report(key: string): void {
-  if (!import.meta.env.DEV || reported.has(key)) return;
+  if (!import.meta.env.DEV || reported.has(key) || pendingReports.has(key)) return;
 
-  reported.add(key);
-  console.error(`Немає рядка інтерфейсу: ${key} (мова ${current}).`);
+  pendingReports.add(key);
+  scheduleMissingFlush();
+}
+
+/** Перезапускає відлік «каталог відстоявся», якщо є про що скаржитись. */
+function scheduleMissingFlush(): void {
+  if (pendingReports.size === 0) return;
+
+  if (settleTimer !== null) clearTimeout(settleTimer);
+  settleTimer = setTimeout(flushMissingReports, CatalogSettleMs);
+}
+
+/**
+ * Скаржиться на ті відкладені ключі, яких у каталозі так і немає.
+ *
+ * ⛔ Ключ перевіряється ЩЕ РАЗ, а не береться на віру з моменту промаху: саме
+ * ця повторна перевірка й відрізняє «каталог ще не доїхав» від «каталог доїхав,
+ * ключа немає». Без неї відкладення було б просто затримкою того самого
+ * неправдивого попередження.
+ */
+function flushMissingReports(): void {
+  settleTimer = null;
+
+  // Запит іще живий — рішення передчасне; повернемось, коли він завершиться.
+  if (loadsInFlight > 0) {
+    scheduleMissingFlush();
+    return;
+  }
+
+  for (const key of pendingReports) {
+    if (reported.has(key)) continue;
+
+    // Ключ з'явився разом із каталогом — скаржитись немає на що.
+    if ((lookup(current, key) ?? lookup(DefaultLanguage, key)) !== undefined) continue;
+
+    reported.add(key);
+    console.error(`Немає рядка інтерфейсу: ${key} (мова ${current}).`);
+  }
+
+  pendingReports.clear();
 }
 
 /** Скидає перелік поскаржених ключів — для тестів. */
 export function resetMissingReports(): void {
   reported.clear();
+  pendingReports.clear();
+
+  if (settleTimer !== null) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
 }
 
 function lookup(lang: Language, key: string): string | undefined {
