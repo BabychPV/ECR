@@ -70,6 +70,20 @@ public sealed partial class QuartzJobAdapter(
         var progress = provider.GetService<IJobProgressStore>();
         var clock = provider.GetRequiredService<IClock>();
 
+        // ⚠ Затримка старту (`ФВ-12.2`, `tz/08` §8.3) — ТУТ, а не після
+        // блокування нижче: задача вже взята виконавцем, і все, що йде далі, —
+        // це вже її робота, а не чекання в черзі. Міряти після лока означало б
+        // домішувати до затримки конкуренцію інстансів.
+        //
+        // ⚠ Порт НЕОБОВ'ЯЗКОВИЙ (`GetService`, не `GetRequiredService`), як і
+        // `IJobProgressStore` вище: у прогонах без метрик задачі мусять
+        // виконуватись, а не падати на відсутньому спостерігачі.
+        RecordStartLatency(
+            provider.GetService<IJobStartMetrics>(),
+            context.JobDetail.JobDataMap,
+            clock,
+            typeName);
+
         // ⛔ Q-223 (`Jobs`-секція): job поставлена через ScheduleAsync (крон) —
         // той самий детермінований ключ зареєстрований на КОЖНОМУ інстансі
         // окремо, тож без координації N інстансів виконали б її N разів на
@@ -291,6 +305,36 @@ public sealed partial class QuartzJobAdapter(
     }
 
     /// <summary>Знаходить задачу за повним іменем типу.</summary>
+    /// <summary>Фіксує затримку «постановка → старт», якщо мітка є (<c>ФВ-12.2</c>).</summary>
+    /// <remarks>
+    /// ⚠ Мітки немає у ДВОХ законних випадках, і обидва — не помилка: задача
+    /// за розкладом (її ніхто не «ставив», момент задає крон) і деталь,
+    /// збережена до появи цього ключа. Тоді нічого не пишемо: нуль у
+    /// гістограмі був би не «швидко», а вигадкою.
+    ///
+    /// ⚠ Від'ємне значення відкидається так само. Воно можливе, коли годинники
+    /// інстанса-постановника й інстанса-виконавця розійшлися; від'ємна
+    /// затримка в метриці не означає нічого, крім зіпсованого перцентиля.
+    /// </remarks>
+    private static void RecordStartLatency(
+        IJobStartMetrics? metrics, JobDataMap data, IClock clock, string? typeName)
+    {
+        if (metrics is null || !data.ContainsKey(QuartzJobScheduler.EnqueuedAtKey))
+        {
+            return;
+        }
+
+        var elapsed = clock.UtcNow - new DateTime(
+            data.GetLongValue(QuartzJobScheduler.EnqueuedAtKey), DateTimeKind.Utc);
+
+        if (elapsed < TimeSpan.Zero)
+        {
+            return;
+        }
+
+        metrics.RecordStartLatency(elapsed.TotalMilliseconds, typeName ?? "—");
+    }
+
     private static IBackgroundJob? Resolve(IServiceProvider provider, string? typeName)
     {
         if (string.IsNullOrWhiteSpace(typeName))

@@ -46,6 +46,9 @@ public sealed class QuartzJobScheduler(
     /// <summary>Ключ коду задачі — за ним прогрес зіставляється з типом.</summary>
     public const string JobCodeKey = "ecr.jobCode";
 
+    /// <summary>Мітка часу постановки в чергу, у тиках UTC (<c>ФВ-12.2</c>).</summary>
+    public const string EnqueuedAtKey = "ecr.enqueuedAtTicks";
+
     /// <summary>
     /// Ключ лічильника спроб — у <c>JobDataMap</c> ТРИҐЕРА, не задачі (D-134,
     /// №11 T10 #40).
@@ -112,10 +115,32 @@ public sealed class QuartzJobScheduler(
         IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob
     {
-        var detail = JobBuilder.Create<QuartzJobAdapter>()
+        var builder = JobBuilder.Create<QuartzJobAdapter>()
             .WithIdentity(jobId)
             .UsingJobData(PayloadKey, JsonSerializer.Serialize(payload, PayloadOptions))
-            .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
+            .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name);
+
+        // ⚠ Мітка постановки (`ФВ-12.2`). У базі момент постановки Є —
+        // `QueueAsync` нижче створює рядок зі станом `Queued`, — але він НЕ
+        // ПЕРЕЖИВАЄ старту: `JobProgress.Begin` перезаписує `UpdatedAt`, а
+        // `StartedAt` ставить уже на мить запуску. Тобто з бази затримку можна
+        // взяти рівно в мить переходу і ніколи після неї.
+        //
+        // ⚠ Мітка в JobDataMap — судження, не безвихідь: так замір не додає
+        // походу до СУБД на шлях, який сам і міряється, і не залежить від
+        // сховища прогресу, яке для адаптера необов'язкове.
+        //
+        // ⛔ Без годинника мітки НЕМА, і запасного `DateTime.UtcNow` тут бути
+        // не може: `ForbiddenApiTests` забороняє системний час поза
+        // реалізацією `IClock`, і небезпідставно — замір, що бере час із двох
+        // різних джерел, порівнював би непорівнюване. Немає годинника —
+        // затримка просто не міряється (`QuartzJobAdapter` це передбачає).
+        if (clock is not null)
+        {
+            builder = builder.UsingJobData(EnqueuedAtKey, clock.UtcNow.Ticks);
+        }
+
+        var detail = builder
             // ⚠ Дурабельна навмисно (D-134, №11 T10 #40/#50): задача, що
             // вичерпала ретраї, мусить пережити свій єдиний триґер, інакше
             // ручний перезапуск не мав би чого перезапускати. Успіх і

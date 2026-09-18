@@ -68,6 +68,12 @@ builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
 // #41 — RecordConsistencyIssues існував і не мав жодного викликача).
 builder.Services.AddSingleton<Ecr.Application.Ports.IConsistencyMetrics,
     Ecr.Api.Observability.ConsistencyMetricsAdapter>();
+// ⚠ Те саме для затримки старту задач (ФВ-12.2): міст живе в
+// Ecr.Infrastructure, метрика — тут. Без цього рядка ecr.job.start_latency
+// не мала б жодного викликача, а `tz/08` §8.3 обіцяв би вимірювання, якого
+// немає, — рівно та вада, яку 2026-09-18 знайшли в звільненнях від трасування.
+builder.Services.AddSingleton<Ecr.Application.Ports.IJobStartMetrics,
+    Ecr.Api.Observability.JobStartMetricsAdapter>();
 builder.Services.AddScoped<Ecr.Api.Observability.BudgetMetricsFilter>();
 builder.Services
     .AddControllers(options => options.Filters.Add<Ecr.Api.Observability.BudgetMetricsFilter>())

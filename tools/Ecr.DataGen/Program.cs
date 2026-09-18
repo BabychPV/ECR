@@ -27,7 +27,8 @@ internal static class Program
     /// </param>
     /// <returns>
     /// <c>0</c> — зроблено; <c>1</c> — аргументи не розібрані; <c>2</c> —
-    /// **гейт `BR-07` не пройдено**.
+    /// **гейт `BR-07` не пройдено**; <c>3</c> — гейт не виконувався (база
+    /// недоступна або її схема застаріла).
     /// </returns>
     /// <remarks>
     /// ⛔ Код виходу <c>2</c> — це і є вся суть режиму <c>--gate</c>. До нього
@@ -71,7 +72,7 @@ internal static class Program
 
     /// <summary>Заміри гейта і код виходу за їхнім результатом.</summary>
     /// <param name="options">Розібрані аргументи командного рядка.</param>
-    /// <returns><c>0</c> — бюджет витриманий, <c>2</c> — ні.</returns>
+    /// <returns><c>0</c> — бюджет витриманий, <c>2</c> — ні, <c>3</c> — заміри не відбулися.</returns>
     private static async Task<int> RunGateAsync(Options options)
     {
         var benchmark = new GateBenchmark
@@ -82,6 +83,18 @@ internal static class Program
         var result = await benchmark
             .RunAsync(options.ConnectionString, CancellationToken.None)
             .ConfigureAwait(false);
+
+        // ⛔ Окремий код виходу, а не 2. Двійка означає «бюджет BR-07 не
+        // витриманий» — тобто що заміри БУЛИ. Тут їх не було, і видати це за
+        // порушення бюджету означало б збрехати конвеєру про причину.
+        if (result.Blocked is not null)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Гейт BR-07 НЕ виконувався:");
+            Console.WriteLine(Fmt($"  ⛔ {result.Blocked}"));
+
+            return 3;
+        }
 
         Console.WriteLine();
         Console.WriteLine("Гейт BR-07 — заміри:");

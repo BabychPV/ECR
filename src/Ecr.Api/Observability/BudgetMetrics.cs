@@ -37,6 +37,11 @@ public static class BudgetMetrics
 
             // §8.3 — фонові.
             ["Повний річний перерахунок"] = EcrMetrics.CalcFullYear,
+
+            // ⛔ Затримка СТАРТУ, а не тривалість. `JobDuration` тут був би
+            // хибним зіставленням: він міряє, скільки задача працювала, а
+            // `ФВ-12.2` питає, скільки вона ЧЕКАЛА, поки її візьмуть.
+            ["Затримка «зміна даних"] = EcrMetrics.JobStartLatency,
             ["Повний перерахунок документа"] = EcrMetrics.JobDuration,
             ["Крос-аркушний rollup"] = EcrMetrics.FormulaEvaluate,
             ["Збір із PI AF"] = EcrMetrics.JobDuration,
