@@ -118,6 +118,37 @@ test.describe('Ліниве монтування таблиць аркуша', (
       mountedAtOpen,
     );
 
+    /*
+     * ── Слот не міняє висоти, коли сітка в ньому з'явилася ───────────────
+     *
+     * ⛔ Це не естетика. Слот, що росте в мить приходу зрізу, зсуває все, що
+     * нижче, — а на лінивій сторінці зрізи приходять РОЗТЯГНУТО в часі, тобто
+     * сторінка їде під руками, доки людина читає перші таблиці. Перший, хто
+     * на це наступив, — `e2e/keyboardPath.spec.ts`: він міряє кільце фокуса
+     * ПІКСЕЛЯМИ (`e2e/focus.ts`), сторінка зсувалася МІЖ двома знімками, і
+     * прохід рапортував «кільце фокуса невидиме — різниця 0.00 %» про цілком
+     * справний індикатор.
+     *
+     * ⚠ Допуск 4 px — на заокруглення субпікселів (`deviceScaleFactor: 2`), а
+     * не на «майже однаково»: різниця в панель Undo/Redo/Зберегти — це
+     * десятки пікселів, і сюди вона не влізе.
+     */
+    const heightOf = async (index: number): Promise<number> =>
+      (await slots.nth(index).boundingBox())?.height ?? -1;
+
+    const mountedSlotHeight = await heightOf(0);
+    const emptySlotHeight = await heightOf(ExpectedSlots - 1);
+
+    console.log(
+      `[lazy] висота слота: змонтований ${String(Math.round(mountedSlotHeight))} px, ` +
+        `порожній ${String(Math.round(emptySlotHeight))} px`,
+    );
+
+    expect(
+      Math.abs(mountedSlotHeight - emptySlotHeight),
+      'слот міняє висоту, коли сітка з’явилася — сторінка їде під руками',
+    ).toBeLessThanOrEqual(4);
+
     // ── Прокрутка: сітки з'являються далі ────────────────────────────────
     const deepIndex = 40;
     const deepSlot = slots.nth(deepIndex);

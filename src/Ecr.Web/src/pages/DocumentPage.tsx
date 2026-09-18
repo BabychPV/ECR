@@ -376,7 +376,11 @@ export function DocumentPage(): JSX.Element {
       {gridModule.error === null && gridModule.component === null && (
         <Stack gap="xs">
           {active?.tables.map((table) => (
-            <Stack key={table.tableInstanceId} gap="xs" style={{ minHeight: '70vh' }}>
+            <Stack
+              key={table.tableInstanceId}
+              gap="xs"
+              style={{ minHeight: 'calc(70vh + 96px)' }}
+            >
               <Text fw={600}>{localized(table.tableNameL10n)}</Text>
               <Skeleton height="60vh" radius="sm" />
             </Stack>
