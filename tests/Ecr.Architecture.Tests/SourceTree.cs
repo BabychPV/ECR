@@ -103,6 +103,47 @@ internal static partial class SourceTree
         }
     }
 
+    /// <summary>
+    /// Усі файли під <paramref name="root"/>, окрім збіркового непотребу.
+    /// </summary>
+    /// <param name="root">Каталог, від якого йти.</param>
+    /// <remarks>
+    /// ⛔ Обхід зі СТЕКОМ і відсіканням каталогів, а не
+    /// <c>Directory.EnumerateFiles(..., AllDirectories)</c> з подальшим
+    /// фільтром шляху. Різниця не косметична: <c>src/Ecr.Web/node_modules</c>
+    /// — це десятки тисяч файлів, і фільтр ПІСЛЯ перебору однаково їх усі
+    /// перебирає. Для <c>*.cs</c> це майже непомітно (у залежностях npm їх
+    /// немає), а для <c>*.ts</c> і <c>*.json</c> перетворює тест на хвилини.
+    /// </remarks>
+    public static IEnumerable<string> Walk(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+
+            foreach (var child in Directory.EnumerateDirectories(directory))
+            {
+                var name = Path.GetFileName(child);
+
+                if (name is "node_modules" or "bin" or "obj" or "dist"
+                    or "playwright-report" or "test-results" or ".vite")
+                {
+                    continue;
+                }
+
+                pending.Push(child);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(directory))
+            {
+                yield return file;
+            }
+        }
+    }
+
     private static string FindRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
