@@ -21,6 +21,16 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     : IRowStore
 {
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ <c>WR-05</c>, названо й НЕ зроблено. Запит іде до партиціонованої
+    /// <c>doc.TableInstance</c> за самим <c>Id</c>, тобто по всіх партиціях.
+    /// Прокинути сюди <c>PeriodKey</c> без зміни сигнатури порту неможливо, а
+    /// зміна сигнатури зачіпає шість викликачів у трьох збірках і їхні
+    /// підробки в тестах — це обсяг <c>WR-04</c> п. 2 («контролер передає
+    /// розв'язаний <c>TableInstanceRef</c> в обробник»), а не цього рядка.
+    /// Ціна зволікання обмежена: запит одиничний і повертає один рядок, тоді
+    /// як виправлені тут коштували скану на кожен зріз і на кожен <c>PATCH</c>.
+    /// </remarks>
     public async Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct)
     {
         // Один запит через увесь ланцюг: екземпляр → документ → проєкт.
@@ -59,10 +69,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     public async Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {
-        var rows = await db.TableRows.AsNoTracking()
-            .Where(r => r.PeriodKeyValue == periodKey.Value
-                        && r.TableInstanceId == tableInstanceId
-                        && !r.IsDeleted)
+        var rows = await RowsQuery(db, tableInstanceId, periodKey)
             .Select(r => new { r.RowKeyValue, r.RowVersion })
             .ToListAsync(ct).ConfigureAwait(false);
 
@@ -73,14 +80,54 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     public async Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {
-        var rows = await db.TableRows.AsNoTracking()
-            .Where(r => r.PeriodKeyValue == periodKey.Value
-                        && r.TableInstanceId == tableInstanceId
-                        && !r.IsDeleted)
+        var rows = await RowsQuery(db, tableInstanceId, periodKey)
             .Select(r => new { r.RowKeyValue, r.Id })
             .ToListAsync(ct).ConfigureAwait(false);
 
         return rows.ToDictionary(r => r.RowKeyValue, r => r.Id, StringComparer.Ordinal);
+    }
+
+    /// <summary>Живі рядки одного екземпляра таблиці в його періоді.</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⚠ Три методи порту питають ОДНЕ й те саме, різняться лише проєкцією
+    /// (<c>RowVersion</c>, <c>Id</c>, <c>IsOrphaned</c>). Три копії предиката
+    /// розійшлися б до першої правки одного з них — і розійшлися б тихо: на
+    /// малій таблиці різниці не видно, а на партиціонованій ціна помилки —
+    /// повний скан (див. <see cref="TouchRowsAsync"/>).
+    ///
+    /// ⚠ <b>public static</b>: сторож <c>WR-05</c>
+    /// (<c>Ecr.Architecture.Tests/PartitionKeyQueryTests</c>) перевіряє
+    /// <c>ToQueryString()</c> саме цього запиту, а не його копії в тесті.
+    /// </remarks>
+    public static IQueryable<TableRow> RowsQuery(EcrDbContext db, long tableInstanceId, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value
+                        && r.TableInstanceId == tableInstanceId
+                        && !r.IsDeleted);
+    }
+
+    /// <summary>Живі рядки кількох екземплярів таблиць одного періоду.</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
+    public static IQueryable<TableRow> RowsBatchQuery(
+        EcrDbContext db, IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        return db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value
+                        && tableInstanceIds.Contains(r.TableInstanceId)
+                        && !r.IsDeleted);
     }
 
     /// <inheritdoc />
@@ -92,10 +139,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             return new Dictionary<long, IReadOnlyDictionary<string, long>>();
         }
 
-        var rows = await db.TableRows.AsNoTracking()
-            .Where(r => r.PeriodKeyValue == periodKey.Value
-                        && tableInstanceIds.Contains(r.TableInstanceId)
-                        && !r.IsDeleted)
+        var rows = await RowsBatchQuery(db, tableInstanceIds, periodKey)
             .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.Id })
             .ToListAsync(ct).ConfigureAwait(false);
 
@@ -116,10 +160,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             return new Dictionary<long, IReadOnlyDictionary<string, string>>();
         }
 
-        var rows = await db.TableRows.AsNoTracking()
-            .Where(r => r.PeriodKeyValue == periodKey.Value
-                        && tableInstanceIds.Contains(r.TableInstanceId)
-                        && !r.IsDeleted)
+        var rows = await RowsBatchQuery(db, tableInstanceIds, periodKey)
             .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.RowVersion })
             .ToListAsync(ct).ConfigureAwait(false);
 
@@ -286,10 +327,31 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             return;
         }
 
-        await db.TableRows
-            .Where(r => r.PeriodKeyValue == periodKey.Value && rowIds.Contains(r.Id))
+        await TouchRowsQuery(db, rowIds, periodKey)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.ModifiedAt, utcNow), ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Рядки, яких торкається «дотик», — за ідентифікаторами в межах періоду.</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="rowIds">Ідентифікатори рядків.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; оновлення добирає викликач.</returns>
+    /// <remarks>
+    /// ⚠ Запит винесений, щоб сторож <c>WR-05</c> бачив саме його: це той
+    /// самий предикат, чия відсутність коштувала 34 308 логічних читань проти
+    /// 60 (див. <see cref="TouchRowsAsync"/>), і єдина причина, чому він зараз
+    /// правильний, — що колись за це заплатили. Без сторожа ніщо не заважає
+    /// заплатити вдруге.
+    /// </remarks>
+    public static IQueryable<TableRow> TouchRowsQuery(
+        EcrDbContext db, IReadOnlyList<long> rowIds, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(rowIds);
+
+        return db.TableRows
+            .Where(r => r.PeriodKeyValue == periodKey.Value && rowIds.Contains(r.Id));
     }
 
     /// <inheritdoc />
@@ -301,10 +363,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     public async Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {
-        var rows = await db.TableRows.AsNoTracking()
-            .Where(r => r.PeriodKeyValue == periodKey.Value
-                        && r.TableInstanceId == tableInstanceId
-                        && !r.IsDeleted)
+        var rows = await RowsQuery(db, tableInstanceId, periodKey)
             .Select(r => new { r.Id, r.IsOrphaned })
             .ToListAsync(ct).ConfigureAwait(false);
 
@@ -314,9 +373,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     /// <inheritdoc />
     public async Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
-        => await db.TableInstances
-            .AsNoTracking()
-            .Where(t => t.DocumentId == documentId && t.PeriodKeyValue == periodKey.Value)
+        => await TableInstancesQuery(db, documentId, periodKey)
             .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
                   (x, p) => new TableInstanceRef(
@@ -350,9 +407,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var existing = await db.TableInstances
-            .AsNoTracking()
-            .Where(t => t.DocumentId == documentId && t.PeriodKeyValue == periodKey.Value)
+        var existing = await TableInstancesQuery(db, documentId, periodKey)
             .Select(t => t.TableDefId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -453,14 +508,56 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     /// <inheritdoc />
     public async Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
-        => await db.TableRows
-            .AsNoTracking()
-            .Where(r => r.PeriodKeyValue == periodKey.Value && r.IsOrphaned && !r.IsDeleted)
-            .Join(db.TableInstances.Where(t => t.DocumentId == documentId),
-                  r => r.TableInstanceId, t => t.Id, (r, _) => r.Id)
+        => await OrphanedRowIdsQuery(db, documentId, periodKey)
             .Take(MaxOrphanReport)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+    /// <summary>Екземпляри таблиць документа в одному періоді.</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⚠ <c>doc.TableInstance</c> партиціонована так само, як <c>doc.TableRow</c>
+    /// (<c>07-partition-tables.sql:50</c>), і її кластерний ключ теж
+    /// <c>(PeriodKey, Id)</c> — тобто «дешевий довідник» вона лише на вигляд.
+    /// </remarks>
+    public static IQueryable<TableInstance> TableInstancesQuery(
+        EcrDbContext db, long documentId, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.TableInstances
+            .AsNoTracking()
+            .Where(t => t.PeriodKeyValue == periodKey.Value && t.DocumentId == documentId);
+    }
+
+    /// <summary>Осиротілі рядки документа в одному періоді.</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит ідентифікаторів рядків.</returns>
+    /// <remarks>
+    /// ⛔ <c>PeriodKey</c> був лише на <c>doc.TableRow</c>; підзапит екземплярів
+    /// ішов за самим <c>DocumentId</c> — тобто по всіх партиціях
+    /// <c>doc.TableInstance</c>. Помітити це важче, ніж у сусідніх запитах:
+    /// зовнішня частина предикат має, і на перший погляд запит «з періодом».
+    /// Саме тому перевіряється ЗГЕНЕРОВАНИЙ SQL, де видно кожну з двох таблиць
+    /// окремо, а не текст джерела, де достатньо одного збігу слова
+    /// <c>PeriodKeyValue</c>, щоб сторож по тексту заспокоївся.
+    /// </remarks>
+    public static IQueryable<long> OrphanedRowIdsQuery(
+        EcrDbContext db, long documentId, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value && r.IsOrphaned && !r.IsDeleted)
+            .Join(TableInstancesQuery(db, documentId, periodKey),
+                  r => r.TableInstanceId, t => t.Id, (r, _) => r.Id);
+    }
 
     /// <summary>Стеля кількості екземплярів таблиць в одному документі.</summary>
     /// <remarks>
