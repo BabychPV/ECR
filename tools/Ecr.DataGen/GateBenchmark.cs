@@ -136,6 +136,17 @@ public sealed class GateBenchmark
         var notes = new List<string>();
 
         await using var db = CreateContext(connectionString);
+
+        // ⛔ Стан схеми звіряється ПЕРЕД будь-яким заміром. Доти гейт на
+        // ненакоченій базі падав неперехопленим `SqlException: Invalid column
+        // name 'HeartbeatAt'` — і це читалося як дефект гейта, хоча гейт був
+        // цілий, а база просто відставала на три міграції.
+        var shortfall = await FindSchemaShortfallAsync(db, ct).ConfigureAwait(false);
+        if (shortfall is not null)
+        {
+            return new GateResult(false, measurements, [], [], Blocked: shortfall);
+        }
+
         var store = new NormalizedCellStore(db);
 
         // Обсяг фіксується ПЕРШИМ і потрапляє в звіт: замір на недоборі — це
@@ -267,6 +278,61 @@ public sealed class GateBenchmark
             + "потрібен заповнений архівний рік і вікно обслуговування (Q-063).");
 
         return new GateResult(failures.Count == 0, measurements, failures, notes);
+    }
+
+    /// <summary>
+    /// Чи накочена база до міграцій, які є у збірці.
+    /// </summary>
+    /// <param name="db">Контекст, побудований на рядку підключення гейта.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// <c>null</c> — схема поточна, заміри мають сенс; інакше — готовий текст
+    /// названої відмови з причиною і тим, що робити.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Обґрунтування форми. З трьох можливих (звірка набору міграцій, точкова
+    /// перевірка потрібних колонок, перехоплення <c>SqlException</c>) узято
+    /// першу. Перехоплення винятку називає НАСЛІДОК і робить це надто пізно:
+    /// «Invalid column name 'HeartbeatAt'» прилітає вже з заміру №7, тобто
+    /// після того, як прогін відпрацював обсяг, зріз і три перші критерії — а в
+    /// повному гейті це ще й чверть години навантаження, викинута в нікуди.
+    /// Перелік колонок був би третім місцем, де той самий факт треба тримати
+    /// в актуальному стані: додавання будь-якої нової колонки міграцією
+    /// мовчки виводило б його з ладу, і гейт повернувся б до стека. Звірка
+    /// набору міграцій дорога лише на папері — це один запит до
+    /// <c>__EFMigrationsHistory</c>, частки секунди проти хвилин заміру, — і
+    /// вона називає ПРИЧИНУ («база відстає на стільки-то міграцій»), а не той
+    /// один стовпець, на якому спіткнулися першим.
+    ///
+    /// ⛔ Зворотний бік (у базі накочено те, чого немає у збірці) сюди НЕ
+    /// потрапляє: <c>GetPendingMigrations</c> його не бачить. Це свідомо —
+    /// така база для замірів придатна, а розбіжність означає лише застарілий
+    /// чекаут, і блокувати нею прогін було б помилкою в інший бік.
+    /// </remarks>
+    private static async Task<string?> FindSchemaShortfallAsync(EcrDbContext db, CancellationToken ct)
+    {
+        if (!await db.Database.CanConnectAsync(ct).ConfigureAwait(false))
+        {
+            return "Немає з'єднання з базою за вказаним рядком підключення. "
+                + "Заміри не запускалися.";
+        }
+
+        var pending = (await db.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false)).ToList();
+        if (pending.Count == 0)
+        {
+            return null;
+        }
+
+        var total = db.Database.GetMigrations().Count();
+
+        return Fmt($"""
+            Схема бази ЗАСТАРІЛА: не накочено {pending.Count} міграцій із {total}.
+                Заміри не запускалися — на такій базі вони падають на першій же відсутній колонці.
+                Не накочено: {string.Join(", ", pending)}
+                Що робити (одне з двох):
+                  dotnet ef database update --project src/Ecr.Infrastructure --startup-project src/Ecr.Infrastructure --connection "<той самий рядок>"
+                  powershell -File tools/setup-dev-db.ps1 -Server <сервер> -Database <база>   ⛔ цей шлях базу ПЕРЕСТВОРЮЄ
+            """);
     }
 
     /// <summary>З якого боку від межі лежить погіршення.</summary>
@@ -905,14 +971,24 @@ public sealed class GateBenchmark
 /// <param name="Measurements">Виміряні числа.</param>
 /// <param name="Failures">Порушені бюджети — кожне дає ненульовий код виходу.</param>
 /// <param name="Notes">Неперевірене і застереження — друкуються завжди, коду виходу не дають.</param>
+/// <param name="Blocked">
+/// Чому замір не відбувся взагалі (<c>null</c> — відбувся). Це НЕ порушення
+/// бюджету: бюджет не перевірявся.
+/// </param>
 /// <remarks>
 /// ⛔ <paramref name="Failures"/> і <paramref name="Notes"/> розділені
 /// навмисно. Поки неперевірений замір №4 лежав серед порушень, гейт був
 /// червоний ЗАВЖДИ — а завжди червоний гейт перестають читати так само
 /// швидко, як завжди зелений.
+///
+/// ⛔ Так само окремий і <paramref name="Blocked"/>. «Бюджет порушено» і
+/// «замір не відбувся» — різні твердження з різною реакцією: перше — привід
+/// правити продукт, друге — привід накотити базу. Звести їх в одне червоне
+/// означало б посилати людину шукати деградацію там, де її ніхто не міряв.
 /// </remarks>
 public sealed record GateResult(
     bool Passed,
     IReadOnlyDictionary<string, double> Measurements,
     IReadOnlyList<string> Failures,
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes,
+    string? Blocked = null);
