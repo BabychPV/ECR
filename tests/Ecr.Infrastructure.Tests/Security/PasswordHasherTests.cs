@@ -37,8 +37,9 @@ public sealed class PasswordHasherTests
         // ньому ранній вихід дав би найбільшу економію.
         var wrong = string.Concat("X", Password.AsSpan(1));
 
-        var correct = Fastest(() => _hasher.Verify(Password, hash));
-        var incorrect = Fastest(() => _hasher.Verify(wrong, hash));
+        var (correct, incorrect) = FastestBoth(
+            () => _hasher.Verify(Password, hash),
+            () => _hasher.Verify(wrong, hash));
 
         Assert.False(_hasher.Verify(wrong, hash));
 
@@ -90,9 +91,9 @@ public sealed class PasswordHasherTests
         Assert.False(_hasher.Verify(Password, string.Empty));
     }
 
-    /// <summary>Медіана з кількох вимірів; одне влучання GC не має вирішувати.</summary>
-    /// <summary>Найшвидший із заміряних прогонів.</summary>
-    /// <param name="action">Дія, час якої міряється.</param>
+    /// <summary>Найшвидші прогони двох дій, ЧЕРГУЮЧИ їх.</summary>
+    /// <param name="first">Перша дія (правильний пароль).</param>
+    /// <param name="second">Друга дія (неправильний пароль).</param>
     /// <remarks>
     /// ⛔ Саме МІНІМУМ, а не медіана. Тут стояла медіана п'яти замірів, і на
     /// зайнятій машині вона давала відношення 3.22 і 3.93 при межі 3.0 —
@@ -104,23 +105,41 @@ public sealed class PasswordHasherTests
     /// тільки ДОДАЄ час, тож найшвидший прогін — найближча оцінка справжньої
     /// вартості. Ранній вихід на неправильному паролі виявився б саме тут,
     /// і саме найяскравіше.
+    ///
+    /// ⛔ ЧЕРГУВАННЯ — друга половина того самого виправлення, і без неї
+    /// мінімум не рятує. Доти п'ятнадцять замірів правильного пароля йшли
+    /// ПІДРЯД, і лише потім п'ятнадцять неправильного: якщо раннер устиг
+    /// пригальмувати між блоками, відношення мінімумів дорівнює гальмуванню, а
+    /// не ранньому виходу. 2026-09-18 CI дав саме це — 3.12 при межі 3.0, на
+    /// гілці, яка чіпала шляхи файлів БД і на Linux не змінювала нічого.
+    ///
+    /// ⚠ Чергування не послаблює перевірку: ранній вихід — властивість
+    /// ОКРЕМОГО виклику, і від порядку викликів вона не залежить. Змінюється
+    /// тільки те, що обидва виміри тепер бачать однакові умови.
     /// </remarks>
-    private static long Fastest(Func<bool> action)
+    private static (long First, long Second) FastestBoth(Func<bool> first, Func<bool> second)
     {
-        // ⚠ Перший прогін викидається: він платить за JIT похідної функції, і
+        // ⚠ Перші прогони викидаються: вони платять за JIT похідної функції, і
         // платить його лише той вимір, який ішов першим.
-        action();
+        first();
+        second();
 
-        var best = long.MaxValue;
+        var bestFirst = long.MaxValue;
+        var bestSecond = long.MaxValue;
 
         for (var i = 0; i < 15; i++)
         {
             var stopwatch = Stopwatch.StartNew();
-            action();
+            first();
             stopwatch.Stop();
-            best = Math.Min(best, stopwatch.ElapsedTicks);
+            bestFirst = Math.Min(bestFirst, stopwatch.ElapsedTicks);
+
+            stopwatch.Restart();
+            second();
+            stopwatch.Stop();
+            bestSecond = Math.Min(bestSecond, stopwatch.ElapsedTicks);
         }
 
-        return best;
+        return (bestFirst, bestSecond);
     }
 }
