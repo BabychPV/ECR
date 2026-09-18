@@ -297,6 +297,19 @@ export const routes = {
     handle: { labelKey: 'nav.audit', permission: 'Security.ViewAudit', icon: 'audit' },
     showInNav: true,
   },
+  // ⛔ Екрана не було, і знахідки нічної перевірки були недосяжні з продукту
+  // взагалі: `aud.ConsistencyIssue` не читав ні ендпоінт, ні клієнт — видно
+  // було лише КІЛЬКІСТЬ за типом (лічильник `ecr.consistency.issues`).
+  //
+  // ⚠ Право — `System.ViewHealth`, те саме, що в `adminJobs`/`adminHealth`, а
+  // не `Security.ViewAudit`: таблиця лежить у схемі `aud`, але відповідає на
+  // питання «що в даних зламано», а не «хто змінив це число».
+  adminConsistency: {
+    id: 'admin-consistency',
+    path: '/admin/consistency',
+    handle: { labelKey: 'nav.consistency', permission: 'System.ViewHealth', icon: 'consistency' },
+    showInNav: true,
+  },
   adminUiStrings: {
     id: 'admin-ui-strings',
     path: '/admin/ui-strings',

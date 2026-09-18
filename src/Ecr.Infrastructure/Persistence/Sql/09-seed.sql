@@ -409,6 +409,10 @@ USING (VALUES
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
+    -- ⚠ ПОДРОБИЦЯ відмови (`Detail`), не заголовок: заголовок `err.ECR-REQ-0422`
+    -- уже заведений нижче. Ключ із підстановкою `{max}` — рівно та форма, що й
+    -- `auditWindowTooWide` вище (`Q-341`).
+    (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'en', N'The page size must be between 1 and {max}.', 1),
     (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
     (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
     (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
@@ -1416,6 +1420,32 @@ USING (VALUES
     (N'audit.late',                      N'en', N'late', 1),
     (N'audit.empty',                     N'en', N'No changes in this window', 1),
     (N'audit.emptyHint',                 N'en', N'The window is required: the journal is partitioned by change time, and a query without one would scan every partition.', 1),
+
+    -- ⛔ Знахідки перевірки узгодженості (`aud.ConsistencyIssue`). До цього
+    -- екрана з продукту було видно лише КІЛЬКІСТЬ за типом (лічильник
+    -- `ecr.consistency.issues`): «є 12 знахідок BROKEN_FK» без жодного
+    -- способу дізнатися, які саме рядки зачеплені.
+    (N'nav.consistency',                 N'en', N'Consistency issues', 1),
+    (N'consistency.title',               N'en', N'Consistency issues', 1),
+    (N'consistency.rule',                N'en', N'Rule', 1),
+    (N'consistency.ruleHint',            N'en', N'Leave empty for every rule.', 1),
+    (N'consistency.openOnly',            N'en', N'Unresolved only', 1),
+    (N'consistency.when',                N'en', N'Detected at', 1),
+    (N'consistency.severity',            N'en', N'Severity', 1),
+    (N'consistency.entity',              N'en', N'Affected entity', 1),
+    (N'consistency.what',                N'en', N'What was found', 1),
+    (N'consistency.state',               N'en', N'State', 1),
+    (N'consistency.open',                N'en', N'unresolved', 1),
+    (N'consistency.resolved',            N'en', N'resolved', 1),
+    (N'consistency.severityInfo',        N'en', N'info', 1),
+    (N'consistency.severityWarning',     N'en', N'warning', 1),
+    (N'consistency.severityError',       N'en', N'error', 1),
+    -- ⚠ Мова текстів знахідок названа ЯВНО на самому екрані, а не замовчана:
+    -- інакше англійський інтерфейс із українським рядком у колонці виглядає
+    -- як дефект локалізації, а не як свідоме рішення.
+    (N'consistency.messageLanguage',     N'en', N'The finding text is written by the nightly job and is not translated.', 1),
+    (N'consistency.empty',               N'en', N'No consistency issues recorded', 1),
+    (N'consistency.emptyHint',           N'en', N'The nightly check writes what it finds here; an empty journal means the last run found nothing.', 1),
     (N'nav.snapshots',                   N'en', N'Report snapshots', 1),
     (N'snapshots.title',                 N'en', N'Report snapshots', 1),
     (N'snapshots.build',                 N'en', N'Build snapshot', 1),

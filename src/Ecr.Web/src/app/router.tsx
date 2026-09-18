@@ -8,6 +8,7 @@ import { RouteGuard } from './RouteGuard';
 import {
   AuditPage,
   ChangePasswordPage,
+  ConsistencyIssuesPage,
   DocumentPage,
   DocumentsPage,
   ExpressionsPage,
@@ -277,6 +278,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminUnits, 'admin'),
             element: guarded(routes.adminUnits.handle, <UnitsPage />),
             handle: routes.adminUnits.handle,
+          },
+          {
+            path: relativePath(routes.adminConsistency, 'admin'),
+            element: guarded(routes.adminConsistency.handle, <ConsistencyIssuesPage />),
+            handle: routes.adminConsistency.handle,
           },
           {
             path: relativePath(routes.adminUiStrings, 'admin'),

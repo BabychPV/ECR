@@ -306,6 +306,42 @@ export function emptyBodyFor(url: string): unknown {
 
   if (url.includes('/audit/cells')) return { items: [], nextCursor: null };
 
+  // ⛔ НЕ порожня сторінка — та сама причина, що у `DocumentSliceFixture`:
+  // порожній журнал показує `EmptyState`, і таблиця знахідок не рендериться
+  // взагалі. Тобто гейт доступності сканував би екран без того, заради чого
+  // екран існує. Два рядки навмисно РІЗНІ: нерозв'язана помилка і закрите
+  // попередження — два різні бейджі, два різні кольори.
+  if (url.includes('/consistency/issues')) {
+    return {
+      items: [
+        {
+          id: 2,
+          detectedAt: '2026-09-18T03:00:00Z',
+          severity: 3,
+          ruleCode: 'BROKEN_FK',
+          entityType: 'doc.TableRow',
+          entityId: 4021,
+          message: 'Рядок 4021 посилається на екземпляр таблиці 77 періоду 202601, якого не існує.',
+          resolvedAt: null,
+          resolvedByUserId: null,
+        },
+        {
+          id: 1,
+          detectedAt: '2026-09-17T03:00:00Z',
+          severity: 2,
+          ruleCode: 'ORPHANED_CELL',
+          entityType: 'doc.CellValue',
+          entityId: 1188,
+          message: 'Комірка рядка 1188 періоду 202601 посилається на запис довідника 9001, якого не існує.',
+          resolvedAt: '2026-09-17T09:15:00Z',
+          resolvedByUserId: 3,
+        },
+      ],
+      nextCursor: null,
+      totalCount: null,
+    };
+  }
+
   if (url.includes('/calculation-results')) return [];
 
   // ⛔ НЕ порожній зріз — див. `DocumentSliceFixture`: порожній означав, що

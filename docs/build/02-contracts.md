@@ -2091,6 +2091,28 @@ public interface ICollectionRunner
 }
 ```
 
+#### `IConsistencyIssueReader`
+
+Знахідка перевірки узгодженості, як її бачить читач. Ідентифікатор рядка
+журналу. Момент виявлення в UTC. Вага: 1 інформація, 2 попередження,
+3 помилка. Код правила: `ORPHANED_CELL`, `BROKEN_FK`, `ARCHIVE_CHECKSUM`.
+Тип і ідентифікатор зачепленої сутності. Текст знахідки, як його записала
+задача, — український і НЕ локалізований: каталог рядків існує для відмов
+API (`err.*`), не для цього журналу. Момент і автор закриття; `null` —
+знахідка ще актуальна. Журнал **тільки читається**: знахідку закриває той,
+хто усунув причину, а не той, хто на неї дивиться. Окремий порт від
+`IAuditReader`, хоч таблиця й у схемі `aud`: аудит відповідає на «хто змінив
+це число», а тут — «що в даних зламано».
+
+```csharp
+public interface IConsistencyIssueReader
+{
+    public interface IConsistencyIssueReader
+    public Task<PagedResult<ConsistencyIssueView>> ReadIssuesAsync(
+        string? ruleCode, bool openOnly, CursorRequest page, CancellationToken ct);
+}
+```
+
 #### `IDocumentStore`
 
 Документ у переліку. ⛔ Статусу тут немає (D-93). Зведений стан рахується запитом до wf.ApprovalState і віддається окремим полем : скалярний статус був би другим джерелом істини і рано чи пізно показав би Approved на документі, половина аркушів якого ще в Draft. Ідентифікатор. Проєкт. Бізнес-ключ, унікальний у межах проєкту. Момент створення. Скільки аркушів у складі. Стан робочого процесу: аркуш → статус. public sealed record DocumentSummary( long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount, IReadOnlyDictionary SheetStates); Порушення правила складу документа. Група аркушів. Вид правила: 0 RequiresAll, 1 RequiresOne, 2 Optional. Що саме не так. public sealed record CompositionViolation(string SheetGroup, byte RuleKind, string Detail); Читання і створення документів. public interface IDocumentStore { Додає документ разом зі складом аркушів. public Task AddAsync(Document document, CancellationToken ct); Документ за ідентифікатором; null — не існує. public Task FindAsync(long documentId, PeriodKeyFilter period, CancellationToken ct); Сторінка документів проєкту. public Task> ListAsync( int? projectId, PeriodKeyFilter period, CursorRequest page, CancellationToken ct); Перевіряє склад за SheetGroupRule (ФВ-3.2).
@@ -2817,6 +2839,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/alerts` | `Security.ManageUsers` | 5 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
+| `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |

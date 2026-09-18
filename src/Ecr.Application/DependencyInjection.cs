@@ -139,6 +139,7 @@ public static class DependencyInjection
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();
         services.AddScoped<Audit.GetCellChangesHandler>();
+        services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
         services.AddScoped<Projects.CloneProjectHandler>();
 
         // Періоди (модуль 3.4)
