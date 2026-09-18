@@ -15,8 +15,30 @@ namespace Ecr.Infrastructure.Caching;
 /// між інстансами як клас проблеми — і саме тому ≥2 інстанси тут дешеві (D-16).
 /// </remarks>
 public sealed class MetadataCache(
-    IMemoryCache memory, EcrDbContext db, CacheLifetimes? lifetimes = null) : IMetadataCache
+    IMemoryCache memory,
+    EcrDbContext db,
+    CacheLifetimes? lifetimes = null,
+    SingleFlight<TemplateVersionSnapshot>? flight = null) : IMetadataCache
 {
+    /// <summary>
+    /// Спільний «один політ на ключ».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Приходить ПАРАМЕТРОМ і мусить бути СПІЛЬНИМ на процес, бо сам
+    /// <c>MetadataCache</c> — <c>Scoped</c>: на кожен HTTP-запит свій
+    /// екземпляр. Власний словник у кожному екземплярі не злив би нічого —
+    /// саме той напівстан, коли код прийому є, а прийому немає.
+    ///
+    /// ⚠ Дефолт (<c>new</c>) лишений заради прямих <c>new MetadataCache(...)</c>
+    /// у тестах: контейнер значень за замовчуванням не застосовує, а
+    /// <c>DependencyInjection</c> передає зареєстрований
+    /// <c>SingleFlight&lt;TemplateVersionSnapshot&gt;</c> явно. Тест злиття
+    /// (`RD-05`) будує екземпляри рівно так, як контейнер, — інакше він довів
+    /// би роботу того, чого в продукті немає.
+    /// </remarks>
+    private readonly SingleFlight<TemplateVersionSnapshot> _flight =
+        flight ?? new SingleFlight<TemplateVersionSnapshot>();
+
     /// <summary>
     /// Стеля життя запису.
     /// </summary>
@@ -42,13 +64,88 @@ public sealed class MetadataCache(
     /// </remarks>
     private TimeSpan Lifetime => (lifetimes ?? CacheLifetimes.Default).Metadata;
 
+    /// <summary>Вікно, у якому ревізія не перечитується з бази (`RD-05`).</summary>
+    private TimeSpan RevisionWindow => (lifetimes ?? CacheLifetimes.Default).Revision;
+
     /// <inheritdoc />
     public async Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct)
     {
-        // Один легкий запит по ключу — саме він і робить схему з ключем
-        // працездатною: ревізію треба знати ДО того, як шукати в кеші.
-        // Дешевше за перечитування всієї структури на кожен запит рівно
-        // настільки, наскільки одне число дешевше за сотні рядків.
+        var revision = await RevisionAsync(templateVersionId, ct).ConfigureAwait(false);
+        var key = CacheKey(templateVersionId, revision);
+
+        if (memory.TryGetValue(key, out TemplateVersionSnapshot? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        // ⛔ Промах ключа — це НЕ «піти й побудувати». Між `TryGetValue` і
+        // `Set` тут нічого не стояло, і на холодному ключі N одночасних
+        // запитів давали N побудов по шість запитів кожна (`RD-05`, вада `D`).
+        // Злиття робить із них одну; решта чекають її результату.
+        return await _flight
+            .RunAsync(key, token => BuildAsync(templateVersionId, revision, key, token), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Будує знімок і кладе його в кеш — усередині одного польоту.</summary>
+    private async Task<TemplateVersionSnapshot> BuildAsync(
+        int templateVersionId, int revision, string key, CancellationToken ct)
+    {
+        // Повторна перевірка вже всередині польоту: поки ми ставали в чергу,
+        // попередній політ міг завершитися і покласти готове.
+        if (memory.TryGetValue(key, out TemplateVersionSnapshot? ready) && ready is not null)
+        {
+            return ready;
+        }
+
+        var snapshot = await LoadAsync(templateVersionId, revision, ct).ConfigureAwait(false);
+
+        // Термін не для коректності — її й так тримає ревізія в ключі, запис
+        // не «застаріває» доти, доки він там лежить, — а для пам'яті (Q-252):
+        // без стелі знімок ревізії, що випала з вузького вікна
+        // InvalidateAsync (кілька презентаційних правок поспіль без
+        // Publish/міграції), лишався б у процесі назавжди.
+        //
+        // ⚠ `Size` тут БІЛЬШЕ НЕМАЄ, і це не недогляд — див. пояснення біля
+        // `AddMemoryCache` у `DependencyInjection.cs`: ліміту в сховища немає,
+        // а розмір без ліміту не обмежує нічого і лише вдає стелю.
+        memory.Set(key, snapshot, new MemoryCacheEntryOptions
+        {
+            Priority = CacheItemPriority.High,
+            AbsoluteExpirationRelativeToNow = Lifetime,
+        });
+
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Поточна ревізія версії — з мемоїзацією на <see cref="RevisionWindow"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До `RD-05` це був запит до <c>cfg.TemplateVersion</c> на КОЖЕН
+    /// <c>GetAsync</c>, а на один зріз таблиці викликів ≥ 2. Прийом узятий
+    /// дослівно з <c>SecurityStampValidator</c>: п'ять секунд у спільному
+    /// <see cref="IMemoryCache"/>, після яких число перечитується.
+    ///
+    /// ⚠ Що саме стає несвіжим. Ключ <c>v{id}:r{rev}</c> лишається чесним —
+    /// просто новий <c>rev</c> помічається не миттєво, а протягом вікна.
+    /// Тобто ПРЕЗЕНТАЦІЙНА правка чернетки доходить до читача за ≤ 5 с. Для
+    /// <c>Publish</c> і міграції цього мало, тому
+    /// <see cref="InvalidateAsync"/> знімає й мемоїзоване число.
+    ///
+    /// ⚠ Відсутність версії НЕ мемоїзується: нуль користі (шлях однаково
+    /// кидає) і зайва морока з <c>null</c> у сховищі значень.
+    /// </remarks>
+    private async Task<int> RevisionAsync(int templateVersionId, CancellationToken ct)
+    {
+        var window = RevisionWindow;
+        var key = RevisionKey(templateVersionId);
+
+        if (window > TimeSpan.Zero && memory.TryGetValue(key, out int memoized))
+        {
+            return memoized;
+        }
+
         var revision = await db.TemplateVersions
             .AsNoTracking()
             .Where(v => v.Id == templateVersionId)
@@ -62,33 +159,16 @@ public sealed class MetadataCache(
                 $"Версії шаблону {templateVersionId} не існує.");
         }
 
-        var key = CacheKey(templateVersionId, revision.Value);
-        memory.Set(RevisionKey(templateVersionId), revision.Value, new MemoryCacheEntryOptions
+        if (window > TimeSpan.Zero)
         {
-            Size = 1,
-            Priority = CacheItemPriority.High,
-        });
-
-        if (memory.TryGetValue(key, out TemplateVersionSnapshot? cached) && cached is not null)
-        {
-            return cached;
+            memory.Set(key, revision.Value, new MemoryCacheEntryOptions
+            {
+                Priority = CacheItemPriority.High,
+                AbsoluteExpirationRelativeToNow = window,
+            });
         }
 
-        var snapshot = await LoadAsync(templateVersionId, revision.Value, ct).ConfigureAwait(false);
-
-        // Термін не для коректності — її й так тримає ревізія в ключі, запис
-        // не «застаріває» доти, доки він там лежить, — а для пам'яті (Q-252):
-        // без стелі знімок ревізії, що випала з вузького вікна
-        // InvalidateAsync (кілька презентаційних правок поспіль без
-        // Publish/міграції), лишався б у процесі назавжди.
-        memory.Set(key, snapshot, new MemoryCacheEntryOptions
-        {
-            Size = 1,
-            Priority = CacheItemPriority.High,
-            AbsoluteExpirationRelativeToNow = Lifetime,
-        });
-
-        return snapshot;
+        return revision.Value;
     }
 
     /// <inheritdoc />
@@ -104,6 +184,11 @@ public sealed class MetadataCache(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ Мемоїзоване число знімається ПЕРШИМ. Publish і міграція — рівно ті
+        // випадки, де стеля несвіжості в 5 с недопустима, і лишити тут старе
+        // число означало б, що явна інвалідація не діє ці п'ять секунд.
+        memory.Remove(RevisionKey(templateVersionId));
+
         var current = revision ?? 0;
         for (var r = Math.Max(0, current - 1); r <= current + 1; r++)
         {
@@ -112,16 +197,17 @@ public sealed class MetadataCache(
     }
 
     /// <summary>
-    /// Ключ, під яким лежить ПОТОЧНА ревізія версії.
+    /// Ключ, під яким лежить мемоїзована ревізія версії (`RD-05`).
     /// </summary>
     /// <remarks>
-    /// Потрібен синхронному <c>ITemplateStructure</c>: щоб дістати знімок із
-    /// кешу, треба знати ревізію, а вона живе в базі. Запис цього числа поруч
-    /// зі знімком — єдиний спосіб уникнути синхронного запиту там, де його
-    /// робити не можна.
+    /// ⚠ Раніше це число клалося в кеш НАЗАВЖДИ і на КОЖЕН виклик — заради
+    /// синхронного <c>ITemplateStructure</c>, у якого не було жодного
+    /// споживача (`Q-192`, `AR-06`). Порт і його реалізація прибрані разом із
+    /// цим записом; ключ лишився, але вже зі строком і в іншій ролі — вікно, у
+    /// якому ревізію не перечитують.
     /// </remarks>
     /// <param name="templateVersionId">Версія шаблону.</param>
-    public static string RevisionKey(int templateVersionId) => $"rev:{templateVersionId}";
+    private static string RevisionKey(int templateVersionId) => $"rev:{templateVersionId}";
 
     /// <summary>Ключ знімка: <c>v{id}:r{rev}</c> (D-16).</summary>
     /// <param name="templateVersionId">Версія шаблону.</param>
