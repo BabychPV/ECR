@@ -3,10 +3,15 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Channels;
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure;
+using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Quartz;
 
 namespace Ecr.DataGen;
 
@@ -26,6 +31,27 @@ namespace Ecr.DataGen;
 /// </remarks>
 public sealed class GateBenchmark
 {
+    /// <summary>
+    /// Критерій №7: затримка «зміна даних → ПОЧАТОК перерахунку» (<c>ФВ-12.2</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це НЕ тривалість перерахунку. §8.2 `08-nfr.md` має рядок «перерахунок
+    /// піддерева після зміни комірки — 300 мс / 600 мс»: то час самої роботи.
+    /// Тут міряється інше — скільки задача чекає, поки її ВІЗЬМУТЬ із черги.
+    /// Величини незалежні: робота може йти 200 мс, а починатися через хвилину.
+    ///
+    /// ⛔ Критерію не існувало до 2026-09-18, і це мало наслідок за межами
+    /// гейта: `contracts/trace-exempt.md` звільняв `ФВ-12.2` від покриття
+    /// тестом саме тим, що вона «міряється гейтом продуктивності (`tz/08`)».
+    /// Гейт існував, цієї величини в ньому не було — звільнення посилалося на
+    /// перевірку, якої ніхто не написав.
+    ///
+    /// ⚠ Беремо суворіше з двох чисел вимоги: 5 с (ручний запуск), а не 10 с
+    /// (авто). Обидва йдуть тим самим `EnqueueAsync`, і межа має відповідати
+    /// найжорсткішому випадку, інакше ручний запуск лишиться без сторожа.
+    /// </remarks>
+    private const double RecalcStartBudgetMs = 5_000;
+
     /// <summary>Критерій №1: <c>ReadSliceAsync</c> на 500×60, p95.</summary>
     private const double SliceBudgetMs = 600;
 
@@ -179,6 +205,14 @@ public sealed class GateBenchmark
             .ConfigureAwait(false);
         measurements["rollup_p95_ms"] = rollup;
 
+        // 7) Затримка «зміна даних → початок перерахунку» (ФВ-12.2).
+        // ⚠ ДО навантаження, а не після: замір має показати затримку черги в
+        // штатному стані. Під 125 RPS у партицію він міряв би вже інше —
+        // поведінку під навантаженням, а це окрема величина й окремий бюджет.
+        var (recalcStart, recalcCold) = await MeasureRecalculationStartAsync(connectionString, ct).ConfigureAwait(false);
+        measurements["recalc_start_latency_ms"] = recalcStart;
+        measurements["recalc_start_cold_ms"] = recalcCold;
+
         // 6) ⚠ ГОЛОВНИЙ замір: усе навантаження в ОДНУ партицію.
         var load = await LoadOnePartitionAsync(connectionString, loadTarget, ct).ConfigureAwait(false);
         measurements["one_partition_rps"] = load.Rps;
@@ -212,6 +246,8 @@ public sealed class GateBenchmark
                     Fmt($"Під навантаженням запис p95 {load.WriteP95:F0} мс")),
                 new Criterion("lock_escalations", load.LockEscalations, 0, Worse.Higher,
                     Fmt($"Ескалацій блокувань за вікно: {load.LockEscalations:F0}")),
+                new Criterion("recalc_start_latency_ms", recalcStart, RecalcStartBudgetMs, Worse.Higher,
+                    Fmt($"Перерахунок почався через {recalcStart:F0} мс після постановки в чергу")),
             ],
             failures,
             notes);
@@ -566,6 +602,121 @@ public sealed class GateBenchmark
     /// на питання «база повільна» проти «база не встигає»: при першому обидва
     /// числа великі, при другому велике лише перше.
     /// </remarks>
+    /// <summary>
+    /// Критерій №7: скільки минає від <c>EnqueueAsync</c> до першого рядка тіла
+    /// задачі перерахунку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Планувальник і місток СПРАВЖНІ: `AddQuartz` із тими самими
+    /// `UseSimpleTypeLoader`/`UseInMemoryStore`, що й у
+    /// `Ecr.Infrastructure.DependencyInjection`, і справжній
+    /// <c>QuartzJobAdapter</c>. Замір без них показував би затримку Quartz як
+    /// бібліотеки, а не нашого шляху: адаптер розв'язує тип, відкриває свій
+    /// scope і пише рядок `itg.JobProgress` — усе це лежить МІЖ постановкою в
+    /// чергу і першим рядком роботи, тобто входить у те, що міряє `ФВ-12.2`.
+    ///
+    /// ⚠ Заглушкою лишається ТІЛЬКИ тіло перерахунку: задача під маркером
+    /// <see cref="IFormulaRecalculationJob"/> ставить мітку часу й завершується.
+    /// Інакше замір включив би тривалість самої роботи — а це інша величина з
+    /// іншим бюджетом (§8.2 `08-nfr.md`).
+    ///
+    /// ⚠ Одна постановка, не p95. Затримка тут визначається одним тригером
+    /// `StartNow()` і не має розкиду, який має сенс усереднювати; двадцять
+    /// повторів міряли б розігрів пулу потоків Quartz, а не чергу.
+    ///
+    /// ⚠ Якщо задача не стартувала за подвоєний бюджет — повертається саме це
+    /// число, а не нескінченність: критерій має впасти з ЧИСЛОМ, а гейт —
+    /// завершитись, а не висіти.
+    /// </remarks>
+    private static async Task<(double Warm, double Cold)> MeasureRecalculationStartAsync(
+        string connectionString, CancellationToken ct)
+    {
+        var started = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = Stopwatch.StartNew();
+        var stamp = new StampingJob(clock, started);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddQuartz(quartz =>
+        {
+            quartz.UseSimpleTypeLoader();
+            quartz.UseInMemoryStore();
+        });
+        services.AddTransient<QuartzJobAdapter>();
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddDbContext<EcrDbContext>(options => options.UseSqlServer(connectionString));
+        services.AddScoped<IJobProgressStore, JobProgressStore>();
+        services.AddScoped<IFormulaRecalculationJob>(_ => stamp);
+
+        await using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISchedulerFactory>();
+        var scheduler = await factory.GetScheduler(ct).ConfigureAwait(false);
+        await scheduler.Start(ct).ConfigureAwait(false);
+
+        try
+        {
+            var jobs = new QuartzJobScheduler(
+                factory, provider.GetRequiredService<IJobProgressStore>(), provider.GetRequiredService<IClock>());
+
+            // ⛔ Перша постановка — РОЗІГРІВ, і її число викидається. Замір
+            // 2026-09-18 на 4.1 млн комірок: перша задача стартувала через
+            // 3588 мс, друга — на порядок швидше. Різниця не в черзі: у першу
+            // входить побудова моделі EF, відкриття з'єднання і JIT шляху
+            // адаптера. `ФВ-12.2` міряє систему, що ПРАЦЮЄ, а не мить після
+            // старту процесу, тож холодне число тут було б завищенням, яке
+            // ховає справжній запас.
+            //
+            // ⚠ Холодне число НЕ зникає — воно йде в `measurements` окремим
+            // рядком `recalc_start_cold_ms`. Якщо запас колись з'їсться, різниця
+            // між холодним і теплим одразу скаже, де саме.
+            await jobs.EnqueueAsync<IFormulaRecalculationJob>(new { DocumentId = 0L }, ct).ConfigureAwait(false);
+
+            var warmup = Task.Delay(TimeSpan.FromMilliseconds(RecalcStartBudgetMs * 2), ct);
+            var warmed = await Task.WhenAny(started.Task, warmup).ConfigureAwait(false);
+            var cold = warmed == started.Task
+                ? await started.Task.ConfigureAwait(false)
+                : RecalcStartBudgetMs * 2;
+
+            var second = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+            stamp.Next(second);
+
+            clock.Restart();
+            await jobs.EnqueueAsync<IFormulaRecalculationJob>(new { DocumentId = 0L }, ct).ConfigureAwait(false);
+
+            var timeout = Task.Delay(TimeSpan.FromMilliseconds(RecalcStartBudgetMs * 2), ct);
+            var finished = await Task.WhenAny(second.Task, timeout).ConfigureAwait(false);
+
+            return (
+                Warm: finished == second.Task ? await second.Task.ConfigureAwait(false) : RecalcStartBudgetMs * 2,
+                Cold: cold);
+        }
+        finally
+        {
+            await scheduler.Shutdown(waitForJobsToComplete: false, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Тіло-заглушка: ставить мітку часу й завершується.</summary>
+    /// <remarks>
+    /// ⚠ Ціль перемикається між постановками (<see cref="Next"/>), а не
+    /// створюється заново: адаптер розв'язує задачу за типом із контейнера, і
+    /// новий екземпляр довелося б туди перереєстровувати.
+    /// </remarks>
+    private sealed class StampingJob(Stopwatch clock, TaskCompletionSource<double> first)
+        : IFormulaRecalculationJob
+    {
+        private TaskCompletionSource<double> _target = first;
+
+        public void Next(TaskCompletionSource<double> target) => _target = target;
+
+        public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+        {
+            _target.TrySetResult(clock.Elapsed.TotalMilliseconds);
+
+            return Task.CompletedTask;
+        }
+    }
+
     private static async Task ConsumeAsync(
         string connectionString,
         SliceTarget target,

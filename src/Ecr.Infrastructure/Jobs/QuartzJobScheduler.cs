@@ -46,6 +46,9 @@ public sealed class QuartzJobScheduler(
     /// <summary>Ключ коду задачі — за ним прогрес зіставляється з типом.</summary>
     public const string JobCodeKey = "ecr.jobCode";
 
+    /// <summary>Мітка часу постановки в чергу, у тиках UTC (<c>ФВ-12.2</c>).</summary>
+    public const string EnqueuedAtKey = "ecr.enqueuedAtTicks";
+
     /// <summary>
     /// Ключ лічильника спроб — у <c>JobDataMap</c> ТРИҐЕРА, не задачі (D-134,
     /// №11 T10 #40).
@@ -112,10 +115,29 @@ public sealed class QuartzJobScheduler(
         IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob
     {
-        var detail = JobBuilder.Create<QuartzJobAdapter>()
+        var builder = JobBuilder.Create<QuartzJobAdapter>()
             .WithIdentity(jobId)
             .UsingJobData(PayloadKey, JsonSerializer.Serialize(payload, PayloadOptions))
-            .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
+            .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name);
+
+        // ⚠ Мітка постановки (`ФВ-12.2`): без неї затримку «зміна даних →
+        // початок перерахунку» не порахувати НІЯК. `itg.JobProgress`
+        // з'являється вже зі станом `Running`, тобто в момент СТАРТУ; стан
+        // `Queued` у `JobProgressStore` фігурує лише у фільтрах і ніким не
+        // пишеться. Мітка їде в JobDataMap, а не в базу, щоб не додавати похід
+        // до СУБД на шлях, який сам і міряється.
+        //
+        // ⛔ Без годинника мітки НЕМА, і запасного `DateTime.UtcNow` тут бути
+        // не може: `ForbiddenApiTests` забороняє системний час поза
+        // реалізацією `IClock`, і небезпідставно — замір, що бере час із двох
+        // різних джерел, порівнював би непорівнюване. Немає годинника —
+        // затримка просто не міряється (`QuartzJobAdapter` це передбачає).
+        if (clock is not null)
+        {
+            builder = builder.UsingJobData(EnqueuedAtKey, clock.UtcNow.Ticks);
+        }
+
+        var detail = builder
             // ⚠ Дурабельна навмисно (D-134, №11 T10 #40/#50): задача, що
             // вичерпала ретраї, мусить пережити свій єдиний триґер, інакше
             // ручний перезапуск не мав би чого перезапускати. Успіх і

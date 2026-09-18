@@ -36,6 +36,18 @@ public sealed class EcrMetrics
     /// <summary>Знахідки нічної перевірки інваріантів.</summary>
     public const string ConsistencyIssues = "ecr.consistency.issues";
 
+    /// <summary>
+    /// Затримка «поставили в чергу → задача ПОЧАЛА виконуватись» (<c>ФВ-12.2</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це НЕ <see cref="JobDuration"/>. Та міряє, скільки задача ПРАЦЮВАЛА;
+    /// ця — скільки вона ЧЕКАЛА, поки її візьмуть. Величини незалежні:
+    /// перерахунок може йти 200 мс, а починатися через хвилину — і саме друге
+    /// оператор відчуває як «нічого не відбувається».
+    /// </remarks>
+    public const string JobStartLatency = "ecr.job.start_latency";
+
+    private readonly Histogram<double> _jobStartLatency;
     private readonly Histogram<double> _cellsRead;
     private readonly Histogram<double> _cellsWrite;
     private readonly Histogram<double> _formulaEvaluate;
@@ -57,6 +69,8 @@ public sealed class EcrMetrics
         _calcFullYear = meter.CreateHistogram<double>(CalcFullYear, "s", "Повний річний перерахунок");
         _conflicts = meter.CreateCounter<long>(ConflictCount, "1", "Конфлікти паралельного редагування");
         _consistencyIssues = meter.CreateCounter<long>(ConsistencyIssues, "1", "Знахідки ConsistencyCheckJob");
+        _jobStartLatency = meter.CreateHistogram<double>(
+            JobStartLatency, "ms", "Затримка від постановки задачі в чергу до її старту");
     }
 
     /// <summary>
@@ -178,4 +192,13 @@ public sealed class EcrMetrics
     /// </remarks>
     public void RecordConsistencyIssues(int count, string kind)
         => _consistencyIssues.Add(count, new KeyValuePair<string, object?>("kind", kind));
+
+    /// <summary>Фіксує затримку старту задачі (<c>ФВ-12.2</c>).</summary>
+    /// <remarks>
+    /// ⚠ Тег — код задачі, бо межі різні за змістом: перерахунок після зміни
+    /// комірки мусить починатися за секунди, а нічна архівація може чекати
+    /// вікна обслуговування і бути при цьому цілком справною.
+    /// </remarks>
+    public void RecordJobStartLatency(double milliseconds, string jobCode)
+        => _jobStartLatency.Record(milliseconds, new KeyValuePair<string, object?>("job", jobCode));
 }
