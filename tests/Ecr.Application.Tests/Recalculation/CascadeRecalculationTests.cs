@@ -547,6 +547,15 @@ public sealed class CascadeRecalculationTests
         periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
             .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
+        // ⛔ `DAT-02` п. 4 (`S-04`): запис і аудит перерахунку тепер ідуть
+        // через `IUnitOfWork.ExecuteInTransactionAsync`. Без цього налаштування
+        // NSubstitute повертає typed-default (`Task.CompletedTask`) і НІКОЛИ не
+        // викликає передане замикання — тобто жодна перевірка нижче
+        // (`ApplyAsync`, аудит) не виконалась би НАСПРАВДІ, а тести мовчки
+        // перестали б щось доводити. Той самий прийом, що в `PatchCellsTests`.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
             _audit,

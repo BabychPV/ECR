@@ -436,6 +436,20 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
         var units = Substitute.For<IUnitCatalog>();
         units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
+        // ⛔ Заглушку `IUnitOfWork` треба НАЛАШТУВАТИ на виклик замикання.
+        // `DAT-02` п.4 обгорнув тіло циклу `RecalculationService.RunAsync` у
+        // `ExecuteInTransactionAsync`, а NSubstitute за замовчуванням повертає
+        // `Task.CompletedTask` і передане замикання НЕ ВИКЛИКАЄ взагалі — тобто
+        // `ApplyAsync` не відбувається, і три тести цього файлу починають
+        // падати на `Applied()` з «Sequence contains no matching element».
+        //
+        // ⚠ Той самий різновид пастки вже описано в конструкторі
+        // `PatchCellsTests` (`Q-243`): без цього рядка тест мовчки перестає
+        // щось доводити — тут він хоча б падає гучно.
+        var uow = Substitute.For<IUnitOfWork>();
+        uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+           .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         return new(
             _cells,
             _rows,
@@ -446,7 +460,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             units,
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            Substitute.For<IUnitOfWork>());
+            uow);
     }
 
     private static RunCalculationHandler RunHandler()
