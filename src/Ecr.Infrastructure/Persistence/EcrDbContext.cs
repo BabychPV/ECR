@@ -8,6 +8,7 @@ using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Units;
 using Ecr.Domain.Entities.Workflow;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 
@@ -21,7 +22,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// тригером без цього оголошення падає в рантаймі — помилка, яку легко
 /// пропустити до першого запису (ТЗ §13.5 п.1).
 /// </remarks>
-public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbContext(options)
+public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
+    : DbContext(options), IDataProtectionKeyContext
 {
     // cfg
     public DbSet<Template> Templates => Set<Template>();
@@ -139,12 +141,42 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options) : DbCon
     // doc — індекс фільтрів
     public DbSet<DocumentIndexValue> DocumentIndexValues => Set<DocumentIndexValue>();
 
+    /// <summary>
+    /// Кільце ключів DataProtection — спільне для всіх інстансів (`MI-01`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Реалізація <see cref="IDataProtectionKeyContext"/>, а не «ще одна
+    /// таблиця». Без неї ключі лежать у профілі облікового запису процесу:
+    /// cookie, видана одним інстансом, для другого — шум (`D-32` не
+    /// виконується), а під сервісною обліковкою без завантаженого профілю вони
+    /// ефемерні, тобто кожен рестарт служби розлогінює всіх.
+    ///
+    /// ⚠ Форму таблиці диктує пакет
+    /// <c>Microsoft.AspNetCore.DataProtection.EntityFrameworkCore</c> — ми її
+    /// не визначаємо. На відміну від <c>dbo.Cache</c>, вона все ж кладеться в
+    /// контрактну схему <c>sec</c>: сюди йдуть ключі шифрування сесії, і
+    /// таблиця, на яку DBA видає <c>DENY</c> (див. <c>02a-db-schema.md</c> §11),
+    /// мусить бути названа в контракті схеми.
+    /// </remarks>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(EcrDbContext).Assembly);
+
+        // ⚠ Конфігурація тут, а не в `Configurations/`: сутність чужа (її
+        // оголошує пакет DataProtection), і єдине, що ми про неї вирішуємо, —
+        // де вона лежить. Форму колонок лишаємо за пакетом: `Xml` несе
+        // серіалізований елемент кільця ключів, і будь-яка наша межа довжини
+        // була б вигаданою. Без цього рядка EF кладе таблицю конвенцією в
+        // `dbo.DataProtectionKeys`, і сторож
+        // `Міграція_не_створює_таблиць_поза_контрактними_схемами` червоніє —
+        // справедливо: таблицю, на яку DBA видає `DENY`, контракт схеми має
+        // знати поіменно.
+        modelBuilder.Entity<DataProtectionKey>().ToTable("DataProtectionKey", "sec");
 
         // ⛔ Сім сутностей, у яких розбіжність зі схемою ще не вирішена
         // (`Q-027` для шести, `Q-042` для `RoleAssignment`), свідомо вилучені

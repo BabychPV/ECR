@@ -2112,7 +2112,34 @@ GO
 
 CREATE INDEX IX_LoginAttempt_User ON sec.LoginAttempt (UserName, AttemptedAt DESC) ON [INDEXES];
 GO
+
+CREATE TABLE sec.DataProtectionKey
+(
+    Id           int            IDENTITY(1,1) NOT NULL,
+    FriendlyName nvarchar(max)  NULL,
+    Xml          nvarchar(max)  NULL,
+    CONSTRAINT PK_DataProtectionKey PRIMARY KEY (Id)
+);
+GO
 ```
+
+> **Кільце ключів DataProtection (`MI-01`, `D-32`).** Форму таблиці диктує
+> `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore`: читає її власний
+> провайдер пакета, і межі довжин тут були б нашою вигадкою. Наше рішення одне
+> — схема `sec`, а не конвенційна `dbo`, і воно не про охайність.
+>
+> Без цієї таблиці ключі лежать у профілі облікового запису процесу: cookie,
+> видана одним інстансом, для другого — шум (`D-32` не виконується), а під
+> сервісною обліковкою без завантаженого профілю ключі ефемерні — кожен
+> рестарт служби розлогінює всіх навіть на одному інстансі.
+>
+> ⚠ **Права.** У `Xml` лежить ключ, яким підписана сесія. Коли налаштовано
+> сертифікат (`Auth:DataProtection:CertificateThumbprint`, той самий, що для
+> HTTPS у `D14-08`), значення зашифроване ним. У режимі HTTP без сертифіката
+> воно лежить **відкрито**, і єдиний захист — права: `SELECT`/`INSERT`/`UPDATE`
+> лише обліковому запису служби, `DENY SELECT` решті. Застосунок у цьому режимі
+> не мовчить: `/health/db` показує обмеження
+> `health.db.limitation.dataProtectionKeys`.
 
 ---
 

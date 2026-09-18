@@ -20,7 +20,8 @@ public sealed class DatabaseHealthCheck(
     Ecr.Infrastructure.Persistence.EcrDbContext db,
     Ecr.Domain.Abstractions.IClock clock,
     IUiStringCatalog catalog,
-    ICurrentUser currentUser) : IHealthCheck
+    ICurrentUser currentUser,
+    DataProtectionKeyProtection keyProtection) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -186,6 +187,20 @@ public sealed class DatabaseHealthCheck(
             list.Add(await Text(
                 "health.db.limitation.rcsi",
                 "RCSI is disabled: reads will block writes during the peak of the last day of the period.",
+                null, ct).ConfigureAwait(false));
+        }
+
+        // ⛔ `MI-01`/`D14-08`: тимчасове рішення не має права стати невидимим
+        // постійним. Ключі, якими підписана сесія, лежать у `sec.DataProtectionKey`
+        // відкрито доти, доки немає сертифіката, і єдиний захист від їх читання —
+        // права в базі. Про це адміністратор має дізнатися з health, а не з
+        // аудиту.
+        if (!keyProtection.IsProtected)
+        {
+            list.Add(await Text(
+                "health.db.limitation.dataProtectionKeys",
+                "Session keys are stored unencrypted in sec.DataProtectionKey: no certificate is configured "
+                + "(Auth:DataProtection:CertificateThumbprint). Restrict the table to the service account with DENY for everyone else.",
                 null, ct).ConfigureAwait(false));
         }
 
