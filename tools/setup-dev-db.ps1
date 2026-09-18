@@ -88,13 +88,28 @@ function Invoke-Sql {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & sqlcmd @arguments | Out-Null
+        # ⛔ Вивід ЗБИРАЄТЬСЯ, а не глушиться в `Out-Null`. Доти відмова
+        # виглядала як «sqlcmd повернув 1 на 01-filegroups.sql» — код без
+        # причини. 2026-09-18 за цим рядком ховалося
+        # `Msg 5149 ... operating system error 112 (There is not enough space
+        # on the disk.)`, і три прогони стенда поспіль прочиталися як дефект
+        # розгортання, хоча бракувало місця на диску даних SQL Server.
+        #
+        # ⚠ На успіху вивід так само не показується (його багато й він ні про
+        # що), тож звичний прогін не змінюється — змінюється лише те, що видно
+        # при падінні.
+        $output = & sqlcmd @arguments 2>&1
     }
     finally {
         $ErrorActionPreference = $previousEap
     }
     if ($LASTEXITCODE -ne 0) {
-        throw "sqlcmd повернув $LASTEXITCODE на $(if ($File) { $File } else { $Query })"
+        # ⚠ Останні рядки, а не весь вивід: `sqlcmd` друкує попередження про
+        # зіставлення на кожен файл, і справжня помилка йде в кінці.
+        $tail = ($output | Select-Object -Last 12) -join [Environment]::NewLine
+
+        throw "sqlcmd повернув $LASTEXITCODE на $(if ($File) { $File } else { $Query })" `
+            + [Environment]::NewLine + $tail
     }
 }
 
