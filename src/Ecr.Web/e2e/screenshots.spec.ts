@@ -39,7 +39,16 @@ const OutputDirectory = path.resolve('../../artifacts/screenshots');
 async function signIn(page: Page, user: string, password: string): Promise<void> {
   await page.goto('/login');
   await page.getByLabel(/User name|Ім'я/i).fill(user);
-  await page.getByLabel(/Password|Пароль/i).fill(password);
+
+  // ⚠ Q-260 (змержено вже ПІСЛЯ написання цього файла) додав кнопці-тумблеру
+  // видимості пароля `aria-label="Toggle password visibility"`
+  // (`LoginPage.tsx`, `passwordToggleProps`) — і `getByLabel(/Password|Пароль/i)`
+  // відтоді резолвиться у ДВА елементи: саме поле і цю кнопку. Дослівно:
+  //   strict mode violation: getByLabel(/Password|Пароль/i) resolved to 2 elements
+  // Роль розрізняє їх однозначно: поле вводу — `textbox`, кнопка — `button`.
+  // Той самий рядок уже стоїть у `security.spec.ts` і `keyboardPath.spec.ts`;
+  // сюди він не доїхав, і саме тому знімки падали на вході, а не на маршруті.
+  await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(password);
   await page.keyboard.press('Enter');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 }

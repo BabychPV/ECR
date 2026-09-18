@@ -128,7 +128,15 @@ async function signIn(page: Page): Promise<void> {
 
   await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
   await page.getByLabel(/User name|Ім'я/i).fill(Operator.user);
-  await page.getByLabel(/Password|Пароль/i).fill(Operator.password);
+  // ⚠ Той самий Q-260, що вже виправлений у `security.spec.ts`,
+  // `keyboardPath.spec.ts` і `screenshots.spec.ts`: кнопка-тумблер видимості
+  // пароля має `aria-label="Toggle password visibility"`, тож
+  // `getByLabel(/Password|Пароль/i)` резолвиться у ДВА елементи — поле і
+  // кнопку. Тут це падало НЕ ЗАВЖДИ, і саме тому дожило досі: доки публічний
+  // каталог рядків ще не прийшов, підпис поля не збігався з регуляркою, збіг
+  // лишався один, і `fill` устигав спрацювати. Роль розрізняє елементи
+  // однозначно: поле вводу — `textbox`, кнопка — `button`.
+  await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Operator.password);
   await page.keyboard.press('Enter');
 
   await expect(page.getByRole('navigation')).toBeVisible({ timeout: 30_000 });

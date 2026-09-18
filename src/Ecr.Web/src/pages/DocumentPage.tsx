@@ -1,5 +1,5 @@
-﻿import { Suspense, lazy, useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+﻿import { useEffect, useState, type JSX } from 'react';
+import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -18,6 +18,7 @@ import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
@@ -35,10 +36,55 @@ import { t } from '@/shared/i18n';
  * ⚠ Видимої затримки це не додає, і ось чому: сітка й до того не могла
  * намалюватися раніше за свій зріз даних — вона тягне його власним
  * запитом. Чанк вантажиться паралельно з тим самим очікуванням.
+ *
+ * ⛔ Чанк той самий, а от `React.lazy` і `<Suspense>` ПРИБРАНО — і це не
+ * стиль, а єдине, що лікує зміряний дефект. Числа, спосіб вимірювання і
+ * перебрані (та відкинуті) гіпотези — у `features/grid/SheetTables.tsx`;
+ * коротко: під `<Suspense>` сітки не з'являлися НІКОЛИ на документі
+ * чинного розміру, і жодне перекладання самих меж цього не міняло.
+ *
+ * ⚠ Динамічний `import()` в ефекті дає рівно ту саму окрему точку розбиття,
+ * що й `lazy` (Vite/Rollup ріже чанк за виразом `import()`, а не за тим, хто
+ * його обгортає), тому бюджет `D-132`/`H-4` лишається виконаним. Різниця в
+ * тому, КОЛИ монтуються сітки: у звичайній фіксації після `setState`, а не
+ * всередині повторної спроби межі очікування.
  */
-const DocumentGrid = lazy(async () => ({
-  default: (await import('@/features/grid/DocumentGrid')).DocumentGrid,
-}));
+type SheetTablesComponent = typeof import('@/features/grid/SheetTables')['SheetTables'];
+
+interface GridModuleState {
+  readonly component: SheetTablesComponent | null;
+  readonly error: unknown;
+}
+
+function useSheetTablesModule(): GridModuleState & { readonly reload: () => void } {
+  const [state, setState] = useState<GridModuleState>({ component: null, error: null });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+
+    // ⚠ Компонент лежить у ПОЛІ об'єкта стану, а не в стані напряму: `useState`
+    // трактує функцію як апдейтер, і компонент (він теж функція) інакше був би
+    // ВИКЛИКАНИЙ замість того, щоб бути збереженим.
+    void import('@/features/grid/SheetTables').then(
+      (module) => {
+        if (alive) setState({ component: module.SheetTables, error: null });
+      },
+      (error: unknown) => {
+        // ⛔ Мовчазний провал тут коштував би дорожче за будь-який інший:
+        // екран лишився б із заглушками назавжди, і це виглядало б рівно як
+        // дефект, який ця картка й закриває.
+        if (alive) setState({ component: null, error });
+      },
+    );
+
+    return () => {
+      alive = false;
+    };
+  }, [attempt]);
+
+  return { ...state, reload: () => setAttempt((value) => value + 1) };
+}
 
 /**
  * Екран документа: вибір періоду, вкладки аркушів, таблиці, робочий процес.
@@ -187,6 +233,10 @@ export function DocumentPage(): JSX.Element {
   // редагувати відхилений аркуш і треба, інакше виправити зауваження нічим.
   const readOnly = !isEditable(state);
 
+  // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
+  // хуків не знає про `AsyncBoundary` нижче.
+  const gridModule = useSheetTablesModule();
+
   return (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -288,37 +338,33 @@ export function DocumentPage(): JSX.Element {
         </Tabs.List>
       </Tabs>
 
-      {/* ⚠ Межа ОДНА на всі таблиці аркуша, а не на кожну: чанк у них
-          спільний, тож окремі межі дали б кілька заглушок на одне й те саме
-          очікування. Заголовки таблиць лишаються поза нею — вони відомі до
-          завантаження сітки, і ховати їх означало б показувати менше, ніж
-          маємо. */}
-      <Suspense
-        fallback={
-          <Stack gap="xs">
-            {active?.tables.map((table) => (
-              <Stack key={table.tableInstanceId} gap="xs">
-                <Text fw={600}>{localized(table.tableNameL10n)}</Text>
-                <Skeleton height={240} radius="sm" />
-              </Stack>
-            ))}
-          </Stack>
-        }
-      >
-        {active?.tables.map((table) => (
-          <Stack key={table.tableInstanceId} gap="xs">
-            <Text fw={600}>{localized(table.tableNameL10n)}</Text>
-            <DocumentGrid
-              documentId={documentId}
-              tableInstanceId={table.tableInstanceId}
-              periodKey={periodKey}
-              readOnly={readOnly}
-              allowsDynamicRows={table.allowsDynamicRows}
-              maxDynamicRows={table.maxDynamicRows}
-            />
-          </Stack>
-        ))}
-      </Suspense>
+      {/* ⚠ Три стани чанка сітки замість `<Suspense>`: вантажиться —
+          заглушка ПО ОДНІЙ НА ТАБЛИЦЮ (кількість таблиць відома до
+          завантаження чанка, і одна смужка замість дев'яноста однієї
+          збрехала б про розмір сторінки, яка зараз з'явиться); не
+          завантажився — помилка з кнопкою «повторити», бо порожній екран із
+          заглушками тут не відрізнити від того самого дефекту, який ця
+          картка закриває; завантажився — таблиці. */}
+      {gridModule.error !== null && (
+        <ErrorAlert error={gridModule.error} onRetry={gridModule.reload} />
+      )}
+
+      {gridModule.error === null && gridModule.component === null && (
+        <Stack gap="xs">
+          {active?.tables.map((table) => (
+            <Skeleton key={table.tableInstanceId} height={240} radius="sm" />
+          ))}
+        </Stack>
+      )}
+
+      {gridModule.component !== null && active !== undefined && (
+        <gridModule.component
+          documentId={documentId}
+          periodKey={periodKey}
+          readOnly={readOnly}
+          tables={active.tables}
+        />
+      )}
 
       {/* ⛔ Числа методологій — окремо від сітки, і це `D-69`: у комірку
           вони не потрапляють ніколи, а приходять у документ посиланням через
