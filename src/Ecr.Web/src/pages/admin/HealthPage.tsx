@@ -96,7 +96,7 @@ export function HealthPage(): JSX.Element {
                 {Object.entries(details(report) ?? {}).map(([key, value]) => (
                   <Table.Tr key={key}>
                     <Table.Td miw={200}>{fieldLabel(key)}</Table.Td>
-                    <Table.Td>{String(value)}</Table.Td>
+                    <Table.Td>{fieldValue(value)}</Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -147,6 +147,44 @@ function fieldLabel(key: string): string {
   const translationKey = FieldLabelKeys[key];
 
   return translationKey === undefined ? key : t(translationKey);
+}
+
+/**
+ * Знак «значення є, і воно порожнє» (UI-прохід, F7).
+ *
+ * ⛔ Порожня клітинка читається ДВОЯКО: «відсутніх файлових груп немає» і «цей
+ * рядок не завантажився». Це той самий клас, що `A7-04` вище на цій же
+ * сторінці, лише на один рядок дрібніший: порожнеча ≠ помилка мусить бути
+ * видно, а не додумуватись (`ФВ-14.22`).
+ *
+ * ⚠ Тире, а не `t('…')`: рядки цього застосунку йдуть із серверного каталогу
+ * (`09-seed.sql`), ключа під «немає» там немає, а голий `t()` без рядка показав
+ * би `⟦…⟧` — тобто замінив би одну незрозумілу клітинку на іншу. Той самий
+ * аргумент, що в `passwordToggleProps` (`pages/LoginPage.tsx`). Знак
+ * нейтральний до мови, тож заміна його рядком каталогу пізніше нічого тут не
+ * перебудовує.
+ */
+const EmptyValue = '—';
+
+/**
+ * Значення поля `/health/db` у вигляді, придатному для клітинки.
+ *
+ * ⛔ Сирий `String(value)` і був дефектом: `missingFilegroups` і `limitations`
+ * — це СПИСКИ (`DatabaseHealthCheck.cs`, `data["missingFilegroups"] = missing`),
+ * а `String([])` — порожній рядок. Здорова система (жодної відсутньої групи,
+ * жодного обмеження режиму) малювала два порожні рядки серед восьми
+ * заповнених. Непорожній список він же зліплював без пробілів (`A,B`).
+ */
+function fieldValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length === 0 ? EmptyValue : value.map(String).join(', ');
+  }
+
+  if (value === null || value === undefined) return EmptyValue;
+
+  const text = String(value);
+
+  return text.trim().length === 0 ? EmptyValue : text;
 }
 
 /**

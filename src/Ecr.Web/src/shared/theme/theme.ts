@@ -305,6 +305,19 @@ export const theme = createTheme({
     Modal: {
       defaultProps: { transitionProps: { duration: 150 }, closeButtonProps: { 'aria-label': 'Close' } },
     },
+    // ⛔ Те саме, що в `Modal` вище, і з тієї ж причини — але для сповіщень,
+    // і знайдено це вже проходом інтерфейсу як користувач
+    // (`docs/build/UI-WALKTHROUGH.md`, F8). Mantine малює хрестик тоста через
+    // `<CloseButton>` без тексту й без `aria-label`, тож читалка оголошує
+    // «кнопка» — а це ЄДИНА дія, якою сповіщення прибирається з екрана.
+    //
+    // ⚠ Тут, а не лише в `shared/ui/notify.ts`: одинадцять місць кличуть
+    // `notifications.show(...)` повз ту обгортку (`SheetActions.tsx`,
+    // `DocumentPage.tsx`, `ExportButton.tsx`, `UserAccessEditor.tsx`,
+    // `CreateMappingModal.tsx`, `SourcesPage.tsx`, `PeriodsPage.tsx`,
+    // `SnapshotsPage.tsx`, `GrantsPanel.tsx`). Виправлення лише в обгортці
+    // закрило б два виклики з тринадцяти і читалося б як «F8 закрито».
+    Notification: { defaultProps: { closeButtonProps: { 'aria-label': 'Close notification' } } },
     Drawer: { defaultProps: { transitionProps: { duration: 150 } } },
     Tooltip: { defaultProps: { transitionProps: { duration: 80 } } },
   },

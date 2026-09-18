@@ -283,8 +283,16 @@ describe('Контраст токенів (ФВ-14.17)', () => {
         'utf8',
       );
 
-      expect(source).toMatch(/notifications\.show\(\{ color: 'statusSuccess', message \}\);/);
-      expect(source).not.toMatch(/notifications\.show\(\{ color: 'green', message \}\);/);
+      // ⛔ Перевіряється ТІЛО `showDone`, а не дослівний однорядковий виклик.
+      // Тут стояло `toMatch(/notifications\.show\(\{ color: 'statusSuccess',
+      // message \}\);/)` — і воно впало не на регресі кольору, а на тому, що
+      // виклик став багаторядковим (до нього додали `closeButtonProps`, F8).
+      // Сторож, прив'язаний до форматування, оголошує дефектом переніс рядка:
+      // предмет картки — колір, і саме його треба тримати.
+      const body = source.slice(source.indexOf('export function showDone'));
+
+      expect(body).toMatch(/color: 'statusSuccess'/);
+      expect(body).not.toMatch(/color: 'green'/);
     });
 
     // Той самий `blend`, що й для Q-272 вище: доводить не лише присутність
