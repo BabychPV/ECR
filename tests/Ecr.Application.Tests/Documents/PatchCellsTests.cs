@@ -99,8 +99,21 @@ public sealed class PatchCellsTests
         _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        // ⛔ Тут стояв ПОРОЖНІЙ словник, і всі тести нижче проходили — бо
+        // обробник трактував відсутність рішення про доступ як ДОЗВІЛ
+        // (`DIRECTIVE-14-ARCH.md`, `DAT-04`; `S-15` частини 1). Після
+        // виправлення з 31 тесту цього файлу впало **20**: саме стільки їх
+        // спиралося на дефект, навіть не знаючи про нього.
+        //
+        // ⚠ Тепер передумова названа явно: рішення на адреси, які тести
+        // чіпають, ІСНУЮТЬ і дозволяють. Це не послаблення перевірки, а
+        // повернення їй предмета — заборону підставляє той тест, що про неї.
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
-               .Returns(new Dictionary<CellAddress, EditDecision>());
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = EditDecision.Allow(),
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, RegistryLinkColumnId)] = EditDecision.Allow(),
+               });
 
         // ⚠ Створення за замовчуванням ДОЗВОЛЕНЕ: тести, які не про права, не
         // мають падати на правах. Заборону підставляє той тест, який про неї.
@@ -408,6 +421,87 @@ public sealed class PatchCellsTests
         // Перелік конфліктів іде клієнтові: «перезаписати мовчки» не є опцією.
         Assert.NotNull(ex.Details);
         Assert.True(ex.Details!.ContainsKey("conflicts"));
+    }
+
+    /// <summary>
+    /// Період із тіла не збігається з періодом екземпляра таблиці — <c>422</c>
+    /// зі стабільним кодом, а не <c>500</c> (<c>DAT-04</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не звірялося ніде. Розбіжність доїжджала аж до порушення зовнішнього
+    /// ключа, і назовні виходив голий <c>500</c>: помилка в запиті виглядала як
+    /// збій сервера, а клієнт не мав чого розрізняти (<c>02-contracts.md</c> §7).
+    ///
+    /// ⚠ Перевірка живе в ОБРОБНИКУ, хоч директива називає контролер: обробника
+    /// кличе не лише HTTP — <c>ExcelImporter.ApplyAsync</c> ходить у нього
+    /// напряму. У контролері правило захищало б один шлях із двох.
+    ///
+    /// ⚠ Випадок не теоретичний: період і аркуш живуть в адресі
+    /// (<c>ФВ-14.29</c>), тож застаріла вкладка з попереднім періодом надсилає
+    /// рівно таку пару.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-14.29")]
+    public async Task Чужий_період_у_тілі_відхиляється_кодом_а_не_падінням()
+    {
+        // Екземпляр таблиці належить періоду 202601 (див. `_rows.Resolve…`),
+        // а запит приходить за 202512 — рівно те, що надсилає застаріла вкладка.
+        var request = new PatchCellsRequest(
+            TableInstance, 202512, "UserEdit",
+            [new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])]);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(request, CancellationToken.None));
+
+        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.RequestInvalid, ex.ErrorCode);
+
+        // ⛔ Ключ каталогу обов'язковий: без нього відмова поїде українським
+        // реченням мовою, якої немає серед мов продукту (`D-95`).
+        Assert.NotNull(ex.Details);
+        Assert.Equal("err.ECR-REQ-0422.periodMismatch", ex.Details!["messageKey"]);
+
+        // Нічого не записано: розбіжність зупиняє запит, а не супроводжує його.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Немає рішення про доступ — це ВІДМОВА, а не дозвіл (<c>DAT-04</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До виправлення тут стояло
+    /// <c>decisions.TryGetValue(a, out var d) &amp;&amp; !d.IsAllowed</c>: адреса,
+    /// якої обчислювач не повернув, ПРОХОДИЛА як дозволена. Поруч, у гілці
+    /// створення рядків, той самий метод замовчував протилежне і навіть
+    /// пояснював чому — тобто дві протилежні політики жили в одному методі, і
+    /// небезпечніша припадала на оновлення, тобто на гарячий шлях.
+    ///
+    /// ⚠ Відсутнє рішення — не теоретичний випадок: <c>CanEditSliceAsync</c>
+    /// будує словник із рядків, прочитаних окремим запитом, і рядок, створений
+    /// паралельним запитом між тими двома читаннями, у словник не потрапляє.
+    ///
+    /// ⛔ Масштаб дефекту видно з того, що НЕ в цьому тесті: після
+    /// виправлення з 31 тесту цього файлу впало <b>20</b> — саме стільки їх
+    /// спиралося на «рішення немає, отже можна», не знаючи про це.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Відсутнє_рішення_про_доступ_відхиляє_батч()
+    {
+        // Порожній словник рішень при НЕпорожньому батчі — рівно та ситуація,
+        // що раніше означала «можна».
+        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>());
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+
+        // ⛔ І нічого не записано: відмова має зупиняти батч, а не
+        // супроводжувати його.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
