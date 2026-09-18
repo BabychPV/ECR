@@ -48,8 +48,8 @@ public sealed class ContractIntegrityTests
         // перелічення в коментарях: IBackgroundJob давав 11 «реалізацій»,
         // жодної з яких не існує.
         var declarations = SourceTree
-            .Production("Ecr.Infrastructure", "Ecr.Adapters.PiAf", "Ecr.Adapters.Excel",
-                        "Ecr.Expressions", "Ecr.Calculations", "Ecr.Api")
+            .Production("Ecr.Infrastructure", "Ecr.Adapters.PiAf", "Ecr.Adapters.Sql",
+                        "Ecr.Adapters.Excel", "Ecr.Expressions", "Ecr.Calculations", "Ecr.Api")
             .SelectMany(f => Regex.Matches(f.Text, @"(?m)^\s*(?:public|internal)\s+(?:sealed\s+)?class\s+\w+[^\n{{]*:\s*([^\n{{]+)")
                                   .Select(m => m.Groups[1].Value))
             .ToList();

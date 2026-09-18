@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ecr.Adapters.Sql</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ecr.Domain\Ecr.Domain.csproj" />
+    <ProjectReference Include="..\Ecr.Application\Ecr.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ⚠ Microsoft.Data.SqlClient, а не System.Data.Odbc: джерело цього
+         транспорту — звичайна SQL-база, до якої ми ходимо рідним клієнтом.
+         ODBC потрібен сусідньому Ecr.Adapters.PiAf, бо PI SQL Client — це
+         ODBC-драйвер (D-46), а не тому, що так ходять у SQL Server. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+  </ItemGroup>
+
+</Project>

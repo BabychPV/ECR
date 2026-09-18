@@ -7,6 +7,7 @@ using Ecr.Infrastructure;
 using Ecr.Calculations;
 using Ecr.Adapters.Excel;
 using Ecr.Adapters.PiAf;
+using Ecr.Adapters.Sql;
 using Ecr.Api.Health;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Scalar.AspNetCore;
@@ -40,6 +41,11 @@ builder.Services.AddEcrInfrastructure(builder.Configuration);
 builder.Services.AddEcrCalculations();
 builder.Services.AddExcelAdapters();
 builder.Services.AddPiAfAdapters();
+// ⚠ Окремим викликом, а не всередині AddPiAfAdapters: SQL-джерело (FLERT,
+// ФВ-11.8) — не PI, і зібрати їх в одну реєстрацію означало б повторити в
+// композиції рівно ту помилку, через яку не-PI джерело так довго не мало
+// чим оголоситися.
+builder.Services.AddSqlAdapters();
 builder.Services.AddEcrApplication();
 
 builder.Services.AddEcrAuthentication(builder.Configuration);
