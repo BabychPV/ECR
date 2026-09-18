@@ -1,9 +1,11 @@
 ﻿import { useState, type JSX } from 'react';
 import {
+  Box,
   Button,
   Card,
   Center,
   Divider,
+  Group,
   Loader,
   PasswordInput,
   Stack,
@@ -11,6 +13,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
+import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
@@ -130,9 +133,43 @@ export function LoginPage(): JSX.Element {
   return (
     <Center h="100vh">
       <Card withBorder w={380} p="lg">
-        <Title order={3} mb="md">
-          {t('login.title')}
-        </Title>
+        {/*
+         * ⚠ Знак і скорочення — ОЗДОБА, повна назва — заголовок. Порядок саме
+         * такий: зчитувач екрана має прочитати назву системи один раз і як
+         * заголовок, а не як три уривки тексту (той самий прийом, що в шапці
+         * `AppLayout`).
+         *
+         * ⛔ До цього тут стояв самий лише `Title order={3}` з повною назвою:
+         * три слова жирним на всю ширину картки, які переносилися на два
+         * рядки і були найгучнішим елементом екрана. Перший екран системи не
+         * мав ані знака, ані впізнаваності — лише довгий рядок.
+         */}
+        <Stack gap="xs" align="center" mb="lg">
+          {/* ⚠ Знак і слово мають ОДНАКОВУ пару відтінків. Спершу колір стояв
+              один на всю групу — і в темній темі знак лишався темно-синім на
+              темному тлі, тоді як слово світлішало. Видно це було лише на
+              знімку темної теми, не з коду. */}
+          <Group gap="xs" wrap="nowrap">
+            <Box c="brand.8" darkHidden>
+              <BrandMark size={30} />
+            </Box>
+            <Box c="brand.2" lightHidden>
+              <BrandMark size={30} />
+            </Box>
+            <Text component="span" fz={30} fw={700} lh={1} c="brand.8" darkHidden>
+              ECR
+            </Text>
+            <Text component="span" fz={30} fw={700} lh={1} c="brand.2" lightHidden>
+              ECR
+            </Text>
+          </Group>
+
+          {/* ⚠ Заголовок лишається `h3` — e2e й перевірки доступності шукають
+              саме роль, а не розмір. Змінюється вага й вирівнювання, не роль. */}
+          <Title order={3} fz="sm" fw={500} ta="center">
+            {t('login.title')}
+          </Title>
+        </Stack>
 
         {/*
          * ⛔ Справжня `<form>`, а не набір полів із кнопкою.
