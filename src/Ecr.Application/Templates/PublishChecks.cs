@@ -550,6 +550,15 @@ public static class PublishChecks
         // яку оператор не має права заповнити. Ловити це має інша перевірка —
         // не на публікації структури, а там, де вже видно обидві половини
         // конфігурації.
+        //
+        // ⚠ Ця перевірка ТЕПЕР Є, і вона не гейт:
+        // `ConsistencyCheckJob.UnboundCalculatedColumnsAsync` (знахідка
+        // `UNBOUND_CALCULATED_COLUMN` в `aud.ConsistencyIssue`). Гейтом вона
+        // бути не може за побудовою — «`Calculated` без прив'язки» є законним
+        // перехідним станом на КОЖНОМУ переході життєвого циклу (публікація
+        // методології, активація проєкту, створення документа), і доказ цього
+        // — наявні сценарії, які саме так і роблять. Обґрунтування повністю —
+        // у remarks того методу.
         foreach (var column in table.Columns.Where(c =>
             !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Formula))
         {
