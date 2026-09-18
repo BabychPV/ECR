@@ -94,7 +94,14 @@ public sealed class RecalculateDocumentHandler(
             && !await documents.HasSheetAsync(documentId, targetSheetId, ct).ConfigureAwait(false))
         {
             throw new Errors.NotFoundException(
-                "ECR-DOC-0404", $"Аркуша {targetSheetId} немає в складі документа {documentId}.");
+                "ECR-DOC-0404",
+                $"Аркуша {targetSheetId} немає в складі документа {documentId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.sheetNotInDocument",
+                    ["sheetDefId"] = targetSheetId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ Стан періоду і робочого процесу — ДО черги (ФВ-9.7, ФВ-9.17).

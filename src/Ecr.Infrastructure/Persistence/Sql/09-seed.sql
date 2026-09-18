@@ -402,6 +402,31 @@ USING (VALUES
     (N'err.ECR-CELL-0422.unknownColumn',     N'en', N'There is no column "{columnCode}" in this template version.', 1),
     (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
     (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
+    -- ⛔ `Q-341`, другий зріз: УСІ кидки `ECR-DOC-0404` — «документа/аркуша/
+    -- екземпляра таблиці немає». Це найчастіший 404 продукту: код лежить на
+    -- шляху відкриття сітки (`GetTableSliceHandler`, `RowStore`,
+    -- `AccessDecisionService` — кожне читання і кожне збереження), на подачі
+    -- аркуша, на перерахунку та на обміні книгами. Зріз узятий по КОДУ, а не
+    -- по файлу: код — саме та одиниця, яку читає клієнт, і один текст на подію
+    -- незалежно від того, яким шляхом код до неї дійшов.
+    -- Приватна область: документи видно лише після входу.
+    (N'err.ECR-DOC-0404.document',           N'en', N'Document {documentId} was not found.', 1),
+    (N'err.ECR-DOC-0404.tableInstance',      N'en', N'Table instance {tableInstanceId} was not found.', 1),
+    (N'err.ECR-DOC-0404.tableInstanceNotInDocument', N'en', N'Table instance {tableInstanceId} does not belong to document {documentId}.', 1),
+    (N'err.ECR-DOC-0404.sheetNotInDocument', N'en', N'Sheet {sheetDefId} is not part of document {documentId}.', 1),
+    (N'err.ECR-DOC-0404.periodEmpty',        N'en', N'Document {documentId} for period {periodKey} does not exist or is empty.', 1),
+    (N'err.ECR-DOC-0404.exportExpired',      N'en', N'The workbook is gone or has expired: build the export again.', 1),
+
+    -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
+    -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
+    -- не знайдено». Для оператора це не назва нічого — у продукті немає
+    -- сутності «TemplateVersion», є «версія шаблону». Ключ окремий на КОЖЕН
+    -- тип, хоч код у двох із них спільний: один ключ на код сказав би «не
+    -- знайдено шаблон» там, де немає ВЕРСІЇ, і людина шукала б не те.
+    (N'err.ECR-TMPL-0404.template',          N'en', N'Template {templateId} was not found.', 1),
+    (N'err.ECR-TMPL-0404.templateVersion',   N'en', N'Template version {versionId} was not found.', 1),
+    (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
+    (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),

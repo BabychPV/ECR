@@ -34,11 +34,17 @@ namespace Ecr.Architecture.Tests;
 /// бачить щодня, від тієї, куди не ходить ніхто. І він не вміє сказати, що
 /// ключ, який у кидку є, справді заведений у каталозі — лише що ключ названий.
 ///
-/// ⚠ <c>NotFoundException</c> у перелік типів НЕ входить, і це не поблажка:
-/// у самого типу немає параметра <c>Details</c> (`Ecr.Application/Errors/EcrException.cs`),
-/// тож покласти ключ у його кидок сьогодні НЕМА КУДИ. Це окрема робота (змінити
-/// тип), і поки її не зроблено, рядки в переліку про 404 були б переліком
-/// вимог, які неможливо виконати.
+/// ✎ <c>NotFoundException</c> ТЕПЕР у переліку типів. Доти його не було з
+/// причини, яка зникла: у самого типу не було параметра <c>Details</c>, тож
+/// покласти ключ у його кидок не було КУДИ, і рядки переліку про 404 були б
+/// вимогами, які неможливо виконати. Параметр додано (`Q-341`,
+/// `Ecr.Application/Errors/EcrException.cs`), разом із ним — <c>e.Details</c>
+/// в армі 404 у <c>ExceptionHandlingMiddleware.Map</c> (там стояла жорстка
+/// <c>null</c>, тобто подробиця відкидалася ще до резолвера).
+///
+/// ⛔ Через це перелік у <c>contracts/localization-debt.md</c> ВИРІС, і це не
+/// регрес: 404 були в коді й до цього, просто сторож на них не дивився. Число
+/// стало більшим саме тому, що замір став чеснішим.
 /// </remarks>
 public sealed partial class MessageKeyRatchetTests
 {
@@ -54,9 +60,19 @@ public sealed partial class MessageKeyRatchetTests
     /// тощо) доїжджає як 500, а для 500 подробиця стала й беззмістовна
     /// НАВМИСНО (`ФВ-6.11`): локалізувати там нічого.
     /// </remarks>
+    /// <remarks>
+    /// ⚠ Кваліфікатор перед іменем типу НЕОБОВ'ЯЗКОВИЙ
+    /// (<c>(?:[A-Za-z_]\w*\s*\.\s*)*</c>). Без цього сторож не бачив понад
+    /// тридцяти кидків, написаних як <c>throw new Errors.NotFoundException(…)</c>
+    /// чи <c>throw new Application.Errors.BusinessRuleException(…)</c>, — серед
+    /// них два з тих, що локалізує `Q-341`. Дірка не в тому, що число було
+    /// меншим, а в тому, що НОВИЙ кидок, написаний із кваліфікатором, сторож
+    /// пропустив би мовчки.
+    /// </remarks>
     [GeneratedRegex(
-        @"throw\s+new\s+(?:BusinessRuleException|AccessDeniedException|ConcurrencyConflictException"
-        + @"|DomainException|SourceAuthenticationException)\s*\(")]
+        @"throw\s+new\s+(?:[A-Za-z_]\w*\s*\.\s*)*"
+        + @"(?:BusinessRuleException|AccessDeniedException|ConcurrencyConflictException"
+        + @"|DomainException|SourceAuthenticationException|NotFoundException)\s*\(")]
     private static partial Regex ThrowSite();
 
     /// <summary>Рядок переліку: <c>| `src/…cs` | 7 |</c>.</summary>

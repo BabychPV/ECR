@@ -106,12 +106,12 @@ public sealed class OrphanScanner : IOrphanScanner
     }
 
     /// <inheritdoc />
-    public async Task<int> ScanAllAsync(CancellationToken ct)
+    public async Task<OrphanScanSummary> ScanAllAsync(CancellationToken ct)
     {
         var periods = await OpenPeriodsAsync(ct).ConfigureAwait(false);
         if (periods.Count == 0)
         {
-            return 0;
+            return OrphanScanSummary.Nothing;
         }
 
         var cursor = await LoadCursorAsync(ct).ConfigureAwait(false);
@@ -173,7 +173,12 @@ public sealed class OrphanScanner : IOrphanScanner
             await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
 
-        return changed;
+        // ⚠ Лічильники читаються з курсора ПІСЛЯ можливого `CompleteCycle` —
+        // інакше ніч, яка щойно замкнула обхід, звітувала б числом до
+        // замикання, тобто найцікавіший факт губився б рівно тоді, коли він
+        // з'являється.
+        return new OrphanScanSummary(
+            changed, examinedRows, reachedEnd, cursor.CyclesCompleted, cursor.LastCycleCompletedAt);
     }
 
     /// <inheritdoc />

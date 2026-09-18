@@ -460,7 +460,14 @@ public sealed class AccessDecisionService(
             .Select(t => new { t.DocumentId, t.TableDefId, t.PeriodKeyValue })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-DOC-0404", $"Екземпляр таблиці {tableInstanceId} не знайдено.");
+            ?? throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляр таблиці {tableInstanceId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var periodKey = new PeriodKey(instance.PeriodKeyValue);
 
@@ -738,7 +745,14 @@ public sealed class AccessDecisionService(
             .Select(d => new { d.ProjectId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-DOC-0404", $"Документ {documentId} не знайдено.");
+            ?? throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {documentId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var project = await db.Projects
             .AsNoTracking()
@@ -870,7 +884,14 @@ public sealed class AccessDecisionService(
             .Select(d => (int?)d.ProjectId)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
-           ?? throw new NotFoundException("ECR-DOC-0404", $"Документ {documentId} не знайдено.");
+           ?? throw new NotFoundException(
+               "ECR-DOC-0404",
+               $"Документ {documentId} не знайдено.",
+               new Dictionary<string, object?>
+               {
+                   ["messageKey"] = "err.ECR-DOC-0404.document",
+                   ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+               });
 
     /// <summary>Знімок структури шаблону документа.</summary>
     private async Task<TemplateVersionSnapshot> SnapshotAsync(long documentId, CancellationToken ct)
