@@ -39,7 +39,17 @@ param(
     # ⚠ Пароль bootstrap задається ПАРАМЕТРОМ, бо він діє лише на першому
     # старті (`D-115`): запис уже існує → змінна ігнорується. Скрипт, що
     # викликає цей, мусить знати той самий пароль, інакше не увійде.
-    [string] $BootstrapPassword = 'Dev-Bootstrap-2026!'
+    [string] $BootstrapPassword = 'Dev-Bootstrap-2026!',
+
+    # ⚠ Куди класти файли бази. Порожній рядок — типовий каталог інстансу
+    # (поведінка до 2026-09-18). Умовчання нижче обирається за наявністю
+    # диска: на машині розробки це `H:`, бо типовий каталог інстансу тут
+    # лежить на носії, який стенди вибирають до нуля — кожна база важить
+    # 14 ГБ (`01-filegroups.sql`, коментар про Developer Edition).
+    #
+    # ⛔ Це рішення РОЗГОРТАННЯ, а не схеми: у замовника каталог свій, і
+    # жодного шляху в `Sql/*.sql` не зашито (`Q-029`).
+    [string] $DataPath = $(if (Test-Path 'H:\') { 'H:\EcrData' } else { '' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,8 +149,27 @@ BEGIN
     ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
     DROP DATABASE [$Database];
 END;
-CREATE DATABASE [$Database];
+CREATE DATABASE [$Database]$(if ($DataPath) { @"
+
+ON PRIMARY (NAME = N'$Database', FILENAME = N'$DataPath\$Database.mdf')
+LOG ON      (NAME = N'${Database}_log', FILENAME = N'$DataPath\${Database}_log.ldf')
+"@ });
 "@
+
+# ⚠ Каталог файлів бази. Типовий каталог інстансу — це диск, який обирали не
+# під ECR: 2026-09-18 стенди вибрали його до 0.15 ГБ із 293, бо кожна база тут
+# важить 14 ГБ (Developer Edition звітує як Enterprise — див. коментар у
+# `01-filegroups.sql`). Наслідок був не лише «розгортання не пройшло»:
+# вичерпаний диск СПОТВОРИВ заміри гейта втричі.
+#
+# ⚠ Властивість ставиться ДО `01-filegroups.sql`, бо саме він створює файли.
+if ($DataPath) {
+    if (-not (Test-Path $DataPath)) { New-Item -ItemType Directory -Force -Path $DataPath | Out-Null }
+
+    Invoke-Sql -Db $Database -Query @"
+EXEC sys.sp_addextendedproperty @name = N'Ecr_DataPath', @value = N'$DataPath';
+"@
+}
 
 # ⛔ Перелік і порядок — з `09-commands.md` §3. `07` переносить таблиці на
 # схеми партиціонування і тому йде ПІСЛЯ міграцій; `11` — ПЕРЕД `07`,

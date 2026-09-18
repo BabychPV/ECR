@@ -48,7 +48,25 @@ IF @Collation <> N'Latin1_General_100_CI_AS_SC'
         + N' відрізняється від еталонного Latin1_General_100_CI_AS_SC (02a §1.0). '
         + N'Унікальність бізнес-кодів не змінюється (CI збережено), але порядок сортування — так.';
 
-DECLARE @DataPath    nvarchar(260) = NULL;   -- NULL = типовий каталог інстансу
+-- ⚠ Каталог можна задати ЗЗОВНІ — розширеною властивістю бази `Ecr_DataPath`,
+-- поставленою одразу після `CREATE DATABASE`:
+--
+--     EXEC sys.sp_addextendedproperty @name = N'Ecr_DataPath', @value = N'H:\EcrData';
+--
+-- ⛔ Саме властивістю, а не змінною `sqlcmd`: `$(…)` обірвав би задокументовані
+-- виклики без `-v` (`09-commands.md` §3, `02a-db-schema.md`), а `:setvar` не
+-- розуміє `SqlClient`, яким цей же файл виконує `SqlServerFixture`. Механізм
+-- той самий, що вже діє для `Ecr_SmallFiles` нижче — і з тієї ж причини.
+--
+-- ⛔ Навіщо: типовий каталог інстансу — це диск, який обирали не під ECR, і
+-- стенди його вибирають (кожна база тут — 14 ГБ, див. довгий коментар про
+-- Developer Edition нижче). 2026-09-18 вичерпаний диск не лише зупинив
+-- розгортання, а й СПОТВОРИВ заміри: читання зрізу p95 дало 642 мс при
+-- повному диску проти 240 мс на вільному — «порушення бюджету», якого немає.
+DECLARE @DataPath    nvarchar(260) = (
+    SELECT CAST(value AS nvarchar(260)) FROM sys.extended_properties
+    WHERE class = 0 AND name = N'Ecr_DataPath');
+
 DECLARE @ArchivePath nvarchar(260) = NULL;   -- NULL = той самий, що й @DataPath
 
 -- NULLIF: SERVERPROPERTY на нетиповій конфігурації може віддати порожній рядок,
