@@ -49,7 +49,12 @@ public static class DependencyInjection
             options.UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
-                sql.CommandTimeout(ReadInt(configuration, "Sql:CommandTimeoutSeconds", 60));
+                // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі
+                // перейменували, а обидва читачі лишили на старому — і
+                // налаштування мовчки перестали діяти. Тут дефолт випадково
+                // дорівнював значенню у файлі, тож дефект не проявлявся б до
+                // першої зміни таймаута адміністратором.
+                sql.CommandTimeout(ReadInt(configuration, "Database:CommandTimeoutSeconds", 60));
 
                 // Повтори на транзієнтних збоях. ⚠ Транзакцію з таким
                 // налаштуванням треба виконувати цілком усередині
@@ -86,15 +91,31 @@ public static class DependencyInjection
 
         // BulkCellLoader працює власним з'єднанням (SqlBulkCopy), тому рядок
         // підключення передається йому напряму, а не через DbContext.
+        //
+        // ⛔ `Database:BulkBatchSize`, не `Sql:BulkBatchSize` (`S-11`). Тут
+        // розбіжність коштувала найдорожче: файл оголошує 50 000, читач із
+        // чужим префіксом брав СВІЙ дефолт 5 000, і масове завантаження йшло
+        // вдесятеро дрібнішими пакетами — без жодної ознаки ззовні.
         services.AddScoped(_ => new BulkCellLoader(
-            connectionString, ReadInt(configuration, "Sql:BulkBatchSize", 5_000)));
+            connectionString, ReadInt(configuration, "Database:BulkBatchSize", 5_000)));
 
         // ⚠ Кеш метаданих — Scoped, а не Singleton, попри те що сам
         // IMemoryCache спільний: MetadataCache тримає EcrDbContext, а той
         // Scoped. Спільним лишається саме сховище кешу, тож ключ v{id}:r{rev}
         // працює між запитами так само (D-16).
         services.AddMemoryCache();
-        services.AddScoped<IMetadataCache, MetadataCache>();
+
+        // ⚠ Строки кешів читаються ОДИН раз і передаються явною фабрикою, а не
+        // через необов'язковий параметр конструктора: контейнер
+        // Microsoft.Extensions.DependencyInjection значень за замовчуванням не
+        // застосовує — він або резолвить параметр, або кидає. Дефолт у
+        // сигнатурі лишається для прямих `new` (тести).
+        services.AddSingleton(_ => CacheLifetimes.FromConfiguration(configuration));
+
+        services.AddScoped<IMetadataCache>(sp => new MetadataCache(
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<EcrDbContext>(),
+            sp.GetRequiredService<CacheLifetimes>()));
 
         // ⛔ Реєстрація без споживача. Тут стояло «потрібен рушію виразів, бо
         // ExtractDependencies у контракті синхронний» — і це вже неправда:
@@ -117,7 +138,9 @@ public static class DependencyInjection
         // Безпека. AccessProfileCache — Singleton поверх IMemoryCache: профіль
         // будується раз на (користувач × SecurityStamp), і зміна штампа сама
         // дає новий ключ, тому інвалідація не потрібна (ФВ-6.7).
-        services.AddSingleton<Caching.AccessProfileCache>();
+        services.AddSingleton(sp => new Caching.AccessProfileCache(
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<CacheLifetimes>()));
         services.AddSingleton<IRegistryEntryCache, Caching.RegistryEntryCache>();
         services.AddScoped<Application.Security.IAccessDecisionService, AccessDecisionService>();
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();

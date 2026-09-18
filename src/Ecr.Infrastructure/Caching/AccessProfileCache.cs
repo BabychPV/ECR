@@ -8,7 +8,7 @@ namespace Ecr.Infrastructure.Caching;
 /// на кожну комірку — гарантована смерть продуктивності, бо бюджет відкриття
 /// таблиці дає на права 50 мс на весь запит (ФВ-6.10).
 /// </summary>
-public sealed class AccessProfileCache(IMemoryCache memory)
+public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? lifetimes = null)
 {
     /// <summary>
     /// Стеля життя запису.
@@ -17,8 +17,12 @@ public sealed class AccessProfileCache(IMemoryCache memory)
     /// Інвалідація тут не потрібна — її робить <c>SecurityStamp</c> у ключі, —
     /// але без стелі запис вимкненого користувача жив би в пам'яті до
     /// перезапуску процесу. Це не про доступ (штамп змінюється), а про пам'ять.
+    ///
+    /// ⚠ 30 хв — це ДЕФОЛТ, а не константа: значення береться з
+    /// <c>Cache:AccessProfileSlidingMinutes</c> (`S-13`). Ключ був у
+    /// <c>appsettings.json</c> без читача, тобто виставлені там 60 хв не діяли.
     /// </remarks>
-    private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(30);
+    private TimeSpan Lifetime => (lifetimes ?? CacheLifetimes.Default).AccessProfile;
 
     /// <summary>Повертає профіль із кешу або будує його.</summary>
     /// <param name="userId">Користувач.</param>
