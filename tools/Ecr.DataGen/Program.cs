@@ -51,18 +51,42 @@ internal static class Program
                   --fill N          заповненість комірок у відсотках (35 | 60 | 90)
                   --year N          рік періодів (типово 2026)
                   --connection S    рядок підключення; без нього береться ECR_ConnectionStrings__Ecr
-                  --gate            не генерувати, а ЗАМІРЯТИ; код виходу 2, якщо бюджет не пройдено
+                  --store-bench     МІКРОБЕНЧМАРК СХОВИЩА (він же --gate): б'є у
+                                    NormalizedCellStore напряму, ПОВЗ права, аудит, «дотик»
+                                    документа й чергу задач. Його числа — оптимістична стеля
+                                    doc.CellValue, а НЕ числа продукту
                   --load-seconds N  тривалість заміру №6 (типово 900 — 15 хв повного гейта)
                   --load-slice S    у який зріз б'є замір №6: typical (типово, ~5 000 комірок
                                     за tz/08 §8.2) або worst (500×60, критерій №1)
+
+                  --http-gate       ГЕЙТ ПРОДУКТУ (MS-01): навантаження на піднятий Ecr.Api
+                                    через HTTP — вхід, cookie, права, аудит, черга. Критерії
+                                    з tz/08 §8.2 (p95/p99), а не RPS сховища
+                  --url S           адреса піднятого застосунку (типово http://localhost:5099)
+                  --bootstrap S     разовий пароль bootstrap, відданий застосунку при першому старті
+                  --load-rps N      цільовий темп операцій (типово 25)
+                  --operators N     скільки операторів б'є в ОДИН документ (типово 3, мінімум 2:
+                                    з одним дефект DAT-01 не проявляється взагалі)
+                  --workers N       скільки ОДНОЧАСНИХ робітників (типово за темпом). --workers 1
+                                    серіалізує все — контрольний прогін, у якому фальшивих 409
+                                    не може бути за побудовою
 
                 ⚠ Цільовий сценарій гейта — 300 документів при заповненості 90%:
                   замовник називає ≥200 на рік, і саме на 300 мають виконуватися бюджети.
                 ⚠ Обсяг задається В КОМІРКАХ (--cells), бо BR-07 названий у рядках
                   doc.CellValue, а не в документах: скільки документів дасть 108 млн
                   комірок, залежить від заповненості.
+                ⛔ Два режими заміру НЕ взаємозамінні. --store-bench каже, чи тримає
+                  нормалізована модель; --http-gate каже, чи тримає СИСТЕМА. Рішення D-21
+                  (гібридне зберігання) ухвалюється лише коли обидва зняті — інакше
+                  переробляється модель через вузьке місце, якого в ній немає (MS-03).
                 """);
             return 1;
+        }
+
+        if (options.HttpGate)
+        {
+            return await RunHttpGateAsync(options).ConfigureAwait(false);
         }
 
         return options.Gate
@@ -70,9 +94,53 @@ internal static class Program
             : await GenerateAsync(options).ConfigureAwait(false);
     }
 
-    /// <summary>Заміри гейта і код виходу за їхнім результатом.</summary>
+    /// <summary>
+    /// Гейт продукту через HTTP (<c>MS-01</c>) і код виходу за його результатом.
+    /// </summary>
+    /// <param name="options">Розібрані аргументи командного рядка.</param>
+    /// <returns><c>0</c> — бюджет §8.2 витриманий, <c>2</c> — ні, <c>3</c> — замір не відбувся.</returns>
+    /// <remarks>
+    /// ⛔ Окремий режим, а не заміна <see cref="RunGateAsync"/>. Мікробенчмарк
+    /// сховища лишається потрібним: він відповідає на питання «чи тримає
+    /// <c>doc.CellValue</c>», без якого не можна відрізнити «модель не тягне»
+    /// від «конвеєр навколо моделі не тягне». Помилка була не в тому, що його
+    /// написали, а в тому, що його числа видавали за числа продукту
+    /// (директива №14, частина 3, §2.2 рядок F).
+    /// </remarks>
+    private static async Task<int> RunHttpGateAsync(Options options)
+    {
+        var benchmark = new HttpLoadBenchmark
+        {
+            BaseAddress = new Uri(options.Url, UriKind.Absolute),
+            ConnectionString = options.ConnectionString,
+            BootstrapPassword = options.BootstrapPassword,
+            LoadSeconds = options.LoadSeconds,
+            TargetRps = options.LoadRps,
+            Operators = options.Operators,
+            Workers = options.Workers,
+        };
+
+        var result = await benchmark.RunAsync(CancellationToken.None).ConfigureAwait(false);
+
+        return Print(
+            result,
+            Fmt($"Гейт продукту через HTTP (MS-01), {options.Url}"),
+            "Критерії — tz/08 §8.2: зріз 400/800 мс, PATCH 100 комірок 250/500 мс.");
+    }
+
+    /// <summary>Мікробенчмарк сховища і код виходу за його результатом.</summary>
     /// <param name="options">Розібрані аргументи командного рядка.</param>
     /// <returns><c>0</c> — бюджет витриманий, <c>2</c> — ні, <c>3</c> — заміри не відбулися.</returns>
+    /// <remarks>
+    /// ⛔ Назва режиму змінена свідомо. Це НЕ «гейт BR-07 продукту»: замір іде
+    /// повз <c>PatchCellsHandler</c>, права, аудит, «дотик» документа й чергу
+    /// задач (<c>GateBenchmark.cs:150,796</c>). Його 63 RPS — оптимістична
+    /// стеля сховища; справжній <c>PATCH</c> повільніший, і рішення
+    /// <c>D-21</c> на цих числах ухвалювати не можна (<c>MS-03</c>).
+    /// Прапорець <c>--gate</c> лишено робочим, бо його кличе
+    /// <c>tools/br07-load-test.ps1</c>, але друкований заголовок більше не
+    /// стверджує, що це числа продукту.
+    /// </remarks>
     private static async Task<int> RunGateAsync(Options options)
     {
         var benchmark = new GateBenchmark
@@ -84,20 +152,36 @@ internal static class Program
             .RunAsync(options.ConnectionString, CancellationToken.None)
             .ConfigureAwait(false);
 
-        // ⛔ Окремий код виходу, а не 2. Двійка означає «бюджет BR-07 не
+        return Print(
+            result,
+            "Мікробенчмарк сховища doc.CellValue (НЕ гейт продукту)",
+            "⛔ Замір іде ПОВЗ PatchCellsHandler, права, аудит, «дотик» документа й чергу задач. "
+            + "Це оптимістична стеля моделі, а не число системи; для числа системи — --http-gate.");
+    }
+
+    /// <summary>Друкує результат заміру і віддає код виходу.</summary>
+    /// <param name="result">Результат будь-якого з двох режимів.</param>
+    /// <param name="title">Заголовок — він мусить чесно називати, ЩО виміряно.</param>
+    /// <param name="subtitle">Другий рядок: межі або застереження.</param>
+    /// <returns><c>0</c> — пройдено, <c>2</c> — порушено, <c>3</c> — замір не відбувся.</returns>
+    private static int Print(GateResult result, string title, string subtitle)
+    {
+        // ⛔ Окремий код виходу, а не 2. Двійка означає «бюджет не
         // витриманий» — тобто що заміри БУЛИ. Тут їх не було, і видати це за
         // порушення бюджету означало б збрехати конвеєру про причину.
         if (result.Blocked is not null)
         {
             Console.WriteLine();
-            Console.WriteLine("Гейт BR-07 НЕ виконувався:");
+            Console.WriteLine(Fmt($"{title} — НЕ виконувався:"));
             Console.WriteLine(Fmt($"  ⛔ {result.Blocked}"));
 
             return 3;
         }
 
         Console.WriteLine();
-        Console.WriteLine("Гейт BR-07 — заміри:");
+        Console.WriteLine(Fmt($"{title} — заміри:"));
+        Console.WriteLine(Fmt($"  {subtitle}"));
+        Console.WriteLine();
         foreach (var (name, value) in result.Measurements)
         {
             Console.WriteLine(Fmt($"  {name,-28} {value,12:F1}"));
@@ -119,7 +203,9 @@ internal static class Program
         }
 
         Console.WriteLine();
-        Console.WriteLine(result.Passed ? "Гейт BR-07 пройдено." : "Гейт BR-07 НЕ пройдено.");
+        Console.WriteLine(result.Passed
+            ? Fmt($"{title}: бюджет витриманий.")
+            : Fmt($"{title}: бюджет НЕ витриманий."));
 
         // ⛔ Ненульовий код виходу — єдине, що відрізняє перевірку від звіту.
         // Скрипт, який друкує числа і завжди виходить нулем, конвеєр пропустить.
@@ -433,9 +519,15 @@ internal static class Program
     /// <param name="Fill">Заповненість комірок, %.</param>
     /// <param name="Year">Рік періодів.</param>
     /// <param name="ConnectionString">Рядок підключення до бази.</param>
-    /// <param name="Gate">Режим заміру замість генерації.</param>
+    /// <param name="Gate">Мікробенчмарк сховища замість генерації.</param>
     /// <param name="LoadSeconds">Тривалість заміру №6, секунд.</param>
     /// <param name="LoadWorstSlice">Бити заміром №6 у найважчий зріз, а не в типовий.</param>
+    /// <param name="HttpGate">Гейт продукту через HTTP (<c>MS-01</c>).</param>
+    /// <param name="Url">Адреса піднятого застосунку.</param>
+    /// <param name="BootstrapPassword">Разовий пароль bootstrap.</param>
+    /// <param name="LoadRps">Цільовий темп операцій.</param>
+    /// <param name="Operators">Скільки операторів б'є в один документ.</param>
+    /// <param name="Workers">Скільки одночасних робітників; <c>0</c> — за темпом.</param>
     private sealed record Options(
         int Documents,
         long TargetCells,
@@ -444,7 +536,13 @@ internal static class Program
         string ConnectionString,
         bool Gate,
         int LoadSeconds,
-        bool LoadWorstSlice)
+        bool LoadWorstSlice,
+        bool HttpGate,
+        string Url,
+        string BootstrapPassword,
+        int LoadRps,
+        int Operators,
+        int Workers)
     {
         /// <summary>Розбирає аргументи; <c>null</c>, якщо немає рядка підключення.</summary>
         /// <param name="args">Аргументи командного рядка.</param>
@@ -480,6 +578,7 @@ internal static class Program
             }
 
             var cells = (long)Read(map, "cells", 0);
+            var httpGate = flags.Contains("http-gate");
 
             return new Options(
                 // ⚠ Коли обсяг заданий комірками, межа за документами має не
@@ -490,9 +589,22 @@ internal static class Program
                 Fill: Read(map, "fill", 90),
                 Year: Read(map, "year", 2026),
                 ConnectionString: connection,
-                Gate: flags.Contains("gate"),
-                LoadSeconds: Read(map, "load-seconds", 900),
-                LoadWorstSlice: map.GetValueOrDefault("load-slice") == "worst");
+
+                // ⚠ `--gate` лишається синонімом `--store-bench`: його кличе
+                // `tools/br07-load-test.ps1`, і тихо зламати чинний скрипт
+                // заради чеснішої назви прапорця було б гіршим обміном.
+                // Чесність винесена туди, де її читають, — у заголовок звіту.
+                Gate: flags.Contains("gate") || flags.Contains("store-bench"),
+                LoadSeconds: Read(map, "load-seconds", httpGate ? 120 : 900),
+                LoadWorstSlice: map.GetValueOrDefault("load-slice") == "worst",
+                HttpGate: httpGate,
+                Url: map.GetValueOrDefault("url") ?? "http://localhost:5099",
+                BootstrapPassword: map.GetValueOrDefault("bootstrap")
+                    ?? Environment.GetEnvironmentVariable("ECR_Bootstrap__Password")
+                    ?? "Dev-Bootstrap-2026!",
+                LoadRps: Read(map, "load-rps", 25),
+                Operators: Read(map, "operators", 3),
+                Workers: Read(map, "workers", 0));
         }
 
         private static int Read(Dictionary<string, string> map, string key, int fallback)
