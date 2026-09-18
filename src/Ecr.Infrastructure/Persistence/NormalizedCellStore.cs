@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
+using Microsoft.Data.SqlClient.Server;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -23,15 +24,66 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
 {
     /// <summary>
-    /// Скільки комірок іде в один <c>MERGE</c>.
+    /// Скільки адрес іде в один запит там, де кожна несе власні параметри.
     /// </summary>
     /// <remarks>
     /// Обмеження не з голови: SQL Server приймає максимум 2100 параметрів на
-    /// запит, а тут їх 12 на комірку. 100 × 12 = 1200 — із запасом на
-    /// службові. Без чанкування батч на 200 комірок падав би не в тестах, а в
-    /// проді, на найбільшій таблиці.
+    /// запит. Лишилися три такі місця — <see cref="ClaimRowsAsync"/> (2 на
+    /// рядок), <see cref="DeleteAsync"/> (3 на комірку) і
+    /// <see cref="TouchRowsAsync"/> (1 на рядок); 100 × 3 = 300, із запасом.
+    ///
+    /// ⚠ Раніше константа звалася <c>MergeChunkSize</c> і стосувалася
+    /// насамперед <c>MERGE</c>. Після <c>WR-02</c> це неправда: батч значень
+    /// їде ОДНИМ табличним параметром будь-якого розміру
+    /// (<see cref="UpsertAsync"/>), і чанкування його не стосується. Ім'я
+    /// перейменоване разом зі зміною, бо константа з брехливим іменем
+    /// переживає будь-який коментар.
     /// </remarks>
-    private const int MergeChunkSize = 100;
+    private const int ParameterChunkSize = 100;
+
+    /// <summary>
+    /// Форма <c>doc.CellValueTvp</c> — колонка в колонку зі скриптом
+    /// <c>15-cell-tvp.sql</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>WR-02</c>. Типи мусять збігатися з типами стовпців точно, інакше
+    /// SQL Server ставить неявну конверсію і план знову залежить від того, що
+    /// приїхало — тобто зникає рівно те, заради чого табличний параметр і
+    /// заводили. Числа ті самі, що в <see cref="NumericPrecision"/>,
+    /// <see cref="NumericScale"/> і <see cref="DateScale"/>, і походять із
+    /// <c>CellValueConfiguration.cs:40-42</c>.
+    ///
+    /// ⛔ <c>ValueString</c> — <c>nvarchar(max)</c>, хоча стовпець
+    /// <c>nvarchar(1000)</c>. Причина та сама, що вела до <c>Size = -1</c> у
+    /// параметрі рядка до <c>WR-02</c>, і вона важить більше за точність типу:
+    /// <see cref="SqlMetaData"/> з
+    /// оголошеною довжиною ОБРІЗАЄ довше значення на клієнті (його
+    /// <c>Adjust</c> робить це мовчки), тобто <c>DAT-03</c> повернувся б через
+    /// іншу двері. Межу тримає стовпець: задовге значення доїжджає до СУБД і
+    /// падає помилкою усічення — гучно, як і має.
+    ///
+    /// ⚠ Масив статичний і спільний на всі виклики: <see cref="SqlMetaData"/>
+    /// незмінний, а будувати дванадцять описів на кожен батч на шляху з
+    /// бюджетом p95 150 мс — марна робота.
+    /// </remarks>
+    private static readonly SqlMetaData[] CellTvpShape =
+    [
+        new("PeriodKey", SqlDbType.Int),
+        new("TableRowId", SqlDbType.BigInt),
+        new("ColumnDefId", SqlDbType.Int),
+        new("TableDefId", SqlDbType.Int),
+        new("ValueString", SqlDbType.NVarChar, SqlMetaData.Max),
+        new("ValueNumeric", SqlDbType.Decimal, NumericPrecision, NumericScale),
+        new("ValueDate", SqlDbType.DateTime2, 0, DateScale),
+        new("ValueBool", SqlDbType.Bit),
+        new("ValueRegistryEntryId", SqlDbType.Int),
+        new("ValueUnitId", SqlDbType.Int),
+        new("IsCalculated", SqlDbType.Bit),
+        new("IsEmpty", SqlDbType.Bit),
+    ];
+
+    /// <summary>Ім'я табличного типу в СУБД.</summary>
+    private const string CellTvpTypeName = "doc.CellValueTvp";
 
     /// <summary>Точність <c>doc.CellValue.ValueNumeric</c> — <c>decimal(28,10)</c>.</summary>
     /// <remarks>
@@ -414,7 +466,7 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         var claims = expected.OrderBy(pair => pair.Key).ToArray();
         var stale = new List<long>();
 
-        foreach (var chunk in claims.Chunk(MergeChunkSize))
+        foreach (var chunk in claims.Chunk(ParameterChunkSize))
         {
             await using var command = connection.CreateCommand();
             command.Transaction = tx;
@@ -505,7 +557,7 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
 
         // Видалення сутностей не завантажуємо: читати рядок, щоб його стерти,
         // означало б подвоїти кількість звернень на кожну комірку.
-        foreach (var chunk in deletes.Chunk(MergeChunkSize))
+        foreach (var chunk in deletes.Chunk(ParameterChunkSize))
         {
             var sql = new StringBuilder("DELETE FROM doc.CellValue WHERE ");
             await using var command = connection.CreateCommand();
@@ -531,9 +583,35 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         }
     }
 
-    /// <summary>Вставляє нові комірки і оновлює наявні одним <c>MERGE</c> на чанк.</summary>
+    /// <summary>Вставляє нові комірки і оновлює наявні ОДНИМ <c>MERGE</c>.</summary>
     /// <returns>Скільки рядків <c>doc.CellValue</c> запис реально змінив.</returns>
     /// <remarks>
+    /// ⛔ <c>WR-02</c>. Джерело — табличний параметр
+    /// (<c>doc.CellValueTvp</c>), а не список <c>VALUES</c> із дванадцяти
+    /// параметрів на комірку. Два наслідки, і обидва вимірювані:
+    ///
+    /// 1. <b>Одна команда на батч будь-якого розміру.</b> Було: чанк 100, тобто
+    ///    вставка 500×60 = 30 000 комірок давала <b>300 послідовних</b>
+    ///    <c>MERGE</c> в одній транзакції — 300 походів до сервера, і всі під
+    ///    тими самими замками. Стало: один.
+    /// 2. <b>Один план назавжди.</b> Текст запиту більше не містить списку
+    ///    <c>VALUES</c>, тобто не залежить від КІЛЬКОСТІ рядків. Лінійка
+    ///    <c>MS-01</c> §3.2 після <c>WR-01</c> бачила <b>сім</b> планів
+    ///    <c>MERGE doc.CellValue</c> у кеші — рівно по одному на розмір батчу;
+    ///    <c>WR-01</c> прибрав залежність від ЗНАЧЕНЬ, цей рядок — від
+    ///    РОЗМІРУ.
+    ///
+    /// ⚠ Заразом зникає межа 2100 параметрів на запит: параметр тут рівно
+    /// один, скільки б комірок у ньому не їхало. Саме вона й змушувала різати
+    /// батч на чанки (<see cref="ParameterChunkSize"/>), а не бажання
+    /// економити.
+    ///
+    /// ⚠ <c>HOLDLOCK</c> лишається НЕЗМІННИМ. Зняти його — окремий рядок плану
+    /// (<c>WR-07</c>), і директива прямо вимагає спершу зняти фактичний план і
+    /// поміряти очікування на замках, а потім написати тест гонки. Тиха зміна
+    /// семантики конкурентного upsert «заразом, поки правимо файл» — рівно те,
+    /// чого там заборонено робити.
+    ///
     /// <c>MERGE</c>, а не «прочитати — порівняти — записати»: другий варіант
     /// дає гонку між читанням і записом, яку під RCSI не видно на тестах і
     /// добре видно в останній день періоду.
@@ -568,52 +646,16 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
             return 0;
         }
 
-        var affected = 0;
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
 
-        foreach (var chunk in upserts.Chunk(MergeChunkSize))
-        {
-            await using var command = connection.CreateCommand();
-            command.Transaction = tx;
+        var cells = command.Parameters.Add("@cells", SqlDbType.Structured);
+        cells.TypeName = CellTvpTypeName;
+        cells.Value = ToCellRecords(upserts);
 
-            var values = new StringBuilder();
-            for (var i = 0; i < chunk.Length; i++)
-            {
-                var record = chunk[i];
-                var value = record.Value;
-
-                if (i > 0)
-                {
-                    values.Append(',');
-                }
-
-                values.Append(CultureInfo.InvariantCulture,
-                    $"(@p{i},@r{i},@c{i},@t{i},@vs{i},@vn{i},@vd{i},@vb{i},@ve{i},@vu{i},@ic{i},@ie{i})");
-
-                AddInt32(command, $"@p{i}", record.Address.PeriodKey.Value);
-                AddInt64(command, $"@r{i}", record.Address.TableRowId);
-                AddInt32(command, $"@c{i}", record.Address.ColumnDefId);
-                AddInt32(command, $"@t{i}", record.TableDefId);
-                AddNullable(command, $"@vs{i}", value.ValueString, SqlDbType.NVarChar);
-                AddNullable(command, $"@vn{i}", value.ValueNumeric, SqlDbType.Decimal,
-                    NumericPrecision, NumericScale);
-                AddNullable(command, $"@vd{i}", value.ValueDate, SqlDbType.DateTime2, scale: DateScale);
-                AddNullable(command, $"@vb{i}", value.ValueBool, SqlDbType.Bit);
-                // ⛔ Звужено до int навмисно: фізична колонка лишається
-                // `int` (RegistryEntry.Id — long у CLR, конвертований у int
-                // лише для зберігання, RegistryEntryConfiguration.cs:41).
-                // Сирий SQL-параметр повз конвеєр EF `HasConversion<int?>()`
-                // потребує того самого звуження, що й BulkCellLoader.
-                AddNullable(command, $"@ve{i}", (int?)value.ValueRegistryEntryId, SqlDbType.Int);
-                AddNullable(command, $"@vu{i}", value.ValueUnitId, SqlDbType.Int);
-                AddBit(command, $"@ic{i}", value.IsCalculated);
-                AddBit(command, $"@ie{i}", value.IsEmpty);
-            }
-
-            command.CommandText = $"""
+        command.CommandText = $"""
                 MERGE doc.CellValue WITH (HOLDLOCK) AS target
-                USING (VALUES {values}) AS source
-                    (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
-                     ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
+                USING @cells AS source
                 ON  target.PeriodKey   = source.PeriodKey
                 AND target.TableRowId  = source.TableRowId
                 AND target.ColumnDefId = source.ColumnDefId
@@ -647,10 +689,102 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                             source.ValueRegistryEntryId, source.ValueUnitId, source.IsCalculated, source.IsEmpty);
                 """;
 
-            affected += await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
+        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
 
-        return affected;
+    /// <summary>
+    /// Перекладає батч у рядки табличного параметра.
+    /// </summary>
+    /// <param name="upserts">Комірки батчу; порожнім не буває.</param>
+    /// <returns>Лінива послідовність рядків <c>doc.CellValueTvp</c>.</returns>
+    /// <remarks>
+    /// ⚠ Один <see cref="SqlDataRecord"/> на всю послідовність — це
+    /// документована форма, а не економія на сірниках: провайдер читає рядок
+    /// ПОВНІСТЮ, перш ніж попросити наступний, тож переповнювати той самий
+    /// буфер безпечно, а нових об'єктів на 30 000 комірок не виникає взагалі.
+    ///
+    /// ⛔ Саме тому КОЖНА колонка присвоюється на КОЖНОМУ рядку, навіть коли
+    /// значення <c>null</c>. Пропустити <c>SetDBNull</c> означало б лишити в
+    /// буфері значення ПОПЕРЕДНЬОЇ комірки — тобто мовчки записати в порожню
+    /// комірку чуже число. Найгірший різновид дефекту: тихий, залежний від
+    /// порядку і невидимий у тесті на одну комірку.
+    ///
+    /// ⚠ Послідовність лінива, і <c>SqlClient</c> перебирає її вже під час
+    /// відправки, всередині транзакції. Тому тут не можна ні читати з бази, ні
+    /// кидати в середині: виняток застане команду напіввідправленою.
+    /// Обчислень тут і немає — лише перекладання полів.
+    /// </remarks>
+    private static IEnumerable<SqlDataRecord> ToCellRecords(IReadOnlyList<CellRecord> upserts)
+    {
+        var row = new SqlDataRecord(CellTvpShape);
+
+        foreach (var record in upserts)
+        {
+            var value = record.Value;
+
+            row.SetInt32(0, record.Address.PeriodKey.Value);
+            row.SetInt64(1, record.Address.TableRowId);
+            row.SetInt32(2, record.Address.ColumnDefId);
+            row.SetInt32(3, record.TableDefId);
+            SetNullableString(row, 4, value.ValueString);
+            SetNullable(row, 5, value.ValueNumeric, static (r, i, v) => r.SetDecimal(i, v));
+            SetNullable(row, 6, value.ValueDate, static (r, i, v) => r.SetDateTime(i, v));
+            SetNullable(row, 7, value.ValueBool, static (r, i, v) => r.SetBoolean(i, v));
+
+            // ⛔ Звужено до int навмисно: фізична колонка лишається `int`
+            // (RegistryEntry.Id — long у CLR, конвертований у int лише для
+            // зберігання, RegistryEntryConfiguration.cs:41). Сирий шлях повз
+            // конвеєр EF `HasConversion<int?>()` потребує того самого
+            // звуження, що й BulkCellLoader.
+            SetNullable(row, 8, (int?)value.ValueRegistryEntryId, static (r, i, v) => r.SetInt32(i, v));
+            SetNullable(row, 9, value.ValueUnitId, static (r, i, v) => r.SetInt32(i, v));
+            row.SetBoolean(10, value.IsCalculated);
+            row.SetBoolean(11, value.IsEmpty);
+
+            yield return row;
+        }
+    }
+
+    /// <summary>Значеннєве поле або <c>NULL</c> — без забутого <c>SetDBNull</c>.</summary>
+    /// <typeparam name="T">Тип значення.</typeparam>
+    /// <param name="row">Рядок табличного параметра.</param>
+    /// <param name="ordinal">Номер колонки.</param>
+    /// <param name="value">Значення або <c>null</c>.</param>
+    /// <param name="set">Як покласти НЕпорожнє значення.</param>
+    private static void SetNullable<T>(SqlDataRecord row, int ordinal, T? value, Action<SqlDataRecord, int, T> set)
+        where T : struct
+    {
+        if (value.HasValue)
+        {
+            set(row, ordinal, value.Value);
+        }
+        else
+        {
+            row.SetDBNull(ordinal);
+        }
+    }
+
+    /// <summary>Рядкове поле або <c>NULL</c>.</summary>
+    /// <param name="row">Рядок табличного параметра.</param>
+    /// <param name="ordinal">Номер колонки.</param>
+    /// <param name="value">Значення або <c>null</c>.</param>
+    /// <remarks>
+    /// ⚠ Довжина НЕ перевіряється і не обрізається: колонка типу оголошена
+    /// <c>nvarchar(max)</c> (<see cref="CellTvpShape"/>), тож задовге значення
+    /// доїжджає до СУБД цілим і впирається у <c>nvarchar(1000)</c> самого
+    /// стовпця — помилкою, а не огризком. Це другий рубіж <c>DAT-03</c>;
+    /// перший — <c>ColumnDef.ValidateValue</c>.
+    /// </remarks>
+    private static void SetNullableString(SqlDataRecord row, int ordinal, string? value)
+    {
+        if (value is null)
+        {
+            row.SetDBNull(ordinal);
+        }
+        else
+        {
+            row.SetString(ordinal, value);
+        }
     }
 
     /// <summary>Піднімає <c>ModifiedAt</c> у зачеплених рядках.</summary>
@@ -683,7 +817,7 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
 
         var periodKey = PeriodKeyOf(changes);
 
-        foreach (var chunk in pending.Chunk(MergeChunkSize))
+        foreach (var chunk in pending.Chunk(ParameterChunkSize))
         {
             await using var command = connection.CreateCommand();
             command.Transaction = tx;
@@ -713,38 +847,6 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
         }
     }
 
-    /// <summary>Параметр значеннєвого типу зі СТАЛОЮ сигнатурою.</summary>
-    /// <param name="command">Команда.</param>
-    /// <param name="name">Ім'я параметра.</param>
-    /// <param name="value">Значення; <c>null</c> → <c>DBNull</c>.</param>
-    /// <param name="type">Тип у СУБД.</param>
-    /// <param name="precision">Точність; <c>0</c> — не задавати.</param>
-    /// <param name="scale">Масштаб; <c>0</c> — не задавати.</param>
-    /// <remarks>
-    /// ⛔ <c>WR-01</c>. <c>precision</c>/<c>scale</c> тут не «для охайності»:
-    /// саме їх відсутність робила ключ кешу планів залежним від ДАНИХ, а не від
-    /// форми запиту. Для типів, у яких сигнатура від значення не залежить
-    /// (<c>Int</c>, <c>BigInt</c>, <c>Bit</c>), обидва лишаються нулем — задати
-    /// їх було б неправдою про тип.
-    /// </remarks>
-    private static void AddNullable<T>(
-        SqlCommand command, string name, T? value, SqlDbType type, byte precision = 0, byte scale = 0)
-        where T : struct
-    {
-        var parameter = command.Parameters.Add(name, type);
-        if (precision > 0)
-        {
-            parameter.Precision = precision;
-        }
-
-        if (scale > 0)
-        {
-            parameter.Scale = scale;
-        }
-
-        parameter.Value = value.HasValue ? value.Value : DBNull.Value;
-    }
-
     /// <summary><c>int</c> зі сталою сигнатурою.</summary>
     /// <param name="command">Команда.</param>
     /// <param name="name">Ім'я параметра.</param>
@@ -765,52 +867,4 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     private static void AddInt64(SqlCommand command, string name, long value)
         => command.Parameters.Add(name, SqlDbType.BigInt).Value = value;
 
-    /// <summary><c>bit</c> зі сталою сигнатурою.</summary>
-    /// <param name="command">Команда.</param>
-    /// <param name="name">Ім'я параметра.</param>
-    /// <param name="value">Значення.</param>
-    private static void AddBit(SqlCommand command, string name, bool value)
-        => command.Parameters.Add(name, SqlDbType.Bit).Value = value;
-
-    /// <summary>Рядковий параметр без власної стелі довжини.</summary>
-    /// <remarks>
-    /// ⛔ <c>DAT-03</c>. Тут стояло <c>Parameters.Add(name, type, 1000)</c>, і
-    /// саме цей третій аргумент робив утрату даних ТИХОЮ:
-    /// <c>SqlParameter</c> із заданим <c>Size</c> обрізає довше значення на
-    /// клієнті, ще до відправки. СУБД отримувала рівно 1000 припустимих
-    /// символів, тож <c>nvarchar(1000)</c> не мав на що скаржитись. Виміряно
-    /// мутацією: <c>ApplyAsync</c> з 1001 символом проходив БЕЗ винятку, а в
-    /// <c>doc.CellValue</c> лишався рядок рівно на 1000 символів.
-    ///
-    /// ⚠ На шляху <c>PATCH</c> користувач при цьому отримував не <c>200</c>,
-    /// а <c>500</c>: <c>AuditWriter</c> пише <c>NewValue</c> без <c>Size</c>,
-    /// тож ПОВНЕ значення впиралося в <c>aud.CellChange.NewValue</c> і валило
-    /// батч помилкою 2628 — з текстом про журнал аудиту, а не про завеликий
-    /// ввід. Тобто тихе обрізання тут було прикрите гучним збоєм не за
-    /// адресою; межу тепер тримає домен, до цього рядка задовге значення не
-    /// доходить узагалі.
-    ///
-    /// ⚠ <c>Size = -1</c> (<c>nvarchar(max)</c>) НЕ розширює стовпець і не
-    /// дозволяє писати довше: він лише знімає мовчазне обрізання на клієнті,
-    /// тож задовге значення доїжджає до СУБД і падає помилкою усічення.
-    /// Межу тримає домен (<see
-    /// cref="Ecr.Domain.Entities.Configuration.ColumnDef.MaxStringLength"/>),
-    /// а це — другий рубіж на випадок, коли перевірку обійшли: гучна відмова
-    /// замість тихого огризка.
-    ///
-    /// ⚠ <c>WR-01</c> вимагає «рядкові — <c>Add(name, type, довжина стовпця)</c>»,
-    /// тобто <c>1000</c>. Тут це НЕ зроблено свідомо, і це не відхилення від
-    /// рядка плану, а його виконання: мета <c>WR-01</c> — СТАЛА сигнатура
-    /// запиту, а <c>Size = -1</c> стала рівно так само, як <c>1000</c>
-    /// (<c>@vs0 nvarchar(max)</c> на будь-якому значенні). Виграш у кеші планів
-    /// однаковий, а <c>1000</c> на додачу повернуло б <c>DAT-03</c> — тихе
-    /// обрізання на клієнті, закрите менш ніж за добу до цієї правки. Замір
-    /// підтверджує: 20 записів із рядками різної довжини дають ОДИН план і без
-    /// цієї зміни.
-    /// </remarks>
-    private static void AddNullable(SqlCommand command, string name, string? value, SqlDbType type)
-    {
-        var parameter = command.Parameters.Add(name, type, -1);
-        parameter.Value = (object?)value ?? DBNull.Value;
-    }
 }

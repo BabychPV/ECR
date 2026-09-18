@@ -363,6 +363,15 @@ public sealed class SqlServerFixture : IAsyncLifetime
         // не доїде до проду.
         await RunScriptAsync("05-rpt-views.sql").ConfigureAwait(false);
 
+        // ⛔ `WR-02`. Табличні типи `doc.CellValueTvp` і `aud.CellChangeTvp`,
+        // якими шлють батч `NormalizedCellStore` і `AuditWriter`. Без них
+        // гарячий шлях запису не працює ВЗАГАЛІ — «Cannot find data type
+        // doc.CellValueTvp» на першому ж записі комірки, — а не «працює
+        // повільніше». Це рівно та розбіжність «розгортання створює, фікстура
+        // не створює», про яку попереджає зауваження до цього методу вище:
+        // сторожа тут немає, тож рядок додано разом зі скриптом, а не потім.
+        await RunScriptAsync("15-cell-tvp.sql").ConfigureAwait(false);
+
         await RunScriptAsync("10-triggers.sql").ConfigureAwait(false);
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
 

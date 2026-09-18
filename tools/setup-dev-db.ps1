@@ -275,6 +275,7 @@ $scripts = @(
 '03-archive-proc.sql'
 '04-partition-maintenance.sql'
 '05-rpt-views.sql'
+'15-cell-tvp.sql'
 '10-triggers.sql'
 '06-rcsi.sql'
 )
