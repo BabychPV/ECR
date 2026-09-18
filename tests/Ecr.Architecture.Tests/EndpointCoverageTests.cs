@@ -592,7 +592,8 @@ public sealed partial class EndpointCoverageTests
         var offenders = SourceTree
             .Production(
                 "Ecr.Domain", "Ecr.Application", "Ecr.Infrastructure", "Ecr.Api",
-                "Ecr.Calculations", "Ecr.Expressions", "Ecr.Adapters.PiAf", "Ecr.Adapters.Excel")
+                "Ecr.Calculations", "Ecr.Expressions", "Ecr.Adapters.PiAf", "Ecr.Adapters.Sql",
+                "Ecr.Adapters.Excel")
             .SelectMany(file => StaleStubRegex
                 .Matches(WithoutComments(file.Text))
                 .Where(match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) <= CurrentStage)

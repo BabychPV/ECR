@@ -496,10 +496,30 @@ public enum SnapshotStatus : byte
 }
 
 /// <summary>Транспорт до зовнішнього джерела (ФВ-11.2).</summary>
+/// <remarks>
+/// ⚠ Не всі значення ведуть у PI, і це головне, що тут варто знати.
+/// <see cref="PiWebApi"/> і <see cref="PiSqlClient"/> — два транспорти до
+/// ОДНОГО й того самого PI AF (D-47), а <see cref="Sql"/> — окрема база, яка
+/// до PI не має стосунку взагалі.
+/// </remarks>
 public enum ExternalTransport : byte
 {
     PiWebApi = 0,
-    PiSqlClient = 1
+    PiSqlClient = 1,
+
+    /// <summary>Довільна SQL-база; іменований випадок — FLERT (ФВ-11.8).</summary>
+    /// <remarks>
+    /// ⛔ Це НЕ PI SQL DAS. <see cref="PiSqlClient"/> ходить у PI AF через
+    /// RTQP-драйвер; тут — звичайний SQL Server, у якому немає ні елементів,
+    /// ні шаблонів, ні атрибутів AF.
+    /// <para>
+    /// Доти, доки цього значення не було, джерело, яке не є PI, оголосити було
+    /// нічим — тож FLERT лишався тим, чим і був у чинній системі: синонімами
+    /// на чужий сервер усередині нашої ж схеми. Саме від цього відмовляється
+    /// `B18` §14.5.
+    /// </para>
+    /// </remarks>
+    Sql = 2
 }
 
 /// <summary>Режим роботи з редакцією SQL Server (АРХ-7).</summary>

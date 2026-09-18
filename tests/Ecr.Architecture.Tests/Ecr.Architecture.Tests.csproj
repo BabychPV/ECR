@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\src\Ecr.Calculations\Ecr.Calculations.csproj" />
     <ProjectReference Include="..\..\src\Ecr.Adapters.Excel\Ecr.Adapters.Excel.csproj" />
     <ProjectReference Include="..\..\src\Ecr.Adapters.PiAf\Ecr.Adapters.PiAf.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Adapters.Sql\Ecr.Adapters.Sql.csproj" />
     <ProjectReference Include="..\..\src\Ecr.Api\Ecr.Api.csproj" />
     <ProjectReference Include="..\Ecr.TestKit\Ecr.TestKit.csproj" />
   </ItemGroup>
