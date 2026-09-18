@@ -6,7 +6,7 @@
 > кличе.
 
 ⛔ Клас дефекту той самий, що дав `A7-08`, `A7-10`, `A7-51`, `A7-53`, `A7-55`
-і `A7-56: **механізм оголошений, покритий тестами і недосяжний**. Тест
+і `A7-56`: **механізм оголошений, покритий тестами і недосяжний**. Тест
 доводить, що метод уміє відмовити; ніхто не питає, чи хтось передає йому те,
 від чого відмова залежить.
 
@@ -20,6 +20,65 @@
 | ⛔ **дефект** | працююча система поводиться не так, як обіцяно; треба виправляти |
 | ⏳ **чекає на крок** | механізм навмисно готовий раніше за свій екран; крок названий |
 | ✔ **закрито** | виправлено, рядок лишається як історія |
+
+---
+
+## ⛔ ✎ 2026-09-18 — реєстр перезібрано з коду, бо він сам став тим, що описує
+
+**Директива №14 §9 («Документи, що брешуть про стан») перевірила цей файл і
+знайшла, що 8 із 12 його чинних тверджень хибні.** Перевірка на `e428852`
+підтвердила знахідку й додала до неї: хибних тверджень **дев'ять** (вісім
+повністю, одне наполовину), плюс преамбула розділу «Пережили свій крок».
+
+**Чому це сталося — і чому урок ширший за файл.** Розділ «Як цим
+користуватися» нижче сам пояснює, що сторожа тут немає і бути не може: сторож
+«метод без викликача» дав би сотні хибних спрацювань на портах і фабриках.
+Висновок звідти був зроблений правильний — «список авторський» — але з нього
+випало друге речення: **авторський список треба перечитувати, інакше він
+описує не систему, а день, коли його писали.** Кроки 6–9 директиви №04
+закрилися; викликачі з'явилися; жоден рядок не оновився. Це той самий дефект,
+який `CLAUDE.md` називає словами «перевірка, яку не ганяють, не просто не
+ловить дефектів — вона сама тихо гниє», і `problems.md` `P-02` зловив його ж
+того самого дня.
+
+⚠ **Метод цієї перевірки.** Кожне твердження — один `git grep` по символу
+окремо в `src/` і в `tests/`, із відніманням оголошення, реалізації й
+коментарів. Кількість збігів grep'а **не дорівнює** кількості викликів, і на
+цьому легко помилитися: для `EnsureStructurallyMutable` grep дає 21 збіг у
+`src/`, а викликів — 18 (решта: одне оголошення і два коментарі). Нижче всюди
+названо саме **виклики**.
+
+### Зведення перевірки (`git grep`, `e428852`, 2026-09-18)
+
+| № | Твердження файла | Що показав `git grep` | Вердикт |
+|---|---|---|---|
+| 4a | `ITemplateStructure`/`CachedTemplateStructure` без споживача | 6 збігів у `src/`: порт `Ports/ITemplateStructure.cs:22`, реалізація `Caching/CachedTemplateStructure.cs:16`, реєстрація `DependencyInjection.cs:107` і три коментарі. Жодного виклику `.Get` | ✔ **чинне** |
+| 5a | `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити | єдині конструктори — `Security/UserStore.cs:88,172,191`, усі `new RoleAssignment(roleId, user)` без строку; `PUT /users/{id}/roles` (`SecurityController.cs:202`) строку не приймає | ✔ **чинне** |
+| 6 | `EnsureStructurallyMutable` «кличеться лише тестом» | **18 викликів у 9 обробниках** `src/Ecr.Application/Templates/**` | ⛔ **ХИБНЕ** |
+| 7 | `IValidationResultStore.GetLatestAsync` не кличе ніхто | `Documents/GetValidationResultHandler.cs:57`; ендпоінт — `DocumentsController.cs:163` | ⛔ **ХИБНЕ** |
+| 10 | `TableRow.SetOrphaned` не кличе ніхто | у `src/` — нуль викликів (оголошення `TableRow.cs:92` + два коментарі `OrphanScanner.cs:573,577`); у тестах — 3 | ✔ **чинне** |
+| 11 | `DeleteRegistryEntryHandler` без ендпоінта | зареєстрований (`Application/DependencyInjection.cs:172`), у `RegistriesController.cs` жодного `HttpDelete` | ✔ **чинне** |
+| 13 | ревізія каталогу підписів не бере участі ні в `ETag`, ні в інвалідації | `UiStringsController.cs:58` будує `ETag` саме з неї; `UiStringResolver.ETag(scope, lang, revision)` — `:124`; `304` на збіг — `:62-65` | ⛔ **ХИБНЕ** |
+| 15 | `INotificationOutbox.EnqueueAsync` не кличе жоден обробник | `Jobs/CollectionJob.cs:130` | ⛔ **ХИБНЕ** |
+| 16 | `IWorkflowStore.GetSheetsAsync` **і** `GetSnapshotsAsync` без викликача | `GetSheetsAsync` — `Documents/RecalculateDocumentHandler.cs:120`; `GetSnapshotsAsync` — нуль | ⛔ **ХИБНЕ наполовину** |
+| П-преамбула | «авторства структури шаблону, методології й конфігурації збору в продукті НЕ ІСНУЄ — ні ендпоінтів, ні екранів» | `TemplateVersionsController.cs` — 26 маршрутів, із них **21 записовий** (`POST`/`PUT`/`DELETE`) і лише 5 `GET`; `MethodologiesController.cs` — 10 авторських; сторінки `TemplateVersionPage.tsx`, `MethodologyVersionsPage.tsx`, `RegistryConstructorPage.tsx`, `TableRelationsPage.tsx` під'єднані в `router.tsx:211,224,234,259` | ⛔ **ХИБНЕ** |
+| П1 | авторство структури шаблону — «кличуть лише тести» | `SetNumericFormat` → `ColumnDefHandlers.cs:211`; `SetPresentation` → `:212`; `SetLookup` → `:216`; `SetUnit` → `:221`; `AddFormula` → `FormulaDefHandlers.cs:155`; `AddValidationRule` → `ValidationRuleHandlers.cs:120`; `SetMaxDynamicRows` → `TableDefHandlers.cs:150,169` | ⛔ **ХИБНЕ** |
+| П2 | фабрики `PeriodAccessRuleDef` — «кличуть лише тести» | `PeriodAccessRuleHandlers.cs:147` (`ForRelativeWindow`), `:151` (`ForSourceWindow`), `:160` (`ForExpression`); маршрути — `TemplateVersionsController.cs:723,759` | ⛔ **ХИБНЕ** |
+| П3 | авторство методології | `AddVersion` → `MethodologyDraftHandlers.cs:138`; `SetModes` → `MethodologyAuthoringHandlers.cs:746`; `SetScope` → `:234`; `MethodologyTestCaseEntity.Update` → `MethodologyVersion.cs:500`. Нуль лише в `SetContentHash` (`MethodologyVersion.cs:120`) | ⛔ **ХИБНЕ, крім `SetContentHash`** |
+| П4 | конфігурація збору | `EntityFieldMap.ToColumn`/`ToRegistryField` → `EntityFieldMapHandlers.cs:114,136`, маршрут `EntityFieldMapsController.cs:31`. Нуль: `DataSource.Configure` (`DataSource.cs:75`), `CollectionSchedule.SetLookback` (`CollectionSchedule.cs:50`), `LegacyMappings.*` | ◐ **частково хибне** |
+| П5 | `IAccessDecisionService.CanEditCellAsync` без викликача | нуль у `src/` (порт `IAccessDecisionService.cs:58`, реалізація `AccessDecisionService.cs:253`); `AccessDecisionService.cs:485` пояснює чому — виклик у циклі був би антипатерном | ✔ **чинне** |
+| П6 | `RegistryEntry.Restore`/`SetOrdinal`, `RegistryExternalKey.MarkSynced`, `RegistryEntryLink.SetPayload` | нуль викликів у `src/` (оголошення `RegistryEntry.cs:190,139`, `RegistryExternalKey.cs:59`, `RegistryEntryLink.cs:64`) | ✔ **чинне** |
+| П7 | `IntegrationLogs.MarkPeriodDone`, `RecordChecksums` | нуль викликів (`IntegrationLogs.cs:243,252`) | ✔ **чинне** |
+
+⚠ **Уточнення до знахідки директиви.** Директива №14 §9 наводить
+`EnsureStructurallyMutable` як «21 виклик». 21 — це збіги `git grep`; викликів
+**18**. Різниця нічого не міняє у вердикті (твердження файла хибне в обох
+випадках), але сама плутанка «збіг grep = виклик» і породжує половину записів
+цього реєстру, тому названа тут явно.
+
+⚠ Рядки з вироком ✔ **чинне** нижче лишаються як були. Рядки з ⛔ **ХИБНЕ**
+перекреслено на місці з датованою поправкою — за прийомом проєкту: слід того,
+як твердження обдурило, корисніший за чисту сторінку.
 
 ---
 
@@ -43,6 +102,7 @@
 | Ролі наявному користувачеві призначити нічим | ✔ | `A7-61` |
 | `User.Email` не присвоювався ніде | ✔ | `A7-62` |
 | `DialectCatalog` — виміряний набір функцій діалекту B — не мав жодного споживача в `src/`: розбирав і обчислював вирази методологій вигаданий `FunctionRegistry` | ✔ | `I.14` (`Q-082`): розбір, обчислення, `ECR-CALC-0433` і склад мови в редакторі беруть імена з каталогу |
+| ✎ 2026-09-18 | ✔ | `TemplateVersion.EnsureStructurallyMutable`, `IValidationResultStore.GetLatestAsync`, `IUiStringCatalog`-ревізія в `ETag`, `INotificationOutbox.EnqueueAsync`, `IWorkflowStore.GetSheetsAsync`, авторство структури шаблону, фабрики `PeriodAccessRuleDef`, авторство методології, `EntityFieldMap.*` — закрилися й **не були зняті з переліку**; розділ «перезібрано з коду» вище |
 
 ---
 
@@ -72,7 +132,15 @@
 контракт, а не дефект реалізації: або порт приймає знімок параметром, або
 метод прибирається. **Питання до ПК-1.**
 
-### 4a. `ITemplateStructure` і `CachedTemplateStructure` без споживача
+### 4a. ✔ `ITemplateStructure` і `CachedTemplateStructure` без споживача
+
+> ✔ **Перевірено 2026-09-18 — твердження чинне.** `git grep ITemplateStructure -- src/`
+> дає шість збігів, і **жоден не є викликом**: порт
+> `src/Ecr.Application/Ports/ITemplateStructure.cs:22`, реалізація
+> `src/Ecr.Infrastructure/Caching/CachedTemplateStructure.cs:16`, реєстрація
+> `src/Ecr.Infrastructure/DependencyInjection.cs:107` і три коментарі
+> (`Ports/IFormulaEngine.cs:30`, `CachedTemplateStructure.cs:8`,
+> `Caching/MetadataCache.cs:112`).
 
 Порт існував рівно з однієї причини: `ExtractDependencies` був синхронним і
 мусив дістати знімок із кешу, не чекаючи. Після `H-3` знімок приходить
@@ -102,25 +170,83 @@
 > ролей. Строкове призначення сьогодні заводиться тільки руками в базі — тобто
 > механізм тепер працює, а створити для нього дані нічим. Рядок нижче.
 
-### 5a. `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити
+### 5a. ✔ `RoleAssignment.ValidFrom`/`ValidTo` нічим заповнити
+
+> ✔ **Перевірено 2026-09-18 — твердження чинне.** Єдині три місця, де
+> призначення взагалі народжується, — `src/Ecr.Infrastructure/Security/UserStore.cs:88`,
+> `:172`, `:191`, і всі три пишуть `new RoleAssignment(roleId, user)`: строку в
+> конструкторі немає. Маршрут `PUT /api/v1/users/{id}/roles`
+> (`src/Ecr.Api/Controllers/SecurityController.cs:202`) приймає лише перелік
+> ролей.
+>
+> ⚠ Не сплутати з `ValidFrom`/`ValidTo` **констант методології** — ті
+> заводяться повноцінно (`MethodologiesController.cs:208` →
+> `MethodologyAuthoringHandlers.cs:235`, `constant.SetValidity(...)`).
+> Однойменні поля різних сутностей: `git grep ValidFrom` дає 285 збігів у
+> `src/`, і майже всі — не про ролі.
 
 Межі дії призначення перевіряються (`H-23a`), але **задати** їх не може ніхто:
 у `RoleAssignment` немає ані фабрики зі строком, ані сеттера, а
 `PUT /api/v1/users/{id}/roles` приймає лише перелік ролей.
 
 ⚠ Закриття вимагає поля в тілі запиту, тобто правки `02-contracts.md` §9 і
-знімка OpenAPI. Тому це окремий крок, а не побіжна правка.
+знімка OpenAPI. Тому це окремий крок, а не побіжна правка. Той самий рядок —
+у директиві №14 `T-04` (хвиля `W4`, по одному ендпоінту на PR).
 
-### 6. `TemplateVersion.EnsureStructurallyMutable` не стоїть на шляху запису
+### 6. ~~`TemplateVersion.EnsureStructurallyMutable` не стоїть на шляху запису~~ — ЗАКРИТО
 
-Охоронець проти структурної зміни замороженої версії існує і кличеться лише
+> ⛔ **✎ 2026-09-18: твердження було ХИБНЕ, і це найдорожчий рядок файла** —
+> саме на нього директива №14 §9 послалася як на зразок класу. Охоронець
+> стоїть **першою дією** дев'ятьох обробників структури, тобто рівно там, де
+> файл стверджував, що його немає. **18 викликів у `src/`:**
+>
+> | Файл | Рядки |
+> |---|---|
+> | `src/Ecr.Application/Templates/ColumnDefHandlers.cs` | 81, 366 |
+> | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 118, 425 |
+> | `src/Ecr.Application/Templates/PeriodAccessRuleHandlers.cs` | 211, 342, 438 |
+> | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 71, 302 |
+> | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 84, 268 |
+> | `src/Ecr.Application/Templates/StyleDefHandlers.cs` | 66 |
+> | `src/Ecr.Application/Templates/TableDefHandlers.cs` | 85, 280 |
+> | `src/Ecr.Application/Templates/TableRelationHandlers.cs` | 162, 358 |
+> | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 79, 253 |
+>
+> (Оголошення — `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs:145`;
+> ще два збіги `git grep` — коментарі в `StyleDefHandlers.cs:63` і
+> `TableRelationHandlers.cs:114`. Звідси «21» у директиві проти 18 викликів.)
+>
+> ⛔ Друга половина твердження хибна **як наслідок першої**: раз доменний
+> охоронець на шляху, застосунок дізнається про заморожену версію
+> `DomainException` із власним кодом, а не сирим винятком SQL від тригера.
+> Тригер лишається другим рубежем — і це правильно, — але вже не єдиним.
+>
+> ⚠ Обидва тести в `tests/Ecr.Domain.Tests/Configuration/` (`TemplateVersionTests.cs:72,86`,
+> `TemplateVersionDeprecationTests.cs:63`) чинні: вони доводять поведінку
+> домену, а не заміняють викликача. Наявність доменного тесту — це не ознака
+> «кличе лише тест», і саме ця підміна дала рядок.
+
+~~Охоронець проти структурної зміни замороженої версії існує і кличеться лише
 тестом. Захист тримає тригер у базі — але застосунок дізнається про це
-винятком SQL, а не зрозумілою відмовою.
+винятком SQL, а не зрозумілою відмовою.~~
 
-### 7. `IValidationResultStore.GetLatestAsync` не кличе ніхто
+### 7. ~~`IValidationResultStore.GetLatestAsync` не кличе ніхто~~ — ЗАКРИТО
 
-Підсумок валідації пишеться і ніколи не читається назад. Показати результат
-останнього прогону без повторного перерахунку неможливо.
+> ⛔ **✎ 2026-09-18: твердження ХИБНЕ.** Читач є, і в нього є ендпоінт:
+>
+> - `src/Ecr.Application/Documents/GetValidationResultHandler.cs:57` —
+>   `.GetLatestAsync(documentId, periodKey.Value, ct)`;
+> - `src/Ecr.Api/Controllers/DocumentsController.cs:163` — маршрут, і його
+>   коментар **прямо цитує цей реєстр** у минулому часі: «`IValidationResultStore
+>   .GetLatestAsync` не мав жодного виклику». Тобто закриття було зроблене
+>   свідомо й задокументоване в коді — не оновився лише сам реєстр;
+> - `src/Ecr.Application/Workflow/SubmitSheetHandler.cs:111` читає той самий
+>   підсумок при поданні аркуша;
+> - сценарій `tests/Ecr.Scenarios.Tests/DataEntryScenarios.cs:702` це
+>   перевіряє наскрізно.
+
+~~Підсумок валідації пишеться і ніколи не читається назад. Показати результат
+останнього прогону без повторного перерахунку неможливо.~~
 
 ### 8. ~~`IReportSnapshotBuilder.MarkSubmittedAsync` і `RefreshStatusAsync`~~ — ЗАКРИТО
 
@@ -148,16 +274,36 @@
 > тіло відповіді, і нове поле означає правку знімка OpenAPI та клієнтських
 > типів. Дані тепер правдиві; показати їх — окремий крок.
 
-### 10. `TableRow.SetOrphaned` не кличе ніхто
+### 10. ✔ `TableRow.SetOrphaned` не кличе ніхто
+
+> ✔ **Перевірено 2026-09-18 — твердження чинне.** У `src/` нуль викликів:
+> оголошення `src/Ecr.Domain/Entities/Documents/TableRow.cs:92` і два
+> коментарі в `src/Ecr.Infrastructure/Persistence/OrphanScanner.cs:573,577`.
+> Викликають лише тести (`tests/Ecr.Infrastructure.Tests/Persistence/
+> OrphanScannerPartitionScopeTests.cs:123,141`,
+> `OrphanScannerRescanReferenceTests.cs:156`).
+>
+> ⚠ Коментар `OrphanScanner.cs:573` уже сам пояснює, ЧОМУ доменний метод не
+> кличеться: завантаження кожного рядка сутністю проти пакетного
+> `ExecuteUpdate`. Тобто це свідомий компроміс, а не забуття, — але
+> продубльований інваріант від цього не перестає розходитися тихо.
 
 `OrphanScanner` пише ознаку пакетним `ExecuteUpdate`, а коментар методу
 стверджує, що його кличе задача. Інваріант «`OrphanedAt` нульується разом з
 ознакою» продубльовано в SQL — розійдуться вони тихо.
 
-### 11. `DeleteRegistryEntryHandler` без ендпоінта
+### 11. ✔ `DeleteRegistryEntryHandler` без ендпоінта
+
+> ✔ **Перевірено 2026-09-18 — твердження чинне.** Обробник є і
+> зареєстрований (`src/Ecr.Application/Registries/RegistryAdminHandlers.cs:264`,
+> `src/Ecr.Application/DependencyInjection.cs:172`), кличе його лише тест
+> (`tests/Ecr.Application.Tests/Registries/RegistryResolverTests.cs:167`).
+> У `src/Ecr.Api/Controllers/RegistriesController.cs` п'ять маршрутів
+> (`:42`, `:104`, `:146`, `:184`, `:213`) і **жодного `HttpDelete`**.
 
 Логічне видалення запису довідника з перевіркою посилань (`ECR-REG-0409`)
 недосяжне ззовні: помилково створений запис лишається в обігу назавжди.
+Той самий рядок — у директиві №14 `T-04` (хвиля `W4`).
 
 ### 12. ~~`IBackgroundJobScheduler.CancelAsync` не кличе ніхто~~ — ЗАКРИТО частково
 
@@ -174,10 +320,33 @@
 > зупинити довгий прогін людина може лише повторним запуском, і це рішення
 > потребує підтвердження.
 
-### 13. `IUiStringCatalog.GetRevisionAsync` не кличе ніхто
+### 13. ~~`IUiStringCatalog.GetRevisionAsync` не кличе ніхто~~ — формулювання ХИБНЕ
 
-Ревізія каталогу підписів не бере участі ні в `ETag`, ні в інвалідації: зміна
-підпису кнопки не доходить до відкритих сесій.
+> ⛔ **✎ 2026-09-18.** Наслідок, яким рядок лякав, **не настає**: ревізія
+> каталогу бере участь і в `ETag`, і в інвалідації.
+>
+> - `src/Ecr.Api/Controllers/UiStringsController.cs:58` —
+>   `GetUiStringsHandler.ETag(publicOnly, lang, catalog.Revision)`, далі
+>   заголовок `ETag` (`:60`) і `304` на збіг `If-None-Match` (`:62-65`);
+> - `src/Ecr.Application/Localization/UiStringResolver.cs:124` —
+>   `ETag(UiStringScope scope, string languageCode, int revision)`; коментар
+>   `:116-117` пояснює, чому область мусить входити в `ETag` разом із
+>   ревізією;
+> - будь-який запис інкрементує ревізію
+>   (`src/Ecr.Infrastructure/Localization/UiStringCatalogStore.cs:128`,
+>   `UPDATE sys_ecr.UiStringRevision`), і `PUT` віддає її назад
+>   (`UiStringsController.cs:88`).
+>
+> ⚠ **Чинним лишається рівно вужчий факт, і сам по собі він не дефект:**
+> конкретний метод порту `IUiStringCatalog.GetRevisionAsync`
+> (`src/Ecr.Application/Ports/IUiStringCatalog.cs:44`, реалізація
+> `UiStringCatalogStore.cs:40`) у `src/` не кличе ніхто — ревізія приїжджає
+> полем `UiStringCatalog.Revision` разом із самим каталогом, одним читанням
+> замість двох. Тобто метод зайвий, а не механізм відсутній. Рішення —
+> прибрати з порту або лишити свідомо; ціна помилки нульова в обидва боки.
+
+~~Ревізія каталогу підписів не бере участі ні в `ETag`, ні в інвалідації: зміна
+підпису кнопки не доходить до відкритих сесій.~~
 
 ### 14. ~~`IUserStore.FilterUnknownAsync` не кличе ніхто~~ — ЗАКРИТО
 
@@ -204,16 +373,48 @@
 Створення ролі й видача прав не відсіюють неіснуючі коди прав: роль мовчки
 зберігається з набором, частина якого нічого не означає.
 
-### 15. `INotificationOutbox.EnqueueAsync` не кличе жоден обробник
+### 15. ~~`INotificationOutbox.EnqueueAsync` не кличе жоден обробник~~ — ХИБНЕ
 
-`NotificationJob` кладе події в чергу повз порт, напряму через `DbContext`.
+> ⛔ **✎ 2026-09-18: твердження ХИБНЕ.** Порт кличеться:
+> `src/Ecr.Infrastructure/Jobs/CollectionJob.cs:130` —
+> `outbox.EnqueueAsync(CollectionFailure.AlertEventCode, …)` при провалі
+> автентифікації до джерела (ін'єкція — `CollectionJob.cs:31`).
+> Тобто механізм, який рядок називав неіснуючим, існує і має продуктовий шлях.
+>
+> ⚠ Друга половина рядка чинна й важлива: `NotificationJob` справді кладе
+> події **повз** порт, напряму через `DbContext` —
+> `src/Ecr.Infrastructure/Jobs/NotificationJob.cs:198`,
+> `db.NotificationOutbox.Add(new NotificationOutboxItem(…))`. Два шляхи запису
+> в одну чергу — це і є справжній дефект цього рядка, і він інший, ніж
+> записано: не «порту ніхто не кличе», а «половина системи його обходить».
+> `NotificationJob` при цьому ще й **відправляє** чергу (`:21`, `:32`), тобто
+> суміщає роль виробника і споживача.
+>
+> ⚠ Коментар `CollectionJob.cs:139-142` описує контракт порту, який варто
+> знати перед правкою: `EnqueueAsync` кладе подію в набір змін і **не
+> зберігає** його сам — щоб подія їхала комітом того, що її породило.
+
+~~`NotificationJob` кладе події в чергу повз порт, напряму через `DbContext`.
 Доменні сценарії сповіщень не породжують — тобто порт описує механізм, якого
-немає.
+немає.~~
 
-### 16. `IWorkflowStore.GetSheetsAsync` і `GetSnapshotsAsync`
+### 16. ~~`IWorkflowStore.GetSheetsAsync` і `GetSnapshotsAsync`~~ — ХИБНЕ наполовину
 
-Немає способу показати стан затвердження всіх аркушів документа за період і
-історію іммутабельних зрізів подання, хоча дані для цього пишуться.
+> ⛔ **✎ 2026-09-18.** `GetSheetsAsync` кличеться:
+> `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs:120`
+> (`.GetSheetsAsync(documentId, periodKey, ct)`) — перерахунок питає стан
+> затвердження аркушів, перш ніж писати.
+>
+> ✔ **`GetSnapshotsAsync` — чинне:** нуль викликів у `src/` (порт
+> `src/Ecr.Application/Ports/IWorkflowStore.cs:44`, реалізація
+> `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs:181`); обидва методи
+> обгорнуті лише в тестовому декораторі
+> `tests/Ecr.Application.Tests/Periods/ReopenRaceTests.cs:282-292`. Тобто
+> історія іммутабельних зрізів подання пишеться і не показується ніде —
+> це директива №14 `T-04` (`Q-195`, хвиля `W4`).
+
+~~Немає способу показати стан затвердження всіх аркушів документа за період і
+історію іммутабельних зрізів подання, хоча дані для цього пишуться.~~
 
 ---
 
@@ -223,11 +424,46 @@
 «рядок, який не зник разом зі своїм кроком, змінює вирок на ⛔ — механізм, що
 пережив свій екран, уже не готовий раніше, а забутий».
 
-Кроки 6, 7 і 8 директиви №04 закриті (`roadmap.md`: «Кроки директиви №04 —
+> ⛔ **✎ 2026-09-18: преамбула цього розділу була ХИБНОЮ, і хибним був саме
+> той факт, на якому тримався весь розділ.** Перевірено в коді:
+>
+> - **ендпоінти авторства структури шаблону є** —
+>   `src/Ecr.Api/Controllers/TemplateVersionsController.cs`: `PUT`/`DELETE`
+>   аркуша (`:301`, `:328`), таблиці (`:365`, `:487`), колонки (`:455`,
+>   `:505`), рядка (`:578`, `:607`), формули (`:416`, `:625`), правила
+>   валідації (`:668`, `:697`), стилю (`:543`), зв'язку (`:241`, `:273`),
+>   правил доступу за періодом (`:723`, `:759`);
+> - **ендпоінти авторства методології є** —
+>   `src/Ecr.Api/Controllers/MethodologiesController.cs:124` (версія), `:164`
+>   (формула), `:208` (константа), `:271` (правило), `:315` (обов'язкові
+>   входи), `:354` (виходи), `:394` (тест-кейс), `:428` (режими), `:499`
+>   (`DELETE` формули), `:524` (публікація);
+> - **екрани є й мають маршрути** — `src/Ecr.Web/src/app/router.tsx:211`
+>   (`TableRelationsPage`), `:224` (`RegistryConstructorPage`), `:234`
+>   (`MethodologyVersionsPage`), `:259` (`MappingPreviewPage`); плюс
+>   `TemplateVersionPage.tsx`.
+>
+> Отже речення «авторства структури шаблону, методології й конфігурації збору
+> в продукті **не існує** — ні ендпоінтів, ні екранів» було правдою в день
+> написання і перестало нею бути, коли кроки 6–9 закрилися. Наступне речення
+> преамбули — «це та сама знахідка, яку аудит назвав „44 вимоги мають бойовий
+> код і зелені тести і жодного шляху з інтерфейсу“» — тому теж не можна
+> цитувати як поточний стан: число 44 не перевимірювалося.
+>
+> ⚠ **Чинним лишається рівно одне з чотирьох: конфігурація збору.**
+> `SourcesController.cs` має три маршрути (`:30`, `:43`, `:77`) і жодного
+> авторського — це збігається з `T-03` директиви №14 («конфігуратор джерел —
+> лише читання»).
+>
+> ⛔ Правило розділу («механізм, що пережив свій екран, — забутий») **не
+> скасовується**: воно чинне й далі. Помилка була не в правилі, а в тому, що
+> вхідні дані до нього ніхто не перемірював після закриття кроків.
+
+~~Кроки 6, 7 і 8 директиви №04 закриті (`roadmap.md`: «Кроки директиви №04 —
 1–9 ✔, усі»). Механізми нижче свого екрана так і не дочекалися: авторства
 структури шаблону, методології й конфігурації збору в продукті **не існує** —
 ні ендпоінтів, ні екранів. Це та сама знахідка, яку аудит назвав «44 вимоги
-мають бойовий код і зелені тести і жодного шляху з інтерфейсу».
+мають бойовий код і зелені тести і жодного шляху з інтерфейсу».~~
 
 ⚠ Правило застосоване, а не обійдене, саме тому, що обійти його дешево: досить
 було лишити ⏳ і сказати «крок закритий частково». Тоді реєстр перестав би бути
@@ -235,17 +471,17 @@
 
 ⚠ Два останні рядки таблиці до кроків не прив'язані й вироку не міняють.
 
-| Що | Крок, який його не забрав | Куди це впирається |
+| Що | Крок | Стан на 2026-09-18 (`git grep`) |
 |---|---|---|
-| ⛔ Авторство структури шаблону: `ColumnDef.SetUnit`/`SetLookup`/`SetNumericFormat`/`SetPresentation`, `TableDef.AddFormula`/`AddValidationRule`/`SetMaxDynamicRows` | 8 (`B-1`, конструктор) — закритий, екрана немає | `A10` пункт 5 |
-| ⛔ Фабрики `PeriodAccessRuleDef` — кличуть лише тести | 8: редактор правил доступу — закритий, редактора немає | `A10` пункт 5 |
-| ⛔ Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope` | 6 (`B-3`) — закритий | `A10` пункт 6. ⚠ `SetModes` не кличе ніхто, тобто `NumericMode = Strict` увімкнути **неможливо в принципі**. `ScriptVersion.MarkCompiled` виключено з переліку: сама сутність видалена разом із рівнем 2 (`Q-206`, `#44`, директива №11) — метод, якого без викликача не буде, більше не рахується |
-| ⛔ Конфігурація збору: `DataSource.Configure`, `CollectionSchedule.SetLookback`, `EntityFieldMap.*`, `LegacyMappings.*` | 7 (`B-5`, перегляд мапінгу) — закритий | екран показує мапінг, але не дає його заводити |
-| `IAccessDecisionService.CanEditCellAsync` | до кроку не прив'язаний | не потрібен: усі шляхи запису йдуть через зріз; **або прибрати з порту** |
+| ~~⛔~~ ✔ Авторство структури шаблону: `ColumnDef.SetUnit`/`SetLookup`/`SetNumericFormat`/`SetPresentation`, `TableDef.AddFormula`/`AddValidationRule`/`SetMaxDynamicRows` | 8 (`B-1`) | **ЗАКРИТО.** `SetNumericFormat` → `ColumnDefHandlers.cs:211`; `SetPresentation` → `:212`; `SetLookup` → `:216`; `SetUnit` → `:221`; `AddFormula` → `FormulaDefHandlers.cs:155`; `AddValidationRule` → `ValidationRuleHandlers.cs:120`; `SetMaxDynamicRows` → `TableDefHandlers.cs:150,169`. Маршрути — `TemplateVersionsController.cs:455,416,668,365` |
+| ~~⛔~~ ✔ Фабрики `PeriodAccessRuleDef` — ~~кличуть лише тести~~ | 8 | **ЗАКРИТО.** `PeriodAccessRuleHandlers.cs:147` (`ForRelativeWindow`), `:151` (`ForSourceWindow`), `:160` (`ForExpression`); маршрути — `TemplateVersionsController.cs:723,759` |
+| ~~⛔~~ ◐ Авторство методології: `Methodology.AddVersion`, `MethodologyVersion.SetModes`/`SetContentHash`, `MethodologyTestCaseEntity.Update`, `MethodologyConstant.SetScope` | 6 (`B-3`) | **Здебільшого ЗАКРИТО:** `AddVersion` → `MethodologyDraftHandlers.cs:138`; `SetModes` → `MethodologyAuthoringHandlers.cs:746` (маршрут `MethodologiesController.cs:428`) — отже ~~«`SetModes` не кличе ніхто, тобто `NumericMode = Strict` увімкнути неможливо в принципі»~~ теж хибне; `SetScope` → `MethodologyAuthoringHandlers.cs:234`; `MethodologyTestCaseEntity.Update` → `MethodologyVersion.cs:500` (через `MethodologyVersion.EditTestCase`, `:492`, який кличе `MethodologyAuthoringHandlers.cs:687`, маршрут `MethodologiesController.cs:394`) — пошук по `.Update(` цього не показує, бо виклик схований за доменним фасадом. ⛔ **Лишається лише `SetContentHash`** (`MethodologyVersion.cs:120`) — нуль викликів. `ScriptVersion.MarkCompiled` виключено раніше: сутність видалена разом із рівнем 2 (`Q-206`, `#44`, директива №11) |
+| ◐ Конфігурація збору: `DataSource.Configure`, `CollectionSchedule.SetLookback`, `EntityFieldMap.*`, `LegacyMappings.*` | 7 (`B-5`) | **Частково.** ✔ `EntityFieldMap.ToColumn`/`ToRegistryField` → `EntityFieldMapHandlers.cs:114,136`, маршрут `EntityFieldMapsController.cs:31`. ⛔ Нуль викликів: `DataSource.Configure` (`DataSource.cs:75`), `CollectionSchedule.SetLookback` (`CollectionSchedule.cs:50`), `LegacyMappings.*` (`LegacyMappings.cs` — жодної згадки поза власним файлом). `SourcesController.cs` — три маршрути, усі неавторські (`T-03`) |
+| ✔ (чинне) ⛔ `IAccessDecisionService.CanEditCellAsync` | до кроку не прив'язаний | нуль викликів (порт `IAccessDecisionService.cs:58`, реалізація `AccessDecisionService.cs:253`); коментар `AccessDecisionService.cs:485` пояснює, чому виклик у циклі — антипатерн (30 000 звернень на таблиці 500×60). **Або прибрати з порту** |
 | `ICellStore.ReadCellsAsync` | до кроку не прив'язаний | використовує `ExcelImporter` і фікстури; лишити |
 | ⛔ `ICellStore.BulkInsertAsync` | до кроку не прив'язаний | директива №11, T10 #50: твердження «використовує `ExcelImporter`» тут не підтвердилось — `ExcelImporter` кличе лише `ReadSlicesAsync`; нуль викликів поза власною реалізацією й тестами реалізації. Прибрано з порту; `BulkCellLoader.LoadAsync` лишається — його напряму кличе `Ecr.DataGen` (генератор, реальний споживач) |
-| ⛔ `RegistryEntry.Restore`, `RegistryEntry.SetOrdinal`, `RegistryExternalKey.MarkSynced`, `RegistryEntryLink.SetPayload` | 8 (`B-1`) — закритий | `A10` пункт 5 |
-| ⛔ `IntegrationLogs.MarkPeriodDone`, `RecordChecksums` | 7 (`B-5`) — закритий | `A10` пункт 3 (перерахунок і задачі) |
+| ✔ (чинне) ⛔ `RegistryEntry.Restore`, `RegistryEntry.SetOrdinal`, `RegistryExternalKey.MarkSynced`, `RegistryEntryLink.SetPayload` | 8 (`B-1`) | нуль викликів у `src/`: `RegistryEntry.cs:190`, `:139`, `RegistryExternalKey.cs:59`, `RegistryEntryLink.cs:64`. ⚠ Крок 8 закрився (`RegistryConstructorPage.tsx`, `router.tsx:224`) — отже це вже не «готове раніше», а забуте. `A10` пункт 5 |
+| ✔ (чинне) ⛔ `IntegrationLogs.MarkPeriodDone`, `RecordChecksums` | 7 (`B-5`) | нуль викликів: `IntegrationLogs.cs:243,252`. `A10` пункт 3 (перерахунок і задачі) |
 
 ---
 
@@ -259,3 +495,27 @@
 
 ⛔ Рядок, який **не зник** разом зі своїм кроком, змінює вирок на ⛔: механізм,
 що пережив свій екран, уже не «готовий раніше», а забутий.
+
+### ✎ 2026-09-18: а що робити з рядком, який не зник, бо його НЕ ПЕРЕЧИТАЛИ
+
+Абзац вище описує, як рядок міняє вирок, і мовчить про випадок, який стався
+насправді: рядок лишився не тому, що механізм забули, а тому, що **забули
+рядок**. Дев'ять із шістнадцяти тверджень описували день, коли їх написали.
+
+**Правило, якого бракувало:**
+
+1. Перед тим як послатися на будь-який рядок цього файла — **один `git grep`
+   на його символ**. Не на кількість збігів: відніми оголошення, реалізацію,
+   реєстрацію в DI і коментарі. Збіг `git grep` ≠ виклик.
+2. Кожне твердження мусить нести `файл:рядок`, за яким його можна спростувати
+   за хвилину. Твердження без посилання прирівнюється до відсутнього.
+3. Хибне твердження **перекреслюється з датою і поправкою**, а не видаляється:
+   слід того, як воно обдурило, дорожчий за чисту сторінку (`CLAUDE.md`,
+   «файл, що вводить в оману, шкідливіший за відсутній»).
+4. Перевірка всього файла — при кожному закритті кроку директиви, а не при
+   кожному зверненні до нього.
+
+⛔ Урок ширший за реєстр і збігається з тим, що `CLAUDE.md` уже записав про
+Playwright: **перевірка, яку не ганяють, не просто не ловить дефектів — вона
+сама тихо гниє.** Реєстр недосяжних механізмів — теж перевірка, просто
+ручна; звільнення від сторожа не було звільненням від прогону.
