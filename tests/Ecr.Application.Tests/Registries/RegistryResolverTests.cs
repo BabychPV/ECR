@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Registries/RegistryResolverTests.cs
+// tests/Ecr.Application.Tests/Registries/RegistryResolverTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -211,7 +211,7 @@ public sealed class RegistryResolverTests
 
         Assert.Equal("ECR-REG-0409", error.ErrorCode);
         Assert.NotNull(error.Details);
-        Assert.Equal("err.ECR-REG-0409", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REG-0409.entryCodeTaken", error.Details!["messageKey"]);
         Assert.Equal("PERMIT_A", error.Details["code"]);
     }
 

@@ -72,7 +72,7 @@ public sealed class EcrCodeTests
             () => EcrCode.Create("bad code"));
 
         Assert.NotNull(exception.Details);
-        Assert.Equal("err.ECR-CFG-0422", exception.Details!["messageKey"]);
+        Assert.Equal("err.ECR-CFG-0422.invalidCode", exception.Details!["messageKey"]);
         Assert.Equal("bad code", exception.Details["code"]);
     }
 }

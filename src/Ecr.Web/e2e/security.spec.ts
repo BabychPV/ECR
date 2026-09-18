@@ -73,6 +73,10 @@ test.describe('Гранти на /admin/security діють на сесію оп
     // (не прибирає геть — GetDocumentHandler ховає документ ЦІЛКОМ нижче
     // Read, а сценарій має довести саме поріг Write, не видимість документа).
     await signIn(page, Admin.user, Admin.password);
+
+    // ⛔ І передумова, якої тут бракувало: аркуш має бути РЕДАГОВАНИМ.
+    await makeSheetEditable(page);
+
     await openGrantsFor(page, OperatorRole);
     await removeAllGrantRows(page);
     await addGrant(page, { resourceId: 1, level: 'Read' });
@@ -240,6 +244,67 @@ async function saveGrants(page: Page): Promise<void> {
     page.getByText('Access updated; affected sessions revalidate immediately.'),
     'сервер не підтвердив збереження гранта',
   ).toBeVisible({ timeout: 15_000 });
+}
+
+/**
+ * Повертає аркуш документа в стан, у якому в нього взагалі можна писати.
+ *
+ * ⛔ ЗВ'ЯЗАНІСТЬ ЧЕРЕЗ СПІЛЬНИЙ ДОКУМЕНТ — і саме вона робила цей файл
+ * єдиним червоним із двадцяти. Стенд заводить ОДИН документ
+ * (`tools/e2e-stand.ps1`: `setup-dev-db.ps1 -Documents 1`) з одним аркушем
+ * (`Ecr.DataGen/Program.cs`), а прогони йдуть в одному робітнику за
+ * алфавітом файлів — і `keyboardPath.spec.ts`, який іде раніше, доводить той
+ * самий аркуш до `Approved` (його кроки 9 і 10 — «подати» і «затвердити», в
+ * цьому й полягає той сценарій). Затверджений аркуш не редагується
+ * (`ФВ-5.20a`, `isEditable` у `features/workflow/SheetActions.tsx`), тому
+ * `DocumentGrid.onPaste` виходить ПЕРШИМ ЖЕ рядком (`readOnly`) — і вставка
+ * не давала ані модалки відмови, ані збереження. Обидві перевірки цього
+ * файла (`expectPasteDenied`, `expectPasteAccepted`) падали, доводячи не те,
+ * про що вони: не про грант, а про стан аркуша.
+ *
+ * ⛔ Лікуємо не порядком файлів. Порядок — це домовленість, яку ламає перший
+ * же перейменований файл, і ламає мовчки. Сценарій сам встановлює свою
+ * передумову: він про ПОРІГ `Write` у `EditRules.CanEdit`, тож усе, що не
+ * поріг, має бути приведене до відомого стану ним самим, а не успадковане
+ * від сусіда.
+ *
+ * ⚠ Повернення в роботу — законна дія адміністратора з правом
+ * `Document.Reopen` (`ReopenDocumentHandler` → `Draft`, `ФВ-5.20a`), а не
+ * чорний хід: той самий шлях, той самий діалог із причиною, що й у людини.
+ *
+ * ⚠ Виклик ідемпотентний: аркуш уже в `Draft` (наприклад, цей файл прогнали
+ * окремо через `--grep`) — функція нічого не робить.
+ */
+async function makeSheetEditable(page: Page): Promise<void> {
+  await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+  await expect(page.getByRole('heading').first(), 'документ не відрендерився').toBeVisible({
+    timeout: 30_000,
+  });
+
+  // ⚠ Стан читається з бейджа активної вкладки (`DocumentPage.tsx`,
+  // `document.sheetStates`) — це сирий рядок стану сервера, не переклад.
+  const activeTab = page.getByRole('tab', { selected: true });
+  await expect(activeTab, 'у документа немає жодного аркуша').toBeVisible({ timeout: 30_000 });
+
+  const state = (await activeTab.textContent()) ?? '';
+  if (!/Submitted|Approved/.test(state)) return;
+
+  const reopen = page.getByRole('button', { name: /Return for edits|Повернути/i }).first();
+  await expect(reopen, 'у шапці немає кнопки повернення в роботу').toBeVisible({
+    timeout: 10_000,
+  });
+  await reopen.click();
+
+  // ⚠ Причина обов'язкова в домені (`ECR-DOC-0422`) — і кнопка підтвердження
+  // вимкнена, доки поле порожнє (`ReasonModal.tsx`).
+  const dialog = page.getByRole('dialog');
+  await expect(dialog, 'діалог причини не відкрився').toBeVisible({ timeout: 10_000 });
+  await dialog.getByRole('textbox', { name: /Reason|Причина/i }).fill('e2e: перевірка гранта');
+  await dialog.getByRole('button', { name: /Return for edits|Повернути/i }).click();
+
+  await expect(activeTab, 'аркуш не повернувся в Draft').toContainText('Draft', {
+    timeout: 15_000,
+  });
 }
 
 /** Відкриває документ стенда на потрібному періоді. */

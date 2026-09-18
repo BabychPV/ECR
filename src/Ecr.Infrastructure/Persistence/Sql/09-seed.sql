@@ -365,21 +365,47 @@ USING (VALUES
     -- речення резолвить ExceptionHandlingMiddleware.LocalizedDetailAsync.
     -- Приватна область: код валідується лише на автентифікованих
     -- адмін-екранах (роль, проєкт, шаблон, довідник, методологія).
-    (N'err.ECR-CFG-0422',  N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.', 1),
+    -- ⛔ Сім ключів нижче були ОДНИМИ І ТИМИ САМИМИ для заголовка й подробиці,
+    -- і саме тому містили плейсхолдер. `LocalizedTitleAsync` підстановок не
+    -- робить — заголовком плашки їхав сирий `{code}`, а другим рядком те саме
+    -- речення вдруге, уже з підставленим значенням. Тепер речення живе на
+    -- суфіксованому ключі (`err.<код>.<що саме>`, як для `ECR-TMPL-4227` і
+    -- `ECR-DOC-0404`), а під `err.<код>` лишилася коротка називна фраза.
+    -- ⚠ Перейменування ключа тут НЕ самодостатнє: кожен із семи названий у
+    -- `Details["messageKey"]` конкретного кидка в `src/`, і обидві половини
+    -- правляться разом. Розрив між ними тепер червонить
+    -- `ErrorTitleCatalogTests.Кожен_messageKey_із_коду_заведено_в_сіді`.
+    (N'err.ECR-CFG-0422',  N'en', N'Invalid code', 1),
+    (N'err.ECR-CFG-0422.invalidCode', N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.', 1),
+    -- ⛔ `StyleDef.SetAppearance` кидав `err.ECR-CFG-0422.styleAlign`, якого в
+    -- сіді НЕ БУЛО ЖОДНОГО РАЗУ, тож подробиця падала на український фолбек
+    -- незалежно від мови інтерфейсу. Знайшов це новий сторож
+    -- `Кожен_messageKey_із_коду_заведено_в_сіді` — дефект був невидимий саме
+    -- тому, що незаведений ключ нічого не ламає. Ключів два, а не один:
+    -- горизонталь має діапазон 0..3, вертикаль 0..2, і один спільний текст
+    -- назвав би хибний діапазон половині випадків.
+    (N'err.ECR-CFG-0422.horizontalAlign', N'en', N'Horizontal alignment {value} is unknown: 0..3 (Left/Center/Right/Justify).', 1),
+    (N'err.ECR-CFG-0422.verticalAlign',   N'en', N'Vertical alignment {value} is unknown: 0..2 (Top/Center/Bottom).', 1),
     -- ⛔ Q-30x: чотири варіанти «код/ім'я вже зайняте», кожен — своя сутність
     -- (роль/проєкт/довідниковий запис/користувач), кожен свій messageKey,
     -- усі приватної області (лише автентифіковані адмін-екрани).
-    (N'err.ECR-SEC-0409',  N'en', N'A role with code "{code}" already exists.', 1),
-    (N'err.ECR-PRJ-0409',  N'en', N'A project with code "{code}" already exists.', 1),
-    (N'err.ECR-REG-0409',  N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
-    (N'err.ECR-USR-0409',  N'en', N'A user named "{userName}" already exists.', 1),
+    (N'err.ECR-SEC-0409',  N'en', N'Role code already in use', 1),
+    (N'err.ECR-SEC-0409.roleCodeTaken', N'en', N'A role with code "{code}" already exists.', 1),
+    (N'err.ECR-PRJ-0409',  N'en', N'Project code already in use', 1),
+    (N'err.ECR-PRJ-0409.projectCodeTaken', N'en', N'A project with code "{code}" already exists.', 1),
+    (N'err.ECR-REG-0409',  N'en', N'Registry entry code already in use', 1),
+    (N'err.ECR-REG-0409.entryCodeTaken', N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
+    (N'err.ECR-USR-0409',  N'en', N'User name already in use', 1),
+    (N'err.ECR-USR-0409.userNameTaken', N'en', N'A user named "{userName}" already exists.', 1),
     -- ⛔ Аудит-пас 4: ще шість джерел, той самий клас дефекту (Q-303/Q-304)
     -- — готове українське речення доходило до клієнта незалежно від мови.
-    (N'err.ECR-REG-4091',  N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.', 1),
+    (N'err.ECR-REG-4091',  N'en', N'Registry code already in use', 1),
+    (N'err.ECR-REG-4091.registryCodeTaken', N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.', 1),
     -- ⛔ UI-аудит, lane 4: заведення одиниці виміру не мало жодного шляху,
     -- доступного людині — той самий клас дефекту, що вже виправлений для
     -- довідників (`Q-200`).
-    (N'err.ECR-UOM-4091',  N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
+    (N'err.ECR-UOM-4091',  N'en', N'Unit code already in use', 1),
+    (N'err.ECR-UOM-4091.unitCodeTaken', N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),

@@ -72,7 +72,7 @@ public sealed class CreateUnitHandler(
                 $"Одиниця «{unitCode.Value}» уже існує (ідентифікатор {clash.Id}).",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-UOM-4091",
+                    ["messageKey"] = "err.ECR-UOM-4091.unitCodeTaken",
                     ["code"] = unitCode.Value,
                     ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
