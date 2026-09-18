@@ -1,11 +1,12 @@
-import type { JSX } from 'react';
-import { Stack, Text } from '@mantine/core';
+import { useEffect, useRef, useState, type JSX } from 'react';
+import { Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { DocumentGrid } from './DocumentGrid';
 
 /**
- * Усі таблиці активного аркуша — ОДНИМ лінивим елементом.
+ * Усі таблиці активного аркуша — ОДНИМ лінивим елементом, сітки монтуються
+ * за прокруткою.
  *
  * ⛔ Цей модуль існує заради однієї межі: усе, що тягне ядро `RevoGrid`,
  * лежить ЗА виразом `import()` у `DocumentPage.tsx` — отже в окремому чанку,
@@ -13,7 +14,7 @@ import { DocumentGrid } from './DocumentGrid';
  * `<Suspense>`. Обидві половини цього речення куплені вимірюванням, не
  * смаком.
  *
- * ⛔ ЩО ЛАМАЛОСЯ. `DocumentPage` малював `<Suspense>`, а всередині —
+ * ⛔ ЩО ЛАМАЛОСЯ (#295). `DocumentPage` малював `<Suspense>`, а всередині —
  * `active.tables.map(...)` з ЛІНИВИМ `DocumentGrid`. На документі чинного
  * розміру (91 таблиця на аркуші — `Ecr.DataGen/DistributionProfile.cs`:
  * `TablesPerDocument = 90` плюс контрольна таблиця гейта; числа зняті з
@@ -39,29 +40,46 @@ import { DocumentGrid } from './DocumentGrid';
  * ефект — 5 с; `lazy` з ОДНИМ елементом `SheetTables`, усередині якого ті
  * самі 91 сітка, — знову ніколи.
  *
- * ⛔ ЯК ЦЕ ВИГЛЯДАЛО ЗСЕРЕДИНИ (зонд у самому компоненті): цикл «змонтувати
- * → перерендерити → викинути → змонтувати наново», ~1400 рендерів на
- * секунду, ~17 500 на кожну з ПЕРШИХ П'ЯТИ таблиць — шоста не рендерилася
- * жодного разу. Головний потік при цьому ВІЛЬНИЙ, `DocumentPage`
- * рендериться всього 3 рази, і жодного `GET /documents/{id}/tables/{id}` не
- * йде: `useQuery` усередині сітки не доживає до фіксації. Оператор бачив 91
- * заглушку й нічого більше.
+ * ⛔ ЩО ДОДАЄ ЦЯ ВЕРСІЯ і чому цього не досить було зробити в #295. Той
+ * пакет прибрав межу очікування — сітки з'явилися, усі 91 за 4–5 с. Але
+ * малювати 91 сітку й робити 91 запит зрізу заради екрана, на якому видно
+ * одну-дві таблиці, — марна робота, і платить за неї не лише браузер:
+ * `GET /documents/{id}/tables/{id}` — найважчий регулярний запит системи
+ * (бюджет p95 1.5 с на 500×60, `GetTableSliceHandler`). Тому `DocumentGrid`
+ * монтується лише для таблиці, що потрапила у видиму область (або близько
+ * до неї), — і лишається змонтованим назавжди.
  *
- * ⚠ Це НЕ дефект самих сіток і не питання швидкості: 91 сітка малюється за
- * 4–5 с, щойно межі очікування немає. Тому й ліки — прибрати межу, а не
- * ділити таблиці на сторінки.
+ * ⛔ РОЗМОНТОВУВАТИ ПРИ ПРОКРУТЦІ ГЕТЬ — НЕ МОЖНА, і це не питання швидкості.
+ * У `DocumentGrid` живе стан, якого немає більше ніде: незбережені правки
+ * (`pending`), підтверджені значення (`overrides`), історія Undo/Redo
+ * (`UndoStack`, ≥50 кроків — вимога `B21` §12), виділення, ширини колонок.
+ * Розмонтування викинуло б усе це мовчки, а повернення прокрутки назад
+ * коштувало б ще одного запиту зрізу.
+ *
+ * ⛔ ВИСОТА ЗАГЛУШКИ — не косметика, а умова, без якої весь механізм
+ * безглуздий. Заглушка нульової (чи довільно малої) висоти означає, що всі
+ * 91 слот схлопуються в один екран, `IntersectionObserver` бачить їх усі
+ * одразу — і монтується знову все. Тому слот кожної таблиці — і порожній, і
+ * зайнятий — тримає `minHeight` (`TableSlotMinHeight`), узгоджений із
+ * висотою самої сітки (`DocumentGrid`: `style={{ height: '70vh' }}`).
+ *
+ * ⚠ `minHeight` стоїть на слоті ЗАВЖДИ, а не лише на заглушці, і це теж
+ * куплено міркуванням про каскад: щойно змонтована сітка ще не має зрізу і
+ * малює власний скелет (`AsyncBoundary`, `skeleton="table"`, ~250 px). Якби
+ * слот у цей момент стискався з 70vh до 250 px, розмітка підтягла б наступні
+ * таблиці у видиму область — і монтування пішло б ланцюгом, тобто рівно
+ * тим, чого ця картка уникає.
+ *
+ * ⚠ Заголовок таблиці видимий ОДРАЗУ для ВСІХ таблиць, змонтованих і ні:
+ * інакше прокрутка сторінкою заглушок не має сенсу — людина не знає, повз що
+ * вона їде. Той самий заголовок малює й `DocumentPage` у стані «чанк сітки
+ * ще вантажиться», тож розмітка не стрибає між цими двома станами.
  *
  * ⚠ Бюджет збережено, і саме тому тут новий модуль, а не статичний імпорт у
  * `DocumentPage`: `RevoGrid` — 79,1 % джерел чанка сторінки, через нього
- * маршрут важив 259,2 КБ при межі 250 (`D-132`, `H-4`). Vite ріже чанк за
- * виразом `import()`, а не за тим, `lazy` його обгортає чи `then`, — тож
- * розбиття лишилося те саме.
- *
- * ⚠ Заголовки таблиць переїхали СЮДИ разом із сітками, тож поки чанк
- * вантажиться, їх не видно (раніше заглушка малювала їх сама). Ціна названа
- * свідомо: показ заголовків окремо від сіток нічого не додає — очікування те
- * саме й одне, а заглушка лишилася по одній на таблицю, тобто розмір
- * майбутньої сторінки видно й без них.
+ * маршрут важив 259,2 КБ при межі 250 (`D-132`). Vite ріже чанк за виразом
+ * `import()`, а не за тим, `lazy` його обгортає чи `then`, — тож розбиття
+ * лишилося те саме.
  */
 export interface SheetTablesProps {
   readonly documentId: number;
@@ -70,27 +88,161 @@ export interface SheetTablesProps {
   readonly tables: readonly DocumentTableDto[];
 }
 
+/**
+ * Атрибут слота таблиці: несе `tableInstanceId`.
+ *
+ * ⚠ Ідентифікатор читається З DOM, а не із замикання, бо спостерігач
+ * повідомляє про ЕЛЕМЕНТ. Тримати окрему мапу «вузол → id» означало б завести
+ * друге джерело тієї самої відповідності й стежити за його узгодженістю при
+ * кожній зміні переліку таблиць.
+ */
+export const TableSlotAttribute = 'data-table-slot';
+
+/**
+ * Зарезервована висота слота таблиці.
+ *
+ * ⛔ Те саме значення, що й висота сітки в `DocumentGrid`
+ * (`style={{ height: '70vh' }}`). Розійшовшись із нею, воно зіпсує рівно те,
+ * заради чого існує: менше — і в екран влізе більше слотів, ніж таблиць
+ * поміщається насправді; більше — і між таблицями з'явиться порожнеча.
+ */
+export const TableSlotMinHeight = '70vh';
+
+/**
+ * Наскільки раніше за появу в екрані монтувати сітку.
+ *
+ * ⚠ Не нуль: зріз таблиці приходить не миттєво (бюджет p95 1.5 с), і
+ * монтування рівно в мить появи означало б, що людина завжди бачить спершу
+ * скелет. Запас у 200 px — приблизно третина екрана — дає сітці почати
+ * запит, доки слот ще під згином.
+ */
+export const MountAheadMargin = '200px 0px';
+
 export function SheetTables({
   documentId,
   periodKey,
   readOnly,
   tables,
 }: SheetTablesProps): JSX.Element {
+  /**
+   * Екземпляри таблиць, чиї сітки вже змонтовані.
+   *
+   * ⚠ Множина тільки РОСТЕ — див. заборону розмонтовувати в коментарі
+   * компонента. Перемикання аркуша міняє самі `tableInstanceId`, тож
+   * ідентифікатори попереднього аркуша нікому не заважають: вони просто
+   * більше не згадуються.
+   */
+  const [mounted, setMounted] = useState<ReadonlySet<number>>(() => new Set<number>());
+
+  /** Вузли слотів; заповнює React під час фіксації, ДО ефекту нижче. */
+  const slots = useRef(new Map<number, HTMLDivElement>());
+
+  useEffect(() => {
+    /*
+     * ⚠ Немає `IntersectionObserver` (дуже старий браузер) — монтуємо все, як
+     * робив #295. Це свідома деградація до ПОПЕРЕДНЬОЇ, робочої поведінки, а
+     * не до порожнього екрана: сторінка лишається придатною, просто дорогою.
+     */
+    if (typeof IntersectionObserver === 'undefined') {
+      if (tables.some((table) => !mounted.has(table.tableInstanceId))) {
+        setMounted(new Set(tables.map((table) => table.tableInstanceId)));
+      }
+
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const appeared: number[] = [];
+
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+
+          const raw = entry.target.getAttribute(TableSlotAttribute);
+          if (raw !== null) appeared.push(Number(raw));
+        }
+
+        if (appeared.length === 0) return;
+
+        setMounted((previous) => {
+          const next = new Set(previous);
+          for (const id of appeared) next.add(id);
+
+          // ⚠ Та сама множина, якщо нічого не додалося: інакше кожне
+          // спрацювання спостерігача давало б новий `Set`, новий рендер і —
+          // через залежність ефекту нижче — нового спостерігача. Цикл без
+          // кінця і без жодної видимої причини.
+          return next.size === previous.size ? previous : next;
+        });
+      },
+      { rootMargin: MountAheadMargin },
+    );
+
+    /*
+     * ⚠ Спостерігач створюється НАНОВО на кожну зміну `mounted` — і це не
+     * марнотратство, а те, що робить механізм самовідновним. Монтування
+     * змінює розмітку (скелет сітки нижчий за заглушку рівно доти, доки не
+     * прийшов зріз); новий спостерігач при першому ж такті повідомляє про
+     * ПОТОЧНИЙ перетин усіх слотів, що лишилися, — тобто сам добирає ті, які
+     * доїхали у видиму область через цей зсув. Старий, створений до зсуву,
+     * мовчав би про них до наступної прокрутки.
+     */
+    for (const table of tables) {
+      if (mounted.has(table.tableInstanceId)) continue;
+
+      const node = slots.current.get(table.tableInstanceId);
+      if (node !== undefined) observer.observe(node);
+    }
+
+    return () => observer.disconnect();
+
+    /*
+     * ⚠ `tables` тут мусить бути СТАБІЛЬНИМ між рендерами сторінки — інакше
+     * ефект перезапускається на кожен її рендер, а перше повідомлення
+     * спостерігача асинхронне, і черга «створили → знищили → створили» може
+     * не доставити його жодного разу. Тому `DocumentPage` мемоізує групування
+     * аркушів (`useMemo(groupBySheet…)`), і це не косметика там теж.
+     */
+  }, [tables, mounted]);
+
   return (
     <>
-      {tables.map((table) => (
-        <Stack key={table.tableInstanceId} gap="xs">
-          <Text fw={600}>{localized(table.tableNameL10n)}</Text>
-          <DocumentGrid
-            documentId={documentId}
-            tableInstanceId={table.tableInstanceId}
-            periodKey={periodKey}
-            readOnly={readOnly}
-            allowsDynamicRows={table.allowsDynamicRows}
-            maxDynamicRows={table.maxDynamicRows}
-          />
-        </Stack>
-      ))}
+      {tables.map((table) => {
+        const id = table.tableInstanceId;
+        const isMounted = mounted.has(id);
+
+        return (
+          <Stack
+            key={id}
+            gap="xs"
+            ref={(node: HTMLDivElement | null) => {
+              if (node === null) slots.current.delete(id);
+              else slots.current.set(id, node);
+            }}
+            data-table-slot={id}
+            data-table-mounted={isMounted}
+            // ⛔ Саме інлайновий `minHeight`, а не `mih` Mantine: значення —
+            // умова роботи механізму (коментар компонента), і воно має бути
+            // видимим і перевірюваним рівно там, де записане.
+            style={{ minHeight: TableSlotMinHeight }}
+          >
+            <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+
+            {isMounted ? (
+              <DocumentGrid
+                documentId={documentId}
+                tableInstanceId={id}
+                periodKey={periodKey}
+                readOnly={readOnly}
+                allowsDynamicRows={table.allowsDynamicRows}
+                maxDynamicRows={table.maxDynamicRows}
+              />
+            ) : (
+              <Skeleton height="60vh" radius="sm" />
+            )}
+          </Stack>
+        );
+      })}
     </>
   );
 }

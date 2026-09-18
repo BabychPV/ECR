@@ -1,5 +1,5 @@
-﻿import { useEffect, useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs } from '@mantine/core';
+﻿import { useEffect, useMemo, useState, type JSX } from 'react';
+import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -216,7 +216,22 @@ export function DocumentPage(): JSX.Element {
   const shownValidation =
     (fresh?.scope === scope ? fresh.result : null) ?? lastValidation.data ?? null;
 
-  const sheets = groupBySheet(tables.data ?? []);
+  /*
+   * ⛔ `useMemo`, а не виклик на кожному рендері, — і це не мікрооптимізація.
+   * `groupBySheet` будує НОВІ масиви щоразу, а `active.tables` іде пропом у
+   * `SheetTables`, де від його ІДЕНТИЧНОСТІ залежить ефект, що заводить
+   * `IntersectionObserver`. Нестабільний проп означав би, що спостерігача
+   * знищують і створюють наново на кожен рендер сторінки (а їх тут кілька
+   * поспіль: три запити приходять у різний час), — а перше повідомлення
+   * спостерігача АСИНХРОННЕ, тож черга «створили → знищили → створили» здатна
+   * не доставити його жодного разу. Сітки не з'явилися б зовсім, і виглядало б
+   * це рівно як дефект, який закрив #295.
+   *
+   * ⚠ `tables.data` від React Query стабільний між рендерами, доки не прийшла
+   * нова відповідь, — тобто мемоізація тут справді тримає ідентичність, а не
+   * створює її видимість.
+   */
+  const sheets = useMemo(() => groupBySheet(tables.data ?? []), [tables.data]);
   const active = sheets.find((s) => s.code === sheet) ?? sheets[0];
 
   // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
@@ -349,10 +364,22 @@ export function DocumentPage(): JSX.Element {
         <ErrorAlert error={gridModule.error} onRetry={gridModule.reload} />
       )}
 
+      {/* ⚠ Заглушка чанка повторює розкладку `SheetTables`: заголовок таблиці
+          ПЛЮС смужка зарезервованої висоти. Обидва — не прикраса. Заголовок
+          робить осмисленою прокрутку по ще не завантаженій сторінці (і
+          з'являється він одразу, а не після чанка сітки), а висота слота
+          мусить збігатися з тією, яку тримає `SheetTables`
+          (`TableSlotMinHeight`), інакше поява чанка перекладає всю сторінку
+          під курсором. Числове значення тут не імпортується з модуля сітки
+          навмисно: це той самий модуль, який ця гілка й чекає, і статичний
+          імпорт із нього повернув би `RevoGrid` у чанк маршруту (`D-132`). */}
       {gridModule.error === null && gridModule.component === null && (
         <Stack gap="xs">
           {active?.tables.map((table) => (
-            <Skeleton key={table.tableInstanceId} height={240} radius="sm" />
+            <Stack key={table.tableInstanceId} gap="xs" style={{ minHeight: '70vh' }}>
+              <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+              <Skeleton height="60vh" radius="sm" />
+            </Stack>
           ))}
         </Stack>
       )}
