@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Anchor, Breadcrumbs as MantineBreadcrumbs, Skeleton, Text, UnstyledButton } from '@mantine/core';
 import type { QueryClient } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
@@ -64,13 +64,82 @@ import { routeList, type RouteHandle } from './routes';
  * цієї підписки — під час імплементації друга незалежна підписка на
  * `QueryCache` в тому самому дереві (`AppLayout`, де вже є справжній
  * `useQuery` — `useSession()`) детерміновано зациклювала рендер (RED,
- * відтворено й підтверджено видаленням саме цього виклику). Причина
- * лишається поза межами цієї картки; `useRouteTransitionFocus.ts` називає
- * прогалину прямо (заголовок вкладки не гарантовано оновлюється в ту саму
- * мить, що видимі крихти, лише на наступному з інших причин перемальовуванні).
+ * відтворено й підтверджено видаленням саме цього виклику). Причина названа
+ * нижче (`useCacheVersion`) і тепер усунена — але сам виклик у
+ * `useRouteTransitionFocus.ts` лишається відсутнім: це окрема картка.
+ *
+ * ### ✎ Livelock рендера: чому відкладення через `queueMicrotask` було
+ * ### половиною виправлення
+ *
+ * ⛔ Q-305 (вище) прибрав ПОПЕРЕДЖЕННЯ React, але не прибрав зворотний
+ * зв'язок, що його викликав, — лише переніс його на мікрозадачу. Повний
+ * цикл, відтворений на живому стенді (`tools/e2e-stand.ps1`, dev-сервер
+ * Vite, роль `e2e-admin`, маршрут `/admin/units`):
+ *
+ *   1. React починає КОНКУРЕНТНИЙ рендер піддерева маршруту й віддає
+ *      керування кожні ~5 мс (`renderRootConcurrent` → `shouldYield`).
+ *   2. Під час цього рендера кожен `useQuery`/`useMutation` сторінки
+ *      створює свій `QueryObserver` лінивим ініціалізатором
+ *      `useState(() => new Observer(...))` — тобто ПІД ЧАС рендера, —
+ *      а конструктор синхронно кличе `queryCache.notify()`.
+ *   3. Підписник нижче ставить `setVersion` у мікрозадачу. Мікрозадачі
+ *      виконуються ОДРАЗУ після поточного зрізу роботи React і ДО
+ *      наступного — тобто оновлення приходить рівно в паузу між зрізами.
+ *   4. React відкидає незавершений рендер і починає його спочатку. Крок 2
+ *      повторюється — бо ініціалізатори `useState` невиконаного рендера
+ *      виконуються знову. ПЕРЕХІД ДО 1.
+ *
+ * ⚠ Цикл розривається лише випадково — якщо піддерево встигне
+ * відрендеритися ЦІЛКОМ за один зріз. Тому дефект і виглядав як «іноді
+ * повільно»: у виробничій збірці рендер укладається в зріз завжди
+ * (виміряно: `/admin/units` — 294–426 мс, 6 прогонів із 6), а на dev-сервері
+ * (React у режимі розробки, ~на порядок повільніший) сторінка з трьома
+ * полями вводу в шапці не встигає НІКОЛИ: 6 прогонів із 6 — понад 40 с,
+ * 15 000 рендерів `RouteGuard` і ЖОДНОГО коміту (`commitRoot` не
+ * викликався). Саме це й валило `e2e/screenshots.spec.ts` на `units` під
+ * роллю `admin` — і лише під нею: оператор на `/admin/*` бачить
+ * `AccessDeniedPage` (заголовок є одразу), тож до важкого піддерева не
+ * доходить.
+ *
+ * ⛔ Виправлення — НЕ прибрати підписку (вона й далі потрібна: крихта, що
+ * застала кеш холодним, інакше довіку лишиться `Skeleton`) і НЕ «почекати
+ * довше». Підписка тепер перерендерює ЛИШЕ тоді, коли змінилося те, що
+ * крихти реально показують (`crumbSignature`). Подія «з'явився спостерігач
+ * чужого запиту» крихт не змінює — і рендер більше не переривається.
  */
-function useCacheVersion(queryClient: QueryClient): void {
+function crumbSignature(chain: readonly CrumbEntry[]): string {
+  // ⚠ Розділювачі — недруковані символи: назва довідника чи версії приходить
+  // із бази, і будь-який звичайний роздільник (`|`, `::`) у ній зустрічається
+  // легально. Збіг відбитків для РІЗНИХ ланцюжків означав би пропущене
+  // оновлення — тобто вічний `Skeleton` замість назви.
+  return chain
+    .map(
+      (entry) =>
+        `${entry.key}${entry.text ?? ' '}${entry.href ?? ' '}${
+          entry.current ? '1' : '0'
+        }`,
+    )
+    .join('');
+}
+
+function useCacheVersion(
+  queryClient: QueryClient,
+  matches: readonly CrumbMatch[],
+  chain: readonly CrumbEntry[],
+): void {
   const [, setVersion] = useState(0);
+
+  // ⚠ Відбиток того, що ЗАРАЗ НА ЕКРАНІ, і матчі, з яких він побудований.
+  // Пишуться в ефекті (після коміту), а не під час рендера: рендер, який
+  // React відкинув, нічого не показав, і брати його за «показане» означало б
+  // пропустити справжнє оновлення.
+  const painted = useRef<string | null>(null);
+  const currentMatches = useRef(matches);
+
+  useEffect(() => {
+    painted.current = crumbSignature(chain);
+    currentMatches.current = matches;
+  });
 
   // ⚠ Підписка живе в `useEffect`, з відпискою в поверненій функції: без неї
   // кожен новий рендер лишав би по собі ще одного підписника на `QueryCache`,
@@ -86,12 +155,25 @@ function useCacheVersion(queryClient: QueryClient): void {
     // на яку варто покладатися.
     let cancelled = false;
     const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-      // Q-305: див. пояснення над компонентом — без цього відкладення
-      // `setVersion` виконується СИНХРОННО всередині `notify()`, який сам
-      // може бути викликаний під час рендера ІНШОГО компонента (будь-який
-      // `useQuery`, що вперше монтується для нового ключа кешу).
+      // Q-305: без цього відкладення `setVersion` виконується СИНХРОННО
+      // всередині `notify()`, який сам може бути викликаний під час рендера
+      // ІНШОГО компонента (будь-який `useQuery`, що вперше монтується для
+      // нового ключа кешу).
       queueMicrotask(() => {
-        if (!cancelled) setVersion((v) => v + 1);
+        if (cancelled) return;
+
+        // ⛔ І лише тут — умова, якої бракувало (див. «Livelock рендера»
+        // вище). Читання з кешу, без жодного запиту: `buildCrumbChain`
+        // ходить виключно через `getQueryData`/`getQueryState`.
+        const next = crumbSignature(buildCrumbChain(currentMatches.current, queryClient));
+        if (next === painted.current) return;
+
+        // ⚠ Відбиток оновлюється ТУТ, а не тільки в ефекті після коміту:
+        // інакше друга така сама подія, що прийшла до коміту, замовила б
+        // другий рендер із тим самим результатом — тобто рівно той цикл, що
+        // виправляється.
+        painted.current = next;
+        setVersion((v) => v + 1);
       });
     });
     return () => {
@@ -266,9 +348,12 @@ export function Breadcrumbs(): JSX.Element | null {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
 
-  useCacheVersion(queryClient);
-
   const chain = buildCrumbChain(matches, queryClient);
+
+  // ⚠ Після `buildCrumbChain`, не перед: підписці потрібен саме той ланцюжок,
+  // який цей рендер збирається показати (умова «змінилося те, що видно»).
+  // Обидва виклики — беззастережні й до єдиного раннього `return` нижче.
+  useCacheVersion(queryClient, matches, chain);
 
   // Акцептанс: видимі на маршрутах глибиною ≥2. «Глибина» тут — кількість
   // РЕЗОЛВЛЕНИХ крихт (після `ancestorIds`), не кількість сегментів URL:
