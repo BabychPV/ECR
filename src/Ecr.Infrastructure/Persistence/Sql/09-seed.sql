@@ -414,6 +414,16 @@ USING (VALUES
     -- `auditWindowTooWide` вище (`Q-341`).
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'en', N'The page size must be between 1 and {max}.', 1),
     (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
+    -- ⚠ Збір із SQL-джерела, яке не є PI (`ФВ-11.8`, транспорт `Sql`). Усі
+    -- чотири подробиці кажуть, ЩО саме поправити: ключ налаштування, поле
+    -- Endpoint, облікові дані. «Джерело недоступне» без цього відправляє
+    -- шукати мережу навіть тоді, коли джерело просто не налаштоване.
+    (N'err.ECR-INT-0503.queryNotConfigured',    N'en', N'Source "{dataSource}" has no query configured ({settingKey}): there is nothing to collect with. The table and column names of the source belong to the customer, so there is deliberately no default.', 1),
+    (N'err.ECR-INT-0503.connectionStringBroken', N'en', N'The connection string of source "{dataSource}" cannot be parsed: fix the Endpoint field of the source.', 1),
+    (N'err.ECR-INT-0503.connectFailed',         N'en', N'The SQL source "{dataSource}" cannot be reached.', 1),
+    (N'err.ECR-INT-0503.sourceMissing',         N'en', N'Data source {dataSourceId} does not exist or is switched off: there is nothing to collect.', 1),
+    (N'err.ECR-INT-0503.sourcePathTooLong',     N'en', N'The entity path is longer than {maxLength} characters, so it cannot be sent to source "{dataSource}". A truncated path is not an error but silence: the source would answer "no such entity".', 1),
+    (N'err.ECR-INT-0502.credentialsRefused',    N'en', N'The SQL source "{dataSource}" refused the service credentials. This is not a temporary outage: the collection will not retry.', 1),
     (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
     (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)

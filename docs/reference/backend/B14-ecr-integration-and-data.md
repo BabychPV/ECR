@@ -213,9 +213,22 @@ FLERT (`Data_Lifecycle` §2.1) — зовнішня БД: часові ряди 
 У БД ECR доступ реалізований синонімами (`Utility_RebindFlertSynonyms`) і
 окремим набором RTQP-об'єктів (`PI AF/FLERT_NV_0114_PISqlClientExportedObjects.sql`).
 
-**TO-BE:** окремий `ext.DataSource(Kind = Sql, Code = 'Flert')`, свій адаптер за
+**TO-BE:** окремий `ext.DataSource(Transport = Sql, Code = 'Flert')`, свій адаптер за
 тим самим `IExternalDataSource`. Ніяких синонімів і linked server у схемі ядра.
 Це джерело **не зникає після переходу** — воно єдине постачає реальні виміри.
+
+> ✎ 2026-09-18: **зроблено.** `ExternalTransport.Sql` + проєкт
+> `Ecr.Adapters.Sql` (`SqlDataSource`), зареєстрований у `Program.cs` поруч з
+> обома транспортами PI. `Kind` виправлено на `Transport`: у моделі поле
+> одне, і другий вимір давав би комбінації на кшталт «`Kind = Sql` при
+> `Transport = PiWebApi`», яких ніщо не забороняє.
+>
+> ⚠ Запити до FLERT — **конфігурація без типового значення**
+> (`Sql:Flert:ValueQuery`, `Sql:Flert:CatalogQuery`). Імена таблиць і колонок
+> FLERT у цьому репозиторії не відомі, а вигаданий дефолт виглядав би як
+> робоче налаштування і мовчки збирав би нуль точок. Наш бік контракту
+> заданий жорстко: параметри `@path`/`@from`/`@to` (межі напіввідкриті) і
+> колонки результату `Ts`, `Val`, `Uom`, `Quality`.
 
 ---
 

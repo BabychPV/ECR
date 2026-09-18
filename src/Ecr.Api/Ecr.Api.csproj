@@ -13,6 +13,7 @@
     <ProjectReference Include="..\Ecr.Calculations\Ecr.Calculations.csproj" />
     <ProjectReference Include="..\Ecr.Adapters.Excel\Ecr.Adapters.Excel.csproj" />
     <ProjectReference Include="..\Ecr.Adapters.PiAf\Ecr.Adapters.PiAf.csproj" />
+    <ProjectReference Include="..\Ecr.Adapters.Sql\Ecr.Adapters.Sql.csproj" />
   </ItemGroup>
 
   <ItemGroup>
