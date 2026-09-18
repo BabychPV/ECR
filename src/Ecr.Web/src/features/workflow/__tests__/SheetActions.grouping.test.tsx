@@ -21,10 +21,18 @@ import { SheetActions } from '../SheetActions';
  * ТОГО САМОГО `Group`, а не власного контейнера.
  */
 
+/**
+ * ⚠ Грант на проєкт іде В ПРОФІЛЬ разом із правами (F9): робочий процес сервер
+ * закриває РІВНЕМ ГРАНТА (`EditRules.CanSubmit` — поріг `GrantLevel.Submit`),
+ * а не іменованим правом, тож без гранта кнопки «Submit» більше не буває — і
+ * цей файл, який перевіряє РОЗМІТКУ панелі, мусить спершу зробити так, щоб
+ * кнопка взагалі з'явилася. Поріг як такий доводить
+ * `SheetActions.workflowGrant.test.tsx`, не цей файл.
+ */
 function currentUser(permissions: string[]) {
   return {
     denies: [],
-    grants: {},
+    grants: { 'Project:7': 'Manage' },
     isSimulation: false,
     language: 'en',
     mustChangePassword: false,
@@ -56,6 +64,19 @@ function mockFetch(permissions: string[]): void {
 function show(permissions: string[], state: string): void {
   mockFetch(permissions);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  // ⚠ Зведення документа — у кеші під тим самим ключем, що його тримає
+  // `DocumentPage`: `SheetActions` бере звідти `projectId` для рішення про
+  // грант і не робить власного запиту.
+  client.setQueryData(['document', 1, 202601], {
+    businessKey: 'DOC-1',
+    createdAt: '2026-01-01T00:00:00Z',
+    id: 1,
+    nameL10n: null,
+    projectId: 7,
+    sheetCount: 1,
+    sheetStates: {},
+  });
 
   render(
     <MantineProvider>
