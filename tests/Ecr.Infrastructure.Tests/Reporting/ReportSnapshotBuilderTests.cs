@@ -89,8 +89,9 @@ public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
         const int draftPeriod = 202601;
         const int approvedPeriod = 202602;
 
-        await DeployViewAsync();
-
+        // ⚠ Вʼюху накочує `SqlServerFixture` (з 2026-09-18, у тій самій
+        // позиції, що й `tools/setup-dev-db.ps1`). Раніше цей тест розгортав
+        // її сам — обхід був потрібен саме тому, що фікстура скрипт пропускала.
         await using var db = CreateContext();
 
         // ⛔ ReportSnapshot.ProjectId несе реальний зовнішній ключ на
@@ -156,28 +157,6 @@ public sealed class ReportSnapshotBuilderTests(SqlServerFixture sql)
         // вʼюха.
         Assert.DoesNotContain(draftPeriod, periods);
         Assert.Contains(approvedPeriod, periods);
-    }
-
-    /// <summary>
-    /// Розгортає `rpt.v_WaterReport_v1` виконанням РЕАЛЬНОГО файлу скрипта —
-    /// не власним переказом його вмісту. `SqlServerFixture` цей скрипт не
-    /// накочує сама (він не в переліку `RunScriptAsync`), тож без цього
-    /// кроку вʼюхи в тестовій базі не існувало б узагалі.
-    /// </summary>
-    private async Task DeployViewAsync()
-    {
-        var path = Path.Combine(AppContext.BaseDirectory, "Persistence", "Sql", "05-rpt-views.sql");
-        var script = await File.ReadAllTextAsync(path).ConfigureAwait(false);
-
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        foreach (var batch in Ecr.Infrastructure.Persistence.SqlBatches.Split(script))
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = batch;
-            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-        }
     }
 
     /// <summary>Періоди, видимі крізь регуляторну вʼюху для проєкту.</summary>

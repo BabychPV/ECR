@@ -242,9 +242,24 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <item>`06` — RCSI;</item>
     /// <item>seed.</item>
     /// </list>
-    /// `05` (вʼюхи звітів) не виконується: вʼюха генерується під конкретний
-    /// звіт, а звітів у порожній базі немає. `03` і `04` виконуються з Етапу 5,
-    /// коли з'явилися `calc.*` і `arc.*`.
+    /// `03` і `04` виконуються з Етапу 5, коли з'явилися `calc.*` і `arc.*`.
+    ///
+    /// ⛔ `05` (вʼюхи звітів) ТЕПЕР виконується, а до 2026-09-18 — ні, і
+    /// причина тут стояла хибна: «вʼюха генерується під конкретний звіт, а
+    /// звітів у порожній базі немає». Вона плутає РЯДКИ з ТАБЛИЦЯМИ:
+    /// `rpt.v_WaterReport_v1` лише читає `rpt.ReportSnapshot`, `rpt.ReportRow`,
+    /// `rpt.ReportVersion`, `rpt.ReportDef` — усі чотири створюють міграції EF,
+    /// тож вʼюха будується в порожній базі без жодного звіту. Наслідок цієї
+    /// хиби видно було в коді: `ReportSnapshotBuilderTests` накочував скрипт
+    /// власним методом, обходячи фікстуру.
+    ///
+    /// ⚠ Порядок — той самий, що в `tools/setup-dev-db.ps1`. Там є сторож, що
+    /// не дає з'явитися `.sql`-файлу поза переліком; у цієї фікстури такого
+    /// сторожа немає, тож розбіжність «розгортання створює, фікстура — ні»
+    /// накопичується мовчки.
+    ///
+    /// ⚠ Контракт вʼюхи стереже `Persistence/RptContractTests.cs`
+    /// (`ФВ-10.12`, `D-53` у `docs/tz/10-decisions.md`).
     /// </remarks>
     private async Task BuildSchemaAsync()
     {
@@ -278,6 +293,12 @@ public sealed class SqlServerFixture : IAsyncLifetime
         // переглядом і застосуванням. Без неї інтеграційний тест імпорту
         // падав би не на своїй причині, а на відсутній таблиці кешу.
         await RunScriptAsync("13-cache-table.sql").ConfigureAwait(false);
+
+        // ⚠ Порядок той самий, що в `tools/setup-dev-db.ps1`: `05` після `04`
+        // і перед `10`. Розбіжність між тим, що створює розгортання, і тим, що
+        // створює фікстура, — це рівно той зазор, у якому дефект живе, доки
+        // не доїде до проду.
+        await RunScriptAsync("05-rpt-views.sql").ConfigureAwait(false);
 
         await RunScriptAsync("10-triggers.sql").ConfigureAwait(false);
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
