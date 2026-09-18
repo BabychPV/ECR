@@ -174,11 +174,12 @@ public sealed class SqlServerFixture : IAsyncLifetime
             // одному ноутбуці seed вставляється, на іншому падає.
             await ExecuteAsync(
                 connection,
-                $"CREATE DATABASE [{DatabaseName}] COLLATE Latin1_General_100_CI_AS_SC;")
+                $"CREATE DATABASE [{DatabaseName}]{FilesClause()} COLLATE Latin1_General_100_CI_AS_SC;")
                 .ConfigureAwait(false);
         }
 
         await MarkAsSmallAsync(serverConnection).ConfigureAwait(false);
+        await MarkDataPathAsync(serverConnection).ConfigureAwait(false);
 
         var target = new SqlConnectionStringBuilder(serverConnection)
         {
@@ -222,6 +223,68 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await ExecuteAsync(
             connection,
             "EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;")
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Каталог файлів тестових баз, якщо він відрізняється від типового.</summary>
+    /// <remarks>
+    /// ⛔ Типовий каталог інстансу — це диск, який обирали не під ECR. Навіть
+    /// із позначкою <c>Ecr_SmallFiles</c> кожна тестова база важить ~256 МБ, а
+    /// вони лишаються після прогону НАВМИСНЕ (щоб зазирнути після падіння):
+    /// 2026-09-18 їх накопичилося 112, тобто 32 ГБ, і диск дійшов до 0.15 ГБ
+    /// вільного з 293.
+    ///
+    /// ⚠ Наслідок був не лише «розгортання не пройшло». Вичерпаний диск
+    /// СПОТВОРЮЄ заміри: читання зрізу p95 давало 642 мс при повному диску
+    /// проти 240 мс на вільному — тобто «порушення бюджету» було артефактом
+    /// середовища, і на його пошук пішла половина дня.
+    ///
+    /// ⚠ Порожнє значення (немає диска <c>H:</c>) лишає типовий каталог —
+    /// збірка на CI від цього не змінюється.
+    /// </remarks>
+    private static string DataPath()
+        => Environment.GetEnvironmentVariable("ECR_TEST_DATA_PATH")
+           ?? (Directory.Exists("H:\\") ? "H:\\EcrData" : string.Empty);
+
+    /// <summary>Фрагмент <c>CREATE DATABASE</c> із явними файлами.</summary>
+    private string FilesClause()
+    {
+        var path = DataPath();
+        if (string.IsNullOrEmpty(path))
+        {
+            return string.Empty;
+        }
+
+        Directory.CreateDirectory(path);
+
+        return $"""
+
+            ON PRIMARY (NAME = N'{DatabaseName}', FILENAME = N'{path}\{DatabaseName}.mdf')
+            LOG ON     (NAME = N'{DatabaseName}_log', FILENAME = N'{path}\{DatabaseName}_log.ldf')
+            """;
+    }
+
+    /// <summary>Каже <c>01-filegroups.sql</c>, куди класти файли груп.</summary>
+    private async Task MarkDataPathAsync(string serverConnection)
+    {
+        var path = DataPath();
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        var target = new SqlConnectionStringBuilder(serverConnection)
+        {
+            InitialCatalog = DatabaseName,
+            TrustServerCertificate = true,
+        };
+
+        await using var connection = new SqlConnection(target.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await ExecuteAsync(
+            connection,
+            $"EXEC sys.sp_addextendedproperty @name = N'Ecr_DataPath', @value = N'{path}';")
             .ConfigureAwait(false);
     }
 

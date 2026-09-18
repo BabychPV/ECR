@@ -409,3 +409,52 @@ sqlcmd -S localhost -E -d EcrDev -Q "SELECT s.name + '.' + t.name FROM sys.table
 ⚠ `sqlcmd` тут працює лише з `-E`; без нього «Login failed». Бази
 `EcrDev`, `EcrE2E`, `EcrTest_*` лишаються після прогонів навмисно — на них
 і дивись.
+
+### ✎ 2026-09-18: диск даних SQL Server — і як він прикидається дефектом
+
+⛔ **Дані SQL Server лежать на `F:`, не на `H:` і не на `C:`.** Кожен стенд
+(`smoke.ps1`, `e2e-stand.ps1`) резервує під файлові групи **~14 ГБ**, а
+`EcrTest_*` накопичуються попри «детерміновані імена»: 2026-09-18 їх було
+**112 баз, 580 файлів, 32.3 ГБ**, і диск дійшов до **0.15 ГБ вільного з 293**.
+
+**Як це виглядає, коли місця немає** — і чому це найдорожчий різновид
+поломки:
+
+```
+e2e-stand: крок 1 — розгортання не пройшло
+sqlcmd повернув 1 на …\Sql\01-filegroups.sql
+```
+
+Причина ховалася за `| Out-Null` у `setup-dev-db.ps1`; насправді там було
+`Msg 5149 … operating system error 112 (There is not enough space on the
+disk.)`. Тепер скрипт друкує останні рядки виводу при ненульовому коді.
+
+⛔ **Але наслідок був гірший за нечитабельну відмову.** Під вичерпаним диском
+падає не лише розгортання: `keyboardPath.spec.ts` тричі поспіль давав
+«кільце фокуса невидиме — різниця 0.00 %», і це виглядало як **детермінована
+залежність від порядку наборів** (кожен набір окремо проходив, разом —
+падали). Після звільнення диска той самий набір дав 21/21. Зонд усередині
+виміру показував `matches=true outline=2px/solid` — тобто кільце було
+намальоване, а ламався сам знімок.
+
+⚠ Урок, ширший за цей запис: **«падає стабільно» ще не означає «падає з тієї
+причини, яку я перевіряю»**. Перш ніж будувати гіпотезу про зв'язаність
+тестів — подивись на середовище:
+
+```powershell
+Get-PSDrive -Name F | Select-Object @{n='вільно_ГБ';e={[math]::Round($_.Free/1GB,1)}}
+sqlcmd -S localhost -E -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.databases WHERE name LIKE 'EcrTest[_]%';" -h -1
+```
+
+Прибирання (бази відтворює `SqlServerFixture` сама, нічого цінного в них
+немає):
+
+```powershell
+$n = sqlcmd -S localhost -E -Q "SET NOCOUNT ON; SELECT name FROM sys.databases WHERE name LIKE 'EcrTest[_]%';" -h -1 -W | Where-Object { $_.Trim() }
+foreach ($d in $n) { sqlcmd -S localhost -E -Q "ALTER DATABASE [$($d.Trim())] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$($d.Trim())];" }
+```
+
+⚠ `gh pr merge --delete-branch` **калічить worktree**, якщо той зайнятий:
+2026-09-18 він лишив каталог без `src/` і без `.git`, і три прогони підряд
+падали «розгортання не пройшло» вже з цієї причини. Спершу
+`git worktree remove`, потім мерж.
