@@ -405,6 +405,16 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryDefDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Та сама родина, і арм з'явився разом із маршрутом
+        // `DELETE /registries/{code}/entries/{id}` (директива №15, BE-01):
+        // доти `ECR-REG-0409` не доїжджав до HTTP узагалі — обробник існував,
+        // кликати його не було звідки. «На запис посилаються N комірок» — це
+        // конфлікт стану, а не невірні дані запиту: повторювати запит марно,
+        // треба закрити запис датою. Клієнт, що дивиться на статус раніше за
+        // код, показав би «перевірте введене» там, де вводити нічого.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryEntryInUse =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // Той самий клас, що й `ECR-RPT-4091` вище: код політики періодів —
         // адреса вибору у формі створення проєкту (T6/#37), і дублікат має
         // читатися як «цей код зайнятий», а не як помилка введення.
