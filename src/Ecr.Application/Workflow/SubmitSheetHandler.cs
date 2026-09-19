@@ -50,7 +50,9 @@ public sealed class SubmitSheetHandler(
     public async Task HandleAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
     {
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не може подавати аркуші.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може подавати аркуші.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var key = new PeriodKey(periodKey);
 
@@ -82,7 +84,12 @@ public sealed class SubmitSheetHandler(
             throw new AccessDeniedException(
                 "ECR-ACCS-0403",
                 $"Подання аркуша {sheetDefId} відхилено: {decision.Reason}.",
-                new Dictionary<string, object?> { ["reason"] = decision.Reason.ToString() });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.submitDenied",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = decision.Reason.ToString(),
+                });
         }
 
         // ⚠ Рядки з IsOrphaned блокують подання (ФВ-8.13). До Етапу 4 прапорець
@@ -98,7 +105,12 @@ public sealed class SubmitSheetHandler(
             throw new BusinessRuleException(
                 "ECR-SUB-4221",
                 $"Подання неможливе: рядків із втраченим посиланням на реєстр — {orphaned.Count}.",
-                new Dictionary<string, object?> { ["rowIds"] = orphaned });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SUB-4221.orphanedRows",
+                    ["rowCount"] = orphaned.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["rowIds"] = orphaned,
+                });
         }
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
@@ -170,6 +182,8 @@ public sealed class SubmitSheetHandler(
                 $"Подання неможливе: блокувальних помилок валідації — {blocking.Count}.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-SUB-4221.validationBlocked",
+                    ["messageCount"] = blocking.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["messages"] = blocking
                         .Select(m => new { m.RuleCode, m.Message, m.RowKey, m.ColumnCode })
                         .ToList(),

@@ -36,7 +36,12 @@ public sealed class GetPeriodCalendarHandler(
         // обіцяв 422 цифрами і віддавав 404 конвеєром (`P-25`, рядок 4).
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException(
-                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
+                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
+                          new Dictionary<string, object?>
+                          {
+                              ["messageKey"] = "err.ECR-PRJ-0404.project",
+                              ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                          });
 
         // ⛔ Q-246: `Document.View` — глобальне право «працює з документами
         // взагалі», не «бачить кожен проєкт» (саме тому `ListProjectsHandler`
@@ -49,7 +54,12 @@ public sealed class GetPeriodCalendarHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);

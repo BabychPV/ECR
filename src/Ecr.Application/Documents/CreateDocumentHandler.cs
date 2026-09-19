@@ -56,12 +56,18 @@ public sealed class CreateDocumentHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Write)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта на запис у проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта на запис у проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectWriteGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може створювати документи.");
+                         "ECR-AUTH-0401", "Анонімний запит не може створювати документи.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var known = snapshot.Sheets.Select(s => s.Id).ToHashSet();
@@ -72,7 +78,11 @@ public sealed class CreateDocumentHandler(
             throw new BusinessRuleException(
                 "ECR-DOC-0422",
                 "Склад документа містить аркуші, яких немає у версії шаблону.",
-                new Dictionary<string, object?> { ["sheetDefIds"] = unknown });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0422.unknownSheets",
+                    ["sheetDefIds"] = unknown,
+                });
         }
 
         // ⚠ Склад перевіряється за SheetGroupRule: RequiresAll / RequiresOne /
@@ -87,7 +97,11 @@ public sealed class CreateDocumentHandler(
             throw new BusinessRuleException(
                 "ECR-DOC-0422",
                 "Склад документа порушує правила груп аркушів.",
-                new Dictionary<string, object?> { ["violations"] = violations });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0422.sheetGroupRules",
+                    ["violations"] = violations,
+                });
         }
 
         var now = clock.UtcNow;

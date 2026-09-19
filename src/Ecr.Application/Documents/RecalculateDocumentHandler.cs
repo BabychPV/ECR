@@ -80,7 +80,13 @@ public sealed class RecalculateDocumentHandler(
         if (!read.IsAllowed)
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         // ⛔ Q-331: аркуш мусить входити в СКЛАД документа — той самий гейт,

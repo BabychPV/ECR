@@ -40,7 +40,8 @@ public sealed class GetCurrentUserHandler(IAccessDecisionService access, ICurren
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Сесія не містить користувача.");
+                         "ECR-AUTH-0401", "Сесія не містить користувача.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 

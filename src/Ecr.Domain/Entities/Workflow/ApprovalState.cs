@@ -60,12 +60,19 @@ public sealed class ApprovalState : Entity<long>
         {
             throw new DomainException(
                 "ECR-DOC-0409",
-                $"Відкривати можна лише поданий або затверджений аркуш; поточний стан — {Status}.");
+                $"Відкривати можна лише поданий або затверджений аркуш; поточний стан — {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.reopenWrongState",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         if (string.IsNullOrWhiteSpace(reason))
         {
-            throw new DomainException("ECR-DOC-0422", "Причина повернення в роботу обов'язкова.");
+            throw new DomainException(
+                "ECR-DOC-0422", "Причина повернення в роботу обов'язкова.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0422.reopenReasonRequired" });
         }
 
         Status = DocumentStatus.Draft;
@@ -104,7 +111,12 @@ public sealed class ApprovalState : Entity<long>
         {
             throw new DomainException(
                 "ECR-DOC-0409",
-                $"Подати можна лише чернетку або відхилений аркуш; поточний стан — {Status}.");
+                $"Подати можна лише чернетку або відхилений аркуш; поточний стан — {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.submitWrongState",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         Status = DocumentStatus.Submitted;
@@ -124,7 +136,12 @@ public sealed class ApprovalState : Entity<long>
         {
             throw new DomainException(
                 "ECR-DOC-0409",
-                $"Затверджувати можна лише поданий аркуш; поточний стан — {Status}.");
+                $"Затверджувати можна лише поданий аркуш; поточний стан — {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.approveWrongState",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         Status = DocumentStatus.Approved;
@@ -159,7 +176,12 @@ public sealed class ApprovalState : Entity<long>
         {
             throw new DomainException(
                 "ECR-DOC-0409",
-                $"Затверджувати можна лише поданий аркуш; поточний стан — {Status}.");
+                $"Затверджувати можна лише поданий аркуш; поточний стан — {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.approveWrongState",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         if (nextStepId is { } next)
@@ -184,14 +206,21 @@ public sealed class ApprovalState : Entity<long>
         {
             throw new DomainException(
                 "ECR-DOC-0409",
-                $"Відхилити можна лише поданий аркуш; поточний стан — {Status}.");
+                $"Відхилити можна лише поданий аркуш; поточний стан — {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.rejectWrongState",
+                    ["status"] = Status.ToString(),
+                });
         }
 
         // ⚠ Коментар обов'язковий: відхилення без пояснення повертає роботу
         // тому, хто не знає, що виправляти, — і цикл повторюється.
         if (string.IsNullOrWhiteSpace(comment))
         {
-            throw new DomainException("ECR-DOC-0422", "Коментар при відхиленні обов'язковий.");
+            throw new DomainException(
+                "ECR-DOC-0422", "Коментар при відхиленні обов'язковий.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0422.rejectCommentRequired" });
         }
 
         Status = DocumentStatus.Rejected;

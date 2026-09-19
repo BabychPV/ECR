@@ -139,6 +139,71 @@ public sealed partial class MessageKeyRatchetTests
     }
 
     /// <summary>
+    /// Кожен <c>{плейсхолдер}</c> шаблону з сіду названий полем у
+    /// <c>Details</c> того кидка, що несе цей <c>messageKey</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Резолвер мовчить: підстановки немає — <c>{periodKey}</c> так і їде
+    /// користувачеві фігурними дужками. Сторож ловить розбіжність ІМЕН (одруківка,
+    /// перейменований плейсхолдер). ТИП значення (резолвер бере лише
+    /// <c>string</c>) із тексту джерела не встановити — його стережуть прогони
+    /// справжніх кидків крізь конвеєр (<c>MainPathLocalizedErrorTests</c>).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожен_плейсхолдер_шаблону_має_підстановку_в_кидку()
+    {
+        var seed = File.ReadAllText(Path.Combine(
+            SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
+
+        var templates = SeedTemplate().Matches(seed).ToDictionary(
+            m => m.Groups[1].Value, m => m.Groups[2].Value, StringComparer.Ordinal);
+
+        var failures = new List<string>();
+        var checkedSites = 0;
+
+        foreach (var file in SourceTree.Production())
+        {
+            foreach (Match site in ThrowSite().Matches(file.Text))
+            {
+                var arguments = ArgumentList(file.Text, site.Index + site.Length - 1);
+                var key = InlineKey().Match(arguments);
+
+                if (!key.Success || !templates.TryGetValue(key.Groups[1].Value, out var template))
+                {
+                    continue;
+                }
+
+                checkedSites++;
+
+                failures.AddRange(
+                    from Match placeholder in Placeholder().Matches(template)
+                    let name = placeholder.Groups[1].Value
+                    where !arguments.Contains($"[\"{name}\"]", StringComparison.Ordinal)
+                    let line = file.Text.Take(site.Index).Count(c => c == '\n') + 1
+                    select $"{file.Path}:{line}: шаблон {key.Groups[1].Value} чекає {{{name}}}, "
+                           + $"а поля [\"{name}\"] у Details кидка немає — користувач побачить фігурні дужки.");
+            }
+        }
+
+        // ⛔ Регулярка, що перестала збігатися, дала б нуль перевірок і ЗЕЛЕНЕ.
+        Assert.NotEqual(0, checkedSites);
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    }
+
+    /// <summary>Рядок сіду <c>(N'err.…', N'en', N'шаблон', 0|1)</c>.</summary>
+    [GeneratedRegex(@"\(\s*N'(err\.[^']+)'\s*,\s*N'en'\s*,\s*N'((?:[^']|'')*)'\s*,\s*[01]\s*\)")]
+    private static partial Regex SeedTemplate();
+
+    /// <summary>Ключ, названий літералом прямо в <c>Details</c> кидка.</summary>
+    [GeneratedRegex(@"\[""messageKey""\]\s*=\s*""(err\.[^""]+)""")]
+    private static partial Regex InlineKey();
+
+    [GeneratedRegex(@"\{([A-Za-z_]\w*)\}")]
+    private static partial Regex Placeholder();
+
+    /// <summary>
     /// Кидки 4xx без <c>messageKey</c>: шлях файлу → номери рядків.
     /// </summary>
     private static Dictionary<string, List<int>> Unkeyed()

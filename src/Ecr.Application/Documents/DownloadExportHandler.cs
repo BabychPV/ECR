@@ -74,7 +74,13 @@ public sealed class DownloadExportHandler(
         if (!read.IsAllowed)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {book.DocumentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {book.DocumentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = book.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         return book.Content;

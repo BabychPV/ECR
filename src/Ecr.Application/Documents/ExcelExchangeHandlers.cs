@@ -48,7 +48,13 @@ public sealed class ExportDocumentHandler(
         if (!read.IsAllowed)
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
@@ -110,7 +116,13 @@ public sealed class PreviewImportHandler(
         if (!read.IsAllowed)
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
@@ -177,7 +189,13 @@ public sealed class ApplyImportHandler(
         if (!read.IsAllowed)
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);

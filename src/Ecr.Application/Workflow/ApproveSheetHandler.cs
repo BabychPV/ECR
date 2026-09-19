@@ -29,7 +29,9 @@ public sealed class ApproveSheetHandler(
         long documentId, int sheetDefId, int periodKey, bool approved, string? reason, CancellationToken ct)
     {
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не може затверджувати.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може затверджувати.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var key = new PeriodKey(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
@@ -41,7 +43,12 @@ public sealed class ApproveSheetHandler(
             throw new AccessDeniedException(
                 "ECR-ACCS-0403",
                 $"Затвердження аркуша {sheetDefId} відхилено: {decision.Reason}.",
-                new Dictionary<string, object?> { ["reason"] = decision.Reason.ToString() });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.approveDenied",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = decision.Reason.ToString(),
+                });
         }
 
         // ⛔ `DAT-06`. Стан аркуша, запис у аудит і перерахунок статусу зрізу —
