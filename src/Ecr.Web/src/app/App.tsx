@@ -3,9 +3,8 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
-import { cssVariablesResolver } from '@/shared/theme/cssVariables';
 import { applyDensity, density } from '@/shared/theme/preferences';
-import { theme } from '@/shared/theme/theme';
+import { mantineProviderProps } from '@/shared/theme/provider';
 import { createQueryClient } from './queryClient';
 import { router } from './router';
 import { NewVersionBanner } from './staleVersion';
@@ -43,12 +42,14 @@ export function App(): JSX.Element {
      * виводить `--ecr-*` і перебиває чотири власні змінні Mantine (тло, текст,
      * приглушений текст, межа поля) — без нього токени макета лишилися б у
      * `theme.ts` і не дійшли б до жодного CSS.
+     *
+     * ⛔ Разом із темою він приходить ОДНИМ об'єктом (`mantineProviderProps`),
+     * а не двома пропами, і це не стиль: приладдя набору a11y будує власний
+     * провайдер, і коли `UI-01` додав резолвер лише сюди, два з семи гейтів
+     * почали перевіряти застосунок на дефолтних змінних Mantine. Спільний
+     * об'єкт робить таку розбіжність неможливою за побудовою.
      */
-    <MantineProvider
-      theme={theme}
-      defaultColorScheme="auto"
-      cssVariablesResolver={cssVariablesResolver}
-    >
+    <MantineProvider {...mantineProviderProps} defaultColorScheme="auto">
       <QueryClientProvider client={queryClient}>
         <Notifications position="top-right" />
 

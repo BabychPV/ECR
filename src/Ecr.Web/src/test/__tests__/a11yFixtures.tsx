@@ -5,7 +5,7 @@ import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { theme } from '@/shared/theme/theme';
+import { mantineProviderProps } from '@/shared/theme/provider';
 
 /**
  * Спільні прилади для розбитого набору перевірки доступності (`ФВ-14.16`,
@@ -25,6 +25,13 @@ import { theme } from '@/shared/theme/theme';
  * розійшлися одна з одною з часом. Перелік маршрутів і власне тіло `it.each`
  * лишаються в кожному файлі — це і є межа «спільне приладдя» / «що саме
  * перевіряється».
+ *
+ * ⛔ **Провайдер береться з `mantineProviderProps`, а не збирається тут.** До
+ * цього він збирався: `<MantineProvider theme={theme}>`. Коли `UI-01` додав
+ * `cssVariablesResolver`, той дійшов лише до `App.tsx` — і два з семи гейтів
+ * почали проганяти застосунок на дефолтних змінних Mantine, тобто перевіряти
+ * те, чого на екрані немає. Розбіжність прибрано за побудовою: новий проп
+ * провайдера фізично потрапляє в обидва місця.
  */
 export function Shell({
   children,
@@ -36,7 +43,7 @@ export function Shell({
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return (
-    <MantineProvider theme={theme} forceColorScheme={colorScheme}>
+    <MantineProvider {...mantineProviderProps} forceColorScheme={colorScheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
