@@ -115,5 +115,23 @@ public sealed class LoginGroupMatchTests
         Assert.Contains(GroupA, warning.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "P-02")]
+    [Trait("Requirement", "ФВ-6.15a")]
+    public async Task У_cookie_йдуть_лише_групи_з_призначенням_навіть_ще_нечинним()
+    {
+        // ⚠ Нечинне сьогодні призначення теж лишає групу в cookie: чинність
+        // профіль рахує на кожен запит, і підміна з завтра не чекає входу.
+        _users.GroupAssignments.Add(new GroupRoleAssignment(GroupA, "DataEntry"));
+        _users.GroupAssignments.Add(new GroupRoleAssignment(
+            GroupB, "DataEntry", ValidFrom: new DateOnly(2026, 5, 21), ValidTo: null));
+
+        var result = await Handler().HandleWindowsAsync(
+            Sid, "ivanov", "Іванов", [GroupA, "S-1-5-21-777", GroupB, GroupA], "10.0.0.1", CancellationToken.None);
+
+        Assert.Equal([GroupA, GroupB], result.GroupSids);
+    }
+
     private LoginHandler Handler() => new(_users, _hasher, _uow, _clock, _log);
 }
