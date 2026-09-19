@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryObserver, focusManager } from '@tanstack/react-query';
 import type { DocumentTableDto } from '@/api/types';
 import { queryKeys } from '@/api/queryKeys';
+import { createQueryClient } from '@/app/queryClient';
 import { applySliceCachePolicy, invalidateSlices, markSlicesStale } from '../sliceCache';
 
 /**
@@ -214,18 +213,22 @@ describe('CL-02 · політика кешу зрізів', () => {
 
   it('політику застосовано до КЛІЄНТА застосунку, а не лише оголошено', () => {
     /*
-     * ⛔ Сторож по тексту — свідомо, і причина названа: політика діє лише
-     * тоді, коли її застосували до того самого `QueryClient`, який віддає
-     * `QueryClientProvider`. Зібрати це поведінково означало б змонтувати
-     * `App` разом із роутером і всіма сторінками — а `App.tsx` у цьому
-     * пакеті й так правиться рівно одним рядком. Мутація (прибрати виклик)
-     * валить саме цей тест.
+     * ⛔ Сторож був ПО ТЕКСТУ `App.tsx` (`toContain('applySliceCachePolicy(
+     * queryClient)')`) — і причина була поважна: створення клієнта жило
+     * модульною змінною в `App.tsx`, дістати його з тесту було нічим, а
+     * монтувати `App` разом із роутером і всіма сторінками заради однієї
+     * перевірки — задорого.
+     *
+     * ⚠ Після `UI-00` клієнт створює `createQueryClient()`, і підпірка більше
+     * не потрібна: тест бере рівно той екземпляр, який отримує
+     * `QueryClientProvider`, і питає в нього САМУ політику. Текстовий сторож
+     * лишився б зеленим після перейменування виклику; цей — ні.
      */
-    // ⚠ Шлях від кореня проєкту, а не від `import.meta.url`: під jsdom той
-    // не має схеми `file:` (той самий урок, що й у `contrast.test.ts`).
-    const source = readFileSync(path.resolve(process.cwd(), 'src/app/App.tsx'), 'utf8');
+    const client = createQueryClient();
 
-    expect(source).toContain('applySliceCachePolicy(queryClient)');
+    const forSlice = client.getQueryDefaults(queryKeys.slices.one(700, PeriodKey));
+    expect(forSlice.staleTime).toBeGreaterThanOrEqual(5 * 60_000);
+    expect(forSlice.refetchOnWindowFocus).toBe(false);
   });
 
   it('свіжість зрізу — не менше п’яти хвилин, і лише для зрізів', () => {

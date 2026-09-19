@@ -85,9 +85,28 @@ public sealed class SingleFlightTests
     /// <remarks>
     /// ⚠ Попередній тест доводить злиття детерміновано, але одним потоком.
     /// Цей додає те, чого той не перевіряє: <c>ConcurrentDictionary.GetOrAdd</c>
-    /// і <see cref="Lazy{T}"/> під справжньою гонкою. Бар'єр гарантує, що всі
-    /// 50 стартували; побудова однаково не може завершитися до
-    /// <c>release</c>, тож планувальник на результат не впливає.
+    /// і <see cref="Lazy{T}"/> під справжньою гонкою.
+    /// <para>
+    /// ⛔ Попередня редакція стверджувала, що «планувальник на результат не
+    /// впливає», і це було НЕПРАВДОЮ — на CI тест упав із
+    /// <c>Expected: 1 / Actual: 50</c>, тобто злиття не сталося ЖОДНОГО разу.
+    /// Причина не в <see cref="SingleFlight{T}"/>: бар'єр <c>atGate</c>
+    /// дочікувався лише того, що всі 50 задач ПОЧАЛИ виконуватися, а
+    /// звільнення спрацьовувало, щойно стартувала ПЕРША побудова. На
+    /// навантаженому раннері пул вводить потоки поступово: перша побудова
+    /// встигала завершитися й прибрати запис зі словника ще до того, як решта
+    /// 49 доходили до <c>RunAsync</c> — і кожна будувала своє. Тест міряв
+    /// швидкість планувальника CI, а не поведінку коду.
+    /// </para>
+    /// <para>
+    /// ⚠ Тепер звільнення чекає, доки всі 50 ВВІЙДУТЬ у <c>RunAsync</c>
+    /// (<c>entered</c>), і доки запис справді один (<c>Pending == 1</c>).
+    /// Залишкове вікно назване, а не заметене: потік, витіснений між
+    /// <c>Interlocked.Increment</c> і <c>GetOrAdd</c> довше, ніж триває цикл
+    /// опитування (≥ 10 мс), збудує вдруге. Це кілька сусідніх інструкцій
+    /// проти десятків мілісекунд — на порядки вужче за попереднє «майже
+    /// гарантовано впаде під навантаженням».
+    /// </para>
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -98,6 +117,7 @@ public sealed class SingleFlightTests
         using var atGate = new CountdownEvent(Parallel);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var builds = 0;
+        var entered = 0;
 
         async Task<int> Build(CancellationToken _)
         {
@@ -106,23 +126,57 @@ public sealed class SingleFlightTests
             return 7;
         }
 
-        var tasks = Enumerable.Range(0, Parallel).Select(_ => Task.Run(async () =>
+        var tasks = Enumerable.Range(0, Parallel).Select(index => Task.Run(async () =>
         {
             atGate.Signal();
             await gate.Task.ConfigureAwait(false);
+
+            /*
+             * ⛔ Розбіг приходу — не завада тесту, а його зміст. Саме
+             * нерівномірний прихід викликачів і валив його на CI; на швидкій
+             * машині без розбігу всі 50 приходять майже одночасно, і тест
+             * зелений незалежно від того, полагоджено бар'єр чи ні. Тобто без
+             * цього рядка він не перевіряє ту умову, під якою падав.
+             *
+             * ⚠ Крок фіксований (0–98 мс), а не випадковий: відмову має бути
+             * видно однаково на кожному прогоні, інакше наступний автор
+             * побачить «іноді червоне» й піде піднімати межу.
+             */
+            await Task.Delay(index * 2).ConfigureAwait(false);
+
+            // ⚠ Лічильник ПЕРЕД викликом, а не всередині `Build`: усередину
+            // заходить лише переможець гонки, а міряти треба саме тих, хто
+            // прийшов і мав злитися з ним.
+            Interlocked.Increment(ref entered);
+
             return await flight.RunAsync("k", Build, CancellationToken.None).ConfigureAwait(false);
         })).ToArray();
 
         Assert.True(atGate.Wait(TimeSpan.FromSeconds(30)), "не всі потоки дійшли до бар'єра");
         gate.SetResult();
 
-        // Дочекатися, доки побудова справді почалася: інакше звільнення могло б
-        // випередити перший виклик, і «одна побудова» означала б «жодної».
-        for (var waited = 0; Volatile.Read(ref builds) == 0; waited++)
+        /*
+         * ⛔ Звільняти можна лише тоді, коли ВСІ викликачі вже в `RunAsync` і
+         * запис у словнику один. Звільнення «щойно почалася перша побудова»
+         * (так було) на повільному раннері випереджало решту викликачів:
+         * перша побудова завершувалася, `finally` прибирав запис, і кожен, хто
+         * прийшов потім, будував своє — 50 побудов замість однієї.
+         */
+        for (var waited = 0; Volatile.Read(ref entered) < Parallel; waited++)
+        {
+            Assert.True(waited < 3_000, "не всі викликачі дійшли до RunAsync — міряти нічого");
+            await Task.Delay(10);
+        }
+
+        for (var waited = 0; Volatile.Read(ref builds) == 0 || flight.Pending != 1; waited++)
         {
             Assert.True(waited < 3_000, "побудова так і не почалася — міряти нічого");
             await Task.Delay(10);
         }
+
+        // Санітарна перевірка ДО звільнення: 50 викликачів, запис один.
+        Assert.Equal(1, Volatile.Read(ref builds));
+        Assert.Equal(1, flight.Pending);
 
         release.SetResult();
         var results = await Task.WhenAll(tasks);

@@ -8203,12 +8203,18 @@
           "severity": {
             "description": "Рівень: `Error`, `Warning`, `Info`.",
             "type": "string"
+          },
+          "tableDefId": {
+            "description": "Таблиця, у якій знайдено зауваження.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
           "severity",
           "ruleCode",
           "message",
+          "tableDefId",
           "rowKey",
           "columnCode",
           "blocksSave"
