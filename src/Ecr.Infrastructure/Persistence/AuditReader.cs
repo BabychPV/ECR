@@ -1,4 +1,6 @@
+using System.Data;
 using System.Globalization;
+using System.Text;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Microsoft.Data.SqlClient;
@@ -15,10 +17,17 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed class AuditReader(EcrDbContext db) : IAuditReader
 {
+    /// <summary>Довжина <c>aud.CellChange.RowKey</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
+    private const int RowKeySize = 100;
+
+    /// <summary>Довжина <c>aud.CellChange.Origin</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
+    private const int OriginSize = 32;
+
     /// <inheritdoc />
     public async Task<PagedResult<CellChangeView>> ReadCellChangesAsync(
-        DateTime from, DateTime to, long? documentId, CursorRequest page, CancellationToken ct)
+        CellChangeFilter filter, CursorRequest page, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(page);
 
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
@@ -29,25 +38,76 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         // ⚠ Вікно за ChangedAt стоїть ПЕРШИМ у WHERE не заради стилю: саме воно
         // відсікає партиції. Курсор за Id додається до нього, а не замість —
         // інакше сторінка 20 читала б журнал цілком.
+        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to\n                   AND Id > @after");
+
+        // ⛔ Умова додається ЛИШЕ за наявності значення, і кожна — іменованим
+        // параметром. Правило «жодного значення в текст запиту» винятків не має
+        // (див. коментар у ReadStructureChangesAsync нижче).
+        //
+        // ⚠ Параметри рядків ТИПІЗОВАНІ разом із довжиною, а не через
+        // AddWithValue: нетипізований рядок їде як nvarchar(4000) і дає окремий
+        // план на кожну довжину значення — той самий урок, що `WR-01` у №14.
+        // Довжини взято зі схеми (`11-audit-tables.sql`: RowKey nvarchar(100),
+        // Origin nvarchar(32)), а не з пам'яті.
+        void And(string clause, string name, object value, SqlDbType type, int size = 0)
+        {
+            where.Append("\n                   AND ").Append(clause);
+
+            var parameter = command.Parameters.Add(name, type);
+            if (size > 0)
+            {
+                parameter.Size = size;
+            }
+
+            parameter.Value = value;
+        }
+
+        if (filter.DocumentId is { } documentId)
+        {
+            And("DocumentId = @documentId", "@documentId", documentId, SqlDbType.BigInt);
+        }
+
+        if (filter.RowKey is { } rowKey)
+        {
+            And("RowKey = @rowKey", "@rowKey", rowKey, SqlDbType.NVarChar, RowKeySize);
+        }
+
+        if (filter.ColumnDefId is { } columnDefId)
+        {
+            And("ColumnDefId = @columnDefId", "@columnDefId", columnDefId, SqlDbType.Int);
+        }
+
+        if (filter.ChangedByUserId is { } changedBy)
+        {
+            And("ChangedByUserId = @changedBy", "@changedBy", changedBy, SqlDbType.Int);
+        }
+
+        if (filter.Origin is { } origin)
+        {
+            And("Origin = @origin", "@origin", origin, SqlDbType.NVarChar, OriginSize);
+        }
+
+        if (filter.LateOnly)
+        {
+            // ⚠ Константа, а не параметр: значення приходить не ззовні, а з
+            // форми самого фільтра — параметризувати літерал `1` нічого не
+            // захищає і лише ховає умову від читача плану.
+            where.Append("\n                   AND IsLateEdit = 1");
+        }
+
         command.CommandText = $"""
             SELECT TOP (@take)
                    Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
                    OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit
               FROM aud.CellChange
-             WHERE ChangedAt >= @from AND ChangedAt < @to
-                   AND Id > @after
-                   {(documentId is null ? string.Empty : "AND DocumentId = @documentId")}
+             WHERE {where}
              ORDER BY Id;
             """;
 
         command.Parameters.AddWithValue("@take", page.Limit + 1);
-        command.Parameters.AddWithValue("@from", from);
-        command.Parameters.AddWithValue("@to", to);
+        command.Parameters.AddWithValue("@from", filter.From);
+        command.Parameters.AddWithValue("@to", filter.To);
         command.Parameters.AddWithValue("@after", Cursor.Decode(page.Cursor));
-        if (documentId is not null)
-        {
-            command.Parameters.AddWithValue("@documentId", documentId.Value);
-        }
 
         var rows = new List<(long Id, CellChangeView View)>();
         await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
