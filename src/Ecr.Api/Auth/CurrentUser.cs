@@ -41,7 +41,9 @@ public sealed class CurrentUser(IHttpContextAccessor accessor) : ICurrentUser
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ Читається <c>ClaimTypes.GroupSid</c> — саме те, що кладе в токен
-    /// Negotiate. У локального користувача таких заявок немає, і перелік
+    /// Negotiate. На вході це весь квиток; далі — наша cookie, куди вхід
+    /// переносить лише групи з призначеннями (<c>AuthController.SignInAsync</c>).
+    /// У локального користувача таких заявок немає, і перелік
     /// порожній: це не помилка, а нормальний стан (`P-02`).
     /// </remarks>
     public IReadOnlyList<string> GroupSids =>

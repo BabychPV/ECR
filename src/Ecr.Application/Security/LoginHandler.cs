@@ -13,8 +13,19 @@ namespace Ecr.Application.Security;
 /// <param name="DisplayName">Ім'я для показу.</param>
 /// <param name="SecurityStamp">Штамп; перевіряється на кожен запит.</param>
 /// <param name="MustChangePassword">Пароль виданий разово (ФВ-6.18).</param>
+/// <param name="GroupSids">
+/// SID груп із квитка, на які в системі Є призначення ролі, — лише вони йдуть
+/// у cookie (ФВ-6.15a). Увесь квиток (десятки–сотні SID) у cookie не влазить.
+/// ⚠ Наслідок: зміна членства в AD і ПЕРШЕ призначення на групу, якої досі
+/// не було серед призначень, діють з наступного входу користувача.
+/// </param>
 public sealed record LoginResult(
-    int UserId, string UserName, string DisplayName, string SecurityStamp, bool MustChangePassword);
+    int UserId,
+    string UserName,
+    string DisplayName,
+    string SecurityStamp,
+    bool MustChangePassword,
+    IReadOnlyList<string> GroupSids);
 
 /// <summary>
 /// Вхід локального користувача (ФВ-6.1, ФВ-6.4a).
@@ -91,7 +102,7 @@ public sealed partial class LoginHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new LoginResult(
-            user.Id, user.UserName, user.DisplayName, user.SecurityStamp, user.MustChangePassword);
+            user.Id, user.UserName, user.DisplayName, user.SecurityStamp, user.MustChangePassword, GroupSids: []);
     }
 
     /// <summary>Знаходить або заводить доменного користувача за SID (ФВ-6.2).</summary>
@@ -140,14 +151,15 @@ public sealed partial class LoginHandler(
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Windows, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        await WarnOnEmptyGroupMatchAsync(user.Id, userName, groupSids, now, ct).ConfigureAwait(false);
+        var assigned = await MatchGroupsAsync(user.Id, userName, groupSids, now, ct).ConfigureAwait(false);
 
         return new LoginResult(
-            user.Id, user.UserName, user.DisplayName, user.SecurityStamp, MustChangePassword: false);
+            user.Id, user.UserName, user.DisplayName, user.SecurityStamp, MustChangePassword: false, assigned);
     }
 
     /// <summary>
-    /// Пише <c>Warning</c>, коли жоден SID групи з квитка не дав ролі.
+    /// Відбирає SID груп із призначеннями і пише <c>Warning</c>, коли жоден
+    /// SID групи з квитка не дав ролі.
     /// </summary>
     /// <param name="userId">Обліковий запис, який щойно увійшов.</param>
     /// <param name="userName">Ім'я входу — щоб рядок журналу був адресний.</param>
@@ -177,16 +189,30 @@ public sealed partial class LoginHandler(
     /// будується тим самим набором рядків одразу після цього, тож ідеться про
     /// подвоєння того, що й так робиться раз на сесію.
     /// </remarks>
-    private async Task WarnOnEmptyGroupMatchAsync(
+    /// <returns>
+    /// SID із квитка, на які є ХОЧ ОДНЕ призначення — саме вони йдуть у cookie.
+    /// ⚠ Навмисно й нечинні: чинність профіль рахує на кожен запит
+    /// (<c>IsEffectiveOn</c>), тож підміна, що почнеться завтра, запрацює без
+    /// повторного входу, а та, що скінчилася, прав не дасть.
+    /// </returns>
+    private async Task<IReadOnlyList<string>> MatchGroupsAsync(
         int userId, string userName, IReadOnlyList<string> groupSids, DateTime now, CancellationToken ct)
     {
         var assignments = await users
             .ListAssignmentsAsync(userId, groupSids, DateOnly.FromDateTime(now), ct)
             .ConfigureAwait(false);
 
+        var assignedSids = assignments
+            .Where(a => a.PrincipalSid is not null)
+            .Select(a => a.PrincipalSid!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        IReadOnlyList<string> matched =
+            [.. groupSids.Where(assignedSids.Contains).Distinct(StringComparer.OrdinalIgnoreCase)];
+
         if (assignments.Any(a => a.IsEffective && a.PrincipalSid is not null))
         {
-            return;
+            return matched;
         }
 
         // ⚠ Порожній квиток пишеться окремим словом, а не порожнім переліком:
@@ -202,6 +228,8 @@ public sealed partial class LoginHandler(
             groupSids.Count,
             sids,
             assignments.Count(a => a.IsEffective && a.PrincipalSid is null));
+
+        return matched;
     }
 
     /// <summary>Рядок журналу про вхід без жодного збігу за групами.</summary>
