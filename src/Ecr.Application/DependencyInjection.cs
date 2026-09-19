@@ -252,6 +252,11 @@ public static class DependencyInjection
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();
 
+        // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
+        // жодного права — бо викликається до автентифікації; склад полів і
+        // причина кожного з них — у самому файлі.
+        services.AddScoped<PublicApi.GetPublicBootstrapHandler>();
+
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();
 
