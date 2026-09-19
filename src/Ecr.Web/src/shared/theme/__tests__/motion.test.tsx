@@ -4,11 +4,13 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import type { JSX } from 'react';
 import { theme } from '../theme';
+import { RouteHeadingClass } from '../routeHeading';
 import { router } from '@/app/router';
 import { routeMotionDurationMs, routeMotionEasing } from '@/app/motionTokens';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
 
 const cssWithComments = readFileSync(
   path.resolve(process.cwd(), 'src/shared/theme/motion.css'),
@@ -99,6 +101,49 @@ describe('Рух (ФВ-14.27, ФВ-14.28)', () => {
     expect(css).toContain(':focus-visible');
     expect(css).toContain('outline: 2px solid');
     expect(css).not.toMatch(/outline:\s*none/);
+  });
+
+  it(`заголовок маршруту має ТИХІШЕ кільце, а не жодного`, () => {
+    /*
+     * ⛔ Обидві половини обов'язкові, і друга — головна. Правило заведено
+     * тому, що на всіх восьми наборах знімків зі стенда навколо назви кожного
+     * екрана стояла рамка 2px фірмового кольору — і після переходу мишею
+     * теж, усупереч правилу, записаному в самому `motion.css`. Але прибрати
+     * кільце зовсім означало б, що зрячий користувач клавіатури не бачить,
+     * куди переїхав фокус, і не знає, звідки продовжиться `Tab`.
+     */
+    const rule = css.slice(css.indexOf(`.${RouteHeadingClass}:focus-visible`));
+
+    expect(rule).toMatch(/outline:\s*1px solid var\(--ecr-faint\)/);
+    expect(rule).not.toMatch(/outline:\s*none/);
+
+    // ⚠ Темна схема окремо: правило теми вище специфічніше за голий клас, і
+    // без власного рядка колір там повертався б до фірмового.
+    expect(css).toMatch(
+      new RegExp(
+        `\\[data-mantine-color-scheme='dark'\\]\\s*\\.${RouteHeadingClass}:focus-visible`,
+      ),
+    );
+  });
+
+  it('клас стоїть на заголовку, який фокусує застосунок — інакше правило нічого не фарбує', () => {
+    /*
+     * ⛔ Саме ця половина й гниє першою: правило в CSS лишається, а клас із
+     * розмітки зникає при рефакторингу — і перевірка тексту CSS цього НЕ
+     * бачить. Тому тут рендериться справжній `PageHeader`.
+     */
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <PageHeader title="Проба" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    const heading = screen.getByRole('heading', { name: 'Проба' });
+
+    expect(heading.classList.contains(RouteHeadingClass)).toBe(true);
+    expect(heading.getAttribute('tabindex')).toBe('-1');
   });
 });
 
