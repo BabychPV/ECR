@@ -59,7 +59,7 @@
 ### BE-01 · Видалення запису довідника — маршрут до наявного обробника ✔
 
 **Факт.** `DeleteRegistryEntryHandler` існує й зареєстрований
-(`RegistryAdminHandlers.cs:264-312` ✔, DI — `DependencyInjection.cs:172` ◐), але
+(`RegistryAdminHandlers.cs:286-334` ✔, DI — `DependencyInjection.cs:172` ✔), але
 в `RegistriesController.cs` немає жодного `[HttpDelete]` ✔ (пошук по
 `Controllers/`). Обробник уже робить усе правильне: право `Registry.EditData`,
 `ECR-REG-0404`, `ECR-REG-0409` з `Details["references"]`, `SoftDelete`,
