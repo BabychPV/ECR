@@ -16,7 +16,12 @@ import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
-import { buildRequest, useCellPatch, type PendingEdit } from './useCellPatch';
+import {
+  buildRequest,
+  useCellPatch,
+  useRecalculationStatus,
+  type PendingEdit,
+} from './useCellPatch';
 import { registerSliceSaver, scheduleAutosave } from './autosave';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
@@ -161,7 +166,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
 
-  const { patch, isPending, conflicts, status: saveStatus } = useCellPatch(documentId);
+  const {
+    patch,
+    isPending,
+    conflicts,
+    status: saveStatus,
+    recalculationJobId,
+  } = useCellPatch(documentId);
+
+  // ⚠ `BE-05`: стеження за перерахунком — ЛИШЕ читання стану задачі. Зріз
+  // цей хук не чіпає взагалі (ні `invalidateQueries`, ні `refetch`): саме
+  // перезапит зрізу на кожне збереження прибрали `CL-01…03`, і повертати його
+  // під виглядом «оновити обчислені колонки» не можна.
+  const recalc = useRecalculationStatus(recalculationJobId);
 
   /**
    * Додавання рядка динамічної таблиці (`ФВ-3.2`).
@@ -979,6 +996,39 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         {saveStatus === 'error' && (
           <Badge color="statusError" variant="light" role="alert" data-save-status="error">
             {t('grid.saveError')}
+          </Badge>
+        )}
+
+        {/*
+         * ⛔ `BE-05`: статус-рядок перерахунку. До ідентифікатора задачі у
+         * відповіді на `PATCH` клієнт міг лише вгадувати таймером, коли
+         * обчислені колонки оновляться, — тобто не показував нічого, і
+         * оператор не знав, чи перерахунок іще йде, чи вже впав.
+         *
+         * ⚠ Окремий індикатор, а не розширення `saveStatus`: «збережено» і
+         * «перераховано» — різні факти й різні моменти. Записано вже тоді,
+         * коли перерахунок тільки поставлено в чергу; злити їх в один напис
+         * означало б або зарано сказати «готово», або тримати «зберігається»
+         * на правці, яка давно в базі.
+         *
+         * ⚠ `unknown` (стан прочитати не вдалося) навмисно мовчить — той
+         * самий вибір, що в `ExportButton`: причина в праві на читання задачі,
+         * а не в перерахунку, і показ помилки звинуватив би його в тому, чого
+         * він не робив.
+         */}
+        {recalc.outcome === 'running' && (
+          <Text size="xs" c="dimmed" role="status" aria-live="polite" data-recalc-status="running">
+            {t('grid.recalculating')}
+          </Text>
+        )}
+        {recalc.outcome === 'succeeded' && recalc.finishedAt !== null && (
+          <Text size="xs" c="dimmed" role="status" aria-live="polite" data-recalc-status="succeeded">
+            {t('grid.recalculated', { time: recalc.finishedAt })}
+          </Text>
+        )}
+        {recalc.outcome === 'failed' && (
+          <Badge color="statusWarning" variant="light" role="alert" data-recalc-status="failed">
+            {t('grid.recalcFailed')}
           </Badge>
         )}
 

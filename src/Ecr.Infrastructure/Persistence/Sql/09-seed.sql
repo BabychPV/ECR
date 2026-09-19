@@ -665,6 +665,14 @@ USING (VALUES
     (N'grid.saving',                     N'en', N'Saving...', 1),
     (N'grid.saved',                      N'en', N'Saved', 1),
     (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    -- ⛔ `BE-05`: статус-рядок перерахунку. Запис і перерахунок — різні моменти:
+    -- комірка вже в базі, а обчислені колонки ще ні, і до появи `jobId` у
+    -- відповіді сказати про це було нічим.
+    -- ⚠ `{time}` — година й хвилина, коли ЦЕЙ екран побачив завершення:
+    -- `JobStatus` позначки часу не несе (`useCellPatch.clockLabel`).
+    (N'grid.recalculating',              N'en', N'Recalculating...', 1),
+    (N'grid.recalculated',               N'en', N'Recalculated {time}', 1),
+    (N'grid.recalcFailed',               N'en', N'Recalculation failed', 1),
     (N'grid.requiredInputBlockedTitle',  N'en', N'Cannot save: {count} required column(s) missing', 1),
     (N'grid.requiredInputWarningTitle',  N'en', N'{count} required column(s) missing (does not block saving)', 1),
     (N'grid.columnRequiredHint',         N'en', N'This column is required.', 1),
