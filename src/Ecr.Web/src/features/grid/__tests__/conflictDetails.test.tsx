@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { buildRequest, conflictTimeLabel, useCellPatch } from '../useCellPatch';
+import { formatTime } from '@/shared/format';
 import type { CellConflictDto } from '@/api/types';
 
 /**
@@ -120,15 +121,37 @@ describe('useCellPatch — подробиці конфлікту', () => {
 });
 
 describe('conflictTimeLabel', () => {
-  it('момент правки показується як ГГ:ХХ місцевого часу', () => {
-    // ⚠ Час місцевий, тому очікуване значення рахується з того самого `Date`, а
-    // не пишеться літералом: тест не має падати від зміни часового поясу
-    // машини, на якій його ганяють.
+  it('момент правки пишеться тим самим часом, що й решта екрана', () => {
     const at = new Date('2026-02-01T09:15:00Z');
-    const expected =
+
+    /*
+     * ✎ 2026-09-19. Очікуване значення складалося В ТЕСТІ тим самим способом,
+     * яким його складав продукт (`ГГ:ХХ` вручну). Такий тест дзеркалить
+     * реалізацію й тому не може побачити, що вона розходиться з рештою
+     * застосунку: під `en` кожна інша позначка часу — `2:05 PM`
+     * (`formatTime`), а ця була `14:05`.
+     */
+    expect(conflictTimeLabel('2026-02-01T09:15:00Z')).toBe(formatTime(at));
+  });
+
+  it('перевірка вище не осліпне, якщо мову набору змінять', () => {
+    /*
+     * ⛔ Передумова попереднього тесту, названа вголос. Рівність із
+     * `formatTime` ловить повернення власного `ГГ:ХХ` лише доти, доки мова
+     * набору дає ЗАПИС, ВІДМІННИЙ від двоцифрового 24-годинного (під `en` це
+     * `9:15 AM`). Якщо дефолт набору колись стане `ru` чи `kz`, обидва записи
+     * збіжаться, і той тест мовчки перестане щось доводити — тому умова
+     * перевіряється окремо й падає з поясненням, а не тихне.
+     */
+    const handRolled = (at: Date): string =>
       `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 
-    expect(conflictTimeLabel('2026-02-01T09:15:00Z')).toBe(expected);
+    const at = new Date('2026-02-01T09:15:00Z');
+
+    expect(
+      formatTime(at),
+      'мова набору дає той самий запис, що й ручний ГГ:ХХ — рівність вище стала порожньою',
+    ).not.toBe(handRolled(at));
   });
 
   it('невідомий момент лишається невідомим, а не стає «зараз»', () => {
