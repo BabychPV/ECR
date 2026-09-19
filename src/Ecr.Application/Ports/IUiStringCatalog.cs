@@ -65,7 +65,26 @@ public interface IUiStringCatalog
     /// <c>ETag</c> збігся б із першим при різному вмісті (R-B7).
     /// </remarks>
     public Task<UiStringWriteResult> SetAsync(UiStringWrite write, CancellationToken ct);
+
+    /// <summary>
+    /// «Сирі» рядки мови для адміністрування (<c>BE-13</c>): по одному запису на
+    /// кожен ключ мови за замовчуванням, переклад — **без fallback**.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий метод, а не прапорець у <see cref="GetAsync"/>: каталог для
+    /// екрана зобов'язаний підміняти відсутній переклад, а перелік для
+    /// термінолога зобов'язаний цього НЕ робити — інакше відсутній переклад
+    /// невидимий. Порожній переклад дорівнює відсутньому: саме так його читає
+    /// <c>UiStringResolver.Compose</c>, і два визначення «перекладено» розійшлися б.
+    /// </remarks>
+    public Task<IReadOnlyList<UiStringRawRow>> ListRawAsync(string languageCode, CancellationToken ct);
 }
+
+/// <summary>Рядок адміністративного переліку: оригінал і переклад як він є в базі.</summary>
+/// <param name="Key">Ключ.</param>
+/// <param name="Reference">Текст мовою за замовчуванням.</param>
+/// <param name="Value">Переклад; <c>null</c> — перекладу немає (підміни тут не буває).</param>
+public sealed record UiStringRawRow(string Key, string Reference, string? Value);
 
 /// <summary>Мова інтерфейсу з реєстру.</summary>
 /// <param name="Code">Код мови, напр. <c>en</c>.</param>
