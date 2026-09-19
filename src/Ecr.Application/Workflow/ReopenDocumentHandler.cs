@@ -38,7 +38,9 @@ public sealed class ReopenDocumentHandler(
         long documentId, int sheetDefId, int periodKey, string reason, CancellationToken ct)
     {
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не може відкривати аркуші.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може відкривати аркуші.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var key = new PeriodKey(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
@@ -48,7 +50,12 @@ public sealed class ReopenDocumentHandler(
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
-                "ECR-ACCS-0403", $"Потрібне право {Permission}.");
+                "ECR-ACCS-0403", $"Потрібне право {Permission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         // ⛔ Q-173 (аудит фази 2, авторизація). Глобальне право вище каже «ця
@@ -63,7 +70,12 @@ public sealed class ReopenDocumentHandler(
             throw new AccessDeniedException(
                 "ECR-ACCS-0403",
                 $"Повернення аркуша {sheetDefId} у роботу відхилено: {reopenDecision.Reason}.",
-                new Dictionary<string, object?> { ["reason"] = reopenDecision.Reason.ToString() });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.reopenDenied",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = reopenDecision.Reason.ToString(),
+                });
         }
 
         // ⛔ Блокування періоду, перевірка стану і запис — В ОДНІЙ транзакції
@@ -87,7 +99,12 @@ public sealed class ReopenDocumentHandler(
                 throw new BusinessRuleException(
                     "ECR-PRD-4223",
                     $"Період {periodKey} закрито: спершу відкрийте період, потім аркуш.",
-                    new Dictionary<string, object?> { ["periodState"] = period.State.ToString() });
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PRD-4223.reopenPeriodFirst",
+                        ["periodKey"] = periodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["periodState"] = period.State.ToString(),
+                    });
             }
 
             var state = await workflow

@@ -95,6 +95,7 @@ public static class PasswordChangeGate
 
         throw new BusinessRuleException(
             "ECR-PWD-0428",
-            "Пароль видано разово: доки його не змінено, доступні лише зміна пароля і вихід.");
+            "Пароль видано разово: доки його не змінено, доступні лише зміна пароля і вихід.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PWD-0428.oneTimePassword" });
     }
 }

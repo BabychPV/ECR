@@ -460,7 +460,13 @@ public sealed partial class ExceptionHandlingMiddleware(
         DomainException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
+        // ⚠ Речення стале (ФВ-6.11), але клієнтові їде з КАТАЛОГУ: українське
+        // лишається запасним і для журналу, як і в решті кидків із ключем.
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
-              "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", null),
+              "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", InternalDetails),
     };
+
+    /// <summary>Подробиця 500-ї: лише ключ каталогу, жодних даних винятку.</summary>
+    private static readonly IReadOnlyDictionary<string, object?> InternalDetails =
+        new Dictionary<string, object?> { [MessageKeyDetailName] = "err.ECR-SYS-0500.contactAdmin" };
 }

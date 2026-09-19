@@ -89,6 +89,26 @@
 (`err.ECR-DOC-0404.document`, `{documentId}`), а не заведено нові: той самий
 факт мусить читатися однаково, яким би шляхом код до нього не дійшов.
 
+## ✎ 2026-09-20: третій зріз — головні шляхи користувача, 445 → 382
+
+Рішення людини: «частина повідомлень помилок сервера досі написана
+українською — виправи це». Зріз узято не за файлом і не за кодом, а за тим, що
+людина бачить ЩОДНЯ: вхід і зміна пароля, подання / погодження / відхилення /
+повернення аркуша, створення документа й рядка, відмова в доступі до
+документа (десять однакових кидків на шляху читання, перевірки, перерахунку й
+обміну книгами), періоди (календар, поточний період, повторне відкриття).
+**63 кидки, 21 файл закрито повністю: 445 у 124 → 382 у 103.**
+
+⚠ Свідомо лишилися: `PermissionCheck` (`ECR-AUTH-0403` із полем `permission`
+уже локалізує старший точковий шлях у `ExceptionHandlingMiddleware`, ключа він
+не несе — тому в переліку стоїть, хоча українського речення клієнт не бачить);
+`RecalculateDocumentHandler` (`RecalculationWritePolicy.Explain` — речення
+вибирається за причиною, ключ мусить вибиратися так само); кидки
+`ECR-TMPL-0404` про зламаний інваріант метаданих — адресовані журналу.
+
+⚠ 500-та (`ECR-SYS-0500`) у перелік не входила й не входить, але її стале
+речення теж тепер їде з каталогу (`err.ECR-SYS-0500.contactAdmin`).
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -107,25 +127,13 @@
 | `src/Ecr.Application/Calculations/MethodologyQueryHandlers.cs` | 1 |
 | `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs` | 9 |
 | `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 6 |
-| `src/Ecr.Application/Documents/CreateDocumentHandler.cs` | 4 |
-| `src/Ecr.Application/Documents/CreateRowHandler.cs` | 5 |
-| `src/Ecr.Application/Documents/DocumentQueryHandlers.cs` | 3 |
-| `src/Ecr.Application/Documents/DownloadExportHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/ExcelExchangeHandlers.cs` | 3 |
-| `src/Ecr.Application/Documents/GetCalculationResultsHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/GetDocumentTablesHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 3 |
-| `src/Ecr.Application/Documents/GetValidationResultHandler.cs` | 1 |
+| `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
+| `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs` | 2 |
-| `src/Ecr.Application/Documents/ValidateDocumentHandler.cs` | 1 |
+| `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs` | 1 |
 | `src/Ecr.Application/Integration/IntegrationHandlers.cs` | 6 |
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
-| `src/Ecr.Application/Periods/BuildPeriodCalendarHandler.cs` | 2 |
-| `src/Ecr.Application/Periods/GetPeriodCalendarHandler.cs` | 2 |
-| `src/Ecr.Application/Periods/ReopenPeriodHandler.cs` | 5 |
-| `src/Ecr.Application/Periods/SetCurrentPeriodHandler.cs` | 3 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Projects/ProjectQueryHandlers.cs` | 15 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
@@ -137,12 +145,8 @@
 | `src/Ecr.Application/Reporting/ReportDefHandlers.cs` | 10 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
 | `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
-| `src/Ecr.Application/Security/ChangePasswordHandler.cs` | 5 |
 | `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
-| `src/Ecr.Application/Security/GetCurrentUserHandler.cs` | 1 |
-| `src/Ecr.Application/Security/LoginHandler.cs` | 1 |
-| `src/Ecr.Application/Security/PasswordChangeGate.cs` | 1 |
-| `src/Ecr.Application/Security/PermissionCheck.cs` | 2 |
+| `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
 | `src/Ecr.Application/Security/RoleAndUserHandlers.cs` | 23 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
@@ -164,9 +168,6 @@
 | `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 4 |
 | `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
-| `src/Ecr.Application/Workflow/ApproveSheetHandler.cs` | 2 |
-| `src/Ecr.Application/Workflow/ReopenDocumentHandler.cs` | 4 |
-| `src/Ecr.Application/Workflow/SubmitSheetHandler.cs` | 4 |
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 2 |
 | `src/Ecr.Calculations/ConstantResolver.cs` | 3 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
@@ -192,13 +193,11 @@
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntryLink.cs` | 3 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryValue.cs` | 8 |
-| `src/Ecr.Domain/Entities/Documents/Period.cs` | 3 |
 | `src/Ecr.Domain/Entities/Documents/PeriodPolicy.cs` | 2 |
 | `src/Ecr.Domain/Entities/Documents/Project.cs` | 3 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
 | `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |
 | `src/Ecr.Domain/Entities/Security/User.cs` | 1 |
-| `src/Ecr.Domain/Entities/Workflow/ApprovalState.cs` | 7 |
 | `src/Ecr.Domain/Services/PeriodCalendar.cs` | 3 |
 | `src/Ecr.Domain/Services/UnitConverter.cs` | 4 |
 | `src/Ecr.Domain/ValueObjects/PeriodKey.cs` | 1 |

@@ -32,7 +32,12 @@ public sealed class ListDocumentsHandler(
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange",
+                    ["max"] = CursorRequest.MaxLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ Гранти йдуть у ЗАПИТ, не лише в постфільтр (аудит 2026-09-16, §3.3).
@@ -104,14 +109,20 @@ public sealed class ListDocumentsHandler(
         IAccessDecisionService access, ICurrentUser currentUser, string permission, CancellationToken ct)
     {
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {permission}.",
-                new Dictionary<string, object?> { ["permission"] = permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = permission,
+                });
         }
 
         return profile;

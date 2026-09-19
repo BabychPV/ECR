@@ -71,7 +71,8 @@ public sealed partial class LoginHandler(
             // «запис існує» стає видимим після вичерпання спроб (ФВ-6.4a).
             throw new BusinessRuleException(
                 "ECR-AUTH-0423",
-                "Обліковий запис тимчасово заблоковано після невдалих спроб входу.");
+                "Обліковий запис тимчасово заблоковано після невдалих спроб входу.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0423.lockedAfterFailures" });
         }
 
         if (user.PasswordHash is null || !hasher.Verify(password, user.PasswordHash))

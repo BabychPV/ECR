@@ -52,7 +52,13 @@ public sealed class GetDocumentTablesHandler(
         if (!read.IsAllowed)
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         var key = PeriodKey.Parse(periodKey);

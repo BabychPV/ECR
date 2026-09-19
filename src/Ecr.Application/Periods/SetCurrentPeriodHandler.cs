@@ -42,13 +42,19 @@ public sealed class SetCurrentPeriodHandler(
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може змінювати поточний період.");
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати поточний період.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         // ⛔ `ECR-PRJ-0404`: старий `ECR-PRD-0422` обіцяв 422 цифрами і віддавав
         // 404 конвеєром — суперечність усередині одного коду (`P-25`, рядок 4).
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException(
-                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.");
+                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
+                          new Dictionary<string, object?>
+                          {
+                              ["messageKey"] = "err.ECR-PRJ-0404.project",
+                              ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                          });
 
         // ⛔ Q-246: `Period.Configure` — глобальне право «координатор періодів»,
         // не грант на КОЖЕН проєкт. Без цієї перевірки будь-хто з цим правом
@@ -61,7 +67,12 @@ public sealed class SetCurrentPeriodHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var now = clock.UtcNow;

@@ -116,7 +116,14 @@ public sealed class Period : Entity<int>
         {
             throw new DomainException(
                 "ECR-PRD-0409",
-                $"Перехід періоду {PeriodKeyValue} зі стану {State} у {state} не допускається.");
+                $"Перехід періоду {PeriodKeyValue} зі стану {State} у {state} не допускається.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.transitionNotAllowed",
+                    ["periodKey"] = PeriodKeyValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["from"] = State.ToString(),
+                    ["to"] = state.ToString(),
+                });
         }
 
         State = state;
@@ -162,7 +169,12 @@ public sealed class Period : Entity<int>
         {
             throw new DomainException(
                 "ECR-PRD-0409",
-                $"Відкривати можна лише закритий період; поточний стан — {State}.");
+                $"Відкривати можна лише закритий період; поточний стан — {State}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.reopenOnlyClosed",
+                    ["state"] = State.ToString(),
+                });
         }
 
         // Причина обов'язкова і тут, і в базі: відкриття закритого періоду —
@@ -170,7 +182,9 @@ public sealed class Period : Entity<int>
         // сам факт без відповіді на «чому».
         if (string.IsNullOrWhiteSpace(reason))
         {
-            throw new DomainException("ECR-PRD-0422", "Причина відкриття періоду обов'язкова.");
+            throw new DomainException(
+                "ECR-PRD-0422", "Причина відкриття періоду обов'язкова.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0422.reopenReasonRequired" });
         }
 
         State = PeriodState.Grace;

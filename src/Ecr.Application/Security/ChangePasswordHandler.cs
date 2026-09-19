@@ -27,17 +27,21 @@ public sealed class ChangePasswordHandler(
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може змінювати пароль.");
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати пароль.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
-                   ?? throw new NotFoundException("ECR-AUTH-0401", "Обліковий запис не знайдено.");
+                   ?? throw new NotFoundException(
+                       "ECR-AUTH-0401", "Обліковий запис не знайдено.",
+                       new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.accountMissing" });
 
         // Доменний пароль живе в каталозі, і міняти його звідси означало б
         // обіцяти те, чого система не робить.
         if (user.Provider != AuthProvider.Local)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", "Пароль доменного облікового запису змінюється засобами домену.");
+                "ECR-AUTH-0403", "Пароль доменного облікового запису змінюється засобами домену.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0403.domainPassword" });
         }
 
         // ⚠ Чинний пароль перевіряється НАВІТЬ при MustChangePassword. Інакше
@@ -46,7 +50,8 @@ public sealed class ChangePasswordHandler(
         if (user.PasswordHash is null || !hasher.Verify(currentPassword, user.PasswordHash))
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0401", "Чинний пароль не підходить.");
+                "ECR-AUTH-0401", "Чинний пароль не підходить.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.currentPasswordWrong" });
         }
 
         var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
@@ -63,7 +68,12 @@ public sealed class ChangePasswordHandler(
             throw new BusinessRuleException(
                 "ECR-PWD-0422",
                 $"Новий пароль коротший за {policy.MinLength} символів.",
-                new Dictionary<string, object?> { ["minLength"] = policy.MinLength });
+                new Dictionary<string, object?>
+                {
+                    // ⚠ Рядком: резолвер підставляє в шаблон лише `string`.
+                    ["messageKey"] = "err.ECR-PWD-0422.tooShort",
+                    ["minLength"] = policy.MinLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // SetPassword знімає прапорець і крутить SecurityStamp, тому всі інші

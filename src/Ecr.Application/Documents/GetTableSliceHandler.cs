@@ -59,7 +59,12 @@ public sealed class GetTableSliceHandler(
         if (!profile.Has("Document.View"))
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", "Потрібне право Document.View.");
+                "ECR-AUTH-0403", "Потрібне право Document.View.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = "Document.View",
+                });
         }
 
         // ⛔ І ГРАНТ на проєкт (`A7-55`, `ФВ-6.13`). Функціональне право
@@ -71,7 +76,13 @@ public sealed class GetTableSliceHandler(
         if (!read.IsAllowed)
         {
             throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.");
+                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = read.Reason.ToString(),
+                });
         }
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);

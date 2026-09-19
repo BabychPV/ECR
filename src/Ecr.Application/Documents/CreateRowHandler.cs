@@ -71,7 +71,13 @@ public sealed class CreateRowHandler(
         {
             throw new Errors.BusinessRuleException(
                 "ECR-ROW-0409",
-                $"Таблиця {table.Code} має RowMode = {table.RowMode}: рядки задані шаблоном і не додаються.");
+                $"Таблиця {table.Code} має RowMode = {table.RowMode}: рядки задані шаблоном і не додаються.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.rowsFromTemplate",
+                    ["tableCode"] = table.Code,
+                    ["rowMode"] = table.RowMode.ToString(),
+                });
         }
 
         var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
@@ -82,7 +88,13 @@ public sealed class CreateRowHandler(
         {
             throw new Errors.BusinessRuleException(
                 "ECR-ROW-0409",
-                $"Досягнуто межу динамічних рядків таблиці {table.Code}: {max}.");
+                $"Досягнуто межу динамічних рядків таблиці {table.Code}: {max}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.rowLimitReached",
+                    ["tableCode"] = table.Code,
+                    ["max"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // 3. Ключ: заданий користувачем або GUID у форматі "N" (ФВ-2.5).
@@ -91,7 +103,12 @@ public sealed class CreateRowHandler(
         if (existing.ContainsKey(key.Value))
         {
             throw new Errors.BusinessRuleException(
-                "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.");
+                "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.rowKeyExists",
+                    ["rowKey"] = key.Value,
+                });
         }
 
         // 4. Права. Питаються ДО вставки і з уже відомим ключем.
@@ -128,6 +145,7 @@ public sealed class CreateRowHandler(
                 $"Рядок у цю таблицю додати не можна: {decision.Reason}.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
                     ["reason"] = decision.Reason.ToString(),
                     ["detail"] = decision.Detail
                 });

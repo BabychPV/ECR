@@ -525,6 +525,57 @@ USING (VALUES
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 
+    -- ⛔ Головні шляхи користувача: вхід і зміна пароля, подання / погодження /
+    -- відхилення / повернення аркуша, створення документа й рядка, періоди,
+    -- обмін книгами. Доти подробицею цих відмов їхало українське речення —
+    -- мови, якої серед мов продукту немає.
+    -- ⚠ `{reason}`, `{status}`, `{state}`, `{from}`, `{to}`, `{rowMode}` — кодові
+    -- слова (`PeriodClosed`, `Submitted`): ті самі, що клієнт показує бейджами
+    -- й читає з поля `reason`; їхній переклад — справа каталогу статусів.
+    -- ⚠ Публічна область (0) — лише те, що видно ДО входу або замість екрана
+    -- (ФВ-14.9b): вимога увійти, блокування, разовий пароль, 500.
+    (N'err.ECR-AUTH-0401.signInRequired',       N'en', N'You are not signed in or your session has ended: sign in again.', 0),
+    (N'err.ECR-AUTH-0401.accountMissing',       N'en', N'Your account no longer exists: sign in again.', 1),
+    (N'err.ECR-AUTH-0401.currentPasswordWrong', N'en', N'The current password is incorrect.', 1),
+    (N'err.ECR-AUTH-0403.domainPassword',       N'en', N'The password of a domain account is changed in the domain, not here.', 1),
+    (N'err.ECR-AUTH-0423.lockedAfterFailures',  N'en', N'The account is temporarily locked after failed sign-in attempts. Try again later.', 0),
+    (N'err.ECR-PWD-0428.oneTimePassword',       N'en', N'Your password was issued for one-time use: until you change it, only changing the password and signing out are available.', 0),
+    (N'err.ECR-PWD-0422.tooShort',              N'en', N'The new password is shorter than {minLength} characters.', 1),
+    -- ⚠ Слово в слово як старший точковий шлях (`requiresPermission` + код
+    -- права): той самий факт читається однаково, яким би шляхом не дійшов.
+    (N'err.ECR-AUTH-0403.permission',           N'en', N'Requires permission {permission}', 1),
+    (N'err.ECR-ACCS-0403.permission',           N'en', N'Requires permission {permission}', 1),
+    (N'err.ECR-AUTH-0403.noDocumentAccess',     N'en', N'You have no access to document {documentId}: {reason}.', 1),
+    (N'err.ECR-AUTH-0403.noProjectGrant',       N'en', N'You have no grant on project {projectId}.', 1),
+    (N'err.ECR-AUTH-0403.noProjectWriteGrant',  N'en', N'You have no write grant on project {projectId}.', 1),
+    (N'err.ECR-AUTH-0403.noProjectManageGrant', N'en', N'You have no Manage grant on project {projectId}.', 1),
+    (N'err.ECR-ACCS-0403.submitDenied',         N'en', N'Sheet {sheetDefId} cannot be submitted: {reason}.', 1),
+    (N'err.ECR-ACCS-0403.approveDenied',        N'en', N'Sheet {sheetDefId} cannot be approved or rejected: {reason}.', 1),
+    (N'err.ECR-ACCS-0403.reopenDenied',         N'en', N'Sheet {sheetDefId} cannot be returned to work: {reason}.', 1),
+    (N'err.ECR-ACCS-0403.addRowDenied',         N'en', N'A row cannot be added to this table: {reason}.', 1),
+    (N'err.ECR-SUB-4221.orphanedRows',          N'en', N'The sheet cannot be submitted: {rowCount} row(s) lost their registry entry.', 1),
+    (N'err.ECR-SUB-4221.validationBlocked',     N'en', N'The sheet cannot be submitted: {messageCount} blocking validation error(s).', 1),
+    (N'err.ECR-PRD-4223.reopenPeriodFirst',     N'en', N'Period {periodKey} is closed: reopen the period first, then the sheet.', 1),
+    (N'err.ECR-DOC-0409.reopenWrongState',      N'en', N'Only a submitted or approved sheet can be returned to work; the sheet is {status}.', 1),
+    (N'err.ECR-DOC-0409.submitWrongState',      N'en', N'Only a draft or rejected sheet can be submitted; the sheet is {status}.', 1),
+    (N'err.ECR-DOC-0409.approveWrongState',     N'en', N'Only a submitted sheet can be approved; the sheet is {status}.', 1),
+    (N'err.ECR-DOC-0409.rejectWrongState',      N'en', N'Only a submitted sheet can be rejected; the sheet is {status}.', 1),
+    (N'err.ECR-DOC-0422.reopenReasonRequired',  N'en', N'A reason is required to return the sheet to work.', 1),
+    (N'err.ECR-DOC-0422.rejectCommentRequired', N'en', N'A comment is required to reject the sheet.', 1),
+    (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
+    (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
+    (N'err.ECR-ROW-0409.rowsFromTemplate',      N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so rows cannot be added.', 1),
+    (N'err.ECR-ROW-0409.rowLimitReached',       N'en', N'Table "{tableCode}" has reached its dynamic-row limit: {max}.', 1),
+    (N'err.ECR-ROW-0409.rowKeyExists',          N'en', N'A row with key "{rowKey}" already exists in this table.', 1),
+    (N'err.ECR-PRJ-0404.project',               N'en', N'Project {projectId} was not found.', 1),
+    (N'err.ECR-PRJ-0404.projectOfPeriod',       N'en', N'The project of period {periodId} was not found.', 1),
+    (N'err.ECR-PRD-0404.period',                N'en', N'Period {periodId} was not found.', 1),
+    (N'err.ECR-PRD-0409.projectArchived',      N'en', N'Project "{projectCode}" is archived: its periods cannot be reopened.', 1),
+    (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
+    (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
+    (N'err.ECR-PRD-0422.reopenReasonRequired',  N'en', N'A reason is required to reopen the period.', 1),
+    (N'err.ECR-SYS-0500.contactAdmin',          N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
+
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --
     -- ⛔ Це рівно та форма ключа, яку читає

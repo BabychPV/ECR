@@ -34,14 +34,19 @@ public sealed class ReopenPeriodHandler(
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може відкривати періоди.");
+                         "ECR-AUTH-0401", "Анонімний запит не може відкривати періоди.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         // ⛔ `DAT-06`. Блокування періоду, перевірка стану, зміна і запис в
@@ -74,18 +79,33 @@ public sealed class ReopenPeriodHandler(
             // номері періоду» і «проєкт видалили».
             var period = await periods.LockAsync(periodId, innerCt).ConfigureAwait(false)
                          ?? throw new NotFoundException(
-                             ErrorCodes.PeriodNotFound, $"Період {periodId} не знайдено.");
+                             ErrorCodes.PeriodNotFound, $"Період {periodId} не знайдено.",
+                             new Dictionary<string, object?>
+                             {
+                                 ["messageKey"] = "err.ECR-PRD-0404.period",
+                                 ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                             });
 
             var project = await periods.FindProjectAsync(period.ProjectId, innerCt).ConfigureAwait(false)
                           ?? throw new NotFoundException(
-                              ErrorCodes.ProjectNotFound, $"Проєкт періоду {periodId} не знайдено.");
+                              ErrorCodes.ProjectNotFound, $"Проєкт періоду {periodId} не знайдено.",
+                              new Dictionary<string, object?>
+                              {
+                                  ["messageKey"] = "err.ECR-PRJ-0404.projectOfPeriod",
+                                  ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                              });
 
             // Архівований проєкт — кінцевий стан: відкривати в ньому нема чого,
             // дані вже поїхали в архівні партиції (ФВ-1.10).
             if (project.Status == ProjectStatus.Archived)
             {
                 throw new BusinessRuleException(
-                    "ECR-PRD-0409", $"Проєкт {project.Code} архівований: періоди в ньому не відкриваються.");
+                    "ECR-PRD-0409", $"Проєкт {project.Code} архівований: періоди в ньому не відкриваються.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PRD-0409.projectArchived",
+                        ["projectCode"] = project.Code,
+                    });
             }
 
             var now = clock.UtcNow;
