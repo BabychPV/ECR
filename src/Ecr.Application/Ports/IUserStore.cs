@@ -198,6 +198,24 @@ public interface IUserStore
     public Task<IReadOnlyList<Security.RoleAssignmentTrace>> ListGroupAssignmentsAsync(
         DateOnly asOf, CancellationToken ct);
 
+    /// <summary>Усі групові призначення з ідентифікаторами — для керування ними.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>⚠ <c>PrincipalName</c> тут завжди <c>null</c>: ім'я резолвить обробник, не сховище.</remarks>
+    public Task<IReadOnlyList<Security.GroupRoleAssignmentView>> ListGroupRoleAssignmentsAsync(CancellationToken ct);
+
+    /// <summary>Додає призначення на групу; збереження — за обробником.</summary>
+    /// <param name="assignment">Призначення з <c>PrincipalSid</c>.</param>
+    public void AddGroupAssignment(RoleAssignment assignment);
+
+    /// <summary>Групове призначення за ідентифікатором; особисті сюди не потрапляють.</summary>
+    /// <param name="assignmentId">Ідентифікатор призначення.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<RoleAssignment?> FindGroupAssignmentAsync(int assignmentId, CancellationToken ct);
+
+    /// <summary>Прибирає групове призначення; збереження — за обробником.</summary>
+    /// <param name="assignment">Призначення, знайдене <see cref="FindGroupAssignmentAsync"/>.</param>
+    public void RemoveGroupAssignment(RoleAssignment assignment);
+
     /// <summary>Коди прав із переданих, яких у каталозі НЕМАЄ.</summary>
     /// <param name="permissionCodes">Коди, які просять видати.</param>
     /// <param name="ct">Токен скасування.</param>

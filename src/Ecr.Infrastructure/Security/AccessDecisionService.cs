@@ -53,13 +53,44 @@ public sealed class AccessDecisionService(
         // за яким запис кладеться, і ключ, під яким `AccessProfile` сам себе
         // описує (`CacheKey`), не могли розійтися (`Q-187`).
         var groupSids = GroupSidsFor(userId);
-        var groupsFingerprint = Fingerprint(groupSids);
+        var groupsFingerprint = await GroupsFingerprintAsync(groupSids, ct).ConfigureAwait(false);
 
         return await profileCache
             .GetOrCreateAsync(
                 userId, account.SecurityStamp, groupsFingerprint,
-                token => LoadAsync(userId, account.SecurityStamp, groupSids, token), ct)
+                token => LoadAsync(userId, account.SecurityStamp, groupSids, groupsFingerprint, token), ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Відбиток груп сесії РАЗОМ із ревізією призначень на них.</summary>
+    /// <remarks>
+    /// ⛔ Відкликання ролі в групи мусить діяти негайно, а штамп крутити нема
+    /// кому: членів групи система поіменно не знає. Тому в ключ кешу входить
+    /// ще й ревізія — кількість і найбільший Id призначень на SID цієї сесії.
+    /// Id — IDENTITY, тож будь-яке додавання чи відкликання міняє пару, і
+    /// запис зі старими правами перестає адресуватися на НАСТУПНОМУ запиті —
+    /// на кожному інстансі, без спільного лічильника в пам'яті.
+    ///
+    /// ⚠ Ціна — один індексний запит (<c>UQ_RoleAssignment_Sid</c>) на запит
+    /// сесії з групами; сесія без груп не платить нічого.
+    /// </remarks>
+    private async Task<string> GroupsFingerprintAsync(IReadOnlyList<string> groupSids, CancellationToken ct)
+    {
+        if (groupSids.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var ids = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid))
+            .OrderByDescending(a => a.Id)
+            .Select(a => a.Id)
+            .Take(MaxRoleAssignments)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return $"{Fingerprint(groupSids)}.{ids.Count}.{(ids.Count == 0 ? 0 : ids[0])}";
     }
 
     /// <inheritdoc />
@@ -79,7 +110,8 @@ public sealed class AccessDecisionService(
             // `groupsFingerprint: ""`, а реальний запис власної сесії творця
             // (є групи → непорожній відбиток) лишався б у кеші недоторканим —
             // тобто щойно виданий грант знову чекав би сплину 30 хв.
-            profileCache.Evict(userId, stamp, Fingerprint(GroupSidsFor(userId)));
+            profileCache.Evict(
+                userId, stamp, await GroupsFingerprintAsync(GroupSidsFor(userId), ct).ConfigureAwait(false));
         }
     }
 
@@ -134,9 +166,11 @@ public sealed class AccessDecisionService(
     /// тут означало б друге формулювання того самого правила поруч із
     /// ключем кешу, який на ньому й тримається.
     /// </param>
+    /// <param name="groupsFingerprint">Той самий відбиток, під яким запис ляже в кеш.</param>
     /// <param name="ct">Токен скасування.</param>
     private async Task<AccessProfile> LoadAsync(
-        int userId, string securityStamp, IReadOnlyList<string> groupSids, CancellationToken ct)
+        int userId, string securityStamp, IReadOnlyList<string> groupSids, string groupsFingerprint,
+        CancellationToken ct)
     {
         // ⚠ «Сьогодні» тут — у UTC, і це СВІДОМО, а не забутий переклад у пояс
         // майданчика (`H-13`, `D2-78`). Строкове призначення ролі належить
@@ -224,7 +258,7 @@ public sealed class AccessDecisionService(
         // після перевходу користувача.
         return new AccessProfile
         {
-            CacheKey = Caching.AccessProfileCache.Key(userId, securityStamp, Fingerprint(groupSids)),
+            CacheKey = Caching.AccessProfileCache.Key(userId, securityStamp, groupsFingerprint),
             UserId = userId,
             SecurityStamp = securityStamp,
             Permissions = permissions.ToHashSet(StringComparer.Ordinal),

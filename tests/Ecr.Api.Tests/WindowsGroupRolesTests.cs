@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Ecr.Domain.Entities.Security;
@@ -34,6 +35,7 @@ public sealed class WindowsGroupRolesTests(SqlServerFixture sql)
 
     private static readonly Uri Login = new("/api/v1/login/windows", UriKind.Relative);
     private static readonly Uri Facts = new("/api/v1/health/facts", UriKind.Relative);
+    private static readonly Uri GroupAssignments = new("/api/v1/security/group-assignments", UriKind.Relative);
 
     private static readonly WebApplicationFactoryClientOptions NoCookieJar = new() { HandleCookies = false };
 
@@ -102,12 +104,74 @@ public sealed class WindowsGroupRolesTests(SqlServerFixture sql)
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.15")]
+    public async Task Роль_призначена_групі_через_API_діє_після_входу_а_відкликана_зникає_без_перевходу()
+    {
+        var admins = NewSid();
+        await ArrangeRoleAsync("Security.ManageUsers", admins);
+        var healthRoleId = await ArrangeRoleAsync(ViewHealth, group: null);
+        var operators = NewDigitSid();
+
+        using var app = new EcrApiFactory(sql);
+        using var host = WithFakeNegotiate(app);
+
+        var admin = await SignInAsync(host, app, NewSid(), [admins]);
+
+        using var assigned = await SendJsonAsync(
+            host, HttpMethod.Post, GroupAssignments, admin, new { roleId = healthRoleId, principal = operators });
+        Assert.True(assigned.StatusCode == HttpStatusCode.Created, $"{assigned.StatusCode}: {app.ErrorsText}");
+
+        var body = await assigned.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.True(body.GetProperty("effectiveAfterNextSignIn").GetBoolean());
+        var id = body.GetProperty("id").GetInt32();
+
+        var member = await SignInAsync(host, app, NewSid(), [operators]);
+        using (var allowed = await GetAsync(host, Facts, member))
+        {
+            Assert.True(allowed.StatusCode == HttpStatusCode.OK, $"{allowed.StatusCode}: {app.ErrorsText}");
+        }
+
+        using var revoked = await SendJsonAsync(
+            host, HttpMethod.Delete, new Uri($"{GroupAssignments}/{id}", UriKind.Relative), admin, body: null);
+        Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+
+        // ⛔ Та сама cookie члена групи — без перевходу.
+        using var denied = await GetAsync(host, Facts, member);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+    }
+
     private static string NewSid() => $"S-1-5-21-{Guid.NewGuid():N}"[..40];
+
+    /// <summary>SID із самих цифр — такий, який приймає API (<see cref="NewSid"/> несе hex).</summary>
+    private static string NewDigitSid()
+        => $"S-1-5-21-{Random.Shared.Next(1, int.MaxValue)}-{Random.Shared.Next(1, int.MaxValue)}-1105";
+
+    private static async Task<HttpResponseMessage> SendJsonAsync(
+        WebApplicationFactory<Program> host, HttpMethod method, Uri address, string cookie, object? body)
+    {
+        using var client = host.CreateClient(NoCookieJar);
+        using var request = new HttpRequestMessage(method, address);
+        request.Headers.Add("Cookie", cookie);
+        request.Content = body is null ? null : JsonContent.Create(body);
+
+        return await client.SendAsync(request);
+    }
 
     /// <summary>Роль із правом <see cref="ViewHealth"/>, призначена лише групі.</summary>
     private async Task<string> ArrangeGroupRoleAsync()
     {
         var group = NewSid();
+        await ArrangeRoleAsync(ViewHealth, group);
+
+        return group;
+    }
+
+    /// <summary>Роль з одним правом; з <paramref name="group"/> — ще й призначена цій групі.</summary>
+    private async Task<int> ArrangeRoleAsync(string permission, string? group)
+    {
 
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
@@ -119,11 +183,15 @@ public sealed class WindowsGroupRolesTests(SqlServerFixture sql)
         db.Roles.Add(role);
         await db.SaveChangesAsync();
 
-        db.RolePermissions.Add(new RolePermission(role.Id, ViewHealth));
-        db.RoleAssignments.Add(new RoleAssignment(role.Id, userId: null, principalSid: group));
+        db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        if (group is not null)
+        {
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, userId: null, principalSid: group));
+        }
+
         await db.SaveChangesAsync();
 
-        return group;
+        return role.Id;
     }
 
     private static WebApplicationFactory<Program> WithFakeNegotiate(EcrApiFactory app)

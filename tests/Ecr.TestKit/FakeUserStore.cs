@@ -11,8 +11,23 @@ namespace Ecr.TestKit;
 /// <param name="RoleCode">Код ролі.</param>
 /// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
 /// <param name="ValidTo">Кінець дії; <c>null</c> — безстроково.</param>
+/// <param name="Id">Ідентифікатор; нуль — засіяне тестом без нього.</param>
 public sealed record GroupRoleAssignment(
-    string Sid, string RoleCode, DateOnly? ValidFrom = null, DateOnly? ValidTo = null);
+    string Sid, string RoleCode, DateOnly? ValidFrom = null, DateOnly? ValidTo = null, int Id = 0);
+
+/// <summary>Резолвер імен груп зі словника — без справжнього домену.</summary>
+public sealed class FakePrincipalNameResolver : IPrincipalNameResolver
+{
+    /// <summary>Ім'я → SID; зворотний переклад іде цим самим словником.</summary>
+    public Dictionary<string, string> Known { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public string? ResolveSid(string accountName) => Known.GetValueOrDefault(accountName);
+
+    /// <inheritdoc />
+    public string? ResolveName(string sid)
+        => Known.FirstOrDefault(p => string.Equals(p.Value, sid, StringComparison.OrdinalIgnoreCase)).Key;
+}
 
 /// <summary>Сховище облікових записів у пам'яті.</summary>
 public sealed class FakeUserStore : IUserStore
@@ -356,6 +371,45 @@ public sealed class FakeUserStore : IUserStore
         DateOnly asOf, CancellationToken ct)
         => Task.FromResult<IReadOnlyList<RoleAssignmentTrace>>(
             [.. GroupAssignments.Select(a => Trace(a, asOf))]);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<GroupRoleAssignmentView>> ListGroupRoleAssignmentsAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<GroupRoleAssignmentView>>(
+            [.. GroupAssignments.Select(a => new GroupRoleAssignmentView(
+                a.Id, RoleIdByCode(a.RoleCode), a.RoleCode, a.Sid, null, a.ValidFrom, a.ValidTo))]);
+
+    /// <inheritdoc />
+    public void AddGroupAssignment(RoleAssignment assignment)
+    {
+        ArgumentNullException.ThrowIfNull(assignment);
+
+        var id = GroupAssignments.Select(a => a.Id).DefaultIfEmpty().Max() + 1;
+        typeof(RoleAssignment).GetProperty(nameof(RoleAssignment.Id))!.SetValue(assignment, id);
+        GroupAssignments.Add(new GroupRoleAssignment(
+            assignment.PrincipalSid!, RoleCodeById(assignment.RoleId), assignment.ValidFrom, assignment.ValidTo, id));
+    }
+
+    /// <inheritdoc />
+    public Task<RoleAssignment?> FindGroupAssignmentAsync(int assignmentId, CancellationToken ct)
+    {
+        var found = GroupAssignments.Find(a => a.Id == assignmentId && assignmentId != 0);
+        if (found is null)
+        {
+            return Task.FromResult<RoleAssignment?>(null);
+        }
+
+        var entity = new RoleAssignment(RoleIdByCode(found.RoleCode), userId: null, principalSid: found.Sid);
+        typeof(RoleAssignment).GetProperty(nameof(RoleAssignment.Id))!.SetValue(entity, found.Id);
+        return Task.FromResult<RoleAssignment?>(entity);
+    }
+
+    /// <inheritdoc />
+    public void RemoveGroupAssignment(RoleAssignment assignment)
+    {
+        ArgumentNullException.ThrowIfNull(assignment);
+
+        GroupAssignments.RemoveAll(a => a.Id == assignment.Id);
+    }
 
     /// <summary>Переводить призначення на групу у зріз для діагностики.</summary>
     /// <param name="assignment">Призначення.</param>
