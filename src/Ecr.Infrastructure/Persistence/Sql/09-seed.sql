@@ -409,6 +409,10 @@ USING (VALUES
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
+    -- ⚠ `BE-03`: ключ рядка унікальний у межах екземпляра таблиці, а не
+    -- системи — «R1» є в кожному документі. Фільтр за ним без documentId
+    -- зібрав би рядки чужих документів і виглядав би як відповідь.
+    (N'err.ECR-REQ-0422.auditCellNeedsDocument', N'en', N'A row key or column filter needs a document: without one the cell address is not an address.', 1),
     -- ⚠ ПОДРОБИЦЯ відмови (`Detail`), не заголовок: заголовок `err.ECR-REQ-0422`
     -- уже заведений нижче. Ключ із підстановкою `{max}` — рівно та форма, що й
     -- `auditWindowTooWide` вище (`Q-341`).
@@ -1458,6 +1462,22 @@ USING (VALUES
     (N'audit.late',                      N'en', N'late', 1),
     (N'audit.empty',                     N'en', N'No changes in this window', 1),
     (N'audit.emptyHint',                 N'en', N'The window is required: the journal is partitioned by change time, and a query without one would scan every partition.', 1),
+
+    -- ⛔ `BE-03`: фільтри журналу й історія ОДНІЄЇ комірки. До цього журнал
+    -- умів лише «документ за вікном»: питання «хто саме», «звідки це число»
+    -- і «що було з ЦІЄЮ коміркою» можна було поставити лише читаючи сторінки
+    -- очима — тобто ніяк, бо сторінок за тиждень тисячі.
+    (N'audit.author',                    N'en', N'By user', 1),
+    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', 1),
+    (N'audit.originAny',                 N'en', N'Any origin', 1),
+    (N'audit.lateOnly',                  N'en', N'Late edits only', 1),
+    (N'audit.rowKey',                    N'en', N'Row key', 1),
+    (N'audit.columnDefId',               N'en', N'Column', 1),
+    -- ⚠ Підказка називає ОБМЕЖЕННЯ, а не поле: ключ рядка унікальний у межах
+    -- екземпляра таблиці, тож без документа він нічого не адресує — і сервер
+    -- відповідає 400, а не порожнім списком.
+    (N'audit.cellHint',                  N'en', N'Row key and column need a document: together the three are the history of one cell.', 1),
+    (N'audit.reset',                     N'en', N'Clear filters', 1),
 
     -- ⛔ Знахідки перевірки узгодженості (`aud.ConsistencyIssue`). До цього
     -- екрана з продукту було видно лише КІЛЬКІСТЬ за типом (лічильник

@@ -88,7 +88,7 @@ public sealed class ErrorFamilyTests
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(
-                from: Now, to: Now.AddDays(-1), documentId: null,
+                new CellChangeFilter(From: Now, To: Now.AddDays(-1)),
                 new CursorRequest(), CancellationToken.None));
 
         Assert.Equal("ECR-REQ-0422", error.ErrorCode);
@@ -107,7 +107,7 @@ public sealed class ErrorFamilyTests
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(
-                from: Now, to: Now.Add(GetCellChangesHandler.MaxWindow).AddDays(1), documentId: null,
+                new CellChangeFilter(From: Now, To: Now.Add(GetCellChangesHandler.MaxWindow).AddDays(1)),
                 new CursorRequest(), CancellationToken.None));
 
         Assert.Equal("ECR-REQ-0422", error.ErrorCode);
