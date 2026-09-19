@@ -15,9 +15,32 @@ import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/**
+ * Що стоїть у межі вікна чинності запису, коли межі НЕМАЄ.
+ *
+ * ⛔ Не тире — і це не нове рішення, а те саме, що вже прийнято для вікна дії
+ * константи методології (`MethodologyConstantsPanel`, `#415`). Дефолт
+ * `Timestamp` — тире, і воно читається як «значення немає»; запис із порожнім
+ * `validTo` не «не має дати кінця» — він **чинний і далі**, і саме це
+ * відрізняє його від запису, виведеного з обігу датою (`ФВ-8.5`). Тире тут
+ * збрехало б у найдорожчий бік: людина шукає, чому рядок документа
+ * осиротів (`ФВ-8.13`), а комірка каже «тут порожньо».
+ *
+ * ⚠ Сам символ тут не новий: склейка рядком, яку цей набір замінює, уже
+ * друкувала `'…'` — тобто СЕНС був правильний від початку, бракувало лише
+ * набору. Дві сторінки мусять відповідати на те саме питання однаково,
+ * інакше «…» на одній і тире на іншій читаються як різні стани даних.
+ *
+ * ⚠ Символ, а не слово з каталогу, навмисно: напис («безстроково») — це новий
+ * ключ `ui-strings` у трьох мовах і рядок сіду, тобто чужі файли. Три крапки
+ * нейтральні до мови й читаються з обох боків вікна.
+ */
+const Unbounded = '…';
 
 /**
  * Конструктор реєстрів: схема, дані, темпоральність.
@@ -260,8 +283,22 @@ export function RegistriesPage(): JSX.Element {
                           лишається читаним, на відміну від еліпсиса. */}
                       <Table.Td className="ecr-wrap-anywhere">{entry.display}</Table.Td>
                       <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
+                      {/* ⛔ Склейку рядком РОЗІБРАНО на вузли, а не замінено
+                          на `formatDate()` всередині неї. Обидва варіанти
+                          дали б читабельний текст, але рядок не має
+                          атрибутів — точне значення не лишилося б ДЕ. Тут
+                          воно лишається в `dateTime` кожної межі окремо.
+
+                          ⚠ `dateOnly` в обох: контракт віддає
+                          `validFrom`/`validTo` як `Format: date`
+                          (`RegistryEntryDto`) — це КАЛЕНДАРНІ межі вікна
+                          чинності, які звіряються з днем документа, а не з
+                          годинником. «12:00 AM» приписало б їм точність,
+                          якої в даних немає. */}
                       <Table.Td>
-                        {(entry.validFrom ?? '…') + ' — ' + (entry.validTo ?? '…')}
+                        <Timestamp value={entry.validFrom} dateOnly fallback={Unbounded} />
+                        {' — '}
+                        <Timestamp value={entry.validTo} dateOnly fallback={Unbounded} />
                       </Table.Td>
                       <Table.Td>
                         <Group gap="xs" justify="flex-end">
