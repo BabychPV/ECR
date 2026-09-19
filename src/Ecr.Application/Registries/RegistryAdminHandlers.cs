@@ -294,12 +294,25 @@ public sealed class DeleteRegistryEntryHandler(
     public const string Permission = "Registry.EditData";
 
     /// <summary>Логічно видаляє запис, якщо на нього ніхто не посилається.</summary>
+    /// <param name="registryCode">Довідник зі шляху запиту.</param>
     /// <param name="registryEntryId">Запис.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <exception cref="NotFoundException">Запису немає.</exception>
+    /// <exception cref="NotFoundException">
+    /// Запису немає — або він належить ІНШОМУ довіднику, ніж названий у шляху.
+    /// </exception>
     /// <exception cref="BusinessRuleException">На запис посилаються дані — <c>ECR-REG-0409</c>.</exception>
-    public async Task HandleAsync(long registryEntryId, CancellationToken ct)
+    /// <remarks>
+    /// ⚠ <paramref name="registryCode"/> не декоративний. Ідентифікатор запису
+    /// наскрізний по всіх довідниках, тож без цієї звірки
+    /// <c>DELETE /registries/FuelTypes/entries/{id запису EmissionSources}</c>
+    /// мовчки видалив би чужий запис — «бо id збігся». Відповідь на таке —
+    /// <c>404</c>, а не видалення і не <c>400</c>: для того, хто питає, запису
+    /// в ЦЬОМУ довіднику справді не існує.
+    /// </remarks>
+    public async Task HandleAsync(string registryCode, long registryEntryId, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
+
         await Templates.ListTemplatesHandler
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
@@ -309,6 +322,31 @@ public sealed class DeleteRegistryEntryHandler(
 
         var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException("ECR-REG-0404", $"Запису довідника {registryEntryId} не існує.");
+
+        // ⚠ Опис читається ДО перевірки посилань і до видалення — він потрібен
+        // двічі: спершу щоб звірити належність довіднику, потім щоб підняти
+        // ревізію даних. Другого читання нижче немає навмисно.
+        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
+        if (definition is null
+            || !string.Equals(definition.Code, registryCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Запису {registryEntryId} у довіднику «{registryCode}» не існує.",
+
+                // ⚠ Ключ той самий, що й у решти «запису не існує»: для того,
+                // хто питає, факт один — записа з таким Id тут немає. Заводити
+                // окремий рядок каталогу заради того, що довідник у шляху
+                // чужий, означало б розповісти про внутрішній устрій замість
+                // відповіді (`ФВ-14.9a`).
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
+                    ["entryId"] = registryEntryId.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                    ["registryCode"] = registryCode,
+                });
+        }
 
         var references = await registries.CountReferencesAsync(registryEntryId, ct).ConfigureAwait(false);
         if (references > 0)
@@ -326,8 +364,10 @@ public sealed class DeleteRegistryEntryHandler(
 
         entry.SoftDelete(userId, clock.UtcNow);
 
-        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
-        definition?.BumpDataRevision();
+        // ⚠ Той самий `definition`, що вже прочитаний вище для звірки коду.
+        // Повторне читання тут було б другим запитом за тим самим рядком — і,
+        // що гірше, другою правдою про те, який саме довідник змінюється.
+        definition.BumpDataRevision();
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

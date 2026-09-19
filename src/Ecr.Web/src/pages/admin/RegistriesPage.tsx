@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
-import { createRegistry } from '@/features/registries/api';
+import { createRegistry, entryReferences, useDeleteRegistryEntry } from '@/features/registries/api';
 import {
   RegistryEntryEditor,
   ValidityEditor,
@@ -45,6 +45,9 @@ export function RegistriesPage(): JSX.Element {
 
   // Для якого запису правимо вікно чинності.
   const [validity, setValidity] = useState<RegistryEntryDto | null>(null);
+
+  // Який запис підтверджуємо до видалення (`ФВ-8.6`).
+  const [deleting, setDeleting] = useState<RegistryEntryDto | null>(null);
 
   // Заведення довідника з нуля (директива №11, T4): доти в системі не було
   // жодного способу, доступного людині, додати довідник, якого немає в seed.
@@ -87,6 +90,12 @@ export function RegistriesPage(): JSX.Element {
   });
 
   const selected = registries.data?.find((registry) => registry.code === code);
+
+  const remove = useDeleteRegistryEntry(code ?? '');
+
+  // ⛔ Не `null` означає «відмовлено, бо на запис посилаються N комірок». Саме
+  // це число, а не текст відмови, вирішує, ЩО показати замість «повторити».
+  const blocked = entryReferences(remove.error);
 
   return (
     <>
@@ -277,6 +286,28 @@ export function RegistriesPage(): JSX.Element {
                               >
                                 {t('registries.validity')}
                               </Button>
+
+                              {/* ⛔ Видалення не мало в інтерфейсі жодної
+                                  кнопки: обробник на сервері існував,
+                                  перевіряв право й рахував посилання — і не
+                                  викликався ніколи (директива №15, BE-01).
+
+                                  ⚠ Дія тут ДРУГА за помітністю після вікна
+                                  чинності навмисно: у більшості випадків
+                                  правильна дія саме закрити датою, а видалення
+                                  доступне лише запису, на який ще ніхто не
+                                  послався. */}
+                              <Button
+                                size="compact-xs"
+                                variant="subtle"
+                                color="statusError"
+                                onClick={() => {
+                                  remove.reset();
+                                  setDeleting(entry);
+                                }}
+                              >
+                                {t('common.delete')}
+                              </Button>
                             </>
                           )}
                         </Group>
@@ -310,6 +341,72 @@ export function RegistriesPage(): JSX.Element {
         entry={validity}
         onClose={() => setValidity(null)}
       />
+
+      {/*
+       * Підтвердження видалення запису і — на відмову `ECR-REG-0409` — той
+       * самий діалог у стані «заблоковано».
+       *
+       * ⛔ Двох діалогів тут немає навмисно: «підтвердьте» і «не можна, бо на
+       * запис посилаються N комірок» — це два стани однієї розмови, і людина
+       * не має шукати причину в плашці, що з'їхала кудись у куток.
+       */}
+      <Modal
+        opened={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title={t('common.delete')}
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            {deleting?.code} — {deleting?.display}
+          </Text>
+
+          {blocked === null ? (
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setDeleting(null)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                color="statusError"
+                loading={remove.isPending}
+                onClick={() => {
+                  if (deleting !== null) {
+                    remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
+                  }
+                }}
+              >
+                {t('common.delete')}
+              </Button>
+            </Group>
+          ) : (
+            <>
+              {/* ⚠ Текст відмови — СЕРВЕРНИЙ: він уже локалізований каталогом
+                  і називає причину словами. Поруч — саме число посилань, бо
+                  воно і є мірою наслідку. */}
+              <Group gap="xs">
+                <Badge color="statusWarning">{blocked}</Badge>
+                <Text size="sm">{remove.error?.message}</Text>
+              </Group>
+
+              {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
+                  треба не запит, а намір — запис виводять з обігу датою
+                  (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
+              <Group justify="flex-end">
+                <Button variant="default" onClick={() => setDeleting(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setValidity(deleting);
+                    setDeleting(null);
+                  }}
+                >
+                  {t('registries.validity')}
+                </Button>
+              </Group>
+            </>
+          )}
+        </Stack>
+      </Modal>
 
       <Modal
         opened={creating}

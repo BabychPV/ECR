@@ -2910,6 +2910,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/security/users/{id}/groups` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
+| `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |
 | `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
