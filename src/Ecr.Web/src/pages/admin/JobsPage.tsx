@@ -1,6 +1,5 @@
 ﻿import { useState, type JSX } from 'react';
 import {
-  Badge,
   Button,
   Card,
   Checkbox,
@@ -17,6 +16,7 @@ import { apiEnqueue, apiFetch } from '@/api/client';
 import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
@@ -131,7 +131,12 @@ export function JobsPage(): JSX.Element {
                   сирий `.NET`-тип на людську назву — `IRecalculationJob-a1b2…`
                   замінюється на `Recalculation-a1b2…`. */}
               <Text fw={600}>{humanizeJobId(status.jobId)}</Text>
-              <Badge color={stateColor(status.state)}>{status.state}</Badge>
+              {/* ⛔ Тут стояла власна `stateColor`, у якої `default` — СИНІЙ.
+                  Тобто `Unknown` і `Unavailable` (планувальник вимкнено або
+                  ідентифікатора вже немає — `QuartzJobScheduler.cs`) малювалися
+                  тим самим кольором, що й `Queued`: відмова відповісти про
+                  задачу виглядала як задача в черзі. Набір дає їм `warning`. */}
+              <StatusBadge kind="job" state={status.state} />
             </Group>
 
             <Progress value={status.percent} animated={status.state === 'Running'} />
@@ -282,7 +287,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                 <Table.Tr key={job.jobId}>
                   <Table.Td>{jobKindLabel(job.jobCode)}</Table.Td>
                   <Table.Td>
-                    <Badge color={stateColor(job.state)}>{job.state}</Badge>
+                    <StatusBadge kind="job" state={job.state} />
                   </Table.Td>
                   {/* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin`
                       перезаписує цей стовпець при запуску, і називати його
@@ -325,15 +330,10 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
   );
 }
 
-function stateColor(state: string): string {
-  switch (state) {
-    case 'Succeeded':
-      return 'statusSuccess';
-    case 'Failed':
-      return 'statusError';
-    case 'Cancelled':
-      return 'gray';
-    default:
-      return 'blue';
-  }
-}
+/*
+ * ✎ Тут стояла `stateColor(state)`. Її `default: 'blue'` і був дефектом,
+ * який набір закриває: невідомий стан (а `JobStatus.state` доходить до
+ * клієнта простим `string` — `schema.d.ts:9452`) мовчки ставав того ж
+ * кольору, що й `Queued`. Розподіл станів тепер один на застосунок —
+ * `statusTable.job` у `shared/ui/StatusBadge.tsx`, невідоме — `warning`.
+ */

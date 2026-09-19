@@ -239,36 +239,61 @@ describe('Контраст токенів (ФВ-14.17)', () => {
    * користувач створений, доступи збережено...). Метод — той самий: перевірка
    * джерела (регрес не зникне непоміченим) плюс перевірка, що заміна дає
    * реальне покращення контрасту, не косметичну зміну імені.
+   *
+   * ✎ 2026-09-19. Трьох названих вище помічників БІЛЬШЕ НЕМАЄ: сторінки
+   * перейшли на `StatusBadge`. Опис лишено як історію картки, а не як опис
+   * чинного коду — шукати `badgeColor`/`stateColor` у цих файлах марно. Що
+   * саме перевіряється натомість — у коментарі всередині `describe`.
    */
   describe('Q-285: чотири виклики поза Q-262/Q-272 — `statusSuccess`, не голий `green`', () => {
-    it('HealthPage.badgeColor(): «Healthy» — `statusSuccess`', () => {
-      const source = readFileSync(
-        path.resolve(process.cwd(), 'src/pages/admin/HealthPage.tsx'),
-        'utf8',
-      );
+    /*
+     * ✎ 2026-09-19, те саме перецілення, що й у `Q-289` нижче, і з тієї самої
+     * причини. Тут стояли три дослівні `toMatch` на ТІЛА трьох локальних
+     * помічників:
+     *   `/if \(status === 'Healthy'\) return 'statusSuccess';/`     (HealthPage)
+     *   `/case 'Succeeded':\s*\n\s*return 'statusSuccess';/`        (JobsPage)
+     *   `/case 'Open':\s*\n\s*return 'statusSuccess';/`             (PeriodsPage)
+     *
+     * ⛔ Предметом картки був колір проти голого `green`, і в цьому сторож був
+     * правий. Але, закріпивши РЕДАКЦІЮ, він заразом закріпив і саме існування
+     * трьох окремих рішень про колір статусу — тобто ту розбіжність, яку
+     * `StatusBadge` і заведено прибрати: `JobsPage.stateColor` віддавала
+     * невідомому стану синій (той самий, що й `Queued`), `PeriodsPage
+     * .stateColor` тим же синім фарбувала `Scheduled`, а `HealthPage
+     * .badgeColor` мала власну трійку. Будь-яке зведення їх до набору
+     * виглядало б для цього сторожа як регрес.
+     *
+     * ⚠ Тепер перевіряється ВЛАСТИВІСТЬ: жодна з трьох сторінок не має
+     * власного рішення про колір статусу — він приходить із набору. Контраст
+     * тонів набору стереже `shared/ui/__tests__/statusBadgeContrast.test.ts`,
+     * розподіл станів за тонами — `StatusBadge.test.tsx` і три тести
+     * `*.statusTone.test.tsx` поруч зі сторінками (рендером, не текстом).
+     *
+     * ⚠ Половина `Q-285`, що рахує контраст токенів, і рядок про
+     * `notify.showDone()` лишилися незмінними: вони не читають цих сторінок.
+     */
+    const kitPages: readonly (readonly [string, string, string])[] = [
+      ['HealthPage', 'src/pages/admin/HealthPage.tsx', 'health'],
+      ['JobsPage', 'src/pages/admin/JobsPage.tsx', 'job'],
+      ['PeriodsPage', 'src/pages/admin/PeriodsPage.tsx', 'period'],
+    ];
 
-      expect(source).toMatch(/if \(status === 'Healthy'\) return 'statusSuccess';/);
-      expect(source).not.toMatch(/if \(status === 'Healthy'\) return 'green';/);
-    });
+    it.each(kitPages)('%s: статус іде через набір, а не через власного помічника', (_name, file, kind) => {
+      const source = readFileSync(path.resolve(process.cwd(), file), 'utf8');
 
-    it('JobsPage.stateColor(): «Succeeded» — `statusSuccess`', () => {
-      const source = readFileSync(
-        path.resolve(process.cwd(), 'src/pages/admin/JobsPage.tsx'),
-        'utf8',
-      );
+      expect(source).toMatch(new RegExp(`<StatusBadge kind="${kind}" state=\\{`));
 
-      expect(source).toMatch(/case 'Succeeded':\s*\n\s*return 'statusSuccess';/);
-      expect(source).not.toMatch(/case 'Succeeded':\s*\n\s*return 'green';/);
-    });
-
-    it('PeriodsPage.stateColor(): «Open» — `statusSuccess`', () => {
-      const source = readFileSync(
-        path.resolve(process.cwd(), 'src/pages/admin/PeriodsPage.tsx'),
-        'utf8',
-      );
-
-      expect(source).toMatch(/case 'Open':\s*\n\s*return 'statusSuccess';/);
-      expect(source).not.toMatch(/case 'Open':\s*\n\s*return 'green';/);
+      /*
+       * ⛔ Мутаційний доказ на джерело в обидва боки: і повернення локального
+       * помічника, і голий `green` замість токена ловляться тут-таки.
+       *
+       * ⚠ Саме ОГОЛОШЕННЯ функції, а не будь-яка згадка імені: коментар поруч
+       * із виправленням цитує стару назву, і сторож «на згадку» впав би на
+       * власному поясненні — рівно так, як це вже сталося з `Q-289`.
+       */
+      expect(source).not.toMatch(/function (badgeColor|stateColor)\s*\(/);
+      expect(source).not.toMatch(/color=\{(badgeColor|stateColor)\(/);
+      expect(source).not.toMatch(/color="green"|color=\{'green'\}/);
     });
 
     /**
