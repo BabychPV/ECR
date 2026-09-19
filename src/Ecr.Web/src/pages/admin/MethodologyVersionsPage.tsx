@@ -55,6 +55,7 @@ import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
 /**
@@ -316,7 +317,19 @@ export function MethodologyVersionsPage(): JSX.Element {
                       {version.numericMode} · {version.calendarMode} · {version.traceLevel}
                     </Text>
                   </Table.Td>
-                  <Table.Td>{version.effectiveFrom ?? '—'}</Table.Td>
+                  {/* ⚠ `dateOnly`, і не тому, що контракт віддає `Format: date`
+                      (хоча віддає), а тому, що на питання цієї колонки — «з
+                      якого ДНЯ періоди рахує ця версія» — година не відповідає
+                      взагалі: дата набуття чинності порівнюється з календарем
+                      періодів, а не з годинником. Приписати їй «12:00 AM»
+                      означало б показати точність, якої в даних немає.
+
+                      ⚠ Тире лишається дефолтне: `null` тут — «чернетка, ще не
+                      опублікована» (`MethodologyDraftVersionDto.effectiveFrom`),
+                      тобто значення справді НЕМАЄ, а не «діє безстроково». */}
+                  <Table.Td>
+                    <Timestamp value={version.effectiveFrom} dateOnly />
+                  </Table.Td>
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
                       <Button

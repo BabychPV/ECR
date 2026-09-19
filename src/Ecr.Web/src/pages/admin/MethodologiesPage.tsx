@@ -31,6 +31,7 @@ import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -214,7 +215,28 @@ export function MethodologiesPage(): JSX.Element {
                       <Group key={version.id} gap="xs">
                         <Badge variant={version.status === 'Published' ? 'filled' : 'light'}>
                           {version.versionNumber} · {version.level}
-                          {version.effectiveFrom === null ? '' : ` · ${version.effectiveFrom}`}
+                          {/* ⛔ Шаблонний рядок тут РОЗІБРАНО на вузли, а не
+                              замінено на `formatDate(...)` всередині нього.
+                              Обидва варіанти чесні, але вони платять різним:
+                              `formatDate` у рядку дає читабельний текст і
+                              ВТРАЧАЄ точне значення — його нема де лишити, бо
+                              рядок не має атрибутів. Тут же підстановка була в
+                              JSX-дітях `Badge`, а не в параметрі `t()` (як
+                              `periods.reopenedUntil` у `PeriodsPage`), тож
+                              вузол вкладається без жодної втрати: `<time
+                              datetime>` лишається в розмітці. Втрачати
+                              точність там, де її можна не втрачати, підстав
+                              немає. */}
+                          {version.effectiveFrom === null ? (
+                            ''
+                          ) : (
+                            <>
+                              {' · '}
+                              {/* ⚠ `dateOnly`: та сама календарна дата набуття
+                                  чинності, що й у таблиці версій. */}
+                              <Timestamp value={version.effectiveFrom} dateOnly />
+                            </>
+                          )}
                         </Badge>
 
                         {/* ⚠ Режим і рівень трасування видно поруч із версією:
