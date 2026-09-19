@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, cleanup } from '@testing-library/react';
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { Notifications, notifications } from '@mantine/notifications';
 import { showUndo } from '@/shared/ui/notify';
@@ -61,8 +61,22 @@ describe('showUndo: натиснута дія «назад»', () => {
     expect(onUndo).toHaveBeenCalledOnce();
     expect(result).toBe(true);
 
-    // Тост після скасування зникає: вікно рішення закрите.
-    expect(screen.queryByText('Аркуш видалено.')).toBeNull();
+    /*
+     * Тост після скасування зникає: вікно рішення закрите.
+     *
+     * ✎ Тут стояло синхронне `expect(...).toBeNull()` одразу після кліку, і
+     * воно ЗЕЛЕНІЛО локально, а на раннері CI дало
+     * `expected <p …(3)></p> to be null`. Причина не в продукті: `notifications
+     * .hide()` знімає тост через ВИХІДНИЙ ПЕРЕХІД, тобто вузол живе ще кадр-два
+     * після виклику. Локально він встигав зникнути всередині того самого
+     * `act()`, на повільнішій машині — ні.
+     *
+     * ⛔ Твердження НЕ ослаблене: тост і далі мусить зникнути, і
+     * `autoClose: 100_000` унеможливлює зелень «сам згорнувся за таймером».
+     * Змінилося лише те, що перевіряється ОБІЦЯНКА («зникає»), а не
+     * незадокументований момент («зникає в межах одного синхронного зливу»).
+     */
+    await waitFor(() => expect(screen.queryByText('Аркуш видалено.')).toBeNull());
   });
 
   it('кнопка «назад» має доступне ім’я, як і хрестик поруч', async () => {
