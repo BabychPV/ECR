@@ -90,6 +90,23 @@ export async function expectFocusVisible(page: Page, where: string): Promise<Foc
  */
 const RingPadding = 6;
 
+/**
+ * Скільки чекати, доки ТИМЧАСОВА перешкода зникне сама.
+ *
+ * ⛔ Відмовити на тості — неправда того самого ґатунку, що й вигадане
+ * «0.00 %»: перевірка повідомила б про дефект, якого немає.
+ * `<Notifications position="top-right" />` (`app/App.tsx`) кладе тост
+ * попередньої дії рівно на панель інструментів документа — туди, де стоять
+ * `Submit` і `Approve`, — і закриває його сам через 4 с (типове `autoClose`
+ * Mantine). Заміряно: без цього очікування крок 10 `keyboardPath.spec.ts`
+ * («кнопка затвердження») падав із «ціль перекрита <div>» одразу після того,
+ * як крок 9 показав тост.
+ *
+ * ⚠ 8 с — подвійний `autoClose`. Перешкода, що пережила його, вже не
+ * тимчасова: людина теж не побачить під нею кільця, і відмовити треба.
+ */
+const ObstructionTimeout = 8_000;
+
 /** Область виміру разом із причиною, чому виміряти її НЕ МОЖНА. */
 interface MeasureRegion {
   readonly clip: { x: number; y: number; width: number; height: number };
@@ -216,6 +233,14 @@ export async function expectFocusRing(page: Page, target: Locator, where: string
     region = await regionFor(page, target);
   }
 
+  // ⚠ Тимчасову перешкоду перечікуємо, а не оголошуємо дефектом: пояснення —
+  // у `ObstructionTimeout`.
+  const deadline = Date.now() + ObstructionTimeout;
+  while (region.problem !== null && Date.now() < deadline) {
+    await page.waitForTimeout(250);
+    region = await regionFor(page, target);
+  }
+
   expect(
     region.problem,
     `${where}: ВИМІР НЕМОЖЛИВИЙ — ${region.problem ?? ''}. Це не «кільця немає»: ` +
@@ -250,6 +275,15 @@ export async function expectFocusRing(page: Page, target: Locator, where: string
     `${where}: розкладка зрушила між знімками на ${shift.toFixed(1)} px — вимір недійсний, ` +
       'бо в тій самій області опинився інший вміст.',
   ).toBeLessThanOrEqual(1);
+
+  // ⛔ І перешкода не мала з'явитися ПОСЕРЕД виміру. Тост, що виплив між двома
+  // знімками, дав би велику різницю в незрушеній області — тобто хибне
+  // «кільце видно». Геометрія його не ловить, бо вона не змінюється.
+  expect(
+    shifted.problem,
+    `${where}: між знімками з'явилася перешкода — ${shifted.problem ?? ''}. ` +
+      'Вимір недійсний: різниця в пікселях належить їй, а не кільцю.',
+  ).toBeNull();
 
   const after = await page.screenshot({ clip });
 
