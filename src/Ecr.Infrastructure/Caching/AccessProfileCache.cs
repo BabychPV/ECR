@@ -11,6 +11,24 @@ namespace Ecr.Infrastructure.Caching;
 public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? lifetimes = null)
 {
     /// <summary>
+    /// Один політ на ключ (`RD-05`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Поле, а не параметр: сам кеш — <c>Singleton</c> (див.
+    /// <c>DependencyInjection</c>), тож словник і так спільний на процес.
+    ///
+    /// ⛔ Чому ділити ПОБУДОВУ профілю безпечно. Ключ складається з
+    /// (користувач, штамп, відбиток груп), а фабрика в єдиного викликача —
+    /// <c>AccessDecisionService.BuildProfileAsync</c> — будує профіль рівно з
+    /// цих самих трьох величин. Отже два одночасні промахи на один ключ
+    /// будують ТОТОЖНІ профілі, і віддати їм спільний результат — не те саме,
+    /// що сплутати профілі (`Q-187`). Профіль симуляції сюди не приходить
+    /// узагалі: <c>SimulationService</c> будує його поза кешем і з іншим
+    /// <c>CacheKey</c>; перевірка нижче лишається другим рубежем.
+    /// </remarks>
+    private readonly SingleFlight<AccessProfile> _flight = new();
+
+    /// <summary>
     /// Стеля життя запису.
     /// </summary>
     /// <remarks>
@@ -52,6 +70,22 @@ public sealed class AccessProfileCache(IMemoryCache memory, CacheLifetimes? life
         if (memory.TryGetValue(key, out AccessProfile? cached) && cached is not null)
         {
             return cached;
+        }
+
+        // ⛔ Вхід у систему сотні людей о 9:00 — це сотня промахів на РІЗНИХ
+        // ключах, але одна людина з десятком вкладок дає десяток промахів на
+        // ОДНОМУ, і кожен будував профіль окремо (`RD-05`).
+        return await _flight.RunAsync(key, token => BuildAsync(key, factory, token), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Будує профіль і кладе його в кеш — усередині одного польоту.</summary>
+    private async Task<AccessProfile> BuildAsync(
+        string key, Func<CancellationToken, Task<AccessProfile>> factory, CancellationToken ct)
+    {
+        if (memory.TryGetValue(key, out AccessProfile? ready) && ready is not null)
+        {
+            return ready;
         }
 
         var profile = await factory(ct).ConfigureAwait(false);

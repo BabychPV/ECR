@@ -1,5 +1,6 @@
 ﻿using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
@@ -103,7 +104,30 @@ public static class DependencyInjection
         // IMemoryCache спільний: MetadataCache тримає EcrDbContext, а той
         // Scoped. Спільним лишається саме сховище кешу, тож ключ v{id}:r{rev}
         // працює між запитами так само (D-16).
+        //
+        // ⛔ `SizeLimit` НЕ задається, і це вибір, а не забудькуватість
+        // (`RD-05`). До цього кроку тут був НАПІВСТАН: ліміту немає, а записи
+        // несли `Size = …` разом із коментарями, що пояснювали неіснуючу
+        // стелю. Вибрано другий бік розвилки — `Size` прибрано з усіх записів
+        // `Caching/**`, бо ввімкнути ліміт звідси неможливо БЕЗПЕЧНО:
+        // `MemoryCache` із `SizeLimit` кидає на КОЖНОМУ `Set` без `Size`, а
+        // таких записувачів у це саме сховище двоє поза межами цього кроку —
+        // `Security/SecurityStampValidator.cs` (перевірка штампа на кожен
+        // запит, тобто шлях входу) і `Localization/UiStringCatalogStore.cs`.
+        // Ліміт, увімкнений тут, поклав би вхід у систему — стеля пам'яті
+        // ціною падіння автентифікації не є покращенням.
+        //
+        // ⚠ Пам'ять натомість тримає СТРОК: кожен запис у `Caching/**` має
+        // абсолютну стелю життя (30 хв метадані й профілі, 15 хв довідники,
+        // 5 с ревізія), тож безмежного зростання немає й без `SizeLimit`.
+        // Увімкнення ліміту з `Size` в УСІХ записувачів процесу — окремий
+        // крок, і він має починатися з тих двох файлів.
         services.AddMemoryCache();
+
+        // ⚠ Singleton, і це несуча деталь: `MetadataCache` нижче — Scoped, і
+        // словник «що зараз будується» мусить пережити окремий запит, інакше
+        // зливати нічого (`RD-05`).
+        services.AddSingleton<Caching.SingleFlight<TemplateVersionSnapshot>>();
 
         // ⚠ Строки кешів читаються ОДИН раз і передаються явною фабрикою, а не
         // через необов'язковий параметр конструктора: контейнер
@@ -115,17 +139,15 @@ public static class DependencyInjection
         services.AddScoped<IMetadataCache>(sp => new MetadataCache(
             sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
             sp.GetRequiredService<EcrDbContext>(),
-            sp.GetRequiredService<CacheLifetimes>()));
+            sp.GetRequiredService<CacheLifetimes>(),
+            sp.GetRequiredService<Caching.SingleFlight<TemplateVersionSnapshot>>()));
 
-        // ⛔ Реєстрація без споживача. Тут стояло «потрібен рушію виразів, бо
-        // ExtractDependencies у контракті синхронний» — і це вже неправда:
-        // після `H-3` порт приймає знімок ПАРАМЕТРОМ, тож у кеш не лізе ніхто.
-        //
-        // ⚠ Лишена свідомо і на один крок: прибирати порт означає правити
-        // `02-contracts.md`, знімати синхронний аксесор у `MetadataCache` і
-        // проходити двома сторожами портів. Записано в
-        // `unreachable-mechanisms.md` як ⛔, щоб не загубитися.
-        services.AddSingleton<ITemplateStructure, Caching.CachedTemplateStructure>();
+        // ⛔ `ITemplateStructure`/`CachedTemplateStructure` тут БІЛЬШЕ НЕМАЄ
+        // (`Q-192`, `AR-06`, `unreachable-mechanisms.md` §4a). Порт існував
+        // лише заради синхронного читання кешу в `ExtractDependencies`; після
+        // `H-3` знімок приходить туди параметром, і викликати `.Get` стало
+        // нікому — жодного виклику в `src/` не було. Разом із портом пішов
+        // запис `rev:{id}` на кожен `GetAsync`, заведений під нього.
 
         // Рушій виразів. Парсер, обчислювач і сортувальник без стану —
         // Singleton; сам рушій теж, бо знімок бере з кешу, а не тримає.

@@ -49,12 +49,40 @@ public sealed class PatchCellsHandler(
     /// <c>Lookup</c>-комірки на неіснуючий запис довідника —
     /// <c>ECR-CELL-4223</c>.
     /// </exception>
+    /// <param name="request">Батч.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <param name="deferRecalculationUntilMi02">
+    /// <b>ТИМЧАСОВИЙ</b> внутрішній параметр (`DAT-05`). <c>null</c> —
+    /// звичайний шлях: перерахунок ставиться в чергу тут, після коміту. Не
+    /// <c>null</c> — задача НЕ ставиться, а насіння каскаду складається в цю
+    /// колекцію, і поставити одну задачу зобов'язаний викликач — ПІСЛЯ коміту
+    /// СВОЄЇ, ширшої транзакції.
+    /// </param>
     /// <remarks>
     /// Орієнтир — тільки послідовність кроків: увесь контекст рішень,
     /// порядок і межі транзакції описані в коментарях відповідних
     /// приватних методів нижче, а не тут.
+    ///
+    /// ⛔ <paramref name="deferRecalculationUntilMi02"/> існує рівно тому, що
+    /// черги задач ще НЕ транзакційні (`MI-02` не зроблена). Єдиний викликач —
+    /// <c>ExcelImporter.ApplyAsync</c>, який тримає одну транзакцію на ВСЮ
+    /// книгу (`DAT-05`, «все або нічого»): поставлена звідси задача стартувала
+    /// б у воркері РАНІШЕ за коміт цієї транзакції і під RCSI прочитала б
+    /// старі дані — або дані, яких після відкату не буде взагалі.
+    ///
+    /// ⚠ Параметр названий із номером підзадачі навмисно: після `MI-02`
+    /// (транзакційна черга) постановка стає частиною тієї самої транзакції,
+    /// відкладати стає нічого — і параметр зникає разом із цим коментарем.
+    ///
+    /// ⚠ Колекція, а не булевий прапорець: «не ставити задачу» без повернення
+    /// насіння означало б, що викликач ВІДНОВЛЮЄ перелік змінених комірок сам
+    /// — другим, незалежним обчисленням того самого, яке одного дня розійшлося
+    /// б із тим, що насправді записано.
     /// </remarks>
-    public async Task<PatchCellsResponse> HandleAsync(PatchCellsRequest request, CancellationToken ct)
+    public async Task<PatchCellsResponse> HandleAsync(
+        PatchCellsRequest request,
+        CancellationToken ct,
+        ICollection<RecalculationSeed>? deferRecalculationUntilMi02 = null)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -76,7 +104,19 @@ public sealed class PatchCellsHandler(
 
         await PersistChangesAsync(request, context, changes, now, isLateEdit, previous, ct).ConfigureAwait(false);
 
-        await EnqueueRecalculationAsync(request, changes, ct).ConfigureAwait(false);
+        var seeds = BuildRecalculationSeeds(changes);
+
+        if (deferRecalculationUntilMi02 is null)
+        {
+            await EnqueueRecalculationAsync(request, seeds, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            foreach (var seed in seeds)
+            {
+                deferRecalculationUntilMi02.Add(seed);
+            }
+        }
 
         return await BuildResponseAsync(request, context.PeriodKey, changes, messages, ct).ConfigureAwait(false);
     }
@@ -1202,19 +1242,26 @@ public sealed class PatchCellsHandler(
     /// них перерахунок був би повним на кожну правку, і граф залежностей
     /// коштував би, не даючи нічого.
     /// </remarks>
-    private async Task EnqueueRecalculationAsync(PatchCellsRequest request, CellChangeLists changes, CancellationToken ct)
-    {
-        var seeds = changes.Upserts
-            .Select(u => u.Address)
-            .Concat(changes.Deletes)
-            .Select(a => new { RowId = a.TableRowId, a.ColumnDefId })
-            .Distinct()
-            .ToList();
-
-        await jobs.EnqueueAsync<Ports.IFormulaRecalculationJob>(
+    private async Task EnqueueRecalculationAsync(
+        PatchCellsRequest request, IReadOnlyList<RecalculationSeed> seeds, CancellationToken ct)
+        => await jobs.EnqueueAsync<Ports.IFormulaRecalculationJob>(
             new { request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct)
             .ConfigureAwait(false);
-    }
+
+    /// <summary>Насіння каскаду: адреси всіх записаних і стертих комірок батчу.</summary>
+    /// <remarks>
+    /// ⚠ Виділено з <see cref="EnqueueRecalculationAsync"/> окремим методом
+    /// (`DAT-05`), щоб відкладена постановка (<c>deferRecalculationUntilMi02</c>)
+    /// і звичайна брали насіння з ОДНОГО місця. Два обчислення того самого
+    /// переліку — це два переліки, які колись розійдуться.
+    /// </remarks>
+    private static List<RecalculationSeed> BuildRecalculationSeeds(CellChangeLists changes)
+        => changes.Upserts
+            .Select(u => u.Address)
+            .Concat(changes.Deletes)
+            .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId))
+            .Distinct()
+            .ToList();
 
     /// <summary>Підсумкова відповідь: застосовані комірки, нові версії рядків, повідомлення валідації.</summary>
     private async Task<PatchCellsResponse> BuildResponseAsync(
@@ -1438,3 +1485,15 @@ public sealed class PatchCellsHandler(
                     ["columnCode"] = columnCode,
                 });
 }
+
+/// <summary>Змінена комірка — насіння каскадного перерахунку формул.</summary>
+/// <param name="RowId">Рядок документа (<c>doc.TableRow.Id</c>).</param>
+/// <param name="ColumnDefId">Колонка.</param>
+/// <remarks>
+/// ⚠ Іменований тип замість анонімного (`DAT-05`): перелік насіння тепер
+/// перетинає межу обробника — його забирає <c>ExcelImporter</c>, щоб поставити
+/// ОДНУ задачу на книгу після коміту. Форма серіалізації не змінилася
+/// (<c>{ rowId, columnDefId }</c>), тож <c>DirtyCell</c> у
+/// <c>FormulaRecalculationJob</c> читає її так само, як читав анонімний тип.
+/// </remarks>
+public sealed record RecalculationSeed(long RowId, int ColumnDefId);

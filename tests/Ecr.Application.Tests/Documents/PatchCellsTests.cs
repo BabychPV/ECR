@@ -912,6 +912,68 @@ public sealed class PatchCellsTests
         });
     }
 
+    /// <summary>
+    /// `DAT-05`: з переданою колекцією обробник НЕ ставить задачу сам, а
+    /// віддає насіння каскаду викликачеві.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це половина контракту тимчасового параметра
+    /// <c>deferRecalculationUntilMi02</c>. Друга половина — що викликач
+    /// (<c>ExcelImporter</c>) справді ставить ОДНУ задачу після коміту —
+    /// доводиться в <c>Ecr.Adapters.Tests</c> і наскрізно в
+    /// <c>Ecr.Scenarios.Tests</c>. Порізно ці дві перевірки нічого не варті:
+    /// «не поставив» без «хтось поставив» означало б, що перерахунок після
+    /// імпорту не відбувається взагалі.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "DAT-05")]
+    public async Task Відкладений_перерахунок_не_ставить_задачу_а_віддає_насіння()
+    {
+        var seeds = new List<RecalculationSeed>();
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            deferRecalculationUntilMi02: seeds);
+
+        // ⛔ Жодної задачі: поставлена звідси, вона стартувала б усередині ще
+        // не закоміченої транзакції імпорту — і під RCSI прочитала б старі
+        // дані або дані, яких після відкату не буде взагалі.
+        await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
+            Arg.Any<object>(), Arg.Any<CancellationToken>());
+
+        // ⚠ Насіння — не «щось непорожнє», а РІВНО та комірка, яку записали:
+        // перелік, зібраний із іншого джерела, одного дня розійшовся б із тим,
+        // що насправді лежить у базі.
+        var seed = Assert.Single(seeds);
+        Assert.Equal(1001L, seed.RowId);
+        Assert.Equal(VolumeColumnId, seed.ColumnDefId);
+
+        // Запис при цьому відбувся: відкладається постановка задачі, а не робота.
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// `DAT-05`: без параметра поведінка не змінилася — одна задача на батч.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Опудало проти «полагодив імпорт — зламав сітку»: звичайний
+    /// <c>PATCH</c> із сітки документа передає <c>null</c>, і перерахунок
+    /// мусить ставитися так само, як до `DAT-05`.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "DAT-05")]
+    public async Task Без_відкладання_задача_ставиться_як_і_раніше()
+    {
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            deferRecalculationUntilMi02: null);
+
+        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
+            Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Код_колонки_резолвиться_в_МЕЖАХ_таблиці_а_не_всієї_версії()

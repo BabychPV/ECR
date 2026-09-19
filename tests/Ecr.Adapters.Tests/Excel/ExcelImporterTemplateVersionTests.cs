@@ -175,7 +175,27 @@ public sealed class ExcelImporterTemplateVersionTests
                 methodologies, patchRegistries,
                 Substitute.For<IAuditWriter>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
                 Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
-            new ImportDiffBuilder(), _cellStore, _rowStore);
+            new ImportDiffBuilder(), _cellStore, _rowStore,
+            // ⚠ `DAT-05`: імпортер тепер сам відкриває транзакцію на всю книгу
+            // і сам ставить задачу перерахунку. Ці тести — про `PreviewAsync`,
+            // тобто до транзакції не доходять; саб віддає працюючу заглушку,
+            // щоб причина падіння в майбутньому тесті не виглядала як дефект
+            // продукту.
+            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>());
+    }
+
+    /// <summary>Саб <see cref="IUnitOfWork"/>, чия «транзакція» просто виконує тіло.</summary>
+    private static class FakeUnitOfWork
+    {
+        public static IUnitOfWork Passthrough()
+        {
+            var uow = Substitute.For<IUnitOfWork>();
+            uow.ExecuteInTransactionAsync(
+                   Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+               .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
+            return uow;
+        }
     }
 
     [Fact]
