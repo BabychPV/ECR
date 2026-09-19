@@ -49,6 +49,37 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
 
     /// <inheritdoc />
     /// <remarks>
+    /// ⚠ <c>Include</c> без <c>AsSplitQuery</c>: потрібен саме ОДИН запит —
+    /// рядок <c>RD-06</c> вимірюється числом звернень, і розділений запит дав
+    /// би два там, де замір чекає одного. Версій на методологію одиниці, тож
+    /// декартів добуток тут нічого не коштує (на відміну від
+    /// <c>TemplateVersionStore</c>, де його і розділяють).
+    /// </remarks>
+    public async Task<IReadOnlyList<Methodology>> ListWithVersionsAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+
+        var query = db.Methodologies
+            .AsNoTracking()
+            .Include(m => m.Versions);
+
+        // ⛔ Порожній набір — це «всі активні», а не «жодної». Саме на цьому
+        // вже спіткнувся перелік один раз: щойно заведена методологія була
+        // недосяжна з єдиного екрана, звідки на неї можна перейти.
+        var filtered = methodologyIds.Count == 0
+            ? query.Where(m => m.IsActive)
+            : query.Where(m => methodologyIds.Contains(m.Id));
+
+        return await filtered
+            .OrderBy(m => m.Code)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// ⛔ Фільтра за станом тут НЕМАЄ — і саме цим порт відрізняється від
     /// <see cref="MethodologyStore.GetPublishedVersionsAsync"/>. Конфігуратор
     /// показує те, що можна правити, а правити можна тільки чернетку.

@@ -67,11 +67,60 @@ public sealed class SwitchRegistrySourceTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Integration.Manage").Build());
 
-        foreach (var definition in new[] { _permits, _waterBodies, _outfalls })
-        {
-            _registries.FindDefinitionAsync(definition.Code, Arg.Any<CancellationToken>())
-                .Returns(definition);
-        }
+        // ⛔ `RD-06`: обробник розв'язує ВЕСЬ набір одним зверненням
+        // (`FindDefinitionsAsync`), а не `FindDefinitionAsync` у циклі. Тому
+        // заглушка теж пакетна: вона віддає ті з відомих довідників, чиї коди
+        // є в запиті, — рівно так, як це робить `RegistryStore` через `IN (…)`.
+        _registries.FindDefinitionsAsync(
+                Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyList<RegistryDef>)All()
+                .Where(d => call.ArgAt<IReadOnlyCollection<string>>(0)
+                    .Contains(d.Code, StringComparer.OrdinalIgnoreCase))
+                .ToList());
+    }
+
+    /// <summary>
+    /// <c>RD-06</c>: набір розв'язується <b>одним</b> зверненням, скільки б
+    /// довідників у ньому не було.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це і є доказ рядка на цьому рівні: число звернень до сховища не
+    /// залежить від довжини набору. Доти тут стояв
+    /// <c>foreach (code) → FindDefinitionAsync</c>, тобто рівно N звернень, і
+    /// перемикання блоку з тридцяти довідників коштувало тридцять запитів
+    /// заради однієї транзакції.
+    ///
+    /// ⛔ Мутація, що валить тест: повернути цикл — <c>Received(1)</c> стає
+    /// <c>Received(2)</c> для першого набору і <c>Received(3)</c> для другого.
+    /// Порівняння двох розмірів обов'язкове: сама по собі «одна відповідь»
+    /// нічого не доводить, доводить саме РІВНІСТЬ при різному N.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-13.10")]
+    public async Task Число_звернень_не_залежить_від_розміру_набору()
+    {
+        await Handler().HandleAsync(
+            ["PERMIT", "WATER_BODY"], RegistrySourceKind.External, "перехід", default);
+
+        await _registries.Received(1).FindDefinitionsAsync(
+            Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+
+        // ⚠ Поштучного читання не лишилося взагалі — інакше пакетний запит
+        // просто додався б до циклу, а не замінив його.
+        await _registries.DidNotReceive().FindDefinitionAsync(
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        _registries.ClearReceivedCalls();
+
+        var wider = Handler();
+        await wider.HandleAsync(
+            ["PERMIT", "WATER_BODY", "OUTFALL"], RegistrySourceKind.Local, "назад", default);
+
+        await _registries.Received(1).FindDefinitionsAsync(
+            Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>());
+        await _registries.DidNotReceive().FindDefinitionAsync(
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -82,9 +131,11 @@ public sealed class SwitchRegistrySourceTests
         // ⛔ Головний тест кроку. Перемкнути «те, що знайшлося», було б гірше
         // за відмову: половина блоку опинилася б в одному режимі, половина в
         // іншому, і ніхто б не знав, де проходить межа.
-        _registries.FindDefinitionAsync("NO_SUCH", Arg.Any<CancellationToken>())
-            .Returns((RegistryDef?)null);
-
+        //
+        // ⚠ `NO_SUCH` тут НЕ підмінюється окремо: пакетна заглушка в
+        // конструкторі віддає лише відомі коди, тож невідомий не потрапляє у
+        // відповідь — рівно як `IN (…)` у базі. Саме цей випадок і має
+        // відхилити ВЕСЬ набір, а не пропустити відсутнє.
         await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
             ["PERMIT", "NO_SUCH", "WATER_BODY"], RegistrySourceKind.External, "перехід", default));
 

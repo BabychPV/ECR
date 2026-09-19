@@ -36,6 +36,19 @@ public sealed class ListMethodologiesHandler(
     /// перейти. Другий шар тієї самої тиші: методологія без ЖОДНОЇ
     /// ОПУБЛІКОВАНОЇ версії відкидалася цілком — тобто щойно заведена, без
     /// версій, зникала так само.
+    ///
+    /// ⛔ <b>Рядок <c>RD-06</c>: один запит, а не <c>1 + N</c>.</b> Доти тут
+    /// стояв <c>ListActiveIdsAsync</c>, а далі <c>FindAsync</c> у ЦИКЛІ по
+    /// кожному ідентифікатору — тобто відкриття екрана коштувало стільки
+    /// звернень до бази, скільки в корпусі активних методологій. Замінено на
+    /// <see cref="Ports.IMethodologyDraftStore.ListWithVersionsAsync"/>: число
+    /// звернень тепер не залежить від довжини переліку взагалі.
+    ///
+    /// ⚠ Другий наслідок тієї ж заміни — <c>AsNoTracking</c>. <c>FindAsync</c>
+    /// віддає агрегат ВІДСТЕЖУВАНИМ, і документовано навмисно: через нього
+    /// правлять чернетки. Переліку відстеження не потрібне ніколи, а з ним
+    /// кожне відкриття екрана складало в <c>ChangeTracker</c> усі методології
+    /// корпусу разом з усіма версіями.
     /// </remarks>
     public async Task<IReadOnlyList<MethodologyDto>> HandleAsync(
         IReadOnlyList<int> methodologyIds, CancellationToken ct)
@@ -46,21 +59,38 @@ public sealed class ListMethodologiesHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var ids = methodologyIds.Count > 0
-            ? methodologyIds
-            : await methodologies.ListActiveIdsAsync(ct).ConfigureAwait(false);
+        var found = await methodologies
+            .ListWithVersionsAsync(methodologyIds, ct)
+            .ConfigureAwait(false);
 
-        var result = new List<MethodologyDto>(ids.Count);
-
-        foreach (var id in ids)
+        if (methodologyIds.Count == 0)
         {
-            var methodology = await methodologies.FindAsync(id, ct).ConfigureAwait(false);
-            if (methodology is null)
-            {
-                continue;
-            }
+            // Порожній запит — усі активні, вже впорядковані за кодом.
+            return found.Select(Map).ToList();
+        }
 
-            result.Add(Map(methodology));
+        // ⚠ Порядок ВІДПОВІДІ — той, у якому методології попросили, а не той,
+        // у якому їх віддала база. Клієнт конфігуратора передає ids саме тоді,
+        // коли сам знає, у якій послідовності їх показувати, і мовчазне
+        // пересортування за кодом переставило б рядки в нього на екрані.
+        //
+        // ⚠ Дублі в запиті теж зберігаються — рівно як у циклі до цього.
+        var byId = new Dictionary<int, Methodology>(found.Count);
+        foreach (var methodology in found)
+        {
+            byId[methodology.Id] = methodology;
+        }
+
+        var result = new List<MethodologyDto>(methodologyIds.Count);
+
+        foreach (var id in methodologyIds)
+        {
+            // Неіснуючий ідентифікатор мовчки пропускається — та сама
+            // поведінка, що давав `FindAsync is null → continue`.
+            if (byId.TryGetValue(id, out var methodology))
+            {
+                result.Add(Map(methodology));
+            }
         }
 
         return result;
