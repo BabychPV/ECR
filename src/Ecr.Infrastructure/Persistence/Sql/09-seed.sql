@@ -1607,6 +1607,13 @@ USING (VALUES
     (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
     (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
     (N'snapshots.noPublished',           N'en', N'No report definition has a published version yet: a snapshot can only be built from one.', 1),
+    -- BE-17: перевірка незмінності зрізу — сума перераховується за збереженими рядками.
+    (N'snapshots.verify',                N'en', N'Verify', 1),
+    (N'snapshots.verifyMatch',           N'en', N'unchanged', 1),
+    (N'snapshots.verifyMismatch',        N'en', N'content changed', 1),
+    (N'snapshots.verifyStored',          N'en', N'Stored: {hash}', 1),
+    (N'snapshots.verifyActual',          N'en', N'Actual: {hash}', 1),
+    (N'snapshots.verifyLegacy',          N'en', N'Matched by the earlier checksum format: this snapshot was built before the format changed.', 1),
 
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.

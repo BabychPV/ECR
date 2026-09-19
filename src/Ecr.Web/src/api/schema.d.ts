@@ -5077,6 +5077,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/snapshots/{id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перевіряє незмінність зрізу: перераховує суму збереженого вмісту й
+         *     порівнює зі збереженою. Право `Report.ViewRegulatory`.
+         * @description ⚠ `POST`, хоча нічого не змінює: це дія з ціною (читає всі рядки
+         *     зрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зріз. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SnapshotVerifyResponse"];
+                        "text/json": components["schemas"]["SnapshotVerifyResponse"];
+                        "text/plain": components["schemas"]["SnapshotVerifyResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/{code}/build": {
         parameters: {
             query?: never;
@@ -11889,6 +11946,18 @@ export interface components {
              * @description Чиїми правами дивимося.
              */
             simulatedForUserId: number;
+        };
+        /** @description Підсумок перевірки зрізу. */
+        SnapshotVerifyResponse: {
+            /** @description Сума, перерахована за збереженими рядками (hex). */
+            actual: string;
+            /** @description За яким форматом суми збіглося: `current`, `legacy` (зріз,
+             *     побудований до BE-17) або `null` — не збіглося за жодним. */
+            matchedFormat: null | string;
+            /** @description Чи перерахована сума збіглася зі збереженою. */
+            matches: boolean;
+            /** @description Сума, записана при побудові (hex). */
+            stored: string;
         };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {
