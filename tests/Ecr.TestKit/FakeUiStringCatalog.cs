@@ -102,6 +102,16 @@ public sealed class FakeUiStringCatalog : IUiStringCatalog
         }
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<UiStringRawRow>> ListRawAsync(string languageCode, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(UiStringResolver.ComposeRaw(
+                Slice(UiStringResolver.DefaultLanguage, scope: null), Slice(languageCode, scope: null)));
+        }
+    }
+
     private UiStringCatalog Build(string languageCode, UiStringScope? scope)
     {
         lock (_gate)
