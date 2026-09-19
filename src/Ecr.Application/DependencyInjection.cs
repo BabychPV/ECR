@@ -139,6 +139,9 @@ public static class DependencyInjection
         services.AddScoped<Security.CreateRoleHandler>();
         services.AddScoped<Security.RenameRoleHandler>();
         services.AddScoped<Security.DeleteRoleHandler>();
+        services.AddScoped<Security.ListGroupRoleAssignmentsHandler>();
+        services.AddScoped<Security.AssignGroupRoleHandler>();
+        services.AddScoped<Security.RevokeGroupRoleHandler>();
         services.AddScoped<Security.CloneRoleHandler>();
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();

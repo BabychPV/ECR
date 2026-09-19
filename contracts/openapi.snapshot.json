@@ -335,6 +335,48 @@
         ],
         "type": "object"
       },
+      "AssignGroupRoleRequest": {
+        "description": "Тіло призначення ролі групі.",
+        "properties": {
+          "confirmDangerous": {
+            "description": "Підтвердження видачі ролі з небезпечними правами.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "principal": {
+            "description": "SID (`S-1-…`) або ім'я `ДОМЕН\\Група`.",
+            "type": "string"
+          },
+          "roleId": {
+            "description": "Роль.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "validFrom": {
+            "description": "Початок дії; `null` — від завжди.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець дії (включно); `null` — безстроково.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "roleId",
+          "principal"
+        ],
+        "type": "object"
+      },
       "AuthProvider": {
         "description": "Провайдер автентифікації. Нижче рівня входу не використовується.",
         "enum": [
@@ -2561,6 +2603,94 @@
         "required": [
           "sid",
           "roleCodes"
+        ],
+        "type": "object"
+      },
+      "GroupRoleAssignedResult": {
+        "description": "Наслідок призначення ролі групі.",
+        "properties": {
+          "effectiveAfterNextSignIn": {
+            "description": "`true` — на цей SID досі не було жодного призначення, тож у cookie вже\n        залогінених членів групи його немає (`#419`: у квиток кладуться лише групи\n        з призначеннями), і роль подіє для них з НАСТУПНОГО входу.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Ідентифікатор нового призначення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "principalName": {
+            "description": "Ім'я групи; `null` — не резолвиться.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "principalSid": {
+            "description": "SID, під яким воно збережене.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "principalSid",
+          "principalName",
+          "effectiveAfterNextSignIn"
+        ],
+        "type": "object"
+      },
+      "GroupRoleAssignmentView": {
+        "description": "Призначення ролі групі каталогу — рядок екрана керування.",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор призначення; ним і відкликають.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "principalName": {
+            "description": "Ім'я групи; `null` — каталог його не назвав.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "principalSid": {
+            "description": "SID групи — зберігається завжди він.",
+            "type": "string"
+          },
+          "roleCode": {
+            "description": "Код ролі.",
+            "type": "string"
+          },
+          "roleId": {
+            "description": "Роль.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "validFrom": {
+            "description": "Початок дії; `null` — від завжди.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець дії (включно); `null` — безстроково.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "roleId",
+          "roleCode",
+          "principalSid",
+          "principalName",
+          "validFrom",
+          "validTo"
         ],
         "type": "object"
       },
@@ -16451,6 +16581,199 @@
         ]
       }
     },
+    "/api/v1/security/group-assignments": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі групові призначення з резолвленими іменами груп.",
+        "tags": [
+          "GroupAssignments"
+        ]
+      },
+      "post": {
+        "description": "⛔ Роль із небезпечними правами — лише з `confirmDangerous: true`,\nінакше `409 ECR-SEC-0409` з переліком у `details`. Дублікат —\nтой самий код; ім'я, що не резолвиться, — `422 ECR-REQ-0422`.\n\n⚠ `effectiveAfterNextSignIn: true` — на цей SID раніше не було\nпризначень, тож у cookie вже залогінених членів групи його немає (`#419`),\nі роль подіє для них з наступного входу. Відкликання діє негайно.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignGroupRoleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignGroupRoleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignGroupRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRoleAssignedResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRoleAssignedResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRoleAssignedResult"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Призначає роль групі за SID або іменем `ДОМЕН\\Група`.",
+        "tags": [
+          "GroupAssignments"
+        ]
+      }
+    },
+    "/api/v1/security/group-assignments/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Відкликає роль у групи; діє на вже залогінених негайно.",
+        "tags": [
+          "GroupAssignments"
+        ]
+      }
+    },
     "/api/v1/security/my-groups": {
       "get": {
         "description": "⛔ Ендпоінт існує тому, що збій рольової моделі на живому домені\n<b>не відрізняється від справної системи</b>: людина входить, бачить\nпорожні переліки і вважає, що даних немає. Тут вона бачить свій SID,\nусі SID груп зі свого квитка, які з них дали ролі і які — ні.\n\n⚠ Права не потребує НАВМИСНО: вимагати `Security.ManageUsers` на\nвласні групи означало б лишити без відповіді саме тих, заради кого\nмаршрут заведений, — рядових співробітників без жодного права. Чужі\nSID цим шляхом не віддаються: суб'єкт завжди сам викликач.",
@@ -20554,6 +20877,9 @@
     },
     {
       "name": "Expressions"
+    },
+    {
+      "name": "GroupAssignments"
     },
     {
       "name": "Jobs"

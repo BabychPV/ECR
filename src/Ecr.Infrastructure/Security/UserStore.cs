@@ -518,6 +518,30 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         return [.. rows.Select(x => Trace(x.Assignment, x.Code, asOf))];
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<GroupRoleAssignmentView>> ListGroupRoleAssignmentsAsync(CancellationToken ct)
+        => await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.PrincipalSid != null)
+            .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { a, r.Code })
+            .OrderBy(x => x.a.PrincipalSid)
+            .ThenBy(x => x.Code)
+            .Take(MaxRoles)
+            .Select(x => new GroupRoleAssignmentView(
+                x.a.Id, x.a.RoleId, x.Code, x.a.PrincipalSid!, null, x.a.ValidFrom, x.a.ValidTo))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddGroupAssignment(RoleAssignment assignment) => db.RoleAssignments.Add(assignment);
+
+    /// <inheritdoc />
+    public Task<RoleAssignment?> FindGroupAssignmentAsync(int assignmentId, CancellationToken ct)
+        => db.RoleAssignments.FirstOrDefaultAsync(a => a.Id == assignmentId && a.PrincipalSid != null, ct);
+
+    /// <inheritdoc />
+    public void RemoveGroupAssignment(RoleAssignment assignment) => db.RoleAssignments.Remove(assignment);
+
     /// <summary>Переводить призначення у зріз для діагностики доступу.</summary>
     /// <param name="assignment">Призначення, вичитане з бази.</param>
     /// <param name="roleCode">Код ролі — його називають в аудиті й у грантах.</param>

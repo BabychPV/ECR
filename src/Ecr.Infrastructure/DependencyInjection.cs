@@ -170,6 +170,7 @@ public static class DependencyInjection
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
         services.AddScoped<IUserStore, UserStore>();
+        services.AddSingleton<Application.Ports.IPrincipalNameResolver, WindowsPrincipalNameResolver>();
         services.AddScoped<Application.Ports.IResourceNameResolver, ResourceNameResolver>();
         services.AddScoped<ISimulationService, SimulationService>();
 

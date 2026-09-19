@@ -88,6 +88,11 @@ const UserAccessEditor = lazy(async () => ({
   default: (await import('@/features/security/UserAccessEditor')).UserAccessEditor,
 }));
 
+/** Ролі груп каталогу — за `import()` з тієї ж причини, що й гранти: бюджет маршруту. */
+const GroupAssignmentsPanel = lazy(async () => ({
+  default: (await import('@/features/security/GroupAssignmentsPanel')).GroupAssignmentsPanel,
+}));
+
 /**
  * Адміністрування безпеки: ролі, матриця прав, користувачі.
  *
@@ -403,6 +408,12 @@ export function SecurityPage(): JSX.Element {
       {tab === 'grants' && (
         <Suspense fallback={null}>
           <GrantsPanel roles={roles.data ?? []} />
+        </Suspense>
+      )}
+
+      {tab === 'users' && can(session.data, 'Security.ManageUsers') && (
+        <Suspense fallback={null}>
+          <GroupAssignmentsPanel roles={roles.data ?? []} />
         </Suspense>
       )}
 
