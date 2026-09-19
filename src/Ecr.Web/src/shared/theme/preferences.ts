@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { theme } from './theme';
 
 /**
@@ -10,6 +11,15 @@ import { theme } from './theme';
 export type Density = 'compact' | 'comfortable';
 
 const DensityKey = 'ecr.density';
+
+/**
+ * Ім'я CSS-змінної висоти рядка — рівно те, що оголошує `tokens.css`.
+ *
+ * ⚠ Константа, а не літерал на місці читання: змінну оголошує CSS, читає
+ * TypeScript, і перевіряє тест. Три написання того самого рядка розійшлися б
+ * мовчки — а наслідок «змінної немає» виглядає як «висота просто така».
+ */
+export const RowHeightVar = '--ecr-row-height';
 
 /** Висота рядка таблиці для щільності, у пікселях. */
 export function rowHeight(density: Density): number {
@@ -44,14 +54,82 @@ export function setDensity(value: Density): void {
   }
 }
 
+/** Ті, кому треба перемалюватися, коли щільність змінилася. */
+const listeners = new Set<() => void>();
+
 /**
  * Застосовує щільність до документа.
  *
  * ⛔ Через CSS-змінну, а не через перерендер кожної таблиці. Щільність зачіпає
  * геть усі подання; пропустити її в одному з п'ятнадцяти означало б, що екран
  * «майже» перемкнувся — і це помітно гірше, ніж якби не перемкнувся зовсім.
+ *
+ * ⛔ `UI-03`: тут стояв ЩЕ Й інлайновий запис `--ecr-row-height` на `<html>`
+ * зі значення `rowHeight()`. Його прибрано навмисно, і це не спрощення. Інлайн
+ * виграє каскад у будь-якому разі, тобто справжнім джерелом висоти було число
+ * з `theme.ts`, а три змінні `tokens.css` лишалися декорацією: `--ecr-ctl-height`
+ * і `--ecr-rail-item` перемикалися атрибутом, а `--ecr-row-height` — ні.
+ * Наслідок гірший за неохайність: прибери оголошення з `tokens.css` — і нічого
+ * не зміниться, тобто жоден тест не побачив би зниклої змінної.
+ *
+ * ⚠ Тепер джерело рівно одне — `tokens.css`, а `rowHeight()` лишається
+ * запасним значенням для середовища, у яке таблицю стилів не завантажено
+ * (модульний тест без `main.tsx`). Те, що ці два джерела не розходяться,
+ * звіряє окремий тест, а не сподівання.
  */
 export function applyDensity(value: Density): void {
-  document.documentElement.style.setProperty('--ecr-row-height', `${rowHeight(value)}px`);
   document.documentElement.dataset['ecrDensity'] = value;
+
+  // ⚠ Копія набору: підписник має право відписатися прямо з обробника
+  // (`useSyncExternalStore` робить саме це при розмонтуванні).
+  for (const notify of [...listeners]) notify();
+}
+
+/**
+ * Висота рядка, ЯК ЇЇ ПОРАХУВАВ БРАУЗЕР; `null` — змінної немає зовсім.
+ *
+ * ⛔ `null`, а не «розумний дефолт». Відсутня змінна і правильна висота — два
+ * різні факти, і функція, яка на перший відповідає другим, робить перевірку
+ * сліпою: тест міряв би число, яке сам собі й підказав. Рівно на цьому вже
+ * обпікся `expectFocusRing` (різниця 0.00 % читалася як «кільце є»).
+ * Запасне значення — рішення ВИКЛИКАЧА, і воно видно на місці виклику.
+ */
+export function measuredRowHeight(): number | null {
+  if (typeof document === 'undefined') return null;
+
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(RowHeightVar).trim();
+  const px = /^(\d+(?:\.\d+)?)px$/.exec(raw);
+
+  return px === null ? null : Number(px[1]);
+}
+
+function subscribeDensity(listener: () => void): () => void {
+  listeners.add(listener);
+
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function rowHeightSnapshot(): number {
+  // ⚠ Запасне значення саме тут: у модульному тесті без `tokens.css` змінної
+  // немає, і сітка з `rowSize={NaN}` не намалювала б жодного рядка. У
+  // застосунку таблиця стилів є завжди (`main.tsx`), тож у продукті працює
+  // перша половина виразу.
+  return measuredRowHeight() ?? rowHeight(density());
+}
+
+/**
+ * Висота рядка для компонента, що мусить перемалюватися при перемиканні.
+ *
+ * ⛔ Потрібна не всім, а тим, хто бере висоту ЧИСЛОМ, а не CSS-ом: RevoGrid
+ * рахує віртуалізацію сам і приймає `rowSize` пропом. Звичайна таблиця читає
+ * ту саму змінну стилем і перемальовується браузером без участі React —
+ * підписувати її на це було б зайвим рендером на кожному екрані.
+ *
+ * ⚠ Знімок — число (примітив), тому `useSyncExternalStore` не зациклиться на
+ * порівнянні за посиланням.
+ */
+export function useRowHeight(): number {
+  return useSyncExternalStore(subscribeDensity, rowHeightSnapshot, rowHeightSnapshot);
 }

@@ -43,6 +43,7 @@ import {
 } from './selection';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { showApiError } from '@/shared/ui/notify';
+import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 
 /** Властивості grid. */
@@ -926,6 +927,29 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // завантаження зрізу, тож ефект із порожніми залежностями його не побачив би
   // — а `focuscell`/`setrange` треба слухати на вузлі, до якого вони
   // піднімаються з тіньового дерева `revo-grid`.
+  /**
+   * Висота рядка сітки — `UI-03`.
+   *
+   * ⛔ Числом, а не CSS-ом, і це не вибір: RevoGrid віртуалізує подання —
+   * рахує, скільки рядків помістилося і на скільки пікселів зсунути полотно.
+   * Висота, задана стилем повз `rowSize`, посунула б намальоване відносно
+   * того, що бібліотека вважає видимим: комірка під курсором виявилася б не
+   * тією, у яку йде введення.
+   *
+   * ⚠ Значення — з тієї самої змінної `--ecr-row-height`, що її читають усі
+   * таблиці (`tokens.css`), а не з окремого числа: інакше сітка документа
+   * жила б у власній щільності, розходячись із рештою екрана на кожну зміну
+   * макета.
+   *
+   * ⚠ `theme` лишається `compact` НЕЗАЛЕЖНО від щільності, і це свідомо.
+   * «Тема» RevoGrid — це шкура (шрифт `Nunito`, шапка капслоком, зашиті
+   * `#000`/`#f8f9fa` у `theme=default`), а не щільність; міняти її разом із
+   * висотою рядка означало б міняти шрифт і кольори шапки — і вийти
+   * з-під сторожа контрасту, зведеного саме для `[theme=compact]`
+   * (`gridCellContrast.test.ts`).
+   */
+  const rowSize = useRowHeight();
+
   const gridListenersCleanup = useRef<(() => void)[]>([]);
   const gridContainerRef = useCallback((node: HTMLDivElement | null) => {
     for (const cleanup of gridListenersCleanup.current) cleanup();
@@ -1151,6 +1175,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       <div ref={gridContainerRef} style={{ display: 'contents' }}>
         <RevoGrid
           theme="compact"
+          rowSize={rowSize}
           range
           resize
           columns={columns}
