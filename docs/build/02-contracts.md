@@ -2918,6 +2918,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/users/{id}/alerts` | `Security.ManageUsers` | 5 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |

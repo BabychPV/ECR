@@ -1486,6 +1486,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health/facts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Версія, час старту, середовище, транспорт сповіщень. Право `System.ViewHealth`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SystemFactsResponse"];
+                        "text/json": components["schemas"]["SystemFactsResponse"];
+                        "text/plain": components["schemas"]["SystemFactsResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health/partitions/script": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Готова команда для DBA на створення наступних партицій. Право `System.ViewHealth`.
+         * @description ⛔ Лише ТЕКСТ (`D15-12`): застосунок не виконує DDL (`D-66`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": string;
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -10463,6 +10560,13 @@ export interface components {
             /** @description Номер версії. */
             versionNumber: string;
         };
+        /** @description Транспорт сповіщень: що відомо з конфігурації, не більше. */
+        NotificationTransportDto: {
+            /** @description Чи налаштований транспорт. */
+            isConfigured: boolean;
+            /** @description Який саме; `null`, коли не налаштований. */
+            kind: null | string;
+        };
         /**
          * @description Арифметичний режим версії методології (ФВ-9.9). `Legacy` відтворює
          *     арифметику чинної системи побітово і використовується лише заради сумісності.
@@ -12140,6 +12244,20 @@ export interface components {
             registryCodes: string[];
             /** @description Нове джерело для всіх перелічених. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
+        /** @description Факти про піднятий процес. */
+        SystemFactsResponse: {
+            /** @description Ім'я середовища хосту (`Production`, `Development`). */
+            environment: string;
+            /** @description Стан транспорту сповіщень. */
+            notificationTransport: components["schemas"]["NotificationTransportDto"];
+            /** @description Версія продукту без метаданих збірки. */
+            productVersion: string;
+            /**
+             * Format: date-time
+             * @description Коли стартував процес, UTC.
+             */
+            startedAt: string;
         };
         TableDto: {
             /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
