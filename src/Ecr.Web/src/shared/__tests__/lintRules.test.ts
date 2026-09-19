@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { ESLint } from 'eslint';
 
 /**
@@ -24,8 +24,20 @@ const webRoot = path.resolve(process.cwd());
 /*
  * ⚠ Один екземпляр на весь файл. Перший `lintText` розбирає конфіг і піднімає
  * парсер TypeScript — це ~12 с, і з новим екземпляром на кожен випадок перший
- * же `it` перевищував типову стелю 5 с. Стеля тут не піднята «щоб не падало»:
- * піднята рівно та, що покриває холодний старт ОДИН раз.
+ * же `it` перевищував типову стелю 5 с.
+ *
+ * ⛔ **Холодний старт винесено в `beforeAll`, і це не косметика.** Раніше він
+ * платився всередині ПЕРШОГО `it`, а стеля там стояла спільна — 30 с. На
+ * теплій машині це вкладалося (увесь файл — 5 с), а на холодній, одразу після
+ * `npm ci` і без кешу Vite, перший випадок валився за таймаутом: повний прогін
+ * ішов 127 с замість 42 с, і `нативне <input type="date"> відхиляється`
+ * червонів. Не через правило — через стелю.
+ *
+ * Це рівно той різновид червоного гейта, про який попереджає коментар у
+ * `vitest.a11y.config.ts`: він падає НЕ з тієї причини, яку стереже, і навчає
+ * читати «правила лінтера впали» як «машина повільна». Тепер ціна
+ * ініціалізації має власну, названу стелю, а кожен випадок міряє рівно
+ * спрацювання правила.
  */
 let shared: ESLint | undefined;
 
@@ -34,6 +46,15 @@ function eslint(): ESLint {
 
   return shared;
 }
+
+/*
+ * ⚠ Прогрів робить САМЕ те, що роблять тести (`lintText` на фікстурі), а не
+ * просто `new ESLint()`: конструктор дешевий, дорогий — перший розбір конфігу
+ * й підняття парсера, а вони стаються на першому лінті.
+ */
+beforeAll(async () => {
+  await lint('export const warm = 1;\n', 'src/features/probe/warm.ts');
+}, 120_000);
 
 async function lintResult(code: string, file: string): Promise<ESLint.LintResult | undefined> {
   const [result] = await eslint().lintText(code, {
@@ -54,7 +75,13 @@ function wrap(body: string): string {
   return `export function Probe(): JSX.Element {\n  return (\n${body}\n  );\n}\n`;
 }
 
-describe('D15-09 — формат дат і чисел не залежить від браузера', { timeout: 30_000 }, () => {
+/*
+ * ⚠ Стеля 10 с, а не 30: холодний старт уже сплачено в `beforeAll`, тож тут
+ * міряється рівно один `lintText` на прогрітому екземплярі (~30 мс). Десять
+ * секунд — це триста разів із запасом; якщо випадок їх вичерпає, це вже
+ * справжня зміна, а не повільна машина.
+ */
+describe('D15-09 — формат дат і чисел не залежить від браузера', { timeout: 10_000 }, () => {
   it.each(['date', 'datetime-local', 'time', 'month', 'week'])(
     'нативне <input type="%s"> відхиляється',
     async (type) => {
@@ -186,7 +213,7 @@ describe('борг D15-09 обмежений і може лише скорочу
   });
 });
 
-describe('правила лінтера мають силу помилки, а не поради', { timeout: 30_000 }, () => {
+describe('правила лінтера мають силу помилки, а не поради', { timeout: 10_000 }, () => {
   it('порушення зупиняє npm run lint', async () => {
     const result = await lintResult(
       wrap('    <input type="date" />'),
