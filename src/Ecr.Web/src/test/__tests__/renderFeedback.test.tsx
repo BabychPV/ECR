@@ -11,6 +11,7 @@ import { TemplateVersionLayout } from '@/app/TemplateVersionLayout';
 import { childPath, relativePath, routes, type RouteEntry } from '@/app/routes';
 import { DocumentPage } from '@/pages/DocumentPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
 import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
 import { UnitsPage } from '@/pages/admin/UnitsPage';
 import { TableSlotAttribute } from '@/features/grid/SheetTables';
@@ -517,6 +518,38 @@ describe("Зворотний зв'язок під час рендера — ст
       routes.adminTemplateVersion,
       <TemplateVersionPage />,
       '/admin/templates/1/versions/7',
+    );
+  }, 60_000);
+
+  /*
+   * ✎ 2026-09-19, п'ятий маршрут і НОВИЙ критерій вибірки.
+   *
+   * ⛔ Два критерії вище («піддерево знайденого дефекту» і «найбільше
+   * спостерігачів, створюваних під час рендера») цього маршруту не давали —
+   * і саме тому його тут не було. Додано за третім, дописаним разом із ним:
+   * **маршрут, у якому щойно з'явилася межа `<Suspense>`**.
+   * `MethodologyVersionsPage` винесла сім панелей змісту за `import()` заради
+   * запасу бюджету (248.4 → 232.0 КБ), тобто дістала рівно ту конструкцію,
+   * якою був #295: `React.lazy` плюс `<Suspense>` над групою компонентів.
+   *
+   * ⛔ ЧЕСНО ПРО ТЕ, ЩО ЦЕ ДАЄ, і не більше. Розділ (б) вище вже зміряв, що
+   * стеля комітів #295 НЕ ловить: на тій мутації коміти не зросли, а ВПАЛИ.
+   * Отже цей випадок додає не захист від #295, а рівно дві речі:
+   *   • маршрут із новою межею потрапляє під перевірку (а) — чужа подія кешу
+   *     не сміє коштувати комітів (це клас #305);
+   *   • і під запобіжник (б) — межа, що ввела нескінченний цикл, упаде з
+   *     числом, а не повисне до таймауту.
+   *
+   * ⚠ Що ПАНЕЛІ СПРАВДІ З'ЯВЛЯЮТЬСЯ, цей випадок НЕ доводить: під заглушкою
+   * мережі версія не обирається, тож до `selected !== undefined` справа не
+   * доходить. Це перевіряється прогоном стенда (`e2e-stand.ps1`) — і саме там
+   * свого часу спіймали #295, якого не побачив жоден із 1800 тестів.
+   */
+  it('/admin/methodologies/:id/versions — маршрут із новою межею <Suspense>', async () => {
+    await guardRoute(
+      routes.adminMethodologyVersions,
+      <MethodologyVersionsPage />,
+      '/admin/methodologies/1/versions',
     );
   }, 60_000);
 

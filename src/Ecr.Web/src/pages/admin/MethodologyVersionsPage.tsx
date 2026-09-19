@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
 import {
   Alert,
   Badge,
@@ -42,21 +42,46 @@ import {
   mayEditContent,
   type FormulaDraft,
 } from '@/features/methodologies/draft';
-import {
-  MethodologyBindingsPanel,
-  MethodologyConstantsPanel,
-  MethodologyModesForm,
-  MethodologyOutputsPanel,
-  MethodologyRequiredInputsPanel,
-  MethodologyRulesPanel,
-  MethodologyTestsPanel,
-} from '@/features/methodologies/MethodologyContentPanels';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
+
+/*
+ * ⛔ Сім панелей змісту версії — за `import()`, і це вимога бюджету (`D-132`),
+ * а не смак. `MethodologyContentPanels.tsx` — 59.7 КБ джерела, і всі сім
+ * експортів статично лежали в чанку маршруту, який стояв на 248.4 з 250 КБ.
+ *
+ * ⚠ Ліниві ВСІ СІМ, а не частина: доки бодай один експорт імпортовано
+ * статично, модуль лишається у вхідному чанку ЦІЛКОМ, і ліниві шість не
+ * економлять нічого. Усі сім резолвляться в ОДИН чанк, тож мережевий запит
+ * теж один.
+ *
+ * ⚠ Панелі й далі малюються ОДНОЧАСНО, а не по вкладках — рішення нижче
+ * (коментар перед `MethodologyConstantsPanel`) не скасоване. Змінився момент
+ * ЗАВАНТАЖЕННЯ коду, а не склад екрана: жодна панель не з'являється раніше за
+ * обрану версію, бо всі стоять під `selected !== undefined`, і чанк іде
+ * мережею паралельно із запитом її змісту.
+ */
+type PanelModule = typeof import('@/features/methodologies/MethodologyContentPanels');
+
+function lazyPanel<K extends keyof PanelModule>(name: K): ReturnType<typeof lazy> {
+  return lazy(async () => {
+    const loaded = await import('@/features/methodologies/MethodologyContentPanels');
+
+    return { default: loaded[name] as never };
+  });
+}
+
+const MethodologyBindingsPanel = lazyPanel('MethodologyBindingsPanel');
+const MethodologyConstantsPanel = lazyPanel('MethodologyConstantsPanel');
+const MethodologyModesForm = lazyPanel('MethodologyModesForm');
+const MethodologyOutputsPanel = lazyPanel('MethodologyOutputsPanel');
+const MethodologyRequiredInputsPanel = lazyPanel('MethodologyRequiredInputsPanel');
+const MethodologyRulesPanel = lazyPanel('MethodologyRulesPanel');
+const MethodologyTestsPanel = lazyPanel('MethodologyTestsPanel');
 
 /**
  * Конфігуратор версії методології: формули чернетки (`ФВ-9.15`).
@@ -370,11 +395,17 @@ export function MethodologyVersionsPage(): JSX.Element {
       )}
 
       {selected !== undefined && (
-        <MethodologyModesForm
-          methodologyId={methodologyId}
-          version={selected}
-          editable={editable}
-        />
+        /* ⚠ `fallback={null}`, а не заглушка: панель з'являється разом із
+            обраною версією, і чанк іде мережею паралельно із запитом її
+            змісту. Смужка-привид на цей час показувала б «щось вантажиться»
+            там, де секундою раніше не було нічого. */
+        <Suspense fallback={null}>
+          <MethodologyModesForm
+            methodologyId={methodologyId}
+            version={selected}
+            editable={editable}
+          />
+        </Suspense>
       )}
 
       {selected !== undefined && (
@@ -488,6 +519,7 @@ export function MethodologyVersionsPage(): JSX.Element {
               без золотого набору не публікується (`ФВ-9.12`), а без прив'язки
               перерахунок завершується успіхом і не рахує нічого. Розкидані по
               вкладках, вони виглядали б необов'язковими. */}
+          <Suspense fallback={null}>
           <MethodologyConstantsPanel
             methodologyId={methodologyId}
             versionId={selected.id}
@@ -525,6 +557,7 @@ export function MethodologyVersionsPage(): JSX.Element {
             methodologyId={methodologyId}
             editable={can(session.data, 'Calculation.EditRule')}
           />
+          </Suspense>
         </>
       )}
 
