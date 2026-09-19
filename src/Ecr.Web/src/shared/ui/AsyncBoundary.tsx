@@ -1,5 +1,16 @@
 ﻿import type { JSX, ReactNode } from 'react';
-import { Center, Code, Skeleton, Stack, Text, Title, VisuallyHidden } from '@mantine/core';
+import {
+  Button,
+  Center,
+  Code,
+  CopyButton,
+  Group,
+  Skeleton,
+  Stack,
+  Text,
+  Title,
+  VisuallyHidden,
+} from '@mantine/core';
 import { EcrApiError } from '@/api/client';
 import { ErrorAlert } from './ErrorAlert';
 import { t } from '@/shared/i18n';
@@ -53,7 +64,7 @@ interface AsyncBoundaryProps<T> {
  *
  * ⛔ Було ЧОТИРИ стани (`loading`/`empty`/`error`/дані); ця картка додає
  * П'ЯТИЙ — `no-permission` — розпізнаючи `403` серед помилок ОКРЕМО від
- * решти (`NoPermissionState` нижче), а не як черговий випадок `ErrorAlert`.
+ * решти (`ForbiddenState` нижче), а не як черговий випадок `ErrorAlert`.
  * `partial` (директива, B3, п'ятий стан) НЕ додає власного коду тут: сторінки
  * з кількома незалежними запитами (`HealthPage`, `MyGroupsPage`,
  * `SecurityPage`) уже монтують по одному `<AsyncBoundary>` НА ЗАПИТ — кожен
@@ -109,10 +120,10 @@ export function AsyncBoundary<T>({
     // у загальний `ErrorAlert` — той самий текст і кнопка «повторити», що й
     // для мережевого збою чи 500, хоча повторний запит нічого не змінить.
     if (error instanceof EcrApiError && error.problem.status === 403) {
-      return <NoPermissionState error={error} />;
+      return <ForbiddenState error={error} />;
     }
 
-    return <ErrorAlert error={error} onRetry={onRetry} />;
+    return <ErrorState error={error} onRetry={onRetry} />;
   }
 
   if (isPending) {
@@ -132,20 +143,85 @@ export function AsyncBoundary<T>({
 }
 
 /**
+ * Стан помилки (директива №15, §2, Шар 2) — **обгортка навколо `ErrorAlert`,
+ * а не друга його редакція**.
+ *
+ * ⛔ Ніщо тут не малює ні тексту сервера, ні коду, ні кореляції: усе це
+ * малює той самий `ErrorAlert`, що й у формах. Другий показ коду помилки
+ * поруч із першим — це рівно та розбіжність, заради усунення якої обгортка
+ * колись і віддала свій варіант (коментар `ErrorAlert.tsx`).
+ *
+ * ⚠ Додається рівно ОДНЕ: кнопка «скопіювати кореляцію». Директива вимагає
+ * «код + correlation id з Copy»; `ErrorAlert` ПОКАЗУЄ обидва, але скопіювати
+ * їх не дає — у підтримку ідентифікатор досі переписують очима з екрана.
+ *
+ * ⛔ Кнопка з'являється разом із `copyLabel` — і це не «прапорець навпаки».
+ * Рядка під цей підпис у каталозі (`09-seed.sql`) немає; кнопка без імені
+ * провалює `button-name` у гейті `a11y`, а `t()` на неіснуючий ключ показав
+ * би читалці `⟦…⟧`. Отже підпис може дати лише викликач — і доки він його не
+ * дав, малювати нічого (`D15-06`). Тому `<AsyncBoundary>`, який підпису не
+ * має, рендерить рівно те саме, що й до цієї зміни.
+ */
+export function ErrorState({
+  error,
+  onRetry,
+  copyLabel,
+}: {
+  readonly error: unknown;
+  readonly onRetry?: (() => void) | undefined;
+
+  /** Підпис кнопки копіювання; без нього кнопки немає. */
+  readonly copyLabel?: string | undefined;
+}): JSX.Element | null {
+  if (error === null || error === undefined) return null;
+
+  // ⚠ Кореляція є лише у відмови, розібраної клієнтом. Мережевий збій до
+  // сервера не дійшов — копіювати там нічого, і порожня кнопка «скопіювати»
+  // обіцяла б підтримці ідентифікатор, якого не існує.
+  const correlationId = error instanceof EcrApiError ? error.problem.correlationId : '';
+
+  if (copyLabel === undefined || correlationId === '') {
+    return <ErrorAlert error={error} onRetry={onRetry} />;
+  }
+
+  return (
+    <Stack gap="xs">
+      <ErrorAlert error={error} onRetry={onRetry} />
+
+      <Group gap="xs">
+        <CopyButton value={correlationId}>
+          {({ copy }) => (
+            <Button size="xs" variant="default" onClick={copy}>
+              {copyLabel}
+            </Button>
+          )}
+        </CopyButton>
+      </Group>
+    </Stack>
+  );
+}
+
+/**
  * Порожній стан: пояснює і пропонує дію (`ФВ-14.23`).
  *
  * ⚠ Не «Немає даних», а «у цьому проєкті ще немає документів» плюс кнопка,
  * якщо право є. Порожній екран без пояснення виглядає як несправність — і
  * половина звернень у підтримку саме про це.
+ *
+ * ⚠ Експортується (директива №15, §2, Шар 2): екран, який САМ знає, що
+ * фільтр нічого не знайшов, не має для цього запиту — тобто `AsyncBoundary`
+ * йому не підходить, а третій порожній стан (`L10`: «немає прав» ≠ «порожньо»
+ * ≠ «фільтр нічого не знайшов») малювати заново означало б четверту подачу
+ * того самого.
  */
-function EmptyState({
+export function EmptyState({
   title,
   hint,
   action,
 }: {
-  title: string | undefined;
-  hint: string | undefined;
-  action: ReactNode;
+  readonly title?: string | undefined;
+  readonly hint?: string | undefined;
+  readonly action?: ReactNode;
 }): JSX.Element {
   return (
     <Center py="xl">
@@ -181,8 +257,13 @@ function EmptyState({
  * ЗАБОРОНИ, а не «тут порожньо». Від `ErrorAlert` цей стан відрізняє
  * відсутність кольорової рамки `Alert` і кнопки «повторити» — обидва
  * навмисно відсутні (коментар компонента вище).
+ *
+ * ⚠ Ім'я — `ForbiddenState` (директива №15, §2, Шар 2), було
+ * `NoPermissionState`. Перейменування, а не другий компонент поруч: два імені
+ * на один стан — це рівно той спосіб, яким у застосунку заводиться друга
+ * подача відмови в праві.
  */
-function NoPermissionState({ error }: { error: EcrApiError }): JSX.Element {
+export function ForbiddenState({ error }: { readonly error: EcrApiError }): JSX.Element {
   // ⚠ `problem.title` завжди рядок (обов'язкове поле `EcrProblem`), але коли
   // сервер відповів БЕЗ структурованого тіла (проксі, шлюз — `problemOf()`,
   // `client.ts`), клієнт підставляє буквально `HTTP 403` — цей рядок не
