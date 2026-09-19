@@ -3,6 +3,7 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
+import { cssVariablesResolver } from '@/shared/theme/cssVariables';
 import { applyDensity, density } from '@/shared/theme/preferences';
 import { theme } from '@/shared/theme/theme';
 import { createQueryClient } from './queryClient';
@@ -36,8 +37,18 @@ export function App(): JSX.Element {
      * `createTheme` в застосунку немає навмисно (`ФВ-14.11`). Обидві теми
      * (світла й темна) виводяться з неї, а `auto` бере системну — користувач,
      * який працює в темній системі, не отримує білого спалаху на весь екран.
+     *
+     * ⚠ `cssVariablesResolver` передається ТУТ, і іншого місця для нього немає:
+     * Mantine приймає його лише як проп `MantineProvider` (`UI-01`). Саме він
+     * виводить `--ecr-*` і перебиває чотири власні змінні Mantine (тло, текст,
+     * приглушений текст, межа поля) — без нього токени макета лишилися б у
+     * `theme.ts` і не дійшли б до жодного CSS.
      */
-    <MantineProvider theme={theme} defaultColorScheme="auto">
+    <MantineProvider
+      theme={theme}
+      defaultColorScheme="auto"
+      cssVariablesResolver={cssVariablesResolver}
+    >
       <QueryClientProvider client={queryClient}>
         <Notifications position="top-right" />
 
