@@ -120,6 +120,14 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    public async Task AddEventAsync(ApprovalEvent approvalEvent, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(approvalEvent);
+
+        await db.ApprovalEvents.AddAsync(approvalEvent, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => await db.ApprovalStates

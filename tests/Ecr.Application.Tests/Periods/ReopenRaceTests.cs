@@ -279,6 +279,10 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetOrCreateAsync(documentId, sheetDefId, periodKey, ct);
 
+        public Task AddEventAsync(
+            Ecr.Domain.Entities.Workflow.ApprovalEvent approvalEvent, CancellationToken ct)
+            => inner.AddEventAsync(approvalEvent, ct);
+
         public Task<IReadOnlyList<Ecr.Domain.Entities.Workflow.ApprovalState>> GetSheetsAsync(
             long documentId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetSheetsAsync(documentId, periodKey, ct);

@@ -27,6 +27,13 @@ public interface IWorkflowStore
     public Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct);
 
+    /// <summary>Додає запис у журнал переходів стану (<c>wf.ApprovalEvent</c>).</summary>
+    /// <remarks>
+    /// ⛔ Лише додає в ту саму одиницю роботи, що й зміна стану, і НЕ зберігає
+    /// сам: подія і стан мають лягти одним комітом або не лягти зовсім.
+    /// </remarks>
+    public Task AddEventAsync(ApprovalEvent approvalEvent, CancellationToken ct);
+
     /// <summary>
     /// Бере період документа **з <c>UPDLOCK</c>** до кінця транзакції.
     /// </summary>

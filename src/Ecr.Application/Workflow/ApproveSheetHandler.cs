@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -76,6 +77,9 @@ public sealed class ApproveSheetHandler(
         var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
         var now = clock.UtcNow;
 
+        // `BE-11`: стан ДО дії — для журналу переходів.
+        var fromStatus = state.Status;
+
         if (approved)
         {
             // ⛔ Проміжний крок НЕ робить аркуш затвердженим (`ФВ-5.17`).
@@ -90,6 +94,12 @@ public sealed class ApproveSheetHandler(
                 .ConfigureAwait(false);
 
             state.ApproveStep(userId, now, step?.NextStepId);
+
+            // `BE-11`: проміжний крок — окрема дія, стан лишається `Submitted`.
+            var action = step is { NextStepId: not null } ? ApprovalAction.ApproveStep : ApprovalAction.Approve;
+            await workflow.AddEventAsync(
+                ApprovalEvent.For(state, fromStatus, action, userId, now, stepOrdinal: step?.Ordinal),
+                ct).ConfigureAwait(false);
 
             // ⛔ ПРОМІЖНИЙ крок пишеться в аудит окремо. На рядку стану є лише
             // `ApprovedByUserId` — один; після маршруту з трьох кроків там
@@ -125,6 +135,12 @@ public sealed class ApproveSheetHandler(
             // Домен вимагає коментаря сам; тут лише переклад порожнього рядка
             // в null, щоб повідомлення було про суть, а не про пробіли.
             state.Reject(userId, reason ?? string.Empty, now);
+
+            // ⛔ `BE-11`: причина відхилення живе ТУТ. На рядку стану її зітре
+            // наступне ж подання (`ApprovalState.Submit`).
+            await workflow.AddEventAsync(
+                ApprovalEvent.For(state, fromStatus, ApprovalAction.Reject, userId, now, state.RejectedReason),
+                ct).ConfigureAwait(false);
         }
 
         // ⛔ Статус ДОКУМЕНТА не чіпається: його немає (D-93). Зведений стан

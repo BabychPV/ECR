@@ -79,6 +79,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<ApprovalRoute> ApprovalRoutes => Set<ApprovalRoute>();
     public DbSet<ApprovalStep> ApprovalSteps => Set<ApprovalStep>();
     public DbSet<ApprovalState> ApprovalStates => Set<ApprovalState>();
+    public DbSet<ApprovalEvent> ApprovalEvents => Set<ApprovalEvent>();
     public DbSet<ValidationResult> ValidationResults => Set<ValidationResult>();
     public DbSet<SubmissionSnapshot> SubmissionSnapshots => Set<SubmissionSnapshot>();
 
