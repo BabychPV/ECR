@@ -7,6 +7,7 @@ import {
   Divider,
   Group,
   Loader,
+  NativeSelect,
   PasswordInput,
   Stack,
   Text,
@@ -18,8 +19,16 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { isCatalogFailed, isCatalogResolved, loadCatalog, preferredLanguage, t } from '@/shared/i18n';
+import {
+  isCatalogFailed,
+  isCatalogResolved,
+  loadCatalog,
+  preferredLanguage,
+  setLanguage,
+  t,
+} from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
+import { usePublicBootstrap } from '@/features/public/api';
 import { useEffect } from 'react';
 
 /**
@@ -58,6 +67,23 @@ const CATALOG_LOAD_FAILED = new EcrApiError({
 const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
 
 /**
+ * Підпис перемикача мови на екрані входу (`BE-07`).
+ *
+ * ⛔ ЛІТЕРАЛ, а не `t('profile.language')`, і причина конкретна, а не
+ * «ще один виняток». Цей ключ заведений у `09-seed.sql` з областю **1
+ * (private)**, тобто в публічний зріз каталогу він не потрапляє за
+ * визначенням (`D-114`): на екрані входу `t()` повернув би позначений ключ
+ * `⟦profile.language⟧` — рівно те, від чого рятує `D-138`. Завести окремий
+ * публічний ключ — один рядок сіду, і він СВІДОМО відкладений: `09-seed.sql`
+ * зараз змінює інша гілка (#368), а два записи в той самий `MERGE` дають
+ * конфлікт заради підпису, якого ніхто не бачить (перемикач має видиму
+ * назву мови в кожному пункті).
+ *
+ * ⚠ Тому підпис лише для читалки: `aria-label`, без видимого тексту.
+ */
+const LANGUAGE_LABEL = 'Interface language';
+
+/**
  * Вхід: доменний і локальний.
  *
  * ⚠ Обидва способи видають **ту саму cookie** і той самий профіль. Різні
@@ -73,6 +99,12 @@ export function LoginPage(): JSX.Element {
 
   // Перемальовує сторінку, коли каталог доїхав (інакше видно самі ключі).
   useCatalog();
+
+  // ⚠ Викликається ДО ранніх повернень нижче (завантаження каталогу, збій
+  // каталогу): порядок хуків у React має бути однаковий на кожному рендері,
+  // і хук після `if (…) return` — це помилка, яка проявляється лише в момент,
+  // коли гілка змінюється.
+  const bootstrap = usePublicBootstrap();
 
   // Публічний каталог рядків тягнеться ДО входу: сторінка входу не може
   // показувати ключі замість написів (D-114).
@@ -195,43 +227,108 @@ export function LoginPage(): JSX.Element {
           }}
         >
           <Stack gap="sm">
-            {/* ⚠ `type="button"` обов'язковий: усередині форми кнопка без
-                типу — це кнопка НАДСИЛАННЯ, і вхід через Windows
-                перехоплював би Enter замість локального. */}
-            <Button
-              type="button"
-              onClick={() => void submit('/api/v1/login/windows')}
-              loading={busy}
-            >
-              {t('login.windows')}
-            </Button>
+            {/*
+              * ⛔ Кнопка доменного входу малюється лише тоді, коли схема
+              * Negotiate СПРАВДІ зареєстрована на сервері
+              * (`GET /api/v1/public/bootstrap`). Доти вона стояла завжди, і на
+              * майданчику з `Auth:EnableNegotiate=false` єдиним способом
+              * дізнатися, що доменний вхід вимкнено, було натиснути її й
+              * отримати 401. Кнопка, яка гарантовано відмовляє, гірша за її
+              * відсутність: вона виглядає як дефект продукту.
+              *
+              * ⚠ `type="button"` обов'язковий: усередині форми кнопка без
+              * типу — це кнопка НАДСИЛАННЯ, і вхід через Windows
+              * перехоплював би Enter замість локального.
+              */}
+            {bootstrap.windowsSignInEnabled && (
+              <Button
+                type="button"
+                onClick={() => void submit('/api/v1/login/windows')}
+                loading={busy}
+              >
+                {t('login.windows')}
+              </Button>
+            )}
 
-            <Divider label={t('login.or')} labelPosition="center" />
+            {bootstrap.windowsSignInEnabled && bootstrap.localSignInEnabled && (
+              <Divider label={t('login.or')} labelPosition="center" />
+            )}
 
-            <TextInput
-              label={t('login.user')}
-              value={login}
-              onChange={(event) => setLogin(event.currentTarget.value)}
-              autoComplete="username"
-            />
+            {bootstrap.localSignInEnabled && (
+              <>
+                <TextInput
+                  label={t('login.user')}
+                  value={login}
+                  onChange={(event) => setLogin(event.currentTarget.value)}
+                  autoComplete="username"
+                />
 
-            <PasswordInput
-              label={t('login.password')}
-              value={password}
-              onChange={(event) => setPassword(event.currentTarget.value)}
-              autoComplete="current-password"
-              visibilityToggleButtonProps={passwordToggleProps}
-            />
+                <PasswordInput
+                  label={t('login.password')}
+                  value={password}
+                  onChange={(event) => setPassword(event.currentTarget.value)}
+                  autoComplete="current-password"
+                  visibilityToggleButtonProps={passwordToggleProps}
+                />
 
-            <Button type="submit" variant="default" loading={busy}>
-              {t('login.submit')}
-            </Button>
+                <Button type="submit" variant="default" loading={busy}>
+                  {t('login.submit')}
+                </Button>
+              </>
+            )}
 
             <ErrorAlert error={error} />
 
             <Text size="xs" c="dimmed">
               {t('login.hint')}
             </Text>
+
+            {/*
+              * ⛔ Перелік мов — із реєстру сервера, не константа бандла
+              * (`ФВ-14.9`): «додавання мови — запис у реєстр, не збірка
+              * клієнта». До входу його віддає анонімний `bootstrap`, бо
+              * `GET /api/v1/languages` вимагає автентифікації — тобто до цієї
+              * дії обіцянка трималася лише ПІСЛЯ входу, а перший екран
+              * системи вгадував мову з браузера і не давав її змінити.
+              *
+              * ⚠ Ховається на одній мові: вибір з одного пункту не є вибором.
+              */}
+            {bootstrap.languages.length > 1 && (
+              <NativeSelect
+                size="xs"
+                variant="unstyled"
+                aria-label={LANGUAGE_LABEL}
+                value={preferredLanguage()}
+                data={bootstrap.languages.map((item) => ({
+                  value: item.code,
+                  label: item.nameNative,
+                }))}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  if (value === preferredLanguage()) return;
+
+                  setLanguage(value);
+
+                  // ⚠ Область `public`, а не `private`, як у перемикачі
+                  // всередині застосунку: приватний зріз анонімний запит не
+                  // отримає (ФВ-14.2), і сторінка лишилася б із позначеними
+                  // ключами замість написів.
+                  void loadCatalog(value, 'public');
+                }}
+              />
+            )}
+
+            {/*
+              * ⚠ Версія — рядок вигляду `1.0.0` і тільки: метадані збірки
+              * (хеш коміту, гілка) сервер зрізає ДО відповіді, бо цей екран
+              * читає кожен, хто дістався порту. Порожнє значення означає «не
+              * знаємо» і не малюється зовсім.
+              */}
+            {bootstrap.productVersion.length > 0 && (
+              <Text size="xs" c="dimmed" ta="center">
+                {bootstrap.productVersion}
+              </Text>
+            )}
           </Stack>
         </form>
       </Card>

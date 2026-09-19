@@ -4579,6 +4579,37 @@
         ],
         "type": "object"
       },
+      "PublicBootstrapResponse": {
+        "description": "Публічні дані екрана входу.",
+        "properties": {
+          "languages": {
+            "description": "Увімкнені мови реєстру в порядку показу.",
+            "items": {
+              "$ref": "#/components/schemas/LanguageDto"
+            },
+            "type": "array"
+          },
+          "localSignInEnabled": {
+            "description": "Чи показувати форму локального входу.",
+            "type": "boolean"
+          },
+          "productVersion": {
+            "description": "Версія продукту без метаданих збірки.",
+            "type": "string"
+          },
+          "windowsSignInEnabled": {
+            "description": "Чи показувати кнопку доменного входу.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "productVersion",
+          "languages",
+          "windowsSignInEnabled",
+          "localSignInEnabled"
+        ],
+        "type": "object"
+      },
       "PublishMethodologyRequest": {
         "description": "Запит на публікацію версії методології.",
         "properties": {
@@ -10536,7 +10567,7 @@
     },
     "/api/v1/languages": {
       "get": {
-        "description": "Без права: перелік мов не є таємницею, а потрібен кожному екрану, що\nмає локалізовану назву. Анонімно теж не віддається — сторінка входу\nобирає мову з браузера і збереженого вибору, реєстр їй не потрібен.",
+        "description": "Без права: перелік мов не є таємницею, а потрібен кожному екрану, що\nмає локалізовану назву.\n\n⛔ ✎ 2026-09-19 (`BE-07`): речення «анонімно теж не віддається —\nсторінка входу обирає мову з браузера і збереженого вибору, реєстр їй не\nпотрібен» БІЛЬШЕ НЕ ЧИННЕ і тому прибране, а не лишене поруч із новою\nправдою. Макет екрана входу дає вибір мови явним перемикачем, а не лише\nвгадуванням із браузера, і перелік для нього віддає анонімний\n`GET /api/v1/public/bootstrap` (PublicController).\nЦЕЙ маршрут лишається закритим: він обслуговує редактор перекладів і\nполя локалізованих назв, тобто вже автентифіковані екрани, і відкривати\nйого заради екрана входу не було потреби.",
         "responses": {
           "200": {
             "content": {
@@ -13742,6 +13773,37 @@
         "summary": "Змінює пояс майданчика проєкту. Право `Project.Manage` (T6/#52).",
         "tags": [
           "Projects"
+        ]
+      }
+    },
+    "/api/v1/public/bootstrap": {
+      "get": {
+        "description": "⚠ Дія не приймає ЖОДНОГО параметра — ні шляху, ні рядка запиту, ні тіла.\nЦе і є доказ того, що відповідь не може залежати від імені користувача:\nїй нізвідки його взяти.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBootstrapResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBootstrapResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBootstrapResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Версія продукту, мови і доступні способи входу.",
+        "tags": [
+          "Public"
         ]
       }
     },
@@ -19016,6 +19078,9 @@
     },
     {
       "name": "Projects"
+    },
+    {
+      "name": "Public"
     },
     {
       "name": "Registries"
