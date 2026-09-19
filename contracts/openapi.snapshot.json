@@ -10284,6 +10284,87 @@
         ]
       }
     },
+    "/api/v1/jobs/{jobId}/cancel": {
+      "post": {
+        "description": "    ⚠ `202`, а не `204`: скасування — прохання, не вбивство.\n    Задача бачить токен і закривається станом `Cancelled` на найближчій\n    межі батчу, тож у мить відповіді вона ЩЕ ВИКОНУЄТЬСЯ. Клієнт дочитує\n    стан тим самим `GET /jobs/{jobId}`, яким уже показує прогрес.\n    ⛔ До цього маршруту зупинити двадцятихвилинний перерахунок з інтерфейсу\nбуло нічим: CancelAsync кликало лише витіснення зсередини\n(D2-64).\n    ⚠ jobId містить # (IRecalculationJob#42), а той в\nURL починає фрагмент — клієнт зобов'язаний кодувати сегмент\n(encodeURIComponent). Саме на цьому падав крок 17 smoke.ps1.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "jobId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Просить задачу завершитися. Право `System.ViewHealth` — або автор\nВЛАСНОЇ задачі (Q-156).",
+        "tags": [
+          "Jobs"
+        ]
+      }
+    },
     "/api/v1/jobs/{jobId}/restart": {
       "post": {
         "description": "⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:\nклієнт, що вже показує цю задачу, продовжує опитувати той самий\n`GET /jobs/{jobId}`.",

@@ -1,14 +1,42 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Card, Group, Progress, Stack, Table, Text, TextInput } from '@mantine/core';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import {
+  Badge,
+  Button,
+  Card,
+  Group,
+  Modal,
+  Progress,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+} from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
+import { useCancelJob } from '@/features/jobs/api';
 import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
+
+/**
+ * Стани, у яких задачу ще є що скасовувати.
+ *
+ * ⛔ Перелік звірений з сервером, а не вигаданий: `CancelJobHandler.Active`
+ * (`IntegrationHandlers.cs`) містить рівно `Queued` і `Running`, решта
+ * (`Succeeded`, `Failed`, `Cancelled`) термінальні й дають `409`
+ * (`ECR-JOB-0409`). Кнопка, показана термінальній задачі, — це підтвердження,
+ * заздалегідь приречене на відмову сервера.
+ */
+const CancellableStates: readonly string[] = ['Queued', 'Running'];
+
+/** Чи можна ще просити задачу зупинитися. */
+function isCancellable(state: string): boolean {
+  return CancellableStates.includes(state);
+}
 
 /** Як часто опитувати стан задачі, поки вона виконується. */
 const PollMs = 1500;
@@ -151,6 +179,14 @@ export function JobsPage(): JSX.Element {
 const ListPollMs = 3000;
 
 function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Element {
+  const queryClient = useQueryClient();
+
+  // ⚠ Підтверджувана задача тримається в стані ЦІЛКОМ, а не самим `jobId`:
+  // заголовок і текст підтвердження називають, ЩО саме зупиняється
+  // (`Recalculation-a1b2…`), і діалог «справді скасувати?» без назви задачі —
+  // це запит на підтвердження чогось невідомого.
+  const [confirming, setConfirming] = useState<JobSummary | null>(null);
+
   const jobs = useQuery({
     queryKey: ['jobs'],
     queryFn: () => apiFetch<JobSummary[]>('/api/v1/jobs'),
@@ -161,42 +197,111 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
     },
   });
 
+  // ⚠ Відповідь на скасування — `202`, не новий стан: задача бачить токен і
+  // закривається станом `Cancelled` на найближчій межі батчу. Тому після
+  // успіху інвалідуються ОБИДВА ключі — і перелік, і картка конкретної задачі
+  // вище: `['job', jobId]` не є нащадком `['jobs']` (різні рядки), тож одна
+  // інвалідація лишила б відкриту картку зі старим `Running`.
+  const cancel = useCancelJob(() => {
+    const cancelled = confirming;
+
+    setConfirming(null);
+    void queryClient.invalidateQueries({ queryKey: ['jobs'] });
+
+    if (cancelled !== null) {
+      void queryClient.invalidateQueries({ queryKey: ['job', cancelled.jobId] });
+    }
+  });
+
   return (
-    <AsyncBoundary<JobSummary[]>
-      isPending={jobs.isPending}
-      error={jobs.error}
-      data={jobs.data}
-      isEmpty={(list) => list.length === 0}
-      emptyTitle={t('jobs.recentEmpty')}
-      onRetry={() => void jobs.refetch()}
-    >
-      {(list) => (
-        <Table>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{t('jobs.recentCode')}</Table.Th>
-              <Table.Th>{t('jobs.recentState')}</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {list.map((job) => (
-              <Table.Tr key={job.jobId}>
-                <Table.Td>{jobKindLabel(job.jobCode)}</Table.Td>
-                <Table.Td>
-                  <Badge color={stateColor(job.state)}>{job.state}</Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
-                    {t('jobs.recentWatch')}
-                  </Button>
-                </Table.Td>
+    <>
+      <Modal
+        opened={confirming !== null}
+        onClose={() => setConfirming(null)}
+        title={t('jobs.cancel')}
+      >
+        <Text size="sm" mb="sm">
+          {t('jobs.cancelConfirm')}
+        </Text>
+
+        {confirming !== null && (
+          <Text size="sm" fw={600} mb="sm">
+            {humanizeJobId(confirming.jobId)}
+          </Text>
+        )}
+
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setConfirming(null)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color="statusError"
+            loading={cancel.isPending}
+            onClick={() => {
+              if (confirming !== null) cancel.mutate(confirming.jobId);
+            }}
+          >
+            {cancel.isPending ? t('jobs.cancelling') : t('jobs.cancel')}
+          </Button>
+        </Group>
+      </Modal>
+
+      <AsyncBoundary<JobSummary[]>
+        isPending={jobs.isPending}
+        error={jobs.error}
+        data={jobs.data}
+        isEmpty={(list) => list.length === 0}
+        emptyTitle={t('jobs.recentEmpty')}
+        onRetry={() => void jobs.refetch()}
+      >
+        {(list) => (
+          <Table>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{t('jobs.recentCode')}</Table.Th>
+                <Table.Th>{t('jobs.recentState')}</Table.Th>
+                <Table.Th />
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
-    </AsyncBoundary>
+            </Table.Thead>
+            <Table.Tbody>
+              {list.map((job) => (
+                <Table.Tr key={job.jobId}>
+                  <Table.Td>{jobKindLabel(job.jobCode)}</Table.Td>
+                  <Table.Td>
+                    <Badge color={stateColor(job.state)}>{job.state}</Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    {/* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не
+                        мають переносити одна одну на другий рядок і рвати
+                        висоту рядків переліку. */}
+                    <Group gap="xs" wrap="nowrap">
+                      <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                        {t('jobs.recentWatch')}
+                      </Button>
+
+                      {/* ⛔ Лише `Queued`/`Running`: термінальній задачі
+                          скасовувати нічого, і сервер відповів би `409`
+                          (`ECR-JOB-0409`) — кнопка, приречена на відмову, гірша
+                          за її відсутність. */}
+                      {isCancellable(job.state) && (
+                        <Button
+                          variant="subtle"
+                          size="xs"
+                          color="statusError"
+                          onClick={() => setConfirming(job)}
+                        >
+                          {t('jobs.cancel')}
+                        </Button>
+                      )}
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        )}
+      </AsyncBoundary>
+    </>
   );
 }
 

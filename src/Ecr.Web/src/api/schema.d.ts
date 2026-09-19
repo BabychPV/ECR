@@ -1525,6 +1525,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Просить задачу завершитися. Право `System.ViewHealth` — або автор
+         *     ВЛАСНОЇ задачі (Q-156).
+         * @description     ⚠ `202`, а не `204`: скасування — прохання, не вбивство.
+         *         Задача бачить токен і закривається станом `Cancelled` на найближчій
+         *         межі батчу, тож у мить відповіді вона ЩЕ ВИКОНУЄТЬСЯ. Клієнт дочитує
+         *         стан тим самим `GET /jobs/{jobId}`, яким уже показує прогрес.
+         *         ⛔ До цього маршруту зупинити двадцятихвилинний перерахунок з інтерфейсу
+         *     було нічим: CancelAsync кликало лише витіснення зсередини
+         *     (D2-64).
+         *         ⚠ jobId містить # (IRecalculationJob#42), а той в
+         *     URL починає фрагмент — клієнт зобов'язаний кодувати сегмент
+         *     (encodeURIComponent). Саме на цьому падав крок 17 smoke.ps1.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{jobId}/restart": {
         parameters: {
             query?: never;

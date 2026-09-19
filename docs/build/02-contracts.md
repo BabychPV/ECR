@@ -2727,7 +2727,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
 | `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
-| `ECR-JOB-0409` | 409 | ручний перезапуск задачі, яка не в стані `Failed` (директива №11, T10 #40) |
+| `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40) **або** скасування задачі, яка вже не `Queued`/`Running` (BE-02) |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
 | `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`) |
 
@@ -2894,6 +2894,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
