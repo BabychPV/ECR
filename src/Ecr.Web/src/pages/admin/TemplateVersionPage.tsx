@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { Suspense, lazy, useState, type JSX } from 'react';
 import {
   Accordion,
   Alert,
@@ -26,7 +26,6 @@ import type {
   VersionIdResponse,
 } from '@/api/types';
 import { AccessMatrix } from '@/features/templates/AccessMatrix';
-import { PeriodAccessRuleEditor, PeriodAccessRuleManager } from '@/features/templates/PeriodAccessRuleEditor';
 import {
   createPeriodAccessRule,
   deletePeriodAccessRule,
@@ -38,27 +37,20 @@ import {
   type CreatePeriodAccessRuleDraft,
   type UpdatePeriodAccessRuleDraft,
 } from '@/features/templates/periodAccessRule';
-import { PresentationEditor } from '@/features/templates/PresentationEditor';
-import { SheetEditor } from '@/features/templates/SheetEditor';
 import { deleteSheet, saveSheet } from '@/features/templates/sheetApi';
 import { draftOf, emptyDraft, type SheetDraft } from '@/features/templates/sheet';
-import { TableEditor } from '@/features/templates/TableEditor';
 import { deleteTable, saveTable } from '@/features/templates/tableApi';
 import {
   draftOf as tableDraftOf,
   emptyDraft as emptyTableDraft,
   type TableDraft,
 } from '@/features/templates/table';
-import { ColumnEditor } from '@/features/templates/ColumnEditor';
 import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
 import { columnDraftOf, emptyColumnDraft, type ColumnDefDto, type ColumnDraft } from '@/features/templates/column';
-import { RowEditor } from '@/features/templates/RowEditor';
 import { deleteRow, saveRow } from '@/features/templates/rowApi';
 import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
-import { FormulaEditor } from '@/features/templates/FormulaEditor';
 import { saveFormula } from '@/features/templates/formulaApi';
 import { emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
-import { ValidationRuleEditor } from '@/features/templates/ValidationRuleEditor';
 import { deleteValidationRule, saveValidationRule } from '@/features/templates/validationRuleApi';
 import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
 import { VersionDiff } from '@/features/templates/VersionDiff';
@@ -69,6 +61,83 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+
+/**
+ * Редактори, що відкриваються ЛИШЕ дією — за `import()`.
+ *
+ * ⛔ Причина не в тому, що #388 додав кілограм спільного коду. Маршрут мав
+ * **нуль запасу**: 249.8 КБ зі стелі 250 (`D-132`). Будь-який приріст
+ * спільного коду — `AsyncBoundary`, `notify`, `PageHeader`, байдуже чий —
+ * ламав його наступного разу так само. Підняти межу означало б прибрати
+ * термометр замість причини.
+ *
+ * ⚠ Що саме винесено і чому це чесно: кожен із цих редакторів монтується
+ * лише всередині `<Modal>`, і кожна модалка вже стоїть за станом
+ * (`sheetDraft !== null`, `periodRulesOpen` тощо). Тобто РАНІШЕ їх код
+ * завантажували всі, хто відкривав сторінку, а показували — одиниці, що
+ * натиснули кнопку. `import()` не міняє ні моменту монтування, ні поведінки —
+ * лише момент завантаження байтів.
+ *
+ * ⚠ `fallback={null}` — свідомо. Рамку діалогу з заголовком малює сама
+ * `Modal`, тобто дія користувача вже має видимий відгук; чанк приходить із
+ * того самого походження за десятки мілісекунд. Копія вмісту в заглушці була
+ * б гіршою за порожнечу: підміна заглушки справжньою формою перемонтовує
+ * піддерево і скидає щойно введене.
+ *
+ * ⛔ Одна межа — ОДИН компонент, і межа існує лише поки діалог відкритий. Це
+ * та сама форма, що вже працює в `ColumnEditor.tsx` (лінивий `StyleEditor`),
+ * і навмисно НЕ та, що дала livelock у #295: там під однією межею стояла 91
+ * лінива сітка (`SheetTables.tsx`).
+ */
+const ColumnEditor = lazy(async () => ({
+  default: (await import('@/features/templates/ColumnEditor')).ColumnEditor,
+}));
+
+const SheetEditor = lazy(async () => ({
+  default: (await import('@/features/templates/SheetEditor')).SheetEditor,
+}));
+
+const TableEditor = lazy(async () => ({
+  default: (await import('@/features/templates/TableEditor')).TableEditor,
+}));
+
+const RowEditor = lazy(async () => ({
+  default: (await import('@/features/templates/RowEditor')).RowEditor,
+}));
+
+const FormulaEditor = lazy(async () => ({
+  default: (await import('@/features/templates/FormulaEditor')).FormulaEditor,
+}));
+
+const ValidationRuleEditor = lazy(async () => ({
+  default: (await import('@/features/templates/ValidationRuleEditor')).ValidationRuleEditor,
+}));
+
+// ⚠ Два експорти одного модуля — два `lazy`, але ОДИН чанк: обидва `import()`
+// вказують на той самий шлях, і Rollup зводить їх до одного файла, а
+// рантайм — до одного завантаження.
+const PeriodAccessRuleEditor = lazy(async () => ({
+  default: (await import('@/features/templates/PeriodAccessRuleEditor')).PeriodAccessRuleEditor,
+}));
+
+const PeriodAccessRuleManager = lazy(async () => ({
+  default: (await import('@/features/templates/PeriodAccessRuleEditor')).PeriodAccessRuleManager,
+}));
+
+/**
+ * ⛔ `PresentationEditor` — єдиний із цих редакторів, що НЕ стоїть за
+ * `{умова && …}`: він сам носить усередині `<Modal opened={column !== null}>`.
+ * Тому гейт тут окремий — і він ОДНОСТОРОННІЙ (`presentationUsed`), а не
+ * `editing !== null`. Різниця не косметична: гейт `editing !== null` знімав би
+ * компонент із дерева в ту саму мить, коли діалог починає закриватися, тобто
+ * вбивав би анімацію закриття й робив би `lazy` видимою зміною поведінки.
+ * Односторонній прапорець дає рівно те, що було: доки не відкривали — у дереві
+ * нічого (закрита `Modal` і так не рендерить ані рамки), відкрили один раз —
+ * далі як раніше.
+ */
+const PresentationEditor = lazy(async () => ({
+  default: (await import('@/features/templates/PresentationEditor')).PresentationEditor,
+}));
 
 /**
  * Редактор структури версії.
@@ -95,6 +164,10 @@ export function TemplateVersionPage(): JSX.Element {
   const [publishing, setPublishing] = useState(false);
   const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
+
+  // ⚠ «Презентаційний редактор уже відкривали». Назад у `false` не вертається
+  // навмисно — див. коментар біля `PresentationEditor` вище.
+  const [presentationUsed, setPresentationUsed] = useState(false);
   const [sheetDraft, setSheetDraft] = useState<SheetDraft | null>(null);
   const [formulaDraft, setFormulaDraft] = useState<FormulaDraft | null>(null);
 
@@ -784,7 +857,10 @@ export function TemplateVersionPage(): JSX.Element {
                                           <Button
                                             size="compact-xs"
                                             variant="subtle"
-                                            onClick={() => setEditing(column)}
+                                            onClick={() => {
+                                              setPresentationUsed(true);
+                                              setEditing(column);
+                                            }}
                                           >
                                             {t('version.presentation')}
                                           </Button>
@@ -948,11 +1024,15 @@ export function TemplateVersionPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
-      <PresentationEditor
-        templateVersionId={id}
-        column={editing}
-        onClose={() => setEditing(null)}
-      />
+      {presentationUsed && (
+        <Suspense fallback={null}>
+          <PresentationEditor
+            templateVersionId={id}
+            column={editing}
+            onClose={() => setEditing(null)}
+          />
+        </Suspense>
+      )}
 
       <ReasonModal
         opened={publishing}
@@ -1005,14 +1085,16 @@ export function TemplateVersionPage(): JSX.Element {
         title={sheetDraft?.isNew === true ? t('sheets.add') : t('sheets.edit')}
       >
         {sheetDraft !== null && (
-          <SheetEditor
-            draft={sheetDraft}
-            disabled={!canEditSheets}
-            saving={saveSheetMutation.isPending}
-            onChange={setSheetDraft}
-            onSubmit={() => saveSheetMutation.mutate(sheetDraft)}
-            onCancel={() => setSheetDraft(null)}
-          />
+          <Suspense fallback={null}>
+            <SheetEditor
+              draft={sheetDraft}
+              disabled={!canEditSheets}
+              saving={saveSheetMutation.isPending}
+              onChange={setSheetDraft}
+              onSubmit={() => saveSheetMutation.mutate(sheetDraft)}
+              onCancel={() => setSheetDraft(null)}
+            />
+          </Suspense>
         )}
       </Modal>
 
@@ -1022,14 +1104,16 @@ export function TemplateVersionPage(): JSX.Element {
         title={tableDraft?.draft.isNew === true ? t('tableDef.add') : t('tableDef.edit')}
       >
         {tableDraft !== null && (
-          <TableEditor
-            draft={tableDraft.draft}
-            disabled={!canEditSheets}
-            saving={saveTableMutation.isPending}
-            onChange={(draft) => setTableDraft({ sheetCode: tableDraft.sheetCode, draft })}
-            onSubmit={() => saveTableMutation.mutate(tableDraft)}
-            onCancel={() => setTableDraft(null)}
-          />
+          <Suspense fallback={null}>
+            <TableEditor
+              draft={tableDraft.draft}
+              disabled={!canEditSheets}
+              saving={saveTableMutation.isPending}
+              onChange={(draft) => setTableDraft({ sheetCode: tableDraft.sheetCode, draft })}
+              onSubmit={() => saveTableMutation.mutate(tableDraft)}
+              onCancel={() => setTableDraft(null)}
+            />
+          </Suspense>
         )}
       </Modal>
 
@@ -1039,15 +1123,17 @@ export function TemplateVersionPage(): JSX.Element {
         title={columnEdit?.draft.isNew === true ? t('columns.add') : t('columns.edit')}
       >
         {columnEdit !== null && (
-          <ColumnEditor
-            draft={columnEdit.draft}
-            disabled={!canEditSheets}
-            saving={saveColumnMutation.isPending}
-            templateVersionId={id}
-            onChange={(draft) => setColumnEdit({ tableId: columnEdit.tableId, draft })}
-            onSubmit={() => saveColumnMutation.mutate(columnEdit)}
-            onCancel={() => setColumnEdit(null)}
-          />
+          <Suspense fallback={null}>
+            <ColumnEditor
+              draft={columnEdit.draft}
+              disabled={!canEditSheets}
+              saving={saveColumnMutation.isPending}
+              templateVersionId={id}
+              onChange={(draft) => setColumnEdit({ tableId: columnEdit.tableId, draft })}
+              onSubmit={() => saveColumnMutation.mutate(columnEdit)}
+              onCancel={() => setColumnEdit(null)}
+            />
+          </Suspense>
         )}
       </Modal>
 
@@ -1057,14 +1143,16 @@ export function TemplateVersionPage(): JSX.Element {
         title={rowEdit?.draft.isNew === true ? t('rows.add') : t('rows.edit')}
       >
         {rowEdit !== null && (
-          <RowEditor
-            draft={rowEdit.draft}
-            disabled={!canEditSheets}
-            saving={saveRowMutation.isPending}
-            onChange={(draft) => setRowEdit({ tableId: rowEdit.tableId, draft })}
-            onSubmit={() => saveRowMutation.mutate(rowEdit)}
-            onCancel={() => setRowEdit(null)}
-          />
+          <Suspense fallback={null}>
+            <RowEditor
+              draft={rowEdit.draft}
+              disabled={!canEditSheets}
+              saving={saveRowMutation.isPending}
+              onChange={(draft) => setRowEdit({ tableId: rowEdit.tableId, draft })}
+              onSubmit={() => saveRowMutation.mutate(rowEdit)}
+              onCancel={() => setRowEdit(null)}
+            />
+          </Suspense>
         )}
       </Modal>
 
@@ -1075,15 +1163,17 @@ export function TemplateVersionPage(): JSX.Element {
         size="lg"
       >
         {formulaDraft !== null && (
-          <FormulaEditor
-            draft={formulaDraft}
-            templateVersionId={id}
-            disabled={!canEditSheets}
-            saving={saveFormulaMutation.isPending}
-            onChange={setFormulaDraft}
-            onSubmit={() => saveFormulaMutation.mutate(formulaDraft)}
-            onCancel={() => setFormulaDraft(null)}
-          />
+          <Suspense fallback={null}>
+            <FormulaEditor
+              draft={formulaDraft}
+              templateVersionId={id}
+              disabled={!canEditSheets}
+              saving={saveFormulaMutation.isPending}
+              onChange={setFormulaDraft}
+              onSubmit={() => saveFormulaMutation.mutate(formulaDraft)}
+              onCancel={() => setFormulaDraft(null)}
+            />
+          </Suspense>
         )}
       </Modal>
 
@@ -1101,19 +1191,24 @@ export function TemplateVersionPage(): JSX.Element {
       >
         {validationRuleTable !== null && (
           <Stack gap="md">
-            <ValidationRuleEditor
-              draft={validationDraft}
-              disabled={!canEditSheets}
-              saving={saveValidationRuleMutation.isPending}
-              onChange={setValidationDraft}
-              onSubmit={() =>
-                saveValidationRuleMutation.mutate({
-                  tableId: validationRuleTable,
-                  draft: validationDraft,
-                })
-              }
-              onCancel={() => setValidationRuleTable(null)}
-            />
+            {/* ⚠ Межа охоплює ЛИШЕ форму, а не весь `Stack`: видалення за кодом
+                нижче — звичайні `TextInput`+`Button` із цього ж файла, і
+                ховати їх на час завантаження чужого чанка немає підстав. */}
+            <Suspense fallback={null}>
+              <ValidationRuleEditor
+                draft={validationDraft}
+                disabled={!canEditSheets}
+                saving={saveValidationRuleMutation.isPending}
+                onChange={setValidationDraft}
+                onSubmit={() =>
+                  saveValidationRuleMutation.mutate({
+                    tableId: validationRuleTable,
+                    draft: validationDraft,
+                  })
+                }
+                onCancel={() => setValidationRuleTable(null)}
+              />
+            </Suspense>
 
             <Divider label={t('validationRules.delete')} />
 
@@ -1155,6 +1250,10 @@ export function TemplateVersionPage(): JSX.Element {
         title={t('periodRules.title')}
         size="lg"
       >
+        {/* ⚠ Одна межа на обидві форми, а не дві: вони живуть в одному модулі,
+            тобто в одному чанку — друга межа дала б другий порожній кадр без
+            жодної користі. */}
+        <Suspense fallback={null}>
         <Stack gap="lg">
           <PeriodAccessRuleEditor
             draft={createPeriodDraft}
@@ -1185,6 +1284,7 @@ export function TemplateVersionPage(): JSX.Element {
             }}
           />
         </Stack>
+        </Suspense>
       </Modal>
     </>
   );
