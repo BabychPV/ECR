@@ -7043,6 +7043,37 @@
         ],
         "type": "object"
       },
+      "SnapshotVerifyResponse": {
+        "description": "Підсумок перевірки зрізу.",
+        "properties": {
+          "actual": {
+            "description": "Сума, перерахована за збереженими рядками (hex).",
+            "type": "string"
+          },
+          "matchedFormat": {
+            "description": "За яким форматом суми збіглося: `current`, `legacy` (зріз,\nпобудований до BE-17) або `null` — не збіглося за жодним.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "matches": {
+            "description": "Чи перерахована сума збіглася зі збереженою.",
+            "type": "boolean"
+          },
+          "stored": {
+            "description": "Сума, записана при побудові (hex).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "matches",
+          "stored",
+          "actual",
+          "matchedFormat"
+        ],
+        "type": "object"
+      },
       "SourceEntityStatus": {
         "description": "Сутність збору разом зі станом останнього прогону.",
         "properties": {
@@ -7504,6 +7535,55 @@
           "rows",
           "cellPermissions",
           "cellConfirmations"
+        ],
+        "type": "object"
+      },
+      "TableStatusDto": {
+        "description": "Заповненість однієї таблиці документа й кількість зауважень до неї\n(`BE-10`) — те, з чого дерево аркушів складає «68 of 91 tables filled»\nі крапку помилки біля таблиці.",
+        "properties": {
+          "errorCount": {
+            "description": "`null` — не перевіряли; інакше — скільки помилок у цій таблиці.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "filledCells": {
+            "description": "Скільки вхідних комірок уже має значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "inputCells": {
+            "description": "Скільки комірок має заповнити людина.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша, якому належить таблиця.",
+            "type": "string"
+          },
+          "tableDefId": {
+            "description": "Опис таблиці; ним клієнт зіставляє рядок із `DocumentTableDto`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "warningCount": {
+            "description": "`null` — не перевіряли; інакше — скільки попереджень.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "tableDefId",
+          "sheetCode",
+          "filledCells",
+          "inputCells",
+          "errorCount",
+          "warningCount"
         ],
         "type": "object"
       },
@@ -8223,6 +8303,59 @@
           "graceOffsetDays",
           "hardCloseOffsetDays",
           "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
+      "UsageItemDto": {
+        "description": "Одне місце, що посилається на ресурс.",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…).",
+            "type": "string"
+          },
+          "label": {
+            "description": "Те, чим об'єкт упізнає людина: код.",
+            "type": "string"
+          },
+          "route": {
+            "description": "Маршрут клієнта до об'єкта; `null` — окремого екрана немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "route"
+        ],
+        "type": "object"
+      },
+      "UsageResponse": {
+        "description": "«Де використовується» — єдина форма відповіді `GET /…/{id}/usage`\n(директива №15, BE-15).",
+        "properties": {
+          "items": {
+            "description": "Перші int UsageResponse.PageSize посилань.",
+            "items": {
+              "$ref": "#/components/schemas/UsageItemDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Скільки посилань усього — не лише показаних.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
         ],
         "type": "object"
       },
@@ -10025,6 +10158,68 @@
           }
         },
         "summary": "Таблиці документа за період. Право `Document.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/tables/status": {
+      "get": {
+        "description": "⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього\n`GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і\nчитається один раз на відкриття, а це — СТАН (скільки введено), який\nзмінюється після кожного запису. Склеїти їх означало б або\nперечитувати структуру заради лічильника, або показувати лічильник\nіз моменту відкриття сторінки.\n\n⛔ `errorCount`/`warningCount` приходять `null`, доки\nдокумент за цей період не перевіряли. Нуль тут був би тією самою\nнеправдою, що й «0 зауважень» у неперевіреного документа\n(`A7-28`): у клієнта має лишитися змога показати «—», а не\nзелений нуль. Сусідній `GET …/validation` тримає той самий поділ\nкодом `404` (`err.ECR-DOC-0404.notValidated`); тут\n`404` не годиться — заповненість відома й до першої перевірки.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період; екземпляри таблиць існують окремо на кожен (R-A6).",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableStatusDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableStatusDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableStatusDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Заповненість таблиць документа за період. Право `Document.View`.",
         "tags": [
           "Documents"
         ]
@@ -14869,6 +15064,70 @@
         ]
       }
     },
+    "/api/v1/reports/snapshots/{id}/verify": {
+      "post": {
+        "description": "⚠ `POST`, хоча нічого не змінює: це дія з ціною (читає всі рядки\nзрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.",
+        "parameters": [
+          {
+            "description": "Зріз.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Перевіряє незмінність зрізу: перераховує суму збереженого вмісту й\nпорівнює зі збереженою. Право `Report.ViewRegulatory`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
     "/api/v1/reports/{code}/build": {
       "post": {
         "description": "Зріз **незмінний**: повторна побудова створює новий, а не переписує\nстарий. Інакше звіт, роздрукований учора, і той самий звіт сьогодні\nдавали б різні числа без жодного сліду.",
@@ -19102,6 +19361,136 @@
           }
         },
         "summary": "Конвертує значення між одиницями.",
+        "tags": [
+          "Units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}": {
+      "delete": {
+        "description": "⛔ Одиниця з посиланнями не видаляється — `409 ECR-UOM-0409`, а\nперелік залежних лежить у `details.references`.",
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє одиницю, на яку ніхто не посилається.",
+        "tags": [
+          "Units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Де використовується одиниця: перші 20 посилань і загальна кількість.",
         "tags": [
           "Units"
         ]

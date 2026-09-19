@@ -24,4 +24,24 @@ public interface IUnitStore
 
     /// <summary>Ставить нову одиницю в чергу на вставку.</summary>
     public void AddUnit(Unit unit);
+
+    /// <summary>Одиниця за ідентифікатором; <c>null</c> — немає.</summary>
+    public Task<Unit?> FindUnitByIdAsync(int unitId, CancellationToken ct);
+
+    /// <summary>
+    /// Усе, що посилається на одиницю: перші <paramref name="take"/> місць і
+    /// загальна кількість (директива №15, BE-15).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Структурні посилання (колонки, поля довідників, методики, мапінг,
+    /// конверсії, складені одиниці, розмірність) перелічуються поштучно.
+    /// Таблиці ДАНИХ (комірки, значення довідників, результати розрахунків,
+    /// сирі дані збору) дають по одному рядку на таблицю — «є значення в цій
+    /// одиниці»: рахувати їх поштучно означало б сканувати мільйони рядків
+    /// заради числа, яке в діалозі видалення нічого не вирішує.
+    /// </remarks>
+    public Task<Common.UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct);
+
+    /// <summary>Ставить одиницю в чергу на видалення.</summary>
+    public void RemoveUnit(Unit unit);
 }
