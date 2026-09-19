@@ -68,6 +68,31 @@ function Guarded(): JSX.Element {
   );
 }
 
+/**
+ * Зміна, що показує відмову В РЕНДЕРІ, а не колбеком.
+ *
+ * ⛔ Саме цей випадок перша редакція сітки не бачила. `useDeleteRegistryEntry`
+ * навмисно не має `onError`: `ECR-REG-0409` пояснює сам діалог, читаючи
+ * `mutation.error` — «на запис посилаються N комірок, закрийте його датою».
+ * Сітка бачила зміну без обробника й додавала другий тост поверх пояснення,
+ * тобто робила рівно те, від чого мала стерегти.
+ */
+function HandledInRender(): JSX.Element {
+  const submit = useMutation({
+    meta: { handled: true },
+    mutationFn: () => Promise.reject(serverRefusal()),
+  });
+
+  return (
+    <>
+      <button type="button" onClick={() => submit.mutate()}>
+        Подати
+      </button>
+      {submit.error !== null && <p>Діалог: {submit.error.message}</p>}
+    </>
+  );
+}
+
 beforeEach(() => {
   notifications.cleanQueue();
   notifications.clean();
@@ -117,6 +142,33 @@ describe('UI-00 — страхувальна сітка під змінами', 
      * ⚠ Мутаційний доказ саме тут: приберіть перевірку `mutation.options.onError`
      * у `queryClient.ts` — і поруч з'явиться другий тост із текстом сервера,
      * тобто `queryAllByText` дасть 1 замість 0, і цей рядок упаде.
+     */
+    expect(screen.queryAllByText('Період закрито — спершу відкрийте період.')).toHaveLength(0);
+  });
+
+  it('зміна, що показує відмову в РЕНДЕРІ, теж не отримує тоста поверх пояснення', async () => {
+    render(
+      <Harness>
+        <HandledInRender />
+      </Harness>,
+    );
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Подати' }).click();
+    });
+
+    // Пояснення на місці — відмова не зникла, її показує сам екран.
+    await waitFor(() => {
+      expect(
+        screen.getByText('Діалог: Період закрито — спершу відкрийте період.'),
+      ).toBeDefined();
+    });
+
+    /*
+     * ⛔ Мутаційний доказ: приберіть перевірку `mutation.meta?.['handled']` у
+     * `queryClient.ts` — поруч з'явиться тост із тим самим текстом сервера, і
+     * `queryAllByText` дасть 1 замість 0. Саме так сітка й поводилася до цієї
+     * правки з `useDeleteRegistryEntry`.
      */
     expect(screen.queryAllByText('Період закрито — спершу відкрийте період.')).toHaveLength(0);
   });
