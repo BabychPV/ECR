@@ -2653,6 +2653,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-AUTH-0401` | 401 | немає автентифікації |
 | `ECR-AUTH-0403` | 403 | немає функціонального права |
 | `ECR-AUTH-0423` | 423 | обліковий запис заблоковано |
+| `ECR-AUTH-0429` | 429 | вичерпано хвилинну межу спроб входу з АДРЕСИ (`S-10`); у відповіді `Retry-After`. Обліковка при цьому не заблокована — це `ECR-AUTH-0423`, інший суб'єкт і інша дія користувача |
 | `ECR-ACCS-0403` | 403 | відмова `IAccessDecisionService`; у `Extensions2.reason` — `EditDenyReason` |
 | `ECR-SEC-0404` | 404 | користувача або ролі не існує (або роль вимкнена) |
 | `ECR-SEC-0409` | 409 | роль із таким кодом уже існує (`UQ_Role`) |
