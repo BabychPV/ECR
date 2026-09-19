@@ -173,6 +173,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
+        services.AddScoped<Units.UnitUsageHandler>();
+        services.AddScoped<Units.DeleteUnitHandler>();
 
         // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
         // мапінг і історія опису.
@@ -228,12 +230,14 @@ public static class DependencyInjection
 
         // Етап 5: обмін із Excel, звітність, інтеграція, стан задач.
         services.AddScoped<Documents.GetDocumentTablesHandler>();
+        services.AddScoped<Documents.GetTableStatusHandler>();
         services.AddScoped<Documents.ExportDocumentHandler>();
         services.AddScoped<Documents.DownloadExportHandler>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();
         services.AddScoped<Reporting.BuildReportSnapshotHandler>();
+        services.AddScoped<Reporting.VerifyReportSnapshotHandler>();
 
         // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
         // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні
@@ -259,6 +263,10 @@ public static class DependencyInjection
         // жодного права — бо викликається до автентифікації; склад полів і
         // причина кожного з них — у самому файлі.
         services.AddScoped<PublicApi.GetPublicBootstrapHandler>();
+
+        // BE-18: факти про процес і текст команди для DBA на `/admin/health`.
+        services.AddScoped<Health.GetSystemFactsHandler>();
+        services.AddScoped<Health.GetPartitionScriptHandler>();
 
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();

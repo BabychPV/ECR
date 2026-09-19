@@ -3,6 +3,29 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { ErrorBoundary } from './app/ErrorBoundary';
 
+/*
+ * ⛔ Шрифт САМОХОСТИНГОМ (`@fontsource`), не з CDN. Рішення замовника
+ * дослівне: «IBM Plex дозволити, self-hosted». Посилання на `fonts.googleapis.com`
+ * означало б, що кожен вхід оператора в систему повідомляє третій стороні, коли
+ * і звідки він увійшов, — і що застосунок у мережі без зовнішнього доступу
+ * малюється системним шрифтом, тобто інакше, ніж на скріншотах приймання.
+ *
+ * ⚠ Ваги рівно ті, що вживає код: `400` (дефолт), `500`, `600`, `700`
+ * (`git grep -o "fw={[0-9]*}"` дає 500×4, 600×40, 700×4). Файл `<вага>.css`
+ * фонтсорса несе `unicode-range` на кожну підмножину, тому браузер тягне
+ * `.woff2` лише тих абеток, які справді трапилися на сторінці: латиниця й
+ * кирилиця — так, грецька та в'єтнамська — ні.
+ *
+ * ⚠ Казахські літери (Ә Ғ Қ Ң Ө Ұ Ү Һ І) покриті двома підмножинами:
+ * `cyrillic` (`U+0400-045F` дає І/і, `U+04B0-04B1` — Ұ/ұ) і `cyrillic-ext`
+ * (`U+0460-052F` — решта). Обидві входять у `<вага>.css`.
+ */
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-sans/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+
 import '@mantine/core/styles.css';
 import '@mantine/dates/styles.css';
 import '@mantine/notifications/styles.css';

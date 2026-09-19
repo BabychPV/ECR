@@ -64,7 +64,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 
         snapshot.Complete(
             rows.Count,
-            Hash(rows),
+            ComputeHash(rows),
 
             // Прогін, з якого взято числа: без нього неможливо сказати, на
             // чому стоїть значення у звіті.
@@ -169,6 +169,74 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<int?> FindProjectIdAsync(long snapshotId, CancellationToken ct)
+        => await db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.Id == snapshotId)
+            .Select(s => (int?)s.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct)
+    {
+        var stored = await db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.Id == snapshotId)
+            .Select(s => new StoredHash(s.Id, s.ContentHash))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (stored is null)
+        {
+            return null;
+        }
+
+        // ⚠ Порядок — той самий, у якому рядки хешувалися при побудові:
+        // `RowNo` зростає, а п'ять комірок рядка йдуть у порядку `Cell(...)`.
+        // Первинний ключ (SnapshotId, RowNo, ColumnCode) дав би АЛФАВІТНИЙ
+        // порядок колонок, тому комірки одного рядка впорядковує
+        // `ColumnOrder`, а не база.
+        var rows = await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId)
+            .OrderBy(r => r.RowNo)
+            .Take(MaxRows * ColumnsPerResult)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var ordered = rows
+            .OrderBy(r => r.RowNo)
+            .ThenBy(r => ColumnOrder(r.ColumnCode))
+            .ThenBy(r => r.ColumnCode, StringComparer.Ordinal)
+            .ToList();
+
+        var storedHex = stored.Hash is null ? string.Empty : Convert.ToHexString(stored.Hash);
+        var actualHex = Convert.ToHexString(ComputeHash(ordered));
+
+        // Стара сума рахується лише тоді, коли нова не збіглася: для зрізів,
+        // побудованих після BE-17, вона не потрібна взагалі.
+        var legacyHex = string.Equals(storedHex, actualHex, StringComparison.Ordinal)
+            ? null
+            : Convert.ToHexString(ComputeLegacyHash(ordered));
+
+        return new SnapshotHashes(storedHex, actualHex, legacyHex);
+    }
+
+    /// <summary>Порядок комірок у рядку — той, у якому їх складає <c>AggregateAsync</c>.</summary>
+    private static readonly string[] Columns =
+        ["DocumentId", "RowKey", "OutputCode", "Value", "SubstanceEntryId"];
+
+    private static int ColumnOrder(string columnCode)
+    {
+        var index = Array.IndexOf(Columns, columnCode);
+        return index < 0 ? Columns.Length : index;
+    }
+
+    /// <summary>Збережена сума зрізу.</summary>
+    private sealed record StoredHash(long Id, byte[]? Hash);
 
     /// <summary>Стеля переліку зрізів.</summary>
     private const int MaxSnapshots = 500;
@@ -336,16 +404,80 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     /// зрізи з однаковими числами мусять мати однакову суму, інакше нею
     /// неможливо довести, що звіт не змінився.
     /// </remarks>
-    private static byte[] Hash(IReadOnlyList<ReportRow> rows)
+    /// <param name="rows">Рядки зрізу в порядку побудови.</param>
+    public static byte[] ComputeHash(IReadOnlyList<ReportRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        return HashOf(rows, r => Canonical(r.ValueNumeric));
+    }
+
+    /// <summary>
+    /// Контрольна сума за форматом ДО BE-17, відтворена зі збережених рядків.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ ТИМЧАСОВО прийнятний формат: приймається для зрізів, побудованих до
+    /// BE-17; прибрати, коли таких не лишиться (жоден <c>rpt.ReportSnapshot</c>
+    /// не збігається за ним — або всі старі перебудовано).
+    /// <para>
+    /// Стара сума писала число як <c>decimal.ToString()</c>, тобто з масштабом,
+    /// який число мало В МИТЬ ПОБУДОВИ. Масштаб у базі втрачено (усе стало
+    /// <c>decimal(28,10)</c>), але для рядків, які складає
+    /// <c>AggregateAsync</c>, він відновлюється з коду колонки однозначно:
+    /// <c>DocumentId</c> і <c>SubstanceEntryId</c> — це <c>long</c> (масштаб 0,
+    /// «4217»), а <c>Value</c> читалось із <c>calc.CalculationResult.Value</c>,
+    /// колонки <c>decimal(28,10)</c>, і SqlClient віддає його з масштабом 10
+    /// («12.5000000000»). Порядок комірок той самий, що й тепер.
+    /// </para>
+    /// <para>
+    /// ⛔ Межа: зріз, рядки якого складено НЕ побудовою (інші колонки, число
+    /// з іншим масштабом), за старим форматом не відтворюється — і тоді
+    /// відповідь лишається «не збігається», бо довести протилежне нема чим.
+    /// </para>
+    /// </remarks>
+    private static byte[] ComputeLegacyHash(IReadOnlyList<ReportRow> rows)
+        => HashOf(rows, LegacyNumber);
+
+    /// <summary>Число так, як його друкував код до BE-17 у мить побудови.</summary>
+    private static string LegacyNumber(ReportRow row)
+    {
+        if (row.ValueNumeric is not { } number)
+        {
+            return string.Empty;
+        }
+
+        // ⛔ Ціла форма — лише для справді цілого ідентифікатора. Відкинути
+        // дріб беззастережно означало б сховати підміну `4217` → `4217.5`.
+        var isId = row.ColumnCode is "DocumentId" or "SubstanceEntryId";
+
+        return isId && number == decimal.Truncate(number)
+            ? decimal.Truncate(number).ToString(CultureInfo.InvariantCulture)
+            : number.ToString("F10", CultureInfo.InvariantCulture);
+    }
+
+    private static byte[] HashOf(IReadOnlyList<ReportRow> rows, Func<ReportRow, string> number)
     {
         var text = string.Join(
             '\n',
             rows.Select(r => string.Create(
                 CultureInfo.InvariantCulture,
-                $"{r.RowNo}|{r.ColumnCode}|{r.ValueString}|{r.ValueNumeric}")));
+                $"{r.RowNo}|{r.ColumnCode}|{r.ValueString}|{number(r)}")));
 
         return SHA256.HashData(Encoding.UTF8.GetBytes(text));
     }
+
+    /// <summary>Число без хвостових нулів, із точністю колонки <c>decimal(28,10)</c>.</summary>
+    /// <remarks>
+    /// ⛔ BE-17. <c>decimal</c> у .NET несе МАСШТАБ: <c>5m</c> друкується «5», а
+    /// те саме число, прочитане з <c>decimal(28,10)</c>, — «5.0000000000». Поки
+    /// суму рахували лише при побудові, цього не було видно; перерахунок за
+    /// збереженими рядками давав би іншу суму на КОЖНОМУ зрізі з числами, тобто
+    /// перевірка завжди казала б «вміст змінено».
+    /// </remarks>
+    private static string Canonical(decimal? value)
+        => value is { } number
+            ? number.ToString("0.##########", CultureInfo.InvariantCulture)
+            : string.Empty;
 
     /// <summary>Результат розрахунку для агрегації.</summary>
     /// <remarks>

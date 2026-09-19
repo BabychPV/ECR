@@ -25,6 +25,19 @@ import { testTheme } from '@/test/render';
  * ⛔ Мутаційний доказ структурний (jsdom не рахує layout): перевіряється, що
  * САМЕ той інлайн-стиль, який лікує дефект (`min-width: fit-content`),
  * застосований РІВНО на бейджі стану.
+ *
+ * ✎ 2026-09-19. Твердження НЕ змінилося — змінилося, ХТО його виконує. Стиль
+ * стояв пропом `miw="fit-content"` на `Badge` цієї сторінки; тепер стан малює
+ * `StatusBadge`, і мінімальна ширина стала його безумовною властивістю (той
+ * самий дефект довелося ловити окремо ще й для `SnapshotsPage`, тобто наступна
+ * таблиця забула б цей проп утретє). Що набір її тримає для ВСІХ різновидів і
+ * в обох варіантах заливки, доводить `shared/ui/__tests__/StatusBadge.test.tsx`;
+ * цей файл лишається доказом, що вона доходить до живої сторінки.
+ *
+ * ⚠ Локатор переведено з `findByText('Scheduled')` на `data-status-state`:
+ * підпис бейджа тепер приходить із каталогу (`status.period.Scheduled` — у
+ * сіді це «Not open yet»), а не є кодом сервера. Пошук за кодом шукав би текст,
+ * якого на екрані більше немає.
  */
 const project = {
   id: 7,
@@ -128,10 +141,14 @@ describe('PeriodsPage: бейдж стану не стискається ниж�
       mockFetch();
       show();
 
-      const badge = await screen.findByText('Scheduled', {}, { timeout: SlowEnvTimeout });
-      const badgeRoot = badge.closest('.mantine-Badge-root') as HTMLElement | null;
+      // ⚠ Рядок періоду в таблиці, а не сам бейдж: чекаємо на розмальований
+      // перелік, і лише тоді беремо корінь бейджа за станом.
+      await screen.findByText('202601', {}, { timeout: SlowEnvTimeout });
+
+      const badgeRoot = document.querySelector<HTMLElement>('[data-status-state="Scheduled"]');
 
       expect(badgeRoot).not.toBeNull();
+      expect(badgeRoot?.classList.contains('mantine-Badge-root')).toBe(true);
       // ⛔ Мутаційний доказ: без цього стилю таблиця (100% ширини контейнера)
       // стискає бейдж до нечитабельного «S…» замість перемикання ScrollArea
       // на горизонтальну прокрутку.

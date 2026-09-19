@@ -1,11 +1,41 @@
 ﻿import type { JSX } from 'react';
-import { Badge, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
+import { Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import type { HealthReport } from '@/api/types';
+import { formatDateTime } from '@/shared/format';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { KeyValue } from '@/shared/ui/KeyValue';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { t } from '@/shared/i18n';
+
+type SystemFacts = components['schemas']['SystemFactsResponse'];
+
+/**
+ * Команда для DBA → буфер обміну (`BE-18`, рішення `D15-12`).
+ *
+ * ⛔ Кнопка НЕ створює партицій: застосунок не виконує DDL (`D-66`). Вона лише
+ * кладе в буфер текст, який сервер віддає як `text/plain`.
+ *
+ * ⚠ Голий `fetch`, а не `apiFetch`: той розбирає тіло як JSON і на простому
+ * тексті впав би. Відмова однаково показується — і мережева, і буфера обміну
+ * (без HTTPS або дозволу `navigator.clipboard` недоступний чи кидає).
+ */
+async function copyPartitionScript(): Promise<void> {
+  try {
+    const response = await fetch('/api/v1/health/partitions/script', { credentials: 'include' });
+
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+
+    await navigator.clipboard.writeText(await response.text());
+    showDone(t('health.partitionScriptCopied'));
+  } catch (error) {
+    showApiError(error);
+  }
+}
 
 /**
  * Операційний дашборд.
@@ -29,13 +59,25 @@ export function HealthPage(): JSX.Element {
     refetchInterval: 60_000,
   });
 
+  // ⚠ Без `refetchInterval`: версія, час старту й середовище не міняються, доки
+  // процес живий, а перезапуск сторінка й так побачить на наступному відкритті.
+  const facts = useQuery({
+    queryKey: ['health', 'facts'],
+    queryFn: () => apiFetch<SystemFacts>('/api/v1/health/facts'),
+  });
+
   return (
     <>
       <PageHeader
         title={t('health.title')}
         actions={
           ready.data === undefined ? null : (
-            <Badge color={badgeColor(ready.data.status)}>{ready.data.status}</Badge>
+            /* ⚠ Зведений статус і статус кожної перевірки — ОДИН словник
+               (`health`), тож і рішення про колір одне, у наборі. Доти їх
+               фарбувала власна `badgeColor` цієї сторінки — п'ята з п'яти
+               розбіжних копій такого рішення (перелік — у шапці
+               `StatusBadge.tsx`). */
+            <StatusBadge kind="health" state={ready.data.status} />
           )
         }
       />
@@ -60,9 +102,7 @@ export function HealthPage(): JSX.Element {
               <Card key={check.name} withBorder>
                 <Group justify="space-between">
                   <Text fw={600}>{check.name}</Text>
-                  <Badge color={badgeColor(check.status)} variant="light">
-                    {check.status}
-                  </Badge>
+                  <StatusBadge kind="health" state={check.status} />
                 </Group>
                 {check.description !== null && (
                   <Text size="sm" mt="xs">
@@ -75,8 +115,23 @@ export function HealthPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
+      {/* ⚠ Довідкові факти, не вміст екрана: доки їх немає (ще вантажаться,
+          відмова, відповідь не тієї форми) — секція не малюється взагалі
+          (`D15-06`), а про справжню біду вже кажуть дві межі поруч. */}
+      {typeof facts.data?.productVersion === 'string' && (
+        <Stack gap="xs" mb="lg" data-health-facts="">
+          <Text fw={600}>{t('health.facts')}</Text>
+          <KeyValue wide items={factItems(facts.data)} />
+        </Stack>
+      )}
+
       <Stack gap="xs">
-        <Text fw={600}>{t('health.database')}</Text>
+        <Group justify="space-between">
+          <Text fw={600}>{t('health.database')}</Text>
+          <Button variant="default" size="xs" onClick={() => void copyPartitionScript()}>
+            {t('health.copyPartitionScript')}
+          </Button>
+        </Group>
 
         {/* ⚠ Обмеження режиму показуються переліком, а не ховаються: саме за
             ними видно, чому вночі не працює архівація або чому немає запасу
@@ -106,6 +161,28 @@ export function HealthPage(): JSX.Element {
       </Stack>
     </>
   );
+}
+
+/**
+ * Факти про процес у вигляді пар для `KeyValue`.
+ *
+ * ⛔ «Не налаштовано» — це ТЕКСТ, а не пропущений рядок: відсутній транспорт
+ * означає, що сповіщення накопичуються в черзі й нікуди не йдуть, і саме це
+ * адміністратор має прочитати. А от «налаштовано» без виду транспорту рядка не
+ * дає — називати нема чого (пару без значення `KeyValue` не малює).
+ */
+function factItems(facts: SystemFacts): { label: string; value: string | null }[] {
+  const transport = facts.notificationTransport;
+
+  return [
+    { label: t('health.facts.productVersion'), value: facts.productVersion },
+    { label: t('health.facts.startedAt'), value: formatDateTime(facts.startedAt) },
+    { label: t('health.facts.environment'), value: facts.environment },
+    {
+      label: t('health.facts.notificationTransport'),
+      value: transport.isConfigured ? transport.kind : t('health.facts.transportNotConfigured'),
+    },
+  ];
 }
 
 /**
@@ -187,15 +264,12 @@ function fieldValue(value: unknown): string {
   return text.trim().length === 0 ? EmptyValue : text;
 }
 
-/**
- * Колір статусу.
- *
- * ⛔ Три стани, а не два. `Degraded` — це не «помилка»: система працює, але
- * чогось у ній бракує. Показувати його червоним означало б навчити оператора
- * не дивитися на червоне.
+/*
+ * ✎ Тут стояла `badgeColor(status)` — власна трійка кольорів цієї сторінки.
+ * Її рішення не втрачене: «три стани, а не два; `Degraded` — це не помилка,
+ * система працює, але чогось у ній бракує, і червоний навчив би оператора не
+ * дивитися на червоне» — воно перенесене в `statusTable.health`
+ * (`shared/ui/StatusBadge.tsx`) разом із самим поясненням. Різниця в тому, що
+ * тепер воно ОДНЕ на застосунок, а не п'яте з п'яти копій, які вже встигли
+ * розійтися між сторінками.
  */
-function badgeColor(status: string): string {
-  if (status === 'Healthy') return 'statusSuccess';
-
-  return status === 'Degraded' ? 'statusWarning' : 'statusError';
-}

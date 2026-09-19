@@ -416,6 +416,9 @@ USING (VALUES
     -- довідників (`Q-200`).
     (N'err.ECR-UOM-4091',  N'en', N'Unit code already in use', 1),
     (N'err.ECR-UOM-4091.unitCodeTaken', N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
+    (N'err.ECR-UOM-0404.unitId', N'en', N'There is no unit with Id {id}.', 1),
+    (N'err.ECR-UOM-0409',  N'en', N'Unit is in use', 1),
+    (N'err.ECR-UOM-0409.unitInUse', N'en', N'Unit "{code}" cannot be removed: it is referenced in {total} place(s).', 1),
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
@@ -1135,6 +1138,16 @@ USING (VALUES
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),
+
+    -- BE-18: факти про процес і команда для DBA (D15-12: застосунок не виконує DDL).
+    (N'health.facts',                    N'en', N'System', 1),
+    (N'health.facts.productVersion',     N'en', N'Product version', 1),
+    (N'health.facts.startedAt',          N'en', N'Started at', 1),
+    (N'health.facts.environment',        N'en', N'Environment', 1),
+    (N'health.facts.notificationTransport', N'en', N'Notification transport', 1),
+    (N'health.facts.transportNotConfigured', N'en', N'Not configured: notifications stay in the queue', 1),
+    (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
+    (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),
     (N'profile.themeAuto',               N'en', N'System', 1),
     (N'profile.themeLight',              N'en', N'Light', 1),
@@ -1515,6 +1528,9 @@ USING (VALUES
     (N'units.factorHint',                N'en', N'Multiplier to the dimension''s base unit.', 1),
     (N'units.offsetHint',                N'en', N'Only nonzero for temperature units (°C to K).', 1),
     (N'units.created',                   N'en', N'Unit created.', 1),
+    (N'units.deleted',                   N'en', N'Unit removed.', 1),
+    (N'units.deleteUnused',              N'en', N'Nothing refers to this unit.', 1),
+    (N'units.deleteUsedIn',              N'en', N'Referenced in {total} place(s) - the unit cannot be removed until they are gone:', 1),
     (N'nav.audit',                       N'en', N'Audit trail', 1),
     (N'audit.title',                     N'en', N'Audit trail', 1),
     (N'audit.from',                      N'en', N'From', 1),
@@ -1599,6 +1615,13 @@ USING (VALUES
     (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
     (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
     (N'snapshots.noPublished',           N'en', N'No report definition has a published version yet: a snapshot can only be built from one.', 1),
+    -- BE-17: перевірка незмінності зрізу — сума перераховується за збереженими рядками.
+    (N'snapshots.verify',                N'en', N'Verify', 1),
+    (N'snapshots.verifyMatch',           N'en', N'unchanged', 1),
+    (N'snapshots.verifyMismatch',        N'en', N'content changed', 1),
+    (N'snapshots.verifyStored',          N'en', N'Stored: {hash}', 1),
+    (N'snapshots.verifyActual',          N'en', N'Actual: {hash}', 1),
+    (N'snapshots.verifyLegacy',          N'en', N'Matched by the earlier checksum format: this snapshot was built before the format changed.', 1),
 
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.

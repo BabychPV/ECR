@@ -1232,6 +1232,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/tables/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Заповненість таблиць документа за період. Право `Document.View`.
+         * @description ⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього
+         *     `GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і
+         *     читається один раз на відкриття, а це — СТАН (скільки введено), який
+         *     змінюється після кожного запису. Склеїти їх означало б або
+         *     перечитувати структуру заради лічильника, або показувати лічильник
+         *     із моменту відкриття сторінки.
+         *
+         *     ⛔ `errorCount`/`warningCount` приходять `null`, доки
+         *     документ за цей період не перевіряли. Нуль тут був би тією самою
+         *     неправдою, що й «0 зауважень» у неперевіреного документа
+         *     (`A7-28`): у клієнта має лишитися змога показати «—», а не
+         *     зелений нуль. Сусідній `GET …/validation` тримає той самий поділ
+         *     кодом `404` (`err.ECR-DOC-0404.notValidated`); тут
+         *     `404` не годиться — заповненість відома й до першої перевірки.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період; екземпляри таблиць існують окремо на кожен (R-A6). */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableStatusDto"][];
+                        "text/json": components["schemas"]["TableStatusDto"][];
+                        "text/plain": components["schemas"]["TableStatusDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/validate": {
         parameters: {
             query?: never;
@@ -1509,6 +1569,103 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health/facts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Версія, час старту, середовище, транспорт сповіщень. Право `System.ViewHealth`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SystemFactsResponse"];
+                        "text/json": components["schemas"]["SystemFactsResponse"];
+                        "text/plain": components["schemas"]["SystemFactsResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health/partitions/script": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Готова команда для DBA на створення наступних партицій. Право `System.ViewHealth`.
+         * @description ⛔ Лише ТЕКСТ (`D15-12`): застосунок не виконує DDL (`D-66`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": string;
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5009,6 +5166,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/snapshots/{id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перевіряє незмінність зрізу: перераховує суму збереженого вмісту й
+         *     порівнює зі збереженою. Право `Report.ViewRegulatory`.
+         * @description ⚠ `POST`, хоча нічого не змінює: це дія з ціною (читає всі рядки
+         *     зрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зріз. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SnapshotVerifyResponse"];
+                        "text/json": components["schemas"]["SnapshotVerifyResponse"];
+                        "text/plain": components["schemas"]["SnapshotVerifyResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/{code}/build": {
         parameters: {
             query?: never;
@@ -7993,6 +8207,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/units/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє одиницю, на яку ніхто не посилається.
+         * @description ⛔ Одиниця з посиланнями не видаляється — `409 ECR-UOM-0409`, а
+         *     перелік залежних лежить у `details.references`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Де використовується одиниця: перші 20 посилань і загальна кількість. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -10119,6 +10448,13 @@ export interface components {
             /** @description Номер версії. */
             versionNumber: string;
         };
+        /** @description Транспорт сповіщень: що відомо з конфігурації, не більше. */
+        NotificationTransportDto: {
+            /** @description Чи налаштований транспорт. */
+            isConfigured: boolean;
+            /** @description Який саме; `null`, коли не налаштований. */
+            kind: null | string;
+        };
         /**
          * @description Арифметичний режим версії методології (ФВ-9.9). `Legacy` відтворює
          *     арифметику чинної системи побітово і використовується лише заради сумісності.
@@ -11713,6 +12049,18 @@ export interface components {
              */
             simulatedForUserId: number;
         };
+        /** @description Підсумок перевірки зрізу. */
+        SnapshotVerifyResponse: {
+            /** @description Сума, перерахована за збереженими рядками (hex). */
+            actual: string;
+            /** @description За яким форматом суми збіглося: `current`, `legacy` (зріз,
+             *     побудований до BE-17) або `null` — не збіглося за жодним. */
+            matchedFormat: null | string;
+            /** @description Чи перерахована сума збіглася зі збереженою. */
+            matches: boolean;
+            /** @description Сума, записана при побудові (hex). */
+            stored: string;
+        };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {
             /** @description Код у джерелі. */
@@ -11816,6 +12164,20 @@ export interface components {
             registryCodes: string[];
             /** @description Нове джерело для всіх перелічених. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
+        /** @description Факти про піднятий процес. */
+        SystemFactsResponse: {
+            /** @description Ім'я середовища хосту (`Production`, `Development`). */
+            environment: string;
+            /** @description Стан транспорту сповіщень. */
+            notificationTransport: components["schemas"]["NotificationTransportDto"];
+            /** @description Версія продукту без метаданих збірки. */
+            productVersion: string;
+            /**
+             * Format: date-time
+             * @description Коли стартував процес, UTC.
+             */
+            startedAt: string;
         };
         TableDto: {
             /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
@@ -11941,6 +12303,38 @@ export interface components {
              * @description Екземпляр таблиці.
              */
             tableInstanceId: number;
+        };
+        /** @description Заповненість однієї таблиці документа й кількість зауважень до неї
+         *     (`BE-10`) — те, з чого дерево аркушів складає «68 of 91 tables filled»
+         *     і крапку помилки біля таблиці. */
+        TableStatusDto: {
+            /**
+             * Format: int32
+             * @description `null` — не перевіряли; інакше — скільки помилок у цій таблиці.
+             */
+            errorCount: null | number;
+            /**
+             * Format: int32
+             * @description Скільки вхідних комірок уже має значення.
+             */
+            filledCells: number;
+            /**
+             * Format: int32
+             * @description Скільки комірок має заповнити людина.
+             */
+            inputCells: number;
+            /** @description Код аркуша, якому належить таблиця. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Опис таблиці; ним клієнт зіставляє рядок із `DocumentTableDto`.
+             */
+            tableDefId: number;
+            /**
+             * Format: int32
+             * @description `null` — не перевіряли; інакше — скільки попереджень.
+             */
+            warningCount: null | number;
         };
         TemplateChangeDto: {
             /** @description Клас ризику; `Breaking` у версії з документами — відмова. */
@@ -12316,6 +12710,28 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Одне місце, що посилається на ресурс. */
+        UsageItemDto: {
+            /** @description Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу. */
+            id: string;
+            /** @description Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…). */
+            kind: string;
+            /** @description Те, чим об'єкт упізнає людина: код. */
+            label: string;
+            /** @description Маршрут клієнта до об'єкта; `null` — окремого екрана немає. */
+            route: null | string;
+        };
+        /** @description «Де використовується» — єдина форма відповіді `GET /…/{id}/usage`
+         *     (директива №15, BE-15). */
+        UsageResponse: {
+            /** @description Перші int UsageResponse.PageSize посилань. */
+            items: components["schemas"]["UsageItemDto"][];
+            /**
+             * Format: int32
+             * @description Скільки посилань усього — не лише показаних.
+             */
+            total: number;
         };
         /** @description Створений користувач. */
         UserIdResponse: {

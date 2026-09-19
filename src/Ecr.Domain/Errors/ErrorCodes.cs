@@ -326,6 +326,12 @@ public static class ErrorCodes
     public const string UnitNotFound = "ECR-UOM-0404";
 
     /// <summary>
+    /// На одиницю посилаються — вона не видаляється; перелік залежних у
+    /// <c>details.references</c> (<c>ECR-UOM-0409</c>, директива №15 BE-15).
+    /// </summary>
+    public const string UnitInUse = "ECR-UOM-0409";
+
+    /// <summary>
     /// Контекстний коефіцієнт у <c>uom.Conversion</c> (ФВ-16.5).
     /// </summary>
     /// <remarks>
