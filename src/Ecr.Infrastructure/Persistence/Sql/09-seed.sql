@@ -1544,6 +1544,14 @@ USING (VALUES
     -- відповідає 400, а не порожнім списком.
     (N'audit.cellHint',                  N'en', N'Row key and column need a document: together the three are the history of one cell.', 1),
     (N'audit.reset',                     N'en', N'Clear filters', 1),
+    -- `BE-16`: друга вкладка екрана — загальний журнал структурних змін.
+    (N'audit.viewCells',                 N'en', N'Cell changes', 1),
+    (N'audit.viewStructure',             N'en', N'Structure changes', 1),
+    (N'audit.entityType',                N'en', N'Entity type', 1),
+    (N'audit.entity',                    N'en', N'Entity', 1),
+    (N'audit.operation',                 N'en', N'Operation', 1),
+    (N'audit.reason',                    N'en', N'Reason', 1),
+    (N'audit.structureEmpty',            N'en', N'No structure changes in this window', 1),
 
     -- ⛔ Знахідки перевірки узгодженості (`aud.ConsistencyIssue`). До цього
     -- екрана з продукту було видно лише КІЛЬКІСТЬ за типом (лічильник

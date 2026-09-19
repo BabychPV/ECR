@@ -13,7 +13,8 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/audit")]
 [Authorize]
-public sealed class AuditController(GetCellChangesHandler cellChanges) : ControllerBase
+public sealed class AuditController(
+    GetCellChangesHandler cellChanges, GetStructureChangesHandler structureChanges) : ControllerBase
 {
     /// <summary>
     /// Історія змін комірок. Право <c>Security.ViewAudit</c> — або
@@ -86,5 +87,42 @@ public sealed class AuditController(GetCellChangesHandler cellChanges) : Control
         // перевіряються в обробнику: правило «без вікна запит іде по всіх
         // партиціях» має діяти незалежно від того, звідки його викликали.
         return Ok(await cellChanges.HandleAsync(filter, page, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Загальний журнал структурних змін (<c>BE-16</c>). Право <c>Security.ViewAudit</c>.
+    /// </summary>
+    /// <remarks>
+    /// Вікно часу **обов'язкове** й обмежене згори, як у <c>cells</c>:
+    /// <c>aud.StructureChange</c> лежить на тій самій схемі партицій. Запит без
+    /// вікна — <c>422 ECR-REQ-0422</c>, а не «весь журнал».
+    /// </remarks>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="entityType">Тип сутності, напр. <c>cfg.RegistryDef</c>.</param>
+    /// <param name="changedByUserId">Автор зміни — <c>UserId</c>, не SID.</param>
+    /// <param name="limit">Розмір сторінки; <c>0</c> — 50.</param>
+    /// <param name="cursor">Курсор наступної сторінки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("structure")]
+    [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.StructureChangeView>>(
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Structure(
+        [FromQuery] DateTime from, [FromQuery] DateTime to,
+        [FromQuery] string? entityType, [FromQuery] int? changedByUserId,
+        [FromQuery] int limit, [FromQuery] string? cursor,
+        CancellationToken ct)
+    {
+        var filter = new Ecr.Application.Ports.StructureChangeFilter(
+            from, to,
+            string.IsNullOrWhiteSpace(entityType) ? null : entityType,
+            changedByUserId);
+
+        return Ok(await structureChanges
+            .HandleAsync(filter, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
+            .ConfigureAwait(false));
     }
 }
