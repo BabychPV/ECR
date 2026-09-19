@@ -44,6 +44,59 @@ public sealed record StructureChangeView(
     string? ChangeReason,
     int ChangedByUserId);
 
+/// <summary>Фільтр журналу змін комірок.</summary>
+/// <remarks>
+/// ⛔ Вікно часу — ОБОВ'ЯЗКОВІ поля запису, а не необов'язкові параметри:
+/// <c>aud.CellChange</c> партиційована за <c>ChangedAt</c>, і запит без меж
+/// пішов би по всіх партиціях, включно з архівними. Решта полів лише звужує
+/// вже відсічений вікном набір і тому має значення за замовчуванням.
+///
+/// ⚠ Чому запис, а не сім позиційних параметрів. Сигнатура
+/// <c>(from, to, documentId, rowKey, columnDefId, userId, origin, lateOnly, page, ct)</c>
+/// складається з чотирьох підряд «необов'язкових ідентифікаторів», два з яких
+/// цілі числа: переставлені місцями <c>columnDefId</c> і <c>changedByUserId</c>
+/// компілюються мовчки і дають журнал ЧУЖОЇ комірки. Іменовані поля роблять
+/// таку перестановку неможливою.
+/// </remarks>
+/// <param name="From">Початок вікна в UTC, включно.</param>
+/// <param name="To">Кінець вікна в UTC, виключно.</param>
+/// <param name="DocumentId">Фільтр за документом; <c>null</c> — усі.</param>
+/// <param name="RowKey">Ключ рядка; має сенс лише разом із <paramref name="DocumentId"/>.</param>
+/// <param name="ColumnDefId">Колонка; має сенс лише разом із <paramref name="DocumentId"/>.</param>
+/// <param name="ChangedByUserId">Автор зміни — <b>UserId</b>, не SID (R-A2, D-86).</param>
+/// <param name="Origin">Походження: <c>UserEdit</c>, <c>Import</c>, <c>Recalculation</c>, <c>Migration</c>.</param>
+/// <param name="LateOnly">Лише пізні правки (<c>Grace</c>/після <c>Reopen</c>, D-70).</param>
+public sealed record CellChangeFilter(
+    DateTime From,
+    DateTime To,
+    long? DocumentId = null,
+    string? RowKey = null,
+    int? ColumnDefId = null,
+    int? ChangedByUserId = null,
+    string? Origin = null,
+    bool LateOnly = false)
+{
+    /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
+    /// <remarks>
+    /// ⚠ Це не зручність, а МЕЖА ДОСТУПУ (D15-16): історію своєї комірки
+    /// бачить той, хто бачить документ, а загальний журнал — лише
+    /// <c>Security.ViewAudit</c>. Адреса комірки повна тоді й лише тоді, коли
+    /// задані всі три складники: без <c>ColumnDefId</c> запит віддав би весь
+    /// рядок, без <c>RowKey</c> — усю колонку документа.
+    /// </remarks>
+    public bool IsSingleCell
+        => DocumentId is not null && RowKey is not null && ColumnDefId is not null;
+
+    /// <summary>Фільтр згадує адресу комірки, але без документа — адреси немає.</summary>
+    /// <remarks>
+    /// <c>RowKey</c> унікальний у межах екземпляра таблиці, а не системи:
+    /// «R1» є в кожному документі. Пошук за ним без <c>DocumentId</c> зібрав
+    /// би рядки з чужих документів і виглядав би як відповідь.
+    /// </remarks>
+    public bool IsCellAddressWithoutDocument
+        => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
+}
+
 /// <summary>
 /// Читання аудиту. Журнал **тільки читається**: методів зміни тут немає і не
 /// буде — журнал, який можна відредагувати, не є доказом.
@@ -54,18 +107,16 @@ public interface IAuditReader
     /// Історія змін комірок у вікні часу.
     /// </summary>
     /// <remarks>
-    /// ⚠ Вікно <paramref name="from"/>…<paramref name="to"/> **обов'язкове**:
-    /// <c>aud.CellChange</c> партиційована за <c>ChangedAt</c>, і запит без
-    /// меж пішов би по всіх партиціях, включно з архівними. Місяць зміни і
-    /// звітний період — різні осі: правка за січень може статися в березні.
+    /// ⚠ Вікно <see cref="CellChangeFilter.From"/>…<see cref="CellChangeFilter.To"/>
+    /// **обов'язкове**: <c>aud.CellChange</c> партиційована за <c>ChangedAt</c>,
+    /// і запит без меж пішов би по всіх партиціях, включно з архівними. Місяць
+    /// зміни і звітний період — різні осі: правка за січень може статися в березні.
     /// </remarks>
-    /// <param name="from">Початок вікна в UTC, включно.</param>
-    /// <param name="to">Кінець вікна в UTC, виключно.</param>
-    /// <param name="documentId">Фільтр за документом; <c>null</c> — усі.</param>
+    /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<PagedResult<CellChangeView>> ReadCellChangesAsync(
-        DateTime from, DateTime to, long? documentId, CursorRequest page, CancellationToken ct);
+        CellChangeFilter filter, CursorRequest page, CancellationToken ct);
 
     /// <summary>
     /// Історія структурних змін однієї сутності конфігурації.
