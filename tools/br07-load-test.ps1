@@ -285,6 +285,7 @@ EXEC sys.sp_addextendedproperty @name = N'Ecr_Br07_Temp', @value = 1;
         '03-archive-proc.sql'
         '04-partition-maintenance.sql'
         '05-rpt-views.sql'
+        '15-cell-tvp.sql'
         '10-triggers.sql'
         '09-seed.sql'
         '06-rcsi.sql'

@@ -504,7 +504,8 @@ END
             '01-filegroups.sql', '02-partitions.sql', '<migration>',
             '11-audit-tables.sql', '07-partition-tables.sql', '08-system-tables.sql',
             '12-archive-tables.sql', '13-cache-table.sql', '03-archive-proc.sql',
-            '04-partition-maintenance.sql', '05-rpt-views.sql', '10-triggers.sql', '06-rcsi.sql'
+            '04-partition-maintenance.sql', '05-rpt-views.sql', '15-cell-tvp.sql',
+            '10-triggers.sql', '06-rcsi.sql'
         ))
         if ($FirstDeployment) { $scripts.Add('14-agent-jobs.sql') }
 
