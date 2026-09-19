@@ -11,6 +11,7 @@ import type {
   ValidationResultResponse,
 } from '@/api/types';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
+import { useDocumentPending } from '@/features/grid/autosave';
 import { ExportButton } from '@/features/export/ExportButton';
 import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
 import { ImportPanel } from '@/features/import/ImportPanel';
@@ -251,6 +252,19 @@ export function DocumentPage(): JSX.Element {
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
   const gridModule = useSheetTablesModule();
+
+  /*
+   * ⛔ Незбережені правки належать ДОКУМЕНТУ, а не сітці (`D14-12`). Хук
+   * відкриває сховище на цей документ, бере на себе збереження зрізів, чиї
+   * сітки вже розмонтовані (перемикання аркуша, прокрутка — `SheetTables`), і
+   * везе все незбережене перед закриттям вкладки. До нього кожна сітка робила
+   * це за себе: правка молодша за 500 мс зникала при перемиканні аркуша
+   * мовчки, а `beforeunload` віз лише ту сітку, у якій стояв курсор (`W-02`).
+   *
+   * ⚠ Імпорт статичний і бюджет чанка (`D-132`) не чіпає: `autosave.ts` не
+   * тягне ядро `RevoGrid` — воно лишається за виразом `import()` вище.
+   */
+  useDocumentPending(documentId);
 
   return (
     /*

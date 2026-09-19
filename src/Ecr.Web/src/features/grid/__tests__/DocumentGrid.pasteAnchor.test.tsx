@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
+import { cancelAutosave } from '../autosave';
+import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 
 /**
@@ -167,6 +169,11 @@ function clipboard(text: string): { clipboardData: { getData: () => string; setD
 }
 
 afterEach(() => {
+  // ⛔ `D14-12`: сховище правок модульне — воно переживає кінець тесту, як і
+  // запланований дебаунсом пакет. Без скидання правка одного сценарію
+  // потрапила б у `PATCH` наступного.
+  cancelAutosave();
+  resetPending();
   vi.unstubAllGlobals();
 });
 
