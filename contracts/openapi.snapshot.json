@@ -8109,6 +8109,59 @@
         ],
         "type": "object"
       },
+      "UsageItemDto": {
+        "description": "Одне місце, що посилається на ресурс.",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…).",
+            "type": "string"
+          },
+          "label": {
+            "description": "Те, чим об'єкт упізнає людина: код.",
+            "type": "string"
+          },
+          "route": {
+            "description": "Маршрут клієнта до об'єкта; `null` — окремого екрана немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "route"
+        ],
+        "type": "object"
+      },
+      "UsageResponse": {
+        "description": "«Де використовується» — єдина форма відповіді `GET /…/{id}/usage`\n(директива №15, BE-15).",
+        "properties": {
+          "items": {
+            "description": "Перші int UsageResponse.PageSize посилань.",
+            "items": {
+              "$ref": "#/components/schemas/UsageItemDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Скільки посилань усього — не лише показаних.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object"
+      },
       "UserIdResponse": {
         "description": "Створений користувач.",
         "properties": {
@@ -18650,6 +18703,136 @@
           }
         },
         "summary": "Конвертує значення між одиницями.",
+        "tags": [
+          "Units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}": {
+      "delete": {
+        "description": "⛔ Одиниця з посиланнями не видаляється — `409 ECR-UOM-0409`, а\nперелік залежних лежить у `details.references`.",
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє одиницю, на яку ніхто не посилається.",
+        "tags": [
+          "Units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Де використовується одиниця: перші 20 посилань і загальна кількість.",
         "tags": [
           "Units"
         ]
