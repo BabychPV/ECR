@@ -1,6 +1,7 @@
 ﻿using Ecr.Api.Auth;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
+using Ecr.Api.Security;
 using Ecr.Api.Startup;
 using Ecr.Application;
 using Ecr.Infrastructure;
@@ -150,6 +151,13 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
 builder.Services.Configure<GzipCompressionProviderOptions>(
     options => options.Level = System.IO.Compression.CompressionLevel.Fastest);
 
+// ⚠ Обмеження частоти на анонімні дорогі шляхи (`S-10`). Пакета не додано
+// навмисно: `Microsoft.AspNetCore.RateLimiting` — частина спільного фреймворку,
+// тобто нової залежності (і нового ліцензійного рядка) тут немає. Правило й
+// пояснення — в `Security/LoginRateLimiting.cs`, а не тут: межа, розмазана між
+// композицією і конвеєром, розходиться першою ж правкою.
+builder.Services.AddEcrRateLimiting(builder.Configuration);
+
 builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.DatabaseHealthCheck>("db", tags: ["db", "ready"])
     .AddCheck<Ecr.Api.Health.JobsHealthCheck>("jobs", tags: ["ready"])
@@ -163,8 +171,30 @@ var app = builder.Build();
 // 6) прогрів кешу         7) перевірка запасу партицій
 await app.RunEcrStartupSequenceAsync();
 
-app.UseMiddleware<CorrelationIdMiddleware>();
+/*
+ * ⛔ `ExceptionHandlingMiddleware` — НАЙЗОВНІШНІЙ (`S-23`). Доти зовні стояв
+ * `CorrelationIdMiddleware`, тобто виняток, кинутий у ньому самому, не мав кому
+ * перетворитися на `problem+json`: він виходив у хост, і клієнт отримував
+ * обірване з'єднання або голий 500 без коду, без `correlationId` і без тіла —
+ * рівно в тому випадку, коли пояснити причину найважче.
+ *
+ * ⚠ Обмін місцями нічого не забирає у кореляції: `ExceptionHandlingMiddleware`
+ * читає ідентифікатор з `HttpContext.Items`, який `CorrelationIdMiddleware`
+ * заповнює ПЕРШИМ рядком свого `InvokeAsync` — тобто до будь-якого можливого
+ * кидка нижче по конвеєру.
+ */
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseMiddleware<CorrelationIdMiddleware>();
+
+// ⚠ Заголовки безпеки (`S-22`) — ВСЕРЕДИНІ обробника помилок, і це не суперечить
+// «заголовки в кожній відповіді»: middleware ставить їх через `OnStarting`, який
+// виконується після `Response.Clear()` обробника помилок. Пояснення — у файлі.
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// ⚠ Обмежувач — ДО стиснення й статики: сенс межі в тому, щоб зайвий запит
+// коштував якнайменше, а не в тому, щоб він пройшов півконвеєра й був
+// відхилений наприкінці.
+app.UseRateLimiter();
 
 // ⚠ ПЕРЕД `UseStaticFiles`: інакше бандл і зріз їхали б нестисненими (`RD-01`).
 app.UseResponseCompression();
