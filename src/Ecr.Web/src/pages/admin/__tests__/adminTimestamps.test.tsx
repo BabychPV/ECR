@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuditPage } from '@/pages/admin/AuditPage';
 import { PeriodsPage } from '@/pages/admin/PeriodsPage';
+import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { formatDate, formatDateTime } from '@/shared/format';
 import { testTheme } from '@/test/render';
 
@@ -136,6 +137,50 @@ describe('AuditPage: момент правки', () => {
       expect(node?.textContent).toBe(formatDateTime(ChangedAt));
       expect(node?.textContent).not.toBe(ChangedAt);
       expect(node?.textContent).not.toMatch(/T\d{2}:\d{2}/);
+    },
+    SlowEnvTimeout,
+  );
+});
+
+describe('Журнал структурних змін: момент правки', () => {
+  const ChangedAt = '2026-02-11T07:05:00Z';
+
+  it(
+    'останнє з сімнадцяти місць — теж через набір',
+    async () => {
+      /*
+       * ⚠ Панель рендериться НАПРЯМУ, а не через `AuditPage`: у сторінці вона
+       * схована за перемикачем «Structure changes», і клік по ньому додав би
+       * до тесту крок, який до предмета — формату моменту — стосунку не має.
+       */
+      respond([
+        [
+          '/api/v1/audit/structure',
+          {
+            items: [
+              {
+                changedAt: ChangedAt,
+                changedByUserId: 5,
+                entityType: 'TableDef',
+                entityId: 42,
+                operation: 'Update',
+                changeReason: 'правка опису',
+              },
+            ],
+            nextCursor: null,
+            totalCount: null,
+          },
+        ],
+      ]);
+      show(<StructureChangesPanel from="2026-02-01" to="2026-02-28" />, '/admin/audit');
+
+      await screen.findByRole('table', {}, { timeout: SlowEnvTimeout });
+
+      const node = timeNode(ChangedAt);
+
+      expect(node, 'момент структурної зміни не пройшов через набір').not.toBeNull();
+      expect(node?.textContent).toBe(formatDateTime(ChangedAt));
+      expect(node?.textContent).not.toBe(ChangedAt);
     },
     SlowEnvTimeout,
   );
