@@ -1481,6 +1481,8 @@ USING (VALUES
     (N'workflow.routeAddStepHint',       N'en', N'The role that approves at this step. The same role may appear twice, but not twice in a row.', 1),
     (N'workflow.routeSaved',             N'en', N'The route now has {count} step(s).', 1),
     (N'workflow.routeCleared',           N'en', N'The route is removed: approval is single-stage again.', 1),
+    (N'workflow.history',                N'en', N'History', 1),
+    (N'workflow.historyStep',            N'en', N'step {step}', 1),
     (N'security.access',                 N'en', N'Access', 1),
     (N'security.accessSaved',            N'en', N'Saved: {count} role(s) assigned.', 1),
     (N'security.rolesHint',              N'en', N'The whole set at once: these roles are the person''s authority, and it should be seen as a whole.', 1),

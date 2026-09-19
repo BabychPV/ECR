@@ -1905,6 +1905,29 @@ CREATE TABLE wf.ApprovalState
 );
 GO
 
+-- Журнал переходів стану (BE-11): лише вставка, тим самим комітом, що й зміна
+-- wf.ApprovalState. ⚠ Починається ПОРОЖНІМ — переходи до міграції
+-- BE11ApprovalEvent не відновлювалися.
+CREATE TABLE wf.ApprovalEvent
+(
+    Id          bigint         IDENTITY(1,1) NOT NULL,
+    DocumentId  bigint         NOT NULL,
+    SheetDefId  int            NOT NULL,
+    PeriodKey   int            NOT NULL,
+    FromStatus  tinyint        NOT NULL,   -- DocumentStatus ДО дії
+    ToStatus    tinyint        NOT NULL,   -- DocumentStatus після дії
+    Action      tinyint        NOT NULL,   -- ApprovalAction: 1 Submit, 2 Approve, 3 ApproveStep, 4 Reject, 5 Reopen
+    ByUserId    int            NULL,       -- NULL — системний перехід; зовнішнього ключа немає
+    At          datetime2(3)   NOT NULL,
+    Reason      nvarchar(1000) NULL,
+    StepOrdinal int            NULL,       -- лише на діях затвердження за маршрутом
+    CONSTRAINT PK_ApprovalEvent PRIMARY KEY (Id),
+    CONSTRAINT FK_ApprEvent_Doc   FOREIGN KEY (DocumentId) REFERENCES doc.Document (Id),
+    CONSTRAINT FK_ApprEvent_Sheet FOREIGN KEY (SheetDefId) REFERENCES cfg.SheetDef (Id)
+);
+CREATE INDEX IX_ApprovalEvent_Document ON wf.ApprovalEvent (DocumentId, PeriodKey, At DESC);
+GO
+
 CREATE TABLE wf.ValidationResult
 (
     Id           bigint        IDENTITY(1,1) NOT NULL,

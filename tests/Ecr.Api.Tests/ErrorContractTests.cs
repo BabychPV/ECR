@@ -271,6 +271,71 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-11")]
+    public async Task Подання_справжнім_HTTP_потрапляє_в_історію_з_іменем_користувача()
+    {
+        // Парний до тесту вище: той самий документ, але користувач ІЗ грантом.
+        // Проходить увесь ланцюг — маршрут, DI, обробник, сховище, серіалізація.
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var (_, documentId, sheetDefId) = await ArrangeAsync().ConfigureAwait(true);
+        var name = $"submitter_{Guid.NewGuid():N}"[..20];
+        var displayName = $"Olena Koval {name[^6..]}";
+
+        await using (var db = new Ecr.Infrastructure.Persistence.EcrDbContext(
+            new DbContextOptionsBuilder<Ecr.Infrastructure.Persistence.EcrDbContext>()
+                .UseSqlServer(sql.ConnectionString).Options))
+        {
+            // ⚠ Ім'я НЕ дорівнює логіну — інакше тест не відрізнив би одне від іншого.
+            var user = new Ecr.Domain.Entities.Security.User(name, displayName, Ecr.Domain.Enums.AuthProvider.Local);
+            user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash(LoginPassword));
+            db.Users.Add(user);
+
+            var role = new Ecr.Domain.Entities.Security.Role(
+                Ecr.Domain.ValueObjects.EcrCode.Create($"H{Guid.NewGuid():N}"[..12]),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Submitter" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            var projectId = await db.Documents.Where(d => d.Id == documentId).Select(d => d.ProjectId)
+                                    .SingleAsync().ConfigureAwait(true);
+
+            db.RolePermissions.Add(new Ecr.Domain.Entities.Security.RolePermission(role.Id, "Document.View"));
+            db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, user.Id, principalSid: null));
+            db.ResourceGrants.Add(new Ecr.Domain.Entities.Security.ResourceGrant(
+                role.Id, Ecr.Domain.Enums.ResourceKind.Project, projectId, Ecr.Domain.Enums.GrantLevel.Submit));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = LoginPassword }).ConfigureAwait(true);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        var submit = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{documentId}/submit", UriKind.Relative),
+            new { sheetDefId, periodKey = 202601 }).ConfigureAwait(true);
+        Assert.True(submit.StatusCode == HttpStatusCode.NoContent, $"{submit.StatusCode}: {app.ErrorsText}");
+
+        var response = await client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId}/workflow/history?periodKey=202601", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var events = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+        var only = Assert.Single(events.EnumerateArray());
+        Assert.Equal("Submit", only.GetProperty("action").GetString());
+        Assert.Equal("Draft", only.GetProperty("fromState").GetString());
+        Assert.Equal("Submitted", only.GetProperty("toState").GetString());
+        Assert.Equal(displayName, only.GetProperty("byDisplayName").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Відкликана_роль_прибирає_застарілу_cookie_а_не_лише_відмовляє()
     {
         // ⛔ Виявлено НЕ тестуванням, а ручною звіркою S-04..S-07 в браузері

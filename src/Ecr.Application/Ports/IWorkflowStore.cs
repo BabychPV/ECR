@@ -35,6 +35,17 @@ public interface IWorkflowStore
     public Task AddEventAsync(ApprovalEvent approvalEvent, CancellationToken ct);
 
     /// <summary>
+    /// Журнал переходів документа за період: найновіші перші, не більше
+    /// <paramref name="limit"/> записів (<c>BE-11b</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Код аркуша й ім'я виконавця приєднуються ТИМ САМИМ запитом: журнал
+    /// читають переліком, і похід у базу на кожен рядок був би N+1.
+    /// </remarks>
+    public Task<IReadOnlyList<ApprovalEventRecord>> GetHistoryAsync(
+        long documentId, PeriodKey periodKey, int limit, CancellationToken ct);
+
+    /// <summary>
     /// Бере період документа **з <c>UPDLOCK</c>** до кінця транзакції.
     /// </summary>
     /// <remarks>
@@ -164,3 +175,24 @@ public sealed record SubmissionSnapshotRecord(
     string ContentHash,
     DateTime SubmittedAt,
     int SubmittedByUserId);
+
+/// <summary>Рядок журналу переходів разом із кодом аркуша й іменем виконавця.</summary>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="FromStatus">Стан до дії.</param>
+/// <param name="ToStatus">Стан після дії.</param>
+/// <param name="Action">Дія.</param>
+/// <param name="ByUserId">Хто виконав; <c>null</c> — система.</param>
+/// <param name="ByDisplayName">Відображуване ім'я; <c>null</c> — система або користувача вже немає.</param>
+/// <param name="At">Момент дії, UTC.</param>
+/// <param name="Reason">Причина відхилення або повернення в роботу.</param>
+/// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
+public sealed record ApprovalEventRecord(
+    string SheetCode,
+    Ecr.Domain.Enums.DocumentStatus FromStatus,
+    Ecr.Domain.Enums.DocumentStatus ToStatus,
+    ApprovalAction Action,
+    int? ByUserId,
+    string? ByDisplayName,
+    DateTime At,
+    string? Reason,
+    int? StepOrdinal);

@@ -162,6 +162,7 @@ public static class DependencyInjection
         services.AddScoped<Workflow.SubmitSheetHandler>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
+        services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
 
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
