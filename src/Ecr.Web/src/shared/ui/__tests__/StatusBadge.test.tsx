@@ -253,7 +253,12 @@ describe('кожна пара має рядок у каталозі (дирек�
     const probe = show(<StatusBadge kind="period" state="Scheduled" />);
 
     // `Not open yet` у сіді; код стану — `Scheduled`. Якби компонент малював
-    // код (як `DocumentsPage` сьогодні), цей рядок упав би.
+    // код, цей рядок упав би.
+    //
+    // ✎ 2026-09-19: раніше тут стояло «як `DocumentsPage` сьогодні» — сторінку
+    // переведено на набір, і прикладу більше немає. Твердження від цього не
+    // змінилося: різниця між кодом сервера й рядком каталогу лишається тим,
+    // що цей тест і стереже.
     expect(badge(probe, 'Scheduled').textContent).toBe(catalog.get('status.period.Scheduled')?.text);
     expect(badge(probe, 'Scheduled').textContent).not.toBe('Scheduled');
   });
