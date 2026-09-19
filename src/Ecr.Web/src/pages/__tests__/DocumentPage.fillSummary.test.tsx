@@ -178,7 +178,11 @@ describe('DocumentPage: заповненість видно на сторінц�
     async () => {
       mockFetch(() =>
         jsonResponse(
-          { title: 'Server error', status: 500, detail: 'boom', errorCode: 'ECR-DOC-0500' },
+          // ⚠ `ECR-SYS-0500` — той код, що справді є в каталозі. Вигаданий
+          // `ECR-DOC-0500` тут уже стояв, і його спіймав архітектурний сторож
+          // `Клієнт_не_згадує_кодів_яких_немає_в_каталозі`: жоден клієнтський
+          // файл не має називати коду, якого сервер не віддає.
+          { title: 'Server error', status: 500, detail: 'boom', errorCode: 'ECR-SYS-0500' },
           500,
         ),
       );
