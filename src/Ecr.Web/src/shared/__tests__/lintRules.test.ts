@@ -210,6 +210,102 @@ describe('D15-09 — формат дат і чисел не залежить в�
   });
 });
 
+/**
+ * Четвертий канал `D15-09` — мить, надрукована в розмітці БЕЗ форматування.
+ *
+ * ⛔ Чому окремий `describe`, а не ще один випадок вище. Три правила стережуть
+ * те, ЯК дату форматують; це — те, що її не форматують узагалі. Порушення тут
+ * не «неправильний виклик», а ВІДСУТНІСТЬ виклику, і жодне з трьох правил його
+ * не бачило: сімнадцять місць друкували `2026-09-20T08:15:42.1234567Z` при
+ * зеленому `npm run lint`.
+ *
+ * ⚠ Правило завелося лише тепер, коли тих місць нуль (`UI-07` закрито). Доти
+ * воно зупиняло б збірку на першому ж і було б заведене з придушеннями — тобто
+ * вимкненим. Лічильник придушень нижче це й доводить: він не зрушив.
+ */
+describe('D15-09 — сира мить у розмітці', { timeout: 10_000 }, () => {
+  const Raw = 'Мить із сервера надрукована в розмітці як є';
+
+  it.each(['createdAt', 'publishedAt', 'validFrom', 'effectiveTo'])(
+    '{row.%s} у тілі елемента відхиляється',
+    async (field) => {
+      const messages = await lint(
+        wrap(`    <Text>{row.${field}}</Text>`),
+        'src/features/probe/Probe.tsx',
+      );
+
+      expect(messages.join('\n')).toContain(Raw);
+    },
+  );
+
+  it('права частина && друкує так само — і так само заборонена', async () => {
+    // ⛔ Найчастіший обхід прямого друку: обгорнути в перевірку на наявність.
+    // Мить від цього читабельнішою не стає.
+    const messages = await lint(
+      wrap('    <Text>{row.createdAt !== null && row.createdAt}</Text>'),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).toContain(Raw);
+  });
+
+  it.each([
+    ['гілка «так»', "{row.createdAt ? row.createdAt : '—'}"],
+    ['гілка «ні»', "{row.createdAt === null ? '—' : row.createdAt}"],
+  ])('тернарник, %s, друкує мить — заборонено', async (_case, body) => {
+    const messages = await lint(wrap(`    <Text>${body}</Text>`), 'src/features/probe/Probe.tsx');
+
+    expect(messages.join('\n')).toContain(Raw);
+  });
+
+  /*
+   * ⛔ Нижче — МЕЖІ правила, і вони важливіші за випадки вище. Заборона, що
+   * ловить і правильний спосіб теж, не переживе тижня: її вимкнуть цілком.
+   */
+  it('<Timestamp value={row.createdAt} /> — ПРАВИЛЬНИЙ спосіб, і він проходить', async () => {
+    const messages = await lint(
+      wrap('    <Timestamp value={row.createdAt} />'),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).not.toContain(Raw);
+  });
+
+  it('той самий проп усередині map — найчастіший взірець переліку — теж проходить', async () => {
+    /*
+     * ⛔ Саме цей випадок вимагає `>` (прямий нащадок) у селекторі замість
+     * нащадка взагалі. З «нащадком» контейнер `{rows.map(…)}` містив би
+     * `row.createdAt` із вкладеного пропа — і правило червоніло б на КОЖНІЙ
+     * таблиці застосунку, де дату показують ПРАВИЛЬНО.
+     */
+    const messages = await lint(
+      wrap(
+        '    <Table>{rows.map((row) => (\n' +
+          '      <Table.Tr key={row.id}><Table.Td><Timestamp value={row.createdAt} /></Table.Td></Table.Tr>\n' +
+          '    ))}</Table>',
+      ),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).not.toContain(Raw);
+  });
+
+  it('перевірка на наявність ліворуч від && — не друк, і не заборона', async () => {
+    const messages = await lint(
+      wrap('    <Text>{row.createdAt && <Timestamp value={row.createdAt} />}</Text>'),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).not.toContain(Raw);
+  });
+
+  it('поле, що не є миттю, не чіпається — правило не ловить усе підряд', async () => {
+    const messages = await lint(wrap('    <Text>{row.code}</Text>'), 'src/features/probe/Probe.tsx');
+
+    expect(messages.join('\n')).not.toContain(Raw);
+  });
+});
+
 describe('борг D15-09 обмежений і може лише скорочуватися', () => {
   /*
    * ⛔ Вісім наявних місць `<TextInput type="date">` не переводяться на
