@@ -244,7 +244,8 @@ public sealed class RecalculationJobIdTests
         public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct)
             => Task.FromResult(_authors.TryGetValue(jobId, out var author) ? author : null);
 
-        public Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct)
+        public Task<IReadOnlyList<JobSummary>> ListRecentAsync(
+            JobListFilter filter, int limit, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<JobSummary>>([]);
     }
 }
