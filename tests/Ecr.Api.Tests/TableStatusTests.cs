@@ -213,6 +213,64 @@ public sealed class TableStatusTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    /// <summary>
+    /// <c>GET /documents/summary</c> ходить справжнім HTTP (<c>BE-09a</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Живе ТУТ, а не у власному файлі, щоб не копіювати вхід і сценарій.
+    /// Єдине, що стереже DI-реєстрацію обробника й сховища зведення: без неї
+    /// маршрут віддає <c>500</c> лише в рантаймі, і жоден модульний тест цього
+    /// не бачить. Читач має грант рівно на СВІЙ проєкт, тож сума станів —
+    /// кількість його видимих документів, а не всіх у базі.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-09")]
+    public async Task Зведення_переліку_ходить_справжнім_HTTP_і_вимагає_період()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var projectId = db.Documents.Where(d => d.Id == scenario.DocumentId).Select(d => d.ProjectId).Single();
+            db.Documents.Add(new Document(
+                projectId, $"SUM-{Guid.NewGuid():N}"[..20], 1, new DateTime(2026, 1, 16, 0, 0, 0, DateTimeKind.Utc)));
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var response = await client
+            .GetAsync(new Uri($"/api/v1/documents/summary?periodKey={scenario.PeriodKey}", UriKind.Relative))
+            .ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"GET зведення: {response.StatusCode}\n{body}\n{app.ErrorsText}");
+
+        var summary = JsonDocument.Parse(body).RootElement;
+        var states = summary.GetProperty("draft").GetInt32()
+                     + summary.GetProperty("submitted").GetInt32()
+                     + summary.GetProperty("approved").GetInt32()
+                     + summary.GetProperty("rejected").GetInt32();
+
+        // Два документи проєкту, жоден не подано й не перевіряли.
+        Assert.Equal(2, states);
+        Assert.Equal(2, summary.GetProperty("draft").GetInt32());
+        Assert.Equal(0, summary.GetProperty("withIssues").GetInt32());
+
+        string[] invalidQueries = [string.Empty, "?periodKey=13"];
+        foreach (var query in invalidQueries)
+        {
+            var invalid = await client
+                .GetAsync(new Uri($"/api/v1/documents/summary{query}", UriKind.Relative))
+                .ConfigureAwait(true);
+
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, invalid.StatusCode);
+        }
+    }
+
     /// <summary>Читає статус і перевіряє, що відповідь узагалі успішна.</summary>
     private static async Task<List<JsonElement>> ReadStatusAsync(
         EcrApiFactory app, HttpClient client, Scenario scenario)
