@@ -8400,13 +8400,30 @@ export interface components {
          *     `Extensions2.conflicts` при `ECR-CELL-0409`.
          *     «Перезаписати мовчки» не є опцією: користувач має побачити розбіжність. */
         CellConflictDto: {
+            /** @description Колонка; `*` — розійшовся весь рядок, конкретної колонки назвати не можна. */
             columnCode: string;
+            /** @description Чинна версія рядка. */
             currentVersion: string;
+            /** @description Ключ рядка, чия версія розійшлася. */
             rowKey: string;
-            /** Format: date-time */
-            theirChangedAt: string;
-            theirUser: string;
+            /**
+             * Format: date-time
+             * @description Момент останньої зміни в UTC; `null` — невідомо.
+             */
+            theirChangedAt: null | string;
+            /** @description Походження останньої зміни: `UserEdit`, `Import`,
+             *     `Recalculation`, `Migration`; `null` — невідоме. Потрібне
+             *     поруч із `system`: «це зробила не людина» без відповіді «а що саме»
+             *     лишає користувача з тим самим питанням. */
+            theirOrigin: null | string;
+            /** @description Відображуване ім'я автора останньої зміни; `system` — зміна не людини
+             *     (перерахунок, імпорт, міграція); `null` — автор невідомий. Ніколи не
+             *     логін і не SID (R-A2, D-86). */
+            theirUser: null | string;
+            /** @description Чинне значення комірки — те, що лежить у сховищі зараз; `null` —
+             *     комірки немає або назвати її неможливо. */
             theirValue: unknown;
+            /** @description Значення, яке надіслав цей користувач. */
             yourValue: unknown;
         };
         /**
