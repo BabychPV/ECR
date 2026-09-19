@@ -24,8 +24,44 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/ui-strings")]
 public sealed class UiStringsController(
     GetUiStringsHandler get,
-    SetUiStringHandler set) : ControllerBase
+    SetUiStringHandler set,
+    GetUiStringCoverageHandler coverage,
+    ListUiStringsHandler list) : ControllerBase
 {
+    /// <summary>Покриття перекладу по мовах. Право <c>System.ManageLocalization</c>.</summary>
+    /// <remarks>
+    /// ⚠ Літеральний сегмент <c>coverage</c> виграє в шаблону <c>{lang}</c> за
+    /// правилами маршрутизації; мови з таким кодом не буває — код мови це
+    /// <c>char(2..5)</c> реєстру.
+    /// </remarks>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("coverage")]
+    [Authorize]
+    [ProducesResponseType<UiStringCoverageResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Coverage(CancellationToken ct)
+        => Ok(await coverage.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Адміністративний перелік рядків мови **без fallback**. Право
+    /// <c>System.ManageLocalization</c>.
+    /// </summary>
+    /// <remarks>
+    /// Каталог <c>GET {lang}</c> підміняє відсутній переклад мовою за
+    /// замовчуванням, і відсутнє там невидиме. Тут <c>value = null</c> означає
+    /// рівно «перекладу немає».
+    /// </remarks>
+    /// <param name="lang">Мова; порожньо — мова за замовчуванням.</param>
+    /// <param name="missingOnly">Лише рядки без перекладу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet]
+    [Authorize]
+    [ProducesResponseType<UiStringListResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> List(
+        [FromQuery] string? lang, [FromQuery] bool missingOnly, CancellationToken ct)
+        => Ok(await list
+            .HandleAsync(string.IsNullOrWhiteSpace(lang) ? UiStringResolver.DefaultLanguage : lang, missingOnly, ct)
+            .ConfigureAwait(false));
+
     /// <summary>Каталог рядків для мови.</summary>
     /// <remarks>
     /// Кожна область має **власний** <c>ETag = revision</c>; на

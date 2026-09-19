@@ -502,6 +502,9 @@ USING (VALUES
     (N'err.ECR-AUTH-0401.anonymous',          N'en', N'An anonymous request has no jobs of its own: sign in again.', 1),
     (N'err.ECR-REQ-0422.jobState',            N'en', N'There is no job state "{state}".', 1),
     (N'err.ECR-REQ-0422.jobLimit',            N'en', N'The number of jobs requested is out of range: {limit}.', 1),
+    -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
+    -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
+    (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -1631,6 +1634,8 @@ USING (VALUES
     (N'uiStrings.saved',                 N'en', N'Saved; the catalogue is now at revision {revision}.', 1),
     (N'uiStrings.empty',                 N'en', N'No keys match', 1),
     (N'uiStrings.emptyHint',             N'en', N'The catalogue is filled from the default language; clear the filter to see everything.', 1),
+    (N'uiStrings.coverage',              N'en', N'{language}: {translated} of {total} translated, {missing} missing', 1),
+    (N'uiStrings.missingOnly',           N'en', N'Missing only', 1),
 
     -- Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
     --

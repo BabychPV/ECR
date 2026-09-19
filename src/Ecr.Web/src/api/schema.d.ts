@@ -7534,6 +7534,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ui-strings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Адміністративний перелік рядків мови **без fallback**. Право
+         *     `System.ManageLocalization`.
+         * @description Каталог `GET {lang}` підміняє відсутній переклад мовою за
+         *     замовчуванням, і відсутнє там невидиме. Тут `value = null` означає
+         *     рівно «перекладу немає».
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мова; порожньо — мова за замовчуванням. */
+                    lang?: string;
+                    /** @description Лише рядки без перекладу. */
+                    missingOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UiStringListResponse"];
+                        "text/json": components["schemas"]["UiStringListResponse"];
+                        "text/plain": components["schemas"]["UiStringListResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui-strings/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Покриття перекладу по мовах. Право `System.ManageLocalization`.
+         * @description ⚠ Літеральний сегмент `coverage` виграє в шаблону `{lang}` за
+         *     правилами маршрутизації; мови з таким кодом не буває — код мови це
+         *     `char(2..5)` реєстру.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UiStringCoverageResponse"];
+                        "text/json": components["schemas"]["UiStringCoverageResponse"];
+                        "text/plain": components["schemas"]["UiStringCoverageResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ui-strings/{lang}": {
         parameters: {
             query?: never;
@@ -11927,6 +12019,47 @@ export interface components {
             strings: {
                 [key: string]: string;
             };
+        };
+        /** @description Покриття перекладу однієї мови. */
+        UiStringCoverageDto: {
+            /** @description Мова. */
+            languageCode: string;
+            /**
+             * Format: int32
+             * @description Скільки показуються підміною.
+             */
+            missing: number;
+            /**
+             * Format: int32
+             * @description Скільки ключів у мові за замовчуванням — стільки й треба перекласти.
+             */
+            total: number;
+            /**
+             * Format: int32
+             * @description Скільки з них мають власний непорожній переклад.
+             */
+            translated: number;
+        };
+        /** @description Покриття перекладу по мовах продукту. */
+        UiStringCoverageResponse: {
+            /** @description Увімкнені мови в порядку показу. */
+            languages: components["schemas"]["UiStringCoverageDto"][];
+        };
+        /** @description Адміністративний перелік рядків мови — без fallback. */
+        UiStringListResponse: {
+            /** @description Рядки за ключем. */
+            items: components["schemas"]["UiStringRawRow"][];
+            /** @description Мова. */
+            languageCode: string;
+        };
+        /** @description Рядок адміністративного переліку: оригінал і переклад як він є в базі. */
+        UiStringRawRow: {
+            /** @description Ключ. */
+            key: string;
+            /** @description Текст мовою за замовчуванням. */
+            reference: string;
+            /** @description Переклад; `null` — перекладу немає (підміни тут не буває). */
+            value: null | string;
         };
         /** @description Версія каталогу після запису. */
         UiStringRevisionResponse: {
