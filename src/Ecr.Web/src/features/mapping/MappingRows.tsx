@@ -3,6 +3,7 @@ import { Badge, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
 import { target } from './MappingGaps';
 import { outcomeColor, outcomeLabel } from './outcome';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 
 /**
@@ -80,7 +81,16 @@ export function MappingRows({ preview }: { readonly preview: MappingPreview }): 
           <Table.Tbody>
             {preview.rows.map((row, index) => (
               <Table.Tr key={`${row.sourcePath}|${row.timestamp}|${index}`}>
-                <Table.Td>{row.timestamp}</Table.Td>
+                {/* ⚠ `precise`: мітка ТОЧКИ ТЕЛЕМЕТРІЇ. Саме секундами вона
+                    відрізняється від сусідньої, і без них два різні виміри в
+                    одній хвилині виглядають однаково — тобто перегляд мапінгу
+                    перестає показувати те, заради чого його відкривають.
+                    ⚠ `key` рядка й далі бере СИРИЙ `row.timestamp`: ключ — для
+                    React, а не для ока, і зав'язувати його на відформатований
+                    текст означало б перестворювати рядки при зміні мови. */}
+                <Table.Td>
+                  <Timestamp value={row.timestamp} precise />
+                </Table.Td>
                 <Table.Td>{row.sourcePath}</Table.Td>
                 <Table.Td>{row.valueNumeric ?? row.valueString ?? '—'}</Table.Td>
                 <Table.Td>{row.quality ?? '—'}</Table.Td>

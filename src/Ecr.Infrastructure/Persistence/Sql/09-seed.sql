@@ -1341,6 +1341,10 @@ USING (VALUES
     (N'documents.nameHint',              N'en', N'Optional. Shown next to the business key; does not replace it.', 1),
     (N'documents.groupRuleRequiresAll',  N'en', N'Group "{group}": {picked} of {total} sheets selected — the group requires all of them.', 1),
     (N'documents.groupRuleRequiresOne',  N'en', N'Group "{group}": requires at least one sheet.', 1),
+    (N'documents.summaryLabel',          N'en', N'Documents by state', 1),
+    (N'documents.summaryWithIssues',     N'en', N'With issues', 1),
+    (N'documents.modified',              N'en', N'Modified', 1),
+    (N'documents.errors',                N'en', N'Errors', 1),
 
     -- Записи довідників і вікна чинності.
     (N'registries.newEntry',             N'en', N'New entry', 1),

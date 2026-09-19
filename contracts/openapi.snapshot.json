@@ -1896,6 +1896,44 @@
         ],
         "type": "object"
       },
+      "DocumentListSummaryResponse": {
+        "description": "Смуга лічильників над переліком документів (`BE-09`).",
+        "properties": {
+          "approved": {
+            "description": "Усі аркуші затверджено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draft": {
+            "description": "Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rejected": {
+            "description": "Хоч один аркуш відхилено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "submitted": {
+            "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "withIssues": {
+            "description": "Документи, у яких ОСТАННІЙ збережений підсумок перевірки має помилки.\nНеперевірений документ сюди не входить — і «без зауважень» він теж не є.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "withIssues"
+        ],
+        "type": "object"
+      },
       "DocumentPeriodRequest": {
         "description": "Дія над документом у межах одного періоду.",
         "properties": {
@@ -1922,10 +1960,33 @@
             "format": "date-time",
             "type": "string"
           },
+          "errorCount": {
+            "description": "Помилки з ОСТАННЬОГО збереженого підсумку перевірки за період (`BE-09`).\n⛔ `null` — документ за цей період не перевіряли (або період не\nзадано); це НЕ нуль: «0 зауважень» під неперевіреним документом — та сама\nнеправда, що `A7-28`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "id": {
             "description": "Ідентифікатор.",
             "format": "int64",
             "type": "integer"
+          },
+          "modifiedAt": {
+            "description": "Остання зміна (UTC); `null` — шлях читання її не несе.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "modifiedByDisplayName": {
+            "description": "Хто змінив; `null` — користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "nameL10n": {
             "oneOf": [
@@ -1954,6 +2015,14 @@
             },
             "description": "Стан робочого процесу: аркуш → статус.",
             "type": "object"
+          },
+          "warningCount": {
+            "description": "Попередження звідти ж; `null` — за тим самим правилом.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -9483,6 +9552,55 @@
           }
         },
         "summary": "Створює документ. Право `Document.Create`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/summary": {
+      "get": {
+        "description": "⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею\nгрантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.\nПеріод обов'язковий: без нього стан документа не визначений (`D-93`).",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListSummaryResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListSummaryResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Зведення переліку за період (`BE-09`). Право `Document.View`.",
         "tags": [
           "Documents"
         ]

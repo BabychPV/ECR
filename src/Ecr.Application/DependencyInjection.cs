@@ -109,6 +109,7 @@ public static class DependencyInjection
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();
         services.AddScoped<ListDocumentsHandler>();
+        services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();

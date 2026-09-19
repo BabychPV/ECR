@@ -5,11 +5,14 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { DocumentPage, PagedProjects } from '@/api/types';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
+import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
+import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -124,6 +127,8 @@ export function DocumentsPage(): JSX.Element {
       >
         {(page) => (
           <>
+            <DocumentListSummaryStrip periodKey={periodKey} />
+
             <Table striped highlightOnHover className="ecr-sticky-head">
               <Table.Thead>
                 <Table.Tr>
@@ -131,6 +136,8 @@ export function DocumentsPage(): JSX.Element {
                   <Table.Th>{t('documents.project')}</Table.Th>
                   <Table.Th>{t('documents.sheets')}</Table.Th>
                   <Table.Th>{t('documents.state')}</Table.Th>
+                  <Table.Th>{t('documents.errors')}</Table.Th>
+                  <Table.Th>{t('documents.modified')}</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -207,6 +214,26 @@ export function DocumentsPage(): JSX.Element {
                           ))}
                         </Group>
                       )}
+                    </Table.Td>
+                    <Table.Td data-document-errors={document.errorCount ?? 'none'}>
+                      {/* ⛔ BE-09: `null` — документ за цей період НЕ ПЕРЕВІРЯЛИ, і
+                          це «—», а не «0»: зелений нуль під неперевіреним
+                          документом — та сама неправда, що `A7-28`. */}
+                      {document.errorCount === null || document.errorCount === undefined ? (
+                        <Text c="dimmed">—</Text>
+                      ) : (
+                        formatNumber(document.errorCount)
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      <Stack gap="xs">
+                        <Timestamp value={document.modifiedAt} />
+                        {typeof document.modifiedByDisplayName === 'string' && (
+                          <Text size="xs" c="dimmed">
+                            {document.modifiedByDisplayName}
+                          </Text>
+                        )}
+                      </Stack>
                     </Table.Td>
                   </Table.Tr>
                   );
