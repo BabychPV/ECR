@@ -20,6 +20,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { createUserBody } from '@/features/security/createUserBody';
+import { RoleActions } from '@/features/security/RoleActions';
 import type {
   CreateRoleRequest,
   PermissionCatalogItem,
@@ -378,6 +379,9 @@ export function SecurityPage(): JSX.Element {
                           {t('security.noPermissions')}
                         </Badge>
                       )}
+
+                      {/* Клонувати / перейменувати / видалити (`BE-14`). */}
+                      {can(session.data, 'Security.ManageRoles') && <RoleActions role={role} />}
                     </Table.Td>
                     {permissions.map((permission) => (
                       <Table.Td key={permission.code}>
