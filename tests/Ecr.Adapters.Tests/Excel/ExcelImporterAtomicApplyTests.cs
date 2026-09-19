@@ -206,7 +206,8 @@ public sealed class ExcelImporterAtomicApplyTests
             new PatchCellsHandler(
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-                _methodologies, _registries, _audit, _jobs, _uow, _user, _clock),
+                _methodologies, _registries, _audit, Substitute.For<IAuditReader>(),
+                _jobs, _uow, _user, _clock),
             new ImportDiffBuilder(), _cells, _rows, _uow, _jobs);
 
     [Fact]

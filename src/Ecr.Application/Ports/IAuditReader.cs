@@ -97,6 +97,33 @@ public sealed record CellChangeFilter(
         => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
 }
 
+/// <summary>Остання зміна однієї комірки — хто і коли (<c>BE-06</c>).</summary>
+/// <remarks>
+/// ⛔ Це ВІДПОВІДЬ НА ПИТАННЯ КОРИСТУВАЧА «чия правка і коли», а не рядок
+/// журналу: значення комірки сюди не входить навмисно. Чинне значення живе в
+/// <c>doc.CellValue</c>, і взяти його з <c>NewValue</c> аудиту означало б
+/// показати те, що записали ОСТАННІМ разом у вікні, а не те, що в комірці
+/// лежить зараз. Різниця видна рівно тоді, коли вона найдорожча: зміна поза
+/// вікном або запис в обхід журналу.
+/// </remarks>
+/// <param name="ChangedAt">Момент зміни в UTC.</param>
+/// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
+/// <param name="ChangedByDisplayName">
+/// Відображуване ім'я автора (<c>sec.User.DisplayName</c>); <c>null</c> —
+/// запису користувача вже немає. ⛔ Саме <c>DisplayName</c>, не <c>UserName</c>:
+/// логін і SID показувати людині заборонено (R-A2, D-86), а «чия це правка»
+/// логіном не відповідається — у діалозі конфлікту має стояти ім'я.
+/// </param>
+/// <param name="Origin">
+/// Походження: <c>UserEdit</c>, <c>Import</c>, <c>Recalculation</c>,
+/// <c>Migration</c>. Усе, крім <c>UserEdit</c>, — не людина.
+/// </param>
+public sealed record LastCellChange(
+    DateTime ChangedAt,
+    int ChangedByUserId,
+    string? ChangedByDisplayName,
+    string Origin);
+
 /// <summary>
 /// Читання аудиту. Журнал **тільки читається**: методів зміни тут немає і не
 /// буде — журнал, який можна відредагувати, не є доказом.
@@ -138,4 +165,36 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<StructureChangeView>> ReadStructureChangesAsync(
         IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік
+    /// (<c>BE-06</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Вікно <paramref name="since"/> — ОБОВ'ЯЗКОВИЙ параметр, а не
+    /// необов'язковий, і з тієї самої причини, що в
+    /// <see cref="ReadCellChangesAsync"/>: <c>aud.CellChange</c> партиційована за
+    /// <c>ChangedAt</c>, індекс <c>IX_CellChange_Cell</c> вирівняний по тій самій
+    /// схемі, тож засічка за <c>(DocumentId, TableRowId, ColumnDefId)</c> без
+    /// межі часу пробиває КОЖНУ партицію, включно з архівними. Адреса комірки
+    /// партицію не звужує — її звужує лише час.
+    ///
+    /// ⚠ Комірок — перелік, а не одна: конфлікт паралельного редагування
+    /// стосується батчу, і питати журнал по одній комірці означало б сотню
+    /// походів у базу на одну відмову.
+    ///
+    /// ⚠ Комірка, яку в межах вікна ніхто не міняв, у результаті ВІДСУТНЯ.
+    /// Порожнього <see cref="LastCellChange"/> тут немає навмисно: «змін не
+    /// знайдено» і «змінив ніхто о нульовій даті» — різні твердження, і друге
+    /// було б вигадкою.
+    /// </remarks>
+    /// <param name="documentId">Документ — перша колонка <c>IX_CellChange_Cell</c>.</param>
+    /// <param name="cells">Адреси комірок у межах документа.</param>
+    /// <param name="since">Початок вікна в UTC, включно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange>> ReadLastChangesAsync(
+        long documentId,
+        IReadOnlyCollection<(long TableRowId, int ColumnDefId)> cells,
+        DateTime since,
+        CancellationToken ct);
 }

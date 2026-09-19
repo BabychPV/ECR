@@ -36,6 +36,9 @@ public sealed class PatchCellsTests
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+
+    /// <summary>Читач журналу — джерело автора й часу чужої правки (`BE-06`).</summary>
+    private readonly IAuditReader _auditReader = Substitute.For<IAuditReader>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -160,7 +163,7 @@ public sealed class PatchCellsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _audit, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _audit, _auditReader, _jobs, _uow, _user, _clock);
 
     /// <summary>Відповідь служби доступу на створення рядків.</summary>
     /// <param name="keys">Ключі, про які питали.</param>
@@ -196,6 +199,41 @@ public sealed class PatchCellsTests
 
         await _cells.Received(1).ApplyAsync(
             Arg.Is<CellChangeSet>(c => c.Upserts.Count == 1 && c.Deletes.Count == 0), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>BE-06</c>: подробиці конфлікту коштують запитів ЛИШЕ на шляху відмови.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це замір, а не стиль. Гарячий шлях запису має бюджет p95 300 мс на
+    /// 100 комірок (tz/08 §8.2), і «дочитати автора чужої правки» на КОЖНОМУ
+    /// успішному збереженні з'їло б його дарма: у 99 випадках зі ста жодного
+    /// конфлікту немає. Тому `DescribeConflictsAsync` живе за `throw`, а цей
+    /// тест стереже, щоб воно там і лишилося.
+    ///
+    /// ⚠ Мутація, від якої тест падає: перенести читання журналу з гілки
+    /// конфлікту в `LoadContextAsync` (тобто «щоб значення вже було в пам'яті»)
+    /// — `Received(0)` стане `Received(1)`.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "BE-06")]
+    public async Task Успішний_батч_не_питає_журнал_змін_жодного_разу()
+    {
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        await _auditReader.DidNotReceive().ReadLastChangesAsync(
+            Arg.Any<long>(),
+            Arg.Any<IReadOnlyCollection<(long TableRowId, int ColumnDefId)>>(),
+            Arg.Any<DateTime>(),
+            Arg.Any<CancellationToken>());
+
+        // ⚠ Читання значень на успішному шляху рівно ОДНЕ — і воно не про
+        // конфлікт, а про аудит: старі значення потрібні, щоб журнал знав, ЩО
+        // було до запису (`ReadPreviousValuesAsync`).
+        await _cells.Received(1).ReadCellsAsync(
+            Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]

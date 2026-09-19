@@ -52,6 +52,9 @@ public sealed class PatchCellsLocalizedErrorTests
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+
+    /// <summary>Читач журналу — джерело автора й часу чужої правки (`BE-06`).</summary>
+    private readonly IAuditReader _auditReader = Substitute.For<IAuditReader>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -83,6 +86,14 @@ public sealed class PatchCellsLocalizedErrorTests
 
         _user.UserId.Returns(9);
         _user.Language.Returns("en");
+
+        // ⛔ Годинник тепер МАЄ бути заданий, і це не косметика фікстури.
+        // `BE-06` рахує від нього вікно журналу (`UtcNow.AddMonths(-13)`), а
+        // непіднастроєний `Substitute` віддає `DateTime.MinValue` — відняти від
+        // якого тринадцять місяців неможливо. Наслідок був видимий рівно тут:
+        // замість локалізованого `ECR-CELL-0409` приїжджала «внутрішня
+        // помилка», тобто 500 замість 409.
+        _clock.UtcNow.Returns(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc));
         _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
              .Returns(new TableInstanceRef(
                  TableInstance, DocumentId: 700, TableDefId: 3, TemplateVersionId: 2, PeriodKey: Period));
@@ -108,7 +119,7 @@ public sealed class PatchCellsLocalizedErrorTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _audit, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _audit, _auditReader, _jobs, _uow, _user, _clock);
 
     /// <summary>Каталог із рівно тими ключами, які заводить `09-seed.sql`.</summary>
     private static FakeUiStringCatalog Catalog()

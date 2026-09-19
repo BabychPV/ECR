@@ -3,12 +3,14 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { EcrApiError, apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
+  CellConflictDto,
   JobStatus,
   PatchCell,
   PatchCellsRequest,
   PatchCellsResponse,
   TableSliceDto,
 } from '@/api/types';
+import { MoreConflictsExtension } from '@/api/types';
 // ⚠ Правило «доки опитувати» береться з наявного модуля, а не пишеться вдруге:
 // `jobFollow.ts` уже знає, які стани кінцеві, і саме він виник із двох копій
 // цього правила, що розійшлися (`Q-234`). Тут інший лише ІНТЕРВАЛ — див.
@@ -178,7 +180,24 @@ export function useCellPatch(documentId: number): {
   /** Версії рядків після останнього успішного збереження. */
   rowVersions: Record<string, string>;
   isPending: boolean;
-  conflicts: unknown[];
+
+  /**
+   * Розбіжності останньої відмови `ECR-CELL-0409` (`BE-06`).
+   *
+   * ⛔ Було `unknown[]` — і саме тому інтерфейс показував лише ЛІЧИЛЬНИК
+   * («змінено комірок: 3»). Тип, який нічого не обіцяє, не дає чого показати:
+   * щоб намалювати «їхнє значення 12.40 · A. Serikbayev · 14:02», треба знати,
+   * що ці поля існують.
+   */
+  conflicts: CellConflictDto[];
+
+  /**
+   * Скільки розбіжних комірок сервер НЕ вмістив у перелік (стеля — 100).
+   *
+   * ⚠ `0` — усе вмістилося. Мовчати про решту не можна: людина, яка бачить сто
+   * рядків із трьохсот, вважає, що бачить усі.
+   */
+  moreConflicts: number;
   /** Видимий індикатор для оператора — не лише лічильник незбереженого. */
   status: SaveStatus;
 
@@ -194,7 +213,8 @@ export function useCellPatch(documentId: number): {
 } {
   const queryClient = useQueryClient();
   const [isPending, setPending] = useState(false);
-  const [conflicts, setConflicts] = useState<unknown[]>([]);
+  const [conflicts, setConflicts] = useState<CellConflictDto[]>([]);
+  const [moreConflicts, setMoreConflicts] = useState(0);
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [recalculationJobId, setRecalculationJobId] = useState<string | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -204,6 +224,7 @@ export function useCellPatch(documentId: number): {
     async (request: PatchCellsRequest): Promise<PatchCellsResponse> => {
       setPending(true);
       setConflicts([]);
+      setMoreConflicts(0);
       setStatus('saving');
       if (savedTimer.current !== null) clearTimeout(savedTimer.current);
 
@@ -236,7 +257,8 @@ export function useCellPatch(documentId: number): {
         // ⛔ Конфлікт не «вирішується» мовчазним перезаписом: перелік
         // розбіжностей іде в діалог порівняння, і рішення ухвалює людина.
         if (error instanceof EcrApiError && error.isConflict) {
-          setConflicts(error.conflicts);
+          setConflicts(error.conflicts as CellConflictDto[]);
+          setMoreConflicts(moreConflictsOf(error));
         }
 
         setStatus('error');
@@ -257,7 +279,34 @@ export function useCellPatch(documentId: number): {
     if (savedTimer.current !== null) clearTimeout(savedTimer.current);
   }, []);
 
-  return { patch, rowVersions: versions.current, isPending, conflicts, status, recalculationJobId };
+  return {
+    patch,
+    rowVersions: versions.current,
+    isPending,
+    conflicts,
+    moreConflicts,
+    status,
+    recalculationJobId,
+  };
+}
+
+/**
+ * Скільки розбіжних комірок сервер не вмістив у перелік (`BE-06`).
+ *
+ * ⛔ Число приходить РЯДКОМ — така конвенція розширень `ProblemDetails` на
+ * сервері (у шаблон каталогу підставляються лише поля типу `string`). Тому
+ * `Number(...)`, а не приведення типу: `'37' as number` скомпілювалося б і дало
+ * б рядок там, де далі стоїть арифметика.
+ *
+ * ⚠ Усе, що не розбирається в скінченне число (поля немає, старіший сервер,
+ * чужий формат), — це `0`, тобто «про решту нічого не відомо». Показати `NaN`
+ * у реченні «і ще N комірок» було б гірше за мовчання.
+ */
+function moreConflictsOf(error: EcrApiError): number {
+  const raw = error.problem.extensions2?.[MoreConflictsExtension];
+  const parsed = Number(raw);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 /**
@@ -384,6 +433,26 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
  */
 function clockLabel(at: Date): string {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Момент чужої правки у вигляді `ГГ:ХХ` місцевого часу (`BE-06`).
+ *
+ * ⛔ `null` на вході — це `null` на виході, а не поточний час і не порожній
+ * рядок. Сервер каже `null` рівно тоді, коли автора й моменту встановити не
+ * вдалося, і підставити тут «зараз» означало б повернути той самий дефект,
+ * який `BE-06` і прибирає, — лише на клієнті.
+ *
+ * ⚠ Той самий `clockLabel`, що й у статус-рядку перерахунку: два різні написи
+ * часу на одному екрані читалися б як два різні поняття. Про заборону
+ * `toLocale*()` без явної локалі — у коментарі до `clockLabel` вище (`D15-09`).
+ */
+export function conflictTimeLabel(iso: string | null): string | null {
+  if (iso === null) return null;
+
+  const at = new Date(iso);
+
+  return Number.isNaN(at.getTime()) ? null : clockLabel(at);
 }
 
 /**

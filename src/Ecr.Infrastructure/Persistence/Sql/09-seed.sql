@@ -676,6 +676,19 @@ USING (VALUES
     (N'grid.paste',                      N'en', N'Paste {count} cell(s)', 1),
     (N'grid.conflictTitle',              N'en', N'Someone changed these cells', 1),
     (N'grid.conflictHint',               N'en', N'{count} cell(s) were changed by another user. Review them before saving again.', 1),
+    -- ⛔ `BE-06`: перелік, а не саме лише число. До цих рядків сітка показувала
+    -- лише лічильник, бо сервер і не мав чого сказати: чиє значення, хто і коли
+    -- заповнювалися заглушками, і час чужої правки дорівнював поточному часу
+    -- сервера. Рішення «беру їхнє / лишаю своє» ухвалюють саме за цими трьома.
+    (N'grid.conflictItem',               N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}', 1),
+    -- ⚠ Стеля переліку — 100 комірок: решту показує лічильник, бо людина, яка
+    -- бачить сто рядків із трьохсот, вважає, що бачить усі.
+    (N'grid.conflictMore',               N'en', N'And {count} more changed cell(s) not listed here.', 1),
+    -- ⚠ «Невідомо» написано словом: порожнє місце в рядку про автора читалося б
+    -- як «ніхто», а це інше твердження.
+    (N'grid.conflictUnknownUser',        N'en', N'unknown', 1),
+    (N'grid.conflictUnknownTime',        N'en', N'time unknown', 1),
+    (N'grid.conflictNoValue',            N'en', N'(no value)', 1),
     (N'grid.rejectedTitle',              N'en', N'Some cells were not saved', 1),
     (N'grid.rejectedHint',               N'en', N'The cells below are read-only for you. Nothing from this paste was saved.', 1),
     (N'grid.unknownColumn',              N'en', N'There is no column {column} in this table.', 1),

@@ -18,6 +18,7 @@ import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './per
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
+  conflictTimeLabel,
   useCellPatch,
   useRecalculationStatus,
   type PendingEdit,
@@ -170,6 +171,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     patch,
     isPending,
     conflicts,
+    moreConflicts,
     status: saveStatus,
     recalculationJobId,
   } = useCellPatch(documentId);
@@ -1080,6 +1082,38 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           {/* ⛔ «Перезаписати мовчки» не є опцією: користувач бачить, чия
               правка і яка саме, і вирішує сам. */}
           <Text size="sm">{t('grid.conflictHint', { count: conflicts.length })}</Text>
+
+          {/* ⛔ `BE-06`: перелік, а не саме лише число. Лічильник «змінено
+              комірок: 3» не веде до жодної дії — людина не дізнається ні що
+              саме розійшлося, ні чия це правка, ні коли вона сталася, а
+              вирішувати «беру їхнє / лишаю своє» доводиться саме за цим.
+              Сервер до цієї роботи й не мав чого сказати: поля заповнювалися
+              заглушками. */}
+          <List size="sm">
+            {conflicts.map((conflict) => (
+              <List.Item key={`${conflict.rowKey}:${conflict.columnCode}`}>
+                {t('grid.conflictItem', {
+                  row: conflict.rowKey,
+                  column: conflict.columnCode,
+                  value:
+                    conflict.theirValue === null || conflict.theirValue === undefined
+                      ? t('grid.conflictNoValue')
+                      : String(conflict.theirValue),
+
+                  // ⚠ `null` означає «невідомо», і воно так і написано словом.
+                  // Порожнє місце на цьому рядку читалося б як «ніхто».
+                  user: conflict.theirUser ?? t('grid.conflictUnknownUser'),
+                  time: conflictTimeLabel(conflict.theirChangedAt) ?? t('grid.conflictUnknownTime'),
+                })}
+              </List.Item>
+            ))}
+          </List>
+
+          {moreConflicts > 0 && (
+            // ⛔ Стеля переліку — 100 комірок; решта не має зникати мовчки.
+            // Людина, яка бачить сто рядків із трьохсот, вважає, що бачить усі.
+            <Text size="sm">{t('grid.conflictMore', { count: moreConflicts })}</Text>
+          )}
         </Alert>
       )}
 
