@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, type JSX, type ReactNode } from 'rea
 import { Anchor, Group, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { announceRoute } from './RouteAnnouncer';
+import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 
 /**
  * ⛔ Кластер дій — ЗА `import()`, і це вимога бюджету (`D-132`), а не смак.
@@ -136,7 +137,7 @@ export function PageHeader({
      * зупинкою при обході табом. Інакше кожен екран додавав би користувачеві
      * зайве натискання на шляху до першого поля.
      */
-    <Title order={3} ref={heading} tabIndex={-1}>
+    <Title order={3} ref={heading} tabIndex={-1} className={RouteHeadingClass}>
       {title}
     </Title>
   );

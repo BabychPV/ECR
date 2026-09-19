@@ -3,6 +3,7 @@ import { Anchor, Center, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { announceRoute } from '@/shared/ui/RouteAnnouncer';
+import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 
 /**
  * Каталог маршрутів застосунку не покриває кожну адресу (`router.tsx` не
@@ -36,7 +37,7 @@ export function NotFoundPage(): JSX.Element {
   return (
     <Center py="xl">
       <Stack gap="xs" align="center" maw={420} role="alert">
-        <Title order={2} ref={heading} tabIndex={-1}>
+        <Title order={2} ref={heading} tabIndex={-1} className={RouteHeadingClass}>
           {title}
         </Title>
 
