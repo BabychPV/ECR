@@ -3729,6 +3729,27 @@
         ],
         "type": "object"
       },
+      "NotificationTransportDto": {
+        "description": "Транспорт сповіщень: що відомо з конфігурації, не більше.",
+        "properties": {
+          "isConfigured": {
+            "description": "Чи налаштований транспорт.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "Який саме; `null`, коли не налаштований.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "isConfigured",
+          "kind"
+        ],
+        "type": "object"
+      },
       "NumericMode": {
         "description": "Арифметичний режим версії методології (ФВ-9.9). `Legacy` відтворює\nарифметику чинної системи побітово і використовується лише заради сумісності.",
         "enum": [
@@ -7249,6 +7270,35 @@
         ],
         "type": "object"
       },
+      "SystemFactsResponse": {
+        "description": "Факти про піднятий процес.",
+        "properties": {
+          "environment": {
+            "description": "Ім'я середовища хосту (`Production`, `Development`).",
+            "type": "string"
+          },
+          "notificationTransport": {
+            "$ref": "#/components/schemas/NotificationTransportDto",
+            "description": "Стан транспорту сповіщень."
+          },
+          "productVersion": {
+            "description": "Версія продукту без метаданих збірки.",
+            "type": "string"
+          },
+          "startedAt": {
+            "description": "Коли стартував процес, UTC.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "productVersion",
+          "startedAt",
+          "environment",
+          "notificationTransport"
+        ],
+        "type": "object"
+      },
       "TableDto": {
         "properties": {
           "code": {
@@ -10341,6 +10391,87 @@
         "summary": "Перевіряє вираз так само, як це зробить публікація.",
         "tags": [
           "Expressions"
+        ]
+      }
+    },
+    "/api/v1/health/facts": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemFactsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemFactsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemFactsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Версія, час старту, середовище, транспорт сповіщень. Право `System.ViewHealth`.",
+        "tags": [
+          "SystemHealth"
+        ]
+      }
+    },
+    "/api/v1/health/partitions/script": {
+      "get": {
+        "description": "⛔ Лише ТЕКСТ (`D15-12`): застосунок не виконує DDL (`D-66`).",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Готова команда для DBA на створення наступних партицій. Право `System.ViewHealth`.",
+        "tags": [
+          "SystemHealth"
         ]
       }
     },
@@ -19290,6 +19421,9 @@
     },
     {
       "name": "Sources"
+    },
+    {
+      "name": "SystemHealth"
     },
     {
       "name": "Templates"
