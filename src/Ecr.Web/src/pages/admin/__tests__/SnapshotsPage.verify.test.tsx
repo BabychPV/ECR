@@ -18,6 +18,7 @@ const Strings: Record<string, string> = {
   'snapshots.verifyMismatch': 'content changed',
   'snapshots.verifyStored': 'Stored: {hash}',
   'snapshots.verifyActual': 'Actual: {hash}',
+  'snapshots.verifyLegacy': 'earlier checksum format',
 };
 
 const snapshot = {
@@ -95,7 +96,12 @@ describe('SnapshotsPage: перевірка незмінності зрізу (B
   it(
     'збіг — бейдж «unchanged», сум розбіжності не показано',
     async () => {
-      const fetchMock = mockFetch({ matches: true, stored: 'AAAA', actual: 'AAAA' });
+      const fetchMock = mockFetch({
+        matches: true,
+        stored: 'AAAA',
+        actual: 'AAAA',
+        matchedFormat: 'current',
+      });
       await show();
 
       fireEvent.click(
@@ -104,9 +110,28 @@ describe('SnapshotsPage: перевірка незмінності зрізу (B
 
       expect(await screen.findByText('unchanged')).toBeDefined();
       expect(screen.queryByText(/^Actual:/)).toBeNull();
+      expect(screen.queryByText('earlier checksum format')).toBeNull();
 
       const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/7/verify'));
       expect((call?.[1] as RequestInit | undefined)?.method).toBe('POST');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'збіг за старим форматом — «unchanged» і нейтральна примітка, без сум і без тривоги',
+    async () => {
+      mockFetch({ matches: true, stored: 'AAAA', actual: 'BBBB', matchedFormat: 'legacy' });
+      await show();
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Verify' }, { timeout: SlowEnvTimeout }),
+      );
+
+      expect(await screen.findByText('unchanged')).toBeDefined();
+      expect(screen.getByText('earlier checksum format')).toBeDefined();
+      expect(screen.queryByText('content changed')).toBeNull();
+      expect(screen.queryByText(/^Actual:/)).toBeNull();
     },
     SlowEnvTimeout,
   );

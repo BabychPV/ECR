@@ -379,6 +379,13 @@ function VerifyCell(props: {
           </Badge>
         )}
       </Group>
+      {/* ⚠ Примітка, а не тривога: вміст НЕ змінено, інший лише формат суми
+          (зріз побудовано до BE-17). Прибрати разом зі старим форматом. */}
+      {result !== undefined && result.matches && result.matchedFormat === 'legacy' && (
+        <Text size="xs" mt="xs" c="dimmed">
+          {t('snapshots.verifyLegacy')}
+        </Text>
+      )}
       {result !== undefined && !result.matches && (
         <Text size="xs" mt="xs" style={{ wordBreak: 'break-all' }}>
           {t('snapshots.verifyStored', { hash: result.stored || '—' })}

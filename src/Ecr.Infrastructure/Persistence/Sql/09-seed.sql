@@ -1597,6 +1597,7 @@ USING (VALUES
     (N'snapshots.verifyMismatch',        N'en', N'content changed', 1),
     (N'snapshots.verifyStored',          N'en', N'Stored: {hash}', 1),
     (N'snapshots.verifyActual',          N'en', N'Actual: {hash}', 1),
+    (N'snapshots.verifyLegacy',          N'en', N'Matched by the earlier checksum format: this snapshot was built before the format changed.', 1),
 
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.
