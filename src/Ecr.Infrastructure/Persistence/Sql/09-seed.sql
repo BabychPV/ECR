@@ -1041,6 +1041,12 @@ USING (VALUES
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'jobs.restart',                    N'en', N'Restart', 1),
     (N'jobs.restarting',                 N'en', N'Restarting…', 1),
+    -- ⚠ Скасування — ПРОХАННЯ, не вбивство: підтвердження має сказати це
+    -- прямо, інакше «Cancel» читається як «нічого не сталося», а задача ще
+    -- дописує поточний батч (`CancelJobHandler`, відповідь `202`).
+    (N'jobs.cancel',                     N'en', N'Cancel job', 1),
+    (N'jobs.cancelConfirm',              N'en', N'The job is asked to stop and finishes in the Cancelled state at the nearest batch boundary. Work already written is kept.', 1),
+    (N'jobs.cancelling',                 N'en', N'Cancelling…', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
 
