@@ -20,6 +20,9 @@ const Message = (over: Partial<ValidationFindingDto> = {}): ValidationFindingDto
   severity: 'Error',
   ruleCode: 'CAP',
   message: 'Volume is over the cap',
+  // ⚠ Таблиця — частина адреси, і в типі вона обов'язкова: `rowKey` унікальний
+  // лише всередині своєї таблиці аркуша (`BE-04`).
+  tableDefId: 7,
   rowKey: 'R1',
   columnCode: null,
   blocksSave: true,

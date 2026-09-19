@@ -33,7 +33,11 @@
    OpenAPI немає імені типу (`A7-16`, `A7-32`; див. коментар у
    `DocumentsController.cs:129-132` ✔).
 3. **Право перевіряє обробник, не контролер** — той самий виклик, що всюди:
-   `await ListTemplatesHandler.RequireAsync(access, currentUser, Permission, ct)`.
+   `await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)`
+   (`Ecr.Application.Security`).
+   ⛔ **✎ 2026-09-19:** тут стояло `ListTemplatesHandler.RequireAsync` — такого
+   методу **не існує**; той самий хибний виклик лишився в код-блоці `BE-02`
+   нижче. Скопійований дослівно, він не компілюється.
 4. **Помилки — кодами** `ECR-<ОБЛАСТЬ>-<HTTP>`; новий код = рядок у сіді
    повідомлень (`messageKey`) + рядок `en` у `09-seed.sql`. Див. пам'ятку
    «покрити звільнену вимогу — це три файли й два сторожі».
@@ -59,7 +63,7 @@
 ### BE-01 · Видалення запису довідника — маршрут до наявного обробника ✔
 
 **Факт.** `DeleteRegistryEntryHandler` існує й зареєстрований
-(`RegistryAdminHandlers.cs:264-312` ✔, DI — `DependencyInjection.cs:172` ◐), але
+(`RegistryAdminHandlers.cs:286-334` ✔, DI — `DependencyInjection.cs:172` ✔), але
 в `RegistriesController.cs` немає жодного `[HttpDelete]` ✔ (пошук по
 `Controllers/`). Обробник уже робить усе правильне: право `Registry.EditData`,
 `ECR-REG-0404`, `ECR-REG-0409` з `Details["references"]`, `SoftDelete`,
@@ -179,7 +183,8 @@ public sealed class CancelJobHandler(
         var ownerId = await progress.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
         if (ownerId is null || ownerId != currentUser.UserId)
         {
-            await ListTemplatesHandler
+            // ✎ 2026-09-19: було ListTemplatesHandler.RequireAsync — такого методу немає.
+            await PermissionCheck
                 .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
                 .ConfigureAwait(false);
         }
@@ -258,12 +263,18 @@ void And(string clause, string name, object value, SqlDbType type, int size = 0)
 }
 
 if (filter.DocumentId is { } d)      And("DocumentId = @documentId", "@documentId", d, SqlDbType.BigInt);
-if (filter.RowKey is { } r)          And("RowKey = @rowKey", "@rowKey", r, SqlDbType.NVarChar, 200);
+if (filter.RowKey is { } r)          And("RowKey = @rowKey", "@rowKey", r, SqlDbType.NVarChar, 100); // ✎ 2026-09-19: було 200 — помилка, див. нижче
 if (filter.ColumnDefId is { } c)     And("ColumnDefId = @columnDefId", "@columnDefId", c, SqlDbType.Int);
 if (filter.ChangedByUserId is { } u) And("ChangedByUserId = @userId", "@userId", u, SqlDbType.Int);
 if (filter.Origin is { } o)          And("Origin = @origin", "@origin", o, SqlDbType.NVarChar, 32);
 if (filter.LateOnly)                 where.Append(" AND IsLateEdit = 1");
 ```
+
+⛔ **✎ 2026-09-19, виправлення факту.** `RowKey` у схемі — `nvarchar(100)`, не
+200 (`11-audit-tables.sql:48`, звірено запитом до живої `EcrDev`). Параметр
+завширшки 200 тихо дав би **другий запис у кеші планів** — рівно той дефект
+`WR-01`, від якого застерігає абзац вище. Ширина параметра мусить збігатися зі
+схемою до символа.
 
 ⚠ Типізовані параметри, не `AddWithValue` — той самий урок, що `WR-01` у №14
 (нетипізований `nvarchar(4000)` ламає кеш планів). Розмір `RowKey` звір зі

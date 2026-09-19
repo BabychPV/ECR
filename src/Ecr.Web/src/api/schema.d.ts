@@ -11864,6 +11864,11 @@ export interface components {
             ruleCode: string;
             /** @description Рівень: `Error`, `Warning`, `Info`. */
             severity: string;
+            /**
+             * Format: int32
+             * @description Таблиця, у якій знайдено зауваження.
+             */
+            tableDefId: number;
         };
         /** @description Повідомлення валідації. */
         ValidationMessageDto: {

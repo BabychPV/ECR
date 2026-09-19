@@ -31,6 +31,12 @@ export interface ValidationPanelProps {
  * саме вона перетворює зауваження на дію. Правило рівня таблиці чи документа
  * адреси рядка не має за визначенням — там стоїть прочерк, а не порожнеча,
  * щоб «немає адреси» не читалося як «не показали».
+ *
+ * ⚠ Повна адреса починається з `tableDefId` (`BE-04`): аркуш містить кілька
+ * таблиць, і `rowKey` унікальний лише всередині своєї. Поле вже приходить із
+ * сервера і входить у ключ рядка, але «клац → стрибок до комірки» тут ще
+ * НЕМАЄ — це окрема задача інтерфейсу. Названо прямо, щоб наявність поля не
+ * читалася як наявність переходу.
  */
 export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element | null {
   if (messages === null) {
@@ -78,7 +84,9 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
           </Table.Thead>
           <Table.Tbody>
             {messages.map((message, index) => (
-              <Table.Tr key={`${message.ruleCode}:${message.rowKey ?? ''}:${message.columnCode ?? ''}:${index}`}>
+              <Table.Tr
+                key={`${message.tableDefId}:${message.ruleCode}:${message.rowKey ?? ''}:${message.columnCode ?? ''}:${index}`}
+              >
                 <Table.Td>
                   <Badge size="sm" color={colorOf(message.severity)} variant="light">
                     {message.severity}
