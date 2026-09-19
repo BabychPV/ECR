@@ -236,6 +236,60 @@ public sealed class VerifyReportSnapshotHandler(
         => new(ErrorCodes.ReportNotFound, $"Зрізу {snapshotId} немає.");
 }
 
+/// <summary>
+/// Рядки зрізу сторінками (D-52a): другий споживач <c>rpt.*</c> поруч із SSRS.
+/// Право <c>Report.ViewRegulatory</c> і грант на проєкт зрізу — як у перевірки.
+/// </summary>
+public sealed class GetSnapshotRowsHandler(
+    IReportSnapshotBuilder snapshots,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Рядків на сторінці, якщо клієнт не сказав.</summary>
+    public const int DefaultLimit = 100;
+
+    /// <summary>Стеля сторінки.</summary>
+    public const int MaxLimit = 500;
+
+    /// <summary>Віддає сторінку рядків після курсора.</summary>
+    /// <param name="snapshotId">Зріз.</param>
+    /// <param name="cursor">Останній уже отриманий <c>RowNo</c>; <c>null</c> — з початку.</param>
+    /// <param name="limit">Розмір сторінки; обрізається до <see cref="MaxLimit"/>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="NotFoundException">Зрізу немає або він у невидимому проєкті.</exception>
+    public async Task<SnapshotRowsPage> HandleAsync(long snapshotId, int? cursor, int? limit, CancellationToken ct)
+    {
+        var profile = await PermissionCheck
+            .RequireAsync(access, currentUser, ListReportSnapshotsHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        var projectId = await snapshots.FindProjectIdAsync(snapshotId, ct).ConfigureAwait(false);
+
+        // ⛔ Чужий = неіснуючий, той самий 404, що й у перевірки (BE-17, Q-239).
+        if (projectId is not { } project
+            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read)
+        {
+            throw NotFound(snapshotId);
+        }
+
+        return await snapshots
+                   .RowsAsync(
+                       snapshotId, Math.Max(cursor ?? 0, 0), Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit), ct)
+                   .ConfigureAwait(false)
+               ?? throw NotFound(snapshotId);
+    }
+
+    private static NotFoundException NotFound(long snapshotId)
+        => new(
+            ErrorCodes.ReportNotFound,
+            $"Зрізу {snapshotId} немає.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0404.snapshot",
+                ["snapshotId"] = snapshotId.ToString(CultureInfo.InvariantCulture),
+            });
+}
+
 /// <summary>Підсумок перевірки зрізу.</summary>
 /// <param name="Matches">Чи перерахована сума збіглася зі збереженою.</param>
 /// <param name="Stored">Сума, записана при побудові (hex).</param>

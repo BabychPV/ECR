@@ -2963,6 +2963,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
+| `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |

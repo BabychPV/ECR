@@ -5814,6 +5814,14 @@
           "rowSource": {
             "description": "Звідки беруться рядки. Єдине відоме будівнику значення —\nstring ReportDefinitionSpec.CalculationResults.",
             "type": "string"
+          },
+          "schema": {
+            "description": "Версія схеми правил; `null` — чинна (int ReportRules.CurrentSchema).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -7293,6 +7301,77 @@
           "sessionId",
           "simulatedForUserId",
           "readOnly"
+        ],
+        "type": "object"
+      },
+      "SnapshotColumn": {
+        "description": "Колонка зрізу.",
+        "properties": {
+          "code": {
+            "description": "Код — ключ у IReadOnlyDictionary&lt;string, object?&gt; SnapshotRow.Cells.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Тип значення: `text`, `number`, `date`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "SnapshotRow": {
+        "description": "Рядок зрізу.",
+        "properties": {
+          "cells": {
+            "additionalProperties": {},
+            "description": "Значення за кодом колонки: рядок, число або `null`.",
+            "type": "object"
+          },
+          "rowNo": {
+            "description": "Номер рядка в зрізі.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rowNo",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "SnapshotRowsPage": {
+        "description": "Сторінка рядків зрізу.",
+        "properties": {
+          "columns": {
+            "description": "Колонки в порядку опису версії.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotColumn"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — рядків більше немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rows": {
+            "description": "Рядки за зростанням `RowNo`.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "columns",
+          "rows",
+          "nextCursor"
         ],
         "type": "object"
       },
@@ -15813,6 +15892,88 @@
           }
         },
         "summary": "Перелік побудованих зрізів. Право `Report.ViewRegulatory`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
+    "/api/v1/reports/snapshots/{id}/rows": {
+      "get": {
+        "description": "D-52a: другий споживач `rpt.*` поруч із SSRS. Колонки — з опису\nверсії, за якою зріз побудовано; чужий зріз — той самий 404, що й неіснуючий.",
+        "parameters": [
+          {
+            "description": "Зріз.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Останній уже отриманий `rowNo`; без нього — з початку.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір сторінки, не більше 500; типово 100.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotRowsPage"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotRowsPage"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotRowsPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Рядки зрізу сторінками, у широкому вигляді. Право `Report.ViewRegulatory`.",
         "tags": [
           "Reports"
         ]

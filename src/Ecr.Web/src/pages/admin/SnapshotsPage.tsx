@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,6 +23,9 @@ import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 
+// ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
+const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
+
 /**
  * Зрізи регламентної звітності.
  *
@@ -30,6 +33,9 @@ import { localized } from '@/shared/i18n/localized';
  * `/reports/*` в інтерфейсі немає навмисно. Наша межа — `rpt.*`: незмінний
  * зріз, який SSRS читає. Тут його будують і бачать, на яких даних він
  * побудований.
+ *
+ * ✎ `D-52a` (2026-09-19): SSRS лишається для PDF держформ, але рядки зрізу
+ * тепер видно й тут — дія «View rows» (`SnapshotRowsModal`).
  *
  * ⛔ Побудова не мала в клієнті жодного споживача (`A7-39`): зріз можна було
  * створити лише запитом повз інтерфейс, тобто звітність для регулятора
@@ -128,6 +134,9 @@ export function SnapshotsPage(): JSX.Element {
   // відповідь, що зникає з натисканням наступної кнопки, довелося б записувати
   // на папірці.
   const [verified, setVerified] = useState<Record<number, SnapshotVerifyResponse>>({});
+
+  // D-52a: рядки зрізу в застосунку — другий споживач `rpt.*` поруч із SSRS.
+  const [viewing, setViewing] = useState<number | null>(null);
 
   const verify = useMutation({
     mutationFn: (snapshotId: number) =>
@@ -254,7 +263,18 @@ export function SnapshotsPage(): JSX.Element {
                   </Table.Td>
                   <Table.Td>{projectCodeOf(snapshot.projectId)}</Table.Td>
                   <Table.Td>{snapshot.periodKey ?? '—'}</Table.Td>
-                  <Table.Td>{snapshot.rowCount}</Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" wrap="nowrap">
+                      {snapshot.rowCount}
+                      <Button
+                        size="compact-xs"
+                        variant="default"
+                        onClick={() => setViewing(snapshot.id)}
+                      >
+                        {t('snapshots.viewRows')}
+                      </Button>
+                    </Group>
+                  </Table.Td>
                   <Table.Td>
                     {/* ⚠ Статус зрізу успадковується від стану даних: зріз
                         `Draft` існує, але регулятор його не бачить —
@@ -349,6 +369,12 @@ export function SnapshotsPage(): JSX.Element {
         onClose={() => setManaging(false)}
         definitions={reportDefs.data ?? []}
       />
+
+      {viewing !== null && (
+        <Suspense fallback={null}>
+          <SnapshotRowsModal snapshotId={viewing} onClose={() => setViewing(null)} />
+        </Suspense>
+      )}
     </>
   );
 }

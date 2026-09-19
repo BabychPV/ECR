@@ -5268,6 +5268,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/snapshots/{id}/rows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Рядки зрізу сторінками, у широкому вигляді. Право `Report.ViewRegulatory`.
+         * @description D-52a: другий споживач `rpt.*` поруч із SSRS. Колонки — з опису
+         *     версії, за якою зріз побудовано; чужий зріз — той самий 404, що й неіснуючий.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Останній уже отриманий `rowNo`; без нього — з початку. */
+                    cursor?: number;
+                    /** @description Розмір сторінки, не більше 500; типово 100. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Зріз. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SnapshotRowsPage"];
+                        "text/json": components["schemas"]["SnapshotRowsPage"];
+                        "text/plain": components["schemas"]["SnapshotRowsPage"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/snapshots/{id}/verify": {
         parameters: {
             query?: never;
@@ -11917,6 +11978,11 @@ export interface components {
             /** @description Звідки беруться рядки. Єдине відоме будівнику значення —
              *     string ReportDefinitionSpec.CalculationResults. */
             rowSource: string;
+            /**
+             * Format: int32
+             * @description Версія схеми правил; `null` — чинна (int ReportRules.CurrentSchema).
+             */
+            schema?: null | number;
         };
         /** @description Зріз у переліку. */
         ReportSnapshotSummary: {
@@ -12631,6 +12697,37 @@ export interface components {
              * @description Чиїми правами дивимося.
              */
             simulatedForUserId: number;
+        };
+        /** @description Колонка зрізу. */
+        SnapshotColumn: {
+            /** @description Код — ключ у IReadOnlyDictionary&lt;string, object?&gt; SnapshotRow.Cells. */
+            code: string;
+            /** @description Тип значення: `text`, `number`, `date`. */
+            kind: string;
+        };
+        /** @description Рядок зрізу. */
+        SnapshotRow: {
+            /** @description Значення за кодом колонки: рядок, число або `null`. */
+            cells: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: int32
+             * @description Номер рядка в зрізі.
+             */
+            rowNo: number;
+        };
+        /** @description Сторінка рядків зрізу. */
+        SnapshotRowsPage: {
+            /** @description Колонки в порядку опису версії. */
+            columns: components["schemas"]["SnapshotColumn"][];
+            /**
+             * Format: int32
+             * @description Курсор наступної сторінки; `null` — рядків більше немає.
+             */
+            nextCursor: null | number;
+            /** @description Рядки за зростанням `RowNo`. */
+            rows: components["schemas"]["SnapshotRow"][];
         };
         /** @description Підсумок перевірки зрізу. */
         SnapshotVerifyResponse: {
