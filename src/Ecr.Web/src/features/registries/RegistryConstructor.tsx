@@ -28,6 +28,7 @@ import {
   type RuleDraft,
 } from './definition';
 import { localized } from '@/shared/i18n/localized';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 
 /**
@@ -545,7 +546,22 @@ export function RegistryHistory({
         <Table.Tbody>
           {entries.map((entry) => (
             <Table.Tr key={`${entry.changedAt}:${entry.operation}`}>
-              <Table.Td>{entry.changedAt}</Table.Td>
+              {/* ⚠ БЕЗ `dateOnly`: `changedAt` — МОМЕНТ зміни в UTC
+                  (`RegistryHistoryEntryDto`, `Format: date-time`), і година
+                  тут не декорація. Питання, на яке дивляться в цій колонці, —
+                  «яка з двох правок опису була пізніша»; календарний день на
+                  нього не відповідає, бо правки опису довідника лягають
+                  пачками в один день.
+
+                  ⚠ `precise` теж НЕ поставлено: секунда тут нічого не
+                  вирішує — ключ рядка й так `changedAt:operation`, а дві
+                  правки в одну хвилину відрізняються операцією і причиною, а
+                  не секундою. Зайва точність на екрані читається як
+                  важливість (див. `TimestampProps.precise`). Точне значення
+                  нікуди не діло́ся — воно в `dateTime`. */}
+              <Table.Td>
+                <Timestamp value={entry.changedAt} />
+              </Table.Td>
               <Table.Td>{entry.operation}</Table.Td>
               <Table.Td>{entry.changeReason ?? '—'}</Table.Td>
               <Table.Td>
