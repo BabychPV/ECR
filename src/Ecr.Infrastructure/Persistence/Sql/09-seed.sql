@@ -467,6 +467,18 @@ USING (VALUES
     -- повідомити неправду про дані (`DocumentsController.LastValidation`).
     (N'err.ECR-DOC-0404.notValidated',        N'en', N'Document {documentId} has not been validated for period {periodKey} yet.', 1),
 
+    -- ⛔ `BE-02`, скасування фонової задачі. Три подробиці однієї дії, і всі
+    -- три людина бачить у момент, коли ТІЛЬКИ ЩО натиснула кнопку: задачі
+    -- немає, задача чужа, задача вже завершилась. Без ключа сюди приїхало б
+    -- українське речення — мови продукту `en`/`ru`/`kz` (`ФВ-14.9`).
+    -- ⚠ `{state}` лишається кодовим словом (`Succeeded`/`Failed`/`Cancelled`):
+    -- це те саме слово, що бейдж у переліку задач, і перекладати його тут
+    -- означало б розійтися з екраном.
+    -- Приватна область: задачі видно лише після входу.
+    (N'err.ECR-JOB-0404.job',                 N'en', N'Background job {jobId} does not exist.', 1),
+    (N'err.ECR-JOB-0409.notActive',           N'en', N'Job {jobId} is in state {state}: there is nothing to cancel.', 1),
+    (N'err.ECR-AUTH-0403.jobNotYours',        N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', 1),
+
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
     -- не знайдено». Для оператора це не назва нічого — у продукті немає

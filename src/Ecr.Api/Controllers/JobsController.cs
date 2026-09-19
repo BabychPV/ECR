@@ -10,7 +10,10 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/jobs")]
 [Authorize]
 public sealed class JobsController(
-    GetJobStatusHandler status, ListJobsHandler list, RestartJobHandler restart) : ControllerBase
+    GetJobStatusHandler status,
+    ListJobsHandler list,
+    RestartJobHandler restart,
+    CancelJobHandler cancel) : ControllerBase
 {
     /// <summary>
     /// Останні фонові задачі. Право <c>System.ViewHealth</c>.
@@ -59,6 +62,37 @@ public sealed class JobsController(
     public async Task<IActionResult> Restart(string jobId, CancellationToken ct)
     {
         await restart.HandleAsync(jobId, ct).ConfigureAwait(false);
+
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
+    }
+
+    /// <summary>
+    /// Просить задачу завершитися. Право <c>System.ViewHealth</c> — або автор
+    /// ВЛАСНОЇ задачі (Q-156).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>202</c>, а не <c>204</c>: скасування — прохання, не вбивство.
+    /// Задача бачить токен і закривається станом <c>Cancelled</c> на найближчій
+    /// межі батчу, тож у мить відповіді вона ЩЕ ВИКОНУЄТЬСЯ. Клієнт дочитує
+    /// стан тим самим <c>GET /jobs/{jobId}</c>, яким уже показує прогрес.
+    /// <para>
+    /// ⛔ До цього маршруту зупинити двадцятихвилинний перерахунок з інтерфейсу
+    /// було нічим: <c>CancelAsync</c> кликало лише витіснення зсередини
+    /// (<c>D2-64</c>).
+    /// </para>
+    /// <para>
+    /// ⚠ <c>jobId</c> містить <c>#</c> (<c>IRecalculationJob#42</c>), а той в
+    /// URL починає фрагмент — клієнт зобов'язаний кодувати сегмент
+    /// (<c>encodeURIComponent</c>). Саме на цьому падав крок 17 <c>smoke.ps1</c>.
+    /// </para>
+    /// </remarks>
+    [HttpPost("{jobId}/cancel")]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Cancel(string jobId, CancellationToken ct)
+    {
+        await cancel.HandleAsync(jobId, ct).ConfigureAwait(false);
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }

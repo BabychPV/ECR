@@ -274,3 +274,137 @@ public sealed class RestartJobHandler(
         }
     }
 }
+
+/// <summary>
+/// Скасування фонової задачі. Право <c>System.ViewHealth</c> — або автор
+/// ВЛАСНОЇ задачі (Q-156, та сама межа, що в <see cref="GetJobStatusHandler"/>).
+/// </summary>
+/// <remarks>
+/// ⛔ До цього обробника довгу задачу не можна було зупинити НІЯК. Річний
+/// перерахунок іде двадцять хвилин, і єдиним способом його обірвати було
+/// ВИТІСНЕННЯ — повторний запуск тієї самої роботи
+/// (<see cref="IBackgroundJobScheduler.EnqueueExclusiveAsync{TJob}"/>, <c>D2-64</c>),
+/// тобто «щоб зупинити, запусти ще раз». Кнопки не було, бо маршрут не був
+/// оголошений у контракті §9, а сторож «жоден маршрут поза контрактом»
+/// блокуючий; тепер оголошений.
+/// <para>
+/// ⚠ Межа права — ТА САМА, що в <see cref="GetJobStatusHandler"/>, а не та, що
+/// в <see cref="RestartJobHandler"/>. Перезапуск — втручання в чергу системи
+/// (хтось полагодив причину провалу й вирішує за всіх, що спробувати варто);
+/// скасування ВЛАСНОЇ задачі — відмова від роботи, яку ти сам і замовив.
+/// Вимагати на неї <c>System.ViewHealth</c> означало б: оператор запустив
+/// двадцятихвилинний перерахунок помилково і не має способу його спинити.
+/// </para>
+/// <para>
+/// ⚠ Скасування — ПРОХАННЯ, не вбивство: задача бачить
+/// <c>CancellationToken</c> і закриває свій прогін станом <c>Cancelled</c> на
+/// найближчій межі батчу (<c>QuartzJobAdapter</c>). Тому відповідь — <c>202</c>,
+/// а стан клієнт дочитує тим самим <c>GET /jobs/{jobId}</c>.
+/// </para>
+/// </remarks>
+public sealed class CancelJobHandler(
+    IBackgroundJobScheduler jobs,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Код помилки: скасувати можна лише задачу, що ще не завершилась.</summary>
+    /// <remarks>
+    /// ⚠ Значення збігається з <see cref="RestartJobHandler.NotFailedErrorCode"/>
+    /// НАВМИСНО: це одна природа відмови («стан задачі не дозволяє дію») і один
+    /// HTTP-статус, а конвеєр (<c>ExceptionHandlingMiddleware</c>) мапить саме
+    /// код. Окрема константа лишається тому, що причина в текст відповіді
+    /// підставляється різна, і шукати «звідки цей 409» треба від дії, а не від
+    /// сусіднього обробника.
+    /// </remarks>
+    public const string NotActiveErrorCode = "ECR-JOB-0409";
+
+    /// <summary>Стани, у яких задачу ще є що скасовувати.</summary>
+    /// <remarks>
+    /// ⚠ Рядки звірені з тим, ХТО їх пише: <c>JobProgress.Queue</c> ставить
+    /// <c>Queued</c>, <c>JobProgress.Begin</c> — <c>Running</c>
+    /// (<c>IntegrationLogs.cs</c>). Решта (<c>Succeeded</c>, <c>Failed</c>,
+    /// <c>Cancelled</c>) термінальні, а <c>Unknown</c>/<c>Unavailable</c> —
+    /// відповіді планувальника про відсутність запису, не стани задачі.
+    /// </remarks>
+    private static readonly string[] Active = ["Queued", "Running"];
+
+    /// <summary>Просить задачу завершитися.</summary>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="ct">Скасування самого запиту (не задачі).</param>
+    /// <exception cref="NotFoundException">Задачі з таким ідентифікатором немає.</exception>
+    /// <exception cref="AccessDeniedException">Чужа задача без <c>System.ViewHealth</c>.</exception>
+    /// <exception cref="BusinessRuleException">Задача вже в термінальному стані.</exception>
+    public async Task HandleAsync(string jobId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        // ⚠ Кожна відмова цього обробника несе `messageKey` (Q-341): мови
+        // продукту — `en`/`ru`/`kz`, української серед них немає, і готове
+        // українське речення нижче лишається ЗАПАСНИМ на випадок, коли ключа в
+        // каталозі не знайдено. Підстановки йдуть сирими полями поруч, а не
+        // вклеєними в текст, — інакше локалізувати нічого.
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?>
+                         {
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
+                         });
+
+        // ⚠ Існування перевіряється ПЕРЕД правом — той самий порядок, що в
+        // `GetJobStatusHandler` (Q-156, Q-179/Q-180): інакше невідомий `jobId`
+        // завжди падав би на «немає права», ховаючи справжню причину за 403.
+        var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
+
+        if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
+        {
+            throw new NotFoundException(
+                "ECR-JOB-0404", $"Задачі {jobId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0404.job",
+                    ["jobId"] = jobId,
+                });
+        }
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        if (!profile.Has(GetJobStatusHandler.Permission))
+        {
+            // Автор скасовує СВОЮ задачу без `System.ViewHealth`; чужу — ні.
+            // ⚠ `null` (системна задача за розкладом) автором не є нікому:
+            // порівняння з `int?` дало б `false`, але покладатися тут на
+            // семантику `Nullable` мовчки — не варто, і тест на це є.
+            var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+
+            if (ownerId is null || ownerId.Value != userId)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Потрібне право {GetJobStatusHandler.Permission}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                        ["permission"] = GetJobStatusHandler.Permission,
+                    });
+            }
+        }
+
+        // ⚠ Стан перевіряється ПІСЛЯ права: «задача вже завершилась» — це
+        // відомість про чужу задачу, і віддавати її тому, хто не має права її
+        // бачити, означало б зробити з 409 оракул існування.
+        if (!Active.Contains(status.State, StringComparer.Ordinal))
+        {
+            throw new BusinessRuleException(
+                NotActiveErrorCode,
+                $"Задача {jobId} у стані «{status.State}» — скасовувати нічого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0409.notActive",
+                    ["jobId"] = jobId,
+                    ["state"] = status.State,
+                });
+        }
+
+        await jobs.CancelAsync(jobId, ct).ConfigureAwait(false);
+    }
+}
