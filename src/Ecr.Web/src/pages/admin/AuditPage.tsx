@@ -14,6 +14,7 @@ import {
 import type { CellChangePage } from '@/api/types';
 import { cellChangeOrigins, isSingleCell, useCellChanges } from '@/features/audit/api';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -268,7 +269,15 @@ export function AuditPage(): JSX.Element {
                 {page.items.map((change, index) => (
                   <Table.Tr key={`${change.documentId}:${change.rowKey}:${change.columnDefId}:${index}`}>
                     <Table.Td>
-                      {change.changedAt}
+                      {/* ⛔ Саме `Timestamp`, а не сирий рядок, і аргумент
+                          «журнал — доказ, доказ мусить бути однозначним»
+                          цьому НЕ суперечить: точне значення нікуди не
+                          дівається, воно лишається в `dateTime`/`title`
+                          (`<time datetime="2026-09-19T18:51:58.275Z">`).
+                          Читабельним стає лише те, що бачить око — а саме цю
+                          колонку оператор читає рядок за рядком, шукаючи «хто
+                          і коли», не звіряючи мілісекунди. */}
+                      <Timestamp value={change.changedAt} />
                       {/* ⚠ Пізня правка — та, що зроблена в пільговому строку
                           після кінця періоду (`D-70`). В аудиті вона виглядає
                           інакше саме тому, що пояснювати доводиться саме її. */}

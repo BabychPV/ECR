@@ -37,6 +37,8 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
+import { formatDateTime } from '@/shared/format';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -564,7 +566,15 @@ export function PeriodsPage(): JSX.Element {
                 </Table.Td>
                 <Table.Td>{period.sequence}</Table.Td>
                 <Table.Td>
-                  {period.startsAt} — {period.endsAt}
+                  {/* ⚠ Межі періоду — БЕЗ години (`dateOnly`), хоча контракт
+                      віддає їх моментом (`Format: date-time`, «початок періоду
+                      в поясі майданчика»). Ця колонка відповідає на питання
+                      «який це місяць», і «Sep 1, 2026, 12:00 AM — Sep 30,
+                      2026, 11:59 PM» відповідає на нього гірше за
+                      «Sep 1 — Sep 30». Точний момент нікуди не дівається: він
+                      у `dateTime` кожного з двох `<time>`. */}
+                  <Timestamp value={period.startsAt} dateOnly /> —{' '}
+                  <Timestamp value={period.endsAt} dateOnly />
                 </Table.Td>
                 <Table.Td>
                   {/* ⛔ UI-аудит, lane 8 (рішення НЕ скасоване, лише переїхало):
@@ -587,11 +597,25 @@ export function PeriodsPage(): JSX.Element {
                       календаря, а не як свідоме рішення людини. */}
                   {period.reopenedUntil !== null && (
                     <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
-                      {t('periods.reopenedUntil', { until: period.reopenedUntil })}
+                      {/* ⚠ Тут `formatDateTime`, а не `<Timestamp>`: момент
+                          підставляється ВСЕРЕДИНУ рядка каталогу, а компонент
+                          — це вузол, який у параметр `t()` не вкладеш. Година
+                          лишається (на відміну від меж періоду вище): це
+                          КРАЙНІЙ СТРОК, і «до 30 вересня» без години не
+                          відповідає на питання «чи встигну ще сьогодні». */}
+                      {t('periods.reopenedUntil', {
+                        until: formatDateTime(period.reopenedUntil),
+                      })}
                     </Badge>
                   )}
                 </Table.Td>
-                <Table.Td>{period.graceEndsAt ?? '—'}</Table.Td>
+                {/* ⚠ Пільговий строк — із годиною: це теж КРАЙНІЙ СТРОК, і
+                    саме година визначає, чи правка ще буде «вчасною», чи вже
+                    позначиться в аудиті як пізня (`D-70`). Тире для «немає»
+                    тепер дає сам `Timestamp`, а не `?? '—'` на місці. */}
+                <Table.Td>
+                  <Timestamp value={period.graceEndsAt} />
+                </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
                     {period.state === 'Closed' && reopens && (
