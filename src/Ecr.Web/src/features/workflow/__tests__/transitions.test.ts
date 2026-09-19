@@ -92,6 +92,8 @@ describe('Повнота таблиці', () => {
       isAllowed(action as keyof typeof AllowedIn, 'Submitted'),
     );
 
-    expect([...inSubmitted].sort()).toEqual(['approve', 'reject', 'reopen']);
+    // `recall` — `BE-31`: відкликання автором; причина обов'язкова, як у `reopen`.
+    expect([...inSubmitted].sort()).toEqual(['approve', 'recall', 'reject', 'reopen']);
+    expect(needsReason('recall')).toBe(true);
   });
 });

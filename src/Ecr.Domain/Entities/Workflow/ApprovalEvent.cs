@@ -21,6 +21,9 @@ public enum ApprovalAction : byte
 
     /// <summary>Повернення в роботу з причиною.</summary>
     Reopen = 5,
+
+    /// <summary>Відкликання поданого автором, доки жоден крок не підписано (<c>BE-31</c>).</summary>
+    Recall = 6,
 }
 
 /// <summary>
