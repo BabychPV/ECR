@@ -23,6 +23,34 @@ public sealed class ArchiveJob(
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "archive-year";
 
+    /// <summary>
+    /// Скільки секунд дається команді <c>EXEC arc.usp_ArchiveYear</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>S-09</c>. Глобальний <c>Database:CommandTimeoutSeconds = 60</c>
+    /// (<c>DependencyInjection.cs:58</c>) поставлений під ІНТЕРАКТИВНИЙ запит,
+    /// і архівація року йшла під ним же. Рік — це десятки мільйонів рядків
+    /// (<c>14-performance.md</c> §6 п. 4), тобто таймаут був не ризиком, а
+    /// ГАРАНТІЄЮ: кожен прогін падав і кожне падіння вело до ретраю
+    /// (<see cref="QuartzJobAdapter.MaxRetryAttempts"/> — три), а ретрай
+    /// запускав другу архівацію того самого року поверх першої, яка на сервері
+    /// ще котиться.
+    /// <para>
+    /// ⚠ Чотири години — СТЕЛЯ, а не бюджет: процедура має вкластися у вікно
+    /// низької активності, і якщо вона його проїла, це аварія, про яку треба
+    /// дізнатися, а не чекати далі. Число — судження: жоден документ не
+    /// називає тривалості архівації (<c>14-performance.md</c> §6 п. 4 дає
+    /// критерій «без блокування робочих запитів» і не дає часу).
+    /// </para>
+    /// <para>
+    /// ⚠ Константа В КОДІ навмисно. Ключ конфігурації сюди просився б, але
+    /// <c>appsettings.json</c> тримає інший рядок директиви разом зі сторожем
+    /// <c>ConfigurationKeysTests</c> (ключ без читача і читач без ключа —
+    /// обидва червоні). Потреба названа окремим <c>[debt]</c>.
+    /// </para>
+    /// </remarks>
+    public const int CommandTimeoutSeconds = 4 * 60 * 60;
+
     /// <inheritdoc />
     public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
     {
@@ -75,18 +103,34 @@ public sealed class ArchiveJob(
                 ct)
             .ConfigureAwait(false);
 
-        // ⚠ Викликається ПРОЦЕДУРА. Копіювання, звірка сум і звільнення
-        // партицій — усе там, під окремим principal (D-66). Спроба зробити те
-        // саме з застосунку впала б на правах, і — гірше — зробила б половину.
-        await db.Database.ExecuteSqlRawAsync(
-            "EXEC arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize",
-            [
-                new SqlParameter("@ProjectId", request.ProjectId),
-                new SqlParameter("@FromPeriodKey", range.From),
-                new SqlParameter("@ToPeriodKey", range.To),
-                new SqlParameter("@BatchSize", capabilities.ArchiveBatchSize),
-            ],
-            ct).ConfigureAwait(false);
+        // ⚠ Таймаут ставиться на КОНТЕКСТ і повертається назад. Контекст задачі
+        // scoped (QuartzJobAdapter створює scope на прогін), тож чужого запиту
+        // ця стеля не зачепить; але лишити її на решту запитів САМОЇ задачі
+        // означало б сховати за чотирма годинами зависання читання нижче —
+        // читання журналу прогонів мусить далі падати швидко.
+        var previousTimeout = db.Database.GetCommandTimeout();
+        db.Database.SetCommandTimeout(CommandTimeoutSeconds);
+
+        try
+        {
+            // ⚠ Викликається ПРОЦЕДУРА. Копіювання, звірка сум і звільнення
+            // партицій — усе там, під окремим principal (D-66). Спроба зробити
+            // те саме з застосунку впала б на правах, і — гірше — зробила б
+            // половину.
+            await db.Database.ExecuteSqlRawAsync(
+                "EXEC arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize",
+                [
+                    new SqlParameter("@ProjectId", request.ProjectId),
+                    new SqlParameter("@FromPeriodKey", range.From),
+                    new SqlParameter("@ToPeriodKey", range.To),
+                    new SqlParameter("@BatchSize", capabilities.ArchiveBatchSize),
+                ],
+                ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            db.Database.SetCommandTimeout(previousTimeout);
+        }
 
         var run = await db.ArchiveRuns
             .AsNoTracking()
