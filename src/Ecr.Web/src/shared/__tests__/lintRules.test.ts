@@ -160,6 +160,54 @@ describe('D15-09 — формат дат і чисел не залежить в�
 
     expect(messages.join('\n')).not.toContain('локаль БРАУЗЕРА');
   });
+
+  /*
+   * ⛔ Третій канал, і його довелося заводити ПІСЛЯ того, як він спрацював у
+   * продукті. Два правила вище стерегли нативне поле й `toLocale*()` — а
+   * `useCellPatch.clockLabel` обійшов обидва найтихішим способом: склав
+   * `ГГ:ХХ` руками, з коментарем, який пояснював, чому це нібито єдиний вихід.
+   * Наслідок був на екрані: 24-годинний запис там, де решта сторінки писала
+   * 12-годинний.
+   */
+  it.each(['getHours', 'getMinutes', 'getSeconds'])(
+    'час, складений руками через %s(), відхиляється',
+    async (method) => {
+      const messages = await lint(
+        `export const probe = (value: Date): string => String(value.${method}());\n`,
+        'src/features/probe/probe.ts',
+      );
+
+      expect(messages.join('\n')).toContain('Час доби не складається руками');
+    },
+  );
+
+  it.each(['getFullYear', 'getMonth', 'getDate'])(
+    '%s() лишається дозволеним — з нього будують МАШИННІ формати',
+    async (method) => {
+      /*
+       * ⛔ Це не послаблення, а межа правила, і вона має власну причину в
+       * коді: `AuditPage.isoDaysAgo` складає `YYYY-MM-DD` саме так і свідомо
+       * НЕ через `toISOString()` — той переводить у UTC і ввечері зсуває дату
+       * на добу назад. Заборонити й це означало б зробити правило шумом, який
+       * вимикають цілком.
+       */
+      const messages = await lint(
+        `export const probe = (value: Date): string => String(value.${method}());\n`,
+        'src/features/probe/probe.ts',
+      );
+
+      expect(messages.join('\n')).not.toContain('Час доби не складається руками');
+    },
+  );
+
+  it('formatTime зі спільного модуля проходить', async () => {
+    const messages = await lint(
+      "import { formatTime } from '@/shared/format';\nexport const probe = (value: Date): string => formatTime(value);\n",
+      'src/features/probe/probe.ts',
+    );
+
+    expect(messages.join('\n')).not.toContain('Час доби не складається руками');
+  });
 });
 
 describe('борг D15-09 обмежений і може лише скорочуватися', () => {
