@@ -5,6 +5,7 @@ import {
   Checkbox,
   Group,
   NumberInput,
+  SegmentedControl,
   Select,
   Table,
   Text,
@@ -12,6 +13,7 @@ import {
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { cellChangeOrigins, isSingleCell, useCellChanges } from '@/features/audit/api';
+import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -53,6 +55,7 @@ export function AuditPage(): JSX.Element {
   const [author, setAuthor] = useUrlNumber('author');
   const [origin, setOrigin] = useUrlState('origin');
   const [lateOnly, setLateOnly] = useUrlState('lateOnly');
+  const [view, setView] = useUrlState('view');
   const setParams = useUrlParamsSetter();
   const [cursor, setCursor] = useState<string | null>(null);
 
@@ -72,7 +75,11 @@ export function AuditPage(): JSX.Element {
     cursor,
   };
 
-  const changes = useCellChanges(filter);
+  // ⚠ `BE-16`: друга вкладка — журнал структурних змін. Вкладка живе в адресі
+  // (`?view=structure`), бо саме адресу людина надсилає колезі. Журнал комірок
+  // на ній НЕ запитується: зайвий запит по партиціях заради невидимої таблиці.
+  const structure = view === 'structure';
+  const changes = useCellChanges(filter, !structure);
 
   /**
    * ⚠ Курсор скидається на КОЖНУ зміну фільтра — він позначає позицію в
@@ -88,6 +95,15 @@ export function AuditPage(): JSX.Element {
         title={t('audit.title')}
         actions={
           <Group gap="xs" align="end">
+            <SegmentedControl
+              size="xs"
+              value={structure ? 'structure' : 'cells'}
+              onChange={(value) => setView(value === 'structure' ? 'structure' : null)}
+              data={[
+                { value: 'cells', label: t('audit.viewCells') },
+                { value: 'structure', label: t('audit.viewStructure') },
+              ]}
+            />
             <TextInput
               size="xs"
               // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №1/8: перехід на DateInput змінює тип значення (string → Date) і стан сторінки, тому окремим PR; список боргу сторожить lintRules.test.ts
@@ -113,6 +129,9 @@ export function AuditPage(): JSX.Element {
             <NumberInput
               size="xs"
               miw={140}
+              // ⚠ На вкладці структурних змін документа немає: мертвий фільтр
+              // читався б як «за цим документом змін не було».
+              display={structure ? 'none' : undefined}
               label={t('audit.document')}
               description={t('audit.documentHint')}
               value={documentId ?? ''}
@@ -125,6 +144,12 @@ export function AuditPage(): JSX.Element {
         }
       />
 
+      {structure && <StructureChangesPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />}
+
+      {/* ⚠ Відступ усередині цієї обгортки НАВМИСНО не зсунуто: зсув — це
+          форматування 160 рядків, а воно йде окремим PR (CLAUDE.md, правило 4). */}
+      {!structure && (
+      <>
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
       <Group gap="xs" align="end" mb="md" wrap="wrap">
@@ -286,6 +311,8 @@ export function AuditPage(): JSX.Element {
           </>
         )}
       </AsyncBoundary>
+      </>
+      )}
     </>
   );
 }

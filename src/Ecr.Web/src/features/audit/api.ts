@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import type { CellChangePage } from '@/api/types';
 
 /*
@@ -100,6 +101,55 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
   return params.toString();
 }
 
+/** Сторінка журналу структурних змін (`BE-16`). */
+export type StructureChangePage = components['schemas']['PagedResultOfStructureChangeView'];
+
+/** Фільтр журналу структурних змін; вікно **обов'язкове**, як у журналі комірок. */
+export interface StructureChangeFilter {
+  readonly from: string;
+  readonly to: string;
+  readonly entityType?: string | null;
+  /** Автор зміни — `UserId`, не SID. */
+  readonly changedByUserId?: number | null;
+  readonly limit?: number;
+  readonly cursor?: string | null;
+}
+
+/** Рядок запиту журналу структурних змін — ті самі правила, що в `cellChangesQuery`. */
+export function structureChangesQuery(filter: StructureChangeFilter): string {
+  const params = new URLSearchParams();
+
+  params.set('from', filter.from);
+  params.set('to', filter.to);
+  params.set('limit', String(filter.limit ?? 100));
+
+  if (filter.entityType !== null && filter.entityType !== undefined && filter.entityType.length > 0) {
+    params.set('entityType', filter.entityType);
+  }
+
+  if (filter.changedByUserId !== null && filter.changedByUserId !== undefined) {
+    params.set('changedByUserId', String(filter.changedByUserId));
+  }
+
+  if (filter.cursor !== null && filter.cursor !== undefined && filter.cursor.length > 0) {
+    params.set('cursor', filter.cursor);
+  }
+
+  return params.toString();
+}
+
+/** Сторінка загального журналу структурних змін (`BE-16`). */
+export function useStructureChanges(
+  filter: StructureChangeFilter,
+): UseQueryResult<StructureChangePage> {
+  const query = structureChangesQuery(filter);
+
+  return useQuery({
+    queryKey: ['audit-structure', query],
+    queryFn: () => apiFetch<StructureChangePage>(`/api/v1/audit/structure?${query}`),
+  });
+}
+
 /**
  * Сторінка журналу змін комірок.
  *
@@ -112,10 +162,14 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
  * однієї комірки — це фільтр `documentId + rowKey + columnDefId`, а не окремий
  * маршрут (див. `isSingleCell`).
  */
-export function useCellChanges(filter: CellChangeFilter): UseQueryResult<CellChangePage> {
+export function useCellChanges(
+  filter: CellChangeFilter,
+  enabled = true,
+): UseQueryResult<CellChangePage> {
   const query = cellChangesQuery(filter);
 
   return useQuery({
+    enabled,
     queryKey: ['audit-cells', query],
     queryFn: () => apiFetch<CellChangePage>(`/api/v1/audit/cells?${query}`),
   });

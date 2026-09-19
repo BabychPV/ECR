@@ -117,6 +117,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/structure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Загальний журнал структурних змін (`BE-16`). Право `Security.ViewAudit`.
+         * @description Вікно часу **обов'язкове** й обмежене згори, як у `cells`:
+         *     `aud.StructureChange` лежить на тій самій схемі партицій. Запит без
+         *     вікна — `422 ECR-REQ-0422`, а не «весь журнал».
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Тип сутності, напр. `cfg.RegistryDef`. */
+                    entityType?: string;
+                    /** @description Автор зміни — `UserId`, не SID. */
+                    changedByUserId?: number;
+                    /** @description Розмір сторінки; `0` — 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfStructureChangeView"];
+                        "text/json": components["schemas"]["PagedResultOfStructureChangeView"];
+                        "text/plain": components["schemas"]["PagedResultOfStructureChangeView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/change-password": {
         parameters: {
             query?: never;
@@ -10632,6 +10721,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfStructureChangeView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["StructureChangeView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfTemplateSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["TemplateSummary"][];
@@ -12211,6 +12313,34 @@ export interface components {
             /** Format: int32 */
             offset?: number;
             value?: null | string;
+        };
+        /** @description Структурна зміна в журналі, як її бачить читач. */
+        StructureChangeView: {
+            /** @description Причина, якщо її вимагала операція. */
+            changeReason: null | string;
+            /**
+             * Format: date-time
+             * @description Момент зміни в UTC.
+             */
+            changedAt: string;
+            /**
+             * Format: int32
+             * @description Автор — <b>UserId</b>, не SID (R-A2, D-86).
+             */
+            changedByUserId: number;
+            /**
+             * Format: int32
+             * @description Ідентифікатор сутності; `0` — операція над набором.
+             */
+            entityId: number;
+            /** @description Сутність: `cfg.RegistryDef`, `cfg.RegistryRuleDef`. */
+            entityType: string;
+            /** @description Стан після зміни. */
+            newJson: null | string;
+            /** @description Стан до зміни. */
+            oldJson: null | string;
+            /** @description Що зробили: `SaveRules`, `SwitchSourceSet`. */
+            operation: string;
         };
         /** @description Стиль у відповіді на запис/перелік. */
         StyleDefDto: {
