@@ -23,6 +23,7 @@ namespace Ecr.Api.Controllers;
 public sealed class ReportsController(
     ListReportSnapshotsHandler snapshots,
     BuildReportSnapshotHandler build,
+    VerifyReportSnapshotHandler verify,
     ListReportDefsHandler definitions,
     CreateReportDefHandler createDefinition,
     CreateReportVersionHandler createVersion,
@@ -125,6 +126,22 @@ public sealed class ReportsController(
     public async Task<IActionResult> Snapshots(
         [FromQuery] int? projectId, [FromQuery] int? periodKey, CancellationToken ct)
         => Ok(await snapshots.HandleAsync(projectId, periodKey, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Перевіряє незмінність зрізу: перераховує суму збереженого вмісту й
+    /// порівнює зі збереженою. Право <c>Report.ViewRegulatory</c>.
+    /// </summary>
+    /// <param name="id">Зріз.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ <c>POST</c>, хоча нічого не змінює: це дія з ціною (читає всі рядки
+    /// зрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.
+    /// </remarks>
+    [HttpPost("snapshots/{id:long}/verify")]
+    [ProducesResponseType<SnapshotVerifyResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> VerifySnapshot(long id, CancellationToken ct)
+        => Ok(await verify.HandleAsync(id, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Будує зріз. Право <c>Report.BuildSnapshot</c>.
