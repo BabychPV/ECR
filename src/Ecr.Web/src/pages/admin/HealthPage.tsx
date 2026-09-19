@@ -1,15 +1,15 @@
-﻿import type { JSX } from 'react';
+﻿import type { JSX, ReactNode } from 'react';
 import { Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { HealthReport } from '@/api/types';
-import { formatDateTime } from '@/shared/format';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 
 type SystemFacts = components['schemas']['SystemFactsResponse'];
@@ -171,12 +171,28 @@ export function HealthPage(): JSX.Element {
  * адміністратор має прочитати. А от «налаштовано» без виду транспорту рядка не
  * дає — називати нема чого (пару без значення `KeyValue` не малює).
  */
-function factItems(facts: SystemFacts): { label: string; value: string | null }[] {
+function factItems(facts: SystemFacts): { label: string; value: ReactNode }[] {
   const transport = facts.notificationTransport;
 
   return [
     { label: t('health.facts.productVersion'), value: facts.productVersion },
-    { label: t('health.facts.startedAt'), value: formatDateTime(facts.startedAt) },
+    /*
+     * ⛔ `Timestamp`, а не голий `formatDateTime`: це було ЄДИНЕ місце в
+     * застосунку, де момент уже форматувався — і саме тому єдине, де точне
+     * значення справді ВТРАЧАЛОСЯ. «Sep 19, 2026, 6:51 PM» у довідці про
+     * систему годиться, доки адміністратор просто дивиться; щойно він звіряє
+     * час старту з журналом чи з тикетом, округлена до хвилини форма стає
+     * непридатною. Тепер точний рядок лишається в `dateTime`/`title`.
+     *
+     * ⚠ `SystemFactsResponse.startedAt` НЕ nullable (`schema.d.ts:12390`),
+     * тож прочерк тут не з'явиться — а якби з'явився, він порушив би
+     * `D15-06`, який `KeyValue` виконує ВІДСУТНІСТЮ рядка. Це справжнє
+     * протиріччя між двома компонентами набору: `Timestamp` за замовчуванням
+     * малює тире, `KeyValue` тире не терпить. Тут воно не виникає — і це
+     * названо, щоб наступний, хто покладе `Timestamp` у `KeyValue` з
+     * nullable-полем, побачив пастку до того, як у неї впаде.
+     */
+    { label: t('health.facts.startedAt'), value: <Timestamp value={facts.startedAt} /> },
     { label: t('health.facts.environment'), value: facts.environment },
     {
       label: t('health.facts.notificationTransport'),

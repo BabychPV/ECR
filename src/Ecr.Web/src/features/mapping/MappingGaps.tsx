@@ -3,6 +3,7 @@ import { Badge, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
 import { brokenMaps, hasNoGaps } from './api';
 import { outcomeLabel } from './outcome';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 
 /**
@@ -97,7 +98,14 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
                 <Table.Tr key={field.sourcePath}>
                   <Table.Td>{field.sourcePath}</Table.Td>
                   <Table.Td>{field.pointCount}</Table.Td>
-                  <Table.Td>{field.lastSeenUtc}</Table.Td>
+                  {/* ⚠ `precise`: ця колонка існує, щоб порівняти останню
+                      мітку з тим, коли точка мала прийти. Без секунд дві різні
+                      мітки в одній хвилині виглядають однаково — тобто
+                      прогалина, заради якої відкривають цю таблицю, зникає з
+                      екрана. */}
+                  <Table.Td>
+                    <Timestamp value={field.lastSeenUtc} precise />
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>

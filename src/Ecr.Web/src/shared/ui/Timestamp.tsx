@@ -43,15 +43,37 @@ export interface TimestampProps {
    * `DocumentsPage` (UI-walkthrough F6).
    */
   readonly fallback?: string | undefined;
+
+  /**
+   * Показати СЕКУНДИ.
+   *
+   * ⛔ Заведено не «про всяк випадок». Дефолт — `timeStyle: 'short'`, тобто
+   * без секунд, і для «коли задача почалася» чи «коли застосунок піднявся»
+   * цього досить. Але є колонки, де секунда — це сама суть даних: мітки
+   * телеметрії в перегляді мапінгу (`MappingRows`) відрізняються між собою
+   * саме секундами, і без них два різні виміри виглядають однаково. Показати
+   * їх однаково означало б сховати те, заради чого на цю таблицю й дивляться.
+   *
+   * ⚠ Не вмикати там, де секунди нічого не додають: зайва точність на екрані
+   * читається як важливість і змушує вчитуватися в число, яке не має змісту.
+   */
+  readonly precise?: boolean | undefined;
 }
 
 /** Момент часу: читабельно на екрані, точно — в розмітці. */
-export function Timestamp({ value, dateOnly = false, fallback = '—' }: TimestampProps): JSX.Element {
+export function Timestamp({
+  value,
+  dateOnly = false,
+  fallback = '—',
+  precise = false,
+}: TimestampProps): JSX.Element {
   if (value === null || value === undefined || value === '') {
     return <span data-timestamp="none">{fallback}</span>;
   }
 
-  const shown = dateOnly ? formatDate(value) : formatDateTime(value);
+  const shown = dateOnly
+    ? formatDate(value)
+    : formatDateTime(value, precise ? { dateStyle: 'medium', timeStyle: 'medium' } : undefined);
 
   /*
    * ⛔ Нерозібраний рядок показується ЯК Є, а не тире й не порожнеча.
