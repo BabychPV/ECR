@@ -1,5 +1,5 @@
 ﻿import type { JSX } from 'react';
-import { Badge, Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
+import { Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -9,6 +9,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { t } from '@/shared/i18n';
 
 type SystemFacts = components['schemas']['SystemFactsResponse'];
@@ -71,7 +72,12 @@ export function HealthPage(): JSX.Element {
         title={t('health.title')}
         actions={
           ready.data === undefined ? null : (
-            <Badge color={badgeColor(ready.data.status)}>{ready.data.status}</Badge>
+            /* ⚠ Зведений статус і статус кожної перевірки — ОДИН словник
+               (`health`), тож і рішення про колір одне, у наборі. Доти їх
+               фарбувала власна `badgeColor` цієї сторінки — п'ята з п'яти
+               розбіжних копій такого рішення (перелік — у шапці
+               `StatusBadge.tsx`). */
+            <StatusBadge kind="health" state={ready.data.status} />
           )
         }
       />
@@ -96,9 +102,7 @@ export function HealthPage(): JSX.Element {
               <Card key={check.name} withBorder>
                 <Group justify="space-between">
                   <Text fw={600}>{check.name}</Text>
-                  <Badge color={badgeColor(check.status)} variant="light">
-                    {check.status}
-                  </Badge>
+                  <StatusBadge kind="health" state={check.status} />
                 </Group>
                 {check.description !== null && (
                   <Text size="sm" mt="xs">
@@ -260,15 +264,12 @@ function fieldValue(value: unknown): string {
   return text.trim().length === 0 ? EmptyValue : text;
 }
 
-/**
- * Колір статусу.
- *
- * ⛔ Три стани, а не два. `Degraded` — це не «помилка»: система працює, але
- * чогось у ній бракує. Показувати його червоним означало б навчити оператора
- * не дивитися на червоне.
+/*
+ * ✎ Тут стояла `badgeColor(status)` — власна трійка кольорів цієї сторінки.
+ * Її рішення не втрачене: «три стани, а не два; `Degraded` — це не помилка,
+ * система працює, але чогось у ній бракує, і червоний навчив би оператора не
+ * дивитися на червоне» — воно перенесене в `statusTable.health`
+ * (`shared/ui/StatusBadge.tsx`) разом із самим поясненням. Різниця в тому, що
+ * тепер воно ОДНЕ на застосунок, а не п'яте з п'яти копій, які вже встигли
+ * розійтися між сторінками.
  */
-function badgeColor(status: string): string {
-  if (status === 'Healthy') return 'statusSuccess';
-
-  return status === 'Degraded' ? 'statusWarning' : 'statusError';
-}

@@ -84,6 +84,22 @@ function show(): void {
   );
 }
 
+/**
+ * Чи є в переліку рядок у цьому стані.
+ *
+ * ✎ 2026-09-19. Тут стояло `screen.getByText('Succeeded')` — пошук за КОДОМ
+ * СЕРВЕРА як за видимим текстом. Відколи стан малює `StatusBadge`, підпис
+ * береться з каталогу (`status.job.*`): код сервера не є текстом інтерфейсу й
+ * не перекладається. Локатор переведено на `data-status-state` — атрибут, який
+ * набір кладе в розмітку саме для тестів і e2e.
+ *
+ * ⚠ Твердження тесту НЕ змінилося: чужа задача має зникнути, своя — лишитись.
+ * Атрибут прив'язаний до стану точніше, ніж збіг слова в тексті.
+ */
+function hasState(state: string): boolean {
+  return document.querySelector(`[data-status-state="${state}"]`) !== null;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   requested.length = 0;
@@ -97,7 +113,7 @@ describe('JobsPage: лише мої задачі', () => {
 
     // Спершу — уся черга: екран відкривається лише з `System.ViewHealth`, і
     // для його власника звуження до своїх було б несподіванкою.
-    await screen.findByText('Succeeded');
+    await waitFor(() => expect(hasState('Succeeded')).toBe(true));
     await waitFor(() => expect(requested.length).toBeGreaterThan(0));
     expect(requested.every((u) => !u.includes('mine='))).toBe(true);
 
@@ -112,8 +128,8 @@ describe('JobsPage: лише мої задачі', () => {
 
     // Чужа задача зникла, своя лишилася — тобто показано те, що віддав сервер
     // на звужений запит, а не відфільтрований на клієнті старий масив.
-    await waitFor(() => expect(screen.queryByText('Succeeded')).toBeNull());
-    expect(screen.getByText('Running')).toBeTruthy();
+    await waitFor(() => expect(hasState('Succeeded')).toBe(false));
+    expect(hasState('Running')).toBe(true);
   });
 
   it('момент старту задачі видно в переліку', async () => {

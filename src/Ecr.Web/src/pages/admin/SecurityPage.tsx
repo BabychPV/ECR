@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import { Suspense, lazy, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -20,7 +20,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { createUserBody } from '@/features/security/createUserBody';
-import { UserAccessEditor } from '@/features/security/UserAccessEditor';
 import type {
   CreateRoleRequest,
   PermissionCatalogItem,
@@ -32,7 +31,6 @@ import type {
   UserView,
 } from '@/api/types';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
-import { GrantsPanel } from '@/pages/admin/GrantsPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -56,6 +54,38 @@ import { t } from '@/shared/i18n';
  * би читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
  */
 const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/**
+ * Вкладка грантів — за `import()`.
+ *
+ * ⛔ Та сама причина, що й на `TemplateVersionPage`: маршрут стояв на 249.3 КБ
+ * зі стелі 250 (`D-132`), тобто мав 0.7 КБ запасу на ВСІ майбутні правки
+ * спільного коду. Гранти — окрема вкладка (`tab === 'grants'`), і за
+ * замовчуванням відкривається вкладка ролей: код, який більшість відвідувачів
+ * не показує жодного разу, платився кожним.
+ *
+ * ⚠ `fallback={null}`: перемикач вкладок (`SegmentedControl`) лишається на
+ * місці й уже показує, що вкладка змінилася — порожнеча під ним триває рівно
+ * стільки, скільки йде чанк із того самого походження. Скелет таблиці тут був
+ * би гіршим: `GrantsPanel` сам малює власний `AsyncBoundary` зі скелетом, і
+ * два скелети поспіль блимали б один в одного.
+ */
+const GrantsPanel = lazy(async () => ({
+  default: (await import('@/pages/admin/GrantsPanel')).GrantsPanel,
+}));
+
+/**
+ * ⛔ `UserAccessEditor` носить `<Modal opened={user !== null}>` усередині себе,
+ * тобто рендериться ЗАВЖДИ. Гейт нижче (`accessUsed`) тому односторонній:
+ * `editingAccess !== null` знімав би компонент із дерева в ту саму мить, коли
+ * діалог починає закриватися, і `lazy` перестав би бути лише моментом
+ * завантаження — він зіпсував би анімацію закриття. Доки кнопку «Access» не
+ * натиснули, у дереві немає нічого (закрита `Modal` і так не рендерить рамки);
+ * після першого натискання — рівно те, що було до цієї правки.
+ */
+const UserAccessEditor = lazy(async () => ({
+  default: (await import('@/features/security/UserAccessEditor')).UserAccessEditor,
+}));
 
 /**
  * Адміністрування безпеки: ролі, матриця прав, користувачі.
@@ -99,6 +129,10 @@ export function SecurityPage(): JSX.Element {
 
   // Кого редагуємо: `null` — діалог закритий.
   const [editingAccess, setEditingAccess] = useState<UserView | null>(null);
+
+  // ⚠ «Діалог доступу вже відкривали». Назад у `false` не вертається навмисно —
+  // див. коментар біля `UserAccessEditor` вище.
+  const [accessUsed, setAccessUsed] = useState(false);
 
   // ⛔ Адресати алертів — ДАНІ, а не конфігурація (`D-125`). Перелік у змінних
   // оточення довелося б міняти розгортанням щоразу, коли хтось іде у
@@ -362,7 +396,11 @@ export function SecurityPage(): JSX.Element {
       {/* ⛔ Гранти — окрема вкладка, а не колонка в матриці прав. Права
           відповідають на питання «що людина вміє», гранти — «до чого саме»;
           без другої відповіді перша не відкриває нічого (`A7-22`). */}
-      {tab === 'grants' && <GrantsPanel roles={roles.data ?? []} />}
+      {tab === 'grants' && (
+        <Suspense fallback={null}>
+          <GrantsPanel roles={roles.data ?? []} />
+        </Suspense>
+      )}
 
       {tab === 'users' && (
         <AsyncBoundary<UserPage>
@@ -415,7 +453,10 @@ export function SecurityPage(): JSX.Element {
                     <Button
                       size="compact-xs"
                       variant="subtle"
-                      onClick={() => setEditingAccess(user)}
+                      onClick={() => {
+                        setAccessUsed(true);
+                        setEditingAccess(user);
+                      }}
                     >
                       {t('security.access')}
                     </Button>
@@ -577,11 +618,15 @@ export function SecurityPage(): JSX.Element {
         </Group>
       </Modal>
 
-      <UserAccessEditor
-        user={editingAccess}
-        roles={roles.data ?? []}
-        onClose={() => setEditingAccess(null)}
-      />
+      {accessUsed && (
+        <Suspense fallback={null}>
+          <UserAccessEditor
+            user={editingAccess}
+            roles={roles.data ?? []}
+            onClose={() => setEditingAccess(null)}
+          />
+        </Suspense>
+      )}
 
       <Modal
         opened={creatingUser}
