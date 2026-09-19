@@ -18,6 +18,7 @@ public sealed class RegistriesController(
     SwitchRegistrySourceHandler switchSource,
     GetRegistryDefinitionHandler getDefinition,
     SaveRegistryDefinitionHandler saveDefinition,
+    DeleteRegistryEntryHandler deleteEntry,
     GetRegistryHistoryHandler getHistory) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
@@ -195,6 +196,33 @@ public sealed class RegistriesController(
         // Повертається кількість зачеплених рядків: той, хто звузив вікно, має
         // бачити масштаб наслідку, а не лише «ок».
         return Ok(new AffectedRowsResponse(affected));
+    }
+
+    /// <summary>
+    /// Видаляє запис довідника. Право <c>Registry.EditData</c> (ФВ-8.6).
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="id">Запис.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Запис, на який посилаються дані, не видаляється — <c>409 ECR-REG-0409</c>
+    /// з кількістю посилань у <c>details.references</c>. Клієнт у відповідь
+    /// пропонує закрити запис датою (<c>POST …/validity</c>), а не повторює
+    /// спробу: повтор дасть ту саму відмову, бо змінити треба не запит, а намір.
+    /// <para>
+    /// ⚠ <c>code</c> у шляху перевіряється обробником: запис чужого довідника —
+    /// <c>404</c>, а не мовчазне видалення «бо id збігся».
+    /// </para>
+    /// </remarks>
+    [HttpDelete("{code}/entries/{id:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteEntry(string code, long id, CancellationToken ct)
+    {
+        await deleteEntry.HandleAsync(code, id, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>

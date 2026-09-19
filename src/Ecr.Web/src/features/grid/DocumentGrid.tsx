@@ -16,14 +16,17 @@ import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
+import { buildRequest, useCellPatch, type PendingEdit } from './useCellPatch';
+import { registerSliceSaver, scheduleAutosave } from './autosave';
+// ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
+// з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
+// правок має бути рівно той, яким її будує сам сховищний модуль.
 import {
-  buildRequest,
-  cellEditKey,
-  sendPatchBeacon,
-  useCellPatch,
-  type PendingEdit,
-} from './useCellPatch';
-import { createDebouncer, registerUnloadFlush } from './autosave';
+  cellKey as pendingCellKey,
+  discardPendingRows,
+  putPendingEdit,
+  usePendingSlice,
+} from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
 import { cellsOfSaveError } from './saveErrors';
 import {
@@ -196,7 +199,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * протягування.
    */
   const selection = useRef<GridSelection | null>(null);
-  const [pending, setPending] = useState<Map<string, PendingEdit>>(new Map());
+
+  /**
+   * Незбережені правки ЦЬОГО зрізу — вигляд над сховищем документа
+   * (`pendingStore.ts`, `D14-12`).
+   *
+   * ⛔ Тут стояв `useState`, і саме він коштував даних (`W-02`): стан помирав
+   * разом із сіткою, а сітки розмонтовує і перемикання аркуша, і прокрутка
+   * (`SheetTables.tsx`). Правка молодша за 500 мс зникала МОВЧКИ. Тепер сітка
+   * лише ПОКАЗУЄ те, що належить документу: `putPendingEdit` пише,
+   * `discardPendingRows` підтверджує, а хто і коли надішле — рівень вище
+   * (`autosave.ts`).
+   *
+   * ⚠ Перемальовуються не всі сітки на кожне натискання: `usePendingSlice`
+   * віддає знімок ЗРІЗУ, а `useSyncExternalStore` порівнює його за посиланням
+   * — сітки, чий зріз не змінився, бачать те саме посилання й не рендеряться.
+   */
+  const pending = usePendingSlice(tableInstanceId, periodKey);
 
   // ⚠ Значення, підтверджені оператором (`ФВ-2.16`, `#43`), яких сервер ще
   // не бачив: доки не прийде свіжий зріз, grid показує ЇХ, а не збережене
@@ -215,14 +234,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     hint: string;
   } | null>(null);
 
-  // ⚠ `pending` читається з таймера дебаунсу й обробника `beforeunload` —
-  // обидва живуть поза React-рендером, і замикання на `pending` там бачило б
-  // застиглий знімок з моменту створення. `ref` завжди дає ОСТАННЮ мапу.
-  const pendingRef = useRef(pending);
-  useEffect(() => {
-    pendingRef.current = pending;
-  }, [pending]);
-
   const save = useCallback(
     async (edits: PendingEdit[]) => {
       if (edits.length === 0) return;
@@ -231,6 +242,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // нижче. Позначки інших рядків (з попереднього, ще не повтореного
       // збереження) лишаються як є: цей виклик про них нічого не знає.
       const touchedRowKeys = new Set(edits.map((edit) => edit.rowKey));
+
+      // ⚠ Знімок ТОГО, ЩО ПІШЛО на сервер, — за ним `discardPendingRows`
+      // відрізнить підтверджену правку від тієї, яку оператор зробив у ту саму
+      // комірку, доки patch летів.
+      const sent = new Map(edits.map((edit) => [pendingCellKey(edit), edit]));
 
       try {
         const response = await patch(buildRequest(tableInstanceId, periodKey, edits));
@@ -248,7 +264,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // ⚠ Фільтр — той самий `touchedRowKeys`, за яким уже фільтруються
         // `requiredInputBlocked`/`saveErrorCells` нижче: успіх патчу
         // стосується РІВНО його рядків і нічиїх більше.
-        setPending((prev) => discardRows(prev, touchedRowKeys, (_key, edit) => edit.rowKey));
+        //
+        // ⚠ `D14-12`: підтвердження йде у СХОВИЩЕ документа, а не в стан
+        // сітки. `sent` тут обов'язковий — без нього зникла б і правка, яку
+        // оператор зробив у ту саму комірку, доки цей патч був у дорозі.
+        discardPendingRows(tableInstanceId, periodKey, touchedRowKeys, sent);
 
         // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
         // значення, і локальна підстава більше не потрібна нікому — але так
@@ -318,66 +338,33 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [patch, periodKey, tableInstanceId],
   );
 
-  // ⚠ Дебаунс тримає ОДИН стабільний колбек (`autosave.ts`, `#38`): він читає
-  // найсвіжіші `pending`/`save` через `ref` (`pendingRef` вище), а не через
-  // замикання, — інакше кожен рендер створював би новий дебаунсер і
-  // скасовував заплановане збереження попереднього, тобто автозбереження
-  // ніколи не спрацьовувало б.
+  // ⚠ `save` читають ззовні React-рендера (автозбереження документа), тож
+  // потрібне ОСТАННЄ його втілення, а не те, що було на момент підписки.
   const saveRef = useRef(save);
   useEffect(() => {
     saveRef.current = save;
   }, [save]);
 
-  const autosaveDebouncer = useRef(
-    createDebouncer(() => {
-      void saveRef.current([...pendingRef.current.values()]);
-    }),
-  );
-
-  // ⛔ Дебаунс скасовується при РОЗМОНТУВАННІ, а не лише при переході на інший
-  // зріз (ефект нижче за текстом, `tableInstanceId`/`periodKey`).
-  //
-  // ⛔ Попередня версія цього не робила, і це не «витік таймера заради
-  // чистоти»: `setTimeout` на 500 мс переживав компонент і через півсекунди
-  // після його зникнення виконував `saveRef.current(...)` — тобто НАДСИЛАВ
-  // `PATCH` від імені гріда, якого вже немає. Наслідок для оператора: аркуші
-  // документа рендеряться списком грідів із `key={tableInstanceId}`
-  // (`DocumentPage.tsx`), тож перемикання аркуша розмонтовує гріди
-  // попереднього. Правка, введена менш ніж за 500 мс до перемикання, ішла на
-  // сервер запитом, чий результат НІКОМУ показати: `setSaveError`,
-  // `setConflicts`, діалог порівняння версій і банер «не збережено» належать
-  // розмонтованому дереву. Конфлікт `409` чи відмова валідації просто зникали.
-  //
-  // ⚠ Рішення симетричне вже ухваленому нижче: при зміні зрізу `pending`
-  // скидається і дебаунс скасовується — «таймер зрізу, який більше не
-  // відкритий, не має права зберігати». Розмонтування — та сама подія, лише
-  // остаточна. Закриття вкладки покриває окремий механізм (`beforeunload` +
-  // `keepalive` нижче), і саме він, а не випадково вцілілий таймер, є
-  // передбаченим шляхом «ми йдемо, відповіді не дочекаємось».
-  //
-  // ⚠ Той самий взірець уже стоїть у `useCellPatch.ts` для таймера індикатора
-  // «збережено» — там його скасування на розмонтуванні описане тим самим
-  // аргументом. Незакритим лишався рівно цей один таймер.
-  useEffect(() => {
-    const debouncer = autosaveDebouncer.current;
-
-    return () => debouncer.cancel();
-  }, []);
-
-  // ⚠ Останній шанс зберегти перед закриттям вкладки (`B-35`, `#38`):
-  // `patch()` не встигне — `beforeunload` не чекає на `fetch` — тому тут іде
-  // окремий, «доручи й забудь» запит із `keepalive`.
+  /*
+   * ⛔ `D14-12`, крок 2. Тут стояло скасування дебаунсу при розмонтуванні —
+   * і це був свідомий обмін «краще втратити правку, ніж надіслати `PATCH` від
+   * мертвого компонента» (`W-02`). Обміну більше немає: правка живе в сховищі
+   * документа, а план збереження — в одному дебаунсері на документ
+   * (`autosave.ts`). Сітка лише оголошує себе зберігачем СВОГО зрізу на час,
+   * доки вона на екрані: поки вона тут — результат патчу видно їй (банер,
+   * конфлікти, маркери комірок); щойно її немає — зріз бере документ.
+   *
+   * ⚠ Реєструється стабільна обгортка над `saveRef`, а не сам `save`:
+   * інакше кожна зміна `save` (а він залежить від `patch`) перереєстровувала б
+   * зберігача, і між зняттям та встановленням існувало б вікно, у якому зріз
+   * виглядав би безхазяйним.
+   */
   useEffect(
     () =>
-      registerUnloadFlush(
-        () => pendingRef.current.size > 0,
-        () =>
-          sendPatchBeacon(
-            documentId,
-            buildRequest(tableInstanceId, periodKey, [...pendingRef.current.values()]),
-          ),
-      ),
-    [documentId, tableInstanceId, periodKey],
+      registerSliceSaver(tableInstanceId, periodKey, (edits) => {
+        void saveRef.current([...edits]);
+      }),
+    [tableInstanceId, periodKey],
   );
 
   // ⛔ Округлені комірки (D-116, ФВ-9.16c) — перелік із «було → стало», а не
@@ -434,7 +421,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // іншого документа.
   useEffect(() => {
     history.current.rescope(`${tableInstanceId}:${periodKey}`);
-    setPending(new Map());
+
+    // ⚠ `pending` тут більше НЕ скидається, і це не недогляд: правки лежать у
+    // сховищі за ключем `tableInstanceId:periodKey`, тож зміна зрізу просто
+    // переводить погляд на інший ключ. Скидати означало б стерти чуже —
+    // правки зрізу, з якого оператор щойно пішов і куди може повернутися.
     setOverrides(new Map());
     setConfirmRequest(null);
 
@@ -444,11 +435,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     setWidths(readWidths(tableInstanceId));
     touchHistory();
 
-    // ⚠ Дебаунс іншої таблиці не має права зберегти правку в цю: без
-    // скасування таймер, запланований до переходу, спрацював би вже після
-    // нього — з `tableInstanceId`/`periodKey`, зафіксованими в замиканні
-    // `autosaveDebouncer`, тобто в чужий зріз.
-    autosaveDebouncer.current.cancel();
+    // ⚠ І дебаунс тут більше не скасовується. Раніше це було обов'язкове
+    // прибирання за собою: таймер ніс `tableInstanceId`/`periodKey` у
+    // замиканні й після переходу зберіг би правку в ЧУЖИЙ зріз. Тепер
+    // запланований пакет будується з самого сховища, де кожна правка вже
+    // лежить під ключем свого зрізу, — переплутати їх нічим.
   }, [tableInstanceId, periodKey, touchHistory]);
 
   /**
@@ -700,21 +691,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       touchHistory();
 
-      setPending((current) => {
-        const next = new Map(current);
-        next.set(cellEditKey(captured.pending), captured.pending);
-
-        return next;
-      });
+      // ⚠ `D14-12`: правка потрапляє у сховище ДОКУМЕНТА одразу, ще до
+      // будь-якого надсилання. Саме тому вона переживає і розмонтування
+      // сітки, і перемикання аркуша — компонент більше не єдине місце, де
+      // вона існує.
+      putPendingEdit(tableInstanceId, periodKey, captured.pending);
 
       // ⚠ Кожна правка ПЕРЕЗАПУСКАЄ дебаунс (`B-35`, `#38`): збереження йде
       // через 500 мс тиші ПІСЛЯ ОСТАННЬОЇ правки, а не після першої — інакше
       // швидкий ряд натисків Tab відсилав би окремий запит на кожну клітину.
-      autosaveDebouncer.current.trigger();
+      // Дебаунсер один на документ (`autosave.ts`), і він переживе цю сітку.
+      scheduleAutosave();
 
       return captured;
     },
-    [data, touchHistory],
+    [data, touchHistory, tableInstanceId, periodKey],
   );
 
   /**
@@ -1388,8 +1379,13 @@ function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>
  * успішний патч віддавав би React новий об'єкт, а з ним — новий `flags` і
  * перерахунок усіх колонок сітки на 500×60 комірок.
  *
- * @param rowOf Як дістати рядок із записи мапи: `pending` тримає його в
- * значенні (`PendingEdit.rowKey`), `overrides` — у ключі (`cellKey`).
+ * @param rowOf Як дістати рядок із запису мапи: `overrides` тримає його в
+ * ключі (`cellKey`).
+ *
+ * ⚠ Лишилося рівно одне застосування — `overrides`. Те саме правило для
+ * незбережених правок тепер живе в сховищі документа
+ * (`pendingStore.discardPendingRows`), і воно там СУВОРІШЕ: звіряє ще й
+ * знімок надісланого, тобто не чіпає правку, зроблену вже після patch.
  */
 function discardRows<V>(
   current: Map<string, V>,

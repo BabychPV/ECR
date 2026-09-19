@@ -164,10 +164,18 @@ public sealed class RegistryResolverTests
         _registries.FindEntryAsync(101, Arg.Any<CancellationToken>()).Returns(entry);
         _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(17);
 
+        /*
+         * ⚠ Довідник тепер читається ДО видалення: обробник звіряє код зі
+         * шляху з кодом довідника, якому запис належить (`BE-01`). Без цієї
+         * заглушки тест падав би на 404 — тобто на чужій причині, і твердження
+         * про 409 лишалося б неперевіреним.
+         */
+        _registries.FindDefinitionByIdAsync(Permits, Arg.Any<CancellationToken>()).Returns(Definition());
+
         var handler = new DeleteRegistryEntryHandler(_registries, _uow, _access, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(101, CancellationToken.None));
+            () => handler.HandleAsync("PERMITS", 101, CancellationToken.None));
 
         Assert.Equal("ECR-REG-0409", error.ErrorCode);
 
@@ -180,7 +188,7 @@ public sealed class RegistryResolverTests
 
         // Без посилань — видалення логічне і проходить.
         _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(0);
-        await handler.HandleAsync(101, CancellationToken.None);
+        await handler.HandleAsync("PERMITS", 101, CancellationToken.None);
         Assert.True(entry.IsDeleted);
     }
 

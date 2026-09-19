@@ -675,6 +675,21 @@ USING (VALUES
     -- уже існував), але без ЖОДНОГО тексту — клацання виглядало як
     -- зависання, не як «сюди не можна саме тому, що аркуш подано».
     (N'grid.submittedReadOnlyHint',      N'en', N'This sheet has been submitted; editing is closed until it is reopened.', 1),
+
+    -- ⛔ Вихід із документа з незбереженими правками (`D14-12` крок 3,
+    -- `shared/ui/UnsavedGuard.tsx`). Діалог з'являється РІВНО тоді, коли
+    -- збереження при виході не вдалося, — тому і заголовок про факт («зміни не
+    -- збережено»), а не питання «ви впевнені?»: питання на кожному переході
+    -- навчає відповідати «так» не читаючи, а це рядок, який користувач побачить
+    -- один раз за багато днів і мусить прочитати.
+    --
+    -- ⚠ Безпечна дія названа дією («лишитись на сторінці»), а не «Скасувати»:
+    -- що саме скасовується в діалозі, який виник сам, читач не знає.
+    (N'unsaved.title',                   N'en', N'Your changes are not saved', 1),
+    (N'unsaved.body',                    N'en', N'{count} cell(s) could not be saved. If you leave now, they are lost.', 1),
+    (N'unsaved.stay',                    N'en', N'Stay on this page', 1),
+    (N'unsaved.leave',                   N'en', N'Leave without saving', 1),
+
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
     (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),

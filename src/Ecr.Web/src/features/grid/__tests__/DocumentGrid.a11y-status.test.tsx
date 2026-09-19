@@ -4,6 +4,8 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TableSliceDto } from '@/api/types';
 import type { SaveStatus } from '../useCellPatch';
+import { cancelAutosave } from '../autosave';
+import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 
 /**
@@ -116,6 +118,10 @@ function show(): void {
 }
 
 afterEach(() => {
+  // ⛔ `D14-12`: сховище правок модульне — воно переживає кінець тесту, як і
+  // запланований дебаунсом пакет.
+  cancelAutosave();
+  resetPending();
   vi.unstubAllGlobals();
   mockStatus = 'idle';
 });
