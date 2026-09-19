@@ -393,6 +393,7 @@ export function MethodologiesPage(): JSX.Element {
 
         <TextInput
           mt="sm"
+          // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №7/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
           type="date"
           label={t('methodologies.effectiveFrom')}
           description={t('methodologies.effectiveFromHint')}

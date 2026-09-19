@@ -204,6 +204,7 @@ export function ValidityEditor({
   return (
     <Modal opened={entry !== null} onClose={onClose} title={t('registries.validity')}>
       <TextInput
+        // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №5/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
         type="date"
         label={t('registries.validFrom')}
         description={t('registries.validityHint')}
@@ -214,6 +215,7 @@ export function ValidityEditor({
 
       <TextInput
         mt="sm"
+        // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №6/8: див. коментар вище
         type="date"
         label={t('registries.validTo')}
         value={to}
