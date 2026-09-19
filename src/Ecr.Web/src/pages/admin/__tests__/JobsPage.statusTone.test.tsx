@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -93,14 +93,23 @@ function toneOf(state: string): string | null {
 /**
  * Чекає, доки перелік задач домалюється.
  *
- * ⚠ `findAllByText`, а не `findByText`: усі вісім рядків мають один момент
- * старту, і однина впала б на «found multiple elements» — тобто на власному
- * локаторі, а не на предметі тесту.
+ * ⚠ Ознака «домалювалося» — по одному моменту старту на рядок. Однина впала б
+ * на «found multiple elements», тобто на власному локаторі, а не на предметі
+ * тесту, тому рахуємо всі.
+ *
+ * ✎ 2026-09-19, ЗМІНА ПОВЕДІНКИ. Тут стояло
+ * `findAllByText('2026-09-19T09:58:00Z')` — пошук СИРОГО рядка сервера як
+ * видимого тексту. Відколи момент малює `Timestamp` (`UI-07`), на екрані
+ * читабельна форма, а сирий рядок лишився в `dateTime`. Локатор переведено
+ * на атрибут: він прив'язаний до значення точніше, ніж збіг тексту, і не
+ * залежить від мови набору.
  */
 async function ready(): Promise<void> {
-  const rows = await screen.findAllByText('2026-09-19T09:58:00Z');
-
-  expect(rows).toHaveLength(states.length);
+  await waitFor(() =>
+    expect(document.querySelectorAll('time[datetime="2026-09-19T09:58:00Z"]')).toHaveLength(
+      states.length,
+    ),
+  );
 }
 
 afterEach(() => {
