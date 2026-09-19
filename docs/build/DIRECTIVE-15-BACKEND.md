@@ -32,12 +32,24 @@
 2. **Іменовані записи у відповідях, ніколи анонімні об'єкти** — інакше в
    OpenAPI немає імені типу (`A7-16`, `A7-32`; див. коментар у
    `DocumentsController.cs:129-132` ✔).
-3. **Право перевіряє обробник, не контролер** — той самий виклик, що всюди:
-   `await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)`
-   (`Ecr.Application.Security`).
-   ⛔ **✎ 2026-09-19:** тут стояло `ListTemplatesHandler.RequireAsync` — такого
-   методу **не існує**; той самий хибний виклик лишився в код-блоці `BE-02`
-   нижче. Скопійований дослівно, він не компілюється.
+3. **Право перевіряє обробник, не контролер.** Помічників у коді **два**, і
+   обидва справжні:
+   - `PermissionCheck.RequireAsync(access, currentUser, permission, ct)` —
+     `Ecr.Application.Security`, `public static`, **54 виклики**, повертає
+     `AccessProfile`, щоб не будувати його двічі. З'явився після `A7-53`, коли
+     три майже однакові приватні помічники розійшлися. **Для нового коду —
+     цей.**
+   - `ListTemplatesHandler.RequireAsync(access, currentUser, permission, ct)` —
+     `TemplateQueryHandlers.cs:45`, `internal static`, **22 виклики**, зокрема
+     весь `IntegrationHandlers.cs`. Старіша форма; у файлі, де її вже вживають
+     сусіди, лишай її — другий стиль поруч гірший за старий.
+
+   ~~⛔ **✎ 2026-09-19:** тут стояло `ListTemplatesHandler.RequireAsync` —
+   такого методу **не існує**.~~
+   ⛔ **✎ 2026-09-19, пізніше: попереднє виправлення було ХИБНЕ, і хибним був
+   я.** Метод існує; я записав сюди знахідку саб-агента, не перевіривши її сам
+   — тобто зробив рівно те, від чого застерігає позначка ◐ на початку файлу.
+   Первісний текст директиви був правильний.
 4. **Помилки — кодами** `ECR-<ОБЛАСТЬ>-<HTTP>`; новий код = рядок у сіді
    повідомлень (`messageKey`) + рядок `en` у `09-seed.sql`. Див. пам'ятку
    «покрити звільнену вимогу — це три файли й два сторожі».
@@ -183,8 +195,9 @@ public sealed class CancelJobHandler(
         var ownerId = await progress.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
         if (ownerId is null || ownerId != currentUser.UserId)
         {
-            // ✎ 2026-09-19: було ListTemplatesHandler.RequireAsync — такого методу немає.
-            await PermissionCheck
+            // ⚠ Тут годяться обидва помічники (див. §0.3). `IntegrationHandlers.cs`
+            // уже вживає ListTemplatesHandler.RequireAsync — у ньому й лишається він.
+            await ListTemplatesHandler
                 .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
                 .ConfigureAwait(false);
         }
