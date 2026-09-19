@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
@@ -76,6 +76,76 @@ export function buildRequest(
 }
 
 /**
+ * Надсилає пакет правок і повертає відповідь сервера.
+ *
+ * ⚠ Адреса несе ДОКУМЕНТ, а не лише екземпляр таблиці: маршрут контракту —
+ * `PATCH /api/v1/documents/{documentId}/cells`. До аудиту клієнт бив у
+ * `/api/v1/cells`, якого не існує, і збереження не працювало взагалі
+ * (`A7-03`).
+ *
+ * ⛔ Окрема функція, а не тіло хука, саме тому, що надсилати доводиться й
+ * ЗВІДКИ, де хука немає: зріз, чия сітка вже розмонтована перемиканням аркуша,
+ * зберігає рівень документа (`autosave.ts`, `D14-12`). Доки цей `fetch` жив
+ * усередині `useCellPatch`, «зберегти може лише змонтована сітка» було не
+ * рішенням, а наслідком розташування коду.
+ */
+export function patchCells(
+  documentId: number,
+  request: PatchCellsRequest,
+): Promise<PatchCellsResponse> {
+  return apiFetch<PatchCellsResponse>(`/api/v1/documents/${documentId}/cells`, {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  });
+}
+
+/**
+ * Застосовує відповідь на патч до кешу зрізу — БЕЗ жодного запиту.
+ *
+ * ⛔ `CL-01`: тут стояв `invalidateQueries` зрізу — після КОЖНОГО успішного
+ * збереження, тобто автозбереження коштувало `PATCH` плюс найважчий `GET`
+ * системи. І мети він не досягав: перерахунок асинхронний, тож відповідь на
+ * перезапит приходила здебільшого РАНІШЕ за нього, зі старими обчисленими
+ * значеннями.
+ *
+ * ⚠ Тепер відповідь застосовується локально (`sliceApply.ts`): власні значення
+ * оператора, нові `rowVersions`, округлення вставки — усе це вже є в запиті й
+ * відповіді, і жодного запиту не потрібно. Обчислені колонки принесе
+ * перерахунок; стежити за ним клієнт зможе, коли `PatchCellsResponse` понесе
+ * ідентифікатор задачі (контракт його не має — друга половина `CL-01`
+ * заблокована серверною зміною).
+ *
+ * ⛔ Викликається і для зрізу, чия сітка вже розмонтована (`D14-12`): інакше
+ * повернення на аркуш показувало б із кешу СТАРЕ значення — збережене на
+ * сервері, але невидиме, тобто рівно той симптом, від якого лікує сховище.
+ */
+export function applyPatchLocally(
+  queryClient: QueryClient,
+  request: PatchCellsRequest,
+  response: PatchCellsResponse,
+): void {
+  queryClient.setQueryData<TableSliceDto>(
+    queryKeys.slices.one(request.tableInstanceId, request.periodKey),
+    (slice) => (slice === undefined ? slice : applyPatchToSlice(slice, request, response)),
+  );
+
+  // ⚠ І зріз позначається застарілим — БЕЗ запиту (`refetchType: 'none'`).
+  // Судження, яке варто назвати вголос: локальне застосування не знає
+  // обчислених колонок, а `staleTime` зрізів — 5 хв (`CL-02`), тож без цього
+  // рядка результат перерахунку не з'явився б до перезаходу. Так він
+  // з'явиться при наступному монтуванні сітки (перемикання аркуша), не
+  // коштуючи жодного запиту зараз. Повноцінне рішення — стеження за задачею —
+  // чекає на ідентифікатор у `PatchCellsResponse`.
+  //
+  // ⛔ Саме ПІСЛЯ `setQueryData`: успішний запис у кеш скидає позначку
+  // `isInvalidated`, тож зворотний порядок нічого б не позначив.
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
+    refetchType: 'none',
+  });
+}
+
+/**
  * Видимий стан збереження (`B-35`, `#38`).
  *
  * ⛔ Оператор має бачити, чи дійшла його правка до сервера, а не здогадуватися
@@ -88,10 +158,11 @@ export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
  * Хук пакетного збереження комірок.
  *
  * ⚠ Дебаунс ~500 мс і збереження перед закриттям вкладки — це `autosave.ts`
- * (`createDebouncer`, `registerUnloadFlush`), не цей хук: обидва механізми
- * потребують ще й `pending`-мапу, яку тримає `DocumentGrid`, тож самотужки
- * тут їх не зібрати. Хук натомість відповідає за ВИДИМИЙ підсумок: чи
- * зберігається зараз, чи збереглося, чи впало.
+ * (`scheduleAutosave`, `useDocumentPending`), не цей хук: обидва механізми
+ * працюють над `pending`-мапою ВСЬОГО документа (`pendingStore.ts`,
+ * `D14-12`), а не над мапою однієї сітки, тож і живуть рівнем вище. Хук
+ * натомість відповідає за ВИДИМИЙ підсумок: чи зберігається зараз, чи
+ * збереглося, чи впало.
  */
 export function useCellPatch(documentId: number): {
   patch: (request: PatchCellsRequest) => Promise<PatchCellsResponse>;
@@ -117,52 +188,14 @@ export function useCellPatch(documentId: number): {
       if (savedTimer.current !== null) clearTimeout(savedTimer.current);
 
       try {
-        // ⚠ Адреса несе ДОКУМЕНТ, а не лише екземпляр таблиці: маршрут
-        // контракту — `PATCH /api/v1/documents/{documentId}/cells`. До аудиту
-        // клієнт бив у `/api/v1/cells`, якого не існує, і збереження не
-        // працювало взагалі (`A7-03`).
-        const response = await apiFetch<PatchCellsResponse>(
-          `/api/v1/documents/${documentId}/cells`,
-          { method: 'PATCH', body: JSON.stringify(request) },
-        );
+        const response = await patchCells(documentId, request);
 
         // ⚠ Версії оновлюються З ВІДПОВІДІ. Без цього наступний патч піде зі
         // старим `baseVersion` і отримає 409 на власних змінах — конфлікт із
         // самим собою, який неможливо пояснити користувачеві.
         versions.current = { ...versions.current, ...response.rowVersions };
 
-        // ⛔ `CL-01`: тут стояв `invalidateQueries` зрізу — після КОЖНОГО
-        // успішного збереження, тобто автозбереження коштувало `PATCH` плюс
-        // найважчий `GET` системи. І мети він не досягав: перерахунок
-        // асинхронний, тож відповідь на перезапит приходила здебільшого
-        // РАНІШЕ за нього, зі старими обчисленими значеннями.
-        //
-        // ⚠ Тепер відповідь застосовується локально (`sliceApply.ts`):
-        // власні значення оператора, нові `rowVersions`, округлення вставки —
-        // усе це вже є в запиті й відповіді, і жодного запиту не потрібно.
-        // Обчислені колонки принесе перерахунок; стежити за ним клієнт зможе,
-        // коли `PatchCellsResponse` понесе ідентифікатор задачі (контракт
-        // його не має — друга половина `CL-01` заблокована серверною зміною).
-        queryClient.setQueryData<TableSliceDto>(
-          queryKeys.slices.one(request.tableInstanceId, request.periodKey),
-          (slice) => (slice === undefined ? slice : applyPatchToSlice(slice, request, response)),
-        );
-
-        // ⚠ І зріз позначається застарілим — БЕЗ запиту (`refetchType:
-        // 'none'`). Судження, яке варто назвати вголос: локальне застосування
-        // не знає обчислених колонок, а `staleTime` зрізів — 5 хв (`CL-02`),
-        // тож без цього рядка результат перерахунку не з'явився б до
-        // перезаходу. Так він з'явиться при наступному монтуванні сітки
-        // (перемикання аркуша), не коштуючи жодного запиту зараз. Повноцінне
-        // рішення — стеження за задачею — чекає на ідентифікатор у
-        // `PatchCellsResponse`.
-        //
-        // ⛔ Саме ПІСЛЯ `setQueryData`: успішний запис у кеш скидає позначку
-        // `isInvalidated`, тож зворотний порядок нічого б не позначив.
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
-          refetchType: 'none',
-        });
+        applyPatchLocally(queryClient, request, response);
 
         // ⚠ «Збережено» показується ТИМЧАСОВО, а не назавжди: індикатор, який
         // ніколи не гасне, оператор перестає читати за перший же день, і він

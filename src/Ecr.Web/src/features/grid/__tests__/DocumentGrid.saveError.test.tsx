@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TableSliceDto } from '@/api/types';
+import { cancelAutosave } from '../autosave';
+import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 
 /**
@@ -128,6 +130,11 @@ function show(): void {
 }
 
 afterEach(() => {
+  // ⛔ `D14-12`: незбережені правки живуть у МОДУЛЬНОМУ сховищі документа й
+  // переживають кінець тесту — як і запланований дебаунсом пакет. Без
+  // скидання правка одного сценарію потрапила б у `PATCH` наступного.
+  cancelAutosave();
+  resetPending();
   vi.unstubAllGlobals();
 });
 
