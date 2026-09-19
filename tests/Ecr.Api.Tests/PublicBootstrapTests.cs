@@ -184,6 +184,32 @@ public sealed class PublicBootstrapTests(SqlServerFixture sql)
         Assert.Empty(extra);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Жива_відповідь_не_несе_хеша_коміту()
+    {
+        // ⛔ Це не дубль перевірки нижче, і різниця не теоретична. Збірка ЦЬОГО
+        // репозиторію штампує в `AssemblyInformationalVersion` повний хеш
+        // коміту: `1.0.0+5f2a8eff61a9deb9b6056c191841e637ece40ead`
+        // (`obj/Debug/net10.0/Ecr.Api.AssemblyInfo.cs`, генерується SDK без
+        // жодного рядка в наших `.props`). Тобто без обрізання екран входу
+        // публікував би анонімно точну ревізію розгортання.
+        //
+        // ⚠ Перевірка нижче міряє ФУНКЦІЮ, ця — ПРОВОДКУ: контролер мусить
+        // пропустити реальний атрибут саме через неї. Функцію можна лишити
+        // правильною і перестати її кликати.
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        using var document = JsonDocument.Parse(await client.GetStringAsync(Route));
+        var version = document.RootElement.GetProperty("productVersion").GetString();
+
+        Assert.False(string.IsNullOrEmpty(version), "Версія продукту порожня — обрізали більше, ніж метадані.");
+        Assert.DoesNotContain("+", version, StringComparison.Ordinal);
+        Assert.Matches(@"^\d+(\.\d+){0,3}$", version);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [InlineData("1.0.0+9f3c1abdeadbeef", "1.0.0")]
