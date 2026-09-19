@@ -1,19 +1,18 @@
-﻿import type { JSX, ReactNode } from 'react';
-import {
-  Button,
-  Center,
-  Code,
-  CopyButton,
-  Group,
-  Skeleton,
-  Stack,
-  Text,
-  Title,
-  VisuallyHidden,
-} from '@mantine/core';
+﻿import { lazy, Suspense, type JSX, type ReactNode } from 'react';
+import { Center, Code, Skeleton, Stack, Text, Title, VisuallyHidden } from '@mantine/core';
 import { EcrApiError } from '@/api/client';
 import { ErrorAlert } from './ErrorAlert';
 import { t } from '@/shared/i18n';
+
+/**
+ * ⛔ Копіювання кореляції — ЗА `import()` (бюджет `D-132`).
+ *
+ * Межа станів стоїть на КОЖНІЙ сторінці, а `CopyButton` не вживається в
+ * застосунку більше ніде. Статично він додавав +0.4 КБ gzip усім 24
+ * маршрутам (виміряно: `TemplateVersionPage` 250.4 → 250.8), хоча потрібен
+ * лише там, де запит упав І викликач передав підпис кнопки.
+ */
+const CorrelationCopy = lazy(() => import('./CorrelationCopy'));
 
 /** Форма скелета: що саме зараз з'явиться. */
 export type SkeletonShape = 'table' | 'form' | 'none';
@@ -188,15 +187,12 @@ export function ErrorState({
     <Stack gap="xs">
       <ErrorAlert error={error} onRetry={onRetry} />
 
-      <Group gap="xs">
-        <CopyButton value={correlationId}>
-          {({ copy }) => (
-            <Button size="xs" variant="default" onClick={copy}>
-              {copyLabel}
-            </Button>
-          )}
-        </CopyButton>
-      </Group>
+      {/* ⚠ `fallback={null}` безпечний: текст помилки, код і кореляцію вже
+          намалював `ErrorAlert` вище — доки чанк летить, бракує рівно
+          КНОПКИ, а не відомостей, з якими йдуть у підтримку. */}
+      <Suspense fallback={null}>
+        <CorrelationCopy value={correlationId} label={copyLabel} />
+      </Suspense>
     </Stack>
   );
 }

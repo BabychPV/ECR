@@ -1,7 +1,24 @@
-import { useEffect, useRef, type JSX, type ReactNode } from 'react';
-import { Anchor, Button, Group, Menu, Stack, Text, Title } from '@mantine/core';
+import { lazy, Suspense, useEffect, useRef, type JSX, type ReactNode } from 'react';
+import { Anchor, Group, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { announceRoute } from './RouteAnnouncer';
+
+/**
+ * ⛔ Кластер дій — ЗА `import()`, і це вимога бюджету (`D-132`), а не смак.
+ *
+ * `PageHeader` стоїть на кожній сторінці, тож усе статичне в ньому лягає в усі
+ * 24 маршрутні чанки. Виміряно на `TemplateVersionPage` (межа 250.0 КБ gzip):
+ * розширення шапки коштувало +0.6 КБ КОЖНОМУ маршруту, і два маршрути, що
+ * стояли за пів кілобайта від межі, перевалили за неї. Кнопки, меню й
+ * `actionButton` — найбільша частина цього приросту; підстави, чому лівий
+ * блок лишається тут, а не їде слідом, описані в `PageHeaderActions.tsx`.
+ *
+ * ⚠ `fallback={actions}`, а не `null`: 24 чинні сторінки передають дії саме
+ * пропом `actions`, і вони мусять бути на екрані з першого кадру. Нові кнопки
+ * з'являються на кадр пізніше — і платять за це лише ті сторінки, які їх
+ * замовили.
+ */
+const PageHeaderActions = lazy(() => import('./PageHeaderActions'));
 
 /**
  * Дія в шапці сторінки (`KIT.md` §6.4: `{label, icon, onClick|href, id}`).
@@ -28,9 +45,6 @@ export interface HeaderAction {
   readonly disabled?: boolean | undefined;
 }
 
-/** Скільки `secondary`-кнопок лишається на видноті (директива №15, §2). */
-const MaxInlineSecondary = 2;
-
 export interface PageHeaderProps {
   /** Назва екрана: вона ж отримує фокус, вона ж оголошується. */
   readonly title: string;
@@ -54,7 +68,7 @@ export interface PageHeaderProps {
   /** Головна дія екрана. Рівно одна (`L1`), і саме вона — `filled`. */
   readonly primary?: HeaderAction | undefined;
 
-  /** Другорядні дії. Понад `MaxInlineSecondary` — усі йдуть у меню. */
+  /** Другорядні дії. Понад дві — усі йдуть у меню (`PageHeaderActions.tsx`). */
   readonly secondary?: readonly HeaderAction[] | undefined;
 
   /** Дії, яким місце лише в меню. */
@@ -116,59 +130,6 @@ export function PageHeader({
     announceRoute(title);
   }, [title]);
 
-  /*
-   * ⛔ Межа саме тут: ДВІ другорядні кнопки лишаються на видноті, ТРЕТЯ
-   * забирає з видноти всі три. Не «третя їде в меню, а дві лишаються» —
-   * інакше поруч стояли б два способи дістатися до сусідніх за змістом дій,
-   * і користувач мусив би пам'ятати, які з них де.
-   */
-  const inline = secondary ?? [];
-  const overflow = inline.length > MaxInlineSecondary;
-  const menuItems = [...(overflow ? inline : []), ...(more ?? [])];
-
-  const rightNodes: ReactNode[] = [];
-
-  if (!overflow) {
-    for (const action of inline) rightNodes.push(actionButton(action, 'default'));
-  }
-
-  if (primary !== undefined) {
-    rightNodes.push(actionButton(primary, 'filled'));
-  }
-
-  if (menuItems.length > 0) {
-    rightNodes.push(
-      <Menu key="ecr-header-more" shadow="md" position="bottom-end" withinPortal>
-        <Menu.Target>
-          <Button variant="default">{moreLabel}</Button>
-        </Menu.Target>
-
-        <Menu.Dropdown>
-          {menuItems.map((action) =>
-            action.href === undefined ? (
-              <Menu.Item
-                key={action.label}
-                disabled={action.disabled === true}
-                onClick={action.onClick}
-              >
-                {action.label}
-              </Menu.Item>
-            ) : (
-              <Menu.Item
-                key={action.label}
-                component={Link}
-                to={action.href}
-                disabled={action.disabled === true}
-              >
-                {action.label}
-              </Menu.Item>
-            ),
-          )}
-        </Menu.Dropdown>
-      </Menu>,
-    );
-  }
-
   const headingNode = (
     /*
      * ⚠ `tabIndex={-1}`: заголовок приймає фокус програмно, але НЕ стає
@@ -214,57 +175,34 @@ export function PageHeader({
       </Stack>
     );
 
-  const right =
-    rightNodes.length === 0 ? (
-      actions
-    ) : (
-      <Group gap="xs" wrap="nowrap">
-        {actions}
-        {rightNodes}
-      </Group>
-    );
+  /*
+   * ⛔ Перевірка саме ТУТ, а не всередині лінивого модуля: якби `import()`
+   * стояв беззастережно, його замовляли б усі 24 маршрути і винесення не дало
+   * б нічого. Сторінка, що нових дій не просить, іде рівно тим шляхом, що й до
+   * розширення.
+   */
+  const wantsActions =
+    primary !== undefined || (secondary?.length ?? 0) > 0 || (more?.length ?? 0) > 0;
+
+  const right = wantsActions ? (
+    <Suspense fallback={actions}>
+      <PageHeaderActions
+        actions={actions}
+        primary={primary}
+        secondary={secondary}
+        more={more}
+        moreLabel={moreLabel}
+      />
+    </Suspense>
+  ) : (
+    actions
+  );
 
   return (
     <Group justify="space-between" mb="md">
       {left}
       {right}
     </Group>
-  );
-}
-
-/**
- * Кнопка дії.
- *
- * ⚠ `variant` заданий ЯВНО, а не лишений на дефолт Mantine: правило `L1`
- * (одна головна дія на екран) перевіряється тестом екрана по `data-variant`,
- * і атрибут з'являється лише тоді, коли проп переданий.
- *
- * ⚠ Фіксованої ширини немає (`ФВ-14.30`): підписи приходять трьома мовами.
- */
-function actionButton(action: HeaderAction, variant: 'filled' | 'default'): JSX.Element {
-  if (action.href !== undefined) {
-    return (
-      <Button
-        key={action.label}
-        component={Link}
-        to={action.href}
-        variant={variant}
-        disabled={action.disabled === true}
-      >
-        {action.label}
-      </Button>
-    );
-  }
-
-  return (
-    <Button
-      key={action.label}
-      variant={variant}
-      onClick={action.onClick}
-      disabled={action.disabled === true}
-    >
-      {action.label}
-    </Button>
   );
 }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
@@ -30,6 +30,44 @@ function show(node: ReactNode): void {
     </MantineProvider>,
   );
 }
+
+/**
+ * ⛔ Прогрів `React.lazy`, і без нього половина цього файлу була б
+ * ХИБНОЗЕЛЕНОЮ.
+ *
+ * Меню «More» вантажиться за `import()` (бюджет `D-132`, див. коментар у
+ * `PageHeader.tsx`), тобто в першому ж кадрі його немає НІКОЛИ — ні тоді,
+ * коли воно не замовлене, ні тоді, коли замовлене. Перевірка «меню не
+ * з'явилося» одразу після рендера в такому світі не перевіряє нічого:
+ * вона зелена завжди. Перевірено на мутації — з `overflow` при ДВОХ
+ * secondary вона лишалася зеленою.
+ *
+ * Після першого розв'язаного `import()` React запам'ятовує модуль, і всі
+ * наступні рендери малюють меню СИНХРОННО. Тому один прогрівальний рендер
+ * тут повертає решті тестів право стверджувати «є» і «немає» в тому самому
+ * кадрі.
+ *
+ * ⚠ Назва прогріву не повторює жодної іншої в файлі: `announceRoute`
+ * дедуплікує за текстом.
+ */
+beforeAll(async () => {
+  render(
+    <MantineProvider>
+      <MemoryRouter>
+        <PageHeader
+          title="Прогрів lazy-меню"
+          more={[{ label: 'пункт прогріву' }]}
+          moreLabel="Прогрів"
+        />
+      </MemoryRouter>
+    </MantineProvider>,
+  );
+
+  // ⚠ Чекаємо на КНОПКУ меню: пункти живуть у `Menu.Dropdown` і до відкриття
+  // в дереві їх немає взагалі.
+  await screen.findByRole('button', { name: 'Прогрів' });
+  cleanup();
+});
 
 afterEach(() => {
   cleanup();

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, act } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import type { ReactNode } from 'react';
@@ -61,6 +61,30 @@ beforeEach(() => {
       },
     },
   });
+});
+
+/**
+ * ⛔ Прогрів `React.lazy`, і без нього половина перевірок нижче була б
+ * ХИБНОЗЕЛЕНОЮ.
+ *
+ * Кнопка копіювання вантажиться за `import()` (бюджет `D-132`, див. коментар
+ * у `AsyncBoundary.tsx`), тобто в першому кадрі її немає НІКОЛИ — ні коли
+ * `copyLabel` не передано, ні коли передано. Тоді «кнопки копіювання немає» і
+ * «кнопок рівно одна» зелені завжди, тобто не перевіряють нічого.
+ *
+ * Після першого розв'язаного `import()` React запам'ятовує модуль, і наступні
+ * рендери малюють кнопку СИНХРОННО — твердження «є» і «немає» знову можна
+ * робити в тому самому кадрі.
+ */
+beforeAll(async () => {
+  render(
+    <MantineProvider>
+      <ErrorState error={refusal('cid-прогрів')} copyLabel="Прогрів копіювання" />
+    </MantineProvider>,
+  );
+
+  await screen.findByRole('button', { name: 'Прогрів копіювання' });
+  cleanup();
 });
 
 afterEach(() => {
