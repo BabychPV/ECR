@@ -2969,15 +2969,25 @@ GO
 -- Мінімальний ПУБЛІЧНИЙ набір (Scope = 0) мовою за замовчуванням.
 -- Без нього перший запуск покаже сирі ключі на сторінці входу — першому,
 -- що бачить будь-хто. Решта ключів додається разом із областями UI.
+--
+-- ⛔ Це ІЛЮСТРАЦІЯ форми, а не джерело. Єдине джерело —
+-- `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql`; ключі звідти звіряє
+-- `SeedIllustrationTests` у `Ecr.Architecture.Tests`.
+--
+-- ✎ 2026-09-19: тут стояли ключі з префіксом `auth.` — сімох із них у сіді
+-- НЕ ІСНУЄ і ніколи не існувало (`auth.title`, `auth.windows`, `auth.local`,
+-- `auth.userName`, `auth.password`, `auth.submit`, `auth.mustChange`).
+-- Сторінка входу просить `login.*` (`LoginPage.tsx`). Той, хто пішов би за
+-- цим прикладом, засіяв би ключі, яких ніхто не читає, і на екрані лишилося б
+-- `⟦login.title⟧` — тобто рівно та поломка, від якої коментар вище застерігає.
 MERGE sys_ecr.UiString AS t
 USING (VALUES
-    (N'auth.title',            N'en', N'Environmental Compliance Reporting', 0),
-    (N'auth.windows',          N'en', N'Sign in with Windows',              0),
-    (N'auth.local',            N'en', N'Sign in with account',              0),
-    (N'auth.userName',         N'en', N'User name',                         0),
-    (N'auth.password',         N'en', N'Password',                          0),
-    (N'auth.submit',           N'en', N'Sign in',                           0),
-    (N'auth.mustChange',       N'en', N'Change your password to continue',  0),
+    (N'login.title',           N'en', N'Environmental Compliance Reporting', 0),
+    (N'login.windows',         N'en', N'Sign in with Windows',              0),
+    (N'login.or',              N'en', N'or',                                0),
+    (N'login.user',            N'en', N'User name',                         0),
+    (N'login.password',        N'en', N'Password',                          0),
+    (N'login.submit',          N'en', N'Sign in',                           0),
     (N'common.save',           N'en', N'Save',                              0),
     (N'common.cancel',         N'en', N'Cancel',                            0),
     (N'common.retry',          N'en', N'Retry',                             0),
