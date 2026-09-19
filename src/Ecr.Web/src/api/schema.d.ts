@@ -10010,6 +10010,9 @@ export interface components {
              * @description Скільки комірок записано.
              */
             appliedCells: number;
+            /** @description Ідентифікатор поставленої задачі перерахунку формул; `null` —
+             *     перерахунку НЕ поставлено (`BE-05`). */
+            recalculationJobId?: null | string;
             /** @description Нові версії зачеплених рядків: `RowKey` → hex. */
             rowVersions: {
                 [key: string]: string;

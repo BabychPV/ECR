@@ -349,6 +349,16 @@ USING (VALUES
     (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0403.requiresPermission', N'en', N'Requires permission', 1),
     (N'err.ECR-AUTH-0423', N'en', N'The account is locked.', 0),
+    -- ⛔ ECR-AUTH-0429 і ECR-AUTH-0423 — РІЗНІ стани, і доки першого не було,
+    -- обмежувач частоти (`LoginRateLimiting`, S-10) відповідав другим: заголовок
+    -- казав «The account is locked.», хоча межу вичерпала АДРЕСА, а обліковку
+    -- ніхто не блокував — і заблокувати не міг, бо межа ріже ще до того, як
+    -- стане відомо, чи існує назване ім'я. Ціна була не в тексті: користувач
+    -- дзвонив у підтримку через блокування, якого немає.
+    -- ⚠ Публічна область (0): цей стан видно ДО входу (ФВ-14.9b).
+    (N'err.ECR-AUTH-0429', N'en', N'Too many sign-in attempts', 0),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'en',
+     N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', 0),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
 
@@ -665,6 +675,14 @@ USING (VALUES
     (N'grid.saving',                     N'en', N'Saving...', 1),
     (N'grid.saved',                      N'en', N'Saved', 1),
     (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    -- ⛔ `BE-05`: статус-рядок перерахунку. Запис і перерахунок — різні моменти:
+    -- комірка вже в базі, а обчислені колонки ще ні, і до появи `jobId` у
+    -- відповіді сказати про це було нічим.
+    -- ⚠ `{time}` — година й хвилина, коли ЦЕЙ екран побачив завершення:
+    -- `JobStatus` позначки часу не несе (`useCellPatch.clockLabel`).
+    (N'grid.recalculating',              N'en', N'Recalculating...', 1),
+    (N'grid.recalculated',               N'en', N'Recalculated {time}', 1),
+    (N'grid.recalcFailed',               N'en', N'Recalculation failed', 1),
     (N'grid.requiredInputBlockedTitle',  N'en', N'Cannot save: {count} required column(s) missing', 1),
     (N'grid.requiredInputWarningTitle',  N'en', N'{count} required column(s) missing (does not block saving)', 1),
     (N'grid.columnRequiredHint',         N'en', N'This column is required.', 1),
