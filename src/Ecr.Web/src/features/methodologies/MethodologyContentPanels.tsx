@@ -319,6 +319,7 @@ export function MethodologyConstantsPanel({
             )}
 
             <TextInput
+              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №3/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
               type="date"
               label={t('methodologies.validFrom')}
               value={editing.validFrom}
@@ -326,6 +327,7 @@ export function MethodologyConstantsPanel({
             />
 
             <TextInput
+              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №4/8: див. коментар вище
               type="date"
               label={t('methodologies.validTo')}
               description={t('methodologies.validToHint')}

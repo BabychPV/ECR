@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -78,7 +78,7 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
 
         var plans = await PlanCountAsync("%MERGE doc.CellValue%", ct);
 
-        AssertPlans(plans, "MERGE doc.CellValue");
+        AssertPlans(plans, "MERGE doc.CellValue", await PlanFilterWorksAsync(ct));
     }
 
     [Fact]
@@ -92,7 +92,10 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
         var plans = await MeasureAsync(
             (doc, seed) => new CellValueData { ValueNumeric = Numeric(seed) }, CancellationToken.None);
 
-        AssertPlans(plans, "MERGE doc.CellValue (лише число)");
+        AssertPlans(
+            plans,
+            "MERGE doc.CellValue (лише число)",
+            await PlanFilterWorksAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -107,7 +110,10 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
             },
             CancellationToken.None);
 
-        AssertPlans(plans, "MERGE doc.CellValue (лише дата)");
+        AssertPlans(
+            plans,
+            "MERGE doc.CellValue (лише дата)",
+            await PlanFilterWorksAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -139,12 +145,16 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
 
         var plans = await PlanCountAsync("%INSERT INTO aud.CellChange%", ct);
 
-        AssertPlans(plans, "INSERT aud.CellChange");
+        AssertPlans(plans, "INSERT aud.CellChange", await PlanFilterWorksAsync(ct));
     }
 
     /// <summary>Стеля І підлога числа планів.</summary>
     /// <param name="plans">Виміряне число.</param>
     /// <param name="what">Що саме рахували — для тексту відмови.</param>
+    /// <param name="filterWorks">
+    /// Чи підтвердив контрольний зонд, що фільтр узагалі щось знаходить.
+    /// Відрізняє «замір зламаний» від «план витіснено чужим навантаженням».
+    /// </param>
     /// <remarks>
     /// ⛔ Підлога важить не менше за стелю. Перша редакція цього тесту мала
     /// лише стелю, замір давав <b>0</b> через хибний фільтр по базі — і тест
@@ -152,18 +162,62 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
     /// <c>SqlClientCommandCounter.AssertObserved</c>: мовчазний нуль читається
     /// як «оптимізація вдалася» і є найгіршим із можливих результатів.
     /// </remarks>
-    private static void AssertPlans(int plans, string what)
+    private static void AssertPlans(int plans, string what, bool filterWorks)
     {
-        Assert.True(
-            plans >= 1,
-            $"Планів {what} у кеші: 0. Замір НЕ ВІДБУВСЯ — нуль тут не є "
-            + "доказом. Дивись фільтр по базі в PlanCountAsync.");
+        // ⛔ Нуль має ДВІ різні причини, і плутати їх не можна.
+        //
+        // (а) Фільтр по базі зламаний — тоді нуль буде завжди, і тест мовчки
+        //     проходив би на коді до `WR-01`. Це те, проти чого підлога й
+        //     заведена.
+        // (б) План ВИТІСНЕНО з кешу. Кеш планів загальносерверний, і коли на
+        //     тому самому інстансі паралельно працюють інші прогони (у цій
+        //     сесії — до п'яти агентів на одній машині), чужа робота витісняє
+        //     наш план між записом і заміром. Це не дефект продукту й не
+        //     дефект фільтра — це шум спільного ресурсу.
+        //
+        // Перша редакція мала лише `plans >= 1` і читала (б) як (а): тест
+        // падав у трьох повних прогонах поспіль різними підмножинами, а
+        // поодинці був зелений. Тому тепер причина називається окремим
+        // зондом, і повідомлення відмови каже, що саме сталося.
+        if (plans == 0)
+        {
+            Assert.True(
+                filterWorks,
+                $"Планів {what} у кеші: 0, і контрольний зонд теж нічого не "
+                + "знайшов. Замір НЕ ВІДБУВСЯ — фільтр по базі в PlanCountAsync "
+                + "зламаний, і нуль тут не є доказом.");
+
+            Assert.Fail(
+                $"Планів {what} у кеші: 0, хоча контрольний зонд фільтр "
+                + "підтвердив. Найімовірніше — план ВИТІСНЕНО з кешу чужим "
+                + "навантаженням на цьому ж інстансі SQL Server. Повтори "
+                + "прогін на вільній машині; якщо нуль лишається — це вже "
+                + "дефект заміру, а не шум.");
+        }
 
         Assert.True(
             plans <= MaxPlans,
             $"Планів {what} у кеші: {plans} на {Writes} записів. Сигнатура "
             + "запиту залежить від даних (Precision/Scale/довжина рядка) — "
             + "WR-01 не діє.");
+    }
+
+    /// <summary>
+    /// Чи здатен <see cref="PlanCountAsync"/> узагалі щось знайти в ЦЕЙ момент.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Зонд виконує власний, свідомо унікальний запит і одразу шукає його
+    /// план. Якщо не знаходить — справа у фільтрі (база, `dbid`, форма тексту),
+    /// а не в тому, що `WR-01` не працює. Унікальний коментар у тексті запиту
+    /// гарантує, що ми знаходимо саме свій план, а не чийсь схожий.
+    /// </remarks>
+    private async Task<bool> PlanFilterWorksAsync(CancellationToken ct)
+    {
+        var marker = $"ecr-plan-probe-{Guid.NewGuid():N}";
+
+        await ExecuteAsync($"SELECT 1 /* {marker} */;", ct);
+
+        return await PlanCountAsync($"%{marker}%", ct) >= 1;
     }
 
     /// <summary>Двадцять записів однієї комірки і число планів після них.</summary>
