@@ -1678,8 +1678,17 @@ export interface paths {
         /**
          * Увімкнені мови в порядку показу.
          * @description Без права: перелік мов не є таємницею, а потрібен кожному екрану, що
-         *     має локалізовану назву. Анонімно теж не віддається — сторінка входу
-         *     обирає мову з браузера і збереженого вибору, реєстр їй не потрібен.
+         *     має локалізовану назву.
+         *
+         *     ⛔ ✎ 2026-09-19 (`BE-07`): речення «анонімно теж не віддається —
+         *     сторінка входу обирає мову з браузера і збереженого вибору, реєстр їй не
+         *     потрібен» БІЛЬШЕ НЕ ЧИННЕ і тому прибране, а не лишене поруч із новою
+         *     правдою. Макет екрана входу дає вибір мови явним перемикачем, а не лише
+         *     вгадуванням із браузера, і перелік для нього віддає анонімний
+         *     `GET /api/v1/public/bootstrap` (PublicController).
+         *     ЦЕЙ маршрут лишається закритим: він обслуговує редактор перекладів і
+         *     поля локалізованих назв, тобто вже автентифіковані екрани, і відкривати
+         *     його заради екрана входу не було потреби.
          */
         get: {
             parameters: {
@@ -4113,6 +4122,49 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версія продукту, мови і доступні способи входу.
+         * @description ⚠ Дія не приймає ЖОДНОГО параметра — ні шляху, ні рядка запиту, ні тіла.
+         *     Це і є доказ того, що відповідь не може залежати від імені користувача:
+         *     їй нізвідки його взяти.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicBootstrapResponse"];
+                        "text/json": components["schemas"]["PublicBootstrapResponse"];
+                        "text/plain": components["schemas"]["PublicBootstrapResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -10248,6 +10300,17 @@ export interface components {
             status: components["schemas"]["ProjectStatus"];
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). */
             timeZoneId: string;
+        };
+        /** @description Публічні дані екрана входу. */
+        PublicBootstrapResponse: {
+            /** @description Увімкнені мови реєстру в порядку показу. */
+            languages: components["schemas"]["LanguageDto"][];
+            /** @description Чи показувати форму локального входу. */
+            localSignInEnabled: boolean;
+            /** @description Версія продукту без метаданих збірки. */
+            productVersion: string;
+            /** @description Чи показувати кнопку доменного входу. */
+            windowsSignInEnabled: boolean;
         };
         /** @description Запит на публікацію версії методології. */
         PublishMethodologyRequest: {
