@@ -605,7 +605,7 @@ W4 — останньою
 
 | Документ | Твердження | Факт |
 |---|---|---|
-| `problems.md` `P-02` | ролі на AD-групу не працюють | ✔ працюють: `AccessDecisionService.cs:170` |
+| `problems.md` `P-02` | ролі на AD-групу не працюють | ~~✔ працюють: `AccessDecisionService.cs:170`~~ ✎ 2026-09-19: хибно — профіль читав групи, але cookie їх не несла, тож після входу групові ролі не діяли; закрито (`WindowsGroupRolesTests`, `problems.md` `P-02`) |
 | `unreachable-mechanisms.md` | 12 перевірених тверджень | ◐ 8 хибні (напр. `EnsureStructurallyMutable` «кличе лише тест» — 21 виклик) |
 | `roadmap.md:197-200` | екрана редагування методологій не існує | ◐ `MethodologyVersionsPage.tsx` існує |
 | `11-install-guide.md:358` | лог у `%ProgramData%\ECR\logs` | ◐ файлового логера немає |

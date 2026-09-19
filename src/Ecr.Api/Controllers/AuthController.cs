@@ -47,8 +47,8 @@ public sealed class AuthController(
         // коли зміниться спосіб їх читати.
         //
         // ⚠ На цьому шляху `HttpContext.User` — принципал Negotiate, тобто
-        // заявки квитка. Після `SignInAsync` там уже наша cookie, у якій груп
-        // немає, — прочитати їх пізніше було б нічим.
+        // заявки квитка. Після `SignInAsync` там уже наша cookie, і в ній лише
+        // ті групи, які вхід переніс сам (`LoginResult.GroupSids`).
         var result = await login
             .HandleWindowsAsync(sid, userName, userName, currentUser.GroupSids, RemoteIp, ct)
             .ConfigureAwait(false);
@@ -143,6 +143,15 @@ public sealed class AuthController(
         {
             claims.Add(new Claim(AuthenticationSetup.MustChangePasswordClaim, "1"));
         }
+
+        // ⛔ Без цього групові ролі НЕ діють узагалі (`P-02`): на наступних
+        // запитах `ICurrentUser.GroupSids` читає ЦЮ cookie, а не квиток
+        // Negotiate. Кладеться лише перетин квитка з призначеннями (0–5
+        // значень), а не весь квиток: сотні SID не влазять у ~4 КБ cookie.
+        // ⚠ Ціна: зміна членства в AD і перше призначення на нову групу діють
+        // з наступного входу (ФВ-6.15a); відкликання — негайно, бо профіль
+        // читає призначення з бази.
+        claims.AddRange(result.GroupSids.Select(sid => new Claim(ClaimTypes.GroupSid, sid)));
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
 
