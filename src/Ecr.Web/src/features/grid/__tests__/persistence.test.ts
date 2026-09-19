@@ -87,14 +87,25 @@ describe('Щільність переживає перезавантаження
     expect(rowHeight('comfortable')).toBeGreaterThan(rowHeight('compact'));
   });
 
-  it('застосовується CSS-змінною, а не перерендером таблиць', () => {
+  it('застосовується атрибутом кореня, а не перерендером таблиць', () => {
     applyDensity('comfortable');
 
-    // ⛔ Саме змінна: щільність зачіпає всі п'ятнадцять подань, і пропустити
+    // ⛔ Саме атрибут: щільність зачіпає всі п'ятнадцять подань, і пропустити
     // її в одному означало б, що екран «майже» перемкнувся.
-    expect(document.documentElement.style.getPropertyValue('--ecr-row-height')).toBe(
-      `${rowHeight('comfortable')}px`,
-    );
+    //
+    // ⛔ `UI-03`: тут стояло ще й твердження про ІНЛАЙНОВУ `--ecr-row-height`
+    // на `<html>`. Інлайн прибрано навмисно — він вигравав каскад, тобто
+    // справжнім джерелом висоти було число з `theme.ts`, а три змінні
+    // `tokens.css` лишалися декорацією (прибери їх — не зміниться нічого).
+    // Тепер джерело одне: атрибут вибирає набір змінних у `tokens.css`.
+    //
+    // ⚠ Що ці змінні справді дають різну ОБЧИСЛЕНУ висоту рядка таблиці й
+    // сітки — доводять `shared/theme/__tests__/density.test.tsx` і
+    // `features/grid/__tests__/density.test.tsx`; тут — лише те, що вибір
+    // долітає до кореня документа.
     expect(document.documentElement.dataset['ecrDensity']).toBe('comfortable');
+
+    applyDensity('compact');
+    expect(document.documentElement.dataset['ecrDensity']).toBe('compact');
   });
 });
