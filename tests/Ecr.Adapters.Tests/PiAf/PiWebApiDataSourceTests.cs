@@ -35,6 +35,17 @@ namespace Ecr.Adapters.Tests.PiAf;
 /// </remarks>
 public sealed class PiWebApiDataSourceTests
 {
+    /// <summary>
+    /// Крок системного таймера — на нього послаблено нижні межі затримок.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 15.6 мс — типовий крок таймера Windows, яким планується
+    /// <c>Task.Delay</c>. <c>Stopwatch</c> рахує іншим джерелом, тож затримка
+    /// на 2000 мс зрідка вимірюється як 1999.х. Округлено до 20 мс: запас має
+    /// покривати крок, а не дорівнювати йому.
+    /// </remarks>
+    private static readonly TimeSpan TimerGranularity = TimeSpan.FromMilliseconds(20);
+
     private static readonly DateTime From = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime To = new(2026, 1, 1, 1, 0, 0, DateTimeKind.Utc);
 
@@ -114,8 +125,17 @@ public sealed class PiWebApiDataSourceTests
         // ⛔ Мутаційна перевірка: без циклу повторів перший 408 кидав би винятком
         // одразу — виклик не дійшов би до другого запиту (Requests.Count == 1),
         // і затримки не було б узагалі.
+        //
+        // ⚠ Поріг послаблено на роздільність таймера, і це не «підняв поріг».
+        // `Task.Delay` планується системним таймером із кроком ≈15.6 мс і може
+        // завершитися на кілька мілісекунд РАНІШЕ, ніж покаже `Stopwatch`
+        // (різні джерела часу). Через це `Elapsed >= RetryDelay` зрідка падало
+        // на 1999.х мс проти 2000 — я бачив це тричі за добу, і щоразу тест
+        // проходив на повторі. Твердження тут — «затримка ретраю СТАЛАСЯ», а
+        // не «вона тривала не менш ніж 2000.000 мс»: друге неперевірювано за
+        // побудовою годинника, а перше цією межею доводиться так само.
         Assert.True(
-            stopwatch.Elapsed >= PiWebApiDataSource.RetryDelay,
+            stopwatch.Elapsed >= PiWebApiDataSource.RetryDelay - TimerGranularity,
             $"мало пройти принаймні одну затримку ретраю ({PiWebApiDataSource.RetryDelay}), минуло {stopwatch.Elapsed}.");
     }
 
@@ -164,8 +184,11 @@ public sealed class PiWebApiDataSourceTests
         // ⛔ Мутаційна перевірка на ПОДВОЄННЯ: рівно одна стала затримка (2с)
         // між трьома спробами дала б ~4с; подвоєння (2с + 4с) дає ~6с.
         // Поріг 5с відрізняє «доведено подвоєння» від «однакова пауза щоразу».
+        // ⚠ Тут запас уже є за побудовою: поріг 5 с проти очікуваних ~6 с, тож
+        // роздільність таймера його не пробиває. Віднімаємо однаково — щоб
+        // обидві межі в цьому файлі читалися за одним правилом.
         Assert.True(
-            stopwatch.Elapsed >= TimeSpan.FromSeconds(5),
+            stopwatch.Elapsed >= TimeSpan.FromSeconds(5) - TimerGranularity,
             $"подвоєння (2с+4с) мало дати ~6с затримки, минуло лише {stopwatch.Elapsed}.");
     }
 
