@@ -199,10 +199,37 @@ public sealed class VerifyReportSnapshotHandler(
 
         // ⚠ Порожня збережена сума — «не збігається», а не «нема чого
         // перевіряти»: зріз без суми довести свою незмінність не може.
-        var matches = hashes.Stored.Length > 0
-                      && string.Equals(hashes.Stored, hashes.Actual, StringComparison.OrdinalIgnoreCase);
+        var format = MatchedFormat(hashes);
 
-        return new SnapshotVerifyResponse(matches, hashes.Stored, hashes.Actual);
+        return new SnapshotVerifyResponse(format is not null, hashes.Stored, hashes.Actual, format);
+    }
+
+    /// <summary>Формат суми, за яким збігся вміст.</summary>
+    public const string FormatCurrent = "current";
+
+    /// <summary>Формат до BE-17.</summary>
+    /// <remarks>
+    /// ⚠ ТИМЧАСОВО: приймається для зрізів, побудованих до BE-17; прибрати,
+    /// коли таких не лишиться.
+    /// </remarks>
+    public const string FormatLegacy = "legacy";
+
+    private static string? MatchedFormat(SnapshotHashes hashes)
+    {
+        if (hashes.Stored.Length == 0)
+        {
+            return null;
+        }
+
+        if (string.Equals(hashes.Stored, hashes.Actual, StringComparison.OrdinalIgnoreCase))
+        {
+            return FormatCurrent;
+        }
+
+        return hashes.LegacyActual is { Length: > 0 } legacy
+               && string.Equals(hashes.Stored, legacy, StringComparison.OrdinalIgnoreCase)
+            ? FormatLegacy
+            : null;
     }
 
     private static NotFoundException NotFound(long snapshotId)
@@ -213,7 +240,11 @@ public sealed class VerifyReportSnapshotHandler(
 /// <param name="Matches">Чи перерахована сума збіглася зі збереженою.</param>
 /// <param name="Stored">Сума, записана при побудові (hex).</param>
 /// <param name="Actual">Сума, перерахована за збереженими рядками (hex).</param>
-public sealed record SnapshotVerifyResponse(bool Matches, string Stored, string Actual);
+/// <param name="MatchedFormat">
+/// За яким форматом суми збіглося: <c>current</c>, <c>legacy</c> (зріз,
+/// побудований до BE-17) або <c>null</c> — не збіглося за жодним.
+/// </param>
+public sealed record SnapshotVerifyResponse(bool Matches, string Stored, string Actual, string? MatchedFormat);
 
 /// <summary>Завдання на побудову зрізу.</summary>
 /// <param name="ReportVersionId">Версія звіту.</param>

@@ -41,7 +41,42 @@ public sealed class VerifyReportSnapshotHandlerTests
 
         var result = await Handler().HandleAsync(Snapshot, CancellationToken.None);
 
-        Assert.Equal(new SnapshotVerifyResponse(true, "AB12", "AB12"), result);
+        Assert.Equal(new SnapshotVerifyResponse(true, "AB12", "AB12", "current"), result);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Збіг_лише_за_старим_форматом_це_збіг_із_позначкою_legacy()
+    {
+        _snapshots.VerifyAsync(Snapshot, Arg.Any<CancellationToken>())
+                  .Returns(new SnapshotHashes("AB12", "CD34", "AB12"));
+
+        var result = await Handler().HandleAsync(Snapshot, CancellationToken.None);
+
+        Assert.Equal(new SnapshotVerifyResponse(true, "AB12", "CD34", "legacy"), result);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Незбіг_за_обома_форматами_це_незбіг()
+    {
+        _snapshots.VerifyAsync(Snapshot, Arg.Any<CancellationToken>())
+                  .Returns(new SnapshotHashes("AB12", "CD34", "EF56"));
+
+        var result = await Handler().HandleAsync(Snapshot, CancellationToken.None);
+
+        Assert.False(result.Matches);
+        Assert.Null(result.MatchedFormat);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Порожня_збережена_сума_не_збігається_і_з_порожньою_старою()
+    {
+        _snapshots.VerifyAsync(Snapshot, Arg.Any<CancellationToken>())
+                  .Returns(new SnapshotHashes(string.Empty, "CD34", string.Empty));
+
+        var result = await Handler().HandleAsync(Snapshot, CancellationToken.None);
+
+        Assert.False(result.Matches);
+        Assert.Null(result.MatchedFormat);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]

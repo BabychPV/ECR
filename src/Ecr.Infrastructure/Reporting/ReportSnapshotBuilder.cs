@@ -213,9 +213,16 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             .ThenBy(r => r.ColumnCode, StringComparer.Ordinal)
             .ToList();
 
-        return new SnapshotHashes(
-            stored.Hash is null ? string.Empty : Convert.ToHexString(stored.Hash),
-            Convert.ToHexString(ComputeHash(ordered)));
+        var storedHex = stored.Hash is null ? string.Empty : Convert.ToHexString(stored.Hash);
+        var actualHex = Convert.ToHexString(ComputeHash(ordered));
+
+        // Стара сума рахується лише тоді, коли нова не збіглася: для зрізів,
+        // побудованих після BE-17, вона не потрібна взагалі.
+        var legacyHex = string.Equals(storedHex, actualHex, StringComparison.Ordinal)
+            ? null
+            : Convert.ToHexString(ComputeLegacyHash(ordered));
+
+        return new SnapshotHashes(storedHex, actualHex, legacyHex);
     }
 
     /// <summary>Порядок комірок у рядку — той, у якому їх складає <c>AggregateAsync</c>.</summary>
@@ -402,11 +409,59 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     {
         ArgumentNullException.ThrowIfNull(rows);
 
+        return HashOf(rows, r => Canonical(r.ValueNumeric));
+    }
+
+    /// <summary>
+    /// Контрольна сума за форматом ДО BE-17, відтворена зі збережених рядків.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ ТИМЧАСОВО прийнятний формат: приймається для зрізів, побудованих до
+    /// BE-17; прибрати, коли таких не лишиться (жоден <c>rpt.ReportSnapshot</c>
+    /// не збігається за ним — або всі старі перебудовано).
+    /// <para>
+    /// Стара сума писала число як <c>decimal.ToString()</c>, тобто з масштабом,
+    /// який число мало В МИТЬ ПОБУДОВИ. Масштаб у базі втрачено (усе стало
+    /// <c>decimal(28,10)</c>), але для рядків, які складає
+    /// <c>AggregateAsync</c>, він відновлюється з коду колонки однозначно:
+    /// <c>DocumentId</c> і <c>SubstanceEntryId</c> — це <c>long</c> (масштаб 0,
+    /// «4217»), а <c>Value</c> читалось із <c>calc.CalculationResult.Value</c>,
+    /// колонки <c>decimal(28,10)</c>, і SqlClient віддає його з масштабом 10
+    /// («12.5000000000»). Порядок комірок той самий, що й тепер.
+    /// </para>
+    /// <para>
+    /// ⛔ Межа: зріз, рядки якого складено НЕ побудовою (інші колонки, число
+    /// з іншим масштабом), за старим форматом не відтворюється — і тоді
+    /// відповідь лишається «не збігається», бо довести протилежне нема чим.
+    /// </para>
+    /// </remarks>
+    private static byte[] ComputeLegacyHash(IReadOnlyList<ReportRow> rows)
+        => HashOf(rows, LegacyNumber);
+
+    /// <summary>Число так, як його друкував код до BE-17 у мить побудови.</summary>
+    private static string LegacyNumber(ReportRow row)
+    {
+        if (row.ValueNumeric is not { } number)
+        {
+            return string.Empty;
+        }
+
+        // ⛔ Ціла форма — лише для справді цілого ідентифікатора. Відкинути
+        // дріб беззастережно означало б сховати підміну `4217` → `4217.5`.
+        var isId = row.ColumnCode is "DocumentId" or "SubstanceEntryId";
+
+        return isId && number == decimal.Truncate(number)
+            ? decimal.Truncate(number).ToString(CultureInfo.InvariantCulture)
+            : number.ToString("F10", CultureInfo.InvariantCulture);
+    }
+
+    private static byte[] HashOf(IReadOnlyList<ReportRow> rows, Func<ReportRow, string> number)
+    {
         var text = string.Join(
             '\n',
             rows.Select(r => string.Create(
                 CultureInfo.InvariantCulture,
-                $"{r.RowNo}|{r.ColumnCode}|{r.ValueString}|{Canonical(r.ValueNumeric)}")));
+                $"{r.RowNo}|{r.ColumnCode}|{r.ValueString}|{number(r)}")));
 
         return SHA256.HashData(Encoding.UTF8.GetBytes(text));
     }

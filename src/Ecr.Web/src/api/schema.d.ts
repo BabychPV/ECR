@@ -11672,6 +11672,9 @@ export interface components {
         SnapshotVerifyResponse: {
             /** @description Сума, перерахована за збереженими рядками (hex). */
             actual: string;
+            /** @description За яким форматом суми збіглося: `current`, `legacy` (зріз,
+             *     побудований до BE-17) або `null` — не збіглося за жодним. */
+            matchedFormat: null | string;
             /** @description Чи перерахована сума збіглася зі збереженою. */
             matches: boolean;
             /** @description Сума, записана при побудові (hex). */
