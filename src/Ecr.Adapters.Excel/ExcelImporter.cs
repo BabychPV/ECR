@@ -28,7 +28,9 @@ public sealed class ExcelImporter(
     PatchCellsHandler patch,
     ImportDiffBuilder diffBuilder,
     ICellStore cellStore,
-    IRowStore rowStore) : IExcelImporter
+    IRowStore rowStore,
+    IUnitOfWork uow,
+    IBackgroundJobScheduler jobs) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -226,6 +228,35 @@ public sealed class ExcelImporter(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ `DAT-05` («усе або нічого»). До цієї правки цикл нижче кликав
+    /// <c>patch.HandleAsync</c> на КОЖНУ таблицю окремо — кожну зі своєю
+    /// транзакцією і своєю задачею перерахунку. Конфлікт на третій із десяти
+    /// означав: дві вже застосовано й закомічено, клієнт отримує помилку БЕЗ
+    /// переліку застосованого, документ лишається в стані, якого ніхто не
+    /// замовляв. Головний аргумент не в транзакціях: користувач щойно бачив
+    /// diff ЦІЛОЇ КНИГИ і натиснув «Apply» на нього — часткове застосування не
+    /// відповідає жодному екрану системи (`D14-04`). Альтернатива «частковий
+    /// результат із переліком» відхилена свідомо: вона чесніша за колишню
+    /// поведінку, але вимагає нового екрана «застосовано 2 з 10» і лишає той
+    /// самий незамовлений стан.
+    ///
+    /// ⚠ Одна транзакція на всю книгу працює без змін у сховищах:
+    /// <c>NormalizedCellStore.ApplyAsync</c> приєднується до ambient-транзакції
+    /// (<c>db.Database.CurrentTransaction</c>) замість відкриття власної,
+    /// <c>RowStore</c>, <c>DocumentStore</c> і <c>AuditWriter</c> ідуть через
+    /// ТОЙ САМИЙ <c>EcrDbContext</c> (один DI-скоуп), а вкладений
+    /// <c>ExecuteInTransactionAsync</c> усередині <c>PatchCellsHandler</c>
+    /// бачить відкриту транзакцію і просто виконує тіло, лишаючи коміт нам.
+    ///
+    /// ⚠ Ціна — довша транзакція; межу задає розмір книги (`S-16`/`S-17`), а
+    /// під RCSI читачів вона не блокує.
+    ///
+    /// ⚠ Перерахунок ставиться ОДИН на документ і ПІСЛЯ коміту. До `MI-02`
+    /// (транзакційна черга) це неможливо зробити всередині: Quartz тримає чергу
+    /// в пам'яті, воркер стартує раніше за коміт і прочитав би або старі дані,
+    /// або — після відкату — дані, яких не було ніколи.
+    /// </remarks>
     public async Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
     {
         var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
@@ -233,38 +264,87 @@ public sealed class ExcelImporter(
         var applied = 0;
         var versions = new Dictionary<string, string>(StringComparer.Ordinal);
         var validation = new List<ValidationMessageDto>();
+        var seeds = new List<RecalculationSeed>();
+        long seedTableInstanceId = 0;
 
-        foreach (var diff in plan.Tables.Where(t => t.Changes.Count > 0))
-        {
-            // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
-            // baseVersion. Саме це змушує звичайний шлях запису відхилити
-            // весь батч, якщо між переглядом і застосуванням хтось правив ті
-            // самі рядки (ECR-CELL-0409) — тобто конфлікт ловить одна
-            // перевірка, а не дві, які вміють розійтися.
-            var rows = diff.Changes
-                .GroupBy(c => c.RowKey, StringComparer.Ordinal)
-                .Select(g => new PatchRow(
-                    g.Key,
-                    diff.RowVersions.GetValueOrDefault(g.Key),
-                    g.Select(c => new PatchCell(c.ColumnCode, c.NewValue)).ToList()))
-                .ToList();
-
-            // ⚠ Той самий шлях, що й batch-PATCH, із Origin = "Import".
-            // Окремий шлях запису означав би, що аудит, валідація і
-            // перерахунок для імпорту працюють інакше — і розбіжність
-            // виявиться на числах, а не на коді.
-            var response = await patch
-                .HandleAsync(
-                    new PatchCellsRequest(diff.TableInstanceId, diff.PeriodKey, "Import", rows), ct)
-                .ConfigureAwait(false);
-
-            applied += response.AppliedCells;
-            validation.AddRange(response.Validation);
-
-            foreach (var (key, version) in response.RowVersions)
+        await uow.ExecuteInTransactionAsync(
+            async innerCt =>
             {
-                versions[key] = version;
-            }
+                // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
+                // оголошенням: <c>ExecuteInTransactionAsync</c> віддає тіло
+                // стратегії повторів EF (<c>EnableRetryOnFailure</c>), яка має
+                // право виконати його ще раз після транзієнтного збою. Без
+                // скидання другий прохід додав би свої числа до чисел першого.
+                applied = 0;
+                versions.Clear();
+                validation.Clear();
+                seeds.Clear();
+                seedTableInstanceId = 0;
+
+                foreach (var diff in plan.Tables.Where(t => t.Changes.Count > 0))
+                {
+                    // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
+                    // baseVersion. Саме це змушує звичайний шлях запису відхилити
+                    // весь батч, якщо між переглядом і застосуванням хтось правив ті
+                    // самі рядки (ECR-CELL-0409) — тобто конфлікт ловить одна
+                    // перевірка, а не дві, які вміють розійтися.
+                    var rows = diff.Changes
+                        .GroupBy(c => c.RowKey, StringComparer.Ordinal)
+                        .Select(g => new PatchRow(
+                            g.Key,
+                            diff.RowVersions.GetValueOrDefault(g.Key),
+                            g.Select(c => new PatchCell(c.ColumnCode, c.NewValue)).ToList()))
+                        .ToList();
+
+                    PatchCellsResponse response;
+
+                    try
+                    {
+                        // ⚠ Той самий шлях, що й batch-PATCH, із Origin = "Import".
+                        // Окремий шлях запису означав би, що аудит, валідація і
+                        // перерахунок для імпорту працюють інакше — і розбіжність
+                        // виявиться на числах, а не на коді.
+                        response = await patch
+                            .HandleAsync(
+                                new PatchCellsRequest(diff.TableInstanceId, diff.PeriodKey, "Import", rows),
+                                innerCt,
+                                deferRecalculationUntilMi02: seeds)
+                            .ConfigureAwait(false);
+                    }
+                    catch (EcrException error) when (Blame(error, diff.TableInstanceId) is { } named)
+                    {
+                        throw named;
+                    }
+
+                    applied += response.AppliedCells;
+                    validation.AddRange(response.Validation);
+
+                    foreach (var (key, version) in response.RowVersions)
+                    {
+                        versions[key] = version;
+                    }
+
+                    if (seedTableInstanceId == 0)
+                    {
+                        seedTableInstanceId = diff.TableInstanceId;
+                    }
+                }
+            },
+            ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Одна задача на ВСЮ книгу, а не одна на таблицю. Каскад і так
+        // документний: `RecalculationService.RunAsync` резолвить документ із
+        // переданого екземпляра таблиці й далі читає ВСІ таблиці документа за
+        // період — формула сусіднього аркуша має право читати цю. Тому
+        // `TableInstanceId` тут — лише точка входу в документ, а насіння
+        // (`seeds`) зібране з усіх таблиць книги.
+        if (seeds.Count > 0)
+        {
+            await jobs
+                .EnqueueAsync<IFormulaRecalculationJob>(
+                    new { TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds }, ct)
+                .ConfigureAwait(false);
         }
 
         // Прибирається ЛИШЕ після успіху: якщо застосування впало на конфлікті,
@@ -273,6 +353,48 @@ public sealed class ExcelImporter(
         await previews.RemoveAsync(previewToken, ct).ConfigureAwait(false);
 
         return new PatchCellsResponse(applied, versions, validation);
+    }
+
+    /// <summary>
+    /// Та сама відмова, але з номером таблиці, на якій застосування спинилося;
+    /// <c>null</c> — тип відмови невідомий, і викликач лишає оригінал як є.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього перекладу «усе або нічого» було б гіршим за часткове
+    /// застосування: користувач бачить, що не змінилося НІЧОГО, і не знає, де
+    /// саме шукати причину. Книга на десять таблиць, відмова без адреси — і
+    /// єдиний спосіб знайти винувату таблицю це пробувати їх по одній.
+    ///
+    /// ⚠ Тип відмови зберігається (від нього залежить HTTP-статус у
+    /// <c>ExceptionHandlingMiddleware.Map</c>), як і код та <c>messageKey</c>:
+    /// додається РІВНО одне поле. Невідомий підтип <see cref="EcrException"/>
+    /// дає <c>null</c> — фільтр <c>when</c> не спрацьовує, і оригінальний
+    /// виняток іде далі зі своїм стеком, а не підмінюється типом, який змінив
+    /// би статус відповіді.
+    /// </remarks>
+    private static EcrException? Blame(EcrException error, long tableInstanceId)
+    {
+        var details = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        if (error.Details is not null)
+        {
+            foreach (var (key, value) in error.Details)
+            {
+                details[key] = value;
+            }
+        }
+
+        details["tableInstanceId"] =
+            tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        return error switch
+        {
+            ConcurrencyConflictException => new ConcurrencyConflictException(error.ErrorCode, error.Message, details),
+            AccessDeniedException => new AccessDeniedException(error.ErrorCode, error.Message, details),
+            NotFoundException => new NotFoundException(error.ErrorCode, error.Message, details),
+            BusinessRuleException => new BusinessRuleException(error.ErrorCode, error.Message, details),
+            _ => null,
+        };
     }
 
     /// <summary>
