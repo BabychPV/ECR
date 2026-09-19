@@ -49,13 +49,48 @@ function formatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.Da
 }
 
 /**
+ * Дата БЕЗ часу: рівно `2026-01-01`, без `T`, без зони.
+ *
+ * ⚠ Саме ця форма, а не «рядок, схожий на дату»: специфікація ECMAScript
+ * велить читати як UTC саме її, і саме з неї береться зсув на добу нижче.
+ */
+const DateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
  * Момент або `null`, якщо його встановити не вдалося.
  *
  * ⚠ `Number.isNaN(getTime())` — єдина працююча перевірка: `new Date('дурниця')`
  * повертає ОБ'ЄКТ `Date`, а не `null` і не виняток.
+ *
+ * ⛔ Дата без часу читається як МІСЦЕВА північ, а не як UTC. Це не педантизм —
+ * наслідок зміряний:
+ *
+ *   new Date('2026-01-01')                        → 2026-01-01T00:00:00.000Z
+ *   Intl(en, timeZone: 'America/New_York').format → «Dec 31, 2025»
+ *
+ * Тобто дата набуття чинності методології чи межа дії запису довідника
+ * З'ЇЖДЖАЄ НА ДОБУ для кожного користувача в мінусовому зсуві. Сервер у таких
+ * полях віддає саме КАЛЕНДАРНУ дату (`validFrom`, `effectiveFrom`,
+ * `startsAt`), а календарна дата не має години взагалі — перетворювати її
+ * через UTC означає приписати їй годину, якої в ній немає.
+ *
+ * ⚠ Чесно про межу: у поточного замовника зсув ДОДАТНИЙ (UTC+5…+6), як і в
+ * Києві, тож на їхніх екранах цей зсув не проявляється. Виправлено тому, що
+ * ціна нульова, а відмова тиха: вона не падає, не логується й помітна лише
+ * тому, хто знає правильну дату.
  */
 function moment(value: DateLike): Date | null {
   if (value === null || value === undefined) return null;
+
+  if (typeof value === 'string') {
+    const parts = DateOnly.exec(value);
+
+    if (parts !== null) {
+      const at = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+
+      return Number.isNaN(at.getTime()) ? null : at;
+    }
+  }
 
   const at = value instanceof Date ? value : new Date(value);
 
