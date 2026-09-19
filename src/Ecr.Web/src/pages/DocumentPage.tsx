@@ -17,6 +17,7 @@ import { ExportButton } from '@/features/export/ExportButton';
 import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
 import { ImportPanel } from '@/features/import/ImportPanel';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
+import { WorkflowHistory } from '@/features/workflow/WorkflowHistory';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -361,6 +362,11 @@ export function DocumentPage(): JSX.Element {
           вкладку означало б показувати їх лише тому, хто вгадав, куди
           дивитися. */}
       <ValidationPanel messages={shownValidation?.messages ?? null} />
+
+      {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
+          про всі аркуші документа за період. Згорнутий, і до розгортання
+          запиту не робить; порожній — не малюється зовсім. */}
+      <WorkflowHistory documentId={documentId} periodKey={periodKey} />
 
       <Tabs value={active?.code ?? null} onChange={setSheet}>
         <Tabs.List>

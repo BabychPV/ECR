@@ -1456,6 +1456,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/workflow/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Хто й коли подав, погодив, відхилив або повернув аркуші документа за
+         *     період; найновіші перші, не більше 200 подій. Право `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowEventDto"][];
+                        "text/json": components["schemas"]["WorkflowEventDto"][];
+                        "text/plain": components["schemas"]["WorkflowEventDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/entity-field-maps": {
         parameters: {
             query?: never;
@@ -13189,6 +13245,31 @@ export interface components {
              * @description Ідентифікатор.
              */
             versionId: number;
+        };
+        /** @description Подія журналу переходів стану аркуша (`BE-11b`). */
+        WorkflowEventDto: {
+            /** @description Дія (`ApprovalAction`). */
+            action: string;
+            /**
+             * Format: date-time
+             * @description Момент дії, UTC.
+             */
+            at: string;
+            /** @description Відображуване ім'я виконавця; `system` — системний перехід. */
+            byDisplayName: string;
+            /** @description Стан до дії (`DocumentStatus`). */
+            fromState: string;
+            /** @description Причина відхилення або повернення в роботу. */
+            reason: null | string;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Крок маршруту, якщо маршрут є.
+             */
+            stepOrdinal: null | number;
+            /** @description Стан після дії. */
+            toState: string;
         };
     };
     responses: never;

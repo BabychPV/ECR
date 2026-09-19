@@ -2587,6 +2587,8 @@ public interface IWorkflowStore
     public interface IWorkflowStore
     public Task<ApprovalState> GetOrCreateAsync(
     public Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
+    public Task AddEventAsync(ApprovalEvent approvalEvent, CancellationToken ct);
+    public Task<IReadOnlyList<ApprovalEventRecord>> GetHistoryAsync(
     public Task<Period> LockPeriodAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
     public Task<long> SaveSnapshotAsync(SubmissionSnapshotRecord snapshot, CancellationToken ct);
     public Task<IReadOnlyList<SubmissionSnapshotRecord>> GetSnapshotsAsync(
@@ -2877,6 +2879,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
+| `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
