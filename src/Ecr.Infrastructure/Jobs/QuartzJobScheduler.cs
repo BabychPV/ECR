@@ -380,10 +380,11 @@ public sealed class QuartzJobScheduler(
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(
+        JobListFilter filter, int limit, CancellationToken ct)
         => progress is null
             ? []
-            : await progress.ListRecentAsync(limit, ct).ConfigureAwait(false);
+            : await progress.ListRecentAsync(filter, limit, ct).ConfigureAwait(false);
 
     /// <summary>Налаштування серіалізації payload; спільні на всі виклики.</summary>
     private static readonly System.Text.Json.JsonSerializerOptions PayloadOptions =

@@ -80,9 +80,20 @@ public interface IJobProgressStore
     public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct);
 
     /// <summary>Останні задачі, найновіші перші.</summary>
+    /// <param name="filter">
+    /// Звуження переліку (BE-08). <see cref="JobListFilter.CreatedByUserId"/>
+    /// приходить лише з <c>ICurrentUser</c> — див. зауваження в самому типі.
+    /// </param>
     /// <param name="limit">Скільки повернути.</param>
     /// <param name="ct">Скасування.</param>
-    public Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct);
+    /// <remarks>
+    /// ⚠ Фільтр застосовується в ЗАПИТІ, а не після нього. Відбір у пам'яті
+    /// означав би «прочитати 50 останніх задач системи й лишити свої»: власник
+    /// однієї задачі бачив би порожній перелік рівно тоді, коли система
+    /// зайнята, — тобто тоді, коли він і дивиться.
+    /// </remarks>
+    public Task<IReadOnlyList<JobSummary>> ListRecentAsync(
+        JobListFilter filter, int limit, CancellationToken ct);
 
     /// <summary>
     /// Підтверджує, що задача досі виконується цим процесом.

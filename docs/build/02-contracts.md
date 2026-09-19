@@ -2893,6 +2893,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
@@ -2922,6 +2923,29 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
+
+> **`GET /jobs?mine=true` — межа доступу, а не фільтр зручності** (`BE-08`,
+> `Q-156`). Параметри переліку: `state` (`Queued`, `Running`, `Succeeded`,
+> `Failed`, `Cancelled`), `code` (тип задачі), `mine`, `limit` (1…50).
+>
+> ⛔ Рядок таблиці з `?mine=true` і правом «—» — не дубль, а друга межа на
+> тому самому шляху. Автор бачить ВЛАСНІ задачі без `System.ViewHealth`: це
+> право на стан СИСТЕМИ, і вимагати його означало б, що оператор, який щойно
+> отримав `jobId` у відповіді `202`, не має способу побачити перелік власних
+> перерахунків — та сама відмова, що `S-28` для читання одного стану.
+>
+> ⛔ Ідентифікатор власника береться ЛИШЕ з сеансу. Ані в дії контролера, ані
+> в обробнику немає параметра, яким можна назвати іншого автора, — інакше
+> звільнення від права перетворилося б на спосіб читати чужу чергу, назвавши
+> чуже число.
+>
+> ⛔ Без `mine` і без права — `403`, а не порожній перелік. «Задач немає» і
+> «вам їх не показують» — різні відповіді, і перша тут була б неправдою саме
+> для того, хто прийшов подивитися, що в системі коїться.
+>
+> ⚠ Невідомий `state` і `limit` поза межами — `422` (`ECR-REQ-0422`), а не
+> мовчазне звуження: друкарська помилка у фільтрі інакше відповідала б
+> «таких задач немає».
 
 > **Опис звіту — дані, а не конструктор звітів** (`ФВ-10.4`, `ФВ-10.6`,
 > директива №09 `W7`). Веб-переглядач і конструктор звітів ТЗ виносить за

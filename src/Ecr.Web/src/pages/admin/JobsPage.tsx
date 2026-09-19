@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   Modal,
   Progress,
@@ -18,7 +19,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
-import { useCancelJob } from '@/features/jobs/api';
+import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 
@@ -175,9 +176,6 @@ export function JobsPage(): JSX.Element {
   );
 }
 
-/** Опитувати перелік, доки на екрані є задача не в кінцевому стані. */
-const ListPollMs = 3000;
-
 function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Element {
   const queryClient = useQueryClient();
 
@@ -187,15 +185,14 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
   // це запит на підтвердження чогось невідомого.
   const [confirming, setConfirming] = useState<JobSummary | null>(null);
 
-  const jobs = useQuery({
-    queryKey: ['jobs'],
-    queryFn: () => apiFetch<JobSummary[]>('/api/v1/jobs'),
-    refetchInterval: (query) => {
-      const list = query.state.data ?? [];
+  // ⛔ `BE-08`. Прапорець знятий за замовчуванням — цей екран відкривається
+  // лише з правом `System.ViewHealth` (`routes.ts`), і для його власника
+  // звуження до своїх було б несподіванкою. Сама ж дія `mine=true` потрібна
+  // ширше: перелік власних задач — єдиний, доступний БЕЗ цього права, і на
+  // ньому стоятиме шухляда «Мої задачі» в шапці (директива №15, фронтенд).
+  const [mineOnly, setMineOnly] = useState(false);
 
-      return list.some((j) => j.state === 'Queued' || j.state === 'Running') ? ListPollMs : false;
-    },
-  });
+  const jobs = useRecentJobs(mineOnly);
 
   // ⚠ Відповідь на скасування — `202`, не новий стан: задача бачить токен і
   // закривається станом `Cancelled` на найближчій межі батчу. Тому після
@@ -246,6 +243,22 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
         </Group>
       </Modal>
 
+      {/*
+       * ⚠ Підказка поруч, а не в самій назві: знятий прапорець показує ЧУЖІ
+       * задачі, і без пояснення відмова 403 у того, хто права не має,
+       * читається як збій екрана, а не як межа доступу.
+       */}
+      <Group align="center" gap="xs" mb="sm">
+        <Checkbox
+          label={t('jobs.mineOnly')}
+          checked={mineOnly}
+          onChange={(event) => setMineOnly(event.currentTarget.checked)}
+        />
+        <Text size="xs" c="dimmed">
+          {t('jobs.mineOnlyHint')}
+        </Text>
+      </Group>
+
       <AsyncBoundary<JobSummary[]>
         isPending={jobs.isPending}
         error={jobs.error}
@@ -260,6 +273,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
               <Table.Tr>
                 <Table.Th>{t('jobs.recentCode')}</Table.Th>
                 <Table.Th>{t('jobs.recentState')}</Table.Th>
+                <Table.Th>{t('jobs.recentStarted')}</Table.Th>
                 <Table.Th />
               </Table.Tr>
             </Table.Thead>
@@ -270,6 +284,12 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                   <Table.Td>
                     <Badge color={stateColor(job.state)}>{job.state}</Badge>
                   </Table.Td>
+                  {/* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin`
+                      перезаписує цей стовпець при запуску, і називати його
+                      «створено» означало б брехати про кожну задачу, що вже
+                      працює. Формат — той самий сирий ISO, що в журналі
+                      аудиту й у знімках звітності. */}
+                  <Table.Td>{job.startedAt}</Table.Td>
                   <Table.Td>
                     {/* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не
                         мають переносити одна одну на другий рядок і рвати
