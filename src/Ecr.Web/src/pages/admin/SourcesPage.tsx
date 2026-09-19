@@ -8,6 +8,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { t } from '@/shared/i18n';
 
 /**
@@ -112,14 +113,14 @@ export function SourcesPage(): JSX.Element {
                     <Text c="dimmed">{t('sources.never')}</Text>
                   ) : (
                     <Group gap="xs">
-                      <Badge
-                        variant="light"
-                        color={
-                          source.lastRun.status === 'Succeeded' ? 'statusSuccess' : 'statusWarning'
-                        }
-                      >
-                        {source.lastRun.status}
-                      </Badge>
+                      {/* ⛔ Тут стояло `status === 'Succeeded' ? statusSuccess :
+                          statusWarning` — тобто ПРОВАЛ збору (`Failed`)
+                          малювався попередженням, тим самим кольором, що й
+                          часткова відповідь (`Degraded`). Оператор бачив
+                          «жовтеньке» там, де даних немає зовсім.
+                          `collectionRun` у таблиці набору розрізняє ці три
+                          стани і дає `Failed` тон `danger`. */}
+                      <StatusBadge kind="collectionRun" state={source.lastRun.status} />
                       <Text size="xs">{source.lastRun.pointsRetrieved}</Text>
                     </Group>
                   )}
