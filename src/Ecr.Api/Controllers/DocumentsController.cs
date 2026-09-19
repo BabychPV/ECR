@@ -151,7 +151,8 @@ public sealed class DocumentsController(
             id,
             periodKey,
             [.. messages.Select(m => new ValidationFindingDto(
-                m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
+                m.Severity.ToString(), m.RuleCode, m.Message,
+                m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
     /// <summary>
@@ -204,7 +205,13 @@ public sealed class DocumentsController(
                 id,
                 periodKey,
                 [.. messages.Select(m => new ValidationFindingDto(
-                    m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode, m.BlocksSave))]));
+                    m.Severity.ToString(), m.RuleCode, m.Message,
+                    // ⚠ Тут значення приходить зі ЗБЕРЕЖЕНОГО підсумку, а не з
+                    // щойно порахованого: `wf.ValidationResult.MessagesJson` —
+                    // це серіалізований `List<ValidationMessage>` цілком
+                    // (`ValidateDocumentHandler.cs:106`), тож таблиця в ньому
+                    // вже є і міграція для цього поля не потрібна.
+                    m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))]));
     }
 
     /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Calculation.Recalculate</c>.</summary>
@@ -497,8 +504,19 @@ public sealed record ValidationResultResponse(
 /// <param name="Severity">Рівень: <c>Error</c>, <c>Warning</c>, <c>Info</c>.</param>
 /// <param name="RuleCode">Код правила.</param>
 /// <param name="Message">Текст, уже локалізований.</param>
+/// <param name="TableDefId">
+/// Таблиця, у якій знайдено зауваження.
+/// </param>
 /// <param name="RowKey">Рядок; <c>null</c> — зауваження до таблиці.</param>
 /// <param name="ColumnCode">Колонка; <c>null</c> — зауваження до рядка.</param>
 /// <param name="BlocksSave">Чи блокує збереження.</param>
+/// <remarks>
+/// ⛔ <c>TableDefId</c> — частина АДРЕСИ, а не довідкове поле. Аркуш містить
+/// кілька таблиць, і ключ рядка унікальний лише в межах своєї: без таблиці
+/// пара <c>(RowKey, ColumnCode)</c> вказує на стільки комірок, скільки таблиць
+/// аркуша мають такий рядок. <c>ValidationMessage.TableDefId</c> цю адресу ніс
+/// давно — відображення в DTO його відкидало, тож клієнт отримував
+/// зауваження, за яким не міг перейти до комірки однозначно.
+/// </remarks>
 public sealed record ValidationFindingDto(
-    string Severity, string RuleCode, string Message, string? RowKey, string? ColumnCode, bool BlocksSave);
+    string Severity, string RuleCode, string Message, int TableDefId, string? RowKey, string? ColumnCode, bool BlocksSave);

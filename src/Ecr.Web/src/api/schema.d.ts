@@ -12,19 +12,49 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Історія змін комірок. Право `Security.ViewAudit`.
+         * Історія змін комірок. Право `Security.ViewAudit` — або
+         *     `Document.View`, коли задано повну адресу однієї комірки.
          * @description Таблиця партиційована за `ChangedAt`, а не за періодом: місяць
          *     зміни і звітний період — різні осі (зміна за січень може статися в
          *     березні). Тому запит **обов'язково** обмежений вікном часу — інакше він
          *     піде по всіх партиціях.
+         *
+         *     ⚠ Одна дія, ДВА рівні доступу (D15-16). `documentId + rowKey +
+         *     columnDefId` разом — це історія ОДНІЄЇ комірки, і її бачить той, хто
+         *     бачить документ (`Document.View` плюс грант на проєкт). Будь-який
+         *     ширший запит — загальний журнал, і для нього поріг лишається
+         *     `Security.ViewAudit`. Розділяти це на два маршрути означало б
+         *     дублювати вікно, курсор і всі п'ять фільтрів заради різниці, яка
+         *     виражається самим фільтром.
+         *
+         *     ⚠ `rowKey`/`columnDefId` без `documentId` —
+         *     `422 ECR-REQ-0422`: ключ рядка унікальний у межах екземпляра
+         *     таблиці, а не системи, тож без документа він не адресує нічого.
+         *     Родина `REQ`, а не `AUD`/`CELL`: суб'єкт відмови —
+         *     параметр запиту, і саме так тут уже відмовляють обидві перевірки вікна.
          */
         get: {
             parameters: {
                 query?: {
+                    /** @description Початок вікна в UTC, включно. */
                     from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
                     to?: string;
+                    /** @description Документ; без нього — наскрізний журнал. */
                     documentId?: number;
+                    /** @description Ключ рядка; лише разом із documentId. */
+                    rowKey?: string;
+                    /** @description Колонка; лише разом із documentId. */
+                    columnDefId?: number;
+                    /** @description Автор зміни — `UserId`, не SID. */
+                    author?: number;
+                    /** @description Походження: `UserEdit`, `Import`, `Recalculation`, `Migration`. */
+                    origin?: string;
+                    /** @description Лише пізні правки (`Grace`/після `Reopen`). */
+                    lateOnly?: boolean;
+                    /** @description Розмір сторінки; `0` — 50. */
                     limit?: number;
+                    /** @description Курсор наступної сторінки. */
                     cursor?: string;
                 };
                 header?: never;
@@ -46,6 +76,28 @@ export interface paths {
                 };
                 /** @description Bad Request */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -11795,6 +11847,11 @@ export interface components {
             ruleCode: string;
             /** @description Рівень: `Error`, `Warning`, `Info`. */
             severity: string;
+            /**
+             * Format: int32
+             * @description Таблиця, у якій знайдено зауваження.
+             */
+            tableDefId: number;
         };
         /** @description Повідомлення валідації. */
         ValidationMessageDto: {

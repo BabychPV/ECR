@@ -1,11 +1,20 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Table, Text, TextInput } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  NumberInput,
+  Select,
+  Table,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
+import { cellChangeOrigins, isSingleCell, useCellChanges } from '@/features/audit/api';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
+import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /**
@@ -23,25 +32,55 @@ import { t } from '@/shared/i18n';
  *
  * ⚠ Журнал **тільки читається**: ані правки, ані видалення тут немає і не
  * буде. Журнал, який можна відредагувати, не є доказом.
+ *
+ * ⛔ `BE-03`: фільтри `author`/`origin`/`lateOnly` і адреса комірки
+ * (`rowKey` + `columnDefId`). До цього журнал умів лише «документ за вікном»,
+ * тобто на питання «хто змінив ЦЕ число» доводилося гортати тисячі рядків —
+ * а це і є головне питання, заради якого аудит ведуть.
+ *
+ * ⚠ Документ + рядок + колонка разом — це історія ОДНІЄЇ комірки, і сервер
+ * приймає її за іншим правом (`Document.View` замість `Security.ViewAudit`) і
+ * з ширшим вікном (13 місяців замість 92 днів, `D15-16`). Той самий екран, те
+ * саме читання — інша межа доступу, і вона виражена САМИМ фільтром, а не
+ * окремим маршрутом.
  */
 export function AuditPage(): JSX.Element {
   const [from, setFrom] = useUrlState('from');
   const [to, setTo] = useUrlState('to');
   const [documentId, setDocumentId] = useUrlNumber('documentId');
+  const [rowKey, setRowKey] = useUrlState('rowKey');
+  const [columnDefId, setColumnDefId] = useUrlNumber('columnDefId');
+  const [author, setAuthor] = useUrlNumber('author');
+  const [origin, setOrigin] = useUrlState('origin');
+  const [lateOnly, setLateOnly] = useUrlState('lateOnly');
+  const setParams = useUrlParamsSetter();
   const [cursor, setCursor] = useState<string | null>(null);
 
   const fromDate = from ?? isoDaysAgo(7);
   const toDate = to ?? isoDaysAgo(0);
 
-  const changes = useQuery({
-    queryKey: ['audit-cells', fromDate, toDate, documentId, cursor],
-    queryFn: () =>
-      apiFetch<CellChangePage>(
-        `/api/v1/audit/cells?from=${fromDate}&to=${toDate}&limit=100` +
-          (documentId === null ? '' : `&documentId=${documentId}`) +
-          (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
-      ),
-  });
+  const filter = {
+    from: fromDate,
+    to: toDate,
+    documentId,
+    rowKey,
+    columnDefId,
+    author,
+    origin,
+    lateOnly: lateOnly === 'true',
+    limit: 100,
+    cursor,
+  };
+
+  const changes = useCellChanges(filter);
+
+  /**
+   * ⚠ Курсор скидається на КОЖНУ зміну фільтра — він позначає позицію в
+   * конкретній видачі, і сторінка 5 попереднього фільтра не є сторінкою 5
+   * нового. Без цього зміна фільтра давала б порожню сторінку замість перших
+   * результатів, і це читалося б як «нічого не знайдено».
+   */
+  const single = isSingleCell(filter);
 
   return (
     <>
@@ -85,6 +124,95 @@ export function AuditPage(): JSX.Element {
           </Group>
         }
       />
+
+      {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
+          витіснили б заголовок за край на ноутбучній ширині. */}
+      <Group gap="xs" align="end" mb="md" wrap="wrap">
+        <NumberInput
+          size="xs"
+          miw={140}
+          label={t('audit.author')}
+          description={t('audit.authorHint')}
+          value={author ?? ''}
+          onChange={(value) => {
+            setAuthor(typeof value === 'number' ? value : null);
+            setCursor(null);
+          }}
+        />
+        <Select
+          size="xs"
+          miw={160}
+          clearable
+          label={t('audit.origin')}
+          placeholder={t('audit.originAny')}
+          data={[...cellChangeOrigins]}
+          value={origin}
+          onChange={(value) => {
+            setOrigin(value);
+            setCursor(null);
+          }}
+        />
+        <TextInput
+          size="xs"
+          miw={120}
+          label={t('audit.rowKey')}
+          description={t('audit.cellHint')}
+          value={rowKey ?? ''}
+          onChange={(event) => {
+            setRowKey(event.currentTarget.value);
+            setCursor(null);
+          }}
+        />
+        <NumberInput
+          size="xs"
+          miw={120}
+          label={t('audit.columnDefId')}
+          value={columnDefId ?? ''}
+          onChange={(value) => {
+            setColumnDefId(typeof value === 'number' ? value : null);
+            setCursor(null);
+          }}
+        />
+        <Checkbox
+          mb="xs"
+          label={t('audit.lateOnly')}
+          checked={lateOnly === 'true'}
+          onChange={(event) => {
+            setLateOnly(event.currentTarget.checked ? 'true' : null);
+            setCursor(null);
+          }}
+        />
+        {/* ⚠ Значок «історія однієї комірки» — не прикраса: саме в цьому стані
+            сервер приймає запит за `Document.View` і з вікном у 13 місяців, а
+            не за `Security.ViewAudit` і 92 дні. Без видимої ознаки людина не
+            розуміє, чому те саме вікно то приймається, то ні. */}
+        {single && (
+          <Badge mb="xs" size="sm" variant="light" color="brand">
+            {t('audit.cell')}
+          </Badge>
+        )}
+        <Button
+          size="xs"
+          mb="xs"
+          variant="subtle"
+          onClick={() => {
+            // ⛔ ОДИН перехід на п'ять параметрів, а не п'ять викликів
+            // `useUrlState` підряд: два синхронні `setSearchParams` в одному
+            // тіку гублять ОБИДВІ зміни, а не лише другу (див. коментар до
+            // `useUrlParamsSetter`). П'ять поспіль не скинули б нічого.
+            setParams({
+              rowKey: null,
+              columnDefId: null,
+              author: null,
+              origin: null,
+              lateOnly: null,
+            });
+            setCursor(null);
+          }}
+        >
+          {t('audit.reset')}
+        </Button>
+      </Group>
 
       <AsyncBoundary<CellChangePage>
         isPending={changes.isPending}
