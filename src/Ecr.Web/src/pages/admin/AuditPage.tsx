@@ -51,6 +51,7 @@ export function AuditPage(): JSX.Element {
           <Group gap="xs" align="end">
             <TextInput
               size="xs"
+              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №1/8: перехід на DateInput змінює тип значення (string → Date) і стан сторінки, тому окремим PR; список боргу сторожить lintRules.test.ts
               type="date"
               label={t('audit.from')}
               value={fromDate}
@@ -61,6 +62,7 @@ export function AuditPage(): JSX.Element {
             />
             <TextInput
               size="xs"
+              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №2/8: див. коментар вище
               type="date"
               label={t('audit.to')}
               value={toDate}
