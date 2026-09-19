@@ -1138,6 +1138,16 @@ USING (VALUES
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),
+
+    -- BE-18: факти про процес і команда для DBA (D15-12: застосунок не виконує DDL).
+    (N'health.facts',                    N'en', N'System', 1),
+    (N'health.facts.productVersion',     N'en', N'Product version', 1),
+    (N'health.facts.startedAt',          N'en', N'Started at', 1),
+    (N'health.facts.environment',        N'en', N'Environment', 1),
+    (N'health.facts.notificationTransport', N'en', N'Notification transport', 1),
+    (N'health.facts.transportNotConfigured', N'en', N'Not configured: notifications stay in the queue', 1),
+    (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
+    (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),
     (N'profile.themeAuto',               N'en', N'System', 1),
     (N'profile.themeLight',              N'en', N'Light', 1),

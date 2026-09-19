@@ -263,6 +263,10 @@ public static class DependencyInjection
         // причина кожного з них — у самому файлі.
         services.AddScoped<PublicApi.GetPublicBootstrapHandler>();
 
+        // BE-18: факти про процес і текст команди для DBA на `/admin/health`.
+        services.AddScoped<Health.GetSystemFactsHandler>();
+        services.AddScoped<Health.GetPartitionScriptHandler>();
+
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();
 
