@@ -317,10 +317,32 @@ export const theme = createTheme({
 
   /**
    * Системний стек (`ФВ-14.13`): уже завантажений, рендериться нативно і не
-   * додає жодного кілобайта. Корпоративного шрифту в замовника не питали.
+   * додає жодного кілобайта.
+   *
+   * ⚠ Порядок зведено з макетом (`docs/design/hybrid/index.html:15-16`) **без**
+   * `IBM Plex` — його заведення це `Q15-01a`, на яке замовник не відповів, а
+   * шрифт замовника вигадувати не можна (`UI-02`).
+   *
+   * ⛔ Чесно про наслідки, бо вони різні для двох рядків:
+   *
+   * — **`fontFamily` не змінює нічого видимого.** Перестановка
+   *   `-apple-system` ↔ `"Segoe UI"` ↔ `system-ui` на будь-якій платформі дає
+   *   той самий шрифт: на macOS перші два не резолвляться в Segoe, а
+   *   `system-ui` і `-apple-system` — це San Francisco; на Windows `Segoe UI`
+   *   виграє в обох порядках. `Roboto` прибрано, бо на Android і ChromeOS його
+   *   однаково дає `sans-serif`. Зміна зроблена ЗАРАДИ ЗБІГУ з еталоном, а не
+   *   заради ефекту, і видавати її за поліпшення було б неправдою.
+   *
+   * — **`fontFamilyMonospace` змінює.** Було `"Courier New"` третім: на macOS
+   *   і Linux, де немає ні `Cascadia Mono`, ні `Consolas`, код і коди помилок
+   *   малювалися саме ним — вузьким, із зарубками, з іншою метрикою. Тепер
+   *   перед ним стоять `SFMono-Regular` і `Menlo`, тобто системні моноширинні
+   *   тих платформ. `Courier New` лишається останнім перед родовим `monospace`
+   *   як запобіжник для старих Windows.
    */
-  fontFamily: '-apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif',
-  fontFamilyMonospace: '"Cascadia Mono", Consolas, "Courier New", monospace',
+  fontFamily: '"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif',
+  fontFamilyMonospace:
+    '"Cascadia Mono", Consolas, "SFMono-Regular", Menlo, "Courier New", monospace',
 
   /** Три розміри тексту; основний — `sm` (`ФВ-14.13`). */
   fontSizes: { xs: '11px', sm: '13px', md: '15px', lg: '17px', xl: '20px' },

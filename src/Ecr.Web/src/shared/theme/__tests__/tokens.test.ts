@@ -70,6 +70,45 @@ describe('Типографіка (ФВ-14.13)', () => {
     expect(theme.fontFamily).not.toContain('@import');
   });
 
+  it('IBM Plex не заведено, доки Q15-01a без відповіді', () => {
+    /*
+     * ⛔ Макет (`docs/design/hybrid/index.html:15-16`) набрано IBM Plex, і
+     * саме тому порядок стеку зведено з ним (`UI-02`). Але сам шрифт — це
+     * `Q15-01a`, тобто факт про світ замовника, а не судження: `ФВ-14.13`
+     * вимагає системних шрифтів, і завантажуваний з'явиться лише з відповіддю.
+     *
+     * ⚠ Сторож дивиться на ОБИДВА стеки: заведення Plex зазвичай починають із
+     * моноширинного (код і коди помилок), і перевірка лише `fontFamily`
+     * пропустила б це мовчки.
+     */
+    for (const stack of [theme.fontFamily, theme.fontFamilyMonospace]) {
+      expect(stack).not.toContain('IBM Plex');
+      expect(stack).not.toContain('Plex');
+    }
+  });
+
+  it('моноширинний стек має системний варіант для macOS і Linux, а не лише Courier New', () => {
+    const mono = theme.fontFamilyMonospace ?? '';
+
+    /*
+     * ⛔ Було: `"Cascadia Mono", Consolas, "Courier New", monospace`. На macOS
+     * і Linux немає ні `Cascadia Mono`, ні `Consolas`, тож код і коди помилок
+     * малювалися `Courier New` — вузьким, із зарубками, з іншою метрикою.
+     *
+     * ⚠ Перевіряється ПОРЯДОК, а не наявність: `SFMono-Regular` після
+     * `Courier New` не дав би нічого, бо перший придатний у списку й виграє.
+     */
+    const mac = mono.indexOf('SFMono-Regular');
+    const linux = mono.indexOf('Menlo');
+    const courier = mono.indexOf('Courier New');
+
+    expect(mac).toBeGreaterThan(-1);
+    expect(linux).toBeGreaterThan(-1);
+    expect(courier).toBeGreaterThan(-1);
+    expect(mac).toBeLessThan(courier);
+    expect(linux).toBeLessThan(courier);
+  });
+
   it('розміри тексту зростають монотонно', () => {
     const values = Object.values(theme.fontSizes as Record<string, string>).map(px);
 
