@@ -16,6 +16,7 @@ import { MoreConflictsExtension } from '@/api/types';
 // цього правила, що розійшлися (`Q-234`). Тут інший лише ІНТЕРВАЛ — див.
 // `RecalculationPollMs`.
 import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
+import { formatTime } from '@/shared/format';
 import { applyPatchToSlice } from './sliceApply';
 
 /** Накопичена зміна однієї комірки. */
@@ -395,7 +396,12 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
    * опитування, і для рядка «перераховано о…» вона не має ціни; вигадувати
    * точніше з наявних даних ніяк.
    */
-  const [finishedAt, setFinishedAt] = useState<string | null>(null);
+  /*
+   * ⚠ У стані лежить МОМЕНТ, а не готовий рядок. Напис складається при
+   * рендері, бо `formatTime` бере мову з каталогу: збережений рядок пережив
+   * би перемикання мови і лишився б у записі попередньої.
+   */
+  const [finishedAt, setFinishedAt] = useState<Date | null>(null);
   const markedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -410,49 +416,52 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     if (markedFor.current === active) return;
 
     markedFor.current = active;
-    setFinishedAt(clockLabel(new Date()));
+    setFinishedAt(new Date());
   }, [active, outcome]);
 
   // ⚠ Нова задача гасить час попередньої НЕГАЙНО, ще до її першої відповіді:
   // інакше «перераховано о 14:02» висіло б поруч із правкою, зробленою о 14:05.
   const shown = markedFor.current === active ? finishedAt : null;
 
-  return { state: job.data?.state, outcome, finishedAt: shown };
+  return {
+    state: job.data?.state,
+    outcome,
+    finishedAt: shown === null ? null : formatTime(shown),
+  };
 }
 
 /**
- * Година й хвилина місцевого часу, `ГГ:ХХ`.
- *
- * ⛔ Складається вручну, а не через `toLocaleTimeString`, і це не винахід
- * велосипеда. `D15-09` забороняє `toLocale*()` без явної локалі (правило
- * лінтера, `shared/__tests__/lintRules.test.ts`), а явної локалі тут узяти
- * ніде: мови продукту — `en`/`ru`/`kz`, і `kz` не є тегом BCP-47 взагалі
- * (казахська — `kk`), тож `Intl` на ньому кидає `RangeError`. Двоцифровий
- * 24-годинний запис читається однаково в усіх трьох мовах і не залежить від
- * налаштувань браузера — рівно те, чого вимагає `D15-09`.
- */
-function clockLabel(at: Date): string {
-  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
-}
-
-/**
- * Момент чужої правки у вигляді `ГГ:ХХ` місцевого часу (`BE-06`).
+ * Момент чужої правки, часом інтерфейсу (`BE-06`).
  *
  * ⛔ `null` на вході — це `null` на виході, а не поточний час і не порожній
  * рядок. Сервер каже `null` рівно тоді, коли автора й моменту встановити не
  * вдалося, і підставити тут «зараз» означало б повернути той самий дефект,
  * який `BE-06` і прибирає, — лише на клієнті.
  *
- * ⚠ Той самий `clockLabel`, що й у статус-рядку перерахунку: два різні написи
- * часу на одному екрані читалися б як два різні поняття. Про заборону
- * `toLocale*()` без явної локалі — у коментарі до `clockLabel` вище (`D15-09`).
+ * ✎ 2026-09-19. Тут і в статус-рядку перерахунку стояв власний `clockLabel`,
+ * що складав `ГГ:ХХ` вручну, і його коментар пояснював це так: «`D15-09`
+ * забороняє `toLocale*()` без явної локалі, а явної локалі тут узяти ніде:
+ * `kz` не є тегом BCP-47, і `Intl` на ньому кидає `RangeError`».
+ *
+ * ⛔ Перша половина правдива, друга — ні. Місце, де локаль береться, існує і
+ * називається `shared/format`: `formatLocale()` зводить мову продукту до
+ * чинного тегу (`kz` → `kk`), а `formatTime()` через нього й іде. Що воно НЕ
+ * кидає саме на `kz`, доводить `shared/format/__tests__/locale.test.ts`
+ * (`не кидає на мові, якої немає в BCP-47`).
+ *
+ * ⚠ Ціна тієї неправди була видима: `formatTime` під `en` дає `2:05 PM`
+ * (`datetime.test.ts`), а `clockLabel` — завжди `14:05`. Тобто на одному
+ * екрані англійського інтерфейсу момент чужої правки й момент перерахунку
+ * писалися 24-годинним записом, а кожна інша позначка часу — 12-годинним.
+ * Рівно те, чого цей самий коментар і застерігався уникати: «два різні
+ * написи часу на одному екрані читалися б як два різні поняття».
  */
 export function conflictTimeLabel(iso: string | null): string | null {
   if (iso === null) return null;
 
   const at = new Date(iso);
 
-  return Number.isNaN(at.getTime()) ? null : clockLabel(at);
+  return Number.isNaN(at.getTime()) ? null : formatTime(at);
 }
 
 /**

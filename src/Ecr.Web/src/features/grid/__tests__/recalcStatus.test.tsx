@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { queryKeys } from '@/api/queryKeys';
 import { RecalculationPollMs, useRecalculationStatus } from '../useCellPatch';
+import { formatTime } from '@/shared/format';
 
 /**
  * `BE-05`: статус-рядок сітки стежить за перерахунком по `jobId` з відповіді
@@ -157,6 +158,16 @@ describe('стеження за перерахунком після запису
 
   it('зупиняється на кінцевому стані і повідомляє час завершення', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    /*
+     * ⚠ Годинник ставиться на початок хвилини навмисно. `shouldAdvanceTime`
+     * лишає час рухомим, а `vi.waitFor` крутить кілька інтервалів опитування
+     * (2 с кожен), перш ніж стан стане кінцевим; від секунди `:00` це не може
+     * перетнути хвилину, тож очікуване значення лишається точним, а не
+     * «приблизно тим самим».
+     */
+    vi.setSystemTime(new Date(2026, 1, 1, 9, 15, 0));
+
     state = 'Succeeded';
 
     const { client, wrapper } = harness();
@@ -168,15 +179,34 @@ describe('стеження за перерахунком після запису
 
     await vi.waitFor(() => expect(result.current.outcome).toBe('succeeded'));
 
+    /*
+     * Час завершення — не порожнеча: саме його показує рядок
+     * «Recalculated 14:02» з макета.
+     *
+     * ✎ 2026-09-19. Тут стояло `toMatch(/^\d{2}:\d{2}$/)` — тобто перевірявся
+     * ВЛАСНИЙ 24-годинний формат хука, і саме він був дефектом: під `en` кожна
+     * інша позначка часу на екрані пишеться `2:05 PM` (`formatTime`), а ця —
+     * `14:05`. Тепер перевіряється те саме, що показує решта екрана; мутація
+     * «повернути власний `ГГ:ХХ`» дає `expected '09:15' to be '9:15 AM'`.
+     *
+     * ⚠ Через `vi.waitFor`, а не голим `expect`: час завершення ставить ЕФЕКТ,
+     * і він не встигає до того, як `outcome` стане кінцевим. Голе твердження
+     * проходило поодинці й давало `expected null to be '9:15 AM'` у повному
+     * наборі — тобто падало не з тієї причини, яку стереже.
+     *
+     * ⚠ Очікуване рахується ВСЕРЕДИНІ спроби: `shouldAdvanceTime` лишає
+     * фіктивний годинник рухомим, тож зафіксований зовні літерал розійшовся б
+     * із хвилиною, щойно набір іде під навантаженням.
+     */
+    await vi.waitFor(() => {
+      expect(result.current.finishedAt).toBe(formatTime(new Date()));
+    });
+
     await vi.advanceTimersByTimeAsync(RecalculationPollMs * 5);
 
     // ⛔ РІВНО один запит: нескінченне опитування готової задачі — це запит раз
     // на дві секунди від кожної відкритої вкладки, назавжди.
     expect(jobCalls()).toHaveLength(1);
-
-    // Час завершення — `ГГ:ХХ`, а не порожнеча: саме його показує рядок
-    // «Recalculated 14:02» з макета.
-    expect(result.current.finishedAt).toMatch(/^\d{2}:\d{2}$/);
 
     client.clear();
   });
