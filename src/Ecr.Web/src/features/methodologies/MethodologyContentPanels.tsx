@@ -32,6 +32,7 @@ import { queryKeys } from '@/api/queryKeys';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
   calculationBindings,
@@ -111,6 +112,24 @@ interface ConstantDraft {
   readonly source: string;
   readonly isNew: boolean;
 }
+
+/**
+ * Що стоїть у межі вікна дії, коли межі НЕМАЄ.
+ *
+ * ⛔ Не тире. Тире — дефолт `Timestamp` і читається як «значення немає», а
+ * контракт каже інше й каже це прямо: `validFrom: null` — «від початку»,
+ * `validTo: null` — «без межі» (`MethodologyConstantDto`). Константа з
+ * порожнім `validTo` не «не має дати кінця» — вона **чинна й далі**, і саме
+ * це відрізняє її від константи, у якої строк вичерпався. Тире тут збрехало б
+ * рівно в той бік, у який помилитися найдорожче: людина шукає, чому коефіцієнт
+ * не підставляється, а комірка каже «тут порожньо».
+ *
+ * ⚠ Символ, а не слово з каталогу, навмисно: напис («безстроково») — це новий
+ * ключ `ui-strings` у трьох мовах і рядок сіду, тобто зміна поза межами цієї
+ * підзадачі. Три крапки читаються однаково в усіх трьох мовах каталогу і з
+ * обох боків вікна: `… — 2025-01-01` і `2024-01-01 — …`.
+ */
+const Unbounded = '…';
 
 /** Порожня константа для нового запису. */
 const emptyConstant: ConstantDraft = {
@@ -223,8 +242,19 @@ export function MethodologyConstantsPanel({
                     {constant.value ?? constant.textValue ?? '—'}
                     {constant.isResolved ? '' : ` · ${t('methodologies.unresolved')}`}
                   </Table.Td>
-                  <Table.Td>{constant.validFrom ?? '—'}</Table.Td>
-                  <Table.Td>{constant.validTo ?? '—'}</Table.Td>
+                  {/* ⚠ `dateOnly` в обох колонках. Вікно дії константи
+                      порівнюється з ДНЕМ періоду («чи чинний цей коефіцієнт у
+                      березні 2026»), і `validTo` — перший НЕчинний день
+                      (виключна межа, `saveMethodologyConstant`). Година тут не
+                      лише зайва — вона зробила б виключну межу схожою на
+                      момент, тобто підказувала б, що опівдні 2025-01-01
+                      константа ще діє. */}
+                  <Table.Td>
+                    <Timestamp value={constant.validFrom} dateOnly fallback={Unbounded} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Timestamp value={constant.validTo} dateOnly fallback={Unbounded} />
+                  </Table.Td>
                   <Table.Td>
                     {editable && (
                       <Button
