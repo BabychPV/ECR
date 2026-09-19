@@ -371,6 +371,45 @@ describe('StatusBadge: тон доходить до розмітки', () => {
   });
 });
 
+/**
+ * Підпис не обрізається до першої літери (UI-аудит, lane 8).
+ *
+ * ⛔ Вимір живий, не здогад: `table-layout: auto` бере ширину стовпця з того,
+ * що РЕНДЕРИТЬСЯ, а власний `overflow:hidden` у `.mantine-Badge-label` дозволяє
+ * бейджу «поміститись» у будь-яку ширину замість того, щоб увімкнути
+ * горизонтальну прокрутку таблиці. На ~554px «Scheduled» ставало «S…»:
+ * `clientWidth` мітки 9px проти `scrollWidth` 65px.
+ *
+ * ⚠ Доказ структурний — jsdom не рахує розкладку взагалі
+ * (`getBoundingClientRect` завжди нулі), тож будь-яке «виміряне» твердження
+ * тут було б вигадкою. Перевіряється САМЕ той інлайн-стиль, який лікує дефект,
+ * і саме на корені бейджа.
+ *
+ * ⛔ Перевіряється на КІЛЬКОХ різновидах і в ОБОХ варіантах заливки. Тест на
+ * одному `period/Scheduled` лишався б зеленим і тоді, коли стиль повернули б
+ * на сторінку — тобто доводив би не властивість набору, а один виклик; а тест
+ * лише на `default` пропустив би `quiet`, де інша гілка складає пропи.
+ */
+describe('StatusBadge: підпис не стискається нижче власного тексту', () => {
+  it.each([
+    ['period', 'Scheduled'],
+    ['job', 'Unavailable'],
+    ['health', 'Degraded'],
+    ['collectionRun', 'Failed'],
+  ] as const)('%s/%s — min-width: fit-content на корені бейджа', (kind, state) => {
+    const root = badge(show(<StatusBadge kind={kind} state={state} />), state);
+
+    expect(root.style.minWidth, `${kind}/${state}`).toBe('fit-content');
+  });
+
+  it('`quiet` не втрачає мінімальної ширини — саме щільні таблиці її й потребують', () => {
+    const root = badge(show(<StatusBadge kind="period" state="Scheduled" quiet />), 'Scheduled');
+
+    expect(root.getAttribute('data-variant')).toBe('transparent');
+    expect(root.style.minWidth).toBe('fit-content');
+  });
+});
+
 describe('StatusBadge: один словник на різновид', () => {
   /*
    * ⛔ Те саме слово в різних різновидах — РІЗНІ словники. `Degraded` у
