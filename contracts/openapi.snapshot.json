@@ -545,23 +545,45 @@
         "description": "Конфлікт паралельного редагування. Повертається в\n`Extensions2.conflicts` при `ECR-CELL-0409`.\n«Перезаписати мовчки» не є опцією: користувач має побачити розбіжність.",
         "properties": {
           "columnCode": {
+            "description": "Колонка; `*` — розійшовся весь рядок, конкретної колонки назвати не можна.",
             "type": "string"
           },
           "currentVersion": {
+            "description": "Чинна версія рядка.",
             "type": "string"
           },
           "rowKey": {
+            "description": "Ключ рядка, чия версія розійшлася.",
             "type": "string"
           },
           "theirChangedAt": {
+            "description": "Момент останньої зміни в UTC; `null` — невідомо.",
             "format": "date-time",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "theirOrigin": {
+            "description": "Походження останньої зміни: `UserEdit`, `Import`,\n`Recalculation`, `Migration`; `null` — невідоме. Потрібне\nпоруч із `system`: «це зробила не людина» без відповіді «а що саме»\nлишає користувача з тим самим питанням.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "theirUser": {
-            "type": "string"
+            "description": "Відображуване ім'я автора останньої зміни; `system` — зміна не людини\n(перерахунок, імпорт, міграція); `null` — автор невідомий. Ніколи не\nлогін і не SID (R-A2, D-86).",
+            "type": [
+              "null",
+              "string"
+            ]
           },
-          "theirValue": {},
-          "yourValue": {}
+          "theirValue": {
+            "description": "Чинне значення комірки — те, що лежить у сховищі зараз; `null` —\nкомірки немає або назвати її неможливо."
+          },
+          "yourValue": {
+            "description": "Значення, яке надіслав цей користувач."
+          }
         },
         "required": [
           "rowKey",
@@ -569,6 +591,7 @@
           "yourValue",
           "theirValue",
           "theirUser",
+          "theirOrigin",
           "theirChangedAt",
           "currentVersion"
         ],

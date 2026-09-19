@@ -184,7 +184,8 @@ public sealed class RecalculationJobIdTests
         => await new PatchCellsHandler(
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Application.Validation.ValidationEngine(new RealFormulaEngine()),
-                _methodologies, _registries, _audit, _jobs, _uow, _user, _clock)
+                _methodologies, _registries, _audit, Substitute.For<IAuditReader>(),
+                _jobs, _uow, _user, _clock)
             .HandleAsync(
                 new PatchCellsRequest(
                     TableInstance, Period, "UserEdit",

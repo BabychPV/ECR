@@ -173,7 +173,8 @@ public sealed class ExcelImporterTemplateVersionTests
                 Substitute.For<IPeriodStore>(), Substitute.For<IMetadataCache>(), Substitute.For<IAccessDecisionService>(),
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 methodologies, patchRegistries,
-                Substitute.For<IAuditWriter>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
+                Substitute.For<IAuditWriter>(), Substitute.For<IAuditReader>(),
+                Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
                 Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
             new ImportDiffBuilder(), _cellStore, _rowStore,
             // ⚠ `DAT-05`: імпортер тепер сам відкриває транзакцію на всю книгу
