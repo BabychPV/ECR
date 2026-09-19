@@ -1291,7 +1291,7 @@ USING (VALUES
     (N'security.createRole',             N'en', N'New role', 1),
     (N'security.roleCreated',            N'en', N'The role has been created. Grants say which projects it opens.', 1),
     (N'security.roleCode',               N'en', N'Code', 1),
-    (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', 1),
+    (N'security.roleCodeHint',           N'en', N'Used in grants and audit. Built-in role codes cannot be changed.', 1),
     (N'security.roleName',               N'en', N'Name', 1),
     -- `BE-14`: клонувати / перейменувати / видалити роль.
     (N'security.cloneRole',              N'en', N'Clone', 1),
