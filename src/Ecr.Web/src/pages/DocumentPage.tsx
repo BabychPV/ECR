@@ -10,6 +10,7 @@ import type {
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
+import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { ExportButton } from '@/features/export/ExportButton';
@@ -347,6 +348,13 @@ export function DocumentPage(): JSX.Element {
           </Group>
         }
       />
+
+      {/* ⛔ `BE-10`. Компонент сам вирішує, чи малюватися: доки сервер не
+          відповів, він повертає `null`, а не «0 з 0» — заповненість, якої ще
+          не знають, і заповненість, якої немає, це різні твердження
+          (`D15-06`). Поруч із `ValidationPanel` він і за змістом: обидва
+          кажуть про документ за період цілком, а не про активний аркуш. */}
+      <SheetFillSummary documentId={documentId} periodKey={periodKey} />
 
       {/* ⚠ Панель — ПІД заголовком і НАД вкладками: зауваження стосуються
           документа за період цілком, а не активного аркуша, і сховати їх під
