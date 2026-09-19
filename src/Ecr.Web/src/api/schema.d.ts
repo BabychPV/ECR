@@ -1434,14 +1434,34 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Останні фонові задачі. Право `System.ViewHealth`.
-         * @description ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
-         *     її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
-         *     перевірити те, про що вже здогадався (`ФВ-12.4`).
+         * Останні фонові задачі. Право `System.ViewHealth` — або
+         *     `mine=true` для ВЛАСНИХ задач (BE-08).
+         * @description     ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
+         *         її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
+         *         перевірити те, про що вже здогадався (`ФВ-12.4`).
+         *         ⛔ Автора задачі НЕ МОЖНА назвати з запиту. Дія не має і не
+         *     матиме параметра з ідентифікатором користувача: mine=true —
+         *     межа доступу (власні задачі видно без System.ViewHealth, Q-156),
+         *     і параметр «чиї задачі» перетворив би це звільнення на спосіб читати
+         *     чужу чергу. Власник береться лише з ICurrentUser в обробнику.
+         *         ⛔ Без mine і без права — 403, а не порожній перелік:
+         *     «задач немає» і «вам їх не показують» — різні відповіді, і перша з них
+         *     тут була б неправдою.
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Стан задачі: `Queued`, `Running`, `Succeeded`,
+                     *     `Failed`, `Cancelled`. Невідомий — `422`, а не порожній
+                     *     перелік. */
+                    state?: string;
+                    /** @description Код (тип) задачі, як у `JobSummary.jobCode`. */
+                    code?: string;
+                    /** @description Лише власні задачі; не вимагає `System.ViewHealth`. */
+                    mine?: boolean;
+                    /** @description Скільки повернути, 1…50. */
+                    limit?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1457,6 +1477,28 @@ export interface paths {
                         "application/json": components["schemas"]["JobSummary"][];
                         "text/json": components["schemas"]["JobSummary"][];
                         "text/plain": components["schemas"]["JobSummary"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -9351,6 +9393,16 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /**
+             * Format: date-time
+             * @description             Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
+             *                 ⚠ Поле називається StartedAt, а не CreatedAt, бо саме це
+             *     зберігає стовпець: JobProgress.Begin перезаписує його в момент
+             *     запуску (IntegrationLogs.cs). Назва «створено» була б неправдою
+             *     для кожної задачі, що вже почала працювати, а окремого стовпця з
+             *     моментом постановки в itg.JobProgress немає.
+             */
+            startedAt: string;
             /** @description Стан. */
             state: string;
             /**

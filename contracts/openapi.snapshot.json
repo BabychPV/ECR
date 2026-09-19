@@ -2725,6 +2725,11 @@
             "format": "int32",
             "type": "integer"
           },
+          "startedAt": {
+            "description": "            Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.\n            ⚠ Поле називається StartedAt, а не CreatedAt, бо саме це\nзберігає стовпець: JobProgress.Begin перезаписує його в момент\nзапуску (IntegrationLogs.cs). Назва «створено» була б неправдою\nдля кожної задачі, що вже почала працювати, а окремого стовпця з\nмоментом постановки в itg.JobProgress немає.",
+            "format": "date-time",
+            "type": "string"
+          },
           "state": {
             "description": "Стан.",
             "type": "string"
@@ -2740,7 +2745,8 @@
           "jobCode",
           "state",
           "percent",
-          "updatedAt"
+          "updatedAt",
+          "startedAt"
         ],
         "type": "object"
       },
@@ -10192,7 +10198,42 @@
     },
     "/api/v1/jobs": {
       "get": {
-        "description": "⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає\nїї GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише\nперевірити те, про що вже здогадався (`ФВ-12.4`).",
+        "description": "    ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає\n    її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише\n    перевірити те, про що вже здогадався (`ФВ-12.4`).\n    ⛔ Автора задачі НЕ МОЖНА назвати з запиту. Дія не має і не\nматиме параметра з ідентифікатором користувача: mine=true —\nмежа доступу (власні задачі видно без System.ViewHealth, Q-156),\nі параметр «чиї задачі» перетворив би це звільнення на спосіб читати\nчужу чергу. Власник береться лише з ICurrentUser в обробнику.\n    ⛔ Без mine і без права — 403, а не порожній перелік:\n«задач немає» і «вам їх не показують» — різні відповіді, і перша з них\nтут була б неправдою.",
+        "parameters": [
+          {
+            "description": "Стан задачі: `Queued`, `Running`, `Succeeded`,\n`Failed`, `Cancelled`. Невідомий — `422`, а не порожній\nперелік.",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Код (тип) задачі, як у `JobSummary.jobCode`.",
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише власні задачі; не вимагає `System.ViewHealth`.",
+            "in": "query",
+            "name": "mine",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Скільки повернути, 1…50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10222,9 +10263,49 @@
               }
             },
             "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
-        "summary": "Останні фонові задачі. Право `System.ViewHealth`.",
+        "summary": "Останні фонові задачі. Право `System.ViewHealth` — або\n`mine=true` для ВЛАСНИХ задач (BE-08).",
         "tags": [
           "Jobs"
         ]
