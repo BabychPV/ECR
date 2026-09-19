@@ -1,5 +1,5 @@
 ﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Stack, Table, Text } from '@mantine/core';
+import { Button, Group, NumberInput, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -9,6 +9,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -170,11 +171,39 @@ export function DocumentsPage(): JSX.Element {
                       {Object.keys(document.sheetStates).length === 0 ? (
                         <Text c="dimmed">—</Text>
                       ) : (
-                        <Group gap="xs">
+                        /*
+                         * ⛔ UI-06: тут стояв власний `<Badge variant="light">`
+                         * із `{sheet}: {state}` — п'ятий спосіб показу статусу,
+                         * названий у шапці `StatusBadge.tsx` поіменно. Він був
+                         * гірший за решту чотирьох одразу двічі: друкував КОД
+                         * СЕРВЕРА як текст інтерфейсу і не фарбував НІЧОГО —
+                         * `Rejected` («аркуш повернено, робота стоїть») виглядав
+                         * рівно так само, як `Approved`. Колір тут не окраса:
+                         * перелік документів — екран, з якого починають день, і
+                         * єдине, заради чого в ньому є колонка стану, — побачити,
+                         * де саме щось не так, не відкриваючи кожен документ.
+                         *
+                         * ⚠ Код аркуша лишається видимим ПОРУЧ із бейджем:
+                         * `StatusBadge` малює лише перекладений стан, а аркушів у
+                         * документі кілька, і без коду незрозуміло, ЧИЙ це стан.
+                         * Пара «код + бейдж» загорнута у власний `wrap="nowrap"`
+                         * саме тому, що перенос рядка всередині пари відірвав би
+                         * стан від аркуша й дав би читати його як чужий.
+                         *
+                         * ⚠ Зовнішній проміжок БІЛЬШИЙ за внутрішній (`md` проти
+                         * `xs`, обидва зі шкали теми — `ФВ-14.12`): саме різниця
+                         * проміжків і робить пару «код + стан» однією річчю. За
+                         * однакових проміжків чотири аркуші читалися б як вісім
+                         * незалежних написів.
+                         */
+                        <Group gap="md">
                           {Object.entries(document.sheetStates).map(([sheet, state]) => (
-                            <Badge key={sheet} size="sm" variant="light">
-                              {sheet}: {state}
-                            </Badge>
+                            <Group key={sheet} gap="xs" wrap="nowrap">
+                              <Text size="xs" c="dimmed">
+                                {sheet}
+                              </Text>
+                              <StatusBadge kind="sheet" state={state} />
+                            </Group>
                           ))}
                         </Group>
                       )}
