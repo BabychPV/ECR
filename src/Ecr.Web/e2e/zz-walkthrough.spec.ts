@@ -125,11 +125,27 @@ async function settle(page: Page, timeout = 30_000): Promise<void> {
 interface Watcher {
   readonly consoleErrors: string[];
   readonly httpErrors: string[];
+
+  /**
+   * Відповіді на `PATCH /api/v1/documents/{id}/cells` — НЕминущий слід
+   * збереження комірки.
+   *
+   * ⛔ Усі екранні ознаки збереження минущі, і саме тому крок `cell-saved`
+   * роками не мав чого перевіряти. Кнопка `Save` вимкнена, щойно `pending`
+   * спорожніє (`DocumentGrid.tsx`: `disabled={pending.size === 0}`), а
+   * `onPaste` кличе `save(edits)` НЕГАЙНО — тобто після успішної вставки
+   * кнопка законно вимкнена. Індикатор `[data-save-status="saved"]` живе
+   * близько двох секунд і встигає зникнути між кроками. Запит же в журналі
+   * мережі лишається назавжди — і його наявність із кодом < 400 і є
+   * відповіддю на питання «комірку справді записано?».
+   */
+  readonly cellPatches: Array<{ status: number; path: string }>;
 }
 
 function watch(page: Page): Watcher {
   const consoleErrors: string[] = [];
   const httpErrors: string[] = [];
+  const cellPatches: Array<{ status: number; path: string }> = [];
 
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text().slice(0, 300));
@@ -138,14 +154,18 @@ function watch(page: Page): Watcher {
     consoleErrors.push(`pageerror: ${error.message.slice(0, 300)}`);
   });
   page.on('response', (response) => {
+    const pathname = new URL(response.url()).pathname;
+    const method = response.request().method();
+
+    if (method === 'PATCH' && pathname.endsWith('/cells')) {
+      cellPatches.push({ status: response.status(), path: pathname });
+    }
     if (response.status() >= 400) {
-      httpErrors.push(
-        `${String(response.status())} ${response.request().method()} ${new URL(response.url()).pathname}`,
-      );
+      httpErrors.push(`${String(response.status())} ${method} ${pathname}`);
     }
   });
 
-  return { consoleErrors, httpErrors };
+  return { consoleErrors, httpErrors, cellPatches };
 }
 
 /**
@@ -359,8 +379,16 @@ async function useScheme(page: Page, scheme: 'light' | 'dark'): Promise<void> {
  *
  * ⛔ Пояснення — у шапці файла: зупинка на першій знахідці приховала б усі
  * наступні, а другий прогін коштує стенда. Виняток стає записом.
+ *
+ * ⚠ `hard` — список кроків, чия невдача МУСИТЬ дійти до прогону, а не лише до
+ * журналу. Прохід усе одно йде до кінця (запис у список, не `throw`), але
+ * сценарій перевіряє список наприкінці й падає. Це не робить файл гейтом:
+ * гейт відповідає «так/ні» про продукт, а тут перевіряється, що САМ КРОК
+ * щось перевірив. Крок, який нічого не перевірив і записав «успішно», — не
+ * спостереження, а неправда в журналі, і саме така неправда вивела
+ * розслідування на десять хвилин і чотири кроки вбік.
  */
-async function record(name: string, step: () => Promise<void>): Promise<void> {
+async function record(name: string, step: () => Promise<void>, hard?: string[]): Promise<void> {
   const started = Date.now();
 
   try {
@@ -368,6 +396,7 @@ async function record(name: string, step: () => Promise<void>): Promise<void> {
   } catch (failure) {
     const message = failure instanceof Error ? failure.message : String(failure);
     await log({ screen: name, shot: null, note: 'КРОК ОБІРВАВСЯ', data: message.slice(0, 600) });
+    hard?.push(`${name}: ${message.slice(0, 300)}`);
   }
 
   // ⚠ Тривалість кожного кроку в журналі — не статистика. У першому проході
@@ -545,6 +574,19 @@ test.describe('WALK: прохід системою від А до Я', () => {
     test.setTimeout(600_000);
     const watcher = watch(page);
 
+    /*
+     * ⛔ Кроки, які мусять ДОВОДИТИ, а не лише спостерігати. Решта сценарію
+     * лишається приладом; ці три відповідають на питання «чи введення даних
+     * узагалі працює», і мовчазне «успішно» від них коштувало розслідування
+     * на десять хвилин: `cell-saved` і `cell-undo` проходили на ВИМКНЕНИХ
+     * кнопках, а справжня відмова спливала аж на `validate`.
+     *
+     * ⚠ Список перевіряється в кінці сценарію, а не на місці: прохід має
+     * дійти до кінця й зняти всі екрани, інакше наступне розслідування знову
+     * почнеться з «а що було далі — невідомо».
+     */
+    const hard: string[] = [];
+
     await record('operator-sign-in', async () => {
       await useScheme(page, 'light');
       await signIn(page, Operator.user, Operator.password);
@@ -612,6 +654,21 @@ test.describe('WALK: прохід системою від А до Я', () => {
       await page.waitForTimeout(1_500);
 
       const after = await firstCellText(page);
+
+      /*
+       * ⛔ Модалку відмови ТРЕБА ПОМІТИТИ І ЗГАСИТИ, інакше вона лишається
+       * відкритою до кінця сценарію і псує КОЖЕН наступний крок: її оверлей
+       * перехоплює вказівник, і `validate.click()` чекав 579.8 с саме тому.
+       * Знімок і огляд робляться ще при відкритій модалці — вона і є головною
+       * знахідкою кроку, — і лише потім `Escape`.
+       *
+       * ⚠ Гасимо саме ТУТ, а не в `record()` для всіх кроків підряд: WALK 3
+       * навмисно переносить відкритий діалог попереднього перегляду імпорту з
+       * кроку `import` у крок `import-apply`, і сліпий `Escape` між кроками
+       * зламав би єдину перевірку застосування імпорту.
+       */
+      const rejectedDialog = await page.getByText('Some cells were not saved').count();
+
       const file = await shot(page, 'cell-input');
       await log({
         screen: 'cell-input',
@@ -619,6 +676,8 @@ test.describe('WALK: прохід системою від А до Я', () => {
         note: `після вставки 4242: комірка була «${before}», стала «${after}»`,
         data: {
           seen: await probe(page),
+          rejectedDialog,
+          cellPatches: [...watcher.cellPatches],
           // ⚠ Явний короткий `timeout` у КОЖНОМУ розвідувальному виклику.
           // `innerText()` без нього чекає 30 с, `getAttribute()` — теж, і
           // `.catch(...)` цього не скорочує: він ловить відмову ПІСЛЯ
@@ -632,6 +691,8 @@ test.describe('WALK: прохід системою від А до Я', () => {
           http: [...watcher.httpErrors],
         },
       });
+
+      if (rejectedDialog > 0) await page.keyboard.press('Escape');
     });
 
     await record('cell-saved', async () => {
@@ -649,6 +710,8 @@ test.describe('WALK: прохід системою від А до Я', () => {
       await page.waitForTimeout(1_000);
 
       const file = await shot(page, 'cell-saved');
+      const accepted = watcher.cellPatches.filter((entry) => entry.status < 400);
+
       await log({
         screen: 'cell-saved',
         shot: file,
@@ -656,6 +719,7 @@ test.describe('WALK: прохід системою від А до Я', () => {
         data: {
           seen: await probe(page),
           saveWasEnabled: enabled,
+          cellPatches: [...watcher.cellPatches],
           status: await page
             .locator('[data-save-status]')
             .first()
@@ -664,7 +728,31 @@ test.describe('WALK: прохід системою від А до Я', () => {
           http: [...watcher.httpErrors],
         },
       });
-    });
+
+      /*
+       * ⛔ Цей крок роками звітував «після збереження» з `saveWasEnabled:
+       * false` — тобто не натиснув нічого й нічого не перевірив. Журнал читав
+       * це як норму, і справжня відмова («документ лише для читання, вставку
+       * відхилено цілим пакетом») спливала аж на `validate`, за десять хвилин
+       * і за два кроки далі.
+       *
+       * ⛔ Перевіряється НЕ стан кнопки. Вимкнена `Save` після успішної
+       * вставки — це норма продукту, а не знахідка: `onPaste` кличе
+       * `save(edits)` негайно, `pending` порожніє, і кнопка законно гасне
+       * (`DocumentGrid.tsx`: `disabled={pending.size === 0}`). Індикатор
+       * `[data-save-status]` теж не годиться — він живе ~2 с і встигає
+       * зникнути. Єдиний неминущий доказ — сам запит: відхилена вставка НЕ
+       * надсилає нічого (`onPaste` виходить на `plan.rejected.length > 0`).
+       */
+      expect(
+        accepted.length,
+        'крок «збережено» нічого не зберіг: жодного успішного PATCH …/cells за ' +
+          'весь сценарій. Вимкнена кнопка Save сама по собі не є знахідкою ' +
+          '(вставку зберігає onPaste, і pending порожніє), але відсутність ' +
+          'ЗАПИТУ означає, що вставку відхилено ще на клієнті — дивись крок ' +
+          'cell-input, поле rejectedDialog і модалку «Some cells were not saved».',
+      ).toBeGreaterThan(0);
+    }, hard);
 
     await record('cell-undo', async () => {
       const undo = page.getByRole('button', { name: /^Undo$/i }).first();
@@ -689,7 +777,24 @@ test.describe('WALK: прохід системою від А до Я', () => {
           http: [...watcher.httpErrors],
         },
       });
-    });
+
+      /*
+       * ⛔ Тут стан кнопки — ЗАКОННИЙ доказ, на відміну від `Save` вище, і
+       * різниця не в стилі. `Undo` доступна рівно тоді, коли в історії є крок
+       * (`disabled={!history.current.canUndo}`), а `DocumentGrid.onPaste`
+       * робить `history.current.push(...)` на КОЖНІЙ прийнятій вставці — і
+       * робить це незалежно від автозбереження. Тому вимкнена `Undo` в цьому
+       * місці означає рівно одне: вставки не було, і скасовувати нічого.
+       * Крок, який на це відповідав «після скасування (Undo)», брехав.
+       */
+      expect(
+        enabled,
+        'кнопка Undo вимкнена: історія порожня, отже прийнятої вставки не було — ' +
+          'крок «скасування» не перевірив нічого. Undo не залежить від ' +
+          'автозбереження (history.push у DocumentGrid.onPaste), тож причина ' +
+          'попереду, у cell-input.',
+      ).toBe(true);
+    }, hard);
 
     await record('validate', async () => {
       const validate = page.getByRole('button', { name: /^Validate$/i }).first();
@@ -726,6 +831,18 @@ test.describe('WALK: прохід системою від А до Я', () => {
         data: { seen: await probe(page), http: [...watcher.httpErrors] },
       });
     });
+
+    /*
+     * ⛔ Єдине місце, де цей сценарій падає, — і воно в кінці навмисно: усі
+     * знімки зняті, увесь журнал записаний, і лише тоді прогін каже, що кроки
+     * введення даних нічого не довели. Без цього рядка список `hard`
+     * лишався б черговим записом у файлі, який читають після того, як
+     * розслідування вже пішло не туди.
+     */
+    expect(
+      hard,
+      'кроки, які мусять доводити, а не лише спостерігати, нічого не довели',
+    ).toEqual([]);
   });
 
   test('WALK 3 · оператор: експорт у .xlsx та імпорт', async ({ page }) => {
