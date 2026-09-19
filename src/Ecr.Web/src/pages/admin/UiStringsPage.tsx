@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Select, Table, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Group, Select, Switch, Table, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import type { SetUiStringRequest, UiStringCatalog, UiStringRevisionResponse } from '@/api/types';
 import { useLanguages } from '@/shared/i18n/useLanguages';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -61,6 +62,9 @@ export const RowsPerChunk = 100;
  */
 const LoadAheadMargin = '200px 0px';
 
+type UiStringCoverageResponse = components['schemas']['UiStringCoverageResponse'];
+type UiStringListResponse = components['schemas']['UiStringListResponse'];
+
 export function UiStringsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const languages = useLanguages();
@@ -89,6 +93,36 @@ export function UiStringsPage(): JSX.Element {
   const reference = useQuery({
     queryKey: ['ui-strings', DefaultLanguage],
     queryFn: () => apiFetch<UiStringCatalog>(`/api/v1/ui-strings/${DefaultLanguage}?scope=private`),
+  });
+
+  /**
+   * Покриття перекладу по мовах (`BE-13`).
+   *
+   * ⚠ Відмова тут НЕ валить сторінку: лічильники — довідка над таблицею, і
+   * без них редактор лишається робочим. Тому запит поза `AsyncBoundary`.
+   */
+  const coverage = useQuery({
+    queryKey: ['ui-strings', 'coverage'],
+    queryFn: () => apiFetch<UiStringCoverageResponse>('/api/v1/ui-strings/coverage'),
+  });
+
+  const [missingOnly, setMissingOnly] = useState(false);
+  const isDefault = lang === DefaultLanguage;
+
+  /**
+   * «Сирий» перелік відсутніх — БЕЗ підміни мовою за замовчуванням (`BE-13`).
+   *
+   * ⛔ Каталог вище віддає вже підмінені значення, і відсутній переклад у
+   * ньому невидимий; здогад «значення збігається з оригіналом» бреше на
+   * кожному «OK» і «ID». Тут відповідає сервер, який бачить базу.
+   */
+  const missing = useQuery({
+    queryKey: ['ui-strings', 'missing', lang],
+    queryFn: () =>
+      apiFetch<UiStringListResponse>(
+        `/api/v1/ui-strings?lang=${encodeURIComponent(lang)}&missingOnly=true`,
+      ),
+    enabled: missingOnly && !isDefault,
   });
 
   const save = useMutation({
@@ -123,11 +157,13 @@ export function UiStringsPage(): JSX.Element {
   // неперекладеної мови сервер віддає підмінені значення, і взяти ключі
   // звідти означало б показати рівно ті самі рядки й ніколи не побачити
   // пропущених.
+  const onlyMissing = missingOnly && !isDefault;
+  const missingKeys = new Set((missing.data?.items ?? []).map((item) => item.key));
+
   const keys = Object.keys(original)
     .filter((key) => key.toLowerCase().includes(filter.toLowerCase()))
+    .filter((key) => !onlyMissing || missingKeys.has(key))
     .sort((a, b) => a.localeCompare(b));
-
-  const isDefault = lang === DefaultLanguage;
 
   /** Скільки рядків зараз намальовано. */
   const [shown, setShown] = useState(RowsPerChunk);
@@ -140,7 +176,7 @@ export function UiStringsPage(): JSX.Element {
    */
   useEffect(() => {
     setShown(RowsPerChunk);
-  }, [filter, lang]);
+  }, [filter, lang, missingOnly]);
 
   const visible = keys.slice(0, shown);
 
@@ -214,6 +250,16 @@ export function UiStringsPage(): JSX.Element {
               onChange={(event) => setFilter(event.currentTarget.value)}
             />
 
+            {/* ⚠ Для мови за замовчуванням перемикач вимкнений: вона сама є
+                еталоном, і «відсутніх» у ній не буває за визначенням. */}
+            <Switch
+              size="xs"
+              label={t('uiStrings.missingOnly')}
+              checked={onlyMissing}
+              disabled={isDefault}
+              onChange={(event) => setMissingOnly(event.currentTarget.checked)}
+            />
+
             {/* ⛔ F10: підсумок «намальовано з усього». Нового рядка каталогу
                 тут не заводиться — каталог живе в сіді БД, поза цим пакетом
                 (`D-95`), — тож підпис числовий і тому однаковий усіма мовами.
@@ -226,9 +272,27 @@ export function UiStringsPage(): JSX.Element {
         }
       />
 
+      {/* ⚠ `Array.isArray`, а не довіра типові: тип обіцяє компілятор, а не
+          мережа, і відповідь іншої форми мала б лишити сторінку без лічильників,
+          а не без таблиці. */}
+      {coverage.data !== undefined && Array.isArray(coverage.data.languages) && (
+        <Group gap="md" mb="xs" data-testid="ui-strings-coverage">
+          {coverage.data.languages.map((row) => (
+            <Text key={row.languageCode} size="xs" c="dimmed">
+              {t('uiStrings.coverage', {
+                language: row.languageCode,
+                translated: row.translated,
+                total: row.total,
+                missing: row.missing,
+              })}
+            </Text>
+          ))}
+        </Group>
+      )}
+
       <AsyncBoundary<UiStringCatalog>
-        isPending={catalog.isPending || reference.isPending}
-        error={catalog.error ?? reference.error}
+        isPending={catalog.isPending || reference.isPending || (onlyMissing && missing.isPending)}
+        error={catalog.error ?? reference.error ?? (onlyMissing ? missing.error : null)}
         data={catalog.data}
         isEmpty={() => keys.length === 0}
         emptyTitle={t('uiStrings.empty')}

@@ -7917,6 +7917,100 @@
         ],
         "type": "object"
       },
+      "UiStringCoverageDto": {
+        "description": "Покриття перекладу однієї мови.",
+        "properties": {
+          "languageCode": {
+            "description": "Мова.",
+            "type": "string"
+          },
+          "missing": {
+            "description": "Скільки показуються підміною.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Скільки ключів у мові за замовчуванням — стільки й треба перекласти.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "translated": {
+            "description": "Скільки з них мають власний непорожній переклад.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "languageCode",
+          "total",
+          "translated",
+          "missing"
+        ],
+        "type": "object"
+      },
+      "UiStringCoverageResponse": {
+        "description": "Покриття перекладу по мовах продукту.",
+        "properties": {
+          "languages": {
+            "description": "Увімкнені мови в порядку показу.",
+            "items": {
+              "$ref": "#/components/schemas/UiStringCoverageDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "languages"
+        ],
+        "type": "object"
+      },
+      "UiStringListResponse": {
+        "description": "Адміністративний перелік рядків мови — без fallback.",
+        "properties": {
+          "items": {
+            "description": "Рядки за ключем.",
+            "items": {
+              "$ref": "#/components/schemas/UiStringRawRow"
+            },
+            "type": "array"
+          },
+          "languageCode": {
+            "description": "Мова.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "languageCode",
+          "items"
+        ],
+        "type": "object"
+      },
+      "UiStringRawRow": {
+        "description": "Рядок адміністративного переліку: оригінал і переклад як він є в базі.",
+        "properties": {
+          "key": {
+            "description": "Ключ.",
+            "type": "string"
+          },
+          "reference": {
+            "description": "Текст мовою за замовчуванням.",
+            "type": "string"
+          },
+          "value": {
+            "description": "Переклад; `null` — перекладу немає (підміни тут не буває).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "reference",
+          "value"
+        ],
+        "type": "object"
+      },
       "UiStringRevisionResponse": {
         "description": "Версія каталогу після запису.",
         "properties": {
@@ -18393,6 +18487,86 @@
         "summary": "Створює версію шаблону. Право `Template.Edit`.",
         "tags": [
           "Templates"
+        ]
+      }
+    },
+    "/api/v1/ui-strings": {
+      "get": {
+        "description": "Каталог `GET {lang}` підміняє відсутній переклад мовою за\nзамовчуванням, і відсутнє там невидиме. Тут `value = null` означає\nрівно «перекладу немає».",
+        "parameters": [
+          {
+            "description": "Мова; порожньо — мова за замовчуванням.",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише рядки без перекладу.",
+            "in": "query",
+            "name": "missingOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringListResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringListResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringListResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Адміністративний перелік рядків мови **без fallback**. Право\n`System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/coverage": {
+      "get": {
+        "description": "⚠ Літеральний сегмент `coverage` виграє в шаблону `{lang}` за\nправилами маршрутизації; мови з таким кодом не буває — код мови це\n`char(2..5)` реєстру.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringCoverageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringCoverageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringCoverageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Покриття перекладу по мовах. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
         ]
       }
     },
