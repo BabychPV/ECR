@@ -401,6 +401,11 @@ USING (VALUES
     -- усі приватної області (лише автентифіковані адмін-екрани).
     (N'err.ECR-SEC-0409',  N'en', N'Role code already in use', 1),
     (N'err.ECR-SEC-0409.roleCodeTaken', N'en', N'A role with code "{code}" already exists.', 1),
+    -- ⛔ `BE-14`: та сама родина, інші причини — роль не видаляється, доки на
+    -- ній щось тримається, а вбудована не видаляється й не перейменовується.
+    (N'err.ECR-SEC-0409.roleInUse', N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.', 1),
+    (N'err.ECR-SEC-0409.roleBuiltIn', N'en', N'Role "{code}" is built in: it cannot be renamed or deleted.', 1),
+    (N'err.ECR-SEC-0404.roleNotFound', N'en', N'Role {roleId} does not exist.', 1),
     (N'err.ECR-PRJ-0409',  N'en', N'Project code already in use', 1),
     (N'err.ECR-PRJ-0409.projectCodeTaken', N'en', N'A project with code "{code}" already exists.', 1),
     (N'err.ECR-REG-0409',  N'en', N'Registry entry code already in use', 1),
@@ -416,6 +421,9 @@ USING (VALUES
     -- довідників (`Q-200`).
     (N'err.ECR-UOM-4091',  N'en', N'Unit code already in use', 1),
     (N'err.ECR-UOM-4091.unitCodeTaken', N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
+    (N'err.ECR-UOM-0404.unitId', N'en', N'There is no unit with Id {id}.', 1),
+    (N'err.ECR-UOM-0409',  N'en', N'Unit is in use', 1),
+    (N'err.ECR-UOM-0409.unitInUse', N'en', N'Unit "{code}" cannot be removed: it is referenced in {total} place(s).', 1),
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
@@ -1135,6 +1143,16 @@ USING (VALUES
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),
+
+    -- BE-18: факти про процес і команда для DBA (D15-12: застосунок не виконує DDL).
+    (N'health.facts',                    N'en', N'System', 1),
+    (N'health.facts.productVersion',     N'en', N'Product version', 1),
+    (N'health.facts.startedAt',          N'en', N'Started at', 1),
+    (N'health.facts.environment',        N'en', N'Environment', 1),
+    (N'health.facts.notificationTransport', N'en', N'Notification transport', 1),
+    (N'health.facts.transportNotConfigured', N'en', N'Not configured: notifications stay in the queue', 1),
+    (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
+    (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),
     (N'profile.themeAuto',               N'en', N'System', 1),
     (N'profile.themeLight',              N'en', N'Light', 1),
@@ -1286,8 +1304,18 @@ USING (VALUES
     (N'security.createRole',             N'en', N'New role', 1),
     (N'security.roleCreated',            N'en', N'The role has been created. Grants say which projects it opens.', 1),
     (N'security.roleCode',               N'en', N'Code', 1),
-    (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', 1),
+    (N'security.roleCodeHint',           N'en', N'Used in grants and audit. Built-in role codes cannot be changed.', 1),
     (N'security.roleName',               N'en', N'Name', 1),
+    -- `BE-14`: клонувати / перейменувати / видалити роль.
+    (N'security.cloneRole',              N'en', N'Clone', 1),
+    (N'security.renameRole',             N'en', N'Rename', 1),
+    (N'security.newRoleCode',            N'en', N'New code', 1),
+    (N'security.roleCloned',             N'en', N'The role has been cloned with the same permissions. Grants are not copied.', 1),
+    (N'security.roleRenamed',            N'en', N'The role has been renamed.', 1),
+    (N'security.roleDeleted',            N'en', N'The role has been deleted.', 1),
+    (N'security.deleteRoleConfirm',      N'en', N'Delete role "{code}"? This cannot be undone.', 1),
+    (N'security.roleDeleteRefused',      N'en', N'The role cannot be deleted', 1),
+    (N'security.roleAssignments',        N'en', N'Assignments', 1),
     (N'security.permissions',            N'en', N'Permissions', 1),
     (N'security.permissionsHint',        N'en', N'What the role can do. Which projects it opens is a separate question — see Grants.', 1),
     (N'security.createUser',             N'en', N'New user', 1),
@@ -1515,6 +1543,9 @@ USING (VALUES
     (N'units.factorHint',                N'en', N'Multiplier to the dimension''s base unit.', 1),
     (N'units.offsetHint',                N'en', N'Only nonzero for temperature units (°C to K).', 1),
     (N'units.created',                   N'en', N'Unit created.', 1),
+    (N'units.deleted',                   N'en', N'Unit removed.', 1),
+    (N'units.deleteUnused',              N'en', N'Nothing refers to this unit.', 1),
+    (N'units.deleteUsedIn',              N'en', N'Referenced in {total} place(s) - the unit cannot be removed until they are gone:', 1),
     (N'nav.audit',                       N'en', N'Audit trail', 1),
     (N'audit.title',                     N'en', N'Audit trail', 1),
     (N'audit.from',                      N'en', N'From', 1),
@@ -1544,6 +1575,14 @@ USING (VALUES
     -- відповідає 400, а не порожнім списком.
     (N'audit.cellHint',                  N'en', N'Row key and column need a document: together the three are the history of one cell.', 1),
     (N'audit.reset',                     N'en', N'Clear filters', 1),
+    -- `BE-16`: друга вкладка екрана — загальний журнал структурних змін.
+    (N'audit.viewCells',                 N'en', N'Cell changes', 1),
+    (N'audit.viewStructure',             N'en', N'Structure changes', 1),
+    (N'audit.entityType',                N'en', N'Entity type', 1),
+    (N'audit.entity',                    N'en', N'Entity', 1),
+    (N'audit.operation',                 N'en', N'Operation', 1),
+    (N'audit.reason',                    N'en', N'Reason', 1),
+    (N'audit.structureEmpty',            N'en', N'No structure changes in this window', 1),
 
     -- ⛔ Знахідки перевірки узгодженості (`aud.ConsistencyIssue`). До цього
     -- екрана з продукту було видно лише КІЛЬКІСТЬ за типом (лічильник
@@ -1591,6 +1630,13 @@ USING (VALUES
     (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
     (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
     (N'snapshots.noPublished',           N'en', N'No report definition has a published version yet: a snapshot can only be built from one.', 1),
+    -- BE-17: перевірка незмінності зрізу — сума перераховується за збереженими рядками.
+    (N'snapshots.verify',                N'en', N'Verify', 1),
+    (N'snapshots.verifyMatch',           N'en', N'unchanged', 1),
+    (N'snapshots.verifyMismatch',        N'en', N'content changed', 1),
+    (N'snapshots.verifyStored',          N'en', N'Stored: {hash}', 1),
+    (N'snapshots.verifyActual',          N'en', N'Actual: {hash}', 1),
+    (N'snapshots.verifyLegacy',          N'en', N'Matched by the earlier checksum format: this snapshot was built before the format changed.', 1),
 
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.

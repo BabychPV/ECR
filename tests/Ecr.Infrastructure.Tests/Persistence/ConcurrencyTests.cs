@@ -77,9 +77,16 @@ public sealed class ConcurrencyTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Конфлікт_в_одному_рядку_відхиляє_весь_батч()
+    public async Task Помилка_в_одній_комірці_відкочує_весь_батч()
     {
         var (doc, store, _) = await ArrangeAsync();
+
+        // ⚠ Це НЕ конфлікт версій (стара назва тесту казала саме це і брехала):
+        // `CellChangeSet` на цьому шарі взагалі не несе `BaseVersion`.
+        // Предмет тесту — АТОМАРНІСТЬ батчу: відмова на одній комірці не сміє
+        // лишити в базі сусідні. Відхилення застарілої версії — рішення
+        // прикладного шару, і воно доведено реальним викликом обробника в
+        // `PatchCellsTests.Конфлікт_в_одному_рядку_відхиляє_весь_батч_із_переліком_конфліктів`.
 
         // Батч, у якому один рядок посилається на неіснуючу колонку: складений
         // FK не дасть його записати.
@@ -105,13 +112,32 @@ public sealed class ConcurrencyTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Відповідь_на_конфлікт_містить_чуже_значення_автора_і_момент_зміни()
+    public async Task AuditWriter_зберігає_автора_і_нове_значення_правки_комірки()
     {
         var (doc, store, _) = await ArrangeAsync();
+
+        // ⚠ Цей запис аудиту НЕ породжує рядок у `aud.CellChange`:
+        // `NormalizedCellStore` аудиту не пише взагалі
+        // (`git grep -i audit -- src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs`
+        // дає нуль). Виклик лишено як тло — комірка справді існує в `doc.CellValue`
+        // — але до твердження нижче він не причетний.
         await store.ApplyAsync(Change(doc, rowIndex: 0, value: 7m), CancellationToken.None);
 
-        // Аудит — джерело, з якого будується відповідь на конфлікт: клієнт має
-        // побачити ЧУЖЕ значення, автора і момент, а не просто «409».
+        // ⛔ Стара назва тесту —
+        // `Відповідь_на_конфлікт_містить_чуже_значення_автора_і_момент_зміни` —
+        // обіцяла більше, ніж тіло робить. Тіло САМЕ пише рядок аудиту з
+        // жорстко заданими користувачем 77 і значенням "7", а потім читає його
+        // назад: це round-trip `AuditWriter` через SQL Server, не перевірка
+        // вмісту відповіді на конфлікт. Справжня перевірка `CellConflictDto`
+        // (`TheirValue`/`TheirUser`/`TheirOrigin`/`TheirChangedAt`, включно з
+        // підписом `system` для змін не-людиною і трьома `null`, коли запису у
+        // вікні журналу немає) живе в
+        // `Ecr.Application.Tests/Documents/PatchCellsConflictDetailsTests.cs`
+        // і в `Ecr.Infrastructure.Tests/Persistence/PatchCellsConflictDetailsSqlTests.cs`.
+        //
+        // Цінність, яка тут лишається, реальна: аудит — джерело, з якого та
+        // відповідь будується, і цей тест доводить, що записане в нього
+        // повертається незміненим.
         await using var db = CreateContext();
         await new AuditWriter(db).WriteCellChangesAsync(
             [new CellChangeRecord(
@@ -196,14 +222,6 @@ public sealed class ConcurrencyTests(SqlServerFixture sql)
         }
 
         return result;
-    }
-
-    private async Task<string> RowVersionAsync(TestDocument doc, string rowKey)
-    {
-        var bytes = await ScalarAsync<byte[]>(
-            $"SELECT RowVersion FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} " +
-            $"AND TableInstanceId = {doc.TableInstanceId} AND RowKey = N'{rowKey}'");
-        return Convert.ToBase64String(bytes!);
     }
 
     private EcrDbContext CreateContext()

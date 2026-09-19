@@ -237,6 +237,34 @@ public sealed class FakeUserStore : IUserStore
         return Task.FromResult(id);
     }
 
+    /// <inheritdoc />
+    public Task<RoleUsage> CountRoleUsageAsync(int roleId, CancellationToken ct)
+    {
+        var code = RoleCodeById(roleId);
+
+        return Task.FromResult(new RoleUsage(
+            Grants.Count(g => g.RoleCode == code)
+            + DatedGrants.Count(g => g.RoleCode == code)
+            + GroupAssignments.Count(a => a.RoleCode == code),
+            GrantsByRole.TryGetValue(roleId, out var grants) ? grants.Count : 0));
+    }
+
+    /// <inheritdoc />
+    public Task RenameRoleAsync(
+        int roleId, string code, IReadOnlyDictionary<string, string>? name, CancellationToken ct)
+    {
+        var index = Roles.FindIndex(r => r.Id == roleId);
+        Roles[index] = Roles[index] with { Code = code };
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task RemoveRoleAsync(int roleId, CancellationToken ct)
+    {
+        Roles.RemoveAll(r => r.Id == roleId);
+        return Task.CompletedTask;
+    }
+
     /// <summary>Ресурсні гранти за роллю.</summary>
     /// <remarks>
     /// ⚠ Фікстура тримає гранти так само, як їх тримає система: набором на

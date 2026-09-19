@@ -97,6 +97,24 @@ public sealed record CellChangeFilter(
         => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
 }
 
+/// <summary>Фільтр загального журналу структурних змін (<c>BE-16</c>).</summary>
+/// <remarks>
+/// ⛔ Вікно часу — ОБОВ'ЯЗКОВІ поля, з тієї самої причини, що в
+/// <see cref="CellChangeFilter"/>: <c>aud.StructureChange</c> лежить на
+/// <c>ps_AuditByMonth(ChangedAt)</c> з кластерним ключем <c>(ChangedAt, Id)</c>
+/// (<c>11-audit-tables.sql</c>), тож саме вікно відсікає партиції й воно ж є
+/// єдиним індексним доступом до таблиці.
+/// </remarks>
+/// <param name="From">Початок вікна в UTC, включно.</param>
+/// <param name="To">Кінець вікна в UTC, виключно.</param>
+/// <param name="EntityType">Тип сутності (<c>cfg.RegistryDef</c> тощо); <c>null</c> — усі.</param>
+/// <param name="ChangedByUserId">Автор зміни — <b>UserId</b>, не SID (R-A2, D-86).</param>
+public sealed record StructureChangeFilter(
+    DateTime From,
+    DateTime To,
+    string? EntityType = null,
+    int? ChangedByUserId = null);
+
 /// <summary>Остання зміна однієї комірки — хто і коли (<c>BE-06</c>).</summary>
 /// <remarks>
 /// ⛔ Це ВІДПОВІДЬ НА ПИТАННЯ КОРИСТУВАЧА «чия правка і коли», а не рядок
@@ -155,9 +173,9 @@ public interface IAuditReader
     /// означало б зшивати два впорядкованих потоки в застосунку і
     /// перемішувати сторінки.
     ///
-    /// ⚠ <c>aud.StructureChange</c> не партиційована за часом, на відміну від
-    /// <c>aud.CellChange</c>: структурних змін одиниці на день, і вікно тут не
-    /// обов'язкове. Обмежує обсяг <paramref name="limit"/>.
+    /// ⚠ Вікно тут не обов'язкове, хоч <c>aud.StructureChange</c> і лежить на
+    /// <c>ps_AuditByMonth</c>, як <c>aud.CellChange</c>: структурних змін
+    /// одиниці на день. Обмежує обсяг <paramref name="limit"/>.
     /// </remarks>
     /// <param name="entityTypes">Типи сутностей; порожній набір — нічого.</param>
     /// <param name="entityId">Ідентифікатор сутності.</param>
@@ -165,6 +183,21 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<StructureChangeView>> ReadStructureChangesAsync(
         IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// Загальний журнал структурних змін у вікні часу (<c>BE-16</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий метод, а не розширення <see cref="ReadStructureChangesAsync"/>:
+    /// той відповідає на «історія ЦІЄЇ сутності» (останні N, без вікна), цей —
+    /// на «що змінювали в системі за тиждень» (вікно + курсор). Злити їх
+    /// означало б зробити вікно необов'язковим для обох.
+    /// </remarks>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<PagedResult<StructureChangeView>> ReadStructureJournalAsync(
+        StructureChangeFilter filter, CursorRequest page, CancellationToken ct);
 
     /// <summary>
     /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік

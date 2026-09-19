@@ -1,3 +1,4 @@
+using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Units;
 using Microsoft.AspNetCore.Authorization;
@@ -10,8 +11,36 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/units")]
 [Authorize]
 public sealed class UnitsController(
-    ListUnitsHandler list, ConvertUnitHandler convert, CreateUnitHandler create) : ControllerBase
+    ListUnitsHandler list, ConvertUnitHandler convert, CreateUnitHandler create,
+    UnitUsageHandler usage, DeleteUnitHandler delete) : ControllerBase
 {
+    /// <summary>Де використовується одиниця: перші 20 посилань і загальна кількість.</summary>
+    /// <param name="id">Ідентифікатор одиниці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/usage")]
+    [ProducesResponseType<UsageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UsageResponse>> Usage(int id, CancellationToken ct)
+        => Ok(await usage.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>Видаляє одиницю, на яку ніхто не посилається.</summary>
+    /// <param name="id">Ідентифікатор одиниці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Одиниця з посиланнями не видаляється — <c>409 ECR-UOM-0409</c>, а
+    /// перелік залежних лежить у <c>details.references</c>.
+    /// </remarks>
+    [HttpDelete("{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    {
+        await delete.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
     /// <summary>Перелік одиниць із їхніми розмірностями.</summary>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>

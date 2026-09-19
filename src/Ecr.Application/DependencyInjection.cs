@@ -136,9 +136,13 @@ public static class DependencyInjection
         services.AddScoped<Security.ReplaceResourceGrantsHandler>();
         services.AddScoped<Security.SetReceivesAlertsHandler>();
         services.AddScoped<Security.CreateRoleHandler>();
+        services.AddScoped<Security.RenameRoleHandler>();
+        services.AddScoped<Security.DeleteRoleHandler>();
+        services.AddScoped<Security.CloneRoleHandler>();
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();
         services.AddScoped<Audit.GetCellChangesHandler>();
+        services.AddScoped<Audit.GetStructureChangesHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
         services.AddScoped<Projects.CloneProjectHandler>();
 
@@ -172,6 +176,8 @@ public static class DependencyInjection
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
+        services.AddScoped<Units.UnitUsageHandler>();
+        services.AddScoped<Units.DeleteUnitHandler>();
 
         // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
         // мапінг і історія опису.
@@ -234,6 +240,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();
         services.AddScoped<Reporting.BuildReportSnapshotHandler>();
+        services.AddScoped<Reporting.VerifyReportSnapshotHandler>();
 
         // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
         // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні
@@ -259,6 +266,10 @@ public static class DependencyInjection
         // жодного права — бо викликається до автентифікації; склад полів і
         // причина кожного з них — у самому файлі.
         services.AddScoped<PublicApi.GetPublicBootstrapHandler>();
+
+        // BE-18: факти про процес і текст команди для DBA на `/admin/health`.
+        services.AddScoped<Health.GetSystemFactsHandler>();
+        services.AddScoped<Health.GetPartitionScriptHandler>();
 
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();

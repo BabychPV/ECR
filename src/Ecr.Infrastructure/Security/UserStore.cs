@@ -5,6 +5,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -366,6 +367,37 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<Ecr.Application.Security.RoleUsage> CountRoleUsageAsync(int roleId, CancellationToken ct)
+        => new(
+            await db.RoleAssignments.CountAsync(a => a.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false));
+
+    /// <inheritdoc />
+    public async Task RenameRoleAsync(
+        int roleId, string code, IReadOnlyDictionary<string, string>? name, CancellationToken ct)
+    {
+        var role = await db.Roles.FirstAsync(r => r.Id == roleId, ct).ConfigureAwait(false);
+
+        role.Rename(
+            EcrCode.Create(code),
+            name is null ? null : new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveRoleAsync(int roleId, CancellationToken ct)
+    {
+        // ⚠ Права прибираються явно, а не каскадом бази: чи стоїть на
+        // `FK_RolePerm_Role` каскад — властивість схеми, а не цього коду.
+        var permissions = await db.RolePermissions
+            .Where(p => p.RoleId == roleId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.RolePermissions.RemoveRange(permissions);
+        db.Roles.Remove(await db.Roles.FirstAsync(r => r.Id == roleId, ct).ConfigureAwait(false));
     }
 
     /// <inheritdoc />

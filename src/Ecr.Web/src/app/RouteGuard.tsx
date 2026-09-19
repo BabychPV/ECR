@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { announceRoute } from '@/shared/ui/RouteAnnouncer';
+import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 import type { RouteHandle } from './routes';
 
 /**
@@ -62,7 +63,7 @@ export function AccessDeniedPage({ permission }: { permission: string }): JSX.El
   return (
     <Center py="xl">
       <Stack gap="xs" align="center" maw={420} role="alert">
-        <Title order={2} ref={heading} tabIndex={-1}>
+        <Title order={2} ref={heading} tabIndex={-1} className={RouteHeadingClass}>
           {title}
         </Title>
 

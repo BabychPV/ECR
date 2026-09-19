@@ -141,6 +141,101 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
         Assert.Contains("ECR-UOM-0422", body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Одиниця_з_посиланням_не_видаляється_409_а_без_посилань_204()
+    {
+        // Директива №15, BE-15 — крізь справжній HTTP і справжню базу: перелік
+        // посилань збирає SQL, і лише тут видно, що він перекладається.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        var used = await CreateAsync(client).ConfigureAwait(true);
+        var other = await CreateAsync(client).ConfigureAwait(true);
+        var free = await CreateAsync(client).ConfigureAwait(true);
+
+        var options = new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options;
+        await using (var db = new EcrDbContext(options))
+        {
+            db.UnitConversions.Add(new Ecr.Domain.Entities.Units.UnitConversion(
+                used.Id, other.Id, factor: 2m, offset: 0m, kind: 0, note: null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var usage = await ReadAsync(client, $"/api/v1/units/{used.Id}/usage").ConfigureAwait(true);
+        Assert.Equal(1, usage.GetProperty("total").GetInt32());
+
+        var item = Assert.Single(usage.GetProperty("items").EnumerateArray());
+        Assert.Equal("unitConversion", item.GetProperty("kind").GetString());
+        Assert.Equal($"{used.Code} -> {other.Code}", item.GetProperty("label").GetString());
+
+        var refused = await client.DeleteAsync(new Uri($"/api/v1/units/{used.Id}", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, refused.StatusCode);
+
+        var problem = JsonDocument.Parse(await refused.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.Equal("ECR-UOM-0409", problem.GetProperty("errorCode").GetString());
+
+        // ⚠ `details.references` — те, що діалог показує замість «повторити».
+        // Деталі винятку їдуть розширеннями problem+json, тобто на верхньому рівні.
+        var reference = Assert.Single(problem.GetProperty("references").EnumerateArray());
+        Assert.Equal("unitConversion", reference.GetProperty("kind").GetString());
+
+        var empty = await ReadAsync(client, $"/api/v1/units/{free.Id}/usage").ConfigureAwait(true);
+        Assert.Equal(0, empty.GetProperty("total").GetInt32());
+
+        var removed = await client.DeleteAsync(new Uri($"/api/v1/units/{free.Id}", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, removed.StatusCode);
+
+        // ⛔ Головне: відхилена одиниця ЛИШИЛАСЬ, видалена — зникла.
+        var codes = (await ReadAsync(client, "/api/v1/units").ConfigureAwait(true))
+            .EnumerateArray().Select(u => u.GetProperty("code").GetString()).ToList();
+
+        Assert.Contains(used.Code, codes);
+        Assert.DoesNotContain(free.Code, codes);
+
+        // Базова одиниця розмірності (`kg`) тримається самою розмірністю.
+        var kg = (await ReadAsync(client, "/api/v1/units").ConfigureAwait(true))
+            .EnumerateArray().Single(u => u.GetProperty("code").GetString() == "kg").GetProperty("id").GetInt32();
+        var kgRefused = await client.DeleteAsync(new Uri($"/api/v1/units/{kg}", UriKind.Relative))
+            .ConfigureAwait(true);
+
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, kgRefused.StatusCode);
+    }
+
+    private static async Task<JsonElement> ReadAsync(HttpClient client, string path)
+    {
+        var response = await client.GetAsync(new Uri(path, UriKind.Relative)).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+        Assert.True(response.IsSuccessStatusCode, $"{path}: {response.StatusCode} {body}");
+
+        return JsonDocument.Parse(body).RootElement;
+    }
+
+    private static async Task<(int Id, string Code)> CreateAsync(HttpClient client)
+    {
+        var code = $"d{Guid.NewGuid():N}"[..8];
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/v1/units", UriKind.Relative),
+            new
+            {
+                code,
+                symbolL10n = new Dictionary<string, string> { ["en"] = code },
+                nameL10n = new Dictionary<string, string> { ["en"] = code },
+                dimensionId = 1,
+                factorToBase = 2.5m,
+                offsetToBase = 0m,
+            }).ConfigureAwait(false);
+
+        var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false)).RootElement;
+
+        return (created.GetProperty("id").GetInt32(), code);
+    }
+
     /// <summary>Клієнт із чинним сеансом локального користувача.</summary>
     /// <param name="app">Фабрика застосунку.</param>
     /// <param name="permissions">

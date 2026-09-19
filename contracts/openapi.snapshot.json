@@ -3729,6 +3729,27 @@
         ],
         "type": "object"
       },
+      "NotificationTransportDto": {
+        "description": "Транспорт сповіщень: що відомо з конфігурації, не більше.",
+        "properties": {
+          "isConfigured": {
+            "description": "Чи налаштований транспорт.",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "Який саме; `null`, коли не налаштований.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "isConfigured",
+          "kind"
+        ],
+        "type": "object"
+      },
       "NumericMode": {
         "description": "Арифметичний режим версії методології (ФВ-9.9). `Legacy` відтворює\nарифметику чинної системи побітово і використовується лише заради сумісності.",
         "enum": [
@@ -3851,6 +3872,39 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/ProjectSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfStructureChangeView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/StructureChangeView"
             },
             "type": "array"
           },
@@ -5365,6 +5419,29 @@
           "Hybrid",
           "Local"
         ]
+      },
+      "RenameRoleRequest": {
+        "description": "Новий код ролі — для перейменування і для клона.",
+        "properties": {
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу; без неї перейменування лишає чинну.",
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
       },
       "ReopenDocumentRequest": {
         "description": "Запит на відкриття поданого документа.",
@@ -7020,6 +7097,37 @@
         ],
         "type": "object"
       },
+      "SnapshotVerifyResponse": {
+        "description": "Підсумок перевірки зрізу.",
+        "properties": {
+          "actual": {
+            "description": "Сума, перерахована за збереженими рядками (hex).",
+            "type": "string"
+          },
+          "matchedFormat": {
+            "description": "За яким форматом суми збіглося: `current`, `legacy` (зріз,\nпобудований до BE-17) або `null` — не збіглося за жодним.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "matches": {
+            "description": "Чи перерахована сума збіглася зі збереженою.",
+            "type": "boolean"
+          },
+          "stored": {
+            "description": "Сума, записана при побудові (hex).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "matches",
+          "stored",
+          "actual",
+          "matchedFormat"
+        ],
+        "type": "object"
+      },
       "SourceEntityStatus": {
         "description": "Сутність збору разом зі станом останнього прогону.",
         "properties": {
@@ -7131,6 +7239,66 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "StructureChangeView": {
+        "description": "Структурна зміна в журналі, як її бачить читач.",
+        "properties": {
+          "changeReason": {
+            "description": "Причина, якщо її вимагала операція.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedAt": {
+            "description": "Момент зміни в UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByUserId": {
+            "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entityId": {
+            "description": "Ідентифікатор сутності; `0` — операція над набором.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entityType": {
+            "description": "Сутність: `cfg.RegistryDef`, `cfg.RegistryRuleDef`.",
+            "type": "string"
+          },
+          "newJson": {
+            "description": "Стан після зміни.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldJson": {
+            "description": "Стан до зміни.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "operation": {
+            "description": "Що зробили: `SaveRules`, `SwitchSourceSet`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changedAt",
+          "entityType",
+          "entityId",
+          "operation",
+          "oldJson",
+          "newJson",
+          "changeReason",
+          "changedByUserId"
+        ],
         "type": "object"
       },
       "StyleDefDto": {
@@ -7246,6 +7414,35 @@
           "registryCodes",
           "sourceKind",
           "reason"
+        ],
+        "type": "object"
+      },
+      "SystemFactsResponse": {
+        "description": "Факти про піднятий процес.",
+        "properties": {
+          "environment": {
+            "description": "Ім'я середовища хосту (`Production`, `Development`).",
+            "type": "string"
+          },
+          "notificationTransport": {
+            "$ref": "#/components/schemas/NotificationTransportDto",
+            "description": "Стан транспорту сповіщень."
+          },
+          "productVersion": {
+            "description": "Версія продукту без метаданих збірки.",
+            "type": "string"
+          },
+          "startedAt": {
+            "description": "Коли стартував процес, UTC.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "productVersion",
+          "startedAt",
+          "environment",
+          "notificationTransport"
         ],
         "type": "object"
       },
@@ -8252,6 +8449,59 @@
         ],
         "type": "object"
       },
+      "UsageItemDto": {
+        "description": "Одне місце, що посилається на ресурс.",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…).",
+            "type": "string"
+          },
+          "label": {
+            "description": "Те, чим об'єкт упізнає людина: код.",
+            "type": "string"
+          },
+          "route": {
+            "description": "Маршрут клієнта до об'єкта; `null` — окремого екрана немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "route"
+        ],
+        "type": "object"
+      },
+      "UsageResponse": {
+        "description": "«Де використовується» — єдина форма відповіді `GET /…/{id}/usage`\n(директива №15, BE-15).",
+        "properties": {
+          "items": {
+            "description": "Перші int UsageResponse.PageSize посилань.",
+            "items": {
+              "$ref": "#/components/schemas/UsageItemDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Скільки посилань усього — не лише показаних.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "type": "object"
+      },
       "UserIdResponse": {
         "description": "Створений користувач.",
         "properties": {
@@ -8761,6 +9011,151 @@
           }
         },
         "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/structure": {
+      "get": {
+        "description": "Вікно часу **обов'язкове** й обмежене згори, як у `cells`:\n`aud.StructureChange` лежить на тій самій схемі партицій. Запит без\nвікна — `422 ECR-REQ-0422`, а не «весь журнал».",
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Тип сутності, напр. `cfg.RegistryDef`.",
+            "in": "query",
+            "name": "entityType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Автор зміни — `UserId`, не SID.",
+            "in": "query",
+            "name": "changedByUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Розмір сторінки; `0` — 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfStructureChangeView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfStructureChangeView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfStructureChangeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Загальний журнал структурних змін (`BE-16`). Право `Security.ViewAudit`.",
         "tags": [
           "Audit"
         ]
@@ -10452,6 +10847,87 @@
         "summary": "Перевіряє вираз так само, як це зробить публікація.",
         "tags": [
           "Expressions"
+        ]
+      }
+    },
+    "/api/v1/health/facts": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemFactsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemFactsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemFactsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Версія, час старту, середовище, транспорт сповіщень. Право `System.ViewHealth`.",
+        "tags": [
+          "SystemHealth"
+        ]
+      }
+    },
+    "/api/v1/health/partitions/script": {
+      "get": {
+        "description": "⛔ Лише ТЕКСТ (`D15-12`): застосунок не виконує DDL (`D-66`).",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Готова команда для DBA на створення наступних партицій. Право `System.ViewHealth`.",
+        "tags": [
+          "SystemHealth"
         ]
       }
     },
@@ -14957,6 +15433,70 @@
         ]
       }
     },
+    "/api/v1/reports/snapshots/{id}/verify": {
+      "post": {
+        "description": "⚠ `POST`, хоча нічого не змінює: це дія з ціною (читає всі рядки\nзрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.",
+        "parameters": [
+          {
+            "description": "Зріз.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotVerifyResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Перевіряє незмінність зрізу: перераховує суму збереженого вмісту й\nпорівнює зі збереженою. Право `Report.ViewRegulatory`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
     "/api/v1/reports/{code}/build": {
       "post": {
         "description": "Зріз **незмінний**: повторна побудова створює новий, а не переписує\nстарий. Інакше звіт, роздрукований учора, і той самий звіт сьогодні\nдавали б різні числа без жодного сліду.",
@@ -15300,6 +15840,261 @@
           }
         },
         "summary": "Створює роль. Право `Security.ManageRoles`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/roles/{id}": {
+      "delete": {
+        "description": "⛔ Роль із призначеннями чи грантами — `409 ECR-SEC-0409` з\nкількостями в `details` (`assignments`, `grants`);\nвбудована роль — той самий код з іншим `messageKey`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє роль. Право `Security.ManageRoles`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/roles/{id}/clone": {
+      "post": {
+        "description": "⚠ Гранти й призначення не копіюються — лише права.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRoleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRoleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleIdResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleIdResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleIdResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Клонує роль: новий код і копія набору прав. Право `Security.ManageRoles`.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/roles/{id}/code": {
+      "put": {
+        "description": "⛔ Вбудована роль із сіду і зайнятий код — `409 ECR-SEC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRoleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRoleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameRoleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Перейменовує роль. Право `Security.ManageRoles`.",
         "tags": [
           "Security"
         ]
@@ -18940,6 +19735,136 @@
         ]
       }
     },
+    "/api/v1/units/{id}": {
+      "delete": {
+        "description": "⛔ Одиниця з посиланнями не видаляється — `409 ECR-UOM-0409`, а\nперелік залежних лежить у `details.references`.",
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє одиницю, на яку ніхто не посилається.",
+        "tags": [
+          "Units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Де використовується одиниця: перші 20 посилань і загальна кількість.",
+        "tags": [
+          "Units"
+        ]
+      }
+    },
     "/api/v1/users": {
       "get": {
         "parameters": [
@@ -19401,6 +20326,9 @@
     },
     {
       "name": "Sources"
+    },
+    {
+      "name": "SystemHealth"
     },
     {
       "name": "Templates"

@@ -2724,6 +2724,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
 | `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
+| `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
 | `ECR-CALC-0409` | 409 | публікація методології автором останньої правки (D-40) |
 | `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
@@ -2877,6 +2878,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units` | `Uom.EditCatalog` | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
+| `GET` | `/api/v1/units/{id}/usage` | `Uom.EditCatalog` | 4 |
+| `DELETE` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
@@ -2908,10 +2911,16 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
 | `PUT` | `/api/v1/roles/{id}/grants` | `Security.ManageRoles` | 3 |
+| `POST` | `/api/v1/roles/{id}/clone` | `Security.ManageRoles` | 3 |
+| `PUT` | `/api/v1/roles/{id}/code` | `Security.ManageRoles` | 3 |
+| `DELETE` | `/api/v1/roles/{id}` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/alerts` | `Security.ManageUsers` | 5 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
+| `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
@@ -2922,6 +2931,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
+| `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
