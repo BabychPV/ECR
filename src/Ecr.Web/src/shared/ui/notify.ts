@@ -1,7 +1,7 @@
 import { createElement, type ComponentType, type ReactNode } from 'react';
 import { Button, Group, Text, type ButtonProps, type GroupProps, type TextProps } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { EcrApiError } from '@/api/client';
+import { logSuppressedDetail, problemText } from './problemText';
 
 /*
  * ⚠ Псевдоніми, а не прямі виклики `createElement(Button, …)`.
@@ -61,9 +61,25 @@ export const notificationCloseButtonProps = { 'aria-label': 'Close notification'
  * без розбору, і саме там відмова стане німою.
  */
 export function showApiError(error: unknown): void {
+  /*
+   * ✎ 2026-09-20, рішення людини: «українську прибрати — має бути залежно
+   * від обраної мови». Тут стояв `error.message` (`detail ?? title`) без
+   * розбору мови, а серверні речення писалися українською — якої в продукті
+   * немає (`D-95`: en, ru, kz).
+   *
+   * ⚠ Тост, на відміну від `ErrorAlert`, НЕ має окремого заголовка: сховати
+   * неперекладену подробицю тут означає лишити саму назву проблеми. Тому,
+   * коли подробиці показати не можна, до назви додається КОД — з ним
+   * звернення в підтримку лишається однозначним, а без нього тост
+   * перетворився б на голе «Conflict» без жодної зачіпки.
+   */
+  const shown = problemText(error);
+
+  logSuppressedDetail(shown);
+
   notifications.show({
     color: 'statusError',
-    message: error instanceof EcrApiError ? error.message : String(error),
+    message: shown.detail ?? (shown.code === null ? shown.title : `${shown.title} · ${shown.code}`),
     closeButtonProps: notificationCloseButtonProps,
   });
 }

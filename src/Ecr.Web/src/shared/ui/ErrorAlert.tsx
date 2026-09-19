@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Alert, Button, Code, Group, Stack, Text } from '@mantine/core';
 import { EcrApiError } from '@/api/client';
+import { logSuppressedDetail, problemText } from './problemText';
 import { t } from '@/shared/i18n';
 
 /**
@@ -29,13 +30,28 @@ export function ErrorAlert({
   if (error === null || error === undefined) return null;
 
   const apiError = error instanceof EcrApiError ? error : null;
+  const shown = problemText(error);
+
+  logSuppressedDetail(shown);
 
   return (
-    <Alert color="statusError" title={apiError?.problem.title ?? t('state.errorTitle')} role="alert">
+    <Alert color="statusError" title={shown.title} role="alert">
       <Stack gap="xs">
-        {/* ⚠ Текст СЕРВЕРА, а не власний узагальнений: «не вдалося
-            завантажити» не каже нічого, а «період закрито» каже все. */}
-        <Text size="sm">{apiError?.message ?? t('state.errorUnknown')}</Text>
+        {/*
+          ⚠ Текст СЕРВЕРА, а не власний узагальнений: «не вдалося завантажити»
+          не каже нічого, а «період закрито» каже все.
+
+          ✎ 2026-09-20, рішення людини: «українську прибрати — має бути
+          залежно від обраної мови». Тут стояв `apiError?.message`, тобто
+          `detail ?? title` БЕЗ розбору, якою мовою той `detail` написаний.
+
+          ⛔ Тепер подробиця показується ЛИШЕ тоді, коли сервер позначив її
+          `messageKey` — тобто зібрав із каталогу мовою користувача. Інакше
+          рядка немає ЗОВСІМ (`D15-06`: елемент, для якого немає даних, не
+          малюється). Заглушка («подробиць немає») зайняла б місце й нічого
+          не сказала, а назва проблеми в заголовку вже є — і теж із каталогу.
+        */}
+        {shown.detail !== null && <Text size="sm">{shown.detail}</Text>}
 
         {apiError !== null && (
           // ⚠ Код і кореляція показуються ЗАВЖДИ: з ними звернення в підтримку
