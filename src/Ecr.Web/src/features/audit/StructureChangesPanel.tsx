@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, NumberInput, Table, Text, TextInput } from '@mantine/core';
 import { useStructureChanges, type StructureChangePage } from '@/features/audit/api';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -80,7 +81,17 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
               <Table.Tbody>
                 {page.items.map((change, index) => (
                   <Table.Tr key={`${change.changedAt}:${change.entityType}:${change.entityId}:${index}`}>
-                    <Table.Td>{change.changedAt}</Table.Td>
+                    {/* ⛔ Останнє з сімнадцяти місць, де дата з сервера
+                        друкувалася сирим рядком. Той самий аргумент, що й у
+                        журналі комірок (`AuditPage`): журнал — доказ, і доказ
+                        мусить лишатися однозначним. Він не порушений —
+                        точне значення лишається в `dateTime`/`title`,
+                        читабельним стає лише те, що бачить око.
+                        ⚠ `key` рядка й далі бере СИРИЙ `changedAt`: ключ — для
+                        React, а не для ока. */}
+                    <Table.Td>
+                      <Timestamp value={change.changedAt} />
+                    </Table.Td>
                     <Table.Td>{change.changedByUserId}</Table.Td>
                     <Table.Td>
                       <Text size="xs">
