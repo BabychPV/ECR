@@ -238,6 +238,22 @@ export const DocumentTableFixture = {
 };
 
 /**
+ * Заповненість таблиць документа (`BE-10`) — НЕ порожня і НЕ однорідна.
+ *
+ * ⛔ Порожній масив дав би на екрані «0 / 0» і жодної крапки помилки: гейт
+ * доступності сканував би панель без того, заради чого вона існує. Два рядки
+ * навмисно різні — одна таблиця заповнена без помилок, друга заповнена
+ * частково й має дві, тобто `summarize()` дає «1 / 2» РАЗОМ із крапкою.
+ *
+ * ⚠ `errorCount` не `null` у жодному рядку саме тому, що `null` означає «не
+ * перевіряли», і тоді `hasErrors` теж `null` — крапка не малюється зовсім.
+ */
+export const DocumentTableStatusFixture = [
+  { errorCount: 0, filledCells: 4, inputCells: 4, sheetCode: 'GEN', tableDefId: 1, warningCount: 0 },
+  { errorCount: 2, filledCells: 1, inputCells: 6, sheetCode: 'GEN', tableDefId: 2, warningCount: 1 },
+];
+
+/**
  * Порожня відповідь ПОТРІБНОЇ форми для кожного маршруту (незмінно з
  * попереднього єдиного файлу).
  */
@@ -354,6 +370,13 @@ export function emptyBodyFor(url: string): unknown {
   // ⛔ НЕ порожній зріз — див. `DocumentSliceFixture`: порожній означав, що
   // сітка ніколи не рендерила жодної комірки, і гейт доступності перевіряв
   // сторінку документа без документа.
+  // ⛔ ПЕРЕД зрізом, а не після: `/tables/status?` підпадає під регулярку
+  // зрізу нижче, і без цього рядка панель заповненості отримувала б ОБ'ЄКТ
+  // зрізу замість масиву. Знайдено не читанням — `renderFeedback` дав «сіток
+  // у DOM нуль замість двох»: `summarize()` кликав `.some()` на об'єкті,
+  // кидав, і маршрут цілком замінювався екраном помилки.
+  if (url.includes('/tables/status')) return DocumentTableStatusFixture;
+
   if (/\/tables\/[^/?]+/.test(url)) return DocumentSliceFixture;
 
   if (url.includes('/tables')) return [DocumentTableFixture];

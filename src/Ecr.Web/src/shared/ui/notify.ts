@@ -1,5 +1,26 @@
+import { createElement, type ComponentType, type ReactNode } from 'react';
+import { Button, Group, Text, type ButtonProps, type GroupProps, type TextProps } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { EcrApiError } from '@/api/client';
+
+/*
+ * ⚠ Псевдоніми, а не прямі виклики `createElement(Button, …)`.
+ *
+ * Компоненти Mantine ПОЛІМОРФНІ: їхній тип — перетин узагальнених сигнатур
+ * (`component=` міняє набір допустимих пропів), і під
+ * `exactOptionalPropertyTypes` він не звужується до `FunctionComponent<P>`,
+ * якого чекає `createElement` (`TS2769`). У JSX цього не видно — там працює
+ * інший шлях виводу типів, і саме тому решта файлів проблеми не має.
+ *
+ * ⚠ Звуження НЕ послаблює перевірку: перелічені тут пропи перевіряються далі
+ * як завжди — зайвий або помилковий проп так само не скомпілюється. Втрачено
+ * рівно одне — можливість передати сюди `component=`, яка тут і не потрібна.
+ */
+const UndoRow = Group as ComponentType<GroupProps & { children?: ReactNode }>;
+const UndoText = Text as ComponentType<TextProps & { children?: ReactNode }>;
+const UndoButton = Button as ComponentType<
+  ButtonProps & { onClick: () => void; children?: ReactNode }
+>;
 
 /**
  * Доступне ім'я хрестика на сповіщенні (UI-прохід, F8).
@@ -53,5 +74,125 @@ export function showDone(message: string): void {
     color: 'statusSuccess',
     message,
     closeButtonProps: notificationCloseButtonProps,
+  });
+}
+
+/**
+ * Скільки живе вікно «назад» (директива №15, §2, Шар 2: `ms = 8000`).
+ *
+ * ⚠ Вісім секунд — не «щоб довше повисіло»: це час, за який людина встигає
+ * ПРОЧИТАТИ, що саме сталося, і лише тоді вирішити. Тост на 3–4 секунди
+ * з кнопкою «назад» — це кнопка, якої встигають торкнутися випадково або не
+ * встигають узагалі.
+ */
+const UndoWindowMs = 8000;
+
+/** Номер тоста: id потрібен, щоб закрити СВІЙ тост, а не чийсь сусідній. */
+let undoSequence = 0;
+
+/**
+ * Тост із дією «назад» (`L7`: після дії — що сталося і що далі).
+ *
+ * ⛔ **За замовчуванням — компенсація, а не відкладання.** `onUndo`
+ * викликається РІВНО тоді, коли користувач натиснув «назад»; сама дія на цей
+ * момент уже виконана викликачем. Так обрано тому, що відкладений варіант має
+ * ціну, яку платить не той, хто його обрав: вкладку закривають, ноутбук
+ * складають, мережа падає — і дія, про яку людині вже написали в минулому
+ * часі («Документ подано»), не відбувається НІКОЛИ, а на екрані не лишається
+ * жодного сліду. Повідомити про стан, якого потім не буде, гірше, ніж зробити
+ * зайвий запит і скасувати його.
+ *
+ * ⚠ Але відкладений варіант **доступний**, і саме цього вимагає директива
+ * («виконується ПІСЛЯ спливу таймера або одразу з компенсацією — вирішується
+ * на екрані»): функція повертає `Promise<boolean>` — `true`, якщо натиснули
+ * «назад», `false`, якщо вікно збігло або тост закрили хрестиком. Екран, де
+ * сервер НЕ вміє «назад», чекає на `false` і лише тоді робить запит:
+ *
+ *     if (!(await showUndo(msg, () => {}))) await api.delete(id);   // відкладено
+ *     await api.delete(id); void showUndo(msg, () => api.restore(id)); // компенсація
+ *
+ * ⛔ Таймер тут ВЛАСНИЙ, а не `autoClose` Mantine, хоча `autoClose` теж
+ * заданий тим самим числом. `autoClose` вирішує, коли тост зникне з екрана;
+ * `Promise` — коли вікно рішення ЗАКРИТЕ, а це обіцянка перед викликачем, і
+ * вона не має залежати від того, чи змонтований `<Notifications />` і чи
+ * доїхала анімація виходу.
+ *
+ * ⚠ Обіцянка виконується рівно один раз (`settled`): натиснута кнопка спершу
+ * розв'язує `Promise`, і лише потім ховає тост — інакше `onClose` від
+ * власного ж `hide` прочитався б як «вікно збігло».
+ *
+ * ⚠ `undoLabel` — літерал із тієї самої причини, що й
+ * `notificationCloseButtonProps` вище: ключа під цей напис у каталозі
+ * (`09-seed.sql`) ще немає, а `t()` на неіснуючий ключ показав би `⟦…⟧`.
+ * Викликач, у якого ключ уже є, передає підпис сам.
+ */
+export function showUndo(
+  message: string,
+  onUndo: () => void,
+  ms: number = UndoWindowMs,
+  undoLabel = 'Undo',
+): Promise<boolean> {
+  undoSequence += 1;
+
+  const id = `ecr-undo-${String(undoSequence)}`;
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    function settle(undone: boolean): void {
+      if (settled) return;
+
+      settled = true;
+
+      if (timer !== undefined) clearTimeout(timer);
+      if (undone) onUndo();
+
+      resolve(undone);
+    }
+
+    timer = setTimeout(() => {
+      settle(false);
+      notifications.hide(id);
+    }, ms);
+
+    notifications.show({
+      id,
+      autoClose: ms,
+      closeButtonProps: notificationCloseButtonProps,
+
+      // Хрестик — теж відповідь «ні»: вікно закрите, дію не скасовано.
+      onClose: () => {
+        settle(false);
+      },
+
+      /*
+       * ⚠ `createElement`, а не JSX: файл лишається `.ts`. Перейменування на
+       * `.tsx` заради двох вузлів зачепило б імпорти в тринадцяти місцях і
+       * прийшло б окремим PR-перейменуванням (CLAUDE.md §4) — ціна вища за
+       * незручність двох викликів.
+       *
+       * ⚠ Саме `Button`, а не текст із `onClick`: «назад» має бути досяжним
+       * табом і спрацьовувати пробілом (`ФВ-14.19`), а читалка має почути
+       * роль, що обіцяє дію.
+       */
+      message: createElement(
+        UndoRow,
+        { gap: 'xs', wrap: 'nowrap', justify: 'space-between' },
+        createElement(UndoText, { size: 'sm' }, message),
+        createElement(
+          UndoButton,
+          {
+            size: 'xs',
+            variant: 'default',
+            onClick: () => {
+              settle(true);
+              notifications.hide(id);
+            },
+          },
+          undoLabel,
+        ),
+      ),
+    });
   });
 }

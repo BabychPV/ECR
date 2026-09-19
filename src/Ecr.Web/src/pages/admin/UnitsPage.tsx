@@ -3,7 +3,7 @@ import { Badge, Button, Group, Modal, NumberInput, Select, Stack, Table, Text, T
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
-import { createUnit } from '@/features/units/api';
+import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -115,6 +115,34 @@ export function UnitsPage(): JSX.Element {
     onError: showApiError,
   });
 
+  // Директива №15, BE-15: діалог видалення СПЕРШУ показує залежних, а на
+  // відмову `ECR-UOM-0409` — перелік із самої відмови замість «повторити»:
+  // повтор дав би ту саму відповідь.
+  const canEdit = can(session.data, 'Uom.EditCatalog');
+  const [deleting, setDeleting] = useState<UnitRef | null>(null);
+
+  const usage = useQuery({
+    queryKey: ['units', deleting?.id, 'usage'],
+    queryFn: () => unitUsage(deleting?.id ?? 0),
+    enabled: deleting !== null,
+    staleTime: 0,
+  });
+
+  const remove = useMutation({
+    // Відмову показує діалог, читаючи `remove.error` у рендері.
+    meta: { handled: true },
+    mutationFn: (unitId: number) => deleteUnit(unitId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['units'] });
+      setDeleting(null);
+      showDone(t('units.deleted'));
+    },
+  });
+
+  // ⚠ Відмова свіжіша за перелік, прочитаний при відкритті: посилання могло
+  // з'явитися, поки діалог стояв відкритий.
+  const dependents = unitReferences(remove.error) ?? usage.data;
+
   return (
     <>
       <PageHeader
@@ -200,6 +228,7 @@ export function UnitsPage(): JSX.Element {
                 <Table.Th>{t('units.dimension')}</Table.Th>
                 <Table.Th>{t('units.factor')}</Table.Th>
                 <Table.Th>{t('units.offset')}</Table.Th>
+                {canEdit && <Table.Th />}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -226,12 +255,88 @@ export function UnitsPage(): JSX.Element {
                     <Table.Td>{unit.dimensionCode}</Table.Td>
                     <Table.Td>{unit.factorToBase}</Table.Td>
                     <Table.Td>{unit.offsetToBase}</Table.Td>
+                    {canEdit && (
+                      <Table.Td>
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="statusError"
+                          aria-label={`${t('common.delete')} ${unit.code}`}
+                          onClick={() => {
+                            remove.reset();
+                            setDeleting(unit);
+                          }}
+                        >
+                          {t('common.delete')}
+                        </Button>
+                      </Table.Td>
+                    )}
                   </Table.Tr>
                 ))}
             </Table.Tbody>
           </Table>
         )}
       </AsyncBoundary>
+
+      <Modal
+        opened={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title={`${t('common.delete')} ${deleting?.code ?? ''}`}
+      >
+        <Stack gap="sm">
+          {usage.error !== null && remove.error === null && (
+            <Text size="sm" c="statusError">
+              {usage.error.message}
+            </Text>
+          )}
+
+          {dependents !== undefined &&
+            (dependents.total === 0 ? (
+              <Text size="sm">{t('units.deleteUnused')}</Text>
+            ) : (
+              <>
+                <Text size="sm">{t('units.deleteUsedIn', { total: dependents.total })}</Text>
+                <Stack gap="xs" data-testid="unit-references">
+                  {dependents.items.map((item) => (
+                    <Text size="sm" key={`${item.kind}:${item.id}`}>
+                      <Badge size="xs" variant="light" mr="xs">
+                        {item.kind}
+                      </Badge>
+                      {item.label}
+                    </Text>
+                  ))}
+                </Stack>
+              </>
+            ))}
+
+          {/* Відмова іншого роду (403, 404, мережа) — текстом сервера. */}
+          {remove.error !== null && unitReferences(remove.error) === null && (
+            <Text size="sm" c="statusError">
+              {remove.error.message}
+            </Text>
+          )}
+
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setDeleting(null)}>
+              {t('common.cancel')}
+            </Button>
+            {/* ⛔ Кнопки немає, доки є залежні: вона вела б у відому відмову. */}
+            {dependents?.total === 0 && (
+              <Button
+                color="statusError"
+                loading={remove.isPending}
+                onClick={() => {
+                  if (deleting !== null) {
+                    remove.mutate(deleting.id);
+                  }
+                }}
+              >
+                {t('common.delete')}
+              </Button>
+            )}
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal opened={creating} onClose={() => setCreating(false)} title={t('units.new')}>
         <Stack gap="sm">

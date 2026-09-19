@@ -305,9 +305,27 @@ export function StatusBadge({ kind, state, quiet = false, title }: StatusBadgePr
     ? ({ variant: 'transparent' } as const)
     : ({ variant: 'default', bg: fill.bg } as const);
 
+  /*
+   * ⛔ `miw="fit-content"` БЕЗУМОВНО, а не пропом сторінки. Дефект виміряний у
+   * живому браузері (UI-аудит, lane 8): `table-layout: auto` бере ширину
+   * стовпця з того, що РЕНДЕРИТЬСЯ, а власний `overflow:hidden` у
+   * `.mantine-Badge-label` дозволяє бейджу «поміститись» у будь-яку ширину —
+   * тож на ~554px «Scheduled» ставало нечитабельним «S…» замість того, щоб
+   * увімкнути горизонтальну прокрутку (`clientWidth` мітки 9px проти
+   * `scrollWidth` 65px; з цим стилем обидва збігаються).
+   *
+   * ⚠ Прапорець на виклику розглянуто і відкинуто: сторінка, яка МУСИТЬ
+   * пам'ятати цей проп, — це рівно та розбіжність між екранами, заради
+   * усунення якої набір і заведено. Той самий дефект уже довелося ловити
+   * двічі окремо (`PeriodsPage.stateBadgeMinWidth`,
+   * `SnapshotsPage.statusBadgeMinWidth`), тобто наступна таблиця забула б
+   * його втретє. Обрізаний до однієї літери статус не буває бажаним: підпис —
+   * другий носій змісту (`ФВ-14.18`), і без нього лишається сам колір.
+   */
   return (
     <Badge
       size="sm"
+      miw="fit-content"
       c={fill.text}
       title={title}
       data-status-kind={kind}

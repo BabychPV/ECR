@@ -36,6 +36,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -566,20 +567,21 @@ export function PeriodsPage(): JSX.Element {
                   {period.startsAt} — {period.endsAt}
                 </Table.Td>
                 <Table.Td>
-                  {/* ⛔ UI-аудит, lane 8: `ScrollArea` (Аудит-пас 5) обгортає
-                      ТАБЛИЦЮ, але сам `Badge` лишався здатним стискатись —
-                      table-layout: auto бере ширину стовпця з того, що
-                      РЕНДЕРИТЬСЯ, а `.mantine-Badge-label`'s власний
-                      `overflow:hidden` дозволяє йому «поміститись» у будь-яку
-                      ширину замість того, щоб змусити таблицю (і тим самим
-                      ScrollArea) прокручуватись. Наслідок — «Scheduled»
-                      ставало нечитабельним «S…» саме на типовій ширині вікна,
-                      де прокрутка мала б увімкнутись, а не текст обтинатись.
-                      `miw="fit-content"` тримає власну мінімальну ширину
-                      бейджа рівно рівною його тексту. */}
-                  <Badge color={stateColor(period.state)} variant="light" miw="fit-content">
-                    {period.state}
-                  </Badge>
+                  {/* ⛔ UI-аудит, lane 8 (рішення НЕ скасоване, лише переїхало):
+                      `ScrollArea` (Аудит-пас 5) обгортає ТАБЛИЦЮ, але сам
+                      `Badge` лишався здатним стискатись — table-layout: auto
+                      бере ширину стовпця з того, що РЕНДЕРИТЬСЯ, а
+                      `.mantine-Badge-label`'s власний `overflow:hidden`
+                      дозволяє йому «поміститись» у будь-яку ширину замість
+                      того, щоб змусити таблицю (і тим самим ScrollArea)
+                      прокручуватись. Наслідок — «Scheduled» ставало
+                      нечитабельним «S…». `min-width: fit-content` тепер несе
+                      САМ `StatusBadge` — безумовно, для всіх різновидів:
+                      сторінка, яка мусить пам'ятати про цей проп, — це та сама
+                      розбіжність між екранами, заради усунення якої набір і
+                      заведено (той самий дефект уже ловили окремо для
+                      `SnapshotsPage`). */}
+                  <StatusBadge kind="period" state={period.state} />
                   {/* ⚠ Відкритий понад календар період видно окремо: інакше
                       `Open` після кінця місяця виглядає як несправність
                       календаря, а не як свідоме рішення людини. */}
@@ -770,21 +772,15 @@ export function PeriodsPage(): JSX.Element {
   );
 }
 
-/**
- * Колір стану.
+/*
+ * ✎ Тут стояла `stateColor(state)`. Її змістовне рішення — «`Grace` виділено
+ * окремим кольором, а не зведено до „відкритого“: правка в пільговому строку
+ * позначається як пізня (D-70) і виглядає в аудиті інакше» — живе далі в
+ * `statusTable.period` (`shared/ui/StatusBadge.tsx`), де `Grace` — `warning`.
  *
- * ⚠ `Grace` виділено окремим кольором, а не зведено до «відкритого»: правка в
- * пільговому строку позначається як пізня (D-70) і виглядає в аудиті інакше.
+ * ⛔ А от чого в наборі НЕМАЄ навмисно — це `default: 'blue'`, під який тут
+ * потрапляв `Scheduled`: «ще не відкрито» фарбувалося тим самим кольором, що
+ * й невідомий стан сервера, тобто «нема чого робити» і «клієнт відстав від
+ * сервера» були на екрані нерозрізненні. У наборі `Scheduled` — `muted`,
+ * невідоме — `warning`.
  */
-function stateColor(state: string): string {
-  switch (state) {
-    case 'Open':
-      return 'statusSuccess';
-    case 'Grace':
-      return 'yellow';
-    case 'Closed':
-      return 'gray';
-    default:
-      return 'blue';
-  }
-}
