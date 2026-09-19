@@ -1143,6 +1143,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/tables/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Заповненість таблиць документа за період. Право `Document.View`.
+         * @description ⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього
+         *     `GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і
+         *     читається один раз на відкриття, а це — СТАН (скільки введено), який
+         *     змінюється після кожного запису. Склеїти їх означало б або
+         *     перечитувати структуру заради лічильника, або показувати лічильник
+         *     із моменту відкриття сторінки.
+         *
+         *     ⛔ `errorCount`/`warningCount` приходять `null`, доки
+         *     документ за цей період не перевіряли. Нуль тут був би тією самою
+         *     неправдою, що й «0 зауважень» у неперевіреного документа
+         *     (`A7-28`): у клієнта має лишитися змога показати «—», а не
+         *     зелений нуль. Сусідній `GET …/validation` тримає той самий поділ
+         *     кодом `404` (`err.ECR-DOC-0404.notValidated`); тут
+         *     `404` не годиться — заповненість відома й до першої перевірки.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період; екземпляри таблиць існують окремо на кожен (R-A6). */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TableStatusDto"][];
+                        "text/json": components["schemas"]["TableStatusDto"][];
+                        "text/plain": components["schemas"]["TableStatusDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/validate": {
         parameters: {
             query?: never;
@@ -11811,6 +11871,38 @@ export interface components {
              * @description Екземпляр таблиці.
              */
             tableInstanceId: number;
+        };
+        /** @description Заповненість однієї таблиці документа й кількість зауважень до неї
+         *     (`BE-10`) — те, з чого дерево аркушів складає «68 of 91 tables filled»
+         *     і крапку помилки біля таблиці. */
+        TableStatusDto: {
+            /**
+             * Format: int32
+             * @description `null` — не перевіряли; інакше — скільки помилок у цій таблиці.
+             */
+            errorCount: null | number;
+            /**
+             * Format: int32
+             * @description Скільки вхідних комірок уже має значення.
+             */
+            filledCells: number;
+            /**
+             * Format: int32
+             * @description Скільки комірок має заповнити людина.
+             */
+            inputCells: number;
+            /** @description Код аркуша, якому належить таблиця. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Опис таблиці; ним клієнт зіставляє рядок із `DocumentTableDto`.
+             */
+            tableDefId: number;
+            /**
+             * Format: int32
+             * @description `null` — не перевіряли; інакше — скільки попереджень.
+             */
+            warningCount: null | number;
         };
         TemplateChangeDto: {
             /** @description Клас ризику; `Breaking` у версії з документами — відмова. */

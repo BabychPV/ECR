@@ -26,6 +26,7 @@ public sealed class DocumentsController(
     ReopenDocumentHandler reopen,
     RecalculateDocumentHandler recalculate,
     GetDocumentTablesHandler tables,
+    GetTableStatusHandler tableStatus,
     GetCalculationResultsHandler calculationResults,
     ExportDocumentHandler export,
     DownloadExportHandler downloadExport,
@@ -302,6 +303,33 @@ public sealed class DocumentsController(
     [ProducesResponseType<IReadOnlyList<DocumentTableDto>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Tables(long id, [FromQuery] int periodKey, CancellationToken ct)
         => Ok(await tables.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Заповненість таблиць документа за період. Право <c>Document.View</c>.
+    /// </summary>
+    /// <param name="id">Документ.</param>
+    /// <param name="periodKey">Період; екземпляри таблиць існують окремо на кожен (R-A6).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий маршрут, а не поля в <c>DocumentTableDto</c> сусіднього
+    /// <c>GET …/tables</c>: той віддає СТРУКТУРУ (що є в документі) і
+    /// читається один раз на відкриття, а це — СТАН (скільки введено), який
+    /// змінюється після кожного запису. Склеїти їх означало б або
+    /// перечитувати структуру заради лічильника, або показувати лічильник
+    /// із моменту відкриття сторінки.
+    ///
+    /// ⛔ <c>errorCount</c>/<c>warningCount</c> приходять <c>null</c>, доки
+    /// документ за цей період не перевіряли. Нуль тут був би тією самою
+    /// неправдою, що й «0 зауважень» у неперевіреного документа
+    /// (<c>A7-28</c>): у клієнта має лишитися змога показати «—», а не
+    /// зелений нуль. Сусідній <c>GET …/validation</c> тримає той самий поділ
+    /// кодом <c>404</c> (<c>err.ECR-DOC-0404.notValidated</c>); тут
+    /// <c>404</c> не годиться — заповненість відома й до першої перевірки.
+    /// </remarks>
+    [HttpGet("{id:long}/tables/status")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Documents.Dto.TableStatusDto>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> TablesStatus(long id, [FromQuery] int periodKey, CancellationToken ct)
+        => Ok(await tableStatus.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Числа, які дав розрахунок методологій. Право <c>Calculation.View</c>.

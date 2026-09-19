@@ -97,12 +97,33 @@ function show(): void {
   );
 }
 
-/** Рядок переліку, впізнаний за значком стану. */
+/**
+ * Рядок переліку, впізнаний за значком стану.
+ *
+ * ✎ 2026-09-19. Тут стояло `screen.getByText(state)` — пошук за КОДОМ СЕРВЕРА
+ * (`Running`, `Succeeded`) як за видимим текстом. Відколи стан малює
+ * `StatusBadge`, підпис береться з каталогу (`status.job.*`), а не з коду:
+ * це та зміна поведінки, заради якої набір і заведено — код сервера не є
+ * текстом інтерфейсу й не перекладається. Локатор переведено на
+ * `data-status-state`, який набір кладе в розмітку саме для тестів і e2e.
+ *
+ * ⚠ Це не послаблення: атрибут прив'язаний до стану ТОЧНО, тоді як пошук за
+ * текстом збігся б і з будь-яким іншим вузлом, що містить те саме слово.
+ */
 function rowOfState(state: string): HTMLElement {
-  const row = screen.getByText(state).closest('tr');
+  const row = document.querySelector(`[data-status-state="${state}"]`)?.closest('tr') ?? null;
   expect(row, `рядок задачі у стані «${state}»`).not.toBeNull();
 
   return row as HTMLElement;
+}
+
+/** Чекає, доки в переліку з'явиться рядок у цьому стані. */
+async function findRowOfState(state: string): Promise<HTMLElement> {
+  await waitFor(() =>
+    expect(document.querySelector(`[data-status-state="${state}"]`)).not.toBeNull(),
+  );
+
+  return rowOfState(state);
 }
 
 afterEach(() => {
@@ -116,9 +137,7 @@ describe('JobsPage: скасування задачі з переліку', () =
     const user = userEvent.setup();
     show();
 
-    await screen.findByText('Running');
-
-    const cancelInRow = within(rowOfState('Running')).getByRole('button', {
+    const cancelInRow = within(await findRowOfState('Running')).getByRole('button', {
       name: '⟦jobs.cancel⟧',
     });
 
@@ -148,15 +167,13 @@ describe('JobsPage: скасування задачі з переліку', () =
     mockFetch();
     show();
 
-    await screen.findByText('Succeeded');
-
     // ⛔ Мутаційний доказ: приберіть умову видимості за станом
     // (`isCancellable(job.state) &&` у `JobsPage.tsx`) — і кнопка з'явиться в
     // рядку успішної задачі, а цей тест впаде. Сусідній рядок `Running`
     // доводить, що кнопка взагалі рендериться і відсутність тут — не
     // «нічого не намалювалося».
     expect(
-      within(rowOfState('Succeeded')).queryByRole('button', { name: '⟦jobs.cancel⟧' }),
+      within(await findRowOfState('Succeeded')).queryByRole('button', { name: '⟦jobs.cancel⟧' }),
     ).toBeNull();
 
     expect(

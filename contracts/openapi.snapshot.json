@@ -7484,6 +7484,55 @@
         ],
         "type": "object"
       },
+      "TableStatusDto": {
+        "description": "Заповненість однієї таблиці документа й кількість зауважень до неї\n(`BE-10`) — те, з чого дерево аркушів складає «68 of 91 tables filled»\nі крапку помилки біля таблиці.",
+        "properties": {
+          "errorCount": {
+            "description": "`null` — не перевіряли; інакше — скільки помилок у цій таблиці.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "filledCells": {
+            "description": "Скільки вхідних комірок уже має значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "inputCells": {
+            "description": "Скільки комірок має заповнити людина.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша, якому належить таблиця.",
+            "type": "string"
+          },
+          "tableDefId": {
+            "description": "Опис таблиці; ним клієнт зіставляє рядок із `DocumentTableDto`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "warningCount": {
+            "description": "`null` — не перевіряли; інакше — скільки попереджень.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "tableDefId",
+          "sheetCode",
+          "filledCells",
+          "inputCells",
+          "errorCount",
+          "warningCount"
+        ],
+        "type": "object"
+      },
       "TemplateChangeDto": {
         "properties": {
           "changeClass": {
@@ -10002,6 +10051,68 @@
           }
         },
         "summary": "Таблиці документа за період. Право `Document.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/tables/status": {
+      "get": {
+        "description": "⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього\n`GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і\nчитається один раз на відкриття, а це — СТАН (скільки введено), який\nзмінюється після кожного запису. Склеїти їх означало б або\nперечитувати структуру заради лічильника, або показувати лічильник\nіз моменту відкриття сторінки.\n\n⛔ `errorCount`/`warningCount` приходять `null`, доки\nдокумент за цей період не перевіряли. Нуль тут був би тією самою\nнеправдою, що й «0 зауважень» у неперевіреного документа\n(`A7-28`): у клієнта має лишитися змога показати «—», а не\nзелений нуль. Сусідній `GET …/validation` тримає той самий поділ\nкодом `404` (`err.ECR-DOC-0404.notValidated`); тут\n`404` не годиться — заповненість відома й до першої перевірки.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період; екземпляри таблиць існують окремо на кожен (R-A6).",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableStatusDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableStatusDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TableStatusDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Заповненість таблиць документа за період. Право `Document.View`.",
         "tags": [
           "Documents"
         ]
