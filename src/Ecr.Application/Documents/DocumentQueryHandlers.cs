@@ -73,7 +73,7 @@ public sealed class ListDocumentsHandler(
     /// <see cref="AccessProfile.LevelFor"/> — заборони включно: рівень беремо
     /// через <c>LevelFor</c>, а не з <c>Grants</c> напряму.
     /// </remarks>
-    private static HashSet<int> ReadableProjects(AccessProfile profile)
+    internal static HashSet<int> ReadableProjects(AccessProfile profile)
     {
         var prefix = $"{ResourceKind.Project}:";
         var ids = new HashSet<int>();

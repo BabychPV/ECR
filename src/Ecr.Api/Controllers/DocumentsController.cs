@@ -17,6 +17,7 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class DocumentsController(
     ListDocumentsHandler listDocuments,
+    GetDocumentListSummaryHandler listSummary,
     GetDocumentHandler getDocument,
     CreateDocumentHandler create,
     ValidateDocumentHandler validate,
@@ -72,6 +73,18 @@ public sealed class DocumentsController(
             .HandleAsync(projectId, periodKey, page, ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>Зведення переліку за період (<c>BE-09</c>). Право <c>Document.View</c>.</summary>
+    /// <remarks>
+    /// ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею
+    /// грантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.
+    /// Період обов'язковий: без нього стан документа не визначений (<c>D-93</c>).
+    /// </remarks>
+    [HttpGet("summary")]
+    [ProducesResponseType<Ecr.Application.Documents.Dto.DocumentListSummaryResponse>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Summary(
+        [FromQuery] int periodKey, [FromQuery] int? projectId, CancellationToken ct)
+        => Ok(await listSummary.HandleAsync(projectId, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>Створює документ. Право <c>Document.Create</c>.</summary>
     [HttpPost]

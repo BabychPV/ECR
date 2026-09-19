@@ -2485,6 +2485,20 @@ public interface ITableFillStore
 }
 ```
 
+#### `IDocumentListSummaryStore`
+
+Зведення переліку документів за період (`BE-09`): один агрегований запит, з
+тією самою межею грантів (`visibleProjectIds`), що й `IDocumentStore.ListAsync`.
+
+```csharp
+public interface IDocumentListSummaryStore
+{
+    public Task<DocumentListSummaryResponse> SummarizeAsync(
+        int? projectId, int periodKey,
+        IReadOnlyCollection<int>? visibleProjectIds, CancellationToken ct);
+}
+```
+
 #### `ITemplateStructure`
 
 Синхронний доступ до вже завантаженого знімка структури версії.
@@ -2851,6 +2865,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
+| `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |

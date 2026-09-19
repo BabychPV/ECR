@@ -79,3 +79,30 @@ export function summarize(tables: readonly TableStatus[]): FillSummary {
     hasErrors: validated ? tables.some((table) => (table.errorCount ?? 0) > 0) : null,
   };
 }
+
+/** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
+export type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
+
+/** Зведення переліку за період. Адреса — повним літералом: її шукає сторож споживачів. */
+export function documentListSummary(periodKey: number): Promise<DocumentListSummary> {
+  return apiFetch<DocumentListSummary>(`/api/v1/documents/summary?periodKey=${String(periodKey)}`);
+}
+
+/**
+ * Зведення переліку документів.
+ *
+ * ⚠ Без періоду запит НЕ йде: стан документа поза періодом не визначений
+ * (`D-93`), і сервер на це відповів би `422`.
+ *
+ * ⚠ Ключ починається з `'documents'` навмисно: усе, що інвалідовує перелік
+ * (створення документа), тим самим префіксом оновлює і смугу над ним.
+ */
+export function useDocumentListSummary(
+  periodKey: number | null,
+): UseQueryResult<DocumentListSummary> {
+  return useQuery({
+    queryKey: ['documents', 'summary', periodKey],
+    queryFn: () => documentListSummary(periodKey ?? 0),
+    enabled: periodKey !== null,
+  });
+}
