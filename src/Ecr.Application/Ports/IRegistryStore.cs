@@ -29,6 +29,32 @@ public interface IRegistryStore
     /// <summary>Визначення довідника за ідентифікатором; <c>null</c> — немає.</summary>
     public Task<RegistryDef?> FindDefinitionByIdAsync(int registryDefId, CancellationToken ct);
 
+    /// <summary>
+    /// Визначення довідників за набором кодів — <b>одним запитом</b>.
+    /// </summary>
+    /// <param name="codes">Коди; порожній набір — порожній результат.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Ті, що знайшлися. Відсутні просто не потрапляють у результат — рішення,
+    /// що робити з невідомим кодом, ухвалює викликач, і воно різне: перемикання
+    /// master відхиляє весь набір, інші могли б і пропустити.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Рядок <c>RD-06</c>: перемикання master робило
+    /// <see cref="FindDefinitionAsync"/> у циклі — по запиту на кожен код
+    /// набору, тобто тридцять запитів на перемикання блоку з тридцяти.
+    ///
+    /// ⛔ Результат <b>відстежуваний</b>, як і в <see cref="FindDefinitionAsync"/>,
+    /// і це не недогляд. Єдиний споживач — <c>SwitchRegistrySourceHandler</c>,
+    /// який кличе <c>RegistryDef.SwitchSource</c> і зберігає зміну; з
+    /// <c>AsNoTracking</c> перемикання мовчки не збереглося б, а тест на
+    /// «скільки змінилося» лишився б зеленим, бо рахує він доменні об'єкти в
+    /// пам'яті. Те, що <see cref="ListDefinitionsAsync"/> поруч —
+    /// невідстежуваний, різниці не скасовує: той віддає перелік на ЧИТАННЯ.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryDef>> FindDefinitionsAsync(
+        IReadOnlyCollection<string> codes, CancellationToken ct);
+
     /// <summary>Усі визначення довідників — це метадані, їх десятки.</summary>
     public Task<IReadOnlyList<RegistryDef>> ListDefinitionsAsync(CancellationToken ct);
 

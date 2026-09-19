@@ -36,6 +36,37 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
              .FirstOrDefaultAsync(d => d.Id == registryDefId, ct);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ БЕЗ <c>AsNoTracking</c> навмисно — дзеркально до
+    /// <see cref="FindDefinitionAsync"/>, який цей метод і замінює в циклі.
+    /// Єдиний споживач змінює знайдене (<c>SwitchSource</c>) і зберігає;
+    /// невідстежуваний результат зробив би перемикання порожньою операцією.
+    /// </remarks>
+    public async Task<IReadOnlyList<RegistryDef>> FindDefinitionsAsync(
+        IReadOnlyCollection<string> codes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        if (codes.Count == 0)
+        {
+            return [];
+        }
+
+        // Матеріалізуємо набір у список: EF перекладає `Contains` по списку в
+        // `IN (…)`, і колація порівняння лишається тією самою, що й у
+        // `FindDefinitionAsync` (`d.Code == code`) — тобто регістронезалежною.
+        var wanted = codes.ToList();
+
+        return await db.RegistryDefs
+                       .Include(d => d.Fields)
+                       .Where(d => wanted.Contains(d.Code))
+                       .OrderBy(d => d.Code)
+                       .Take(MaxEntries)
+                       .ToListAsync(ct)
+                       .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<RegistryDef>> ListDefinitionsAsync(CancellationToken ct)
         => await db.RegistryDefs
                    .AsNoTracking()

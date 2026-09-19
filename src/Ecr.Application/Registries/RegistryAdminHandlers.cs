@@ -160,13 +160,35 @@ public sealed class SwitchRegistrySourceHandler(
         // і перемкнути «те, що знайшлося», було б гірше за відмову: половина
         // блоку опинилася б в одному режимі, половина в іншому, і ніхто б не
         // знав, де межа.
+        //
+        // ⛔ Рядок `RD-06`: розв'язуються вони ОДНИМ запитом, а не
+        // `FindDefinitionAsync` у циклі. Набір — це блок довідників (десятки),
+        // і по запиту на код означало десятки звернень заради операції, яка
+        // далі робить рівно одне збереження.
+        //
+        // ⚠ `AsNoTracking` тут НЕ додається, і це не недогляд: нижче
+        // `definition.SwitchSource(kind)` і `SaveChangesAsync`. Невідстежувані
+        // сутності зробили б перемикання порожньою операцією — причому
+        // МОВЧКИ: `changed.Count` рахує доменні об'єкти в пам'яті й лишився б
+        // тим самим, аудит записався б, а таблиця не змінилася б.
+        var found = await registries.FindDefinitionsAsync(registryCodes, ct).ConfigureAwait(false);
+
+        var byCode = new Dictionary<string, RegistryDef>(
+            found.Count, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var definition in found)
+        {
+            byCode.TryAdd(definition.Code, definition);
+        }
+
         var definitions = new List<RegistryDef>(registryCodes.Count);
 
         foreach (var code in registryCodes)
         {
             definitions.Add(
-                await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-                ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує."));
+                byCode.TryGetValue(code, out var definition)
+                    ? definition
+                    : throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує."));
         }
 
         // ⚠ Питання ставиться ОДИН раз на весь набір і ГЛОБАЛЬНО, а не по
