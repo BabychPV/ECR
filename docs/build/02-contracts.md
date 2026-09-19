@@ -2705,6 +2705,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
 | `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
+| `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
 | `ECR-CALC-0409` | 409 | публікація методології автором останньої правки (D-40) |
 | `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
@@ -2857,6 +2858,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units` | `Uom.EditCatalog` | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
+| `GET` | `/api/v1/units/{id}/usage` | `Uom.EditCatalog` | 4 |
+| `DELETE` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
