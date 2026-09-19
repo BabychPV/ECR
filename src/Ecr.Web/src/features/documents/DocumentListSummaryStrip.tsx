@@ -3,12 +3,15 @@ import { Group, Stack, Text } from '@mantine/core';
 import { useDocumentListSummary } from '@/features/documents/api';
 import { formatNumber } from '@/shared/format';
 import { t } from '@/shared/i18n';
-import { statusKey } from '@/shared/ui/StatusBadge';
+import { statusKey, statusTone, toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 
 /** За який період зводити; `null` — період не обрано. */
 export interface DocumentListSummaryStripProps {
   readonly periodKey: number | null;
 }
+
+/** Лічильник смуги: ідентифікатор, підпис, число, тон (`null` — без кольору). */
+type Counter = readonly [string, string, number, StatusTone | null];
 
 /**
  * Смуга лічильників над переліком документів (`BE-09`).
@@ -30,18 +33,30 @@ export function DocumentListSummaryStrip({ periodKey }: DocumentListSummaryStrip
     return null;
   }
 
-  const counters: readonly (readonly [string, string, number])[] = [
-    ['draft', t(statusKey('sheet', 'Draft')), summary.data.draft],
-    ['submitted', t(statusKey('sheet', 'Submitted')), summary.data.submitted],
-    ['approved', t(statusKey('sheet', 'Approved')), summary.data.approved],
-    ['withIssues', t('documents.summaryWithIssues'), summary.data.withIssues],
+  /*
+   * ⛔ Rejected — лише коли відхилені Є (рішення людини, 2026-09-19). У
+   * спокійному стані смуга тримає чотири числа без кольору; «0 відхилено»
+   * червоним привчало б не дивитися на червоне. Тон — той самий, яким
+   * `<StatusBadge>` малює `sheet/Rejected`, з тієї ж таблиці, не власний.
+   */
+  const rejected: readonly Counter[] =
+    summary.data.rejected > 0
+      ? [['rejected', t(statusKey('sheet', 'Rejected')), summary.data.rejected, statusTone('sheet', 'Rejected')]]
+      : [];
+
+  const counters: readonly Counter[] = [
+    ['draft', t(statusKey('sheet', 'Draft')), summary.data.draft, null],
+    ['submitted', t(statusKey('sheet', 'Submitted')), summary.data.submitted, null],
+    ...rejected,
+    ['approved', t(statusKey('sheet', 'Approved')), summary.data.approved, null],
+    ['withIssues', t('documents.summaryWithIssues'), summary.data.withIssues, null],
   ];
 
   return (
     <Group gap="xl" mb="md" role="group" aria-label={t('documents.summaryLabel')}>
-      {counters.map(([id, label, count]) => (
-        <Stack key={id} gap="xs" data-summary-counter={id}>
-          <Text size="xl" fw={600}>
+      {counters.map(([id, label, count, tone]) => (
+        <Stack key={id} gap="xs" data-summary-counter={id} data-summary-tone={tone ?? undefined}>
+          <Text size="xl" fw={600} {...(tone === null ? {} : { c: toneFills[tone].text })}>
             {formatNumber(count)}
           </Text>
           <Text size="xs" c="dimmed">

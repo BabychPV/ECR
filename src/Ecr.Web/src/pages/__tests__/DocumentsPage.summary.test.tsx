@@ -24,7 +24,7 @@ const json = (body: unknown): Response =>
 
 const requested: string[] = [];
 
-function mockFetch(): void {
+function mockFetch(rejected = 0): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -32,7 +32,7 @@ function mockFetch(): void {
       requested.push(url);
 
       if (url.includes('/api/v1/documents/summary')) {
-        return json({ draft: 7, submitted: 3, approved: 12, rejected: 1, withIssues: 4 });
+        return json({ draft: 7, submitted: 3, approved: 12, rejected, withIssues: 4 });
       }
 
       if (url.includes('/api/v1/documents')) {
@@ -86,6 +86,38 @@ describe('DocumentsPage: зведення переліку (BE-09)', () => {
       expect(counter('withIssues')).toContain('4');
       expect(within(strip).queryAllByRole('button')).toHaveLength(0);
       expect(requested.some((url) => url.includes('/documents/summary?periodKey=202601'))).toBe(true);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'відхилені стоять одразу після поданих, у тоні відмови — лише коли вони є',
+    async () => {
+      mockFetch(2);
+      show('/?periodKey=202601');
+
+      const strip = await screen.findByRole('group', { name: /documents\.summaryLabel|Documents by state/ }, { timeout: SlowEnvTimeout });
+      const order = [...strip.querySelectorAll('[data-summary-counter]')].map((node) => node.getAttribute('data-summary-counter'));
+      const rejected = strip.querySelector('[data-summary-counter="rejected"]');
+
+      expect(order).toEqual(['draft', 'submitted', 'rejected', 'approved', 'withIssues']);
+      expect(rejected?.textContent).toContain('2');
+      expect(rejected?.getAttribute('data-summary-tone')).toBe('danger');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'коли відхилених немає, лічильника немає зовсім — не «0»',
+    async () => {
+      mockFetch(0);
+      show('/?periodKey=202601');
+
+      const strip = await screen.findByRole('group', { name: /documents\.summaryLabel|Documents by state/ }, { timeout: SlowEnvTimeout });
+
+      expect(strip.querySelectorAll('[data-summary-counter]')).toHaveLength(4);
+      expect(strip.querySelector('[data-summary-counter="rejected"]')).toBeNull();
+      expect(strip.querySelector('[data-summary-tone]')).toBeNull();
     },
     SlowEnvTimeout,
   );
