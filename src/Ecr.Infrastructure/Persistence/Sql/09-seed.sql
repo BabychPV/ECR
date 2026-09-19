@@ -2107,7 +2107,78 @@ USING (VALUES
     (N'jobs.partitionAhead',                        N'en', N'Partitions ahead: {ahead}', 1),
     (N'jobs.partitionShortage',                     N'en', N'PARTITION SHORTAGE: {ahead}', 1),
     (N'jobs.retentionCleared',                      N'en', N'Cleared snapshots: {snapshots}, rows: {rows}', 1),
-    (N'jobs.retryScheduled',                        N'en', N'Attempt {attempt}/{max} in {delaySeconds}s after error: {error}', 1)
+    (N'jobs.retryScheduled',                        N'en', N'Attempt {attempt}/{max} in {delaySeconds}s after error: {error}', 1),
+
+    -- ══ Підписи станів для `shared/ui/StatusBadge.tsx` (UI-04, директива №15 §2) ══
+    --
+    -- ⛔ Ключ — `status.<різновид>.<стан>`, де `<стан>` записаний ТАК, ЯК ЙОГО
+    -- НАЗИВАЄ СЕРВЕР. Це вже усталена тут форма для ключів, похідних від
+    -- переліку домену (`deny.OutsidePermitWindow`, `deny.ColumnReadOnly` вище):
+    -- будь-яке приведення регістру між значенням сервера й ключем дало б другу
+    -- відповідність, яку нема кому перевірити — рівно `A7-02`
+    -- (`ReadOnlyColumn` проти `ColumnReadOnly`).
+    --
+    -- ⛔ Стани взяті з КОДУ СЕРВЕРА, а не з макета `docs/design/hybrid/KIT.md`:
+    -- макет називає `sheet/Returned`, `period/Archived`, `period/NotOpened`,
+    -- `job/Done`, `version/Archived`, `severity/Critical` і цілий різновид
+    -- `user` — жодного з них у домені немає. Заведені ключі під неіснуючі
+    -- стани були б мертвими рядками каталогу, які ніхто ніколи не покаже.
+    --
+    -- ⚠ Тексти нічого не вигадують: сьогодні ті самі значення видно
+    -- користувачеві СИРИМИ кодами (`pages/DocumentsPage.tsx` малює
+    -- `<Badge>{sheet}: {state}</Badge>`). Рядок лише дає тому самому значенню
+    -- ім'я в каталозі, яке термінолог (`C-7`) зможе перекласти без правки коду.
+    --
+    -- ⚠ Область приватна (1): статуси видно лише після входу.
+
+    -- `DocumentStatus` (Enums.cs) — стан пари «аркуш × період» (`D-93`).
+    (N'status.sheet.Draft',                N'en', N'Draft', 1),
+    (N'status.sheet.Submitted',            N'en', N'Submitted', 1),
+    (N'status.sheet.Approved',             N'en', N'Approved', 1),
+    (N'status.sheet.Rejected',             N'en', N'Rejected', 1),
+
+    -- `PeriodState` (Enums.cs).
+    (N'status.period.Scheduled',           N'en', N'Not open yet', 1),
+    (N'status.period.Open',                N'en', N'Open', 1),
+    (N'status.period.Grace',               N'en', N'Grace period', 1),
+    (N'status.period.Closed',              N'en', N'Closed', 1),
+
+    -- `IntegrationHandlers.KnownStates` плюс `Unknown`/`Unavailable`, які
+    -- віддає лише `GET /jobs/{jobId}` (`QuartzJobScheduler`).
+    (N'status.job.Queued',                 N'en', N'Queued', 1),
+    (N'status.job.Running',                N'en', N'Running', 1),
+    (N'status.job.Succeeded',              N'en', N'Succeeded', 1),
+    (N'status.job.Failed',                 N'en', N'Failed', 1),
+    (N'status.job.Cancelled',              N'en', N'Cancelled', 1),
+    (N'status.job.Unknown',                N'en', N'Unknown job', 1),
+    (N'status.job.Unavailable',            N'en', N'Scheduler unavailable', 1),
+
+    -- `TemplateVersionStatus` (Enums.cs) — і для версій шаблону, і для версій
+    -- методології: перелік один.
+    (N'status.version.Draft',              N'en', N'Draft', 1),
+    (N'status.version.Published',          N'en', N'Published', 1),
+    (N'status.version.Deprecated',         N'en', N'Deprecated', 1),
+
+    -- `ProjectStatus` (Enums.cs).
+    (N'status.project.Draft',              N'en', N'Draft', 1),
+    (N'status.project.Active',             N'en', N'Active', 1),
+    (N'status.project.Archived',           N'en', N'Archived', 1),
+
+    -- Зведений стан перевірок (`HealthReportDto`, `HealthStatus` платформи).
+    (N'status.health.Healthy',             N'en', N'Healthy', 1),
+    (N'status.health.Degraded',            N'en', N'Degraded', 1),
+    (N'status.health.Unhealthy',           N'en', N'Unhealthy', 1),
+
+    -- `ValidationSeverity` (Enums.cs). `Critical` у переліку немає.
+    (N'status.severity.Info',              N'en', N'Info', 1),
+    (N'status.severity.Warning',           N'en', N'Warning', 1),
+    (N'status.severity.Error',             N'en', N'Error', 1),
+
+    -- Результат збору з зовнішнього джерела (`CollectionRunner`). Словник
+    -- окремий від `status.health.*`: спільне в них лише слово `Degraded`.
+    (N'status.collectionRun.Succeeded',    N'en', N'Succeeded', 1),
+    (N'status.collectionRun.Degraded',     N'en', N'Completed with warnings', 1),
+    (N'status.collectionRun.Failed',       N'en', N'Failed', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
