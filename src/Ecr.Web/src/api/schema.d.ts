@@ -7964,6 +7964,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/units/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє одиницю, на яку ніхто не посилається.
+         * @description ⛔ Одиниця з посиланнями не видаляється — `409 ECR-UOM-0409`, а
+         *     перелік залежних лежить у `details.references`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Де використовується одиниця: перші 20 посилань і загальна кількість. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -12278,6 +12393,28 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Одне місце, що посилається на ресурс. */
+        UsageItemDto: {
+            /** @description Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу. */
+            id: string;
+            /** @description Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…). */
+            kind: string;
+            /** @description Те, чим об'єкт упізнає людина: код. */
+            label: string;
+            /** @description Маршрут клієнта до об'єкта; `null` — окремого екрана немає. */
+            route: null | string;
+        };
+        /** @description «Де використовується» — єдина форма відповіді `GET /…/{id}/usage`
+         *     (директива №15, BE-15). */
+        UsageResponse: {
+            /** @description Перші int UsageResponse.PageSize посилань. */
+            items: components["schemas"]["UsageItemDto"][];
+            /**
+             * Format: int32
+             * @description Скільки посилань усього — не лише показаних.
+             */
+            total: number;
         };
         /** @description Створений користувач. */
         UserIdResponse: {
