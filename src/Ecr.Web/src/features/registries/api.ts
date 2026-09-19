@@ -64,6 +64,14 @@ export function useDeleteRegistryEntry(code: string): UseMutationResult<void, Er
   const queryClient = useQueryClient();
 
   return useMutation<void, Error, number>({
+    /*
+     * ⚠ `handled` — оголошення для страхувальної сітки в `app/queryClient.ts`:
+     * відмову показує діалог, читаючи `remove.error` у рендері
+     * (`RegistriesPage.tsx:98`, `:387`), а не колбек `onError`. Без цього
+     * рядка сітка бачила б зміну без обробника й додала б другий тост поверх
+     * пояснення — рівно те подвоєння, від якого вона й мала стерегти.
+     */
+    meta: { handled: true },
     mutationFn: (entryId: number) =>
       apiFetch<void>(
         `/api/v1/registries/${encodeURIComponent(code)}/entries/${entryId}`,
