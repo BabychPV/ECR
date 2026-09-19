@@ -493,6 +493,16 @@ USING (VALUES
     (N'err.ECR-JOB-0409.notActive',           N'en', N'Job {jobId} is in state {state}: there is nothing to cancel.', 1),
     (N'err.ECR-AUTH-0403.jobNotYours',        N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', 1),
 
+    -- ⛔ `BE-08`, перелік задач із фільтрами. Дві подробиці — про ФІЛЬТР, а не
+    -- про задачу: невідомий стан і розмір поза межами відхиляються, бо мовчазна
+    -- порожня видача на друкарську помилку читається як «таких задач немає».
+    -- ⚠ `err.ECR-AUTH-0401.anonymous` — окремо від `anonymousWrite` вище: там
+    -- «анонім не може ЗМІНИТИ дані», а тут анонім не має «своїх» задач узагалі,
+    -- і порада «увійдіть знову» доречна в обох, а речення — ні.
+    (N'err.ECR-AUTH-0401.anonymous',          N'en', N'An anonymous request has no jobs of its own: sign in again.', 1),
+    (N'err.ECR-REQ-0422.jobState',            N'en', N'There is no job state "{state}".', 1),
+    (N'err.ECR-REQ-0422.jobLimit',            N'en', N'The number of jobs requested is out of range: {limit}.', 1),
+
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
     -- не знайдено». Для оператора це не назва нічого — у продукті немає
@@ -1097,6 +1107,13 @@ USING (VALUES
     (N'jobs.cancel',                     N'en', N'Cancel job', 1),
     (N'jobs.cancelConfirm',              N'en', N'The job is asked to stop and finishes in the Cancelled state at the nearest batch boundary. Work already written is kept.', 1),
     (N'jobs.cancelling',                 N'en', N'Cancelling…', 1),
+    -- ⛔ `BE-08`: «Мої задачі» — не косметичний фільтр, а єдиний перелік, який
+    -- видно БЕЗ права `System.ViewHealth` (Q-156). Підказка каже саме це, бо
+    -- інакше знятий прапорець виглядає як «показати більше», а не як «показати
+    -- чуже», і відмова 403 читається як збій.
+    (N'jobs.mineOnly',                   N'en', N'Only my jobs', 1),
+    (N'jobs.mineOnlyHint',               N'en', N'Your own jobs are visible without the System.ViewHealth permission; the full queue is not.', 1),
+    (N'jobs.recentStarted',              N'en', N'Started', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
 

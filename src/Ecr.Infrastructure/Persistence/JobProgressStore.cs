@@ -118,14 +118,43 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct)
-        => await db.JobProgresses
-            .AsNoTracking()
+    public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(
+        JobListFilter filter, int limit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        var query = db.JobProgresses.AsNoTracking();
+
+        // ⛔ Три предикати, і кожен — КОН'ЮНКЦІЯ з рештою. «Мої провалені»
+        // мусить означати саме це, а не «мої або провалені»: об'єднання
+        // віддало б чужі задачі тому, хто права на них не має.
+        //
+        // ⚠ Автор — це `filter.CreatedByUserId`, який обробник бере з
+        // `ICurrentUser`. Жодного шляху сюди з рядка запиту немає за
+        // побудовою: тип не має іншого джерела.
+        if (filter.CreatedByUserId is { } author)
+        {
+            query = query.Where(p => p.CreatedByUserId == author);
+        }
+
+        if (filter.State is { Length: > 0 } state)
+        {
+            query = query.Where(p => p.State == state);
+        }
+
+        if (filter.JobCode is { Length: > 0 } code)
+        {
+            query = query.Where(p => p.JobCode == code);
+        }
+
+        return await query
             .OrderByDescending(p => p.UpdatedAt)
             .Take(limit)
-            .Select(p => new JobSummary(p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt))
+            .Select(p => new JobSummary(
+                p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public Task HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct)

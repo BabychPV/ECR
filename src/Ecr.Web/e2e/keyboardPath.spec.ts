@@ -234,4 +234,89 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
       'після Escape фокус не повернувся на кнопку, яка відкрила діалог',
     ).toBe(opener.label);
   });
+
+  /**
+   * Повертає аркуш у `Draft` — базову лінію стенда.
+   *
+   * ⛔ Без цього хука файл одноразовий, і це доведено, а не припущено: окремий
+   * стенд, `-Grep "клавіатурою"`, два прогони поспіль на ОДНІЙ базі, без
+   * жодного іншого spec-файла — перший зелений, другий червоний. Кроки 9 і 10
+   * доводять аркуш до `Approved`, а на затвердженому аркуші немає кнопки
+   * подання, тож наступний прогін падає на кроці 9 («у шапці немає кнопки
+   * подання») — за десять кроків від причини.
+   *
+   * ⚠ Досі за цим файлом прибирав СУСІД: `security.spec.ts` повертає аркуш у
+   * роботу в `makeSheetEditable`, бо інакше не може перевірити власне
+   * твердження. Це працює, доки ніхто не змінить порядок і не запустить
+   * підмножину набору через `--grep`, — тобто рівно доти, доки про залежність
+   * пам'ятають. Файл, який прибирає за собою сам, такої пам'яті не потребує.
+   *
+   * ⛔ Клавіатурою, як і весь файл (`ФВ-14.16`, лінт на `.click()` у
+   * `eslint.config.js`). Прибирання — не привід заводити в цьому файлі мишу:
+   * саме так заборони й розмиваються.
+   *
+   * ⚠ Повернення в роботу — законна дія з правом `Document.Reopen`
+   * (`ReopenDocumentHandler` → `Draft`, `ФВ-5.20a`); `e2e-admin` його має
+   * (`tools/e2e-stand.ps1`, роль `E2EAdmin`).
+   */
+  test.afterAll(async ({ browser }, testInfo) => {
+    // ⚠ Той самий гейт, що й у `test.skip` вище: без стенда відновлювати
+    // нічого, а `test.skip` на хуки не поширюється.
+    if (PeriodKey === '' || DocumentId === '') return;
+
+    const baseURL = testInfo.project.use.baseURL;
+    if (baseURL === undefined) {
+      throw new Error('у конфігурації немає baseURL — відновлювати базову лінію нема де');
+    }
+
+    const context = await browser.newContext({ baseURL });
+    const page = await context.newPage();
+
+    try {
+      await page.goto('/login');
+      await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
+      await page.getByLabel(/User name|Ім'я/i).fill(Operator.user);
+      await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Operator.password);
+      await page.keyboard.press('Enter');
+      await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
+
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
+
+      // ⚠ Стан читається з бейджа активної вкладки — сирий рядок стану
+      // сервера (`SheetState` з `transitions.ts`), не переклад.
+      const activeTab = page.getByRole('tab', { selected: true });
+      await expect(activeTab, 'у документа немає жодного аркуша').toBeVisible({ timeout: 30_000 });
+
+      // ⚠ Ідемпотентно: прогін міг не дійти до затвердження — тоді повертати
+      // нема чого.
+      const state = (await activeTab.textContent()) ?? '';
+      if (!/Submitted|Approved/.test(state)) return;
+
+      const reopen = page.getByRole('button', { name: /Return for edits|Повернути/i }).first();
+      await expect(reopen, 'у шапці немає кнопки повернення в роботу').toBeVisible({
+        timeout: 10_000,
+      });
+      await reopen.focus();
+      await page.keyboard.press('Enter');
+
+      // ⚠ Причина обов'язкова в домені (`ECR-DOC-0422`), і кнопка
+      // підтвердження вимкнена, доки поле порожнє (`ReasonModal.tsx`).
+      const dialog = page.getByRole('dialog');
+      await expect(dialog, 'діалог причини не відкрився').toBeVisible({ timeout: 10_000 });
+      await dialog
+        .getByRole('textbox', { name: /Reason|Причина/i })
+        .fill('e2e: повернення базової лінії стенда');
+
+      const confirm = dialog.getByRole('button', { name: /Return for edits|Повернути/i });
+      await confirm.focus();
+      await page.keyboard.press('Enter');
+
+      await expect(activeTab, 'аркуш не повернувся в Draft').toContainText('Draft', {
+        timeout: 15_000,
+      });
+    } finally {
+      await context.close();
+    }
+  });
 });

@@ -16,17 +16,46 @@ public sealed class JobsController(
     CancelJobHandler cancel) : ControllerBase
 {
     /// <summary>
-    /// Останні фонові задачі. Право <c>System.ViewHealth</c>.
+    /// Останні фонові задачі. Право <c>System.ViewHealth</c> — або
+    /// <c>mine=true</c> для ВЛАСНИХ задач (BE-08).
     /// </summary>
+    /// <param name="state">
+    /// Стан задачі: <c>Queued</c>, <c>Running</c>, <c>Succeeded</c>,
+    /// <c>Failed</c>, <c>Cancelled</c>. Невідомий — <c>422</c>, а не порожній
+    /// перелік.
+    /// </param>
+    /// <param name="code">Код (тип) задачі, як у <c>JobSummary.jobCode</c>.</param>
+    /// <param name="mine">Лише власні задачі; не вимагає <c>System.ViewHealth</c>.</param>
+    /// <param name="limit">Скільки повернути, 1…50.</param>
+    /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
     /// її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
     /// перевірити те, про що вже здогадався (`ФВ-12.4`).
+    /// <para>
+    /// ⛔ <b>Автора задачі НЕ МОЖНА назвати з запиту.</b> Дія не має і не
+    /// матиме параметра з ідентифікатором користувача: <c>mine=true</c> —
+    /// межа доступу (власні задачі видно без <c>System.ViewHealth</c>, Q-156),
+    /// і параметр «чиї задачі» перетворив би це звільнення на спосіб читати
+    /// чужу чергу. Власник береться лише з <c>ICurrentUser</c> в обробнику.
+    /// </para>
+    /// <para>
+    /// ⛔ Без <c>mine</c> і без права — <c>403</c>, а не порожній перелік:
+    /// «задач немає» і «вам їх не показують» — різні відповіді, і перша з них
+    /// тут була б неправдою.
+    /// </para>
     /// </remarks>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<JobSummary>>(StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<JobSummary>>> List(CancellationToken ct)
-        => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<JobSummary>>> List(
+        [FromQuery] string? state,
+        [FromQuery] string? code,
+        [FromQuery] bool mine,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+        => Ok(await list.HandleAsync(state, code, mine, limit, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Стан задачі за її ідентифікатором. Право <c>System.ViewHealth</c>.

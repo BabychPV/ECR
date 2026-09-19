@@ -99,6 +99,7 @@ public interface IBackgroundJobScheduler
     /// <summary>
     /// Останні задачі, найновіші перші — для черги в інтерфейсі.
     /// </summary>
+    /// <param name="filter">Звуження переліку; порожній — усі задачі.</param>
     /// <param name="limit">Скільки повернути.</param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
@@ -107,7 +108,33 @@ public interface IBackgroundJobScheduler
     /// БУВ ЗНАЙДЕНИЙ, доки хтось не назве точний ідентифікатор
     /// (директива №09 §6.5, `S-25`; `ФВ-12.4`).
     /// </remarks>
-    public Task<IReadOnlyList<JobSummary>> ListRecentAsync(int limit, CancellationToken ct);
+    public Task<IReadOnlyList<JobSummary>> ListRecentAsync(
+        JobListFilter filter, int limit, CancellationToken ct);
+}
+
+/// <summary>
+/// Звуження переліку задач (BE-08).
+/// </summary>
+/// <param name="State">
+/// Стан задачі (<c>Queued</c>, <c>Running</c>, <c>Succeeded</c>, <c>Failed</c>,
+/// <c>Cancelled</c>); <c>null</c> — будь-який.
+/// </param>
+/// <param name="JobCode">Код (тип) задачі; <c>null</c> — будь-який.</param>
+/// <param name="CreatedByUserId">
+/// Автор задачі; <c>null</c> — задачі всіх авторів.
+/// <para>
+/// ⛔ Значення береться ВИКЛЮЧНО з <c>ICurrentUser</c> в обробнику
+/// (<c>ListJobsHandler</c>) і НІКОЛИ з запиту. Це межа доступу, а не
+/// зручність: перелік «моїх» задач не вимагає <c>System.ViewHealth</c>, тож
+/// параметр, яким можна назвати ЧУЖИЙ ідентифікатор, був би не фільтром, а
+/// витоком — будь-хто читав би чужу чергу, назвавши чуже число.
+/// </para>
+/// </param>
+public sealed record JobListFilter(
+    string? State = null, string? JobCode = null, int? CreatedByUserId = null)
+{
+    /// <summary>Порожнє звуження: усі задачі всіх авторів.</summary>
+    public static readonly JobListFilter None = new();
 }
 
 /// <summary>Задача в переліку черги — легша за <see cref="JobStatus"/>.</summary>
@@ -116,7 +143,34 @@ public interface IBackgroundJobScheduler
 /// <param name="State">Стан.</param>
 /// <param name="Percent">Прогрес у відсотках.</param>
 /// <param name="UpdatedAt">Момент останнього оновлення в UTC.</param>
-public sealed record JobSummary(string JobId, string JobCode, string State, int Percent, DateTime UpdatedAt);
+/// <param name="StartedAt">
+/// Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
+/// <para>
+/// ⚠ Поле називається <c>StartedAt</c>, а не <c>CreatedAt</c>, бо саме це
+/// зберігає стовпець: <c>JobProgress.Begin</c> перезаписує його в момент
+/// запуску (<c>IntegrationLogs.cs</c>). Назва «створено» була б неправдою
+/// для кожної задачі, що вже почала працювати, а окремого стовпця з
+/// моментом постановки в <c>itg.JobProgress</c> немає.
+/// </para>
+/// </param>
+/// <remarks>
+/// ⚠ Поля <c>Message</c> тут НЕМАЄ, хоч воно й лежить у тому самому рядку
+/// <c>itg.JobProgress</c>. Причина не в даних, а в резолві: повідомлення —
+/// структурований конверт, який локалізується мовою ЧИТАЧА (<c>Q-326</c>), а
+/// <c>JobProgressMessageResolver</c> приймає рядок по одному й на кожен
+/// виклик відкриває з'єднання по ревізію каталогу
+/// (<c>UiStringCatalogStore.LoadAsync</c>). Півсотні рядків переліку, який
+/// клієнт опитує кожні три секунди, коштували б півсотні з'єднань на запит.
+/// Щоб віддати повідомлення в переліку, резолверу потрібна форма, яка приймає
+/// ВЖЕ завантажений каталог, — окремий PR.
+/// </remarks>
+public sealed record JobSummary(
+    string JobId,
+    string JobCode,
+    string State,
+    int Percent,
+    DateTime UpdatedAt,
+    DateTime StartedAt);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob

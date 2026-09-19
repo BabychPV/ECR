@@ -193,17 +193,117 @@ public sealed class ListJobsHandler(
     /// ⚠ Це журнал того, що ЩОЙНО сталося, не архів: адміністратор дивиться
     /// на нього одразу після дії, а не гортає місяцями назад.
     /// </remarks>
-    private const int Limit = 50;
+    public const int MaxLimit = 50;
 
-    /// <summary>Останні задачі, найновіші перші.</summary>
+    /// <summary>
+    /// Стани, які задача може мати в <c>itg.JobProgress</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Невідомий стан — це <c>422</c>, а не порожній перелік. Порожній
+    /// перелік на друкарську помилку у фільтрі читається як «таких задач
+    /// немає», тобто бреше рівно там, де людина шукає збій.
+    /// <para>
+    /// ⚠ Рядки звірені з тим, ХТО їх пише: <c>JobProgress.Queue</c> →
+    /// <c>Queued</c>, <c>Begin</c> → <c>Running</c>, <c>Finish</c> →
+    /// <c>Succeeded</c>/<c>Failed</c>/<c>Cancelled</c>
+    /// (<c>IntegrationLogs.cs</c>, <c>QuartzJobAdapter.cs</c>).
+    /// <c>Unknown</c> і <c>Unavailable</c> сюди не входять: це відповіді
+    /// планувальника про ВІДСУТНІСТЬ запису, а не стани, які можна знайти в
+    /// переліку.
+    /// </para>
+    /// </remarks>
+    public static readonly string[] KnownStates =
+        ["Queued", "Running", "Succeeded", "Failed", "Cancelled"];
+
+    /// <summary>
+    /// Останні задачі, найновіші перші.
+    /// </summary>
+    /// <param name="state">Стан із <see cref="KnownStates"/>; <c>null</c> — будь-який.</param>
+    /// <param name="code">Код (тип) задачі; <c>null</c> — будь-який.</param>
+    /// <param name="mine">
+    /// <c>true</c> — лише ВЛАСНІ задачі поточного користувача, без права
+    /// <c>System.ViewHealth</c>.
+    /// </param>
+    /// <param name="limit">Скільки повернути, 1…<see cref="MaxLimit"/>; <c>null</c> — стеля.</param>
     /// <param name="ct">Скасування.</param>
-    public async Task<IReadOnlyList<JobSummary>> HandleAsync(CancellationToken ct)
+    /// <remarks>
+    /// ⛔ <b>Межа доступу, а не зручність</b> (та сама, що в
+    /// <see cref="GetJobStatusHandler"/> і <see cref="CancelJobHandler"/>,
+    /// Q-156). Автор бачить СВОЇ задачі без <c>System.ViewHealth</c> — права
+    /// на стан СИСТЕМИ: інакше оператор, який щойно отримав <c>jobId</c> у
+    /// відповіді <c>202</c>, не має жодного способу побачити перелік власних
+    /// перерахунків, і шухляда «Мої задачі» порожня для всіх, крім
+    /// адміністраторів.
+    /// <para>
+    /// ⛔ Ідентифікатор власника береться ЛИШЕ з <c>ICurrentUser</c>. У цього
+    /// методу немає параметра, яким можна назвати іншого автора, і в дії
+    /// контролера теж — тому підставити чужий ідентифікатор нічим: ані
+    /// параметром, ані заголовком. Параметр «чиї задачі» перетворив би
+    /// звільнення від права на спосіб читати чужу чергу.
+    /// </para>
+    /// <para>
+    /// ⛔ Без <c>mine</c> і без права — <c>403</c>, а НЕ порожній перелік.
+    /// Порожній перелік означає «задач немає» і є неправдою: задачі є, їх
+    /// просто не можна показувати цьому читачеві.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="AccessDeniedException">Анонім, або чужі задачі без права.</exception>
+    /// <exception cref="BusinessRuleException">Невідомий стан або розмір поза межами.</exception>
+    public async Task<IReadOnlyList<JobSummary>> HandleAsync(
+        string? state, string? code, bool mine, int? limit, CancellationToken ct)
     {
-        await ListTemplatesHandler
-            .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
-            .ConfigureAwait(false);
+        // ⚠ Анонім не має «своїх» задач за визначенням: `mine` для нього не
+        // послаблення права, а порожнє поняття. Тому 401 стоїть ПЕРЕД
+        // розгалуженням — інакше `?mine=true` без сеансу давав би 200 і
+        // порожній перелік, тобто відповідь замість запиту на вхід.
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?>
+                         {
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymous",
+                         });
 
-        return await jobs.ListRecentAsync(Limit, ct).ConfigureAwait(false);
+        // ⛔ Право вимагається рівно тоді, коли запит виходить за межі власних
+        // задач. Перевірити його ДО розгалуження означало б скасувати весь
+        // сенс `mine`; не перевіряти взагалі — віддати чергу системи будь-кому.
+        if (!mine)
+        {
+            await ListTemplatesHandler
+                .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (state is { Length: > 0 } && !KnownStates.Contains(state, StringComparer.Ordinal))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Стан «{state}» не існує; відомі: {string.Join(", ", KnownStates)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.jobState",
+                    ["state"] = state,
+                });
+        }
+
+        if (limit is < 1 or > MaxLimit)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Розмір переліку поза межами 1..{MaxLimit}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.jobLimit",
+                    ["limit"] = limit,
+                });
+        }
+
+        // ⛔ `userId` — з `ICurrentUser`, і це єдине джерело автора в усьому
+        // ланцюгу. Мутація «підставити сюди число з запиту» неможлива: такого
+        // числа в сигнатурі немає.
+        var filter = new JobListFilter(state, code, mine ? userId : null);
+
+        return await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
     }
 }
 

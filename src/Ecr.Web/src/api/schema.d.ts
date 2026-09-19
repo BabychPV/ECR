@@ -1434,14 +1434,34 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Останні фонові задачі. Право `System.ViewHealth`.
-         * @description ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
-         *     її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
-         *     перевірити те, про що вже здогадався (`ФВ-12.4`).
+         * Останні фонові задачі. Право `System.ViewHealth` — або
+         *     `mine=true` для ВЛАСНИХ задач (BE-08).
+         * @description     ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
+         *         її GUID: перелік — єдиний спосіб дізнатися, ЩО впало, а не лише
+         *         перевірити те, про що вже здогадався (`ФВ-12.4`).
+         *         ⛔ Автора задачі НЕ МОЖНА назвати з запиту. Дія не має і не
+         *     матиме параметра з ідентифікатором користувача: mine=true —
+         *     межа доступу (власні задачі видно без System.ViewHealth, Q-156),
+         *     і параметр «чиї задачі» перетворив би це звільнення на спосіб читати
+         *     чужу чергу. Власник береться лише з ICurrentUser в обробнику.
+         *         ⛔ Без mine і без права — 403, а не порожній перелік:
+         *     «задач немає» і «вам їх не показують» — різні відповіді, і перша з них
+         *     тут була б неправдою.
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Стан задачі: `Queued`, `Running`, `Succeeded`,
+                     *     `Failed`, `Cancelled`. Невідомий — `422`, а не порожній
+                     *     перелік. */
+                    state?: string;
+                    /** @description Код (тип) задачі, як у `JobSummary.jobCode`. */
+                    code?: string;
+                    /** @description Лише власні задачі; не вимагає `System.ViewHealth`. */
+                    mine?: boolean;
+                    /** @description Скільки повернути, 1…50. */
+                    limit?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -1457,6 +1477,28 @@ export interface paths {
                         "application/json": components["schemas"]["JobSummary"][];
                         "text/json": components["schemas"]["JobSummary"][];
                         "text/plain": components["schemas"]["JobSummary"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -1678,8 +1720,17 @@ export interface paths {
         /**
          * Увімкнені мови в порядку показу.
          * @description Без права: перелік мов не є таємницею, а потрібен кожному екрану, що
-         *     має локалізовану назву. Анонімно теж не віддається — сторінка входу
-         *     обирає мову з браузера і збереженого вибору, реєстр їй не потрібен.
+         *     має локалізовану назву.
+         *
+         *     ⛔ ✎ 2026-09-19 (`BE-07`): речення «анонімно теж не віддається —
+         *     сторінка входу обирає мову з браузера і збереженого вибору, реєстр їй не
+         *     потрібен» БІЛЬШЕ НЕ ЧИННЕ і тому прибране, а не лишене поруч із новою
+         *     правдою. Макет екрана входу дає вибір мови явним перемикачем, а не лише
+         *     вгадуванням із браузера, і перелік для нього віддає анонімний
+         *     `GET /api/v1/public/bootstrap` (PublicController).
+         *     ЦЕЙ маршрут лишається закритим: він обслуговує редактор перекладів і
+         *     поля локалізованих назв, тобто вже автентифіковані екрани, і відкривати
+         *     його заради екрана входу не було потреби.
          */
         get: {
             parameters: {
@@ -4113,6 +4164,49 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версія продукту, мови і доступні способи входу.
+         * @description ⚠ Дія не приймає ЖОДНОГО параметра — ні шляху, ні рядка запиту, ні тіла.
+         *     Це і є доказ того, що відповідь не може залежати від імені користувача:
+         *     їй нізвідки його взяти.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicBootstrapResponse"];
+                        "text/json": components["schemas"]["PublicBootstrapResponse"];
+                        "text/plain": components["schemas"]["PublicBootstrapResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -9368,6 +9462,16 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /**
+             * Format: date-time
+             * @description             Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
+             *                 ⚠ Поле називається StartedAt, а не CreatedAt, бо саме це
+             *     зберігає стовпець: JobProgress.Begin перезаписує його в момент
+             *     запуску (IntegrationLogs.cs). Назва «створено» була б неправдою
+             *     для кожної задачі, що вже почала працювати, а окремого стовпця з
+             *     моментом постановки в itg.JobProgress немає.
+             */
+            startedAt: string;
             /** @description Стан. */
             state: string;
             /**
@@ -10268,6 +10372,17 @@ export interface components {
             status: components["schemas"]["ProjectStatus"];
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Aqtau`). */
             timeZoneId: string;
+        };
+        /** @description Публічні дані екрана входу. */
+        PublicBootstrapResponse: {
+            /** @description Увімкнені мови реєстру в порядку показу. */
+            languages: components["schemas"]["LanguageDto"][];
+            /** @description Чи показувати форму локального входу. */
+            localSignInEnabled: boolean;
+            /** @description Версія продукту без метаданих збірки. */
+            productVersion: string;
+            /** @description Чи показувати кнопку доменного входу. */
+            windowsSignInEnabled: boolean;
         };
         /** @description Запит на публікацію версії методології. */
         PublishMethodologyRequest: {
