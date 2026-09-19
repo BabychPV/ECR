@@ -323,21 +323,38 @@ describe('Контраст токенів (ФВ-14.17)', () => {
    * `Q-272` (alpha-композит, не пряма заливка), тож перевірка контрасту
    * тут дзеркалить `Q-272`, а не `Q-285`.
    */
-  describe('Q-289: SourcesPage — Badge «останній запуск», `statusSuccess`, не голий `green`', () => {
-    it('SourcesPage: колір Badge `Succeeded` — `statusSuccess`', () => {
+  describe('Q-289: SourcesPage — «останній запуск» не фарбується вручну', () => {
+    /*
+     * ✎ 2026-09-19. Тут стояло дослівне
+     * `toMatch(/source\.lastRun\.status === 'Succeeded' \? 'statusSuccess' : 'statusWarning'/)`
+     * — тобто сторож ВИМАГАВ саме ту тернарку, яка й була дефектом: вона
+     * фарбувала `Failed` (даних немає зовсім) тим самим `statusWarning`, що й
+     * `Degraded` (є частина). Предметом картки був колір проти голого `green`,
+     * і в цій частині сторож був правий; але, закріпивши ВИРАЗ, він заразом
+     * закріпив і хибний розподіл станів, і будь-яке виправлення виглядало б
+     * як регрес.
+     *
+     * ⛔ Урок ширший за цей рядок: сторож по тексту джерела охороняє не
+     * властивість, а редакцію. Тепер перевіряється властивість — сторінка не
+     * має ВЛАСНОГО рішення про колір статусу прогону; він приходить із набору
+     * (`StatusBadge`, різновид `collectionRun`), а тони набору стереже
+     * `shared/ui/__tests__/statusBadgeContrast.test.ts`. Розподіл станів за
+     * тонами доводить `SourcesPage.runStatusTone.test.tsx` — рендером, не
+     * текстом.
+     */
+    it('SourcesPage: статус прогону йде через набір, а не через власну тернарку', () => {
       const source = readFileSync(
         path.resolve(process.cwd(), 'src/pages/admin/SourcesPage.tsx'),
         'utf8',
       );
 
-      // ⛔ Мутаційний доказ на джерело: поверни хтось голий `'green'` замість
-      // `'statusSuccess'` — цей рядок ловить регрес одразу.
-      expect(source).toMatch(
-        /source\.lastRun\.status === 'Succeeded' \? 'statusSuccess' : 'statusWarning'/,
-      );
-      expect(source).not.toMatch(
-        /source\.lastRun\.status === 'Succeeded' \? 'green' : 'statusWarning'/,
-      );
+      expect(source).toMatch(/<StatusBadge kind="collectionRun" state=\{source\.lastRun\.status\}/);
+
+      // ⚠ Саме проп `color`, обчислений із `lastRun`, а не будь-яка згадка
+      // стану: коментар поруч із виправленням цитує стару тернарку, і сторож
+      // на «згадку» впав би на власному поясненні.
+      expect(source).not.toMatch(/color=\{[^}]*lastRun/);
+      expect(source).not.toMatch(/color="green"|color=\{'green'\}/);
     });
 
     // Той самий `blend`, що й для Q-272: доводить не лише присутність рядка,
