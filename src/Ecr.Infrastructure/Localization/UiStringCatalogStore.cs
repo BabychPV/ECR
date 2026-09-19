@@ -141,6 +141,28 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         return new UiStringWriteResult(revision, previous);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Без кешу: це екран термінолога, а не шлях кожного запиту, і він
+    /// зобов'язаний показати щойно збережений переклад.
+    /// </remarks>
+    public async Task<IReadOnlyList<UiStringRawRow>> ListRawAsync(string languageCode, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(languageCode);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        var defaults = await ReadStringsAsync(connection, UiStringResolver.DefaultLanguage, scope: null, ct)
+            .ConfigureAwait(false);
+        var requested =
+            string.Equals(languageCode, UiStringResolver.DefaultLanguage, StringComparison.OrdinalIgnoreCase)
+                ? defaults
+                : await ReadStringsAsync(connection, languageCode, scope: null, ct).ConfigureAwait(false);
+
+        return UiStringResolver.ComposeRaw(defaults, requested);
+    }
+
     /// <summary>Читає зріз мови з кешу або з бази.</summary>
     private async Task<UiStringCatalog> LoadAsync(string languageCode, UiStringScope? scope, CancellationToken ct)
     {

@@ -52,6 +52,36 @@ public static partial class UiStringResolver
         return result;
     }
 
+    /// <summary>
+    /// Те саме зіставлення, але **без підміни**: переклад як він є (<c>BE-13</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дзеркало <see cref="Compose"/>, і визначення «перекладу немає» в них
+    /// мусить бути одне: ключа немає АБО значення порожнє. Якби порожній рядок
+    /// тут рахувався перекладом, покриття показувало б 100 % для мови, половина
+    /// якої на екрані англійська.
+    ///
+    /// ⚠ Ключі — лише з мови за замовчуванням: рядок, якого в еталоні немає,
+    /// перекладати нема з чого, і в покритті він дав би «перекладено більше, ніж
+    /// усього».
+    /// </remarks>
+    /// <param name="defaults">Каталог мови за замовчуванням.</param>
+    /// <param name="requested">Каталог запитаної мови; може бути неповним.</param>
+    public static IReadOnlyList<UiStringRawRow> ComposeRaw(
+        IReadOnlyDictionary<string, string> defaults,
+        IReadOnlyDictionary<string, string> requested)
+    {
+        ArgumentNullException.ThrowIfNull(defaults);
+        ArgumentNullException.ThrowIfNull(requested);
+
+        return [.. defaults
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => new UiStringRawRow(
+                pair.Key,
+                pair.Value,
+                requested.TryGetValue(pair.Key, out var value) && !string.IsNullOrEmpty(value) ? value : null))];
+    }
+
     /// <summary>Текст за ключем або **сам ключ**, якщо його немає ніде.</summary>
     /// <param name="catalog">Каталог мови.</param>
     /// <param name="key">Ключ.</param>
@@ -105,6 +135,33 @@ public static partial class UiStringResolver
             template,
             match => parameters.TryGetValue(match.Groups[1].Value, out var value) ? value : match.Value);
     }
+
+    /// <summary>Набір плейсхолдерів шаблону (<c>{0}</c>, <c>{name}</c>), без повторів, упорядкований.</summary>
+    /// <param name="template">Текст каталогу.</param>
+    public static IReadOnlyList<string> Placeholders(string template)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+
+        return [.. PlaceholderPattern().Matches(template)
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Чи збігається НАБІР плейсхолдерів перекладу з оригіналом (<c>BE-13</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Набір, а не послідовність: переклад має право переставити
+    /// <c>{from}</c> і <c>{to}</c> місцями й повторити один двічі — порядок слів
+    /// у мовах різний. Загублений чи перейменований плейсхолдер — дефект:
+    /// <see cref="Format"/> лишить <c>{nmae}</c> у тексті як є, і побачить це
+    /// вже користувач. Регістр значущий — так само, як у підстановці.
+    /// </remarks>
+    /// <param name="reference">Текст мовою за замовчуванням.</param>
+    /// <param name="translation">Переклад.</param>
+    public static bool SamePlaceholders(string reference, string translation)
+        => Placeholders(reference).SequenceEqual(Placeholders(translation), StringComparer.Ordinal);
 
     [System.Text.RegularExpressions.GeneratedRegex(@"\{(\w+)\}")]
     private static partial System.Text.RegularExpressions.Regex PlaceholderPattern();
