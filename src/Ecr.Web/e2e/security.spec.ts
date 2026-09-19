@@ -116,6 +116,58 @@ test.describe('Гранти на /admin/security діють на сесію оп
     await gotoDocument(page);
     await expectPasteDenied(page);
   });
+
+  /**
+   * Повертає стендові його базову лінію: `E2EOperator` → `Project/1/Write`.
+   *
+   * ⛔ Без цього хука сценарій лишав стенд ЗЛАМАНИМ для всіх, хто йде після
+   * нього. Крок 5 знижує грант до `Read` і на цьому файл закінчується —
+   * `fullyParallel: false` + `workers: 1` (`playwright.config.ts`) женуть файли
+   * за алфавітом, тож наступний у черзі `zz-walkthrough.spec.ts` відкривав той
+   * самий документ БЕЗ права запису. Наслідок було видно за десять хвилин і в
+   * іншому місці: `DocumentGrid.onPaste` відхиляв вставку цілим пакетом
+   * (`deny.NoGrant`), лишав відкритою модалку «Some cells were not saved», і
+   * `validate.click()` у WALK 2 чекав 579.8 с, доки оверлей перестане
+   * перехоплювати вказівник. Продукт при цьому поводився ПРАВИЛЬНО: документ
+   * справді був лише для читання, і система це чесно пояснила.
+   *
+   * ⚠ Твердження кроку 6 від цього не слабшає: воно відпрацьовує ДО хука. Хук
+   * не «повертає як було на всяк випадок» — він відновлює рівно те, що видає
+   * сам стенд (`tools/e2e-stand.ps1`: `PUT /roles/{E2EOperator}/grants` з
+   * одним записом `Project/1/Write`), і тим самим шляхом через форму, яким
+   * сценарій його й міняв.
+   *
+   * ⚠ Стан АРКУША хук не чіпає навмисно, і це не недогляд. Файл застає аркуш
+   * `Approved` (його залишає `keyboardPath.spec.ts`, див. `makeSheetEditable`)
+   * і лишає `Draft` — тобто не «як узяв», а як його видає стенд. Повертати
+   * `Approved` означало б відтворювати ЧУЖУ незібрану за собою мутацію.
+   */
+  test.afterAll(async ({ browser }, testInfo) => {
+    // ⚠ Той самий гейт, що й у `test.skip` вище: без стенда відновлювати
+    // нічого, а хук `test.skip` не бачить.
+    if (PeriodKey === '' || DocumentId === '') return;
+
+    // ⚠ `browser`, а не `page`: фікстура `page` — рівня прогону, і в
+    // `afterAll` її вже немає. Контекст беремо з `baseURL` проєкту, щоб не
+    // задвоювати адресу з `playwright.config.ts` третьою копією.
+    const baseURL = testInfo.project.use.baseURL;
+    if (baseURL === undefined) {
+      throw new Error('у конфігурації немає baseURL — відновлювати базову лінію нема де');
+    }
+
+    const context = await browser.newContext({ baseURL });
+    const page = await context.newPage();
+
+    try {
+      await signIn(page, Admin.user, Admin.password);
+      await openGrantsFor(page, OperatorRole);
+      await removeAllGrantRows(page);
+      await addGrant(page, { resourceId: 1, level: 'Write' });
+      await saveGrants(page);
+    } finally {
+      await context.close();
+    }
+  });
 });
 
 /** Вхід без миші — той самий шлях, що й у справжнього користувача. */

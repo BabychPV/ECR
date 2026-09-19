@@ -411,6 +411,81 @@ test.describe('WALK: прохід системою від А до Я', () => {
     });
   });
 
+  /**
+   * Повертає аркуш у `Draft` — базову лінію стенда.
+   *
+   * ⛔ Без цього хука ПОВТОРНИЙ прогін на тому самому стенді не повторює
+   * перший, і це не теорія: WALK 5 доводить аркуш до `Approved` і на цьому
+   * файл — останній за алфавітом — закінчується. Наступний повний прогін
+   * починає `keyboardPath.spec.ts`, який на кроці 9 вимагає кнопку `Submit`
+   * («у шапці немає кнопки подання») — а на затвердженому аркуші її немає.
+   * Тобто набір був одноразовим: другий прогін падав би там, де перший
+   * проходив, і причина лежала б за півгодини й за чотири файли назад.
+   *
+   * ⚠ Це не суперечить тому, що файл — ПРИЛАД, а не гейт (шапка файла).
+   * Прибирання за собою — не твердження про продукт: воно нічого не доводить
+   * і нічого не приховує, воно лише не ламає наступного. Тому хук і НЕ
+   * загорнутий у `record()`: його відмова мусить бути видною, бо мовчазна
+   * відмова прибирання — рівно той дефект, який цей хук і лікує.
+   *
+   * ⚠ Повернення в роботу — законна дія з правом `Document.Reopen`
+   * (`ReopenDocumentHandler` → `Draft`, `ФВ-5.20a`), той самий діалог із
+   * причиною, що й у людини, а не запит повз інтерфейс.
+   */
+  test.afterAll(async ({ browser }, testInfo) => {
+    // ⚠ Той самий гейт, що й у `test.skip` вище: без стенда відновлювати
+    // нічого, а `test.skip` на хуки не поширюється.
+    if (PeriodKey === '' || DocumentId === '') return;
+
+    // ⚠ `browser`, а не `page`: фікстура `page` — рівня прогону, і в `afterAll`
+    // її вже немає. `baseURL` беремо з проєкту, щоб адреса стенда не
+    // роздвоїлася з `playwright.config.ts`.
+    const baseURL = testInfo.project.use.baseURL;
+    if (baseURL === undefined) {
+      throw new Error('у конфігурації немає baseURL — відновлювати базову лінію нема де');
+    }
+
+    const context = await browser.newContext({ baseURL });
+    const page = await context.newPage();
+
+    try {
+      await signIn(page, Admin.user, Admin.password);
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      await settle(page);
+
+      // ⚠ Стан читається з бейджа активної вкладки (`DocumentPage.tsx`,
+      // `document.sheetStates`) — сирий рядок стану сервера, не переклад.
+      const activeTab = page.getByRole('tab', { selected: true });
+      await expect(activeTab, 'у документа немає жодного аркуша').toBeVisible({ timeout: 30_000 });
+
+      // ⚠ Ідемпотентно: аркуш уже в `Draft` (наприклад, WALK 5 не дійшов до
+      // затвердження) — повертати нема чого.
+      const state = (await activeTab.textContent()) ?? '';
+      if (!/Submitted|Approved/.test(state)) return;
+
+      const reopen = page.getByRole('button', { name: /Return for edits|Повернути/i }).first();
+      await expect(reopen, 'у шапці немає кнопки повернення в роботу').toBeVisible({
+        timeout: 10_000,
+      });
+      await reopen.click();
+
+      // ⚠ Причина обов'язкова в домені (`ECR-DOC-0422`), і кнопка підтвердження
+      // вимкнена, доки поле порожнє (`ReasonModal.tsx`).
+      const dialog = page.getByRole('dialog');
+      await expect(dialog, 'діалог причини не відкрився').toBeVisible({ timeout: 10_000 });
+      await dialog
+        .getByRole('textbox', { name: /Reason|Причина/i })
+        .fill('e2e: повернення базової лінії стенда');
+      await dialog.getByRole('button', { name: /Return for edits|Повернути/i }).click();
+
+      await expect(activeTab, 'аркуш не повернувся в Draft').toContainText('Draft', {
+        timeout: 15_000,
+      });
+    } finally {
+      await context.close();
+    }
+  });
+
   test('WALK 1 · вхід: форма, хибний пароль, зміна пароля, обидві теми', async ({ page }) => {
     test.setTimeout(180_000);
     const watcher = watch(page);
