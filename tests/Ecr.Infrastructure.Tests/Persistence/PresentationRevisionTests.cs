@@ -72,10 +72,18 @@ public sealed class PresentationRevisionTests(SqlServerFixture sql)
         var doc = await BuildAsync();
         var memory = new MemoryCache(new MemoryCacheOptions());
 
+        // ⚠ Вікно мемоїзації ревізії ВИМКНЕНЕ (`RD-05`, третій аргумент
+        // `CacheLifetimes`). Предмет цього тесту — форма ключа `v{id}:r{rev}`,
+        // а не швидкість, із якою нова ревізія помічається; із вікном у 5 с
+        // тест міряв би таймер замість ключа. Скільки саме триває вікно і що
+        // воно скінченне — перевіряють `MetadataCacheTests`.
+        var lifetimes = new CacheLifetimes(
+            TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30), TimeSpan.Zero);
+
         string before, after;
         await using (var db = CreateContext())
         {
-            before = (await new MetadataCache(memory, db)
+            before = (await new MetadataCache(memory, db, lifetimes)
                 .GetAsync(doc.TemplateVersionId, CancellationToken.None)).CacheKey;
         }
 
@@ -87,7 +95,7 @@ public sealed class PresentationRevisionTests(SqlServerFixture sql)
 
         await using (var db = CreateContext())
         {
-            after = (await new MetadataCache(memory, db)
+            after = (await new MetadataCache(memory, db, lifetimes)
                 .GetAsync(doc.TemplateVersionId, CancellationToken.None)).CacheKey;
         }
 

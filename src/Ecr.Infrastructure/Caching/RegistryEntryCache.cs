@@ -25,6 +25,16 @@ public sealed class RegistryEntryCache(IMemoryCache memory) : IRegistryEntryCach
     /// </remarks>
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(15);
 
+    /// <summary>
+    /// Один політ на ключ (`RD-05`).
+    /// </summary>
+    /// <remarks>
+    /// Кеш — <c>Singleton</c>, тож словник спільний на процес. Довідник на
+    /// 50 000 записів (`RD-06`) читається одним запитом, але великим: N
+    /// одночасних промахів на один ключ означали N таких читань.
+    /// </remarks>
+    private readonly SingleFlight<IReadOnlyList<RegistryEntry>> _flight = new();
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<RegistryEntry>> GetOrAddAsync(
         string key,
@@ -39,16 +49,30 @@ public sealed class RegistryEntryCache(IMemoryCache memory) : IRegistryEntryCach
             return cached;
         }
 
+        return await _flight.RunAsync(key, token => BuildAsync(key, factory, token), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Читає довідник і кладе його в кеш — усередині одного польоту.</summary>
+    private async Task<IReadOnlyList<RegistryEntry>> BuildAsync(
+        string key,
+        Func<CancellationToken, Task<IReadOnlyList<RegistryEntry>>> factory,
+        CancellationToken ct)
+    {
+        if (memory.TryGetValue(key, out IReadOnlyList<RegistryEntry>? ready) && ready is not null)
+        {
+            return ready;
+        }
+
         var built = await factory(ct).ConfigureAwait(false);
 
+        // ⚠ `Size` прибрано разом із коментарем про «кеш обмежується
+        // кількістю»: ліміту в сховища немає і не буде в межах цього кроку
+        // (пояснення — біля `AddMemoryCache` у `DependencyInjection.cs`), а
+        // розмір без ліміту не обмежує нічого. Стелю тут тримає строк.
         memory.Set(key, built, new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = Lifetime,
-
-            // Розмір у записах списку, а не в байтах: кеш обмежується кількістю
-            // (див. налаштування MemoryCache), і довідник на 5 000 записів має
-            // важити стільки ж, скільки 5 000 дрібних, а не стільки ж, скільки один.
-            Size = built.Count + 1,
         });
 
         return built;
