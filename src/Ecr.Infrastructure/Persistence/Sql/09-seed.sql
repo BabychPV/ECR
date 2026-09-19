@@ -401,6 +401,11 @@ USING (VALUES
     -- усі приватної області (лише автентифіковані адмін-екрани).
     (N'err.ECR-SEC-0409',  N'en', N'Role code already in use', 1),
     (N'err.ECR-SEC-0409.roleCodeTaken', N'en', N'A role with code "{code}" already exists.', 1),
+    -- ⛔ `BE-14`: та сама родина, інші причини — роль не видаляється, доки на
+    -- ній щось тримається, а вбудована не видаляється й не перейменовується.
+    (N'err.ECR-SEC-0409.roleInUse', N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.', 1),
+    (N'err.ECR-SEC-0409.roleBuiltIn', N'en', N'Role "{code}" is built in: it cannot be renamed or deleted.', 1),
+    (N'err.ECR-SEC-0404.roleNotFound', N'en', N'Role {roleId} does not exist.', 1),
     (N'err.ECR-PRJ-0409',  N'en', N'Project code already in use', 1),
     (N'err.ECR-PRJ-0409.projectCodeTaken', N'en', N'A project with code "{code}" already exists.', 1),
     (N'err.ECR-REG-0409',  N'en', N'Registry entry code already in use', 1),
@@ -1288,6 +1293,16 @@ USING (VALUES
     (N'security.roleCode',               N'en', N'Code', 1),
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', 1),
     (N'security.roleName',               N'en', N'Name', 1),
+    -- `BE-14`: клонувати / перейменувати / видалити роль.
+    (N'security.cloneRole',              N'en', N'Clone', 1),
+    (N'security.renameRole',             N'en', N'Rename', 1),
+    (N'security.newRoleCode',            N'en', N'New code', 1),
+    (N'security.roleCloned',             N'en', N'The role has been cloned with the same permissions. Grants are not copied.', 1),
+    (N'security.roleRenamed',            N'en', N'The role has been renamed.', 1),
+    (N'security.roleDeleted',            N'en', N'The role has been deleted.', 1),
+    (N'security.deleteRoleConfirm',      N'en', N'Delete role "{code}"? This cannot be undone.', 1),
+    (N'security.roleDeleteRefused',      N'en', N'The role cannot be deleted', 1),
+    (N'security.roleAssignments',        N'en', N'Assignments', 1),
     (N'security.permissions',            N'en', N'Permissions', 1),
     (N'security.permissionsHint',        N'en', N'What the role can do. Which projects it opens is a separate question — see Grants.', 1),
     (N'security.createUser',             N'en', N'New user', 1),

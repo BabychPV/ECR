@@ -98,6 +98,29 @@ public interface IUserStore
     /// <summary>Створює роль із набором прав; повертає її ідентифікатор.</summary>
     public Task<int> AddRoleAsync(Role role, IReadOnlyList<string> permissionCodes, CancellationToken ct);
 
+    /// <summary>Скільки призначень (осіб і груп) і ресурсних грантів тримається на ролі.</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Призначення рахуються ВСІ, включно з простроченими підмінами: рядок
+    /// у <c>sec.RoleAssignment</c> посилається на роль незалежно від дат, і
+    /// видалення впало б на зовнішньому ключі.
+    /// </remarks>
+    public Task<Security.RoleUsage> CountRoleUsageAsync(int roleId, CancellationToken ct);
+
+    /// <summary>Змінює код ролі; збереження — за обробником.</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="code">Новий код.</param>
+    /// <param name="name">Нова назва мовами каталогу; <c>null</c> — лишити чинну.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task RenameRoleAsync(
+        int roleId, string code, IReadOnlyDictionary<string, string>? name, CancellationToken ct);
+
+    /// <summary>Прибирає роль разом із її набором прав; збереження — за обробником.</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task RemoveRoleAsync(int roleId, CancellationToken ct);
+
     /// <summary>Залишає з переліку лише **небезпечні** права (<c>ФВ-6.12</c>).</summary>
     /// <summary>Ресурсні гранти ролі.</summary>
     /// <param name="roleId">Роль.</param>

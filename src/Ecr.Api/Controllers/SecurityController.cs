@@ -14,6 +14,9 @@ public sealed class SecurityController(
     ListRolesHandler listRoles,
     ListPermissionsHandler listPermissions,
     CreateRoleHandler createRole,
+    RenameRoleHandler renameRole,
+    DeleteRoleHandler deleteRole,
+    CloneRoleHandler cloneRole,
     ListUsersHandler listUsers,
     CreateUserHandler createUser,
     StartSimulationHandler startSimulation,
@@ -106,6 +109,57 @@ public sealed class SecurityController(
             .ConfigureAwait(false);
 
         return Created($"/api/v1/roles/{roleId}", new Contracts.RoleIdResponse(roleId));
+    }
+
+    /// <summary>
+    /// Клонує роль: новий код і копія набору прав. Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <remarks>⚠ Гранти й призначення не копіюються — лише права.</remarks>
+    [HttpPost("roles/{id:int}/clone")]
+    [ProducesResponseType<Contracts.RoleIdResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CloneRole(int id, [FromBody] RenameRoleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var roleId = await cloneRole.HandleAsync(id, request.Code, request.NameL10n, ct).ConfigureAwait(false);
+
+        return Created($"/api/v1/roles/{roleId}", new Contracts.RoleIdResponse(roleId));
+    }
+
+    /// <summary>Перейменовує роль. Право <c>Security.ManageRoles</c>.</summary>
+    /// <remarks>
+    /// ⛔ Вбудована роль із сіду і зайнятий код — <c>409 ECR-SEC-0409</c>.
+    /// </remarks>
+    [HttpPut("roles/{id:int}/code")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RenameRole(int id, [FromBody] RenameRoleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await renameRole.HandleAsync(id, request.Code, request.NameL10n, ct).ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>Видаляє роль. Право <c>Security.ManageRoles</c>.</summary>
+    /// <remarks>
+    /// ⛔ Роль із призначеннями чи грантами — <c>409 ECR-SEC-0409</c> з
+    /// кількостями в <c>details</c> (<c>assignments</c>, <c>grants</c>);
+    /// вбудована роль — той самий код з іншим <c>messageKey</c>.
+    /// </remarks>
+    [HttpDelete("roles/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteRole(int id, CancellationToken ct)
+    {
+        await deleteRole.HandleAsync(id, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>
@@ -340,6 +394,11 @@ public sealed class SecurityController(
 /// <param name="PermissionCodes">Права, що входять у роль.</param>
 public sealed record CreateRoleRequest(
     string Code, IReadOnlyDictionary<string, string> NameL10n, IReadOnlyList<string> PermissionCodes);
+
+/// <summary>Новий код ролі — для перейменування і для клона.</summary>
+/// <param name="Code">Код.</param>
+/// <param name="NameL10n">Назва мовами каталогу; без неї перейменування лишає чинну.</param>
+public sealed record RenameRoleRequest(string Code, IReadOnlyDictionary<string, string>? NameL10n = null);
 
 /// <summary>Запит на заміну набору ресурсних грантів ролі.</summary>
 /// <param name="Grants">Новий набір; порожній прибирає доступ ролі повністю.</param>
