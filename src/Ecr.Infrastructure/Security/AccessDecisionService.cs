@@ -4,6 +4,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -270,9 +271,7 @@ public sealed class AccessDecisionService(
 
         var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
 
-        var rows = await db.TableRows
-            .AsNoTracking()
-            .Where(r => r.TableInstanceId == tableInstanceId && !r.IsDeleted)
+        var rows = await SliceRowsQuery(db, tableInstanceId, slice.PeriodKey)
             .Select(r => new { r.Id, r.RowKey })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -295,6 +294,41 @@ public sealed class AccessDecisionService(
         }
 
         return result;
+    }
+
+    /// <summary>Рядки зрізу — запит, який іде і в бойовий шлях, і в сторожа <c>WR-05</c>.</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період екземпляра — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⛔ <paramref name="periodKey"/> тут не «на всяк випадок». Кластерний ключ
+    /// <c>doc.TableRow</c> — <c>(PeriodKey, Id)</c>, унікальний індекс —
+    /// <c>(PeriodKey, TableInstanceId, RowKey)</c>, і обидва вирівняні по
+    /// <c>ps_ByPeriodKey</c>. Фільтр самим лише <c>TableInstanceId</c> не дає
+    /// засічки партиції: СУБД читає ВСІ партиції, щоб знайти рядки одного
+    /// екземпляра. Цей самий клас дефекту вже ловили в
+    /// <c>RowStore.TouchRowsAsync</c> — 34 308 логічних читань проти 60.
+    ///
+    /// ⚠ Запит винесений у <b>public static</b> навмисно, і це не витік
+    /// внутрішньої будови: сторож <c>WR-05</c>
+    /// (<c>Ecr.Architecture.Tests/PartitionKeyQueryTests</c>) бере
+    /// <c>ToQueryString()</c> саме з цього методу. Сторож по ТЕКСТУ джерела в
+    /// цьому репозиторії вже двічі коштував червоного гейта (червонів на
+    /// власному коментарі й на переносі рядка), тому перевіряється згенерований
+    /// SQL — а щоб перевірявся саме бойовий запит, а не його копія в тесті,
+    /// бойовий шлях мусить ходити сюди ж.
+    /// </remarks>
+    public static IQueryable<TableRow> SliceRowsQuery(
+        EcrDbContext db, long tableInstanceId, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value
+                        && r.TableInstanceId == tableInstanceId
+                        && !r.IsDeleted);
     }
 
     /// <inheritdoc />
@@ -454,6 +488,11 @@ public sealed class AccessDecisionService(
     /// </remarks>
     private async Task<SliceContext> SliceContextAsync(long tableInstanceId, CancellationToken ct)
     {
+        // ⚠ `WR-05`, названо й НЕ зроблено — той самий випадок, що
+        // `RowStore.ResolveTableInstanceAsync`: саме цей запит і ВИЗНАЧАЄ
+        // період, тож узяти ключ партиції нізвідки. Дати його може лише
+        // викликач, а це зміна сигнатури `IAccessDecisionService` — обсяг
+        // `WR-03`/`RD-02`, де порт і так переробляється.
         var instance = await db.TableInstances
             .AsNoTracking()
             .Where(t => t.Id == tableInstanceId)
@@ -587,18 +626,7 @@ public sealed class AccessDecisionService(
 
         // ⛔ ОДИН запит на весь зріз: посилання рядків на записи довідника
         // разом із вікнами чинності цих записів.
-        var references = await (
-                from cell in db.CellValues.AsNoTracking()
-                join row in db.TableRows.AsNoTracking()
-                    on new { cell.PeriodKeyValue, Id = cell.TableRowId }
-                    equals new { row.PeriodKeyValue, row.Id }
-                join entry in db.RegistryEntries.AsNoTracking()
-                    on cell.ValueRegistryEntryId!.Value equals entry.Id
-                where row.TableInstanceId == tableInstanceId
-                      && cell.PeriodKeyValue == periodKey.Value
-                      && cell.ValueRegistryEntryId != null
-                      && sourceColumns.Contains(cell.ColumnDefId)
-                select new { cell.TableRowId, cell.ColumnDefId, entry.ValidFrom, entry.ValidTo })
+        var references = await SourceWindowQuery(db, tableInstanceId, periodKey, sourceColumns)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -611,6 +639,48 @@ public sealed class AccessDecisionService(
                     r => new SourceValidity(r.ValidFrom, r.ValidTo)));
 
         return new PeriodRuleContext(rules, currentSequence, windows);
+    }
+
+    /// <summary>
+    /// Посилання рядків зрізу на записи довідника разом із вікнами чинності.
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період екземпляра — він же ключ партиції.</param>
+    /// <param name="sourceColumns">Колонки, на які дивляться правила <c>SourceWindow</c>.</param>
+    /// <returns>Незавершений запит.</returns>
+    /// <remarks>
+    /// ⛔ <c>PeriodKey</c> стоїть на ОБОХ партиціонованих таблицях, а не лише на
+    /// <c>doc.CellValue</c>. Рівність по ключу партиції в умові з'єднання
+    /// (<c>cell.PeriodKey = row.PeriodKey</c>) оптимізатор здебільшого
+    /// розкриває транзитивно, але «здебільшого» — не критерій для гарячого
+    /// шляху: досить одного плану, де він цього не зробив, і
+    /// <c>doc.TableRow</c> читається всіма партиціями. Явний предикат коштує
+    /// нуль і знімає питання.
+    ///
+    /// ⚠ <b>public static</b> — з тієї ж причини, що й
+    /// <see cref="SliceRowsQuery"/>: сторож <c>WR-05</c> перевіряє
+    /// <c>ToQueryString()</c> саме бойового запиту.
+    /// </remarks>
+    public static IQueryable<SourceWindowRow> SourceWindowQuery(
+        EcrDbContext db, long tableInstanceId, PeriodKey periodKey, IReadOnlyCollection<int> sourceColumns)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(sourceColumns);
+
+        return from cell in db.CellValues.AsNoTracking()
+               join row in db.TableRows.AsNoTracking()
+                   on new { cell.PeriodKeyValue, Id = cell.TableRowId }
+                   equals new { row.PeriodKeyValue, row.Id }
+               join entry in db.RegistryEntries.AsNoTracking()
+                   on cell.ValueRegistryEntryId!.Value equals entry.Id
+               where row.TableInstanceId == tableInstanceId
+                     && cell.PeriodKeyValue == periodKey.Value
+                     && row.PeriodKeyValue == periodKey.Value
+                     && cell.ValueRegistryEntryId != null
+                     && sourceColumns.Contains(cell.ColumnDefId)
+               select new SourceWindowRow(
+                   cell.TableRowId, cell.ColumnDefId, entry.ValidFrom, entry.ValidTo);
     }
 
     /// <inheritdoc />
@@ -906,3 +976,16 @@ public sealed class AccessDecisionService(
         return await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 }
+
+/// <summary>Посилання однієї комірки на запис довідника разом із вікном чинності.</summary>
+/// <param name="TableRowId">Рядок, який обрав запис.</param>
+/// <param name="ColumnDefId">Колонка, у якій стоїть посилання.</param>
+/// <param name="ValidFrom">Початок чинності запису; <c>null</c> — необмежений.</param>
+/// <param name="ValidTo">Кінець чинності запису; <c>null</c> — необмежений.</param>
+/// <remarks>
+/// ⚠ Іменований тип замість анонімного потрібен рівно тому, що запит став
+/// <c>public static</c> (див. <see cref="AccessDecisionService.SourceWindowQuery"/>):
+/// анонімний тип не можна повернути з <c>IQueryable&lt;T&gt;</c>.
+/// </remarks>
+public sealed record SourceWindowRow(
+    long TableRowId, int ColumnDefId, DateOnly? ValidFrom, DateOnly? ValidTo);
