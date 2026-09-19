@@ -5,6 +5,7 @@ import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -102,7 +103,13 @@ export function ConsistencyIssuesPage(): JSX.Element {
               <Table.Tbody>
                 {page.items.map((issue) => (
                   <Table.Tr key={issue.id}>
-                    <Table.Td>{issue.detectedAt}</Table.Td>
+                    {/* ⚠ Момент знахідки — з годиною, і саме він відповідає на
+                        «якого прогону це рядок»: нічна перевірка ходить раз на
+                        добу, але ручний перезапуск дає кілька за день. Точне
+                        значення лишається в `dateTime`/`title`. */}
+                    <Table.Td>
+                      <Timestamp value={issue.detectedAt} />
+                    </Table.Td>
                     <Table.Td>
                       <Badge size="sm" variant="light" color={severityColor(issue.severity)}>
                         {severityLabel(issue.severity)}

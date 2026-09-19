@@ -17,6 +17,7 @@ import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModa
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -240,7 +241,11 @@ export function SnapshotsPage(): JSX.Element {
               {all.map((snapshot) => (
                 <Table.Tr key={snapshot.id}>
                   <Table.Td>
-                    {snapshot.builtAt}
+                    {/* ⚠ Момент побудови — з годиною: два зрізи одного дня
+                        розрізняються саме нею. Точне значення лишається в
+                        `dateTime`/`title` (`Timestamp`), бо зріз незмінний і
+                        момент його побудови — частина доказу, а не підпис. */}
+                    <Timestamp value={snapshot.builtAt} />
                     {snapshot.isCurrent && (
                       <Badge ml="xs" size="xs" variant="light">
                         {t('snapshots.current')}
