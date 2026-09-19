@@ -128,6 +128,27 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ApprovalEventRecord>> GetHistoryAsync(
+        long documentId, PeriodKey periodKey, int limit, CancellationToken ct)
+    {
+        // ⚠ Користувач приєднується ЛІВИМ з'єднанням: `ByUserId = null` — це
+        // системний перехід, і внутрішнє з'єднання мовчки викинуло б його з журналу.
+        // `Id` — другий ключ порядку: кілька дій можуть мати той самий `At`.
+        var query =
+            from e in db.ApprovalEvents.AsNoTracking()
+            join sheet in db.SheetDefs.AsNoTracking() on e.SheetDefId equals sheet.Id
+            join u in db.Users.AsNoTracking() on e.ByUserId equals (int?)u.Id into users
+            from user in users.DefaultIfEmpty()
+            where e.DocumentId == documentId && e.PeriodKey == periodKey.Value
+            orderby e.At descending, e.Id descending
+            select new ApprovalEventRecord(
+                sheet.Code, e.FromStatus, e.ToStatus, e.Action, e.ByUserId,
+                user == null ? null : user.DisplayName, e.At, e.Reason, e.StepOrdinal);
+
+        return await query.Take(limit).ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => await db.ApprovalStates

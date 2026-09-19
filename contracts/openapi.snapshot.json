@@ -8898,6 +8898,62 @@
           "versionId"
         ],
         "type": "object"
+      },
+      "WorkflowEventDto": {
+        "description": "Подія журналу переходів стану аркуша (`BE-11b`).",
+        "properties": {
+          "action": {
+            "description": "Дія (`ApprovalAction`).",
+            "type": "string"
+          },
+          "at": {
+            "description": "Момент дії, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "byDisplayName": {
+            "description": "Відображуване ім'я виконавця; `system` — системний перехід.",
+            "type": "string"
+          },
+          "fromState": {
+            "description": "Стан до дії (`DocumentStatus`).",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Причина відхилення або повернення в роботу.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "stepOrdinal": {
+            "description": "Крок маршруту, якщо маршрут є.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "toState": {
+            "description": "Стан після дії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheetCode",
+          "fromState",
+          "toState",
+          "action",
+          "byDisplayName",
+          "at",
+          "reason",
+          "stepOrdinal"
+        ],
+        "type": "object"
       }
     }
   },
@@ -10764,6 +10820,87 @@
         "summary": "Останній результат перевірки. Право `Document.View`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/workflow/history": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkflowEventDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkflowEventDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkflowEventDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Хто й коли подав, погодив, відхилив або повернув аркуші документа за\nперіод; найновіші перші, не більше 200 подій. Право `Document.View`.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },
@@ -20408,6 +20545,9 @@
     },
     {
       "name": "Documents"
+    },
+    {
+      "name": "DocumentWorkflowHistory"
     },
     {
       "name": "EntityFieldMaps"
