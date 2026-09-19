@@ -1,5 +1,6 @@
 ﻿// src/Ecr.Application/Ports/ICalculationModule.cs
 
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
@@ -20,9 +21,85 @@ public interface ICalculationModule
     /// <summary>Чи здатний модуль обробити цю методологію.</summary>
     public bool CanHandle(MethodologyDescriptor methodology);
 
-    /// <summary>Виконує розрахунок. Не пише в БД — повертає результат.</summary>
+    /// <summary>
+    /// Читає все, що НЕ залежить від рядка: склад версії методології і
+    /// календарний контекст періоду (`CAL-06`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий крок, а не ліниве поле всередині модуля. Склад версії
+    /// (формули, речовини, виходи) і межі періоду однакові для всієї
+    /// прив'язки «методологія × період», а <see cref="ExecuteAsync(
+    /// CalculationBindingContext, CalculationInput, CancellationToken)"/>
+    /// викликають на КОЖЕН рядок таблиці. Доти три читання сховища й один
+    /// похід по межі періоду робилися 4 × N разів на прив'язку: на 300 рядках
+    /// це 1200 запитів по відповідь, яка не змінюється.
+    ///
+    /// ⚠ Кеш усередині модуля цього не замінив би: модуль резолвиться зі
+    /// scope гілки пакета (<c>Q-249</c>), тобто живе рівно стільки, скільки
+    /// гілка, і мусив би сам розрізняти, для якої прив'язки його кеш чинний.
+    /// Явний контекст робить цю межу видимою — і перевірюваною.
+    /// </remarks>
+    /// <param name="methodology">Версія методології, яку виконують.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період — він задає календарний контекст.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Контекст прив'язки, придатний для всіх її рядків.</returns>
+    public Task<CalculationBindingContext> PrepareAsync(
+        MethodologyDescriptor methodology, long documentId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Виконує розрахунок одного рядка в уже готовому контексті прив'язки.
+    /// Не пише в БД — повертає результат.
+    /// </summary>
+    /// <param name="binding">Контекст із <see cref="PrepareAsync"/>.</param>
+    /// <param name="input">Рядок документа з аргументами.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<CalculationOutput> ExecuteAsync(
+        CalculationBindingContext binding, CalculationInput input, CancellationToken ct);
+
+    /// <summary>
+    /// Виконує розрахунок одного рядка, готуючи контекст тут-таки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Форма для ОДИНОЧНОГО виклику — публікація золотого набору,
+    /// симуляція в конфігураторі — де рядок один і ділити контекст нема з
+    /// ким. У прогоні (<c>CalculationOrchestrator</c>) її використання було б
+    /// поверненням до 4 × N читань, від яких `CAL-06` і позбувся.
+    /// </remarks>
+    /// <param name="input">Рядок документа з аргументами.</param>
+    /// <param name="ct">Токен скасування.</param>
     public Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct);
 }
+
+/// <summary>
+/// Усе, що модуль читає РАЗ НА ПРИВ'ЯЗКУ «методологія × період» (`CAL-06`).
+/// </summary>
+/// <remarks>
+/// ⛔ Контекст несе власні <see cref="Methodology"/>, <see cref="DocumentId"/>
+/// і <see cref="PeriodKey"/> не для зручності, а щоб виконання могло
+/// ПЕРЕВІРИТИ, що рядок і контекст — з однієї прив'язки. Підставити чужий
+/// контекст означало б порахувати рядок формулами іншої версії або поділити
+/// на дні іншого періоду: число лишилося б правдоподібним, а помилки не було
+/// б ніде.
+/// </remarks>
+/// <param name="Methodology">Версія методології, склад якої прочитано.</param>
+/// <param name="DocumentId">Документ прив'язки.</param>
+/// <param name="PeriodKey">Період прив'язки.</param>
+/// <param name="Formulas">
+/// Формули версії <b>вже в порядку обчислення</b> (<c>EvaluationOrder</c> з
+/// <c>Publish</c>, ФВ-9.4) — сортувати їх повторно на рядку заборонено.
+/// </param>
+/// <param name="Substances">Речовини версії; порожньо — один прогін без речовини.</param>
+/// <param name="Outputs">Оголошені виходи версії.</param>
+/// <param name="Period">Календарний контекст періоду за режимом версії (ФВ-16.11).</param>
+public sealed record CalculationBindingContext(
+    MethodologyDescriptor Methodology,
+    long DocumentId,
+    PeriodKey PeriodKey,
+    IReadOnlyList<MethodologyFormula> Formulas,
+    IReadOnlyList<MethodologySubstance> Substances,
+    IReadOnlyList<MethodologyOutput> Outputs,
+    Ecr.Expressions.PeriodContext Period);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.

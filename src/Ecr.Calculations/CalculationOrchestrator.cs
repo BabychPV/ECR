@@ -192,11 +192,27 @@ public sealed class CalculationOrchestrator(
         var stopwatch = Stopwatch.StartNew();
         var outputs = new List<CalculationOutput>(inputs.Count);
 
-        foreach (var input in inputs)
+        // 5. ⛔ Склад версії методології і межі періоду читаються РАЗ НА
+        //    ПРИВ'ЯЗКУ (`CAL-06`), а не на рядок. Доти кожен виклик
+        //    `ExecuteAsync` сам ходив по формули, речовини й виходи версії та
+        //    по межі періоду — тобто на 300 рядків таблиці припадало 1200
+        //    запитів по відповідь, яка в межах прив'язки не змінюється за
+        //    побудовою (версія опублікована, період — той самий).
+        //
+        //    ⚠ Лише коли є що рахувати: порожній набір рядків не має коштувати
+        //    жодного походу в базу — рівно так поводився й цикл до зміни.
+        if (inputs.Count > 0)
         {
-            // 5. Проміжні значення живуть у пам'яті воркера: модуль нічого не
-            //    пише і не читає з бази між рядками.
-            outputs.Add(await module.ExecuteAsync(input, ct).ConfigureAwait(false));
+            var prepared = await module
+                .PrepareAsync(binding.Descriptor, documentId, periodKey, ct)
+                .ConfigureAwait(false);
+
+            foreach (var input in inputs)
+            {
+                // 6. Проміжні значення живуть у пам'яті воркера: модуль нічого
+                //    не пише і не читає з бази між рядками.
+                outputs.Add(await module.ExecuteAsync(prepared, input, ct).ConfigureAwait(false));
+            }
         }
 
         stopwatch.Stop();

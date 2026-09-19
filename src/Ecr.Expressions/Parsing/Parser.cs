@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
@@ -65,7 +67,49 @@ public sealed class Parser
     /// </remarks>
     public const int MaxRecursionDepth = 192;
 
+    /// <summary>
+    /// Скільки різних виразів парсер тримає розібраними, перш ніж скинути кеш.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Стеля, а не витіснення за давністю (`CAL-05`). Корпус — 44 методології
+    /// і шаблони; різних ТЕКСТІВ виразів там на порядок менше за цю межу, тож
+    /// переповнення означає не «кеш замалий», а щось несподіване — наприклад,
+    /// вирази, що склеюються з даних. У такому разі найдешевша правильна
+    /// відповідь — почати з чистого аркуша: LRU коштував би блокування або
+    /// другої структури на кожному влучанні, тобто плати за випадок, якого в
+    /// корпусі немає.
+    /// </remarks>
+    public const int MaxCachedExpressions = 10_000;
+
     private static readonly FunctionRegistry Functions = new();
+
+    /// <summary>
+    /// Розібрані вирази: <c>(текст, діалект, режим) → результат</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ключ складений із ТРЬОХ частин, і жодна з них не зайва. Діалект:
+    /// <c>"2 ^ 3"</c> у шаблоні — степінь, у методології — відмова
+    /// <c>ECR-CALC-0431</c> (там <c>^</c> це XOR); спільний запис означав би,
+    /// що формула методології порахувалася за правилами шаблонів. Режим:
+    /// <c>Import</c> приймає голе ім'я параметра, <c>Editor</c> — ні
+    /// (директива №05 §4, пункт 5), тож той самий текст там або дерево, або
+    /// діагностика.
+    ///
+    /// ⛔ Кешувати можна ЛИШЕ тому, що <see cref="ParseResult"/> і дерево
+    /// незмінні: вузли — <c>record</c> з <c>init</c>-властивостями, а обидві
+    /// колекції (<c>Diagnostics</c> і <c>FunctionNode.Arguments</c>) тепер
+    /// заморожені в <see cref="Frozen{T}"/>. Доти за інтерфейсом
+    /// <c>IReadOnlyList</c> стояв живий <c>List</c>, і один <c>(List&lt;…&gt;)</c>
+    /// у будь-якому споживачі зіпсував би вираз усім наступним викликачам.
+    ///
+    /// ⚠ Поле екземпляра, а не статичне: у DI <see cref="Parser"/> —
+    /// <c>Singleton</c> (<c>Infrastructure/DependencyInjection.cs:154</c>), тож
+    /// на застосунок він однаково один, зате тести не успадковують чужий кеш.
+    /// </remarks>
+    private readonly ConcurrentDictionary<CacheKey, ParseResult> _cache = new();
+
+    /// <summary>Скільки виразів зараз лежить у кеші — для перевірки стелі.</summary>
+    public int CachedExpressionCount => _cache.Count;
 
     /// <summary>Один параметр підстановки для ключа каталогу (`Q-303`).</summary>
     private static Dictionary<string, string> Param(string name, string value)
@@ -96,6 +140,18 @@ public sealed class Parser
     /// Результат із AST або з діагностиками. Помилка синтаксису — **результат**,
     /// а не виняток: конфігуратор має показати проблему, а не впасти.
     /// </returns>
+    /// <remarks>
+    /// ⚠ Однаковий виклик повертає ТОЙ САМИЙ екземпляр (`CAL-05`). Розбір
+    /// ішов на кожну формулу кожного прогону —
+    /// <c>GenericCalculationModule</c> робив його двічі (обчислення і збір
+    /// констант), <c>RecalculationService</c> — на кожну формулу, — при тому
+    /// що текст формули в межах опублікованої версії не змінюється за
+    /// побудовою.
+    ///
+    /// ⛔ Спільний екземпляр безпечний рівно тому, що дерево незмінне; див.
+    /// <see cref="_cache"/>. Поява бодай одного <c>set</c> у вузлі AST робить
+    /// цей кеш неправильним, а не лише «трохи ризикованим».
+    /// </remarks>
     public ParseResult Parse(
         string expression,
         ExpressionDialect dialect,
@@ -103,6 +159,30 @@ public sealed class Parser
     {
         ArgumentNullException.ThrowIfNull(expression);
 
+        var key = new CacheKey(expression, dialect, mode);
+        if (_cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        if (_cache.Count >= MaxCachedExpressions)
+        {
+            _cache.Clear();
+        }
+
+        // ⚠ `GetOrAdd`, а не індексатор: за гонки два потоки можуть розібрати
+        // той самий текст двічі, але назовні обидва мусять отримати ОДИН
+        // екземпляр — інакше обіцянка «той самий вираз — той самий об'єкт»
+        // була б правдою лише в один потік.
+        return _cache.GetOrAdd(key, static k => ParseUncached(k.Text, k.Dialect, k.Mode));
+    }
+
+    /// <summary>Власне розбір — без кешу.</summary>
+    private static ParseResult ParseUncached(
+        string expression,
+        ExpressionDialect dialect,
+        ExpressionParseMode mode)
+    {
         var diagnostics = new List<ExpressionDiagnostic>();
         var syntax = DialectSyntax.Of(dialect, mode);
 
@@ -115,7 +195,7 @@ public sealed class Parser
         {
             diagnostics.Add(new ExpressionDiagnostic(
                 ExpressionErrors.Syntax, ex.Message, ex.Position, 1, ex.MessageKey, ex.MessageParams));
-            return new ParseResult(false, null, diagnostics);
+            return new ParseResult(false, null, Frozen(diagnostics));
         }
 
         var state = new State(tokens, dialect, syntax, diagnostics);
@@ -135,12 +215,28 @@ public sealed class Parser
         }
         catch (ParseAbort)
         {
-            return new ParseResult(false, null, diagnostics);
+            return new ParseResult(false, null, Frozen(diagnostics));
         }
 
         var parsed = new ParsedExpression(expression, dialect, root, InferShape(root, dialect));
-        return new ParseResult(diagnostics.Count == 0, parsed, diagnostics);
+        return new ParseResult(diagnostics.Count == 0, parsed, Frozen(diagnostics));
     }
+
+    /// <summary>Копія, яку не можна змінити навіть приведенням типу.</summary>
+    /// <remarks>
+    /// ⛔ Саме КОПІЯ в <c>ReadOnlyCollection</c>, а не <c>List.AsReadOnly()</c>
+    /// над живим списком і не сам список під інтерфейсом
+    /// <c>IReadOnlyList</c>. Результат розбору тепер спільний для всіх
+    /// викликачів (`CAL-05`): якби за інтерфейсом лишався <c>List</c>, один
+    /// <c>((List&lt;…&gt;)result.Diagnostics).Add(…)</c> дописував би
+    /// діагностику всім наступним — і побачити це було б ніяк, бо відбувається
+    /// воно в іншому прогоні.
+    /// </remarks>
+    private static ReadOnlyCollection<T> Frozen<T>(List<T> items)
+        => new([.. items]);
+
+    /// <summary>Ключ кеша розбору: текст, діалект і режим разом.</summary>
+    private readonly record struct CacheKey(string Text, ExpressionDialect Dialect, ExpressionParseMode Mode);
 
     // ——— рівні пріоритету, від найслабшого до найсильнішого (02b §2) ———
 
@@ -594,7 +690,11 @@ public sealed class Parser
             ReportArgCountMismatch(s, name, signature, args.Count, token);
         }
 
-        return new FunctionNode(name, args) { Position = token.Position };
+        // ⛔ Заморожений список аргументів: вузол потрапляє в кеш розбору
+        // (`CAL-05`) і звідти — до всіх наступних прогонів. `List` під
+        // `IReadOnlyList` означав би, що будь-який споживач може дописати
+        // аргумент у ЧУЖИЙ вираз.
+        return new FunctionNode(name, Frozen(args)) { Position = token.Position };
     }
 
     /// <summary>

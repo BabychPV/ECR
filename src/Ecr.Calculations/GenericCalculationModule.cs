@@ -1,6 +1,7 @@
 ﻿using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Parsing;
 
@@ -44,20 +45,17 @@ public sealed class GenericCalculationModule(
     }
 
     /// <inheritdoc />
-    public async Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct)
+    public async Task<CalculationBindingContext> PrepareAsync(
+        MethodologyDescriptor methodology, long documentId, PeriodKey periodKey, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(input);
-
-        var version = input.Methodology;
-        var numeric = new NumericPolicy(version.NumericMode);
-        var trace = new TraceRecorder(version.TraceLevel);
+        ArgumentNullException.ThrowIfNull(methodology);
 
         var formulas = await methodologies
-            .GetFormulasAsync(version.MethodologyVersionId, ct).ConfigureAwait(false);
+            .GetFormulasAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
         var substances = await methodologies
-            .GetSubstancesAsync(version.MethodologyVersionId, ct).ConfigureAwait(false);
+            .GetSubstancesAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
         var outputs = await methodologies
-            .GetOutputsAsync(version.MethodologyVersionId, ct).ConfigureAwait(false);
+            .GetOutputsAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
 
         // ⚠ Порядок беремо з EvaluationOrder — він топологічний із Publish
         // (ФВ-9.4). Сортувати граф тут заборонено: порядок мусить бути тим
@@ -65,7 +63,57 @@ public sealed class GenericCalculationModule(
         // сьогодні.
         var ordered = formulas.OrderBy(f => f.EvaluationOrder).ThenBy(f => f.Id).ToList();
 
-        var period = await PeriodAsync(version, input, ct).ConfigureAwait(false);
+        var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
+
+        return new CalculationBindingContext(
+            methodology, documentId, periodKey, ordered, substances, outputs, period);
+    }
+
+    /// <inheritdoc />
+    public async Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var context = await PrepareAsync(input.Methodology, input.DocumentId, input.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        return await ExecuteAsync(context, input, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CalculationOutput> ExecuteAsync(
+        CalculationBindingContext binding, CalculationInput input, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(input);
+
+        // ⛔ Контекст і рядок мусять бути з ОДНІЄЇ прив'язки. Без цієї
+        // перевірки помилка викликача (контекст, підготовлений для іншої
+        // версії, іншого документа чи іншого періоду) не проявилася б ніяк:
+        // рядок порахувався б чужими формулами або поділився б на дні чужого
+        // періоду, і число лишилося б правдоподібним. Саме такий клас дефекту
+        // `D-112` вже коштував утричі завищених `г/с`.
+        if (binding.Methodology.MethodologyVersionId != input.Methodology.MethodologyVersionId
+            || binding.DocumentId != input.DocumentId
+            || binding.PeriodKey != input.PeriodKey)
+        {
+            throw new ArgumentException(
+                $"Контекст прив'язки (версія {binding.Methodology.MethodologyVersionId}, документ "
+                + $"{binding.DocumentId}, період {binding.PeriodKey.Value}) не відповідає рядку "
+                + $"(версія {input.Methodology.MethodologyVersionId}, документ {input.DocumentId}, "
+                + $"період {input.PeriodKey.Value}).",
+                nameof(binding));
+        }
+
+        var version = input.Methodology;
+        var numeric = new NumericPolicy(version.NumericMode);
+        var trace = new TraceRecorder(version.TraceLevel);
+
+        var ordered = binding.Formulas;
+        var substances = binding.Substances;
+        var outputs = binding.Outputs;
+        var period = binding.Period;
+
         var arguments = input.Arguments.ToDictionary(
             a => a.ArgumentCode, ToValue, StringComparer.OrdinalIgnoreCase);
 
@@ -365,23 +413,23 @@ public sealed class GenericCalculationModule(
     /// число залишається правдоподібним (ФВ-16.11a, D-112).
     /// </remarks>
     private async Task<Expressions.PeriodContext> PeriodAsync(
-        MethodologyDescriptor version, CalculationInput input, CancellationToken ct)
+        MethodologyDescriptor version, long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var bounds = await periods
-            .FindPeriodBoundsAsync(input.DocumentId, input.PeriodKey.Value, ct)
+            .FindPeriodBoundsAsync(documentId, periodKey.Value, ct)
             .ConfigureAwait(false)
             ?? throw new Domain.Abstractions.DomainException(
                 "ECR-PRD-0404",
-                $"Періоду {input.PeriodKey.Value} для документа {input.DocumentId} не існує: "
+                $"Періоду {periodKey.Value} для документа {documentId} не існує: "
                 + "тривалість обчислити нема з чого.");
 
         // Sequence — порядковий номер періоду в році, і саме він, а не місяць:
         // у квартальному проєкті їх чотири (R-A6, D-108).
-        var sequence = (byte)(input.PeriodKey.Value % 100);
+        var sequence = (byte)(periodKey.Value % 100);
 
         return calendar.Build(
             bounds.PeriodStart, bounds.PeriodEnd, version.CalendarMode,
-            input.PeriodKey.Value / 100, sequence);
+            periodKey.Value / 100, sequence);
     }
 
     /// <summary>Аргумент розрахунку як значення виразу.</summary>
