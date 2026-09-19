@@ -1,5 +1,6 @@
-import { useMutation, type UseMutationResult } from '@tanstack/react-query';
-import { apiEnqueue, type AcceptedJob } from '@/api/client';
+import { useMutation, useQuery, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
+import { apiEnqueue, apiFetch, type AcceptedJob } from '@/api/client';
+import type { JobSummary } from '@/api/types';
 import { showApiError } from '@/shared/ui/notify';
 
 /*
@@ -9,6 +10,46 @@ import { showApiError } from '@/shared/ui/notify';
  * `/api/v1/…` разом із методом поруч, і винесений префікс зробив би дію
  * «недосяжною з інтерфейсу».
  */
+
+/** Як часто опитувати перелік, доки в ньому є незавершена задача. */
+const ListPollMs = 3000;
+
+/**
+ * Адреса переліку задач.
+ *
+ * ⛔ `mine=true` — НЕ косметичний фільтр, а межа доступу: власні задачі видно
+ * без права `System.ViewHealth`, чужі — ні (`Q-156`, `BE-08`). Тому запит без
+ * нього тому, хто права не має, дає `403`, а не порожній перелік: «задач
+ * немає» і «вам їх не показують» — різні відповіді.
+ *
+ * ⛔ Ідентифікатор власника в адресі НЕ передається і передаватися не може:
+ * сервер бере його з сеансу. Параметр «чиї задачі» перетворив би звільнення
+ * від права на спосіб читати чужу чергу.
+ */
+export function recentJobsUrl(mine: boolean): string {
+  return mine ? '/api/v1/jobs?mine=true' : '/api/v1/jobs';
+}
+
+/**
+ * Перелік останніх задач — своїх або всіх.
+ *
+ * ⚠ Опитування зупиняється, щойно в переліку не лишилося `Queued`/`Running`:
+ * нескінченне опитування завершених задач — це запит на три секунди від кожної
+ * відкритої вкладки.
+ */
+export function useRecentJobs(mine: boolean): UseQueryResult<JobSummary[]> {
+  return useQuery({
+    // ⚠ `mine` входить у ключ: інакше перемикання прапорця показувало б
+    // кешовану відповідь на ІНШЕ питання — свої задачі під виглядом усіх.
+    queryKey: ['jobs', mine],
+    queryFn: () => apiFetch<JobSummary[]>(recentJobsUrl(mine)),
+    refetchInterval: (query) => {
+      const list = query.state.data ?? [];
+
+      return list.some((j) => j.state === 'Queued' || j.state === 'Running') ? ListPollMs : false;
+    },
+  });
+}
 
 /**
  * Просить сервер зупинити фонову задачу.
