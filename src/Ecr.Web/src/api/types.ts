@@ -83,19 +83,24 @@ export type PatchCellsResponse = Schemas['PatchCellsResponse'];
  * ⚠ Приходить у `extensions2.conflicts` при `ECR-CELL-0409`. «Перезаписати
  * мовчки» не є опцією: користувач має побачити, чия правка і яка саме.
  *
- * ⛔ У згенерованій схемі цього типу немає: він живе не в тілі відповіді, а в
- * розширеннях `ProblemDetails`, і OpenAPI описує їх як довільний об'єкт. Тому
- * тут — єдине ручне оголошення у файлі, і воно позначене явно.
+ * ⛔ **Тут стояло рукописне оголошення** з приміткою «у згенерованій схемі
+ * цього типу немає». Примітка була неправдою: тип є і в
+ * `contracts/openapi.snapshot.json`, і в `schema.d.ts` — його тягне в документ
+ * `ImportPreview.conflicts`, звичайне тіло відповіді. Рукописна копія тим
+ * часом жила власним життям: сервер уже зробив `theirUser`/`theirChangedAt`
+ * необов'язковими (`BE-06`), а копія обіцяла `string`, тобто компілятор
+ * дозволяв би читати їх без перевірки на `null`. Псевдонім згенерованого типу
+ * такої розбіжності не має за побудовою.
  */
-export interface CellConflictDto {
-  rowKey: string;
-  columnCode: string;
-  yourValue: unknown;
-  theirValue: unknown;
-  theirUser: string;
-  theirChangedAt: string;
-  currentVersion: string;
-}
+export type CellConflictDto = Schemas['CellConflictDto'];
+
+/**
+ * Скільки розбіжних комірок НЕ вмістилося в `conflicts` (`BE-06`).
+ *
+ * ⚠ Сервер обрізає перелік на сотні й кладе решту лічильником у
+ * `extensions2.moreConflicts` — РЯДКОМ, як і решту чисел у розширеннях.
+ */
+export const MoreConflictsExtension = 'moreConflicts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Решта DTO екранів. Усі — псевдоніми згенерованих типів.
