@@ -675,8 +675,12 @@ public sealed class PatchCellsTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+
+            // ⚠ `BE-05`: третій аргумент — `createdByUserId`. Без `Arg.Any<int?>()`
+            // збіг вимагав би саме `null`, тобто перевірка мовчки перестала б
+            // бачити виклик, щойно обробник почав називати автора правки.
             _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>());
+                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
@@ -884,10 +888,10 @@ public sealed class PatchCellsTests
         // давав нулі, і задача не робила нічого — а цей тест був зелений, бо
         // питав лише «чи поставили в чергу» (`A7-63`).
         await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         // ⛔ І тіло несе ЗМІНЕНІ КОМІРКИ — насіння каскаду. Без них
         // перерахунок був би повним на кожну правку, і граф залежностей
@@ -908,7 +912,7 @@ public sealed class PatchCellsTests
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
             _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>());
+                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
@@ -940,7 +944,7 @@ public sealed class PatchCellsTests
         // не закоміченої транзакції імпорту — і під RCSI прочитала б старі
         // дані або дані, яких після відкату не буде взагалі.
         await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         // ⚠ Насіння — не «щось непорожнє», а РІВНО та комірка, яку записали:
         // перелік, зібраний із іншого джерела, одного дня розійшовся б із тим,
@@ -971,7 +975,76 @@ public sealed class PatchCellsTests
             deferRecalculationUntilMi02: null);
 
         await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
+
+    /// <summary>
+    /// `BE-05`: ідентифікатор поставленої задачі доходить до клієнта, а автором
+    /// задачі записано ТОГО, ХТО ПРАВИВ.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дві половини одного твердження, і порізно вони нічого не варті.
+    /// Ідентифікатор без автора — це <c>403</c> на першому ж опитуванні
+    /// (<c>GetJobStatusHandler</c> пускає до чужої задачі лише за
+    /// <c>System.ViewHealth</c>, Q-156), тобто клієнт отримує ключ до дверей,
+    /// яких йому не відчинять. Автор без ідентифікатора — нікому не потрібне
+    /// поле в планувальнику.
+    ///
+    /// ⚠ Результат <c>EnqueueAsync</c> тут навмисно НЕ <c>Arg.Any</c>-значення
+    /// за замовчуванням: підробка віддає конкретний рядок, і тест звіряє саме
+    /// його. Інакше твердження «непорожній» задовольнив би будь-який рядок,
+    /// зокрема вигаданий обробником.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "BE-05")]
+    public async Task Ідентифікатор_задачі_перерахунку_повертається_у_відповіді_і_несе_автора_правки()
+    {
+        const string JobId = "IFormulaRecalculationJob#77";
+
+        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+             .Returns(JobId);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        Assert.Equal(JobId, response.RecalculationJobId);
+
+        // ⛔ Саме `9` — `_user.UserId` цього набору. `Arg.Any<int?>()` тут
+        // пропустив би `null`, тобто системну задачу без автора: рівно те, що
+        // повертає редактору `403` на власний перерахунок.
+        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
+            Arg.Any<object>(), Arg.Any<CancellationToken>(), 9);
+    }
+
+    /// <summary>
+    /// `BE-05` + `DAT-05`: у гілці відкладання поле — рівно <c>null</c>, а не
+    /// порожній рядок.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Різниця не косметична. <c>null</c> клієнт читає як «стежити нема за
+    /// чим» і мовчить; порожній рядок пройшов би перевірку «поле є» і послав
+    /// статус-рядок опитувати <c>GET /api/v1/jobs/</c> — адресу без сегмента,
+    /// тобто перелік задач замість стану однієї, під правом
+    /// <c>System.ViewHealth</c>, якого в редактора немає.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "BE-05")]
+    public async Task Відкладений_перерахунок_дає_recalculationJobId_рівно_null()
+    {
+        // ⚠ Підробка ГОТОВА віддати ідентифікатор — саме тому тест доводить, що
+        // `null` тут від гілки відкладання, а не від ненаповненого substitute.
+        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+             .Returns("IFormulaRecalculationJob#77");
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            deferRecalculationUntilMi02: []);
+
+        Assert.Null(response.RecalculationJobId);
     }
 
     [Fact]
