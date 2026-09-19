@@ -8373,9 +8373,10 @@
   "paths": {
     "/api/v1/audit/cells": {
       "get": {
-        "description": "Таблиця партиційована за `ChangedAt`, а не за періодом: місяць\nзміни і звітний період — різні осі (зміна за січень може статися в\nберезні). Тому запит **обов'язково** обмежений вікном часу — інакше він\nпіде по всіх партиціях.",
+        "description": "Таблиця партиційована за `ChangedAt`, а не за періодом: місяць\nзміни і звітний період — різні осі (зміна за січень може статися в\nберезні). Тому запит **обов'язково** обмежений вікном часу — інакше він\nпіде по всіх партиціях.\n\n⚠ Одна дія, ДВА рівні доступу (D15-16). `documentId + rowKey +\ncolumnDefId` разом — це історія ОДНІЄЇ комірки, і її бачить той, хто\nбачить документ (`Document.View` плюс грант на проєкт). Будь-який\nширший запит — загальний журнал, і для нього поріг лишається\n`Security.ViewAudit`. Розділяти це на два маршрути означало б\nдублювати вікно, курсор і всі п'ять фільтрів заради різниці, яка\nвиражається самим фільтром.\n\n⚠ `rowKey`/`columnDefId` без `documentId` —\n`422 ECR-REQ-0422`: ключ рядка унікальний у межах екземпляра\nтаблиці, а не системи, тож без документа він не адресує нічого.\nРодина `REQ`, а не `AUD`/`CELL`: суб'єкт відмови —\nпараметр запиту, і саме так тут уже відмовляють обидві перевірки вікна.",
         "parameters": [
           {
+            "description": "Початок вікна в UTC, включно.",
             "in": "query",
             "name": "from",
             "schema": {
@@ -8384,6 +8385,7 @@
             }
           },
           {
+            "description": "Кінець вікна в UTC, виключно.",
             "in": "query",
             "name": "to",
             "schema": {
@@ -8392,6 +8394,7 @@
             }
           },
           {
+            "description": "Документ; без нього — наскрізний журнал.",
             "in": "query",
             "name": "documentId",
             "schema": {
@@ -8400,6 +8403,49 @@
             }
           },
           {
+            "description": "Ключ рядка; лише разом із documentId.",
+            "in": "query",
+            "name": "rowKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Колонка; лише разом із documentId.",
+            "in": "query",
+            "name": "columnDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Автор зміни — `UserId`, не SID.",
+            "in": "query",
+            "name": "author",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Походження: `UserEdit`, `Import`, `Recalculation`, `Migration`.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише пізні правки (`Grace`/після `Reopen`).",
+            "in": "query",
+            "name": "lateOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Розмір сторінки; `0` — 50.",
             "in": "query",
             "name": "limit",
             "schema": {
@@ -8408,6 +8454,7 @@
             }
           },
           {
+            "description": "Курсор наступної сторінки.",
             "in": "query",
             "name": "cursor",
             "schema": {
@@ -8455,9 +8502,49 @@
               }
             },
             "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
-        "summary": "Історія змін комірок. Право `Security.ViewAudit`.",
+        "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
         "tags": [
           "Audit"
         ]
