@@ -32,6 +32,7 @@ public sealed class PatchCellsHandler(
     IMethodologyStore methodologies,
     IRegistryStore registries,
     IAuditWriter audit,
+    IAuditReader auditReader,
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
     ICurrentUser currentUser,
@@ -89,7 +90,7 @@ public sealed class PatchCellsHandler(
         var context = await LoadContextAsync(request, ct).ConfigureAwait(false);
 
         EnforceRowCreationRules(context);
-        EnsureNoVersionConflicts(context);
+        await EnsureNoVersionConflictsAsync(context, ct).ConfigureAwait(false);
         await EnsureAccessAsync(request, context, ct).ConfigureAwait(false);
 
         var changes = await BuildCellChangesAsync(request, context, ct).ConfigureAwait(false);
@@ -128,6 +129,35 @@ public sealed class PatchCellsHandler(
         return await BuildResponseAsync(request, context.PeriodKey, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Скільки розбіжних комірок їде в <c>conflicts</c>; решта — лічильником
+    /// <see cref="MoreConflictsDetail"/> (<c>BE-06</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Стеля, а не «віддамо скільки є». Батч буває на кілька тисяч комірок
+    /// (вставка з Excel), і перелік такого розміру в тілі відмови — це і трафік,
+    /// і діалог, у якому нічого не знайти. Сто — стільки, скільки людина справді
+    /// переглядає, і рівно бюджет запису (`100 комірок` у tz/08 §8.2).
+    /// </remarks>
+    private const int MaxConflictDetails = 100;
+
+    /// <summary>Вікно журналу, у якому шукається автор чужої правки, у місяцях.</summary>
+    /// <remarks>
+    /// ⚠ Те саме число, що стеля вікна історії ОДНІЄЇ комірки в `BE-03`: питання
+    /// тут таке саме («що було з цим числом»), і два різні вікна на одне питання
+    /// одного дня розійшлися б.
+    /// </remarks>
+    private const int ConflictAuditWindowMonths = 13;
+
+    /// <summary>Походження зміни, яку зробила ЛЮДИНА.</summary>
+    private const string UserEditOrigin = "UserEdit";
+
+    /// <summary>Ім'я автора для зміни, яку зробила не людина.</summary>
+    private const string SystemUser = "system";
+
+    /// <summary>Ключ у <c>Details</c>: скільки розбіжних комірок не вмістилося в перелік.</summary>
+    private const string MoreConflictsDetail = "moreConflicts";
 
     /// <summary>
     /// Контекст, зібраний з БД і знімка метаданих для одного виклику
@@ -384,44 +414,239 @@ public sealed class PatchCellsHandler(
     /// рядки з ключем, колонкою і чинною версією, чого запит-захоплення
     /// (`UPDATE … WHERE RowVersion = …`) сказати вже не може.
     /// </remarks>
-    private void EnsureNoVersionConflicts(RequestContext context)
+    private async Task EnsureNoVersionConflictsAsync(RequestContext context, CancellationToken ct)
     {
         // 4. Конфлікти версій. Збираємо ВСІ, а не падаємо на першому:
         //    користувач має побачити повну картину розбіжностей.
-        var conflicts = new List<CellConflictDto>();
+        var stale = new List<StaleCell>();
         foreach (var row in context.Updates)
         {
             if (!context.Versions.TryGetValue(row.RowKey, out var current))
             {
-                conflicts.Add(new CellConflictDto(row.RowKey, "*", null, null, "", clock.UtcNow, ""));
+                // Рядка немає взагалі: ані значення, ані автора назвати нема
+                // звідки — і саме тому всі три поля лишаються `null`.
+                stale.Add(new StaleCell(row.RowKey, "*", null, string.Empty, null, null));
                 continue;
             }
 
-            if (!string.Equals(current, row.BaseVersion, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(current, row.BaseVersion, StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var cell in row.Cells)
-                {
-                    conflicts.Add(new CellConflictDto(
-                        row.RowKey, cell.ColumnCode, cell.Value, null, "", clock.UtcNow, current));
-                }
+                continue;
+            }
+
+            // ⚠ `TryGetValue`, а не `ColumnDefIdOf`: невідомий код колонки — це
+            // `ECR-CELL-0422` нижче по шляху, і перетворювати відмову версії на
+            // відмову структури тут означало б назвати користувачеві не ту
+            // причину. Без ідентифікатора комірка просто лишається без
+            // подробиць — рядок конфлікту від цього не зникає.
+            var rowId = context.RowIds.TryGetValue(row.RowKey, out var id) ? id : (long?)null;
+
+            foreach (var cell in row.Cells)
+            {
+                var columnDefId = context.Columns.TryGetValue(cell.ColumnCode, out var column)
+                    ? column
+                    : (int?)null;
+
+                stale.Add(new StaleCell(row.RowKey, cell.ColumnCode, cell.Value, current, rowId, columnDefId));
             }
         }
 
-        if (conflicts.Count > 0)
+        if (stale.Count == 0)
         {
-            var staleRows = conflicts.Select(c => c.RowKey).Distinct().Count();
-
-            throw new ConcurrencyConflictException(
-                "ECR-CELL-0409",
-                $"Батч відхилено: рядків із розбіжністю версії — {staleRows}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-CELL-0409.batchStale",
-                    ["rowCount"] = staleRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["conflicts"] = conflicts,
-                });
+            return;
         }
+
+        // ⚠ Стеля подробиць. Понад неї — лічильник, а не мовчання: користувач
+        // має знати, що перелік обрізано (`BE-06`).
+        var shown = stale.Count > MaxConflictDetails ? stale.GetRange(0, MaxConflictDetails) : stale;
+
+        // ⛔ Рядки рахуються по ПОВНОМУ переліку, а не по показаному: «рядків із
+        // розбіжністю — 100» на батчі з трьохсот було б неправдою саме в тому
+        // числі, яке користувач побачить першим.
+        var staleRows = stale.Select(c => c.RowKey).Distinct(StringComparer.Ordinal).Count();
+
+        throw new ConcurrencyConflictException(
+            "ECR-CELL-0409",
+            $"Батч відхилено: рядків із розбіжністю версії — {staleRows}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                ["rowCount"] = staleRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["conflicts"] = await DescribeConflictsAsync(context, shown, ct).ConfigureAwait(false),
+
+                // ⚠ Рядком, як і решта чисел у `Details`: підстановку в шаблон
+                // каталогу `ResolveGenericMessageAsync` робить лише для полів
+                // типу `string` (див. коментар у `LoadContextAsync`).
+                [MoreConflictsDetail] = (stale.Count - shown.Count)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
+
+    /// <summary>
+    /// Дочитує до переліку розбіжностей те, чого в пам'яті обробника немає:
+    /// чинне значення комірки, автора й момент останньої зміни (<c>BE-06</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Два ДОДАТКОВІ запити, і обидва — ЛИШЕ на шляху відмови. Гарячий шлях
+    /// (батч без конфлікту) сюди не заходить узагалі, тож бюджет запису
+    /// «p95 300 мс на 100 комірок» не зачеплено жодним читанням.
+    ///
+    /// ⛔ Чому ДВА, а не «нуль, бо значення вже в пам'яті», як припускає
+    /// директива. Обробник дістає з рядків рівно ВЕРСІЇ:
+    /// <c>IRowStore.GetRowVersionsAsync</c> повертає <c>RowKey → RowVersion</c>
+    /// (`IRowStore.cs:43-44`), і саме її результат лежить у
+    /// <c>RequestContext.Versions</c> (`LoadContextAsync`, `:278`). Значень
+    /// комірок у пам'яті НЕМАЄ — єдине читання значень
+    /// (<see cref="ReadPreviousValuesAsync"/>) відбувається на багато кроків
+    /// ПІЗНІШЕ й лише для комірок, які батч записує, тобто на шляху конфлікту не
+    /// виконується ніколи. Тягти значення в кожен <c>GetRowVersionsAsync</c>
+    /// заради відмови означало б платити зрізом на КОЖНОМУ успішному записі.
+    ///
+    /// ⚠ Вікно журналу — 13 місяців, те саме, що стеля історії однієї комірки в
+    /// `BE-03`. Воно обов'язкове (інакше засічка пробиває всі партиції), а
+    /// коротше вікно мовчки лишало б без автора саме той випадок, який до
+    /// конфлікту й призводить найчастіше: вкладку, відкриту давно.
+    /// </remarks>
+    private async Task<List<CellConflictDto>> DescribeConflictsAsync(
+        RequestContext context, IReadOnlyList<StaleCell> stale, CancellationToken ct)
+    {
+        var addressable = stale
+            .Where(cell => cell.TableRowId is not null && cell.ColumnDefId is not null)
+            .Select(cell => (TableRowId: cell.TableRowId!.Value, ColumnDefId: cell.ColumnDefId!.Value))
+            .Distinct()
+            .ToList();
+
+        IReadOnlyDictionary<CellAddress, CellValueData> values =
+            new Dictionary<CellAddress, CellValueData>();
+        IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange> lastChanges =
+            new Dictionary<(long, int), LastCellChange>();
+
+        if (addressable.Count > 0)
+        {
+            values = await cellStore
+                .ReadCellsAsync(
+                    [.. addressable.Select(c => new CellAddress(context.PeriodKey, c.TableRowId, c.ColumnDefId))],
+                    ct)
+                .ConfigureAwait(false);
+
+            lastChanges = await auditReader
+                .ReadLastChangesAsync(
+                    context.Instance.DocumentId,
+                    addressable,
+                    clock.UtcNow.AddMonths(-ConflictAuditWindowMonths),
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        return [.. stale.Select(cell => Describe(context, cell, values, lastChanges))];
+    }
+
+    /// <summary>Один рядок переліку розбіжностей.</summary>
+    private static CellConflictDto Describe(
+        RequestContext context,
+        StaleCell cell,
+        IReadOnlyDictionary<CellAddress, CellValueData> values,
+        IReadOnlyDictionary<(long TableRowId, int ColumnDefId), LastCellChange> lastChanges)
+    {
+        if (cell.TableRowId is not { } rowId || cell.ColumnDefId is not { } columnDefId)
+        {
+            return new CellConflictDto(
+                cell.RowKey, cell.ColumnCode, cell.YourValue,
+                TheirValue: null, TheirUser: null, TheirOrigin: null, TheirChangedAt: null,
+                cell.CurrentVersion);
+        }
+
+        var theirValue = values.TryGetValue(new CellAddress(context.PeriodKey, rowId, columnDefId), out var stored)
+            ? Scalar(stored)
+            : null;
+
+        if (!lastChanges.TryGetValue((rowId, columnDefId), out var last))
+        {
+            // Значення є, автора у вікні журналу немає — і це чесно `null`, а не
+            // «система»: «ніхто не міняв у вікні» і «змінила машина» — різні
+            // твердження.
+            return new CellConflictDto(
+                cell.RowKey, cell.ColumnCode, cell.YourValue, theirValue,
+                TheirUser: null, TheirOrigin: null, TheirChangedAt: null, cell.CurrentVersion);
+        }
+
+        // ⛔ Не людина — і імені людини тут бути не може. Перерахунок та імпорт
+        // теж несуть `ChangedByUserId` (той, хто їх запустив), і підставити його
+        // ім'я означало б сказати «Серікбаєв змінив 12.40» про число, яке
+        // порахувала формула.
+        var byPerson = string.Equals(last.Origin, UserEditOrigin, StringComparison.Ordinal);
+
+        return new CellConflictDto(
+            cell.RowKey,
+            cell.ColumnCode,
+            cell.YourValue,
+            theirValue,
+            byPerson ? last.ChangedByDisplayName : SystemUser,
+            last.Origin,
+            last.ChangedAt,
+            cell.CurrentVersion);
+    }
+
+    /// <summary>Значення комірки як скаляр для відповіді клієнтові.</summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="Describe(CellValueData)"/>: той віддає ТЕКСТ для журналу,
+    /// а тут число має лишитися числом. Діалог конфлікту ставить чуже значення
+    /// поруч зі своїм, і «12.40» рядком проти <c>12.4</c> числом читалося б як
+    /// ще одна розбіжність.
+    ///
+    /// ⚠ Явна порожнеча (<c>IsEmpty</c>) — це <c>null</c>: комірку свідомо
+    /// лишили порожньою, і показувати замість неї нуль означало б підмінити
+    /// намір значенням.
+    /// </remarks>
+    private static object? Scalar(CellValueData value)
+    {
+        if (value.IsEmpty)
+        {
+            return null;
+        }
+
+        if (value.ValueNumeric is { } number)
+        {
+            return number;
+        }
+
+        if (value.ValueString is { } text)
+        {
+            return text;
+        }
+
+        if (value.ValueBool is { } flag)
+        {
+            return flag;
+        }
+
+        if (value.ValueDate is { } date)
+        {
+            return date;
+        }
+
+        if (value.ValueRegistryEntryId is { } entryId)
+        {
+            return entryId;
+        }
+
+        return value.ValueUnitId;
+    }
+
+    /// <summary>Комірка, чия версія рядка розійшлася, до дочитування подробиць.</summary>
+    /// <param name="RowKey">Ключ рядка.</param>
+    /// <param name="ColumnCode">Код колонки; <c>*</c> — розійшовся весь рядок.</param>
+    /// <param name="YourValue">Що надіслав автор батчу.</param>
+    /// <param name="CurrentVersion">Чинна версія рядка.</param>
+    /// <param name="TableRowId">Рядок у БД; <c>null</c> — його немає.</param>
+    /// <param name="ColumnDefId">Колонка в БД; <c>null</c> — код не резолвиться.</param>
+    private sealed record StaleCell(
+        string RowKey,
+        string ColumnCode,
+        object? YourValue,
+        string CurrentVersion,
+        long? TableRowId,
+        int? ColumnDefId);
 
     /// <summary>
     /// Права — ОДНИМ викликом на зріз і ОДНИМ на створювані рядки. Поштучна
@@ -569,7 +794,7 @@ public sealed class PatchCellsHandler(
         var touched = new List<long>();
 
         // ⛔ Заявлена клієнтом версія збирається ТУТ і їде далі в сховище, бо
-        // порівняння у <see cref="EnsureNoVersionConflicts"/> саме по собі
+        // порівняння у <see cref="EnsureNoVersionConflictsAsync"/> саме по собі
         // нічого не гарантує: воно робиться в пам'яті C# і ЗАДОВГО до запису.
         // Між ним і `PersistChangesAsync` чужий батч встигає закомітитись
         // цілком — це і був тихий lost update, через який обидва аналітики
@@ -1062,7 +1287,7 @@ public sealed class PatchCellsHandler(
     /// </summary>
     /// <remarks>
     /// ⛔ Тихе загублене оновлення (lost update). Транзакція тут була, але
-    /// перевірка версії до неї не входила: <see cref="EnsureNoVersionConflicts"/>
+    /// перевірка версії до неї не входила: <see cref="EnsureNoVersionConflictsAsync"/>
     /// порівнювала <c>baseVersion</c> у пам'яті C# за багато кроків ДО цього
     /// блоку, а самі записи не несли предиката на <c>RowVersion</c> —
     /// <c>MERGE doc.CellValue WITH (HOLDLOCK)</c> звіряв лише адресу комірки,
@@ -1080,7 +1305,7 @@ public sealed class PatchCellsHandler(
     /// батч і доїжджає сюди тим самим <c>ECR-CELL-0409</c>, що й перевірка
     /// «до запису».
     ///
-    /// ⚠ <see cref="EnsureNoVersionConflicts"/> лишається — але вже як швидкий
+    /// ⚠ <see cref="EnsureNoVersionConflictsAsync"/> лишається — але вже як швидкий
     /// шлях, а не як гарантія: вона дешево відхиляє звичайний випадок
     /// (клієнт відкрив сітку вчора) і, на відміну від сховища, знає
     /// <c>RowKey</c>, колонку й нову версію, тобто складає клієнтові повний
@@ -1164,10 +1389,23 @@ public sealed class PatchCellsHandler(
                         .Select(id => new CellConflictDto(
                             changes.RowKeyById.GetValueOrDefault(id, string.Empty),
                             // ⚠ `*` — той самий маркер «розійшовся весь рядок»,
-                            // що й у `EnsureNoVersionConflicts`: чия саме правка
-                            // виграла, звідси не видно, і вигадувати колонку
-                            // означало б назвати клієнтові неправду.
-                            "*", null, null, "", clock.UtcNow, ""))
+                            // що й у `EnsureNoVersionConflictsAsync`: чия саме
+                            // правка виграла, звідси не видно, і вигадувати
+                            // колонку означало б назвати клієнтові неправду.
+                            "*",
+                            YourValue: null,
+                            TheirValue: null,
+
+                            // ⛔ `null`, а не `clock.UtcNow`. Колонки тут немає,
+                            // отже немає й адреси, за якою питати журнал, — а
+                            // поточний час сервера в полі «коли змінили» це не
+                            // «приблизно», це неправда (`BE-06`). Дочитати
+                            // подробиці цієї гілки можна лише разом із колонками
+                            // батчу — окремим кроком, не тут.
+                            TheirUser: null,
+                            TheirOrigin: null,
+                            TheirChangedAt: null,
+                            CurrentVersion: string.Empty))
                         .ToList(),
                 });
         }
