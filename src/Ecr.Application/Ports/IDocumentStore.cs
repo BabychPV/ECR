@@ -23,6 +23,15 @@ namespace Ecr.Application.Ports;
 /// (директива "людське ім'я документа"). Показується ПОРУЧ із
 /// <paramref name="BusinessKey"/>, не замість нього.
 /// </param>
+/// <param name="ModifiedAt">Остання зміна (UTC); <c>null</c> — шлях читання її не несе.</param>
+/// <param name="ModifiedByDisplayName">Хто змінив; <c>null</c> — користувача вже немає.</param>
+/// <param name="ErrorCount">
+/// Помилки з ОСТАННЬОГО збереженого підсумку перевірки за період (<c>BE-09</c>).
+/// ⛔ <c>null</c> — документ за цей період не перевіряли (або період не
+/// задано); це НЕ нуль: «0 зауважень» під неперевіреним документом — та сама
+/// неправда, що <c>A7-28</c>.
+/// </param>
+/// <param name="WarningCount">Попередження звідти ж; <c>null</c> — за тим самим правилом.</param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -30,7 +39,11 @@ public sealed record DocumentSummary(
     DateTime CreatedAt,
     int SheetCount,
     IReadOnlyDictionary<string, string> SheetStates,
-    LocalizedText? NameL10n = null);
+    LocalizedText? NameL10n = null,
+    DateTime? ModifiedAt = null,
+    string? ModifiedByDisplayName = null,
+    int? ErrorCount = null,
+    int? WarningCount = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

@@ -109,7 +109,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 d.BusinessKey,
                 d.CreatedAt,
                 db.DocumentSheets.Count(s => s.DocumentId == d.Id && s.IsIncluded),
-                d.NameL10n))
+                d.NameL10n,
+                d.ModifiedAt,
+                db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -123,6 +125,10 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var statesByDocument = await StatesBatchAsync(
             [.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
+        // BE-09: так само ОДИН запит на сторінку — лічильники останньої перевірки.
+        var findingsByDocument = await LatestFindingsBatchAsync(
+            [.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
@@ -130,8 +136,12 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 ? found
                 : new Dictionary<string, string>(StringComparer.Ordinal);
 
+            // ⛔ Немає підсумку — `null`, а не нуль: документ не перевіряли.
+            var findings = findingsByDocument.GetValueOrDefault(d.Id);
+
             items.Add(new DocumentSummary(
-                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states, d.NameL10n));
+                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states, d.NameL10n,
+                d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -428,6 +438,43 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                     StringComparer.Ordinal));
     }
 
+    /// <summary>Лічильники ОСТАННЬОГО підсумку перевірки для сторінки документів — одним запитом.</summary>
+    /// <remarks>
+    /// ⚠ Читання збереженого підсумку, не повторний прогін (<c>BE-09</c>).
+    /// Документа без підсумку у словнику НЕМАЄ — і саме це дає <c>null</c>.
+    /// Два підсумки з однаковим <c>RunAt</c> — рідкість; береться будь-який із них.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<long, LatestFindings>> LatestFindingsBatchAsync(
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+    {
+        if (period.Value is not { } periodKey || documentIds.Count == 0)
+        {
+            return new Dictionary<long, LatestFindings>();
+        }
+
+        var latest = await db.ValidationResults
+            .AsNoTracking()
+            .Where(v => documentIds.Contains(v.DocumentId)
+                        && v.PeriodKey == periodKey
+                        && v.RunAt == db.ValidationResults
+                            .Where(x => x.DocumentId == v.DocumentId && x.PeriodKey == periodKey)
+                            .Max(x => x.RunAt))
+            .Select(v => new LatestFindings(v.DocumentId, v.ErrorCount, v.WarningCount))
+            .Take(documentIds.Count * MaxRunTies)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return latest
+            .GroupBy(f => f.DocumentId)
+            .ToDictionary(g => g.Key, g => g.First());
+    }
+
+    /// <summary>Лічильники останньої перевірки одного документа.</summary>
+    private sealed record LatestFindings(long DocumentId, int ErrorCount, int WarningCount);
+
+    /// <summary>Скільки підсумків з однаковим <c>RunAt</c> допускаємо на документ.</summary>
+    private const int MaxRunTies = 4;
+
     /// <summary>
     /// Рядок переліку документів.
     /// </summary>
@@ -440,7 +487,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// </remarks>
     private sealed record DocumentRow(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
-        Domain.ValueObjects.LocalizedText? NameL10n);
+        Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;

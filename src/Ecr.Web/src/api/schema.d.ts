@@ -461,6 +461,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Зведення переліку за період (`BE-09`). Право `Document.View`.
+         * @description ⚠ Лічить лише документи, які користувач БАЧИТЬ, — тією самою межею
+         *     грантів, що й перелік вище; інакше смуга й таблиця під нею розійдуться.
+         *     Період обов'язковий: без нього стан документа не визначений (`D-93`).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                    projectId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentListSummaryResponse"];
+                        "text/json": components["schemas"]["DocumentListSummaryResponse"];
+                        "text/plain": components["schemas"]["DocumentListSummaryResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/cells": {
         parameters: {
             query?: never;
@@ -9807,6 +9853,35 @@ export interface components {
              */
             documentId: number;
         };
+        /** @description Смуга лічильників над переліком документів (`BE-09`). */
+        DocumentListSummaryResponse: {
+            /**
+             * Format: int32
+             * @description Усі аркуші затверджено.
+             */
+            approved: number;
+            /**
+             * Format: int32
+             * @description Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.
+             */
+            draft: number;
+            /**
+             * Format: int32
+             * @description Хоч один аркуш відхилено.
+             */
+            rejected: number;
+            /**
+             * Format: int32
+             * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
+             */
+            submitted: number;
+            /**
+             * Format: int32
+             * @description Документи, у яких ОСТАННІЙ збережений підсумок перевірки має помилки.
+             *     Неперевірений документ сюди не входить — і «без зауважень» він теж не є.
+             */
+            withIssues: number;
+        };
         /** @description Дія над документом у межах одного періоду. */
         DocumentPeriodRequest: {
             /**
@@ -9825,10 +9900,25 @@ export interface components {
              */
             createdAt: string;
             /**
+             * Format: int32
+             * @description Помилки з ОСТАННЬОГО збереженого підсумку перевірки за період (`BE-09`).
+             *     ⛔ `null` — документ за цей період не перевіряли (або період не
+             *     задано); це НЕ нуль: «0 зауважень» під неперевіреним документом — та сама
+             *     неправда, що `A7-28`.
+             */
+            errorCount?: null | number;
+            /**
              * Format: int64
              * @description Ідентифікатор.
              */
             id: number;
+            /**
+             * Format: date-time
+             * @description Остання зміна (UTC); `null` — шлях читання її не несе.
+             */
+            modifiedAt?: null | string;
+            /** @description Хто змінив; `null` — користувача вже немає. */
+            modifiedByDisplayName?: null | string;
             nameL10n?: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
@@ -9844,6 +9934,11 @@ export interface components {
             sheetStates: {
                 [key: string]: string;
             };
+            /**
+             * Format: int32
+             * @description Попередження звідти ж; `null` — за тим самим правилом.
+             */
+            warningCount?: null | number;
         };
         /** @description Екземпляр таблиці разом з аркушем, якому він належить. */
         DocumentTableDto: {
