@@ -106,9 +106,16 @@ public sealed class PatchCellsHandler(
 
         var seeds = BuildRecalculationSeeds(changes);
 
+        // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
+        // У гілці відкладання він лишається `null` — і це чесно: перерахунку
+        // ЩЕ НЕ ПОСТАВЛЕНО, а назвати тут ідентифікатор задачі, яку поставить
+        // викликач після свого коміту, означало б збрехати про те, що сталося.
+        string? recalculationJobId = null;
+
         if (deferRecalculationUntilMi02 is null)
         {
-            await EnqueueRecalculationAsync(request, seeds, ct).ConfigureAwait(false);
+            recalculationJobId = await EnqueueRecalculationAsync(request, seeds, context.UserId, ct)
+                .ConfigureAwait(false);
         }
         else
         {
@@ -118,7 +125,8 @@ public sealed class PatchCellsHandler(
             }
         }
 
-        return await BuildResponseAsync(request, context.PeriodKey, changes, messages, ct).ConfigureAwait(false);
+        return await BuildResponseAsync(request, context.PeriodKey, changes, messages, recalculationJobId, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1241,11 +1249,27 @@ public sealed class PatchCellsHandler(
     /// ⛔ Змінені комірки передаються ЯВНО: саме вони — насіння каскаду. Без
     /// них перерахунок був би повним на кожну правку, і граф залежностей
     /// коштував би, не даючи нічого.
+    ///
+    /// ⛔ `BE-05`: результат більше НЕ відкидається — він їде клієнтові
+    /// (<see cref="PatchCellsResponse.RecalculationJobId"/>), інакше статус-рядок
+    /// сітки міг би лише вгадувати таймером, коли обчислені колонки оновилися.
+    ///
+    /// ⛔ <paramref name="editorUserId"/> передається в <c>createdByUserId</c>, і
+    /// це не косметика: <c>GetJobStatusHandler</c> пускає до стану чужої задачі
+    /// лише за правом <c>System.ViewHealth</c>, а автора ВЛАСНОЇ — завжди
+    /// (Q-156). Без цього аргументу задача лишалася б системною (без автора), і
+    /// редактор отримував би <c>403</c> на першому ж опитуванні
+    /// ідентифікатора, який сервер щойно сам йому й віддав — рівно дефект
+    /// <c>S-28</c>, лише для перерахунку замість експорту.
     /// </remarks>
-    private async Task EnqueueRecalculationAsync(
-        PatchCellsRequest request, IReadOnlyList<RecalculationSeed> seeds, CancellationToken ct)
+    private async Task<string> EnqueueRecalculationAsync(
+        PatchCellsRequest request,
+        IReadOnlyList<RecalculationSeed> seeds,
+        int editorUserId,
+        CancellationToken ct)
         => await jobs.EnqueueAsync<Ports.IFormulaRecalculationJob>(
-            new { request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct)
+            new { request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct,
+            createdByUserId: editorUserId)
             .ConfigureAwait(false);
 
     /// <summary>Насіння каскаду: адреси всіх записаних і стертих комірок батчу.</summary>
@@ -1269,6 +1293,7 @@ public sealed class PatchCellsHandler(
         PeriodKey periodKey,
         CellChangeLists changes,
         List<Validation.ValidationMessage> messages,
+        string? recalculationJobId,
         CancellationToken ct)
     {
         var newVersions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, periodKey, ct)
@@ -1282,7 +1307,11 @@ public sealed class PatchCellsHandler(
             Validation: messages
                 .Select(m => new ValidationMessageDto(
                     m.Severity.ToString(), m.RuleCode, m.Message, m.RowKey, m.ColumnCode))
-                .ToList());
+                .ToList(),
+
+            // ⚠ `BE-05`: передається ЯК Є, без перетворення порожнього рядка на
+            // `null` і навпаки. Джерело значення одне — гілка постановки вище.
+            RecalculationJobId: recalculationJobId);
     }
 
     /// <summary>Валідує змінені комірки і правила рівня рядка.</summary>

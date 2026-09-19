@@ -363,6 +363,21 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.AccountLocked =>
             (StatusCodes.Status423Locked, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Той самий клас розбіжності, що й `ECR-ROW-0409`/`ECR-RPT-0409`
+        // нижче: цифри коду — НАШ статус відповіді, і `ECR-AUTH-0429` без
+        // власного арма доїхав би загальним `BusinessRuleException` як 422
+        // «дані невірні» — тобто про вичерпану межу клієнт дізнався б як про
+        // помилку введення, без жодного натяку, що треба просто зачекати.
+        //
+        // ⚠ Сьогодні цей код кидає не виняток, а сам обмежувач частоти
+        // (`LoginRateLimiting.WriteProblemAsync` пише `problem+json` напряму —
+        // відхилений запит не має йти крізь конвеєр, заради економії якого
+        // межа й існує). Арм усе одно є, і з тієї самої причини, що
+        // `SourceAuthenticationException` нижче: без нього той самий код,
+        // кинутий із синхронного шляху, віддав би неправильний статус.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.TooManyLoginAttempts =>
+            (StatusCodes.Status429TooManyRequests, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e when e.ErrorCode is ErrorCodes.Archiving or ErrorCodes.SourceUnavailable =>
             (StatusCodes.Status503ServiceUnavailable, e.ErrorCode, e.Message, e.Details),
 

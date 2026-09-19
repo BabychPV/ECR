@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
+  JobStatus,
   PatchCell,
   PatchCellsRequest,
   PatchCellsResponse,
   TableSliceDto,
 } from '@/api/types';
+// ⚠ Правило «доки опитувати» береться з наявного модуля, а не пишеться вдруге:
+// `jobFollow.ts` уже знає, які стани кінцеві, і саме він виник із двох копій
+// цього правила, що розійшлися (`Q-234`). Тут інший лише ІНТЕРВАЛ — див.
+// `RecalculationPollMs`.
+import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
 import { applyPatchToSlice } from './sliceApply';
 
 /** Накопичена зміна однієї комірки. */
@@ -111,9 +117,13 @@ export function patchCells(
  * ⚠ Тепер відповідь застосовується локально (`sliceApply.ts`): власні значення
  * оператора, нові `rowVersions`, округлення вставки — усе це вже є в запиті й
  * відповіді, і жодного запиту не потрібно. Обчислені колонки принесе
- * перерахунок; стежити за ним клієнт зможе, коли `PatchCellsResponse` понесе
- * ідентифікатор задачі (контракт його не має — друга половина `CL-01`
- * заблокована серверною зміною).
+ * перерахунок; стежить за ним `useRecalculationStatus` нижче — по
+ * `recalculationJobId` з відповіді (`BE-05`).
+ *
+ * ⛔ І стеження НЕ повертає сюди `invalidateQueries` зрізу. Опитування задачі
+ * і перезапит зрізу — різні за ціною речі: перше коштує кілька сотень байтів
+ * раз на дві секунди, друге — найважчий `GET` системи. Інвалідація на КОЖНЕ
+ * опитування відкотила б `CL-01…03` рівно туди, звідки їх витягли.
  *
  * ⛔ Викликається і для зрізу, чия сітка вже розмонтована (`D14-12`): інакше
  * повернення на аркуш показувало б із кешу СТАРЕ значення — збережене на
@@ -134,8 +144,7 @@ export function applyPatchLocally(
   // обчислених колонок, а `staleTime` зрізів — 5 хв (`CL-02`), тож без цього
   // рядка результат перерахунку не з'явився б до перезаходу. Так він
   // з'явиться при наступному монтуванні сітки (перемикання аркуша), не
-  // коштуючи жодного запиту зараз. Повноцінне рішення — стеження за задачею —
-  // чекає на ідентифікатор у `PatchCellsResponse`.
+  // коштуючи жодного запиту зараз.
   //
   // ⛔ Саме ПІСЛЯ `setQueryData`: успішний запис у кеш скидає позначку
   // `isInvalidated`, тож зворотний порядок нічого б не позначив.
@@ -172,11 +181,22 @@ export function useCellPatch(documentId: number): {
   conflicts: unknown[];
   /** Видимий індикатор для оператора — не лише лічильник незбереженого. */
   status: SaveStatus;
+
+  /**
+   * Задача перерахунку, поставлена ОСТАННІМ успішним патчем; `null` — стежити
+   * нема за чим (`BE-05`).
+   *
+   * ⚠ Останній, а не перший: кожен наступний патч того самого зрізу ставить
+   * СВІЙ перерахунок, і показувати стан уже витісненої задачі означало б
+   * повідомити «перераховано» про числа, які відтоді змінилися ще раз.
+   */
+  recalculationJobId: string | null;
 } {
   const queryClient = useQueryClient();
   const [isPending, setPending] = useState(false);
   const [conflicts, setConflicts] = useState<unknown[]>([]);
   const [status, setStatus] = useState<SaveStatus>('idle');
+  const [recalculationJobId, setRecalculationJobId] = useState<string | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versions = useRef<Record<string, string>>({});
 
@@ -196,6 +216,13 @@ export function useCellPatch(documentId: number): {
         versions.current = { ...versions.current, ...response.rowVersions };
 
         applyPatchLocally(queryClient, request, response);
+
+        // ⚠ `BE-05`: `null` у відповіді означає «перерахунку не поставлено»
+        // (гілка відкладання `DAT-05`) — і тоді стеження ЗНІМАЄТЬСЯ, а не
+        // лишається на попередній задачі: її результат уже не описує те, що
+        // зараз у зрізі. `?? null` навмисно: поле необов'язкове в контракті,
+        // тож `undefined` зі старішого сервера має читатися так само.
+        setRecalculationJobId(response.recalculationJobId ?? null);
 
         // ⚠ «Збережено» показується ТИМЧАСОВО, а не назавжди: індикатор, який
         // ніколи не гасне, оператор перестає читати за перший же день, і він
@@ -230,7 +257,133 @@ export function useCellPatch(documentId: number): {
     if (savedTimer.current !== null) clearTimeout(savedTimer.current);
   }, []);
 
-  return { patch, rowVersions: versions.current, isPending, conflicts, status };
+  return { patch, rowVersions: versions.current, isPending, conflicts, status, recalculationJobId };
+}
+
+/**
+ * Як часто питати стан перерахунку, поставленого правкою комірки.
+ *
+ * ⛔ Не `PollMs` із `jobFollow.ts` (1.5 с), і це свідоме розходження, а не
+ * недогляд. Ті задачі оператор запускає РУКАМИ і дивиться на кнопку, доки вони
+ * йдуть; ця ж ставиться сама на кожне автозбереження — тобто в найгарячішому
+ * циклі роботи, де відкрита вкладка опитує фон постійно. Директива називає
+ * стелю прямо: інтервал ≥ 2 с.
+ *
+ * ⚠ Що вважати кінцевим станом — вирішує `pollInterval` із того ж
+ * `jobFollow.ts`, а не власна копія переліку станів: саме розходження двох
+ * копій цього правила й коштувало `Q-234`.
+ */
+export const RecalculationPollMs = 2000;
+
+/** Видимий підсумок перерахунку для статус-рядка сітки. */
+export interface RecalculationStatus {
+  /** Стан задачі; `undefined` — відповіді ще немає. */
+  state: string | undefined;
+
+  /** Що показати оператору; `null` — стежити нема за чим. */
+  outcome: JobOutcome | null;
+
+  /**
+   * Коли перерахунок завершився, `ГГ:ХХ`; `null` — ще йде або нема за чим
+   * стежити.
+   */
+  finishedAt: string | null;
+}
+
+/**
+ * Стежить за задачею перерахунку, поставленою правкою комірки (`BE-05`).
+ *
+ * ⛔ Головне, чого тут НЕМАЄ: жодного `invalidateQueries` зрізу. Це прямий
+ * припис директиви, і він захищає вже виконану роботу — `CL-01…03` прибрали
+ * перезапит найважчого `GET` системи з кожного успішного збереження. Повернути
+ * його «лише на час перерахунку» означало б повернути його на кожне
+ * автозбереження, бо перерахунок ставиться саме ним.
+ *
+ * ⚠ Опитування зупиняється на кінцевому стані (`pollInterval` → `false`):
+ * нескінченне опитування готової задачі — це запит раз на дві секунди від
+ * КОЖНОЇ відкритої вкладки документа, назавжди.
+ *
+ * ⚠ `retry: false` і `outcomeOf(..., isError)`: відмова читання — це НЕ «ще
+ * виконується». Без цього розрізнення статус-рядок показував би
+ * «перераховується» вічно на задачі, стан якої просто не віддали (`Q-156`,
+ * той самий дефект, від якого `outcomeOf` рятує кнопку експорту).
+ */
+export function useRecalculationStatus(jobId: string | null): RecalculationStatus {
+  /*
+   * ⛔ Порожній рядок прирівняний до `null`, і це не перестраховка. Сервер
+   * каже «перерахунку не поставлено» саме `null`-ом (`BE-05`), але рядок
+   * нульової довжини, який колись міг би приїхати замість нього, зібрав би
+   * адресу `/api/v1/jobs/` — тобто ПЕРЕЛІК задач замість стану однієї, під
+   * правом `System.ViewHealth`, якого в редактора немає. Замість мовчазного
+   * стеження ні за чим оператор побачив би 403 на кожне збереження.
+   */
+  const active = jobId !== null && jobId.length > 0 ? jobId : null;
+
+  const job = useQuery({
+    // ⚠ Ключ той самий за формою, що в решті екранів, які стежать за задачами
+    // (`ExportButton`, `SnapshotsPage`): один `jobId` — один запис у кеші,
+    // навіть якщо на нього дивляться з двох місць одночасно.
+    queryKey: ['job', active],
+
+    // ⚠ `encodeURIComponent` обов'язковий: `jobId` має вигляд
+    // `IFormulaRecalculationJob#42`, а `#` в URL ПОЧИНАЄ ФРАГМЕНТ —
+    // незакодований він обрізає шлях до `/api/v1/jobs/IFormulaRecalculationJob`,
+    // і сервер чесно відповідає 404. Саме на цьому падав крок 17 `smoke.ps1`.
+    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(active ?? '')}`),
+    enabled: active !== null,
+    refetchInterval: (query) =>
+      pollInterval(query.state.data?.state) === false ? false : RecalculationPollMs,
+    retry: false,
+  });
+
+  const outcome = active === null ? null : outcomeOf(job.data?.state, job.isError);
+
+  /*
+   * ⚠ Час завершення — КЛІЄНТСЬКИЙ, і це названо вголос: `JobStatus` несе
+   * `state`/`percent`/`message`/`error` і не несе жодної позначки часу
+   * (`IBackgroundJobScheduler.cs`). Тому «14:02» означає «коли це побачив цей
+   * екран», а не «коли воркер закрив прогін». Різниця — один інтервал
+   * опитування, і для рядка «перераховано о…» вона не має ціни; вигадувати
+   * точніше з наявних даних ніяк.
+   */
+  const [finishedAt, setFinishedAt] = useState<string | null>(null);
+  const markedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (active === null) {
+      setFinishedAt(null);
+      markedFor.current = null;
+
+      return;
+    }
+
+    if (outcome === null || outcome === 'running') return;
+    if (markedFor.current === active) return;
+
+    markedFor.current = active;
+    setFinishedAt(clockLabel(new Date()));
+  }, [active, outcome]);
+
+  // ⚠ Нова задача гасить час попередньої НЕГАЙНО, ще до її першої відповіді:
+  // інакше «перераховано о 14:02» висіло б поруч із правкою, зробленою о 14:05.
+  const shown = markedFor.current === active ? finishedAt : null;
+
+  return { state: job.data?.state, outcome, finishedAt: shown };
+}
+
+/**
+ * Година й хвилина місцевого часу, `ГГ:ХХ`.
+ *
+ * ⛔ Складається вручну, а не через `toLocaleTimeString`, і це не винахід
+ * велосипеда. `D15-09` забороняє `toLocale*()` без явної локалі (правило
+ * лінтера, `shared/__tests__/lintRules.test.ts`), а явної локалі тут узяти
+ * ніде: мови продукту — `en`/`ru`/`kz`, і `kz` не є тегом BCP-47 взагалі
+ * (казахська — `kk`), тож `Intl` на ньому кидає `RangeError`. Двоцифровий
+ * 24-годинний запис читається однаково в усіх трьох мовах і не залежить від
+ * налаштувань браузера — рівно те, чого вимагає `D15-09`.
+ */
+function clockLabel(at: Date): string {
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }
 
 /**

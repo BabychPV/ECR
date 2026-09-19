@@ -175,6 +175,35 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         Assert.Equal(ErrorCodes.RowDuplicate, code);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Вичерпана_межа_входу_повертає_429_а_не_422()
+    {
+        // ⛔ Цифри коду в цьому проєкті означають НАШ статус відповіді
+        // (`ECR-<ДОМЕН>-<HTTP>`), і припускати це не можна — `ECR-AUTH-0429`
+        // без власного арма потрапляє в загальний `BusinessRuleException` і
+        // доїжджає як 422 «дані невірні». Клієнт, який читає статус раніше за
+        // код, показав би помилку введення там, де правильна відповідь —
+        // «зачекайте, скільки сказано в Retry-After».
+        //
+        // ⚠ Сьогодні цей виняток не кидає ніхто: обмежувач частоти пише
+        // `problem+json` сам, не заходячи в конвеєр (`LoginRateLimiting`).
+        // Арм — страхувальна сітка для синхронного шляху, і перевіряється він
+        // тут рівно тому, що інакше про його відсутність дізналися б у той
+        // день, коли такий шлях з'явиться.
+        var exception = new Ecr.Application.Errors.BusinessRuleException(
+            ErrorCodes.TooManyLoginAttempts, "Забагато спроб входу з цієї адреси.");
+
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var (status, code, _, _) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+
+        Assert.Equal(429, status);
+        Assert.Equal("ECR-AUTH-0429", code);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Finding", "lane1-2-4-unhandled-500-pattern")]

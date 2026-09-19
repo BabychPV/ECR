@@ -349,6 +349,16 @@ USING (VALUES
     (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0403.requiresPermission', N'en', N'Requires permission', 1),
     (N'err.ECR-AUTH-0423', N'en', N'The account is locked.', 0),
+    -- ⛔ ECR-AUTH-0429 і ECR-AUTH-0423 — РІЗНІ стани, і доки першого не було,
+    -- обмежувач частоти (`LoginRateLimiting`, S-10) відповідав другим: заголовок
+    -- казав «The account is locked.», хоча межу вичерпала АДРЕСА, а обліковку
+    -- ніхто не блокував — і заблокувати не міг, бо межа ріже ще до того, як
+    -- стане відомо, чи існує назване ім'я. Ціна була не в тексті: користувач
+    -- дзвонив у підтримку через блокування, якого немає.
+    -- ⚠ Публічна область (0): цей стан видно ДО входу (ФВ-14.9b).
+    (N'err.ECR-AUTH-0429', N'en', N'Too many sign-in attempts', 0),
+    (N'err.ECR-AUTH-0429.tooManyAttempts', N'en',
+     N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', 0),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
 
@@ -470,6 +480,18 @@ USING (VALUES
     -- запускали. Підставити сюди «does not exist or is empty» означало б
     -- повідомити неправду про дані (`DocumentsController.LastValidation`).
     (N'err.ECR-DOC-0404.notValidated',        N'en', N'Document {documentId} has not been validated for period {periodKey} yet.', 1),
+
+    -- ⛔ `BE-02`, скасування фонової задачі. Три подробиці однієї дії, і всі
+    -- три людина бачить у момент, коли ТІЛЬКИ ЩО натиснула кнопку: задачі
+    -- немає, задача чужа, задача вже завершилась. Без ключа сюди приїхало б
+    -- українське речення — мови продукту `en`/`ru`/`kz` (`ФВ-14.9`).
+    -- ⚠ `{state}` лишається кодовим словом (`Succeeded`/`Failed`/`Cancelled`):
+    -- це те саме слово, що бейдж у переліку задач, і перекладати його тут
+    -- означало б розійтися з екраном.
+    -- Приватна область: задачі видно лише після входу.
+    (N'err.ECR-JOB-0404.job',                 N'en', N'Background job {jobId} does not exist.', 1),
+    (N'err.ECR-JOB-0409.notActive',           N'en', N'Job {jobId} is in state {state}: there is nothing to cancel.', 1),
+    (N'err.ECR-AUTH-0403.jobNotYours',        N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -653,6 +675,14 @@ USING (VALUES
     (N'grid.saving',                     N'en', N'Saving...', 1),
     (N'grid.saved',                      N'en', N'Saved', 1),
     (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    -- ⛔ `BE-05`: статус-рядок перерахунку. Запис і перерахунок — різні моменти:
+    -- комірка вже в базі, а обчислені колонки ще ні, і до появи `jobId` у
+    -- відповіді сказати про це було нічим.
+    -- ⚠ `{time}` — година й хвилина, коли ЦЕЙ екран побачив завершення:
+    -- `JobStatus` позначки часу не несе (`useCellPatch.clockLabel`).
+    (N'grid.recalculating',              N'en', N'Recalculating...', 1),
+    (N'grid.recalculated',               N'en', N'Recalculated {time}', 1),
+    (N'grid.recalcFailed',               N'en', N'Recalculation failed', 1),
     (N'grid.requiredInputBlockedTitle',  N'en', N'Cannot save: {count} required column(s) missing', 1),
     (N'grid.requiredInputWarningTitle',  N'en', N'{count} required column(s) missing (does not block saving)', 1),
     (N'grid.columnRequiredHint',         N'en', N'This column is required.', 1),
@@ -665,6 +695,21 @@ USING (VALUES
     -- уже існував), але без ЖОДНОГО тексту — клацання виглядало як
     -- зависання, не як «сюди не можна саме тому, що аркуш подано».
     (N'grid.submittedReadOnlyHint',      N'en', N'This sheet has been submitted; editing is closed until it is reopened.', 1),
+
+    -- ⛔ Вихід із документа з незбереженими правками (`D14-12` крок 3,
+    -- `shared/ui/UnsavedGuard.tsx`). Діалог з'являється РІВНО тоді, коли
+    -- збереження при виході не вдалося, — тому і заголовок про факт («зміни не
+    -- збережено»), а не питання «ви впевнені?»: питання на кожному переході
+    -- навчає відповідати «так» не читаючи, а це рядок, який користувач побачить
+    -- один раз за багато днів і мусить прочитати.
+    --
+    -- ⚠ Безпечна дія названа дією («лишитись на сторінці»), а не «Скасувати»:
+    -- що саме скасовується в діалозі, який виник сам, читач не знає.
+    (N'unsaved.title',                   N'en', N'Your changes are not saved', 1),
+    (N'unsaved.body',                    N'en', N'{count} cell(s) could not be saved. If you leave now, they are lost.', 1),
+    (N'unsaved.stay',                    N'en', N'Stay on this page', 1),
+    (N'unsaved.leave',                   N'en', N'Leave without saving', 1),
+
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),
     (N'deny.PeriodClosed',               N'en', N'The period is closed: changes need a separate approval.', 1),
@@ -1033,6 +1078,12 @@ USING (VALUES
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'jobs.restart',                    N'en', N'Restart', 1),
     (N'jobs.restarting',                 N'en', N'Restarting…', 1),
+    -- ⚠ Скасування — ПРОХАННЯ, не вбивство: підтвердження має сказати це
+    -- прямо, інакше «Cancel» читається як «нічого не сталося», а задача ще
+    -- дописує поточний батч (`CancelJobHandler`, відповідь `202`).
+    (N'jobs.cancel',                     N'en', N'Cancel job', 1),
+    (N'jobs.cancelConfirm',              N'en', N'The job is asked to stop and finishes in the Cancelled state at the nearest batch boundary. Work already written is kept.', 1),
+    (N'jobs.cancelling',                 N'en', N'Cancelling…', 1),
     (N'grid.emptyTable',                 N'en', N'This table has no columns for the selected period', 1),
     (N'grid.emptyTableHint',             N'en', N'The template version in force for this period defines no columns for the table.', 1),
 

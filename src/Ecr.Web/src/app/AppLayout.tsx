@@ -32,6 +32,7 @@ import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
+import { UnsavedGuard } from '@/shared/ui/UnsavedGuard';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
@@ -233,6 +234,29 @@ export function AppLayout(): JSX.Element {
        * пропускав би подію зміни локації, яку мав відновити.
        */}
       <ScrollRestoration />
+
+      {/*
+       * Вихід із документа з незбереженими правками (`D14-12` крок 3,
+       * `D15` `UI-00`).
+       *
+       * ⚠ Тут — з ТІЄЇ САМОЇ причини, що й `<ScrollRestoration/>` вище, і
+       * аргумент не треба вигадувати заново: `useBlocker` усередині компонента
+       * так само потребує контексту роутера й так само має бути ОДИН на
+       * застосунок. `App.tsx` не підходить із тієї ж причини — `RouterProvider`
+       * не layout-маршрут; `AppLayout` — єдиний батько, завжди змонтований для
+       * будь-якого автентифікованого маршруту.
+       *
+       * ⚠ Один екземпляр, а не «по одному на сторінку, що редагує»: кожен
+       * `useBlocker` реєструє в роутері ВЛАСНИЙ блокувальник, а роутер
+       * підтримує рівно один активний — другий екземпляр у дереві означав би
+       * попередження й непередбачуваний вибір того, хто спрацює.
+       *
+       * ⛔ Поза `<Suspense>` навколо `<Outlet/>` — теж навмисно, і причина та
+       * сама, що в сусідів: компонент, який розмонтовується на час
+       * підвантаження чанка, зніме свій блокувальник саме в ту мить, коли
+       * навігація й відбувається.
+       */}
+      <UnsavedGuard />
 
       <AppShell
         header={{ height: 56 }}
