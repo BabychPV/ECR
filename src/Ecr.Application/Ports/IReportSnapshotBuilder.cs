@@ -48,7 +48,27 @@ public interface IReportSnapshotBuilder
     /// </remarks>
     public Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
         int? projectId, int? periodKey, IReadOnlyCollection<int>? visibleProjectIds, CancellationToken ct);
+
+    /// <summary>Проєкт зрізу; <c>null</c> — зрізу немає.</summary>
+    /// <remarks>
+    /// ⚠ Окремий дешевий запит, а не частина <see cref="VerifyAsync"/>: грант
+    /// на проєкт перевіряється ДО перерахунку суми, інакше сторонній змушував
+    /// би сервер читати до 200 000 рядків чужого зрізу заради відмови (BE-17).
+    /// </remarks>
+    public Task<int?> FindProjectIdAsync(long snapshotId, CancellationToken ct);
+
+    /// <summary>
+    /// Перераховує контрольну суму ЗБЕРЕЖЕНОГО вмісту тим самим алгоритмом,
+    /// що й побудова, і віддає її поруч зі збереженою. Нічого не змінює.
+    /// </summary>
+    /// <returns><c>null</c> — зрізу немає.</returns>
+    public Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct);
 }
+
+/// <summary>Дві суми зрізу: записана при побудові й перерахована зараз.</summary>
+/// <param name="Stored">Збережена сума в hex; порожньо — не рахувалася.</param>
+/// <param name="Actual">Сума, перерахована за рядками зрізу, в hex.</param>
+public sealed record SnapshotHashes(string Stored, string Actual);
 
 /// <summary>Зріз у переліку.</summary>
 /// <param name="Id">Ідентифікатор зрізу.</param>

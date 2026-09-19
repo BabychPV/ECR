@@ -231,6 +231,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();
         services.AddScoped<Reporting.BuildReportSnapshotHandler>();
+        services.AddScoped<Reporting.VerifyReportSnapshotHandler>();
 
         // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
         // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні

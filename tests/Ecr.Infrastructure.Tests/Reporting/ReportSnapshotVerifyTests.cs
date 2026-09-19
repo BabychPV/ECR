@@ -1,0 +1,138 @@
+// tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotVerifyTests.cs
+using Ecr.Domain.Entities.Reporting;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Reporting;
+using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
+using Xunit;
+
+namespace Ecr.Infrastructure.Tests.Reporting;
+
+/// <summary>
+/// Перевірка зрізу на РЕАЛЬНІЙ базі (BE-17): сума перераховується за тим, що
+/// справді лежить у <c>rpt.ReportRow</c>, а не переказується зі збереженої.
+/// </summary>
+/// <remarks>
+/// ⚠ Саме на базі, а не на підробці: вся складність — у колі через
+/// <c>decimal(28,10)</c> (масштаб числа після читання інший, ніж при побудові)
+/// і в порядку рядків, який первинний ключ дає алфавітним за кодом колонки.
+/// Обидва дефекти на підробці невидимі.
+/// </remarks>
+[Collection("SqlServer")]
+public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
+{
+    private static readonly DateTime Now = new(2026, 4, 1, 10, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Незмінений_зріз_із_числами_збігається_після_кола_через_базу()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var snapshotId = await SeedAsync(chain);
+
+        await using var db = chain.CreateContext();
+        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now))
+            .VerifyAsync(snapshotId, CancellationToken.None);
+
+        Assert.NotNull(hashes);
+        Assert.Equal(64, hashes.Stored.Length);
+        Assert.Equal(hashes.Stored, hashes.Actual);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Вміст_підмінено_після_створення_суми_розходяться()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var snapshotId = await SeedAsync(chain);
+
+        await using var db = chain.CreateContext();
+
+        // Підміна повз застосунок — рівно те, від чого сума й захищає.
+        var touched = await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE rpt.ReportRow SET ValueNumeric = 999 WHERE SnapshotId = {snapshotId} AND ColumnCode = 'Value'");
+        Assert.Equal(1, touched);
+
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var hashes = await builder.VerifyAsync(snapshotId, CancellationToken.None);
+
+        Assert.NotNull(hashes);
+        Assert.NotEqual(hashes.Stored, hashes.Actual);
+
+        // Перевірка нічого не лагодить: збережена сума лишилась як була.
+        var again = await builder.VerifyAsync(snapshotId, CancellationToken.None);
+        Assert.Equal(hashes, again);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зрізу_немає_перевірка_віддає_null()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await chain.BuildAsync();
+
+        await using var db = chain.CreateContext();
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        Assert.Null(await builder.VerifyAsync(long.MaxValue, CancellationToken.None));
+        Assert.Null(await builder.FindProjectIdAsync(long.MaxValue, CancellationToken.None));
+    }
+
+    /// <summary>Зріз з одним рядком результату — у тому ж вигляді, що дає побудова.</summary>
+    private static async Task<long> SeedAsync(TestDocumentBuilder chain)
+    {
+        var document = await chain.BuildAsync();
+
+        await using var db = chain.CreateContext();
+
+        var def = new ReportDef(
+            EcrCode.Create($"RPT{Guid.NewGuid().ToString("N")[..8]}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Verify test" }),
+            isRegulatory: true);
+
+        db.ReportDefs.Add(def);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var version = new ReportVersion(def.Id, "1.0", "[]", "{}", Now);
+        version.Publish();
+        db.ReportVersions.Add(version);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var snapshot = new ReportSnapshot(
+            version.Id, document.ProjectId, document.PeriodKey.Value, SnapshotStatus.Draft, Now, null);
+
+        db.ReportSnapshots.Add(snapshot);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        // ⚠ Масштаб чисел — як при побудові: ідентифікатори цілі (масштаб 0),
+        // значення — дріб. Після кола через `decimal(28,10)` усе матиме
+        // масштаб 10, і сума мусить це пережити.
+        List<ReportRow> rows =
+        [
+            Cell(snapshot.Id, "DocumentId", null, 4217L),
+            Cell(snapshot.Id, "RowKey", "row-1", null),
+            Cell(snapshot.Id, "OutputCode", "E_CO2", null),
+            Cell(snapshot.Id, "Value", null, 12.5m),
+            Cell(snapshot.Id, "SubstanceEntryId", null, null),
+        ];
+
+        db.ReportRows.AddRange(rows);
+        snapshot.Complete(1, ReportSnapshotBuilder.ComputeHash(rows), null, null);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        return snapshot.Id;
+    }
+
+    private static ReportRow Cell(long snapshotId, string column, string? text, decimal? number)
+    {
+        var row = new ReportRow(snapshotId, 1, column);
+        row.SetValue(text, number, null);
+        return row;
+    }
+}

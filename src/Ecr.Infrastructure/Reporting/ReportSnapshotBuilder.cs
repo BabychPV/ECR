@@ -64,7 +64,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 
         snapshot.Complete(
             rows.Count,
-            Hash(rows),
+            ComputeHash(rows),
 
             // Прогін, з якого взято числа: без нього неможливо сказати, на
             // чому стоїть значення у звіті.
@@ -169,6 +169,67 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<int?> FindProjectIdAsync(long snapshotId, CancellationToken ct)
+        => await db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.Id == snapshotId)
+            .Select(s => (int?)s.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct)
+    {
+        var stored = await db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.Id == snapshotId)
+            .Select(s => new StoredHash(s.Id, s.ContentHash))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (stored is null)
+        {
+            return null;
+        }
+
+        // ⚠ Порядок — той самий, у якому рядки хешувалися при побудові:
+        // `RowNo` зростає, а п'ять комірок рядка йдуть у порядку `Cell(...)`.
+        // Первинний ключ (SnapshotId, RowNo, ColumnCode) дав би АЛФАВІТНИЙ
+        // порядок колонок, тому комірки одного рядка впорядковує
+        // `ColumnOrder`, а не база.
+        var rows = await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId)
+            .OrderBy(r => r.RowNo)
+            .Take(MaxRows * ColumnsPerResult)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var ordered = rows
+            .OrderBy(r => r.RowNo)
+            .ThenBy(r => ColumnOrder(r.ColumnCode))
+            .ThenBy(r => r.ColumnCode, StringComparer.Ordinal)
+            .ToList();
+
+        return new SnapshotHashes(
+            stored.Hash is null ? string.Empty : Convert.ToHexString(stored.Hash),
+            Convert.ToHexString(ComputeHash(ordered)));
+    }
+
+    /// <summary>Порядок комірок у рядку — той, у якому їх складає <c>AggregateAsync</c>.</summary>
+    private static readonly string[] Columns =
+        ["DocumentId", "RowKey", "OutputCode", "Value", "SubstanceEntryId"];
+
+    private static int ColumnOrder(string columnCode)
+    {
+        var index = Array.IndexOf(Columns, columnCode);
+        return index < 0 ? Columns.Length : index;
+    }
+
+    /// <summary>Збережена сума зрізу.</summary>
+    private sealed record StoredHash(long Id, byte[]? Hash);
 
     /// <summary>Стеля переліку зрізів.</summary>
     private const int MaxSnapshots = 500;
@@ -336,16 +397,32 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     /// зрізи з однаковими числами мусять мати однакову суму, інакше нею
     /// неможливо довести, що звіт не змінився.
     /// </remarks>
-    private static byte[] Hash(IReadOnlyList<ReportRow> rows)
+    /// <param name="rows">Рядки зрізу в порядку побудови.</param>
+    public static byte[] ComputeHash(IReadOnlyList<ReportRow> rows)
     {
+        ArgumentNullException.ThrowIfNull(rows);
+
         var text = string.Join(
             '\n',
             rows.Select(r => string.Create(
                 CultureInfo.InvariantCulture,
-                $"{r.RowNo}|{r.ColumnCode}|{r.ValueString}|{r.ValueNumeric}")));
+                $"{r.RowNo}|{r.ColumnCode}|{r.ValueString}|{Canonical(r.ValueNumeric)}")));
 
         return SHA256.HashData(Encoding.UTF8.GetBytes(text));
     }
+
+    /// <summary>Число без хвостових нулів, із точністю колонки <c>decimal(28,10)</c>.</summary>
+    /// <remarks>
+    /// ⛔ BE-17. <c>decimal</c> у .NET несе МАСШТАБ: <c>5m</c> друкується «5», а
+    /// те саме число, прочитане з <c>decimal(28,10)</c>, — «5.0000000000». Поки
+    /// суму рахували лише при побудові, цього не було видно; перерахунок за
+    /// збереженими рядками давав би іншу суму на КОЖНОМУ зрізі з числами, тобто
+    /// перевірка завжди казала б «вміст змінено».
+    /// </remarks>
+    private static string Canonical(decimal? value)
+        => value is { } number
+            ? number.ToString("0.##########", CultureInfo.InvariantCulture)
+            : string.Empty;
 
     /// <summary>Результат розрахунку для агрегації.</summary>
     /// <remarks>

@@ -3,6 +3,7 @@ import { Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Te
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import type {
   BuildSnapshotRequest,
   JobStatus,
@@ -121,6 +122,22 @@ export function SnapshotsPage(): JSX.Element {
     retry: false,
   });
 
+  // BE-17: перевірка незмінності. Підсумок тримається ПО ЗРІЗУ, а не один на
+  // сторінку: звіряють зазвичай кілька зрізів одного періоду поспіль, і
+  // відповідь, що зникає з натисканням наступної кнопки, довелося б записувати
+  // на папірці.
+  const [verified, setVerified] = useState<Record<number, SnapshotVerifyResponse>>({});
+
+  const verify = useMutation({
+    mutationFn: (snapshotId: number) =>
+      apiFetch<SnapshotVerifyResponse>(`/api/v1/reports/snapshots/${snapshotId}/verify`, {
+        method: 'POST',
+      }),
+    onSuccess: (result, snapshotId) =>
+      setVerified((previous) => ({ ...previous, [snapshotId]: result })),
+    onError: showApiError,
+  });
+
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
 
   // ⚠ Інвалідація й тост — ОДИН раз на задачу, не на кожен рендер: `ref`,
@@ -216,6 +233,7 @@ export function SnapshotsPage(): JSX.Element {
                 <Table.Th>{t('snapshots.rows')}</Table.Th>
                 <Table.Th>{t('snapshots.status')}</Table.Th>
                 <Table.Th>{t('snapshots.hash')}</Table.Th>
+                <Table.Th>{t('snapshots.verify')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -259,6 +277,13 @@ export function SnapshotsPage(): JSX.Element {
                     <Text size="xs" style={{ wordBreak: 'break-all' }}>
                       {snapshot.contentHash ?? '—'}
                     </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <VerifyCell
+                      result={verified[snapshot.id]}
+                      loading={verify.isPending && verify.variables === snapshot.id}
+                      onVerify={() => verify.mutate(snapshot.id)}
+                    />
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -319,6 +344,48 @@ export function SnapshotsPage(): JSX.Element {
         onClose={() => setManaging(false)}
         definitions={reportDefs.data ?? []}
       />
+    </>
+  );
+}
+
+type SnapshotVerifyResponse = components['schemas']['SnapshotVerifyResponse'];
+
+/**
+ * Дія «Перевірити» й її підсумок у рядку зрізу (BE-17).
+ *
+ * ⛔ При розбіжності показуються ОБИДВІ суми цілком: «не збігається» без
+ * чисел — це твердження, яке нема чим ні підтвердити, ні передати далі.
+ */
+function VerifyCell(props: {
+  result: SnapshotVerifyResponse | undefined;
+  loading: boolean;
+  onVerify: () => void;
+}): JSX.Element {
+  const { result } = props;
+
+  return (
+    <>
+      <Group gap="xs" wrap="nowrap">
+        <Button size="compact-xs" variant="default" loading={props.loading} onClick={props.onVerify}>
+          {t('snapshots.verify')}
+        </Button>
+        {result !== undefined && (
+          <Badge
+            variant="light"
+            miw="fit-content"
+            color={result.matches ? 'statusSuccess' : 'statusError'}
+          >
+            {t(result.matches ? 'snapshots.verifyMatch' : 'snapshots.verifyMismatch')}
+          </Badge>
+        )}
+      </Group>
+      {result !== undefined && !result.matches && (
+        <Text size="xs" mt="xs" style={{ wordBreak: 'break-all' }}>
+          {t('snapshots.verifyStored', { hash: result.stored || '—' })}
+          <br />
+          {t('snapshots.verifyActual', { hash: result.actual })}
+        </Text>
+      )}
     </>
   );
 }

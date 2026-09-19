@@ -162,6 +162,59 @@ public sealed class BuildReportSnapshotHandler(
     }
 }
 
+/// <summary>
+/// Перевірка незмінності зрізу (BE-17). Право <c>Report.ViewRegulatory</c> —
+/// те саме, що відкриває перелік: перевірка нічого не змінює, вона лише
+/// відповідає на питання, заради якого суму в переліку й показують.
+/// </summary>
+public sealed class VerifyReportSnapshotHandler(
+    IReportSnapshotBuilder snapshots,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
+{
+    /// <summary>Перераховує суму збереженого вмісту й порівнює зі збереженою.</summary>
+    /// <param name="snapshotId">Зріз.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="NotFoundException">Зрізу немає або він у невидимому проєкті.</exception>
+    public async Task<SnapshotVerifyResponse> HandleAsync(long snapshotId, CancellationToken ct)
+    {
+        var profile = await PermissionCheck
+            .RequireAsync(access, currentUser, ListReportSnapshotsHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        var projectId = await snapshots.FindProjectIdAsync(snapshotId, ct).ConfigureAwait(false);
+
+        // ⛔ Чужий проєкт — той самий 404, що й неіснуючий зріз, а не 403:
+        // перелік (Q-239) чужих зрізів не показує взагалі, і відмова «є, але
+        // не твій» розповідала б перебором ідентифікаторів те, що перелік
+        // приховує.
+        if (projectId is not { } project
+            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read)
+        {
+            throw NotFound(snapshotId);
+        }
+
+        var hashes = await snapshots.VerifyAsync(snapshotId, ct).ConfigureAwait(false)
+                     ?? throw NotFound(snapshotId);
+
+        // ⚠ Порожня збережена сума — «не збігається», а не «нема чого
+        // перевіряти»: зріз без суми довести свою незмінність не може.
+        var matches = hashes.Stored.Length > 0
+                      && string.Equals(hashes.Stored, hashes.Actual, StringComparison.OrdinalIgnoreCase);
+
+        return new SnapshotVerifyResponse(matches, hashes.Stored, hashes.Actual);
+    }
+
+    private static NotFoundException NotFound(long snapshotId)
+        => new(ErrorCodes.ReportNotFound, $"Зрізу {snapshotId} немає.");
+}
+
+/// <summary>Підсумок перевірки зрізу.</summary>
+/// <param name="Matches">Чи перерахована сума збіглася зі збереженою.</param>
+/// <param name="Stored">Сума, записана при побудові (hex).</param>
+/// <param name="Actual">Сума, перерахована за збереженими рядками (hex).</param>
+public sealed record SnapshotVerifyResponse(bool Matches, string Stored, string Actual);
+
 /// <summary>Завдання на побудову зрізу.</summary>
 /// <param name="ReportVersionId">Версія звіту.</param>
 /// <param name="ProjectId">Проєкт.</param>
