@@ -7,6 +7,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
@@ -251,7 +252,12 @@ public sealed class SubmitSheetHandler(
             .CurrentApprovalStepAsync(documentId, sheetDefId, key, ct)
             .ConfigureAwait(false);
 
+        var fromStatus = state.Status;
         state.Submit(userId, now, step?.StepId);
+
+        // `BE-11`: перехід лягає в журнал тим самим комітом, що й стан.
+        await workflow.AddEventAsync(
+            ApprovalEvent.For(state, fromStatus, ApprovalAction.Submit, userId, now), ct).ConfigureAwait(false);
 
         // ⛔ Подання СПОВІЩЕННЯ НЕ ПОРОДЖУЄ (`D-119`). Тут раніше стояла
         // постановка події в чергу — прибрано за рішенням замовника: лист про

@@ -3,6 +3,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
@@ -92,7 +93,14 @@ public sealed class ReopenDocumentHandler(
             var state = await workflow
                 .GetOrCreateAsync(documentId, sheetDefId, key, innerCt)
                 .ConfigureAwait(false);
-            state.Reopen(userId, reason, clock.UtcNow);
+            var fromStatus = state.Status;
+            var now = clock.UtcNow;
+            state.Reopen(userId, reason, now);
+
+            // `BE-11`: перехід і його причина — у журнал тим самим комітом.
+            await workflow.AddEventAsync(
+                ApprovalEvent.For(state, fromStatus, ApprovalAction.Reopen, userId, now, reason),
+                innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);

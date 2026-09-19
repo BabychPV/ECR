@@ -38,7 +38,7 @@ namespace Ecr.Application.Tests.Workflow;
 /// зеленим і на системі, яка не пише нічого ніколи.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class WorkflowTransactionTests(SqlServerFixture sql)
+public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 {
     private const int PeriodKeyValue = 202601;
     private const int UserId = 9;
