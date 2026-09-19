@@ -2466,6 +2466,25 @@ public interface IStyleCatalog
 }
 ```
 
+#### `ITableFillStore`
+
+Заповненість таблиць документа за період (`BE-10`): скільки рядків
+матеріалізовано і скільки комірок у НЕобчислюваних колонках уже має значення —
+згрупованими запитами, а не підрахунком у пам'яті над вивантаженим зрізом.
+`PeriodKey` стоїть у предикаті кожного запиту: це ключ партиції `doc.CellValue`
+і `doc.TableRow` (урок `WR-05`).
+
+```csharp
+public interface ITableFillStore
+{
+    public Task<IReadOnlyList<TableFillCounts>> GetFillCountsAsync(
+        long documentId, PeriodKey periodKey,
+        IReadOnlyCollection<int> computedColumnDefIds, CancellationToken ct);
+    public Task<IReadOnlyList<PeriodAccessRuleDef>> GetPeriodAccessRulesAsync(
+        int templateVersionId, CancellationToken ct);
+}
+```
+
 #### `ITemplateStructure`
 
 Синхронний доступ до вже завантаженого знімка структури версії.
@@ -2844,6 +2863,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
+| `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
 | `GET` | `/api/v1/documents/{id}/export/{exportId}` | `Document.Export` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/preview` | `Document.Import` | 5 |
