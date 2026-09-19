@@ -17,6 +17,7 @@ import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
@@ -292,9 +293,26 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                   {/* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin`
                       перезаписує цей стовпець при запуску, і називати його
                       «створено» означало б брехати про кожну задачу, що вже
-                      працює. Формат — той самий сирий ISO, що в журналі
-                      аудиту й у знімках звітності. */}
-                  <Table.Td>{job.startedAt}</Table.Td>
+                      працює.
+
+                      ✎ 2026-09-19. Тут стояв сирий рядок сервера
+                      (`{job.startedAt}` → `2026-09-19T09:58:00Z`), і
+                      виправдання було таке: «формат — той самий сирий ISO, що
+                      в журналі аудиту й у знімках звітності». Аргумент
+                      СЛУШНИЙ і не скасований: перелік задач читають поруч із
+                      журналом, момент із нього копіюють у запит до бази й
+                      звіряють із `aud.*` — а доказ мусить бути однозначним,
+                      без «о котрій це за чиїм поясом».
+
+                      ⛔ Знімає його не відмова від точності, а те, що
+                      `Timestamp` тримає ОБИДВІ форми одночасно: видимий текст
+                      читабельний мовою набору, а РІВНО той рядок, що віддав
+                      сервер, лишається в `dateTime`/`title` — тобто в DOM, у
+                      копії розмітки і в e2e-локаторі. Звіряти є з чим,
+                      дивитися — на що. */}
+                  <Table.Td>
+                    <Timestamp value={job.startedAt} />
+                  </Table.Td>
                   <Table.Td>
                     {/* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не
                         мають переносити одна одну на другий рядок і рвати
