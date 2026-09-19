@@ -16,6 +16,7 @@ SQL / CLR / PI AF / SSRS. Замовник — NCOC; мови продукту `
 | **Пишете код** | → **[`build/00-START-HERE.md`](build/00-START-HERE.md)** |
 | Хочете знати, **що ще не зроблено** | → **[`build/OPEN-ITEMS.md`](build/OPEN-ITEMS.md)** |
 | Хочете знати, **що стоїть між нинішнім станом і стабільним продуктом** | → **[`build/DIRECTIVE-14-ARCH.md`](build/DIRECTIVE-14-ARCH.md)** (зведений перелік виправлень із порядком — починати звідси), [`build/DIRECTIVE-14.md`](build/DIRECTIVE-14.md) (аудит, рішення) і [`build/DIRECTIVE-14-UIUX.md`](build/DIRECTIVE-14-UIUX.md) (інтерфейс) |
+| Переносите **новий інтерфейс** або розширюєте API під нього | → **[`build/DIRECTIVE-15.md`](build/DIRECTIVE-15.md)** (рішення, питання, порядок), [`build/DIRECTIVE-15-FRONTEND.md`](build/DIRECTIVE-15-FRONTEND.md), [`build/DIRECTIVE-15-BACKEND.md`](build/DIRECTIVE-15-BACKEND.md); еталон — робочий макет [`design/hybrid/`](design/hybrid/README.md) |
 | Маєте відповісти як замовник | → **[`build/CUSTOMER-QUESTIONS.md`](build/CUSTOMER-QUESTIONS.md)** |
 | Приймаєте рішення про обсяг, строк, бюджет | → [`tz/00-README.md`](tz/00-README.md) |
 | Хочете знати, **що вирішено і чому** | → [`tz/10-decisions.md`](tz/10-decisions.md) |
@@ -87,6 +88,9 @@ docs/
 │   ├── DIRECTIVE-14.md    ★  аудит 2026-09-18: знахідки, рішення, план робіт
 │   ├── DIRECTIVE-14-UIUX.md  те саме про інтерфейс
 │   ├── DIRECTIVE-14-ARCH.md ★ архітектурна переперевірка: чому не тягне навантаження, перелік виправлень
+│   ├── DIRECTIVE-15.md    ★  новий інтерфейс: рішення, питання людині, порядок
+│   ├── DIRECTIVE-15-FRONTEND.md  токени, набір компонентів, кроки UI-00…UI-10, таблиця екранів
+│   ├── DIRECTIVE-15-BACKEND.md   прогалини API BE-01…BE-31 з кодом і тестами
 │   ├── CUSTOMER-QUESTIONS.md  на що відповідає замовник
 │   ├── 01-TOR.md             обсяг і критерії приймання
 │   ├── 02-contracts.md    ★  контракти готовим кодом
