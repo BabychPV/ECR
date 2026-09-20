@@ -2389,7 +2389,77 @@ USING (VALUES
     -- бляклий: подію навмисно не надіслали (дедуплікація), це нормальна робота.
     (N'status.notificationDelivery.Sent',       N'en', N'Sent', 1),
     (N'status.notificationDelivery.Failed',     N'en', N'Failed', 1),
-    (N'status.notificationDelivery.Suppressed', N'en', N'Suppressed', 1)
+    (N'status.notificationDelivery.Suppressed', N'en', N'Suppressed', 1),
+
+    -- Екран сповіщень (BE-33, рішення 2.3 директиви №15): канали, правила
+    -- «подія × канал» і журнал доставок.
+    (N'nav.notifications',                 N'en', N'Notifications', 1),
+    (N'notifications.title',               N'en', N'Notifications', 1),
+
+    (N'notifications.channels',            N'en', N'Channels', 1),
+    (N'notifications.addChannel',          N'en', N'Add channel', 1),
+    (N'notifications.editChannel',         N'en', N'Edit', 1),
+    (N'notifications.channelForm',         N'en', N'Channel', 1),
+    (N'notifications.channelName',         N'en', N'Name', 1),
+    (N'notifications.channelKind',         N'en', N'Transport', 1),
+    (N'notifications.kind.Smtp',           N'en', N'Email (SMTP)', 1),
+    (N'notifications.kind.TeamsWebhook',   N'en', N'Teams webhook', 1),
+    (N'notifications.enabled',             N'en', N'Enabled', 1),
+    (N'notifications.enabledYes',          N'en', N'Yes', 1),
+    (N'notifications.enabledNo',           N'en', N'No', 1),
+    (N'notifications.modified',            N'en', N'Changed', 1),
+    (N'notifications.channelSaved',        N'en', N'Channel saved.', 1),
+    (N'notifications.channelDeleted',      N'en', N'Channel deleted.', 1),
+    (N'notifications.noChannels',          N'en', N'No channels yet', 1),
+    (N'notifications.noChannelsHint',      N'en', N'Until a channel exists, nobody is notified: rules have nowhere to send.', 1),
+
+    -- ⛔ Секрет каналу сервер не віддає НІКОЛИ — лише ознаку `hasSecret`.
+    -- Тому підписи говорять про ЗАМІНУ, а не про правку значення.
+    (N'notifications.secret',              N'en', N'Secret', 1),
+    (N'notifications.secretHint',          N'en', N'The stored secret is never shown. Typing a new one replaces it.', 1),
+    (N'notifications.secretSet',           N'en', N'Set', 1),
+    (N'notifications.secretMissing',       N'en', N'No secret', 1),
+    (N'notifications.secretSaved',         N'en', N'Secret replaced.', 1),
+    (N'notifications.setSecret',           N'en', N'Secret', 1),
+    (N'notifications.clearSecret',         N'en', N'Remove secret', 1),
+    (N'notifications.testChannel',         N'en', N'Send test', 1),
+    (N'notifications.testOk',              N'en', N'The channel accepted the test message.', 1),
+    (N'notifications.testFailed',          N'en', N'The channel refused the test message.', 1),
+
+    (N'notifications.smtpHost',            N'en', N'Server', 1),
+    (N'notifications.smtpPort',            N'en', N'Port', 1),
+    (N'notifications.smtpFrom',            N'en', N'From', 1),
+    (N'notifications.smtpRecipients',      N'en', N'Recipients', 1),
+    (N'notifications.smtpRecipientsHint',  N'en', N'Comma-separated addresses.', 1),
+    (N'notifications.smtpUseTls',          N'en', N'Require TLS', 1),
+    (N'notifications.teamsTitle',          N'en', N'Card title', 1),
+    (N'notifications.teamsTitleHint',      N'en', N'Shown above the message in Teams.', 1),
+
+    -- Матриця правил «подія × канал».
+    (N'notifications.rules',               N'en', N'Rules', 1),
+    (N'notifications.event',               N'en', N'Event', 1),
+    (N'notifications.channel',             N'en', N'Channel', 1),
+    (N'notifications.minSeverity',         N'en', N'From severity', 1),
+    (N'notifications.saveRules',           N'en', N'Save rules', 1),
+    (N'notifications.rulesSaved',          N'en', N'Rules saved.', 1),
+
+    -- ⚠ `NotificationEventKind` — п'ять видів, усі приходять у `eventKinds`,
+    -- навіть ті, на які правила ще немає.
+    (N'notifications.event.JobFailed',              N'en', N'Background job failed', 1),
+    (N'notifications.event.ConsistencyIssuesFound', N'en', N'Consistency issues found', 1),
+    (N'notifications.event.PartitionsRunningOut',   N'en', N'Partitions running out', 1),
+    (N'notifications.event.CollectionFailed',       N'en', N'Collection from a source failed', 1),
+    (N'notifications.event.ExportFailed',           N'en', N'Export failed', 1),
+
+    -- Журнал доставок.
+    (N'notifications.deliveries',          N'en', N'Deliveries', 1),
+    (N'notifications.at',                  N'en', N'When', 1),
+    (N'notifications.status',              N'en', N'Outcome', 1),
+    (N'notifications.error',               N'en', N'Reason', 1),
+    (N'notifications.channelGone',         N'en', N'The channel has been deleted; the log entry remains.', 1),
+    (N'notifications.showMore',            N'en', N'Show more', 1),
+    (N'notifications.noDeliveries',        N'en', N'No deliveries yet', 1),
+    (N'notifications.noDeliveriesHint',    N'en', N'Nothing has been sent since the log was started.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

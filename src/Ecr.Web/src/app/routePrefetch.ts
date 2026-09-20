@@ -126,6 +126,11 @@ export const UiStringsPage = lazy(UiStringsPageLoader);
 const HealthPageLoader = async () => ({ default: (await import('@/pages/admin/HealthPage')).HealthPage });
 export const HealthPage = lazy(HealthPageLoader);
 
+const NotificationsPageLoader = async () => ({
+  default: (await import('@/pages/admin/NotificationsPage')).NotificationsPage,
+});
+export const NotificationsPage = lazy(NotificationsPageLoader);
+
 /**
  * Прогрів ЧАНКА маршруту за наміром — виклик того самого завантажувача, що
  * й аргумент `lazy()` вище. Виклик поза рендером НЕ рендерить компонент —
@@ -162,6 +167,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminConsistency.id]: ConsistencyIssuesPageLoader,
   [routes.adminUiStrings.id]: UiStringsPageLoader,
   [routes.adminHealth.id]: HealthPageLoader,
+  [routes.adminNotifications.id]: NotificationsPageLoader,
 };
 
 /**

@@ -19,6 +19,7 @@ import {
   MethodologiesPage,
   MethodologyVersionsPage,
   MyGroupsPage,
+  NotificationsPage,
   PeriodsPage,
   RegistriesPage,
   RegistryConstructorPage,
@@ -313,6 +314,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminUiStrings, 'admin'),
             element: guarded(routes.adminUiStrings.handle, <UiStringsPage />),
             handle: routes.adminUiStrings.handle,
+          },
+          {
+            path: relativePath(routes.adminNotifications, 'admin'),
+            element: guarded(routes.adminNotifications.handle, <NotificationsPage />),
+            handle: routes.adminNotifications.handle,
           },
           {
             path: relativePath(routes.adminHealth, 'admin'),

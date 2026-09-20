@@ -11,6 +11,7 @@ import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { JobsPage } from '@/pages/admin/JobsPage';
 import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
+import { NotificationsPage } from '@/pages/admin/NotificationsPage';
 
 /**
  * WCAG 2.1 AA на кожному маршруті (`ФВ-14.16`, `D-127`) — частина 3 із 4
@@ -28,6 +29,10 @@ const Pages: [string, () => JSX.Element][] = [
   ['/admin/mapping', MappingPreviewPage],
   ['/admin/jobs', JobsPage],
   ['/admin/snapshots', SnapshotsPage],
+
+  // ⚠ Новий маршрут (`BE-33`) додано саме сюди: ця частина найлегша, і жодного
+  // з трьох найповільніших маршрутів у ній немає.
+  ['/admin/notifications', NotificationsPage],
 ];
 
 registerA11yFetchMock();

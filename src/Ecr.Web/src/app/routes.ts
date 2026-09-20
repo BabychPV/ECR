@@ -316,6 +316,24 @@ export const routes = {
     handle: { labelKey: 'nav.uiStrings', permission: 'System.ManageLocalization', icon: 'uiStrings' },
     showInNav: true,
   },
+  /**
+   * Канали, правила й журнал доставок сповіщень (`BE-33`, рішення 2.3
+   * директиви №15).
+   *
+   * ⚠ Право — `System.ManageNotifications` (те саме, що вимагають
+   * `NotificationChannelsController` і `NotificationRulesController`): екран
+   * не лише показує, хто й що отримує, а й заводить канали з секретами.
+   */
+  adminNotifications: {
+    id: 'admin-notifications',
+    path: '/admin/notifications',
+    handle: {
+      labelKey: 'nav.notifications',
+      permission: 'System.ManageNotifications',
+      icon: 'notifications',
+    },
+    showInNav: true,
+  },
   adminHealth: {
     id: 'admin-health',
     path: '/admin/health',
