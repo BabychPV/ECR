@@ -20,7 +20,20 @@ import { createQueryClient } from '@/app/queryClient';
  * з обробником не кричить двічі.
  */
 
-/** Відмова сервера в тій самій формі, у якій її бачить застосунок. */
+/**
+ * Відмова сервера в тій самій формі, у якій її бачить застосунок.
+ *
+ * ✎ 2026-09-20. Додано `messageKey`. Відколи діє рішення людини «українську
+ * прибрати — має бути залежно від обраної мови», подробиця доходить до
+ * екрана ЛИШЕ з цією ознакою: нею сервер каже, що `detail` уже зібрано з
+ * каталогу мовою користувача. Період — серед головних шляхів, які сервер уже
+ * позначає, тож фікстура описує реальність.
+ *
+ * ⚠ Текст лишився українським НАВМИСНО: предмет цього тесту — сітка під
+ * змінами («відмова не зникає мовчки»), а не мова. Мову стереже окремий
+ * тест у `shared/ui/__tests__/problemText.test.ts` і на рівні екрана —
+ * `RegistriesPage.newRegistrySilentFailure`.
+ */
 function serverRefusal(): EcrApiError {
   return new EcrApiError({
     type: 'about:blank',
@@ -29,6 +42,7 @@ function serverRefusal(): EcrApiError {
     errorCode: 'ECR-PRD-4223',
     detail: 'Період закрито — спершу відкрийте період.',
     correlationId: 'test-correlation',
+    extensions2: { messageKey: 'err.ECR-PRD-4223.periodClosed' },
   });
 }
 

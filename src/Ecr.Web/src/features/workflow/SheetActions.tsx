@@ -15,6 +15,7 @@ import { invalidateSlices } from '@/features/grid/sliceCache';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
@@ -164,7 +165,7 @@ export function SheetActions({
   const session = useSession();
 
   // Яка дія чекає на причину; `null` — діалог закритий.
-  const [asking, setAsking] = useState<'reject' | 'reopen' | null>(null);
+  const [asking, setAsking] = useState<'reject' | 'reopen' | 'recall' | null>(null);
 
   /** Перечитує стан документа після кожної зміни робочого процесу. */
   const refresh = async (): Promise<void> => {
@@ -219,6 +220,35 @@ export function SheetActions({
     },
     // ⚠ Найчастіша відмова тут — `ECR-PRD-4223`: період закрито, і спершу
     // треба відкрити період, а це інше право (`D-67`). Текст веде саме туди.
+    onError: showApiError,
+  });
+
+  /*
+   * `BE-31`: відкликання подання автором. ⛔ Чи показати кнопку, вирішує
+   * СЕРВЕР (`GET …/recall`): «автор подання» і «жоден крок не підписано» з
+   * `/api/v1/me` і стану аркуша не виводяться. Запит іде лише на поданому
+   * аркуші; доки відповіді немає — кнопки немає.
+   */
+  const recallAvailability = useRecallAvailability(
+    documentId,
+    sheetDefId,
+    periodKey,
+    isAllowed('recall', state),
+  );
+  const canRecall = isAllowed('recall', state) && recallAvailability.data?.canRecall === true;
+
+  const recall = useMutation({
+    mutationFn: (reason: string) =>
+      apiFetch(`/api/v1/documents/${documentId}/recall`, {
+        method: 'POST',
+        body: JSON.stringify({ sheetDefId, periodKey, reason } satisfies RecallSheetRequest),
+      }),
+    onSuccess: async () => {
+      await refresh();
+      setAsking(null);
+      showDone(t('workflow.recalled'));
+    },
+    // ⚠ `409` тут — не збій: погоджувач устиг підписати крок, і текст каже саме це.
     onError: showApiError,
   });
 
@@ -461,6 +491,7 @@ export function SheetActions({
     canSubmit ||
     canApprove ||
     canReject ||
+    canRecall ||
     (isAllowed('reopen', state) && can(me, 'Document.Reopen'));
 
   return (
@@ -549,6 +580,23 @@ export function SheetActions({
           {t('workflow.reopen')}
         </Button>
       )}
+
+      {canRecall && (
+        <Button size="xs" variant="light" onClick={() => setAsking('recall')}>
+          {t('workflow.recall')}
+        </Button>
+      )}
+
+      <ReasonModal
+        opened={asking === 'recall'}
+        title={t('workflow.recallTitle')}
+        label={t('workflow.reason')}
+        description={t('workflow.recallHint')}
+        confirmLabel={t('workflow.recall')}
+        isPending={recall.isPending}
+        onConfirm={(reason) => recall.mutate(reason)}
+        onClose={() => setAsking(null)}
+      />
 
       <ReasonModal
         opened={asking === 'reject'}
