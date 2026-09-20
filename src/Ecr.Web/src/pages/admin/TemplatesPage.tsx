@@ -1,5 +1,5 @@
-﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, Table, TextInput } from '@mantine/core';
+import { useState, type JSX } from 'react';
+import { Anchor, Button, Group, Modal, Table, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -16,6 +16,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
@@ -168,15 +169,39 @@ export function TemplatesPage(): JSX.Element {
                   <Table.Td>
                     <Group gap="xs">
                       {(versionQueries[index]?.data?.items ?? []).map((version) => (
-                        <Badge
-                          key={version.id}
-                          variant={version.status === 'Published' ? 'filled' : 'light'}
-                          component={Link}
-                          to={`/admin/templates/${template.id}/versions/${version.id}`}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {version.version} · {version.status} · r{version.presentationRevision}
-                        </Badge>
+                        /*
+                         * ⛔ Тут стояв ОДИН `Badge`, у тілі якого друкувався
+                         * `version.status` — тобто код сервера (`Published`,
+                         * `Deprecated`) як видимий текст. Це той самий дефект,
+                         * що вже знято з п'яти екранів: код не є текстом
+                         * інтерфейсу й не перекладається, тож казахський
+                         * користувач бачив англійське слово, а `Deprecated`
+                         * нічим не відрізнявся від чинної версії, окрім
+                         * `variant`, який ніхто не пояснює.
+                         *
+                         * ⚠ `Draft` і `Published` у наборі обидва `neutral`, і
+                         * це навмисно: чернетка — не проблема й не
+                         * попередження. Розрізняє їх ПІДПИС із каталогу
+                         * (`status.version.*`), а не колір — рівно те, чого
+                         * вимагає `L3`. Знятий `variant="filled"` для
+                         * `Published` нічого не повідомляв: «опублікована» — це
+                         * норма, а не подія.
+                         *
+                         * ⚠ Посилання стало `Anchor`, а не `Badge` із
+                         * `component={Link}`: перехід на версію — це посилання,
+                         * і читалка має оголосити його посиланням, а не
+                         * позначкою з курсором-пальцем.
+                         */
+                        <Group key={version.id} gap="xs" wrap="nowrap">
+                          <Anchor
+                            component={Link}
+                            size="sm"
+                            to={`/admin/templates/${template.id}/versions/${version.id}`}
+                          >
+                            {version.version} · r{version.presentationRevision}
+                          </Anchor>
+                          <StatusBadge kind="version" state={version.status} quiet />
+                        </Group>
                       ))}
 
                       {/* ⛔ Кнопка стоїть у рядку шаблону, а не на окремому
