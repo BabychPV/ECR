@@ -244,25 +244,18 @@ public sealed class QuartzJobScheduler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cronExpression);
 
+        // ⛔ ДО звернення до Quartz: той кинув би FormatException уже після
+        // DeleteJob — тобто невалідна правка знімала б чинний розклад.
+        if (!IsValidCron(cronExpression, out var cronError))
+        {
+            throw new ArgumentException(
+                $"Невалідний cron-вираз «{cronExpression}»: {cronError}", nameof(cronExpression));
+        }
+
         var scheduler = Scheduler(typeof(TJob).Name);
         var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
 
-        var json = JsonSerializer.Serialize(payload, PayloadOptions);
-
-        // ⚠ Ключ СТАЛИЙ — ім'я типу плюс відбиток payload. Сталість робить
-        // розклад ідемпотентним: повторний старт застосунку не плодить
-        // дванадцять копій нічної перевірки, які всі прокинуться об одній
-        // годині.
-        //
-        // ⚠ Payload входить у ключ, і це не деталь: збір за розкладом
-        // ставиться ОКРЕМО на кожну сутність джерела, і спільний ключ на тип
-        // лишив би одну задачу з останнім payload — решта джерел мовчки
-        // ніколи не збиралася б.
-        //
-        // ⛔ Відбиток — SHA-256, а не GetHashCode: той рандомізований на
-        // кожен запуск процесу, і «сталий» ключ мінявся б при кожному
-        // рестарті, накопичуючи задачі-двійники.
-        var key = new JobKey($"{typeof(TJob).Name}:{Fingerprint(json)}");
+        var (key, json) = RecurringJob<TJob>(payload);
         await instance.DeleteJob(key, ct).ConfigureAwait(false);
 
         var detail = JobBuilder.Create<QuartzJobAdapter>()
@@ -278,6 +271,71 @@ public sealed class QuartzJobScheduler(
             .Build();
 
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> UnscheduleAsync<TJob>(object? payload, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        var scheduler = Scheduler(typeof(TJob).Name);
+        var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
+
+        // DeleteJob прибирає й тригери задачі; false — задачі не було.
+        return await instance.DeleteJob(RecurringJob<TJob>(payload).Key, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    bool IBackgroundJobScheduler.IsValidCron(string expression, out string? error)
+        => IsValidCron(expression, out error);
+
+    /// <summary>Перевіряє cron-вираз Quartz (6–7 полів, напр. <c>0 15 2 * * ?</c>).</summary>
+    /// <param name="expression">Вираз.</param>
+    /// <param name="error">Текст помилки розбору; <c>null</c>, коли вираз валідний.</param>
+    public static bool IsValidCron(string expression, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            error = "вираз порожній";
+            return false;
+        }
+
+        try
+        {
+            CronExpression.ValidateExpression(expression);
+            error = null;
+            return true;
+        }
+        catch (FormatException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>Ключ і тіло періодичної задачі — ОДНЕ місце для постановки і зняття.</summary>
+    /// <remarks>
+    /// ⛔ Два окремі обчислення розійшлися б мовчки: зняття рахувало б інший
+    /// ключ, повертало <c>false</c>, а «вимкнений» розклад збирав би далі.
+    /// </remarks>
+    private static (JobKey Key, string Json) RecurringJob<TJob>(object? payload)
+        where TJob : IBackgroundJob
+    {
+        var json = JsonSerializer.Serialize(payload, PayloadOptions);
+
+        // ⚠ Ключ СТАЛИЙ — ім'я типу плюс відбиток payload. Сталість робить
+        // розклад ідемпотентним: повторний старт застосунку не плодить
+        // дванадцять копій нічної перевірки, які всі прокинуться об одній
+        // годині.
+        //
+        // ⚠ Payload входить у ключ, і це не деталь: збір за розкладом
+        // ставиться ОКРЕМО на кожну сутність джерела, і спільний ключ на тип
+        // лишив би одну задачу з останнім payload — решта джерел мовчки
+        // ніколи не збиралася б.
+        //
+        // ⛔ Відбиток — SHA-256, а не GetHashCode: той рандомізований на
+        // кожен запуск процесу, і «сталий» ключ мінявся б при кожному
+        // рестарті, накопичуючи задачі-двійники.
+        return (new JobKey($"{typeof(TJob).Name}:{Fingerprint(json)}"), json);
     }
 
     /// <inheritdoc />

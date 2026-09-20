@@ -233,6 +233,16 @@ public sealed class RecalculationJobIdTests
             where TJob : IBackgroundJob
             => Task.CompletedTask;
 
+        public Task<bool> UnscheduleAsync<TJob>(object? payload, CancellationToken ct)
+            where TJob : IBackgroundJob
+            => Task.FromResult(false);
+
+        public bool IsValidCron(string expression, out string? error)
+        {
+            error = null;
+            return true;
+        }
+
         public Task CancelAsync(string jobId, CancellationToken ct) => Task.CompletedTask;
 
         public Task<bool> RestartAsync(string jobId, CancellationToken ct) => Task.FromResult(true);
