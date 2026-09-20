@@ -68,6 +68,22 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Діалект_звітів_дає_свій_whitelist_без_агрегатів_і_CONVERT()
+    {
+        await using var db = Context();
+        var result = await Handler(db)
+            .HandleAsync(ExpressionDialect.Report, null, null, CancellationToken.None);
+
+        // ⚠ Перелік літералом: набір закритий (`02b` §8a), і його зміна — зміна контракту.
+        Assert.Equal(
+            ["ABS", "IF", "IFERROR", "IN", "MAX", "MIN", "ROUND"],
+            result.Functions.Select(f => f.Name));
+        Assert.All(result.Functions, f => Assert.False(f.AcceptsRange));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
     public async Task Діалект_методологій_дає_виміряний_набір_а_не_вигаданий()
     {

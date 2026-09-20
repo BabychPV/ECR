@@ -3,6 +3,9 @@ using Ecr.Application.Templates;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Expressions;
+using Ecr.Expressions.Ast;
+using Ecr.Expressions.Binding;
 using Ecr.Expressions.Parsing;
 
 namespace Ecr.Application.Expressions;
@@ -63,6 +66,11 @@ public sealed class ValidateExpressionHandler(
         var diagnostics = new List<ExpressionDiagnostic>();
         var skipped = new List<string>();
 
+        if (request.Dialect == ExpressionDialect.Report)
+        {
+            return CheckReport(request, diagnostics, skipped);
+        }
+
         var scope = request.TemplateVersionId is { } versionId
             ? await StructuredScopeAsync(versionId, ct).ConfigureAwait(false)
             : SyntaxOnlyScope(skipped);
@@ -92,6 +100,76 @@ public sealed class ValidateExpressionHandler(
                 d.Code, d.Message, d.Position, d.Length, d.MessageKey, d.MessageParams))],
             result?.Expression.ResultType.ToString(),
             [.. skipped.Distinct()]);
+    }
+
+    /// <summary>
+    /// Діалект <c>Report</c>: структури шаблону не потребує — оточення приходить у запиті.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Одиниць і циклів у діалекті немає за побудовою (один рядок, жодних
+    /// посилань між правилами), тому в <c>SkippedChecks</c> вони не називаються.
+    /// Без оточення перевіряється лише розбір — і це названо.
+    /// </remarks>
+    private ExpressionValidationDto CheckReport(
+        ExpressionValidationRequest request, List<ExpressionDiagnostic> diagnostics, List<string> skipped)
+    {
+        var parsed = formulaEngine.Parse(request.Expression, ExpressionDialect.Report);
+        diagnostics.AddRange(parsed.Diagnostics);
+
+        var resultType = parsed.Expression?.ResultType;
+
+        if (request.Report is not { } context)
+        {
+            skipped.Add(SkippedReferences);
+            skipped.Add(SkippedTypes);
+        }
+        else if (parsed.Expression is { } expression)
+        {
+            resultType = ReportExpressionChecker.Check(
+                expression,
+                new ReportExpressionScope(
+                    Declared(context.Columns, "колонки", diagnostics),
+                    Declared(context.Parameters, "параметра", diagnostics)),
+                TypeOf(context.ExpectedType, "результату", "очікуваного", diagnostics),
+                diagnostics);
+        }
+
+        return new ExpressionValidationDto(
+            [.. diagnostics.Select(d => new DiagnosticInfo(
+                d.Code, d.Message, d.Position, d.Length, d.MessageKey, d.MessageParams))],
+            resultType?.ToString(),
+            skipped);
+    }
+
+    private static List<KeyValuePair<string, ExpressionValueType>> Declared(
+        IReadOnlyList<ReportSymbolDeclaration>? symbols, string what, List<ExpressionDiagnostic> diagnostics)
+        => (symbols ?? [])
+            .Select(s => (s.Name, Type: TypeOf(s.Type, what, s.Name, diagnostics)))
+            .Where(s => s.Type is not null)
+            .Select(s => KeyValuePair.Create(s.Name, s.Type!.Value))
+            .ToList();
+
+    /// <summary>Оголошений тип: <c>Number</c>, <c>Text</c>, <c>Boolean</c> або <c>Date</c>; регістр не важить.</summary>
+    private static ExpressionValueType? TypeOf(
+        string? type, string what, string name, List<ExpressionDiagnostic> diagnostics)
+    {
+        if (type is null)
+        {
+            return null;
+        }
+
+        if (Enum.TryParse<ExpressionValueType>(type, ignoreCase: true, out var parsed)
+            && !int.TryParse(type, out _)
+            && parsed is not (ExpressionValueType.Null or ExpressionValueType.Error))
+        {
+            return parsed;
+        }
+
+        // ⚠ Зауваженням, а не відмовою запиту: невідомий тип — це помилка ОПИСУ
+        // звіту, і редактор правил має показати її поруч із рештою.
+        diagnostics.Add(new ExpressionDiagnostic(
+            ExpressionErrors.Unresolved, $"Невідомий тип «{type}» {what} «{name}».", 0, 1));
+        return null;
     }
 
     /// <summary>Перевірка посилань пропущена.</summary>
@@ -175,13 +253,34 @@ public sealed class ValidateExpressionHandler(
 /// <param name="TableDefId">Таблиця, в якій живе вираз.</param>
 /// <param name="RowKey">Рядок формули; <c>null</c> для формул рівня колонки.</param>
 /// <param name="ColumnDefId">Колонка — для підстановки <c>{Month}</c>.</param>
+/// <param name="Report">
+/// Оточення діалекту <c>Report</c>; для решти діалектів не читається. <c>null</c> —
+/// перевіряється лише розбір.
+/// </param>
 public sealed record ExpressionValidationRequest(
     string Expression,
     ExpressionDialect Dialect,
     int? TemplateVersionId,
     int? TableDefId,
     string? RowKey,
-    int? ColumnDefId);
+    int? ColumnDefId,
+    ReportExpressionContext? Report = null);
+
+/// <summary>На що може послатися правило звіту і що воно має повернути.</summary>
+/// <param name="Columns">Колонки рядка зрізу — <c>[Code]</c>.</param>
+/// <param name="Parameters">Параметри звіту — <c>@Name</c>.</param>
+/// <param name="ExpectedType">
+/// Очікуваний тип результату: <c>Boolean</c> для умови <c>when</c>; <c>null</c> — довільний.
+/// </param>
+public sealed record ReportExpressionContext(
+    IReadOnlyList<ReportSymbolDeclaration>? Columns,
+    IReadOnlyList<ReportSymbolDeclaration>? Parameters,
+    string? ExpectedType);
+
+/// <summary>Оголошення колонки або параметра.</summary>
+/// <param name="Name">Код колонки або ім'я параметра (без <c>@</c>).</param>
+/// <param name="Type"><c>Number</c>, <c>Text</c>, <c>Boolean</c> або <c>Date</c>.</param>
+public sealed record ReportSymbolDeclaration(string Name, string Type);
 
 /// <summary>Результат перевірки виразу.</summary>
 /// <param name="Diagnostics">

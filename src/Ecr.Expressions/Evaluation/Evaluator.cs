@@ -669,16 +669,33 @@ public sealed class Evaluator(
         FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
         => dialect == ExpressionDialect.Methodology
             ? MethodologyCall(node, context, budget)
-            : TemplateCall(node, context, budget);
+            : TemplateCall(node, context, dialect, budget);
 
+    /// <remarks>
+    /// ⚠ Діалект ПЕРЕДАЄТЬСЯ далі, а не підміняється на <c>Template</c>: цим
+    /// шляхом ходить і діалект звітів, чий <c>IN</c> у шаблонах не існує.
+    /// </remarks>
     private ExpressionValue TemplateCall(
-        FunctionNode node, IEvaluationContext context, EvaluationBudget budget)
+        FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
+        // `IN` діалекту звітів — та сама належність множині, що `in` методологій.
+        if (dialect == ExpressionDialect.Report
+            && node.Name.Equals("IN", StringComparison.OrdinalIgnoreCase))
+        {
+            var members = new List<ExpressionValue>(node.Arguments.Count);
+            foreach (var argument in node.Arguments)
+            {
+                members.Add(EvaluateScalar(argument, context, dialect, budget));
+            }
+
+            return Functions.MethodologyFunctions.Invoke("in", members, arithmetic, context);
+        }
+
         // IFERROR обчислює запасну гілку тільки за потреби — інакше вона могла б
         // сама впасти й перетворити перехоплення на нову помилку.
         if (node.Name.Equals("IFERROR", StringComparison.OrdinalIgnoreCase) && node.Arguments.Count == 2)
         {
-            var value = Evaluate(node.Arguments[0], context, ExpressionDialect.Template, budget);
+            var value = Evaluate(node.Arguments[0], context, dialect, budget);
 
             // ⛔ Вичерпаний бюджет НЕ перехоплюється через IFERROR: інакше
             // `IFERROR(<заважкий вираз>; 0)` давав би нуль, тобто виглядав би
@@ -690,14 +707,14 @@ public sealed class Evaluator(
             }
 
             return value.IsError
-                ? Evaluate(node.Arguments[1], context, ExpressionDialect.Template, budget)
+                ? Evaluate(node.Arguments[1], context, dialect, budget)
                 : value;
         }
 
         var groups = new List<IReadOnlyList<ExpressionValue>>(node.Arguments.Count);
         foreach (var argument in node.Arguments)
         {
-            groups.Add(EvaluateGroup(argument, context, ExpressionDialect.Template, budget));
+            groups.Add(EvaluateGroup(argument, context, dialect, budget));
         }
 
         return functions.Invoke(node.Name, groups, context);

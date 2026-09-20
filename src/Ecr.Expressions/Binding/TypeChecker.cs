@@ -9,7 +9,12 @@ namespace Ecr.Expressions.Binding;
 /// Excel вгадує тип і саме тому дає «майже правильні» числа; тут
 /// неоднозначність — помилка, поки її ще дешево виправити (02b §5).
 /// </summary>
-public sealed class TypeChecker
+/// <param name="signatures">
+/// Каталог функцій діалекту; <c>null</c> — діалект шаблонів. Діалект звітів
+/// передає <see cref="ReportFunctions.Find"/>: без нього його <c>IN</c> мав би тип
+/// <c>Null</c>, і умова <c>when</c> із ним проходила б за будь-який очікуваний тип.
+/// </param>
+public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = null)
 {
     private static readonly FunctionRegistry Functions = new();
 
@@ -189,7 +194,7 @@ public sealed class TypeChecker
                 return ExpressionValueType.Number;
 
             default:
-                return Functions.GetSignature(node.Name)?.ResultType ?? ExpressionValueType.Null;
+                return (signatures ?? Functions.GetSignature)(node.Name)?.ResultType ?? ExpressionValueType.Null;
         }
     }
 
