@@ -180,6 +180,11 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['collectionRun', 'Succeeded', 'neutral'],
   ['collectionRun', 'Degraded', 'warning'],
   ['collectionRun', 'Failed', 'danger'],
+
+  // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
+  ['snapshot', 'Draft', 'muted'],
+  ['snapshot', 'Approved', 'neutral'],
+  ['snapshot', 'Submitted', 'neutral'],
 ];
 
 describe('StatusBadge: стан → тон', () => {
@@ -193,8 +198,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 30 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(30);
+  it('перелік вичерпний: 33 пари, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(33);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>
