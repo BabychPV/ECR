@@ -232,6 +232,33 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         Assert.Equal(code, mappedCode);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-6.11")]
+    [InlineData("ECR-DOC-0409", 409)]
+    [InlineData("ECR-TMPL-0409", 409)]
+    [InlineData("ECR-CALC-0409", 409)]
+    [InlineData("ECR-PRD-0409", 409)]
+    [InlineData("ECR-RPT-0409", 409)]
+    [InlineData("ECR-DOC-0422", 422)]
+    [InlineData("ECR-PRD-4223", 422)]
+    public void Доменний_конфлікт_стану_повертає_409_а_решта_доменних_відмов_422(string code, int expected)
+    {
+        // ⛔ Сутності кидають голий `DomainException`, і статус брався з ТИПУ:
+        // кожен `…-0409` без власного арма їхав як 422 усупереч §7 контракту.
+        // Два останні рядки — контроль: правило не має зачепити сусідів.
+        var exception = new Ecr.Domain.Abstractions.DomainException(code, "Не той стан.");
+
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var (status, mappedCode, _, _) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+
+        Assert.Equal(expected, status);
+        Assert.Equal(code, mappedCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

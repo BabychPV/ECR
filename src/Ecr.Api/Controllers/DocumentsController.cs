@@ -255,6 +255,7 @@ public sealed class DocumentsController(
     /// <summary>Подання аркуша на погодження.</summary>
     [HttpPost("{id:long}/submit")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Submit(
         long id, [FromBody] SheetWorkflowRequest request, CancellationToken ct)
@@ -268,6 +269,7 @@ public sealed class DocumentsController(
     /// <summary>Погодження або відхилення аркуша.</summary>
     [HttpPost("{id:long}/approve")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Approve(
         long id, [FromBody] ApproveSheetRequest request, CancellationToken ct)
     {
@@ -290,6 +292,7 @@ public sealed class DocumentsController(
     /// </remarks>
     [HttpPost("{id:long}/reopen")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Reopen(
         long id, [FromBody] ReopenDocumentRequest request, CancellationToken ct)
