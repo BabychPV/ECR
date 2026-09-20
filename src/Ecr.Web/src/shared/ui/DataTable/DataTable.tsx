@@ -1,7 +1,7 @@
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { Button, Group, ScrollArea, Table, Text, UnstyledButton } from '@mantine/core';
 import { AsyncBoundary } from '../AsyncBoundary';
-import { formatLocale, formatNumber } from '@/shared/format';
+import { decimalEquals, formatLocale, formatNumber, normalizeDecimal } from '@/shared/format';
 import { MaxColumns, type DataTableColumn, type SortKey, type SortState } from './types';
 
 /**
@@ -168,6 +168,94 @@ function isMissing(value: SortKey): boolean {
 }
 
 /**
+ * Десяткове з API приїжджає РЯДКОМ (`e470777a`), і для числової колонки це
+ * означає дві різні поломки одразу.
+ *
+ * ⛔ Сортування: `'10' < '9'` за будь-яким колатором — тобто десяткова колонка
+ * впорядковується як текст, і «найбільше значення» вгорі ним не є. Числову
+ * гілку `compareKeys` рятує `typeof a === 'number'`, а рядок до неї не доходить.
+ *
+ * ⛔ Показ: `typeof raw === 'number'` так само не спрацьовує, і замість
+ * `1,234.5` у клітинці лишається сире `1234.5000000000` — без роздільників
+ * розрядів і з хвостом нулів масштабу колонки.
+ *
+ * ⚠ Обидві гілки вмикає `column.num`, а не «рядок схожий на число»: код виду
+ * `'007'` теж нормалізується в число, і автоматичне розпізнавання перетворило б
+ * його на `7` та переставило б колонку кодів у числовому порядку.
+ */
+
+/** Скільки знаків у дробовій частині канонічного рядка. */
+function scaleOf(canonical: string): number {
+  const dot = canonical.indexOf('.');
+
+  return dot < 0 ? 0 : canonical.length - dot - 1;
+}
+
+/**
+ * Канонічний десятковий рядок як ціле число заданого масштабу.
+ *
+ * ⚠ `bigint`, а не `number`: рівно щоб не втратити те, заради чого сервер і
+ * перевів `decimal` у рядок. `decimal(28,16)` не вміщається в IEEE-754.
+ */
+function scaled(canonical: string, scale: number): bigint {
+  const dot = canonical.indexOf('.');
+  const digits = dot < 0 ? canonical : canonical.slice(0, dot) + canonical.slice(dot + 1);
+
+  return BigInt(digits + '0'.repeat(scale - scaleOf(canonical)));
+}
+
+/**
+ * Порядок двох десяткових рядків; `null` — принаймні один із них не десятковий.
+ *
+ * ⛔ Розбір — лише `normalizeDecimal`, рівність — лише `decimalEquals`
+ * (`shared/format/decimal.ts`): та сама одиниця приходить як `'1'`, `'1.0'` або
+ * `'1.0000000000'` залежно від масштабу колонки, і другий нормалізатор,
+ * написаний тут, розійшовся б із першим мовчки.
+ */
+function compareDecimals(left: string, right: string): number | null {
+  const a = normalizeDecimal(left);
+  const b = normalizeDecimal(right);
+
+  if (a === null || b === null) return null;
+  if (decimalEquals(a, b)) return 0;
+
+  const scale = Math.max(scaleOf(a), scaleOf(b));
+
+  return scaled(a, scale) < scaled(b, scale) ? -1 : 1;
+}
+
+/**
+ * Пам'ять форматувальників — з тієї ж причини, що в `shared/format/number.ts`.
+ *
+ * ⚠ Зберігається сам `format`, а не об'єкт: `Intl.NumberFormat.prototype.format`
+ * — це аксесор, який віддає ВЖЕ ЗВ'ЯЗАНУ функцію, тож відчепити її безпечно.
+ */
+const decimalFormatters = new Map<string, (value: string) => string>();
+
+/**
+ * Канонічний десятковий рядок — локаллю продукту, без проходу через `Number`.
+ *
+ * ⛔ Опцій немає навмисно: числова клітинка поруч малюється `formatNumber(raw)`
+ * так само без опцій, і друга політика дробової частини дала б в одній колонці
+ * два різні формати того самого поняття.
+ *
+ * ⚠ Приведення типу потрібне лише компіляторові: `format` приймає десятковий
+ * РЯДОК із `Intl.NumberFormat` v3 (перевірено в цьому середовищі —
+ * `__tests__/DataTable.decimal.test.tsx`, «Intl приймає рядок»), але
+ * `tsconfig.json` стоїть на `lib: ES2022`, де цього перевантаження ще немає.
+ */
+function formatDecimal(canonical: string): string {
+  const locale = formatLocale();
+  const hit = decimalFormatters.get(locale);
+  if (hit !== undefined) return hit(canonical);
+
+  const made = new Intl.NumberFormat(locale).format as unknown as (value: string) => string;
+  decimalFormatters.set(locale, made);
+
+  return made(canonical);
+}
+
+/**
  * Порівняння двох значень колонки з урахуванням напрямку.
  *
  * ⛔ Напрямок застосовується ВСЕРЕДИНІ, а не множенням результату ззовні, і
@@ -179,8 +267,19 @@ function isMissing(value: SortKey): boolean {
  * ⚠ Рядки порівнює `Intl.Collator` локаллю ПРОДУКТУ, а не оператор `<`: у
  * казахській і російській порядок літер не збігається з кодами UTF-16, і
  * `'Ә' < 'Б'` дало б порядок, якого не існує в жодній абетці.
+ *
+ * ⚠ `numeric` (`column.num`) вмикає ЧИСЛОВЕ порівняння десяткових рядків, і
+ * лише воно: у текстовій колонці той самий перемикач переставив би коди.
+ * Нерозпізнане значення числової колонки спадає на колатор — інакше рядок, що
+ * числом не є, зник би з порядку зовсім.
  */
-function compareKeys(a: SortKey, b: SortKey, sign: number, collator: Intl.Collator): number {
+function compareKeys(
+  a: SortKey,
+  b: SortKey,
+  sign: number,
+  collator: Intl.Collator,
+  numeric: boolean,
+): number {
   const aMissing = isMissing(a);
   const bMissing = isMissing(b);
 
@@ -192,6 +291,12 @@ function compareKeys(a: SortKey, b: SortKey, sign: number, collator: Intl.Collat
 
   if (typeof a === 'number' && typeof b === 'number') return (a - b) * sign;
   if (typeof a === 'boolean' && typeof b === 'boolean') return (Number(a) - Number(b)) * sign;
+
+  if (numeric) {
+    const order = compareDecimals(String(a), String(b));
+
+    if (order !== null) return order * sign;
+  }
 
   return collator.compare(String(a), String(b)) * sign;
 }
@@ -281,7 +386,13 @@ export function DataTable<Row>({
      * самого ключа вважають незмінними.
      */
     return [...rows].sort((left, right) =>
-      compareKeys(sortKeyOf(column, left), sortKeyOf(column, right), sign, collator),
+      compareKeys(
+        sortKeyOf(column, left),
+        sortKeyOf(column, right),
+        sign,
+        collator,
+        column.num === true,
+      ),
     );
   }, [rows, sort, columns, collator]);
 
@@ -506,7 +617,18 @@ function Cell<Row>({
   if (raw === null || raw === undefined) return null;
 
   if (typeof raw === 'number') return <>{formatNumber(raw)}</>;
-  if (typeof raw === 'string') return <>{raw}</>;
+
+  if (typeof raw === 'string') {
+    // ⛔ Лише числова колонка: `'007'` у колонці кодів теж нормалізується — і
+    // поїхав би на екран сімкою.
+    if (column.num === true) {
+      const canonical = normalizeDecimal(raw);
+
+      if (canonical !== null) return <>{formatDecimal(canonical)}</>;
+    }
+
+    return <>{raw}</>;
+  }
 
   // Булеве, об'єкт, масив: скалярного показу не мають — малює `render`.
   return null;

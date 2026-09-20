@@ -3,7 +3,7 @@ import { Button, Group, Modal, ScrollArea, Table, Text } from '@mantine/core';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import { formatNumber } from '@/shared/format';
+import { formatLocale, formatNumber, normalizeDecimal } from '@/shared/format';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
@@ -143,7 +143,7 @@ export default function SnapshotRowsModal(props: {
                         <Table.Td>{row.rowNo}</Table.Td>
                         {columns.map((column) => (
                           <Table.Td key={column.code} ta={column.kind === NumberKind ? 'right' : undefined}>
-                            {cellText(row.cells[column.code], column.code)}
+                            {cellText(row.cells[column.code], column.code, column.kind)}
                           </Table.Td>
                         ))}
                       </Table.Tr>
@@ -316,7 +316,7 @@ function totalValueNode(total: SnapshotTotal, column: SnapshotColumn): ReactNode
    * колонці (те саме рішення, що в книзі). Показати кількість датою означало б
    * зробити з трьох рядків 1970 рік.
    */
-  if (total.fn === CountFn) return cellText(total.value, '');
+  if (total.fn === CountFn) return cellText(total.value, '', NumberKind);
 
   return valueNode(total.value, column);
 }
@@ -340,22 +340,79 @@ function valueNode(value: unknown, column: SnapshotColumn | undefined): ReactNod
     return <Timestamp value={value} dateOnly />;
   }
 
-  return cellText(value, column?.code ?? '');
+  return cellText(value, column?.code ?? '', column?.kind ?? '');
+}
+
+/**
+ * Ідентифікатор за кодом колонки: число лише за типом.
+ *
+ * ⚠ Роздільники розрядів зробили б із `202603` «202 603» — тобто показали б
+ * ключ періоду як величину.
+ */
+const IdentifierCode = /Id$|^PeriodKey$/;
+
+/** Скільки знаків дробової частини показуємо. Рішення `D15-09`, не нове. */
+const CellNumberOptions: Intl.NumberFormatOptions = { maximumFractionDigits: 10 };
+
+/**
+ * Пам'ять форматувальників — з тієї ж причини, що в `shared/format/number.ts`:
+ * зріз малює сотню рядків на кожну колонку.
+ *
+ * ⚠ Зберігається сам `format`, а не об'єкт: `Intl.NumberFormat.prototype.format`
+ * — це аксесор, який віддає ВЖЕ ЗВ'ЯЗАНУ функцію, тож відчепити її безпечно.
+ */
+const decimalFormatters = new Map<string, (value: string) => string>();
+
+/**
+ * Канонічний десятковий рядок — локаллю продукту, БЕЗ проходу через `Number`.
+ *
+ * ⛔ `formatNumber(Number(text), …)` тут був би не скороченням, а втратою:
+ * `decimal(28,16)` не вміщається в IEEE-754, і сервер перевів його в рядок
+ * (`e470777a`) рівно щоб цього не сталося. Перетворити рядок на `number` дорогою
+ * до екрана означало б викинути ті самі знаки, лише на крок пізніше.
+ *
+ * ⚠ Приведення типу потрібне лише компіляторові: `format` приймає десятковий
+ * РЯДОК із `Intl.NumberFormat` v3 (перевірено в цьому середовищі —
+ * `__tests__/SnapshotRowsModal.decimal.test.tsx`, «Intl приймає рядок»), але
+ * `tsconfig.json` стоїть на `lib: ES2022`, де цього перевантаження ще немає.
+ */
+function formatDecimal(canonical: string): string {
+  const locale = formatLocale();
+  const hit = decimalFormatters.get(locale);
+  if (hit !== undefined) return hit(canonical);
+
+  const made = new Intl.NumberFormat(locale, CellNumberOptions).format as unknown as (
+    value: string,
+  ) => string;
+  decimalFormatters.set(locale, made);
+
+  return made(canonical);
 }
 
 /**
  * Значення комірки текстом.
  *
- * ⚠ Ідентифікатори (`…Id`, `PeriodKey`) — числа лише за типом: роздільники
- * розрядів зробили б із `202603` «202 603».
+ * ⛔ Десяткове приходить РЯДКОМ (`e470777a`), тож `typeof value === 'number'`
+ * самого по собі вже не досить: без рядкової гілки числова колонка зрізу
+ * показувала б сире `1234.5000000000` — без роздільників розрядів і з хвостом
+ * нулів масштабу колонки.
+ *
+ * ⚠ Рядкову гілку вмикає `kind` колонки (`SnapshotColumn.kind`), а не «схоже на
+ * число»: текстова колонка цілком законно несе `'007'`, і розпізнавання за
+ * виглядом показало б його сімкою. Той самий `kind` уже вирішує вирівнювання
+ * клітинки праворуч, тож другого джерела правди тут не заводиться.
  */
-function cellText(value: unknown, code: string): string {
+function cellText(value: unknown, code: string, kind: string): string {
   if (value === null || value === undefined) return '—';
 
-  if (typeof value === 'number') {
-    return /Id$|^PeriodKey$/.test(code)
-      ? String(value)
-      : formatNumber(value, { maximumFractionDigits: 10 });
+  if (IdentifierCode.test(code)) return String(value);
+
+  if (typeof value === 'number') return formatNumber(value, CellNumberOptions);
+
+  if (kind === NumberKind && typeof value === 'string') {
+    const canonical = normalizeDecimal(value);
+
+    if (canonical !== null) return formatDecimal(canonical);
   }
 
   return String(value);
