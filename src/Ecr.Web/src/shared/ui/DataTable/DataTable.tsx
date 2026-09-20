@@ -1,7 +1,13 @@
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { Button, Group, ScrollArea, Table, Text, UnstyledButton } from '@mantine/core';
 import { AsyncBoundary } from '../AsyncBoundary';
-import { decimalEquals, formatLocale, formatNumber, normalizeDecimal } from '@/shared/format';
+import {
+  decimalEquals,
+  formatDecimal,
+  formatLocale,
+  formatNumber,
+  normalizeDecimal,
+} from '@/shared/format';
 import { MaxColumns, type DataTableColumn, type SortKey, type SortState } from './types';
 
 /**
@@ -225,35 +231,22 @@ function compareDecimals(left: string, right: string): number | null {
 }
 
 /**
- * Пам'ять форматувальників — з тієї ж причини, що в `shared/format/number.ts`.
+ * Скільки знаків дробової частини показує числова клітинка переліку.
  *
- * ⚠ Зберігається сам `format`, а не об'єкт: `Intl.NumberFormat.prototype.format`
- * — це аксесор, який віддає ВЖЕ ЗВ'ЯЗАНУ функцію, тож відчепити її безпечно.
- */
-const decimalFormatters = new Map<string, (value: string) => string>();
-
-/**
- * Канонічний десятковий рядок — локаллю продукту, без проходу через `Number`.
+ * ⛔ Три — це ДЕФОЛТ `Intl.NumberFormat`, а не нове рішення: доти тут стояв
+ * `new Intl.NumberFormat(locale)` без опцій, і значення з чотирма знаками вже
+ * тоді їхало на екран округленим (`1234.1235` → `1,234.124`). Число названо
+ * явно рівно тому, що мовчазний дефолт цього не казав.
  *
- * ⛔ Опцій немає навмисно: числова клітинка поруч малюється `formatNumber(raw)`
- * так само без опцій, і друга політика дробової частини дала б в одній колонці
+ * ⛔ Політика саме така, бо числова клітинка поруч малюється `formatNumber(raw)`
+ * так само без опцій: друга політика дробової частини дала б в одній колонці
  * два різні формати того самого поняття.
  *
- * ⚠ Приведення типу потрібне лише компіляторові: `format` приймає десятковий
- * РЯДОК із `Intl.NumberFormat` v3 (перевірено в цьому середовищі —
- * `__tests__/DataTable.decimal.test.tsx`, «Intl приймає рядок»), але
- * `tsconfig.json` стоїть на `lib: ES2022`, де цього перевантаження ще немає.
+ * ⚠ Це НЕ та сама стеля, що в зрізі звітності (`SnapshotRowsModal`, `D15-09`,
+ * десять знаків). Різниця існувала й до зведення копій в одне місце; тепер вона
+ * хоч і лишається, але видима — окремим аргументом, а не окремою функцією.
  */
-function formatDecimal(canonical: string): string {
-  const locale = formatLocale();
-  const hit = decimalFormatters.get(locale);
-  if (hit !== undefined) return hit(canonical);
-
-  const made = new Intl.NumberFormat(locale).format as unknown as (value: string) => string;
-  decimalFormatters.set(locale, made);
-
-  return made(canonical);
-}
+const CellFractionCeiling = 3;
 
 /**
  * Порівняння двох значень колонки з урахуванням напрямку.
@@ -622,9 +615,9 @@ function Cell<Row>({
     // ⛔ Лише числова колонка: `'007'` у колонці кодів теж нормалізується — і
     // поїхав би на екран сімкою.
     if (column.num === true) {
-      const canonical = normalizeDecimal(raw);
+      const shown = formatDecimal(raw, undefined, CellFractionCeiling);
 
-      if (canonical !== null) return <>{formatDecimal(canonical)}</>;
+      if (shown !== null) return <>{shown}</>;
     }
 
     return <>{raw}</>;

@@ -3,7 +3,7 @@ import { Button, Group, Modal, ScrollArea, Table, Text } from '@mantine/core';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import { formatLocale, formatNumber, normalizeDecimal } from '@/shared/format';
+import { formatDecimal, formatNumber } from '@/shared/format';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
@@ -351,43 +351,24 @@ function valueNode(value: unknown, column: SnapshotColumn | undefined): ReactNod
  */
 const IdentifierCode = /Id$|^PeriodKey$/;
 
-/** Скільки знаків дробової частини показуємо. Рішення `D15-09`, не нове. */
-const CellNumberOptions: Intl.NumberFormatOptions = { maximumFractionDigits: 10 };
-
 /**
- * Пам'ять форматувальників — з тієї ж причини, що в `shared/format/number.ts`:
- * зріз малює сотню рядків на кожну колонку.
+ * Скільки знаків дробової частини показуємо. Рішення `D15-09`, не нове.
  *
- * ⚠ Зберігається сам `format`, а не об'єкт: `Intl.NumberFormat.prototype.format`
- * — це аксесор, який віддає ВЖЕ ЗВ'ЯЗАНУ функцію, тож відчепити її безпечно.
+ * ⚠ Одне число на обидві дороги значення: `formatNumber` для справжнього
+ * `number` і `formatDecimal` для рядка, який через `number` вести не можна.
+ * Два різні числа тут означали б, що та сама величина виглядає по-різному
+ * залежно від того, чи вліз її масштаб у `double`.
+ *
+ * ⚠ Стеля зрізу звітності НЕ збігається зі стелею переліку
+ * (`DataTable.CellFractionCeiling`, три знаки — дефолт `Intl`). Розбіжність
+ * існувала й до зведення копій в одне місце; тепер вона видима аргументом, а не
+ * схована в другій копії форматувальника.
  */
-const decimalFormatters = new Map<string, (value: string) => string>();
+const CellFractionCeiling = 10;
 
-/**
- * Канонічний десятковий рядок — локаллю продукту, БЕЗ проходу через `Number`.
- *
- * ⛔ `formatNumber(Number(text), …)` тут був би не скороченням, а втратою:
- * `decimal(28,16)` не вміщається в IEEE-754, і сервер перевів його в рядок
- * (`e470777a`) рівно щоб цього не сталося. Перетворити рядок на `number` дорогою
- * до екрана означало б викинути ті самі знаки, лише на крок пізніше.
- *
- * ⚠ Приведення типу потрібне лише компіляторові: `format` приймає десятковий
- * РЯДОК із `Intl.NumberFormat` v3 (перевірено в цьому середовищі —
- * `__tests__/SnapshotRowsModal.decimal.test.tsx`, «Intl приймає рядок»), але
- * `tsconfig.json` стоїть на `lib: ES2022`, де цього перевантаження ще немає.
- */
-function formatDecimal(canonical: string): string {
-  const locale = formatLocale();
-  const hit = decimalFormatters.get(locale);
-  if (hit !== undefined) return hit(canonical);
-
-  const made = new Intl.NumberFormat(locale, CellNumberOptions).format as unknown as (
-    value: string,
-  ) => string;
-  decimalFormatters.set(locale, made);
-
-  return made(canonical);
-}
+const CellNumberOptions: Intl.NumberFormatOptions = {
+  maximumFractionDigits: CellFractionCeiling,
+};
 
 /**
  * Значення комірки текстом.
@@ -410,9 +391,15 @@ function cellText(value: unknown, code: string, kind: string): string {
   if (typeof value === 'number') return formatNumber(value, CellNumberOptions);
 
   if (kind === NumberKind && typeof value === 'string') {
-    const canonical = normalizeDecimal(value);
+    /*
+     * ⛔ `formatNumber(Number(value), …)` тут був би не скороченням, а втратою:
+     * `decimal(28,16)` не вміщається в IEEE-754, і сервер перевів його в рядок
+     * (`e470777a`) рівно щоб цього не сталося. `formatDecimal` веде значення до
+     * екрана рядком — і живе в `shared/format`, а не копією тут.
+     */
+    const shown = formatDecimal(value, undefined, CellFractionCeiling);
 
-    if (canonical !== null) return formatDecimal(canonical);
+    if (shown !== null) return shown;
   }
 
   return String(value);

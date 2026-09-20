@@ -115,12 +115,23 @@ interface StringAwareNumberFormat {
  * дефолту `Intl`: дефолт — ТРИ знаки, тобто
  * `format('1234.1234567890123456')` дало б `1,234.123`. Мовчки.
  *
+ * ⚠ `maxFractionDigits` — стеля ПОДАННЯ конкретного екрана, не політика цього
+ * файлу. Вона тут тому, що інакше екран, якому стеля потрібна, заводить собі
+ * копію цієї функції — і саме так їх стало три (`DataTable.tsx`,
+ * `SnapshotRowsModal.tsx`). Дефолт `MaxIntlFractionDigits` означає «показати
+ * все, що є у значенні»; екран, у якого своя стеля, називає її явно і
+ * пояснює, звідки вона взялася, поруч із викликом.
+ *
  * ⚠ `number` на вході теж приймається — колонки `Int`/`Lookup` їдуть числами й
  * далі. `String(number)` в експоненційному записі (`1e-7`) `normalizeDecimal`
  * свідомо відхиляє, тож такі значення повертаються як `null` і показуються
  * викликачем як є — рівно так, як їх малювала сітка до цього переходу.
  */
-export function formatDecimal(value: unknown, lang?: Language): string | null {
+export function formatDecimal(
+  value: unknown,
+  lang?: Language,
+  maxFractionDigits: number = MaxIntlFractionDigits,
+): string | null {
   const text =
     typeof value === 'string'
       ? value
@@ -137,7 +148,7 @@ export function formatDecimal(value: unknown, lang?: Language): string | null {
   const fractionDigits = dot === -1 ? 0 : canonical.length - dot - 1;
 
   const format = formatter(formatLocale(lang), {
-    maximumFractionDigits: Math.min(fractionDigits, MaxIntlFractionDigits),
+    maximumFractionDigits: Math.min(fractionDigits, maxFractionDigits, MaxIntlFractionDigits),
   }) as unknown as StringAwareNumberFormat;
 
   return format.format(canonical);
