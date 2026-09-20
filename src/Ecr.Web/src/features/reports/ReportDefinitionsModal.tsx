@@ -24,6 +24,7 @@ import type {
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
 /**
@@ -184,13 +185,10 @@ export function ReportDefinitionsModal({
                       {definition.versions.map((reportVersion) => (
                         <Group key={reportVersion.id} gap="xs">
                           <Text size="xs">{reportVersion.version}</Text>
-                          <Badge
-                            size="xs"
-                            variant="light"
-                            color={reportVersion.status === 'Published' ? 'green' : 'gray'}
-                          >
-                            {reportVersion.status}
-                          </Badge>
+                          {/* ⚠ `ReportVersion.Status` — той самий
+                              `TemplateVersionStatus`, що й у шаблонів: словник
+                              `version` один, не два. */}
+                          <StatusBadge kind="version" state={reportVersion.status} />
                           {reportVersion.status === 'Draft' && (
                             <Button
                               size="compact-xs"

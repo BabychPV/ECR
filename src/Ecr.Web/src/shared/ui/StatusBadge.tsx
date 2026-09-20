@@ -95,7 +95,8 @@ export type StatusKind =
   | 'project'
   | 'health'
   | 'severity'
-  | 'collectionRun';
+  | 'collectionRun'
+  | 'snapshot';
 
 /**
  * Таблиця `kind × state → tone` — **один об'єкт** (директива №15 §2).
@@ -215,6 +216,21 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     Succeeded: 'neutral',
     Degraded: 'warning',
     Failed: 'danger',
+  },
+
+  /**
+   * `Ecr.Domain/Enums/Enums.cs` → `SnapshotStatus` (`D-65`); до клієнта їде
+   * рядком (`ReportSnapshotSummary.status: string`).
+   *
+   * ⛔ Окремий різновид, а не `sheet`, хоч три слова збігаються: у зрізі немає
+   * `Rejected`, а `Submitted` тут — не «чекає погодження», а «подано,
+   * іммутабельний» (`ФВ-9.17`), тобто кінцевий стан, а не `info`.
+   * `Draft` бляклий: зріз є, але регуляторна вʼюха його не віддає (`ФВ-10.11`).
+   */
+  snapshot: {
+    Draft: 'muted',
+    Approved: 'neutral',
+    Submitted: 'neutral',
   },
 };
 
