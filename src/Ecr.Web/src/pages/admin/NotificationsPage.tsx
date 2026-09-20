@@ -1,6 +1,8 @@
 import type { JSX } from 'react';
 import { Stack } from '@mantine/core';
 import { ChannelsPanel } from '@/features/notifications/ChannelsPanel';
+import { DeliveriesPanel } from '@/features/notifications/DeliveriesPanel';
+import { RulesMatrixPanel } from '@/features/notifications/RulesMatrixPanel';
 import { t } from '@/shared/i18n';
 import { PageHeader } from '@/shared/ui/PageHeader';
 
@@ -13,9 +15,9 @@ import { PageHeader } from '@/shared/ui/PageHeader';
  * доставки — три різні відповіді на нього, і розкидані по вкладках вони
  * змусили б шукати причину в трьох місцях.
  *
- * ⚠ Правила й журнал додаються наступними кроками в цю ж сторінку
- * (`RulesMatrixPanel`, `DeliveriesPanel`); тут поки лише канали — вони вісь
- * для обох, і без жодного каналу решта екрана не має про що говорити.
+ * ⚠ Порядок блоків причинний, а не за важливістю: канал існує → правило
+ * вирішує, коли ним слати → журнал каже, що з цього вийшло. Людина приходить
+ * сюди з питанням «чому я (не) отримав повідомлення» і йде цим самим шляхом.
  */
 export function NotificationsPage(): JSX.Element {
   return (
@@ -23,6 +25,10 @@ export function NotificationsPage(): JSX.Element {
       <PageHeader title={t('notifications.title')} />
 
       <ChannelsPanel />
+
+      <RulesMatrixPanel />
+
+      <DeliveriesPanel />
     </Stack>
   );
 }
