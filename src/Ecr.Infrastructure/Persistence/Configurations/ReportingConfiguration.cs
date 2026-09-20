@@ -97,7 +97,7 @@ public sealed class ReportRowConfiguration : IEntityTypeConfiguration<ReportRow>
 
         builder.Property(x => x.ColumnCode).HasMaxLength(64);
         builder.Property(x => x.ValueString).HasMaxLength(1000);
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,16)");
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
         builder.HasOne<ReportSnapshot>().WithMany().HasForeignKey(x => x.SnapshotId)
@@ -116,7 +116,7 @@ public sealed class DocumentIndexValueConfiguration : IEntityTypeConfiguration<D
         builder.ToTable("DocumentIndexValue", "doc");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.ValueString).HasMaxLength(400);
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,16)");
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
         builder.HasIndex(x => new { x.DocumentId, x.ColumnDefId })

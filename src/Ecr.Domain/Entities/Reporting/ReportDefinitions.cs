@@ -257,7 +257,7 @@ public sealed class ReportRow
 
     public string? ValueString { get; private set; }
 
-    /// <summary><c>decimal(28,10)</c>; <c>float</c> заборонений (D-30).</summary>
+    /// <summary><c>decimal(28,16)</c>; <c>float</c> заборонений (D-30).</summary>
     public decimal? ValueNumeric { get; private set; }
 
     public DateTime? ValueDate { get; private set; }

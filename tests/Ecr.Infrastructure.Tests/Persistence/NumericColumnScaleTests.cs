@@ -32,15 +32,17 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
     /// Стовпці, кожен із яких несе вимірювану величину.
     /// </summary>
     /// <remarks>
-    /// ⚠ Перелік росте разом із міграціями серії: тут ті, що переведені
-    /// <c>D148CellValueScale16</c> і <c>D148CalculationScale16</c>. Четвірка
-    /// <c>rpt.ReportRow</c>, <c>doc.DocumentIndexValue</c>,
-    /// <c>ext.RawDataPoint</c>, <c>dic.RegistryValue</c> додається наступною
-    /// міграцією — рядком у цю ж таблицю.
+    /// ⚠ Перелік повний: усі тринадцять стовпців, які серія <c>D-148</c>
+    /// перевела на 16 знаків трьома міграціями. Нова колонка з вимірюваною
+    /// величиною має з'явитися саме тут — інакше її масштаб не стереже ніщо.
     /// </remarks>
     public static TheoryData<string, string> Columns() => new()
     {
         { "doc.CellValue", "ValueNumeric" },
+        { "doc.DocumentIndexValue", "ValueNumeric" },
+        { "rpt.ReportRow", "ValueNumeric" },
+        { "ext.RawDataPoint", "ValueNumeric" },
+        { "dic.RegistryValue", "ValueNumeric" },
         { "calc.CalculationResult", "Value" },
         { "calc.CalculationInput", "Value" },
         { "calc.CalculationStep", "Value" },
