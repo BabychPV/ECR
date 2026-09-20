@@ -253,16 +253,38 @@ public sealed class TestNotificationChannelHandler(
     INotificationSender sender,
     IEnumerable<INotificationChannelSender> channelSenders,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    IAuditWriter audit,
+    ICurrentUser currentUser,
+    IClock clock)
 {
     /// <summary>Шле пробу й повертає підсумок; відмова каналу — не виняток.</summary>
+    /// <remarks>
+    /// ⚠ <see cref="IUnitOfWork"/> тут немає навмисно: проба не змінює жодної
+    /// сутності, а <see cref="IAuditWriter"/> пише власною командою.
+    /// </remarks>
     public async Task<NotificationTestResult> HandleAsync(int id, CancellationToken ct)
     {
-        await PermissionCheck
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, ListNotificationChannelsHandler.Permission, ct).ConfigureAwait(false);
 
         var channel = await ListNotificationChannelsHandler.FindAsync(store, id, ct).ConfigureAwait(false);
+        var result = await ProbeAsync(channel, ct).ConfigureAwait(false);
 
+        // ⛔ Проба — подія БЕЗПЕКИ, а не діагностика: вона шле повідомлення
+        // назовні від імені системи, і решта дій над каналом уже в журналі.
+        // ⛔ У деталях лише факт і підсумок: ні секрету, ні тіла повідомлення,
+        // ні тексту відмови транспорту (той складає не наш код).
+        await ListNotificationChannelsHandler.AuditAsync(
+            audit, clock, currentUser, profile.UserId, "NotificationChannelTested",
+            new { id, name = channel.Name, kind = channel.Kind.ToString(), ok = result.Ok }, ct)
+            .ConfigureAwait(false);
+
+        return result;
+    }
+
+    /// <summary>Сама проба: вибирає дорогу за транспортом каналу.</summary>
+    private async Task<NotificationTestResult> ProbeAsync(NotificationChannel channel, CancellationToken ct)
+    {
         if (channel.Kind == NotificationChannelKind.Smtp)
         {
             return !sender.IsConfigured

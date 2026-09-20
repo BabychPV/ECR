@@ -189,6 +189,39 @@ public sealed class NotificationChannelHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-33")]
+    public async Task Проба_каналу_лишає_запис_у_журналі_безпеки_без_секрету_й_без_тіла_повідомлення()
+    {
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+        await Secret().HandleAsync(teams.Id, Webhook, CancellationToken.None);
+        _events.Clear();
+
+        var webhook = new SpyChannelSender(NotificationChannelKind.TeamsWebhook);
+        Assert.True((await Test(webhook).HandleAsync(teams.Id, CancellationToken.None)).Ok);
+
+        // ⛔ Проба шле повідомлення НАЗОВНІ від імені системи — решта дій над
+        // каналом у журналі є, і мовчазна проба лишала б у ньому дірку.
+        var probe = Assert.Single(_events, e => e.EventType == "NotificationChannelTested");
+        Assert.Equal(Actor, probe.ChangedByUserId);
+        Assert.Contains("\"ok\":true", probe.DetailsJson, StringComparison.Ordinal);
+
+        // ⛔ Ні секрету каналу, ні тіла пробного повідомлення в журналі немає.
+        Assert.DoesNotContain("TopSecretSig", probe.DetailsJson!, StringComparison.Ordinal);
+        Assert.DoesNotContain("Test message for channel", probe.DetailsJson!, StringComparison.Ordinal);
+
+        // Невдала проба — така сама подія: журнал, який пише лише успіхи,
+        // не відповідає на питання «хто смикав канал».
+        webhook.Fails = new InvalidOperationException("вебхук відповів 500");
+        await Test(webhook).HandleAsync(teams.Id, CancellationToken.None);
+
+        Assert.Equal(
+            [true, false],
+            _events.Where(e => e.EventType == "NotificationChannelTested")
+                .Select(e => e.DetailsJson!.Contains("\"ok\":true", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
     public async Task Без_System_ManageNotifications_жодна_дія_не_виконується()
     {
         var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
@@ -214,7 +247,7 @@ public sealed class NotificationChannelHandlersTests
     private DeleteNotificationChannelHandler Delete() => new(_store, _access, _uow, _audit, _user, _clock);
 
     private TestNotificationChannelHandler Test(params INotificationChannelSender[] channelSenders)
-        => new(_store, _sender, channelSenders, _access, _user);
+        => new(_store, _sender, channelSenders, _access, _audit, _user, _clock);
 
     /// <summary>Відправник каналу, який нічого не шле — лише запам'ятовує або падає.</summary>
     private sealed class SpyChannelSender(NotificationChannelKind kind) : INotificationChannelSender
