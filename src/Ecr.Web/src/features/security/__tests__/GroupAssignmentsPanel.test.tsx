@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
@@ -171,16 +171,19 @@ describe('GroupAssignmentsPanel', () => {
 
       await userEvent.click(screen.getByRole('textbox', { name: 'Role' }));
       await userEvent.click(await screen.findByRole('option', { name: 'Publishers' }));
-      await userEvent.type(screen.getByLabelText(/Group name or SID/), 'S-1-5-32-544');
-      await userEvent.type(screen.getByRole('textbox', { name: 'Valid from' }), '2026-03-10');
-      await userEvent.type(screen.getByRole('textbox', { name: 'Valid to' }), '2026-03-01');
+      // ⚠ Дати вводяться `fireEvent.change`, а не посимвольним `userEvent.type`:
+      // предмет випадку — ФОРМАТ відправленого тіла, а не ввід. П'ять полів по
+      // десять символів з'їдали майже всю стелю vitest (5000 мс), і випадок падав
+      // таймаутом у повному наборі під навантаженням, проходячи поодинці.
+      fireEvent.change(screen.getByLabelText(/Group name or SID/), { target: { value: 'S-1-5-32-544' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Valid from' }), { target: { value: '2026-03-10' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Valid to' }), { target: { value: '2026-03-01' } });
       await userEvent.tab();
 
       expect(await screen.findByText('End before start')).not.toBeNull();
       expect(screen.getByRole('button', { name: 'Assign role to group' })).toHaveProperty('disabled', true);
 
-      await userEvent.clear(screen.getByRole('textbox', { name: 'Valid to' }));
-      await userEvent.type(screen.getByRole('textbox', { name: 'Valid to' }), '2026-03-31');
+      fireEvent.change(screen.getByRole('textbox', { name: 'Valid to' }), { target: { value: '2026-03-31' } });
       await userEvent.tab();
       await userEvent.click(screen.getByRole('button', { name: 'Assign role to group' }));
 
