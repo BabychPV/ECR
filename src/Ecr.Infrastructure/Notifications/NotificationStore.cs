@@ -59,9 +59,10 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
 
     /// <inheritdoc />
     public async Task<PagedResult<NotificationDeliveryView>> ReadDeliveriesAsync(
-        CursorRequest page, CancellationToken ct)
+        CursorRequest page, NotificationDeliveryFilter filter, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(filter);
 
         // ⚠ Курсор іде ВНИЗ (`Id < before`), бо й порядок спадний: журнал
         // читають із кінця. Порожній курсор — `long.MaxValue`, а не 0: із нулем
@@ -70,9 +71,16 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
         var decoded = Cursor.Decode(page.Cursor);
         var before = decoded == 0 ? long.MaxValue : decoded;
 
+        // ⚠ Локальні змінні, а не поля запису у виразі: так умова стає
+        // параметром запиту, і план не залежить від того, чи фільтр заданий.
+        var channelId = filter.ChannelId;
+        var status = filter.Status;
+
         // ⚠ Беремо на рядок більше за сторінку — це й є ознака «є ще», без COUNT.
         var rows = await db.NotificationDeliveries.AsNoTracking()
             .Where(d => d.Id < before)
+            .Where(d => channelId == null || d.ChannelId == channelId)
+            .Where(d => status == null || d.Status == status)
             .OrderByDescending(d => d.Id)
             .Take(page.Limit + 1)
             .Select(d => new

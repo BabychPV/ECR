@@ -4364,6 +4364,10 @@ export interface paths {
          *
          *     ⚠ Стеля сторінки — 200 (int ListNotificationDeliveriesHandler.MaxLimit),
          *     менша за спільну: більше тут не читає ніхто, а базі коштує.
+         *
+         *     ⚠ Фільтри необов'язкові й звужують ЗАПИТ, а не видачу: у шухляді каналу
+         *     журнал відкривають саме з `channelId`, і сторінка на 50 рядків,
+         *     відфільтрована після вибірки, віддавала б там два.
          */
         get: {
             parameters: {
@@ -4372,6 +4376,11 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Лише доставки цього каналу; без нього — усі. */
+                    channelId?: number;
+                    /** @description Лише цей підсумок (`Sent`, `Failed`, `Suppressed`);
+                     *     невідоме значення — `422 ECR-REQ-0422`, а не мовчазне «усі». */
+                    status?: string;
                 };
                 header?: never;
                 path?: never;

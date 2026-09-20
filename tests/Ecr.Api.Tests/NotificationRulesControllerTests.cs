@@ -195,8 +195,70 @@ public sealed class NotificationRulesControllerTests(SqlServerFixture sql)
         }
     }
 
-    private static Uri Deliveries(int limit)
-        => new($"/api/v1/notifications/deliveries?limit={limit}", UriKind.Relative);
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Журнал_доставок_звужується_каналом_і_підсумком_а_невідомий_підсумок_дає_422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "System.ManageNotifications").ConfigureAwait(true);
+        var mine = await NewChannelAsync(app, client).ConfigureAwait(true);
+        var other = await NewChannelAsync(app, client).ConfigureAwait(true);
+
+        var tag = Guid.NewGuid().ToString("N");
+        await using (var arrange = NewDb())
+        {
+            arrange.NotificationDeliveries.AddRange(
+                new NotificationDelivery(
+                    DateTime.UtcNow, mine, NotificationEventKind.JobFailed, $"sent-{tag}",
+                    NotificationDeliveryStatus.Sent),
+                new NotificationDelivery(
+                    DateTime.UtcNow, mine, NotificationEventKind.JobFailed, $"failed-{tag}",
+                    NotificationDeliveryStatus.Failed, "relay refused"),
+                new NotificationDelivery(
+                    DateTime.UtcNow, other, NotificationEventKind.ExportFailed, $"other-{tag}",
+                    NotificationDeliveryStatus.Failed, "relay refused"));
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var byChannel = await KeysAsync(app, client, Deliveries(200, $"&channelId={mine}")).ConfigureAwait(true);
+
+        // ⛔ Головне твердження: чужого рядка у видачі НЕМАЄ. Саме цим фільтр
+        // відрізняється від підказки — журнал спільний на всі канали, і
+        // «зайвий рядок» тут означає чужу доставку в шухляді не того каналу.
+        Assert.Contains($"sent-{tag}", byChannel);
+        Assert.Contains($"failed-{tag}", byChannel);
+        Assert.DoesNotContain($"other-{tag}", byChannel);
+
+        var byBoth = await KeysAsync(app, client, Deliveries(200, $"&channelId={mine}&status=Failed"))
+            .ConfigureAwait(true);
+        Assert.Equal([$"failed-{tag}"], byBoth.Where(k => k.EndsWith(tag, StringComparison.Ordinal)));
+
+        var byStatus = await KeysAsync(app, client, Deliveries(200, "&status=Sent")).ConfigureAwait(true);
+        Assert.Contains($"sent-{tag}", byStatus);
+        Assert.DoesNotContain($"failed-{tag}", byStatus);
+
+        // Невідомий підсумок — 422 наявним кодом, а не мовчазне «усі».
+        var unknown = await client.GetAsync(Deliveries(50, "&status=Delivered")).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, unknown.StatusCode);
+        Assert.Equal(
+            "err.ECR-REQ-0422.notificationDeliveryStatus",
+            (await BodyAsync(unknown).ConfigureAwait(true)).GetProperty("messageKey").GetString());
+    }
+
+    /// <summary>Ключі подій зі сторінки журналу; відмова — це падіння тесту.</summary>
+    private static async Task<List<string>> KeysAsync(EcrApiFactory app, HttpClient client, Uri path)
+    {
+        var response = await client.GetAsync(path).ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+
+        return [.. (await BodyAsync(response).ConfigureAwait(false)).GetProperty("items").EnumerateArray()
+            .Select(d => d.GetProperty("eventKey").GetString() ?? string.Empty)];
+    }
+
+    private static Uri Deliveries(int limit, string query = "")
+        => new($"/api/v1/notifications/deliveries?limit={limit}{query}", UriKind.Relative);
 
     private static async Task<JsonElement> BodyAsync(HttpResponseMessage response)
         => JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false)).RootElement;

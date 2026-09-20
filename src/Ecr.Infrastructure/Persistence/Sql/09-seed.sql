@@ -558,6 +558,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed',         N'en', N'The webhook address must use https and point to an allowed host.', 1),
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
+    -- ⚠ Той самий вибір, що в `jobState`: невідомий фільтр — відмова, а не
+    -- мовчазне «усі». Порожній перелік на друкарську помилку читався б як
+    -- «таких доставок не було».
+    (N'err.ECR-REQ-0422.notificationDeliveryStatus',   N'en', N'There is no delivery outcome "{status}".', 1),
 
     -- BE-21b: розклад збору редагується з інтерфейсу.
     -- ⚠ Cron перевіряється ДО запису, тому відмова називає і сам вираз, і

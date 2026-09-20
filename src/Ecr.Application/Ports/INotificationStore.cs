@@ -37,14 +37,18 @@ public interface INotificationStore
     public void RemoveRules(IEnumerable<NotificationRule> rules);
 
     /// <summary>
-    /// Сторінка журналу доставок, новіші першими.
+    /// Сторінка журналу доставок, новіші першими, звужена фільтром.
     /// </summary>
     /// <remarks>
     /// ⛔ Повертає ПРОЄКЦІЮ, а не сутність: у журналі немає ні секрету каналу,
     /// ні тіла повідомлення, і тип відповіді це закріплює.
+    ///
+    /// ⚠ Фільтр застосовується В ЗАПИТІ, а не після вибірки: інакше сторінка на
+    /// 50 рядків після звуження віддавала б два, і «більше немає» означало б
+    /// «більше немає в цих п'ятдесяти».
     /// </remarks>
     public Task<Common.PagedResult<Notifications.NotificationDeliveryView>> ReadDeliveriesAsync(
-        Common.CursorRequest page, CancellationToken ct);
+        Common.CursorRequest page, Notifications.NotificationDeliveryFilter filter, CancellationToken ct);
 }
 
 /// <summary>Захист секрету каналу (пароль SMTP, URL вебхука) перед записом у базу.</summary>

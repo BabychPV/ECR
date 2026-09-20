@@ -66,11 +66,22 @@ internal sealed class FakeNotificationStore : INotificationStore
     }
 
     /// <summary>Сторінка журналу: курсор у подвійнику не потрібен — його стереже тест бази.</summary>
-    public Task<PagedResult<NotificationDeliveryView>> ReadDeliveriesAsync(CursorRequest page, CancellationToken ct)
+    /// <remarks>
+    /// ⚠ Фільтр подвійник застосовує САМ — інакше тест обробника доводив би
+    /// фільтрацію власною заглушкою. Що фільтр справді доходить до бази,
+    /// стереже <c>NotificationRulesControllerTests</c> на живому SQL Server.
+    /// </remarks>
+    public Task<PagedResult<NotificationDeliveryView>> ReadDeliveriesAsync(
+        CursorRequest page, NotificationDeliveryFilter filter, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(filter);
+
+        var matching = Deliveries
+            .Where(d => filter.ChannelId is not { } channel || d.ChannelId == channel)
+            .Where(d => filter.Status is not { } status || d.Status == status);
 
         return Task.FromResult(new PagedResult<NotificationDeliveryView>(
-            [.. Deliveries.Take(page.Limit)], NextCursor: null, TotalCount: null));
+            [.. matching.Take(page.Limit)], NextCursor: null, TotalCount: null));
     }
 }

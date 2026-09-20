@@ -60,18 +60,32 @@ public sealed class NotificationRulesController(
     ///
     /// ⚠ Стеля сторінки — 200 (<see cref="ListNotificationDeliveriesHandler.MaxLimit"/>),
     /// менша за спільну: більше тут не читає ніхто, а базі коштує.
+    ///
+    /// ⚠ Фільтри необов'язкові й звужують ЗАПИТ, а не видачу: у шухляді каналу
+    /// журнал відкривають саме з <c>channelId</c>, і сторінка на 50 рядків,
+    /// відфільтрована після вибірки, віддавала б там два.
     /// </remarks>
     /// <param name="limit">Розмір сторінки 1..200; <c>0</c> — типове значення 50.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
+    /// <param name="channelId">Лише доставки цього каналу; без нього — усі.</param>
+    /// <param name="status">
+    /// Лише цей підсумок (<c>Sent</c>, <c>Failed</c>, <c>Suppressed</c>);
+    /// невідоме значення — <c>422 ECR-REQ-0422</c>, а не мовчазне «усі».
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("deliveries")]
     [ProducesResponseType<PagedResult<NotificationDeliveryView>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Deliveries(
-        [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
+        [FromQuery] int limit,
+        [FromQuery] string? cursor,
+        [FromQuery] int? channelId,
+        [FromQuery] string? status,
+        CancellationToken ct)
         => Ok(await deliveries
-            .HandleAsync(new CursorRequest(limit == 0 ? 50 : limit, cursor), ct).ConfigureAwait(false));
+            .HandleAsync(new CursorRequest(limit == 0 ? 50 : limit, cursor), channelId, status, ct)
+            .ConfigureAwait(false));
 }
 
 /// <summary>Тіло заміни матриці правил.</summary>

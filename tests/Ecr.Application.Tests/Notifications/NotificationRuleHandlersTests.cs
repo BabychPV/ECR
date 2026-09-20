@@ -140,7 +140,7 @@ public sealed class NotificationRuleHandlersTests
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Replace().HandleAsync([], CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Deliveries().HandleAsync(new CursorRequest(), CancellationToken.None));
+            () => Deliveries().HandleAsync(new CursorRequest(), channelId: null, status: null, CancellationToken.None));
 
         // ⛔ Відмова на `PUT` мусить статися ДО запису: інакше «немає права»
         // означало б «матрицю вже стерто, але тобі про це не скажуть».
@@ -159,16 +159,47 @@ public sealed class NotificationRuleHandlersTests
         // ⚠ Число літералом: `MaxLimit + 1` рухалося б разом зі стелею, і
         // підміна 200 на 20000 лишила б цей набір зеленим.
         var tooBig = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Deliveries().HandleAsync(new CursorRequest(201), CancellationToken.None));
+            () => Deliveries().HandleAsync(new CursorRequest(201), null, null, CancellationToken.None));
         var zero = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Deliveries().HandleAsync(new CursorRequest(0), CancellationToken.None));
+            () => Deliveries().HandleAsync(new CursorRequest(0), null, null, CancellationToken.None));
 
         Assert.Equal("err.ECR-REQ-0422.pageSizeOutOfRange", tooBig.Details!["messageKey"]);
         Assert.Equal("200", tooBig.Details!["max"]);
         Assert.Equal("ECR-REQ-0422", zero.ErrorCode);
 
-        var page = await Deliveries().HandleAsync(new CursorRequest(200), CancellationToken.None);
+        var page = await Deliveries().HandleAsync(new CursorRequest(200), null, null, CancellationToken.None);
         Assert.Equal("job:7", Assert.Single(page.Items).EventKey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Підсумок_журналу_приймається_лише_іменем_із_переліку_а_решта_це_422()
+    {
+        _store.Deliveries.Add(new NotificationDeliveryView(
+            1, _clock.UtcNow, 1, "Mail", NotificationEventKind.JobFailed, "job:7",
+            NotificationDeliveryStatus.Failed, "relay refused"));
+
+        // Ім'я — у будь-якому регістрі: фільтр приходить із рядка запиту.
+        var byName = await Deliveries().HandleAsync(new CursorRequest(50), null, "failed", CancellationToken.None);
+        Assert.Equal("job:7", Assert.Single(byName.Items).EventKey);
+
+        // ⛔ Числа переліку — НЕ значення фільтра: «2» дорівнює `Failed` лише
+        // всередині .NET, а в рядку запиту це просто невідомий підсумок.
+        foreach (var wrong in new[] { "Delivered", "2", "99", "-1" })
+        {
+            var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Deliveries().HandleAsync(new CursorRequest(50), null, wrong, CancellationToken.None));
+
+            Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+            Assert.Equal("err.ECR-REQ-0422.notificationDeliveryStatus", refused.Details!["messageKey"]);
+            Assert.Equal(wrong, refused.Details!["status"]);
+        }
+
+        // Порожній рядок — це «усі», а не помилка: так приїжджає незаповнене
+        // поле форми.
+        var all = await Deliveries().HandleAsync(new CursorRequest(50), null, "  ", CancellationToken.None);
+        Assert.Single(all.Items);
     }
 
     private void Allow(string permission)

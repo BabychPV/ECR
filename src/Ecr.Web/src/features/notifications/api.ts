@@ -79,10 +79,29 @@ export function replaceNotificationRules(rules: NotificationRule[]): Promise<Not
   return apiFetch<NotificationRuleMatrix>('/api/v1/notifications/rules', { method: 'PUT', ...json({ rules }) });
 }
 
-/** Журнал доставок, новіші першими; `limit` — 1..200. */
-export function listNotificationDeliveries(limit = 50, cursor: string | null = null): Promise<NotificationDeliveryPage> {
+/** Підсумок спроби доставки — рівно значення переліку сервера. */
+export type NotificationDeliveryStatus = NonNullable<NotificationDelivery['status']>;
+
+/** Необов'язкове звуження журналу; поле без значення — «будь-яке». */
+export interface NotificationDeliveryFilter {
+  channelId?: number;
+  status?: NotificationDeliveryStatus;
+}
+
+/**
+ * Журнал доставок, новіші першими; `limit` — 1..200.
+ * Фільтри звужують ЗАПИТ: сторінка лишається повною, а не обрізаною після вибірки.
+ * Невідомий `status` сервер відхиляє `422 ECR-REQ-0422`, а не мовчки показує все.
+ */
+export function listNotificationDeliveries(
+  limit = 50,
+  cursor: string | null = null,
+  filter: NotificationDeliveryFilter = {},
+): Promise<NotificationDeliveryPage> {
   return apiFetch<NotificationDeliveryPage>(
     `/api/v1/notifications/deliveries?limit=${String(limit)}` +
-      (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
+      (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`) +
+      (filter.channelId === undefined ? '' : `&channelId=${String(filter.channelId)}`) +
+      (filter.status === undefined ? '' : `&status=${encodeURIComponent(filter.status)}`),
   );
 }

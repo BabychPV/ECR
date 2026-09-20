@@ -71,4 +71,19 @@ describe('features/notifications/api', () => {
       '/api/v1/notifications/deliveries?limit=200&cursor=MTA%3D',
     ]);
   });
+
+  it('фільтри журналу їдуть рядком запиту, а незадані не їдуть узагалі', async () => {
+    await listNotificationDeliveries(50, null, { channelId: 7 });
+    await listNotificationDeliveries(50, null, { status: 'Failed' });
+    await listNotificationDeliveries(20, 'MTA=', { channelId: 7, status: 'Suppressed' });
+
+    // ⛔ Порожній фільтр не додає ні `channelId=`, ні `status=`: сервер читає
+    // порожній `status` як «усі», але `channelId=` порожнім рядком — це вже
+    // невдале приведення типу, тобто 400 замість переліку.
+    expect(apiFetch.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/notifications/deliveries?limit=50&channelId=7',
+      '/api/v1/notifications/deliveries?limit=50&status=Failed',
+      '/api/v1/notifications/deliveries?limit=20&cursor=MTA%3D&channelId=7&status=Suppressed',
+    ]);
+  });
 });

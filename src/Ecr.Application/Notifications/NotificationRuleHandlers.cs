@@ -42,6 +42,18 @@ public sealed record NotificationDeliveryView(
     long Id, DateTime At, int ChannelId, string? ChannelName, NotificationEventKind EventKind,
     string EventKey, NotificationDeliveryStatus Status, string? Error);
 
+/// <summary>Звуження журналу доставок; <c>null</c> у полі — «будь-яке».</summary>
+/// <remarks>
+/// ⚠ Канал — просто ФІЛЬТР, а не адресація: неіснуючий ідентифікатор дає
+/// порожню сторінку, а не <c>404</c>. Журнал переживає видалення каналу
+/// (зовнішнього ключа немає навмисно), тож «каналу немає» тут не означає
+/// «рядків немає».
+/// </remarks>
+/// <param name="ChannelId">Канал.</param>
+/// <param name="Status">Підсумок спроби.</param>
+public sealed record NotificationDeliveryFilter(
+    int? ChannelId = null, NotificationDeliveryStatus? Status = null);
+
 /// <summary>Матриця правил сповіщень. Право <c>System.ManageNotifications</c>.</summary>
 public sealed class GetNotificationRulesHandler(
     INotificationStore store, IAccessDecisionService access, ICurrentUser currentUser)
@@ -170,7 +182,15 @@ public sealed class ListNotificationDeliveriesHandler(
     public const int MaxLimit = 200;
 
     /// <summary>Повертає сторінку журналу, новіші першими.</summary>
-    public async Task<PagedResult<NotificationDeliveryView>> HandleAsync(CursorRequest page, CancellationToken ct)
+    /// <param name="page">Розмір сторінки й курсор.</param>
+    /// <param name="channelId">Звузити до одного каналу; <c>null</c> — усі.</param>
+    /// <param name="status">
+    /// Звузити до одного підсумку іменем зі списку
+    /// <see cref="NotificationDeliveryStatus"/>; <c>null</c> або порожньо — усі.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<PagedResult<NotificationDeliveryView>> HandleAsync(
+        CursorRequest page, int? channelId, string? status, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -193,6 +213,38 @@ public sealed class ListNotificationDeliveriesHandler(
                 });
         }
 
-        return await store.ReadDeliveriesAsync(page, ct).ConfigureAwait(false);
+        return await store
+            .ReadDeliveriesAsync(page, new NotificationDeliveryFilter(channelId, StatusOf(status)), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Підсумок за іменем; невідоме — <c>422</c>, а не мовчазне «усі».</summary>
+    /// <remarks>
+    /// ⚠ Та сама межа, що й у <c>state</c> переліку задач: друкарська помилка у
+    /// фільтрі інакше відповідала б «таких доставок не було».
+    /// </remarks>
+    private static NotificationDeliveryStatus? StatusOf(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        // ⛔ Звірка з ІМЕНАМИ, а не `Enum.TryParse`: той приймає і число («2»),
+        // і число поза переліком («99»), тобто фільтр мовчки пропускав би те,
+        // чого в переліку немає.
+        var known = Enum.GetValues<NotificationDeliveryStatus>()
+            .Cast<NotificationDeliveryStatus?>()
+            .FirstOrDefault(v => string.Equals(v.ToString(), status.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        return known
+            ?? throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Підсумку доставки «{status}» не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.notificationDeliveryStatus",
+                    ["status"] = status,
+                });
     }
 }
