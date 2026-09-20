@@ -480,6 +480,7 @@ USING (VALUES
     (N'err.ECR-RPT-0422.unknownColumn',      N'en', N'Row source "{rowSource}" has no column "{columnCode}".', 1),
     (N'err.ECR-RPT-0422.columnKindMismatch', N'en', N'Column "{columnCode}" is "{expectedKind}" in the row source, not "{kind}".', 1),
     (N'err.ECR-RPT-0422.rulesSchema',        N'en', N'Rules schema {schema} is not supported: the current one is {currentSchema}.', 1),
+    (N'err.ECR-RPT-0422.rule',               N'en', N'Rule {ruleNo} ({part}) is invalid: {reason}.', 1),
     (N'err.ECR-RPT-0404.snapshot',           N'en', N'Snapshot {snapshotId} does not exist.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в

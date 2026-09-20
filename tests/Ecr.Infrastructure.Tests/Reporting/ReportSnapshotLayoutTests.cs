@@ -138,6 +138,101 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         Assert.Null(await builder.RowsAsync(long.MaxValue, 0, 1, CancellationToken.None));
     }
 
+    private static readonly ReportColumnCommand[] RuledColumns = [new("OutputCode", "text"), new("Value", "number")];
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правило_set_змінює_значення_в_рядках_і_суму_а_перевірка_сходиться()
+    {
+        // 12.5 → 13 (округлення від нуля); другий рядок (5) умова не зачіпає.
+        var (plain, ruled, builder, db) = await BuildPairAsync(
+            new("[Value] > 10", new(Set: new("Value", "ROUND([Value], 0)"))));
+
+        await using var scope = db;
+        var cells = await CellsAsync(db, ruled);
+
+        Assert.Equal(
+            ["1|OutputCode|E_CO2|", "1|Value||13", "2|OutputCode|E_NOX|", "2|Value||5"], cells.Select(Key));
+        Assert.Equal(Convert.ToHexString(OldHash(cells)), await HashAsync(db, ruled));
+        Assert.NotEqual(await HashAsync(db, plain), await HashAsync(db, ruled));
+
+        var hashes = await builder.VerifyAsync(ruled, CancellationToken.None);
+        Assert.Equal(hashes!.Stored, hashes.Actual);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правило_hideRow_прибирає_рядок_зі_зрізу_й_із_суми_а_перевірка_сходиться()
+    {
+        var (plain, ruled, builder, db) = await BuildPairAsync(new("[OutputCode] = 'E_CO2'", new(HideRow: true)));
+
+        await using var scope = db;
+        var cells = await CellsAsync(db, ruled);
+
+        // Прихований рядок номера не займає: лишився один, і він — перший.
+        Assert.Equal(["1|OutputCode|E_NOX|", "1|Value||5"], cells.Select(Key));
+        Assert.Equal(4, (await CellsAsync(db, plain)).Count);
+        Assert.NotEqual(await HashAsync(db, plain), await HashAsync(db, ruled));
+
+        var hashes = await builder.VerifyAsync(ruled, CancellationToken.None);
+        Assert.Equal(hashes!.Stored, hashes.Actual);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Помилка_правила_на_рядку_валить_побудову_і_не_лишає_зрізу()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+
+        // Другий рядок має Value = 5: ділення на нуль.
+        var version = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
+            new("CalculationResults", Rules: [new("1 / ([Value] - 5) > 0", new(HideRow: true))]), RuledColumns));
+
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => new ReportSnapshotBuilder(db, new TestClock(Now)).BuildAsync(
+                version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None));
+
+        Assert.Equal("1", error.Details!["ruleNo"]);
+        Assert.False(await db.ReportSnapshots.AsNoTracking().AnyAsync(s => s.ReportVersionId == version.Id));
+    }
+
+    private const string RuledColumnsJson = """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""";
+
+    /// <summary>Два зрізи тих самих даних: без правил (схема 1) і з правилом (схема 2).</summary>
+    private async Task<(long Plain, long Ruled, ReportSnapshotBuilder Builder, EcrDbContext Db)> BuildPairAsync(
+        ReportRuleCommand rule)
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        var plain = await PublishedAsync(db, RuledColumnsJson);
+        var ruled = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
+            new("CalculationResults", Rules: [rule]), RuledColumns));
+
+        return (
+            await builder.BuildAsync(plain.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None),
+            await builder.BuildAsync(ruled.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None),
+            builder,
+            db);
+    }
+
+    private static async Task<List<ReportRow>> CellsAsync(EcrDbContext db, long snapshotId)
+        => await db.ReportRows.AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId)
+            .OrderBy(r => r.RowNo).ThenBy(r => r.ColumnCode)
+            .ToListAsync();
+
+    private static async Task<string> HashAsync(EcrDbContext db, long snapshotId)
+        => Convert.ToHexString((await db.ReportSnapshots.AsNoTracking()
+            .Where(s => s.Id == snapshotId).Select(s => s.ContentHash).SingleAsync())!);
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Кожне_поле_таблиці_джерела_будівник_уміє_прочитати()
@@ -192,7 +287,8 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         return new Seeded(document.ProjectId, document.PeriodKey, document.DocumentId, unit.Code, results);
     }
 
-    private static async Task<ReportVersion> PublishedAsync(EcrDbContext db, string columnsJson)
+    private static async Task<ReportVersion> PublishedAsync(
+        EcrDbContext db, string columnsJson, string rulesJson = """{"rowSource":"CalculationResults"}""")
     {
         var def = new ReportDef(
             EcrCode.Create($"RPT{Guid.NewGuid().ToString("N")[..8]}"),
@@ -201,7 +297,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         db.ReportDefs.Add(def);
         await db.SaveChangesAsync();
 
-        var version = new ReportVersion(def.Id, "1.0", columnsJson, """{"rowSource":"CalculationResults"}""", Now);
+        var version = new ReportVersion(def.Id, "1.0", columnsJson, rulesJson, Now);
         version.Publish();
         db.ReportVersions.Add(version);
         await db.SaveChangesAsync();

@@ -12130,11 +12130,33 @@ export interface components {
             /** @description Параметри звіту — `@Name`. */
             parameters: null | components["schemas"]["ReportSymbolDeclaration"][];
         };
+        /** @description Правило рядка зрізу: «умова → значення» або «умова → приховати рядок» (`D-52a`). */
+        ReportRuleCommand: {
+            /** @description Дія: рівно одна з `set` і `hideRow`. */
+            then: components["schemas"]["ReportRuleThenCommand"];
+            /** @description Умова — вираз діалекту `Report` типу `Boolean` (`02b` §8a). */
+            when: string;
+        };
+        /** @description Присвоєння колонці рядка. */
+        ReportRuleSetCommand: {
+            /** @description Код ОПИСАНОЇ колонки версії. */
+            column: string;
+            /** @description Вираз діалекту `Report`; тип сумісний із типом колонки. */
+            value: string;
+        };
+        /** @description Дія правила. */
+        ReportRuleThenCommand: {
+            /** @description `true` — рядок у зріз не потрапляє. */
+            hideRow?: null | boolean;
+            set?: null | components["schemas"]["ReportRuleSetCommand"];
+        };
         /** @description Правила відбору рядків зрізу. */
         ReportRulesCommand: {
             /** @description Звідки беруться рядки. Єдине відоме будівнику значення —
              *     string ReportDefinitionSpec.CalculationResults. */
             rowSource: string;
+            /** @description Правила рядка (схема 2) у порядку застосування; у JSON схеми 1 поля немає взагалі. */
+            rules?: null | components["schemas"]["ReportRuleCommand"][];
             /**
              * Format: int32
              * @description Версія схеми правил; `null` — чинна (int ReportRules.CurrentSchema).
