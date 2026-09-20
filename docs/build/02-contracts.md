@@ -3030,6 +3030,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
 | `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |

@@ -613,6 +613,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consistency/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Прогін перевірки узгодженості на вимогу. Право `System.RunJob`.
+         * @description ⛔ `System.RunJob` — одне з восьми прав, які сід видає і які не
+         *     перевіряв жоден обробник (`BE-28`). Це його перший викликач.
+         *
+         *     ⚠ `202`, не `200`: перевірка ходить по всіх партиціях і в
+         *     відповідь укластися не може. Стан клієнт дочитує тим самим
+         *     `GET /api/v1/jobs/{jobId}`, яким уже показує будь-який прогрес.
+         *
+         *     ⚠ Перевірка вже в черзі або вже виконується — `409`
+         *     (`ECR-JOB-0409`) із її `jobId`, а не другий повний обхід тих
+         *     самих таблиць.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RunConsistencyCheckRequest"];
+                    "application/json": components["schemas"]["RunConsistencyCheckRequest"];
+                    "text/json": components["schemas"]["RunConsistencyCheckRequest"];
+                };
+            };
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -13468,6 +13557,11 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Запит на прогін перевірки узгодженості. */
+        RunConsistencyCheckRequest: {
+            /** @description Причина; обов'язкова, потрапляє в журнал безпеки (`aud.SecurityEvent`). */
+            reason: string;
+        };
         /** @description Запит на прив'язку виходу методології до колонки документа. */
         SaveCalculationBindingRequest: {
             /** @description Вимкнена прив'язка не бере участі в прогоні. Законна одразу: її заводять

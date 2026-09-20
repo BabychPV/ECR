@@ -292,6 +292,13 @@ public static class DependencyInjection
         // виконавця — черга приймала б завдання і не робила нічого.
         services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
+
+        // ⚠ Та сама задача, що вже зареєстрована по типу вище: нічний розклад
+        // ставить її конкретним класом, а `POST /consistency/run` — маркером
+        // (`BE-30`). Без цього рядка ручний прогін приймався б у чергу й не
+        // виконувався б — черга без виконавця ззовні виглядає як «дуже довго».
+        services.AddScoped<IConsistencyCheckJob, Jobs.ConsistencyCheckJob>();
+
         services.AddScoped<IExcelExportJob, Jobs.ExcelExportJob>();
         services.AddScoped<IExcelImportJob, Jobs.ExcelImportJob>();
 

@@ -6919,6 +6919,19 @@
           "Header"
         ]
       },
+      "RunConsistencyCheckRequest": {
+        "description": "Запит на прогін перевірки узгодженості.",
+        "properties": {
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал безпеки (`aud.SecurityEvent`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "SaveCalculationBindingRequest": {
         "description": "Запит на прив'язку виходу методології до колонки документа.",
         "properties": {
@@ -10924,6 +10937,117 @@
           }
         },
         "summary": "Знахідки перевірки узгодженості. Право `System.ViewHealth`.",
+        "tags": [
+          "Consistency"
+        ]
+      }
+    },
+    "/api/v1/consistency/run": {
+      "post": {
+        "description": "⛔ `System.RunJob` — одне з восьми прав, які сід видає і які не\nперевіряв жоден обробник (`BE-28`). Це його перший викликач.\n\n⚠ `202`, не `200`: перевірка ходить по всіх партиціях і в\nвідповідь укластися не може. Стан клієнт дочитує тим самим\n`GET /api/v1/jobs/{jobId}`, яким уже показує будь-який прогрес.\n\n⚠ Перевірка вже в черзі або вже виконується — `409`\n(`ECR-JOB-0409`) із її `jobId`, а не другий повний обхід тих\nсамих таблиць.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunConsistencyCheckRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunConsistencyCheckRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunConsistencyCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Прогін перевірки узгодженості на вимогу. Право `System.RunJob`.",
         "tags": [
           "Consistency"
         ]

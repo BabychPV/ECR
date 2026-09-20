@@ -557,6 +557,14 @@ USING (VALUES
     (N'err.ECR-AUTH-0401.anonymous',          N'en', N'An anonymous request has no jobs of its own: sign in again.', 1),
     (N'err.ECR-REQ-0422.jobState',            N'en', N'There is no job state "{state}".', 1),
     (N'err.ECR-REQ-0422.jobLimit',            N'en', N'The number of jobs requested is out of range: {limit}.', 1),
+    -- ⛔ `BE-30`: прогін перевірки узгодженості на вимогу (`System.RunJob`).
+    -- Причина обов'язкова, бо прогін іде в журнал безпеки: найважча операція
+    -- системи не має бути анонімною.
+    -- ⚠ Конфлікт називає ЗАДАЧУ, а не просто «вже виконується»: інакше єдина
+    -- дія у відповідь — тикати кнопку доти, доки не спрацює.
+    (N'err.ECR-REQ-0422.consistencyRunReasonRequired', N'en', N'A reason is required to run the consistency check on demand: the run is recorded in the security journal.', 1),
+    (N'err.ECR-REQ-0422.consistencyRunReasonTooLong',  N'en', N'The reason must be no longer than {max} characters.', 1),
+    (N'err.ECR-JOB-0409.consistencyCheckRunning',      N'en', N'A consistency check is already in progress as job {jobId} ({state}): watch that job instead of starting a second full scan.', 1),
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
     (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),

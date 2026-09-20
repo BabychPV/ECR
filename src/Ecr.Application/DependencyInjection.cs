@@ -156,6 +156,7 @@ public static class DependencyInjection
         services.AddScoped<Audit.GetCellChangesHandler>();
         services.AddScoped<Audit.GetStructureChangesHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
+        services.AddScoped<Consistency.RunConsistencyCheckHandler>();
         services.AddScoped<Projects.CloneProjectHandler>();
 
         // Періоди (модуль 3.4)

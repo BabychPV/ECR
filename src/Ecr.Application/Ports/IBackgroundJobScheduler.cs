@@ -275,3 +275,20 @@ public interface IReportSnapshotJob : IBackgroundJob;
 
 /// <summary>Маркер задачі збору із зовнішнього джерела.</summary>
 public interface ICollectionJob : IBackgroundJob;
+
+/// <summary>
+/// Маркер нічної перевірки узгодженості — щоб її можна було запустити НА
+/// ВИМОГУ (<c>BE-30</c>, «Run check now»).
+/// </summary>
+/// <remarks>
+/// ⚠ Потрібен із тієї самої причини, що й решта маркерів: реалізація живе в
+/// <c>Ecr.Infrastructure</c>, якого прикладний шар не бачить.
+/// <para>
+/// ⚠ Розклад (<c>RecurringScheduleService</c>) ставить ТУ САМУ задачу за
+/// конкретним типом, а не за цим маркером, і <c>JobCode</c> у
+/// <c>itg.JobProgress</c> — це повне ім'я типу, яким задачу поставили. Тобто
+/// назв у черзі ДВІ, і той, хто шукає перевірку серед незавершених задач, має
+/// впізнавати обидві (<c>RunConsistencyCheckHandler.IsConsistencyCheckCode</c>).
+/// </para>
+/// </remarks>
+public interface IConsistencyCheckJob : IBackgroundJob;
