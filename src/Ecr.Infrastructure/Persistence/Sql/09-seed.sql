@@ -460,6 +460,12 @@ USING (VALUES
     (N'err.ECR-INT-0502.credentialsRefused',    N'en', N'The SQL source "{dataSource}" refused the service credentials. This is not a temporary outage: the collection will not retry.', 1),
     (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
     (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
+    -- D-52a: опис звіту керує побудовою зрізу, тож колонка, якої джерело не
+    -- має, відмовляє вже при створенні версії опису.
+    (N'err.ECR-RPT-0422.unknownColumn',      N'en', N'Row source "{rowSource}" has no column "{columnCode}".', 1),
+    (N'err.ECR-RPT-0422.columnKindMismatch', N'en', N'Column "{columnCode}" is "{expectedKind}" in the row source, not "{kind}".', 1),
+    (N'err.ECR-RPT-0422.rulesSchema',        N'en', N'Rules schema {schema} is not supported: the current one is {currentSchema}.', 1),
+    (N'err.ECR-RPT-0404.snapshot',           N'en', N'Snapshot {snapshotId} does not exist.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
@@ -1724,6 +1730,11 @@ USING (VALUES
     (N'snapshots.verifyStored',          N'en', N'Stored: {hash}', 1),
     (N'snapshots.verifyActual',          N'en', N'Actual: {hash}', 1),
     (N'snapshots.verifyLegacy',          N'en', N'Matched by the earlier checksum format: this snapshot was built before the format changed.', 1),
+    -- D-52a: перегляд рядків зрізу в застосунку (другий споживач `rpt.*`).
+    (N'snapshots.viewRows',              N'en', N'View rows', 1),
+    (N'snapshots.rowsTitle',             N'en', N'Snapshot rows', 1),
+    (N'snapshots.rowsMore',              N'en', N'Show more', 1),
+    (N'snapshots.rowsEmpty',             N'en', N'This snapshot has no rows.', 1),
 
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.

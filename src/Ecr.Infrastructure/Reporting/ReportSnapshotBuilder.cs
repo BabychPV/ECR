@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Ecr.Application.Ports;
+using Ecr.Application.Reporting;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
@@ -19,6 +20,11 @@ namespace Ecr.Infrastructure.Reporting;
 /// Межа з SSRS проходить саме тут: звіти лишаються в SSRS (<c>D-52</c>), а ми
 /// віддаємо стабільний контракт даних. <c>rpt.*</c> — зріз **без логіки**:
 /// агрегації робить цей сервіс, вʼюха лише проєктує (ФВ-0.3).
+/// <para>
+/// ✎ <c>D-52a</c>: поруч із SSRS зрізи читає сам застосунок, а колонки зрізу
+/// задає опис версії. Для <c>rpt.*</c> це адитивно (<c>D-53</c>): опис із тими
+/// самими п'ятьма колонками дає той самий вміст і ту саму суму.
+/// </para>
 /// </remarks>
 public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IReportSnapshotBuilder
 {
@@ -44,6 +50,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Версії звіту {reportVersionId} не існує.");
 
+        // ⛔ D-52a: колонки зрізу задає ОПИС. Розбирається ДО створення зрізу:
+        // відмова після нього лишила б у `rpt.ReportSnapshot` порожній рядок.
+        var layout = LayoutOf(version);
+
         // ⚠ Статус УСПАДКОВУЄТЬСЯ від даних (D-65). Окреме поле «статус звіту»
         // стало б другим джерелом істини і рано чи пізно показало б регулятору
         // Approved на чернетці.
@@ -58,7 +68,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         // Агрегації виконуються ТУТ, одним набором запитів. Вʼюха rpt.v_*
         // нічого не рахує (ФВ-0.3): індексована вʼюха з обчисленнями не
         // перебудовується інкрементно і зупиняє запис у джерело.
-        var rows = await AggregateAsync(projectId, periodKey, snapshot.Id, ct).ConfigureAwait(false);
+        var rows = await AggregateAsync(layout, projectId, periodKey, snapshot.Id, ct).ConfigureAwait(false);
 
         db.ReportRows.AddRange(rows);
 
@@ -195,21 +205,24 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         }
 
         // ⚠ Порядок — той самий, у якому рядки хешувалися при побудові:
-        // `RowNo` зростає, а п'ять комірок рядка йдуть у порядку `Cell(...)`.
+        // `RowNo` зростає, а комірки рядка йдуть у порядку колонок ОПИСУ.
         // Первинний ключ (SnapshotId, RowNo, ColumnCode) дав би АЛФАВІТНИЙ
-        // порядок колонок, тому комірки одного рядка впорядковує
-        // `ColumnOrder`, а не база.
+        // порядок колонок, тому комірки одного рядка впорядковує опис, а не база.
+        var described = await DescribedColumnsAsync(snapshotId, ct).ConfigureAwait(false) ?? [];
+
         var rows = await db.ReportRows
             .AsNoTracking()
             .Where(r => r.SnapshotId == snapshotId)
             .OrderBy(r => r.RowNo)
-            .Take(MaxRows * ColumnsPerResult)
+            .Take(MaxRows * Math.Max(described.Count, LegacyColumns.Length))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        var order = StoredLayout(described, rows).Select(c => c.Code).ToList();
+
         var ordered = rows
             .OrderBy(r => r.RowNo)
-            .ThenBy(r => ColumnOrder(r.ColumnCode))
+            .ThenBy(r => ColumnOrder(order, r.ColumnCode))
             .ThenBy(r => r.ColumnCode, StringComparer.Ordinal)
             .ToList();
 
@@ -225,14 +238,115 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         return new SnapshotHashes(storedHex, actualHex, legacyHex);
     }
 
-    /// <summary>Порядок комірок у рядку — той, у якому їх складає <c>AggregateAsync</c>.</summary>
-    private static readonly string[] Columns =
-        ["DocumentId", "RowKey", "OutputCode", "Value", "SubstanceEntryId"];
-
-    private static int ColumnOrder(string columnCode)
+    /// <inheritdoc />
+    public async Task<SnapshotRowsPage?> RowsAsync(long snapshotId, int afterRowNo, int limit, CancellationToken ct)
     {
-        var index = Array.IndexOf(Columns, columnCode);
-        return index < 0 ? Columns.Length : index;
+        var described = await DescribedColumnsAsync(snapshotId, ct).ConfigureAwait(false);
+
+        if (described is null)
+        {
+            return null;
+        }
+
+        // Номери рядків окремим запитом: сторінка рахується в РЯДКАХ звіту, а
+        // `rpt.ReportRow` зберігає комірки, і їх у рядку стільки, скільки колонок.
+        var rowNos = await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId && r.RowNo > afterRowNo)
+            .Select(r => r.RowNo)
+            .Distinct()
+            .OrderBy(n => n)
+            .Take(limit + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var last = rowNos.Take(limit).LastOrDefault();
+
+        var cells = await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId && r.RowNo > afterRowNo && r.RowNo <= last)
+            .OrderBy(r => r.RowNo)
+            .Take(limit * MaxColumnsPerRow)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var layout = StoredLayout(described, cells);
+
+        var rows = cells
+            .GroupBy(c => c.RowNo)
+            .Select(g => new SnapshotRow(
+                g.Key,
+                layout.ToDictionary(
+                    c => c.Code,
+                    c => ValueOf(g.FirstOrDefault(x => x.ColumnCode == c.Code), c.Kind),
+                    StringComparer.Ordinal)))
+            .ToList();
+
+        return new SnapshotRowsPage(
+            [.. layout.Select(c => new SnapshotColumn(c.Code, c.Kind))],
+            rows,
+            rowNos.Count > limit ? last : null);
+    }
+
+    /// <summary>Стеля комірок одного рядка у сторінці рядків.</summary>
+    private const int MaxColumnsPerRow = 64;
+
+    /// <summary>Значення комірки для відповіді: число без хвостових нулів масштабу бази.</summary>
+    private static object? ValueOf(ReportRow? cell, string kind)
+        => kind switch
+        {
+            _ when cell is null => null,
+            ReportSourceColumns.Number => cell.ValueNumeric is { } number
+                ? decimal.Parse(Canonical(number), CultureInfo.InvariantCulture)
+                : null,
+            "date" => cell.ValueDate?.ToString("O", CultureInfo.InvariantCulture),
+            _ => cell.ValueString,
+        };
+
+    /// <summary>
+    /// Колонки, які зрізи мали ДО <c>D-52a</c>: будівник писав їх завжди, хоч би що стояло в описі.
+    /// </summary>
+    private static readonly ReportColumnSpec[] LegacyColumns =
+    [
+        new("DocumentId", ReportSourceColumns.Number),
+        new("RowKey", ReportSourceColumns.Text),
+        new("OutputCode", ReportSourceColumns.Text),
+        new("Value", ReportSourceColumns.Number),
+        new("SubstanceEntryId", ReportSourceColumns.Number),
+    ];
+
+    /// <summary>Колонки опису версії, за якою побудовано зріз; <c>null</c> — зрізу немає.</summary>
+    private async Task<IReadOnlyList<ReportColumnSpec>?> DescribedColumnsAsync(long snapshotId, CancellationToken ct)
+    {
+        var columnsJson = await (
+                from snapshot in db.ReportSnapshots.AsNoTracking()
+                join version in db.ReportVersions.AsNoTracking() on snapshot.ReportVersionId equals version.Id
+                where snapshot.Id == snapshotId
+                select version.ColumnsJson)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return columnsJson is null ? null : ReportColumnSpec.Parse(columnsJson);
+    }
+
+    /// <summary>Колонки ЗБЕРЕЖЕНОГО зрізу в порядку, у якому їх складала побудова.</summary>
+    /// <remarks>
+    /// ⛔ Зріз, побудований до <c>D-52a</c>, має п'ять колонок незалежно від
+    /// опису. Ознака — у рядках є код, якого опис не знає; тоді порядок старий,
+    /// інакше сума такого зрізу перестала б збігатися (BE-17).
+    /// </remarks>
+    private static IReadOnlyList<ReportColumnSpec> StoredLayout(
+        IReadOnlyList<ReportColumnSpec> described, IReadOnlyList<ReportRow> cells)
+    {
+        var known = described.Select(d => d.Code).ToHashSet(StringComparer.Ordinal);
+
+        return known.Count > 0 && cells.All(c => known.Contains(c.ColumnCode)) ? described : LegacyColumns;
+    }
+
+    private static int ColumnOrder(List<string> order, string columnCode)
+    {
+        var index = order.IndexOf(columnCode);
+        return index < 0 ? order.Count : index;
     }
 
     /// <summary>Збережена сума зрізу.</summary>
@@ -283,7 +397,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 
     /// <summary>Агрегує результати розрахунку в рядки зрізу.</summary>
     private async Task<List<ReportRow>> AggregateAsync(
-        int projectId, PeriodKey? periodKey, long snapshotId, CancellationToken ct)
+        IReadOnlyList<ReportColumnSpec> layout, int projectId, PeriodKey? periodKey, long snapshotId,
+        CancellationToken ct)
     {
         var query =
             from result in db.CalculationResults.AsNoTracking()
@@ -291,6 +406,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                 on result.DocumentId equals document.Id
             join run in db.CalculationRuns.AsNoTracking()
                 on result.CalculationRunId equals run.Id
+            join unit in db.Units.AsNoTracking()
+                on result.UnitId equals unit.Id
+            join project in db.Projects.AsNoTracking()
+                on document.ProjectId equals project.Id
             where document.ProjectId == projectId
                   && (periodKey == null || result.PeriodKey == periodKey.Value.Value)
 
@@ -313,31 +432,83 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             orderby result.DocumentId, result.SourceRowKey, result.OutputCode
             select new ResultRow(
                 result.DocumentId, result.SourceRowKey, result.OutputCode,
-                result.Value, result.SubstanceEntryId);
+                result.Value, result.SubstanceEntryId,
+                result.PeriodKey, result.UnitId, unit.Code, result.MethodologyVersionId, project.Code);
 
         var results = await query
             .Take(MaxRows)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var rows = new List<ReportRow>(results.Count * ColumnsPerResult);
+        var rows = new List<ReportRow>(results.Count * layout.Count);
         var rowNo = 0;
 
         foreach (var result in results)
         {
             rowNo++;
-            rows.Add(Cell(snapshotId, rowNo, "DocumentId", null, result.DocumentId));
-            rows.Add(Cell(snapshotId, rowNo, "RowKey", result.SourceRowKey, null));
-            rows.Add(Cell(snapshotId, rowNo, "OutputCode", result.OutputCode, null));
-            rows.Add(Cell(snapshotId, rowNo, "Value", null, result.Value));
-            rows.Add(Cell(snapshotId, rowNo, "SubstanceEntryId", null, result.SubstanceEntryId));
+
+            // ⛔ Лише описані колонки і в порядку опису (D-52a): за цим порядком
+            // рахується сума, і за ним її перераховує `VerifyAsync`.
+            foreach (var column in layout)
+            {
+                var value = Readers[column.Code](result);
+
+                rows.Add(column.Kind == ReportSourceColumns.Number
+                    ? Cell(snapshotId, rowNo, column.Code, null, (decimal?)value)
+                    : Cell(snapshotId, rowNo, column.Code, (string?)value, null));
+            }
         }
 
         return rows;
     }
 
-    /// <summary>Скільки колонок дає один результат розрахунку.</summary>
-    private const int ColumnsPerResult = 5;
+    /// <summary>Як прочитати кожне поле джерела <c>CalculationResults</c>.</summary>
+    /// <remarks>
+    /// Перелік кодів і їхні типи — у <see cref="ReportSourceColumns"/>; рівність
+    /// двох таблиць стереже тест. Ідентифікатори йдуть як <c>decimal</c> з
+    /// масштабом 0 — рівно так їх писав код до <c>D-52a</c> (формат <c>legacy</c>).
+    /// </remarks>
+    private static readonly Dictionary<string, Func<ResultRow, object?>> Readers = new(StringComparer.Ordinal)
+    {
+        ["DocumentId"] = r => (decimal)r.DocumentId,
+        ["RowKey"] = r => r.SourceRowKey,
+        ["OutputCode"] = r => r.OutputCode,
+        ["Value"] = r => r.Value,
+        ["SubstanceEntryId"] = r => (decimal?)r.SubstanceEntryId,
+        ["PeriodKey"] = r => (decimal)r.PeriodKey,
+        ["UnitId"] = r => (decimal)r.UnitId,
+        ["UnitCode"] = r => r.UnitCode,
+        ["MethodologyVersionId"] = r => (decimal)r.MethodologyVersionId,
+        ["ProjectCode"] = r => r.ProjectCode,
+    };
+
+    /// <summary>Коди колонок, які будівник уміє прочитати з джерела.</summary>
+    public static IReadOnlyCollection<string> ReadableColumns => Readers.Keys;
+
+    /// <summary>Колонки зрізу за описом версії; відмовляє, якщо побудувати за ним не можна.</summary>
+    /// <remarks>
+    /// Створення версії таке відсіює (<see cref="ReportSourceColumns.Require"/>);
+    /// сюди доходить лише опис, заведений до <c>D-52a</c> або повз застосунок.
+    /// Мовчки пропустити колонку означало б зріз, у якому менше, ніж обіцяє опис.
+    /// </remarks>
+    private static IReadOnlyList<ReportColumnSpec> LayoutOf(ReportVersion version)
+    {
+        var rules = ReportRules.Parse(version.RulesJson);
+        var columns = ReportColumnSpec.Parse(version.ColumnsJson);
+
+        var broken = columns.FirstOrDefault(c =>
+            !Readers.ContainsKey(c.Code)
+            || !string.Equals(ReportSourceColumns.KindOf(rules.RowSource, c.Code), c.Kind, StringComparison.Ordinal));
+
+        if (columns.Count == 0 || rules.Schema != ReportRules.CurrentSchema || broken is not null)
+        {
+            throw new InvalidOperationException(
+                $"Версія звіту {version.Id}: за описом зріз не будується "
+                + $"(схема {rules.Schema}, колонок {columns.Count}, непридатна колонка «{broken?.Code}»).");
+        }
+
+        return columns;
+    }
 
     /// <summary>Актуальний прогін проєкту й періоду.</summary>
     private Task<long?> CurrentRunAsync(int projectId, PeriodKey? periodKey, CancellationToken ct)
@@ -486,7 +657,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     /// половину інструкції без межі (`D1-08`).
     /// </remarks>
     private sealed record ResultRow(
-        long DocumentId, string? SourceRowKey, string OutputCode, decimal Value, long? SubstanceEntryId);
+        long DocumentId, string? SourceRowKey, string OutputCode, decimal Value, long? SubstanceEntryId,
+        int PeriodKey, int UnitId, string UnitCode, int MethodologyVersionId, string ProjectCode);
 }
 
 /// <summary>Опис колонок звіту, що зберігається у <c>ReportVersion.ColumnsJson</c>.</summary>
@@ -501,9 +673,9 @@ public sealed record ReportColumnSpec(string Code, string Kind)
     /// <param name="columnsJson">Вміст <c>ColumnsJson</c>.</param>
     /// <returns>Колонки; порожній перелік, якщо опис зламаний.</returns>
     /// <remarks>
-    /// Зламаний опис не валить побудову: він ловиться при публікації версії
-    /// звіту, а тут відмова зупинила б нічний прогін усіх звітів через один
-    /// зіпсований.
+    /// Сам розбір не кидає; що робити з порожнім переліком, вирішує споживач.
+    /// Побудова (<c>LayoutOf</c>) за ним відмовляє, перевірка й перегляд рядків
+    /// читають зріз як побудований до <c>D-52a</c>.
     /// </remarks>
     public static IReadOnlyList<ReportColumnSpec> Parse(string columnsJson)
     {

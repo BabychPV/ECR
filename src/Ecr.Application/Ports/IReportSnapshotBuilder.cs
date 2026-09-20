@@ -63,7 +63,32 @@ public interface IReportSnapshotBuilder
     /// </summary>
     /// <returns><c>null</c> — зрізу немає.</returns>
     public Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct);
+
+    /// <summary>Сторінка рядків зрізу в широкому вигляді (D-52a).</summary>
+    /// <param name="snapshotId">Зріз.</param>
+    /// <param name="afterRowNo">Курсор: останній уже відданий <c>RowNo</c>; <c>0</c> — з початку.</param>
+    /// <param name="limit">Скільки рядків щонайбільше.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>null</c> — зрізу немає.</returns>
+    public Task<SnapshotRowsPage?> RowsAsync(long snapshotId, int afterRowNo, int limit, CancellationToken ct);
 }
+
+/// <summary>Сторінка рядків зрізу.</summary>
+/// <param name="Columns">Колонки в порядку опису версії.</param>
+/// <param name="Rows">Рядки за зростанням <c>RowNo</c>.</param>
+/// <param name="NextCursor">Курсор наступної сторінки; <c>null</c> — рядків більше немає.</param>
+public sealed record SnapshotRowsPage(
+    IReadOnlyList<SnapshotColumn> Columns, IReadOnlyList<SnapshotRow> Rows, int? NextCursor);
+
+/// <summary>Колонка зрізу.</summary>
+/// <param name="Code">Код — ключ у <see cref="SnapshotRow.Cells"/>.</param>
+/// <param name="Kind">Тип значення: <c>text</c>, <c>number</c>, <c>date</c>.</param>
+public sealed record SnapshotColumn(string Code, string Kind);
+
+/// <summary>Рядок зрізу.</summary>
+/// <param name="RowNo">Номер рядка в зрізі.</param>
+/// <param name="Cells">Значення за кодом колонки: рядок, число або <c>null</c>.</param>
+public sealed record SnapshotRow(int RowNo, IReadOnlyDictionary<string, object?> Cells);
 
 /// <summary>Суми зрізу: записана при побудові й перераховані зараз.</summary>
 /// <param name="Stored">Збережена сума в hex; порожньо — не рахувалася.</param>

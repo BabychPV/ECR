@@ -70,7 +70,8 @@ public static class ReportDefinitionSpec
     /// <summary>Складає <c>ColumnsJson</c> з опису колонок.</summary>
     /// <param name="columns">Колонки зрізу.</param>
     /// <exception cref="BusinessRuleException">Колонок немає, або опис колонки зламаний.</exception>
-    public static string ColumnsJson(IReadOnlyList<ReportColumnCommand> columns)
+    /// <param name="rules">Правила версії: від джерела рядків залежить, які колонки можливі.</param>
+    public static string ColumnsJson(IReadOnlyList<ReportColumnCommand> columns, ReportRulesCommand? rules = null)
     {
         ArgumentNullException.ThrowIfNull(columns);
 
@@ -111,6 +112,10 @@ public static class ReportDefinitionSpec
                 $"Колонка «{duplicate.Key}» описана двічі: код колонки входить у ключ рядка зрізу.");
         }
 
+        // ⛔ D-52a: опис КЕРУЄ побудовою, тож колонка, якої джерело не має,
+        // відмовляє тут, а не вночі посеред побудови опублікованого звіту.
+        ReportSourceColumns.Require(rules?.RowSource ?? CalculationResults, columns);
+
         return JsonSerializer.Serialize(columns, Options);
     }
 
@@ -129,7 +134,21 @@ public static class ReportDefinitionSpec
                 + $"на сьогодні є одне — «{CalculationResults}» (результати чинного прогону).");
         }
 
-        return JsonSerializer.Serialize(effective, Options);
+        if ((effective.Schema ?? ReportRules.CurrentSchema) != ReportRules.CurrentSchema)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.ReportInvalid,
+                $"Схему правил {effective.Schema} побудова не читає: чинна — {ReportRules.CurrentSchema}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0422.rulesSchema",
+                    ["schema"] = effective.Schema?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["currentSchema"] = ReportRules.CurrentSchema.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // Версія схеми пишеться ЗАВЖДИ: опис без неї — це опис до D-52a.
+        return JsonSerializer.Serialize(effective with { Schema = ReportRules.CurrentSchema }, Options);
     }
 
     /// <summary>Складає назву мовами каталогу.</summary>
@@ -179,7 +198,10 @@ public sealed record ReportColumnCommand(string Code, string Kind);
 /// Звідки беруться рядки. Єдине відоме будівнику значення —
 /// <see cref="ReportDefinitionSpec.CalculationResults"/>.
 /// </param>
-public sealed record ReportRulesCommand(string RowSource);
+/// <param name="Schema">
+/// Версія схеми правил; <c>null</c> — чинна (<see cref="ReportRules.CurrentSchema"/>).
+/// </param>
+public sealed record ReportRulesCommand(string RowSource, int? Schema = null);
 
 /// <summary>
 /// Перелік описів звітів. Право <c>Report.ViewRegulatory</c>.
@@ -252,8 +274,8 @@ public sealed class CreateReportDefHandler(
         var code = EcrCode.Create(command.Code);
         var name = ReportDefinitionSpec.Name(command.NameL10n);
         var versionNumber = ReportDefinitionSpec.Version(command.Version);
-        var columnsJson = ReportDefinitionSpec.ColumnsJson(command.Columns);
         var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules);
+        var columnsJson = ReportDefinitionSpec.ColumnsJson(command.Columns, command.Rules);
 
         if (await definitions.ExistsAsync(code.Value, ct).ConfigureAwait(false))
         {
@@ -345,11 +367,14 @@ public sealed class CreateReportVersionHandler(
             ?? throw new NotFoundException(
                 ErrorCodes.ReportNotFound, $"Опису звіту {reportDefId} немає.");
 
+        // Правила першими: від джерела рядків залежить, які колонки можливі.
+        var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules);
+
         var version = new ReportVersion(
             reportDefId,
             ReportDefinitionSpec.Version(command.Version),
-            ReportDefinitionSpec.ColumnsJson(command.Columns),
-            ReportDefinitionSpec.RulesJson(command.Rules),
+            ReportDefinitionSpec.ColumnsJson(command.Columns, command.Rules),
+            rulesJson,
             clock.UtcNow);
 
         versions.Add(version);

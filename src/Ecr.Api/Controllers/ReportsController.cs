@@ -24,6 +24,7 @@ public sealed class ReportsController(
     ListReportSnapshotsHandler snapshots,
     BuildReportSnapshotHandler build,
     VerifyReportSnapshotHandler verify,
+    GetSnapshotRowsHandler rows,
     ListReportDefsHandler definitions,
     CreateReportDefHandler createDefinition,
     CreateReportVersionHandler createVersion,
@@ -142,6 +143,24 @@ public sealed class ReportsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> VerifySnapshot(long id, CancellationToken ct)
         => Ok(await verify.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Рядки зрізу сторінками, у широкому вигляді. Право <c>Report.ViewRegulatory</c>.
+    /// </summary>
+    /// <param name="id">Зріз.</param>
+    /// <param name="cursor">Останній уже отриманий <c>rowNo</c>; без нього — з початку.</param>
+    /// <param name="limit">Розмір сторінки, не більше 500; типово 100.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// D-52a: другий споживач <c>rpt.*</c> поруч із SSRS. Колонки — з опису
+    /// версії, за якою зріз побудовано; чужий зріз — той самий 404, що й неіснуючий.
+    /// </remarks>
+    [HttpGet("snapshots/{id:long}/rows")]
+    [ProducesResponseType<Ecr.Application.Ports.SnapshotRowsPage>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SnapshotRows(
+        long id, [FromQuery] int? cursor, [FromQuery] int? limit, CancellationToken ct)
+        => Ok(await rows.HandleAsync(id, cursor, limit, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Будує зріз. Право <c>Report.BuildSnapshot</c>.
