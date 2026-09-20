@@ -13,7 +13,7 @@ public sealed class ReportDefinitionStore(EcrDbContext db) : IReportDefinitionSt
     /// виглядав би як звичайний і потрапив би в регуляторну вʼюху — а описи
     /// правлять саме тоді, коли ще не впевнені в них.
     /// </remarks>
-    public async Task<int?> FindCurrentVersionIdAsync(string code, CancellationToken ct)
+    public async Task<ReportVersionRef?> FindCurrentVersionAsync(string code, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
 
@@ -25,7 +25,7 @@ public sealed class ReportDefinitionStore(EcrDbContext db) : IReportDefinitionSt
             // Найновіша опублікована: версій буває кілька, і чинна — остання.
             .OrderByDescending(v => v.CreatedAt)
             .Take(1)
-            .Select(v => (int?)v.Id)
+            .Select(v => new ReportVersionRef(v.Id, v.RulesJson))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

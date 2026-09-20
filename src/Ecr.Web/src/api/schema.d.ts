@@ -6344,6 +6344,28 @@ export interface paths {
                         "text/plain": components["schemas"]["JobAcceptedResponse"];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -10340,6 +10362,14 @@ export interface components {
         AuthProvider: "Windows" | "Local";
         /** @description Запит на побудову зрізу. */
         BuildSnapshotRequest: {
+            /** @description Значення параметрів звіту за іменем (`R6`, `02b` §8a): число,
+             *     рядок, булеве або дата рядком — тип диктує ОГОЛОШЕННЯ параметра у версії.
+             *     Невідоме ім'я, обов'язковий параметр без значення і без `default` або
+             *     значення не того типу — `422 ECR-RPT-0422` одразу у відповіді на цей
+             *     запит, а не невдалою задачею через хвилину. */
+            parameters?: null | {
+                [key: string]: unknown;
+            };
             /**
              * Format: int32
              * @description Період.
@@ -13117,6 +13147,22 @@ export interface components {
             /** @description Параметри звіту — `@Name`. */
             parameters: null | components["schemas"]["ReportSymbolDeclaration"][];
         };
+        /** @description Оголошення параметра звіту в описі версії (`RulesJson`, схема 2). */
+        ReportParameterCommand: {
+            /** @description Ім'я параметра без `@`; у виразі — `@Code`. */
+            code: string;
+            /** @description Значення, яке бере побудова, коли параметр не переданий; JSON-значення
+             *     оголошеного типу (дата — рядком). */
+            default?: unknown;
+            /**
+             * @description Чи побудова без значення неможлива. `Required` разом із `Default` —
+             *     законна пара: замовчування і є тим значенням, без якого не будують.
+             * @default false
+             */
+            required: boolean;
+            /** @description `Number`, `Text`, `Boolean` або `Date`; регістр не важить. */
+            type: string;
+        };
         /** @description Правило рядка зрізу: «умова → значення» або «умова → приховати рядок» (`D-52a`). */
         ReportRuleCommand: {
             /** @description Дія: рівно одна з `set` і `hideRow`. */
@@ -13139,6 +13185,10 @@ export interface components {
         };
         /** @description Правила відбору рядків зрізу. */
         ReportRulesCommand: {
+            /** @description Параметри звіту (схема 2, `R6`): на них посилаються вирази правил як
+             *     `@Code`, а значення задаються при побудові зрізу. У JSON схеми 1 поля
+             *     немає взагалі. */
+            parameters?: null | components["schemas"]["ReportParameterCommand"][];
             /** @description Звідки беруться рядки. Єдине відоме будівнику значення —
              *     string ReportDefinitionSpec.CalculationResults. */
             rowSource: string;
@@ -13213,7 +13263,7 @@ export interface components {
             /** @description Правила відбору рядків. */
             rulesJson: string;
             /** @description `Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою
-             *             (Task&lt;int?&gt; IReportDefinitionStore.FindCurrentVersionIdAsync(string code, CancellationToken ct)). */
+             *             (Task&lt;ReportVersionRef?&gt; IReportDefinitionStore.FindCurrentVersionAsync(string code, CancellationToken ct)). */
             status: string;
             /** @description Номер версії; унікальний у межах опису. */
             version: string;

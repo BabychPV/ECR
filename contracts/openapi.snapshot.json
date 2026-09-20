@@ -387,6 +387,14 @@
       "BuildSnapshotRequest": {
         "description": "Запит на побудову зрізу.",
         "properties": {
+          "parameters": {
+            "additionalProperties": {},
+            "description": "Значення параметрів звіту за іменем (`R6`, `02b` §8a): число,\nрядок, булеве або дата рядком — тип диктує ОГОЛОШЕННЯ параметра у версії.\nНевідоме ім'я, обов'язковий параметр без значення і без `default` або\nзначення не того типу — `422 ECR-RPT-0422` одразу у відповіді на цей\nзапит, а не невдалою задачею через хвилину.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "periodKey": {
             "description": "Період.",
             "format": "int32",
@@ -6345,6 +6353,32 @@
         ],
         "type": "object"
       },
+      "ReportParameterCommand": {
+        "description": "Оголошення параметра звіту в описі версії (`RulesJson`, схема 2).",
+        "properties": {
+          "code": {
+            "description": "Ім'я параметра без `@`; у виразі — `@Code`.",
+            "type": "string"
+          },
+          "default": {
+            "description": "Значення, яке бере побудова, коли параметр не переданий; JSON-значення\nоголошеного типу (дата — рядком)."
+          },
+          "required": {
+            "default": false,
+            "description": "Чи побудова без значення неможлива. `Required` разом із `Default` —\nзаконна пара: замовчування і є тим значенням, без якого не будують.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "`Number`, `Text`, `Boolean` або `Date`; регістр не важить.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "type"
+        ],
+        "type": "object"
+      },
       "ReportRuleCommand": {
         "description": "Правило рядка зрізу: «умова → значення» або «умова → приховати рядок» (`D-52a`).",
         "properties": {
@@ -6408,6 +6442,16 @@
       "ReportRulesCommand": {
         "description": "Правила відбору рядків зрізу.",
         "properties": {
+          "parameters": {
+            "description": "Параметри звіту (схема 2, `R6`): на них посилаються вирази правил як\n`@Code`, а значення задаються при побудові зрізу. У JSON схеми 1 поля\nнемає взагалі.",
+            "items": {
+              "$ref": "#/components/schemas/ReportParameterCommand"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "rowSource": {
             "description": "Звідки беруться рядки. Єдине відоме будівнику значення —\nstring ReportDefinitionSpec.CalculationResults.",
             "type": "string"
@@ -6541,7 +6585,7 @@
             "type": "string"
           },
           "status": {
-            "description": "`Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою\n        (Task&lt;int?&gt; IReportDefinitionStore.FindCurrentVersionIdAsync(string code, CancellationToken ct)).",
+            "description": "`Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою\n        (Task&lt;ReportVersionRef?&gt; IReportDefinitionStore.FindCurrentVersionAsync(string code, CancellationToken ct)).",
             "type": "string"
           },
           "version": {
@@ -18044,6 +18088,46 @@
               }
             },
             "description": "Accepted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Будує зріз. Право `Report.BuildSnapshot`.",

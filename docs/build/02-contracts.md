@@ -2484,7 +2484,7 @@ public interface IRegistryStore
 public interface IReportDefinitionStore
 {
     public interface IReportDefinitionStore
-    public Task<int?> FindCurrentVersionIdAsync(string code, CancellationToken ct);
+    public Task<ReportVersionRef?> FindCurrentVersionAsync(string code, CancellationToken ct);
 }
 ```
 
@@ -3146,6 +3146,23 @@ public sealed class NotFoundException(string errorCode, string message)
 > необов'язкове `rules: [{ when, then: { set: { column, value } } | { hideRow: true } }]`
 > (схема 2 `RulesJson`, `02b` §8a). Зламане правило — `422 ECR-RPT-0422`,
 > ключ `err.ECR-RPT-0422.rule` (`ruleNo`, `part`, `reason`), при СТВОРЕННІ версії.
+>
+> ✎ R6 (`D-52a`): там само — необов'язкове
+> `parameters: [{ code, type, required, default }]` (`02b` §8a): те, на що
+> посилається `@Code` у виразах правил. Типи — `Number`/`Text`/`Boolean`/`Date`,
+> той самий словник, що в `POST /expressions/validate`. Зламане оголошення —
+> `422 ECR-RPT-0422`, ключ `err.ECR-RPT-0422.parameter`; `default` не того типу —
+> `err.ECR-RPT-0422.parameterType`.
+>
+> ⛔ **Значення** параметрів задаються при побудові — `POST /reports/{code}/build`,
+> поле `parameters: { "Code": значення }`, — і зводяться з оголошеннями чинної
+> версії В ОБРОБНИКУ, до постановки задачі в чергу. Тому невідоме ім'я
+> (`err.ECR-RPT-0422.parameterUnknown`), обов'язковий параметр без значення і без
+> `default` (`err.ECR-RPT-0422.parameterRequired`) і значення не того типу
+> (`err.ECR-RPT-0422.parameterType`) дають `422` у відповіді на сам запит. У
+> задачі це було б «задача завершилася помилкою» через хвилину, коли запит давно
+> повернув `202` і виправляти вже нема чого. Використані значення (із
+> підставленими замовчуваннями) лягають у `rpt.ReportSnapshot.ParametersJson`.
 >
 > ⚠ Публікація (`POST …/publish`) стоїть під тим самим правом, що й
 > редагування, а не під власним. Це НЕ те саме, що публікація методології

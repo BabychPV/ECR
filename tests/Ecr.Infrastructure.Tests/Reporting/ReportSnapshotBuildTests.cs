@@ -3,6 +3,7 @@ using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
@@ -87,5 +88,58 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
             string.IsNullOrWhiteSpace(made.ContentHash),
             "зріз побудовано без контрольної суми: звіряти його було б нічим.");
         Assert.Equal(version.Id, made.ReportVersionId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Зріз_зберігає_ВИКОРИСТАНІ_значення_параметрів()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+
+        await using var db = chain.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var def = new ReportDef(
+            EcrCode.Create($"RPP{tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Parameters test" }),
+            isRegulatory: true);
+
+        db.ReportDefs.Add(def);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var version = new ReportVersion(
+            def.Id,
+            "1.0",
+            """[{"code":"DocumentId","kind":"number"},{"code":"Value","kind":"number"}]""",
+            """
+            {"rowSource":"CalculationResults","schema":2,
+             "parameters":[{"code":"Threshold","type":"Number","default":5},{"code":"Mode","type":"Text"}],
+             "rules":[{"when":"[Value] > @Threshold","then":{"hideRow":true}}]}
+            """,
+            Now);
+
+        version.Publish();
+        db.ReportVersions.Add(version);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        var snapshotId = await builder.BuildAsync(
+            version.Id, document.ProjectId, document.PeriodKey, """{"Threshold":12}""",
+            CancellationToken.None);
+
+        var stored = await db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.Id == snapshotId)
+            .Select(s => s.ParametersJson)
+            .SingleAsync(CancellationToken.None);
+
+        // ⛔ Записано те, з ЧИМ рахували, а не те, що надіслали: замовчування
+        // `Mode` вже підставлене. Інакше зріз, побудований без параметра, не
+        // давав би відповіді на питання, на якому значенні стоять його числа.
+        Assert.Equal("""{"Threshold":12,"Mode":null}""", stored);
     }
 }

@@ -127,9 +127,12 @@ public static class ReportDefinitionSpec
     {
         var effective = rules ?? new ReportRulesCommand(CalculationResults);
 
-        // Без явної схеми: правила є — схема 2, немає — схема 1, побайтно як до R5.
+        // Без явної схеми: правила або параметри є — схема 2, немає — схема 1,
+        // побайтно як до R5.
         var schema = effective.Schema
-            ?? (effective.Rules is { Count: > 0 } ? ReportRowRules.Schema : ReportRules.CurrentSchema);
+            ?? (effective.Rules is { Count: > 0 } || effective.Parameters is { Count: > 0 }
+                ? ReportRowRules.Schema
+                : ReportRules.CurrentSchema);
 
         if (!string.Equals(effective.RowSource, CalculationResults, StringComparison.Ordinal))
         {
@@ -152,10 +155,12 @@ public static class ReportDefinitionSpec
                 });
         }
 
-        // ⛔ Вирази правил перевіряються ТУТ, при створенні версії, тим самим кодом,
-        // яким їх застосує побудова: зламане правило не доживає до нічного зрізу.
+        // ⛔ Вирази правил і оголошення параметрів перевіряються ТУТ, при створенні
+        // версії, тим самим кодом, яким їх застосує побудова: зламане правило не
+        // доживає до нічного зрізу.
         _ = ReportRowRules.Compile(
-            schema, effective.RowSource, effective.Rules, [.. (columns ?? []).Select(c => c.Code)]);
+            schema, effective.RowSource, effective.Rules, [.. (columns ?? []).Select(c => c.Code)],
+            effective.Parameters);
 
         // Версія схеми пишеться ЗАВЖДИ: опис без неї — це опис до D-52a.
         return JsonSerializer.Serialize(effective with { Schema = schema }, Options);
@@ -214,12 +219,20 @@ public sealed record ReportColumnCommand(string Code, string Kind);
 /// <param name="Rules">
 /// Правила рядка (схема 2) у порядку застосування; у JSON схеми 1 поля немає взагалі.
 /// </param>
+/// <param name="Parameters">
+/// Параметри звіту (схема 2, <c>R6</c>): на них посилаються вирази правил як
+/// <c>@Code</c>, а значення задаються при побудові зрізу. У JSON схеми 1 поля
+/// немає взагалі.
+/// </param>
 public sealed record ReportRulesCommand(
     string RowSource,
     int? Schema = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<ReportRuleCommand>? Rules = null);
+    IReadOnlyList<ReportRuleCommand>? Rules = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<ReportParameterCommand>? Parameters = null);
 
 /// <summary>
 /// Перелік описів звітів. Право <c>Report.ViewRegulatory</c>.

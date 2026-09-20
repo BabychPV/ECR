@@ -41,7 +41,7 @@ public sealed class ReportRowRulesTests
     [InlineData("[Nope] = 1", null, null, "when")] // колонки джерело не має
     [InlineData("[Value] > 0", "UnitCode", "'t'", "column")] // колонка не описана у версії
     [InlineData("[Value] > 0", "Value", "'багато'", "value")] // текст у числову колонку
-    [InlineData("[Value] > 0", "Value", "@Limit", "value")] // параметрів у схемі 2 немає
+    [InlineData("[Value] > 0", "Value", "@Limit", "value")] // параметра версія не оголошує (R6)
     public void Зламане_правило_відмовляє_при_створенні_версії_з_номером_і_частиною(
         string when, string? column, string? value, string part)
     {

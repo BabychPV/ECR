@@ -57,7 +57,14 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         // ⛔ R5: правила застосовуються до рядка джерела ДО запису й до суми — і ДО
         // створення зрізу: помилка правила на рядку не лишає порожнього зрізу.
         var rowRules = ReportRowRules.Parse(version.RulesJson, [.. layout.Select(c => c.Code)]);
-        var cells = await AggregateAsync(layout, rowRules, projectId, periodKey, ct).ConfigureAwait(false);
+
+        // ⛔ R6: значення параметрів зводяться з оголошеннями ВДРУГЕ. Перший раз
+        // це зробив обробник запиту (щоб відмовити 422 одразу), але задача може
+        // прийти й не звідти — з розкладу або з черги, пережившої переїзд.
+        var parameters = ReportParameters.Bind(rowRules.Parameters, parametersJson);
+
+        var cells = await AggregateAsync(layout, rowRules, parameters.Values, projectId, periodKey, ct)
+            .ConfigureAwait(false);
 
         // ⚠ Статус УСПАДКОВУЄТЬСЯ від даних (D-65). Окреме поле «статус звіту»
         // стало б другим джерелом істини і рано чи пізно показало б регулятору
@@ -84,7 +91,11 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             // Прогін, з якого взято числа: без нього неможливо сказати, на
             // чому стоїть значення у звіті.
             await CurrentRunAsync(projectId, periodKey, ct).ConfigureAwait(false),
-            parametersJson);
+
+            // ⚠ Записуються ВИКОРИСТАНІ значення, а не надіслані: замовчування
+            // вже підставлені. Інакше зріз, побудований без жодного параметра,
+            // не давав би відповіді на питання «з чим його рахували».
+            parameters.Json ?? parametersJson);
 
         await SwitchCurrentAsync(snapshot, ct).ConfigureAwait(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -402,7 +413,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 
     /// <summary>Агрегує результати розрахунку в рядки зрізу.</summary>
     private async Task<List<CellValue>> AggregateAsync(
-        IReadOnlyList<ReportColumnSpec> layout, ReportRowRules rowRules, int projectId, PeriodKey? periodKey,
+        IReadOnlyList<ReportColumnSpec> layout, ReportRowRules rowRules,
+        IReadOnlyDictionary<string, object?> parameters, int projectId, PeriodKey? periodKey,
         CancellationToken ct)
     {
         var query =
@@ -455,7 +467,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                 ? null
                 : Readers.ToDictionary(r => r.Key, r => r.Value(result), StringComparer.Ordinal);
 
-            if (ruled is not null && !rowRules.Apply(ruled))
+            if (ruled is not null && !rowRules.Apply(ruled, parameters))
             {
                 // Прихований рядок номера не займає: `RowNo` лишається суцільним.
                 continue;

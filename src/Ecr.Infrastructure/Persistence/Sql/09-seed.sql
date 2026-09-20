@@ -481,6 +481,13 @@ USING (VALUES
     (N'err.ECR-RPT-0422.columnKindMismatch', N'en', N'Column "{columnCode}" is "{expectedKind}" in the row source, not "{kind}".', 1),
     (N'err.ECR-RPT-0422.rulesSchema',        N'en', N'Rules schema {schema} is not supported: the current one is {currentSchema}.', 1),
     (N'err.ECR-RPT-0422.rule',               N'en', N'Rule {ruleNo} ({part}) is invalid: {reason}.', 1),
+    -- R6: параметри звіту (`@Name`). Оголошення перевіряється при створенні
+    -- версії, значення — при побудові зрізу; обидві відмови адресують параметр
+    -- його іменем, бо іншого способу знайти його в описі немає.
+    (N'err.ECR-RPT-0422.parameter',          N'en', N'Report parameter "{code}" is not declared correctly: {reason}.', 1),
+    (N'err.ECR-RPT-0422.parameterUnknown',   N'en', N'The report version declares no parameter "{code}".', 1),
+    (N'err.ECR-RPT-0422.parameterRequired',  N'en', N'Report parameter "{code}" is required: it has neither a value nor a default.', 1),
+    (N'err.ECR-RPT-0422.parameterType',      N'en', N'Report parameter "{code}" ({part}) expects a value of type {expectedType}.', 1),
     (N'err.ECR-RPT-0404.snapshot',           N'en', N'Snapshot {snapshotId} does not exist.', 1),
     -- R7: книга зрізу будується в пам'яті цілком, тому стеля рядків — відмова,
     -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.
@@ -2524,7 +2531,7 @@ WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsRegulatory, IsActive)
 GO
 
 -- ⚠ Версія одразу `Published` (Status = 1), а не чернетка: сховище описів
--- бере ЛИШЕ опубліковане (`IReportDefinitionStore.FindCurrentVersionIdAsync`),
+-- бере ЛИШЕ опубліковане (`IReportDefinitionStore.FindCurrentVersionAsync`),
 -- і чернетка в seed дала б рівно те, від чого seed і рятує, — опис, за яким
 -- побудова однаково відмовляє.
 --

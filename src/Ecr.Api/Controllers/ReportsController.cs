@@ -204,13 +204,15 @@ public sealed class ReportsController(
     /// </remarks>
     [HttpPost("{code}/build")]
     [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Build(
         string code, [FromBody] BuildSnapshotRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var jobId = await build
-            .HandleAsync(code, request.ProjectId, request.PeriodKey, ct)
+            .HandleAsync(code, request.ProjectId, request.PeriodKey, request.Parameters, ct)
             .ConfigureAwait(false);
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
@@ -220,7 +222,15 @@ public sealed class ReportsController(
 /// <summary>Запит на побудову зрізу.</summary>
 /// <param name="ProjectId">Проєкт.</param>
 /// <param name="PeriodKey">Період.</param>
-public sealed record BuildSnapshotRequest(int ProjectId, int PeriodKey);
+/// <param name="Parameters">
+/// Значення параметрів звіту за іменем (<c>R6</c>, <c>02b</c> §8a): число,
+/// рядок, булеве або дата рядком — тип диктує ОГОЛОШЕННЯ параметра у версії.
+/// Невідоме ім'я, обов'язковий параметр без значення і без <c>default</c> або
+/// значення не того типу — <c>422 ECR-RPT-0422</c> одразу у відповіді на цей
+/// запит, а не невдалою задачею через хвилину.
+/// </param>
+public sealed record BuildSnapshotRequest(
+    int ProjectId, int PeriodKey, IReadOnlyDictionary<string, object?>? Parameters = null);
 
 /// <summary>Запит на створення опису звіту разом із першою версією.</summary>
 /// <param name="Code">Код звіту; ним адресується побудова зрізу.</param>

@@ -23,8 +23,14 @@ public interface IReportDefinitionStore
     /// ⛔ Чернетка версії зрізу не дає. Зріз, побудований за неопублікованим
     /// описом, виглядав би як звичайний і потрапив би в регуляторну вʼюху —
     /// а описи змінюють саме тоді, коли ще не впевнені в них.
+    ///
+    /// ⚠ Разом з ідентифікатором віддаються й правила (<c>R6</c>): параметри
+    /// звіту оголошені саме в них, а значення параметрів мусять відмовити
+    /// <b>у відповіді на запит</b>, а не через хвилину невдалою задачею. Другим
+    /// запитом за тією самою версією це коштувало б зайвий обіг до бази на
+    /// кожну побудову.
     /// </remarks>
-    public Task<int?> FindCurrentVersionIdAsync(string code, CancellationToken ct);
+    public Task<ReportVersionRef?> FindCurrentVersionAsync(string code, CancellationToken ct);
 
     /// <summary>
     /// Усі описи звітів разом із їхніми версіями.
@@ -36,7 +42,7 @@ public interface IReportDefinitionStore
     /// причину, чому зріз за ним більше не будується, ніде не видно; сховати
     /// чернетку — що її нема як опублікувати. Той, хто лише будує зріз,
     /// фільтрує сам: побудова однаково бере лише опубліковане
-    /// (<see cref="FindCurrentVersionIdAsync"/>).
+    /// (<see cref="FindCurrentVersionAsync"/>).
     /// </remarks>
     public Task<IReadOnlyList<ReportDefinitionDto>> ListAsync(CancellationToken ct);
 
@@ -50,6 +56,13 @@ public interface IReportDefinitionStore
     /// </remarks>
     public Task<bool> ExistsAsync(string code, CancellationToken ct);
 }
+
+/// <summary>Чинна версія звіту — рівно те, що потрібно побудові зрізу.</summary>
+/// <param name="Id">Ідентифікатор версії.</param>
+/// <param name="RulesJson">
+/// Правила відбору рядків разом з оголошеннями параметрів (<c>02b</c> §8a).
+/// </param>
+public sealed record ReportVersionRef(int Id, string RulesJson);
 
 /// <summary>Опис звіту разом із його версіями.</summary>
 /// <param name="Id">Ідентифікатор опису.</param>
@@ -74,7 +87,7 @@ public sealed record ReportDefinitionDto(
 /// <param name="Version">Номер версії; унікальний у межах опису.</param>
 /// <param name="Status">
 /// <c>Draft</c> або <c>Published</c>. Зріз будується ЛИШЕ за опублікованою
-/// (<see cref="IReportDefinitionStore.FindCurrentVersionIdAsync"/>).
+/// (<see cref="IReportDefinitionStore.FindCurrentVersionAsync"/>).
 /// </param>
 /// <param name="ColumnsJson">Опис колонок зрізу.</param>
 /// <param name="RulesJson">Правила відбору рядків.</param>
