@@ -2382,7 +2382,14 @@ USING (VALUES
     -- `Rejected` у зрізі немає, а `Submitted` — кінцевий іммутабельний стан.
     (N'status.snapshot.Draft',             N'en', N'Draft', 1),
     (N'status.snapshot.Approved',          N'en', N'Approved', 1),
-    (N'status.snapshot.Submitted',         N'en', N'Submitted', 1)
+    (N'status.snapshot.Submitted',         N'en', N'Submitted', 1),
+
+    -- `NotificationDeliveryStatus` (BE-33). Словник окремий від `status.job.*`:
+    -- там падіння ЗАДАЧІ, тут — недоставлене сповіщення про неї. `Suppressed`
+    -- бляклий: подію навмисно не надіслали (дедуплікація), це нормальна робота.
+    (N'status.notificationDelivery.Sent',       N'en', N'Sent', 1),
+    (N'status.notificationDelivery.Failed',     N'en', N'Failed', 1),
+    (N'status.notificationDelivery.Suppressed', N'en', N'Suppressed', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

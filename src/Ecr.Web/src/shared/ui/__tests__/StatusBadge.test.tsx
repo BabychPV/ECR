@@ -185,6 +185,12 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['snapshot', 'Draft', 'muted'],
   ['snapshot', 'Approved', 'neutral'],
   ['snapshot', 'Submitted', 'neutral'],
+
+  // `NotificationDeliveryStatus` (`BE-33`): `Suppressed` — навмисно не
+  // надіслане (дедуплікація), тобто нормальна робота, а не привід розбиратися.
+  ['notificationDelivery', 'Sent', 'neutral'],
+  ['notificationDelivery', 'Failed', 'danger'],
+  ['notificationDelivery', 'Suppressed', 'muted'],
 ];
 
 describe('StatusBadge: стан → тон', () => {
@@ -198,8 +204,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 33 пари, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(33);
+  it('перелік вичерпний: 36 пар, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(36);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>
