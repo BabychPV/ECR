@@ -16,6 +16,7 @@ import { TestCaseRunner } from '@/features/expressions/TestCaseRunner';
 import type { ExpressionPlacement } from '@/features/expressions/api';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { statusKey } from '@/shared/ui/StatusBadge';
 
@@ -86,6 +87,35 @@ export function ExpressionsPage(): JSX.Element {
     return undefined;
   }, [methodologies.data, methodologyVersionId]);
 
+  /**
+   * ⛔ Директива D15 §0, правило L10. Обидва переліки збиралися через `?? []`,
+   * тож відмова сервера давала порожній `Select` — той самий вигляд, що й
+   * «версій немає». Ціна тут не косметична: сторінка існує, щоб перевірити
+   * вираз ПРОТИ ОБРАНОЇ версії, і вона сама попереджає (`Findings`), що
+   * порожній перелік зауважень без версії означає лише «синтаксис цілий», а
+   * не «вираз правильний». Коли версія зникла через відмову, людина отримує
+   * саме це слабке твердження — і читає його як сильне.
+   *
+   * ⚠ Для діалекту методології відмова коштує ще одну річ: без
+   * `selectedMethodology` не з'являється `TestCaseRunner`, тобто мовчки
+   * зникає єдиний спосіб прогнати золотий набір.
+   */
+  const sourceError = templates.error ?? versions.error ?? methodologies.error ?? null;
+
+  // ⚠ Перечитується лише те, що справді відмовило: `refetch()` на вимкненому
+  // запиті версій сходив би по `/templates/undefined/versions`.
+  const refetchSources = (): void => {
+    if (templates.error !== null) void templates.refetch();
+    if (versions.error !== null) void versions.refetch();
+    if (methodologies.error !== null) void methodologies.refetch();
+  };
+
+  // ⚠ Саме `firstTemplateId !== undefined`, а не голий `isPending`: без
+  // жодного шаблону запит версій лишається вимкненим НАЗАВЖДИ (і `isPending`
+  // з ним), і перелік має бути порожнім і доступним — це правда про світ, а
+  // не очікування.
+  const versionsPending = firstTemplateId !== undefined && versions.isPending;
+
   // ⚠ Об'єкт розміщення мемоізується: редактор перезапитує склад мови і
   // перевірку на КОЖНУ його зміну за посиланням, і новий літерал на кожен
   // перерендер перетворив би затримку перевірки на ніщо.
@@ -100,6 +130,8 @@ export function ExpressionsPage(): JSX.Element {
   return (
     <Stack gap="md">
       <PageHeader title={t('expressions.title')} />
+
+      {sourceError !== null && <ErrorAlert error={sourceError} onRetry={refetchSources} />}
 
       <Group align="flex-end" gap="md">
         <Select
@@ -120,12 +152,16 @@ export function ExpressionsPage(): JSX.Element {
           }}
         />
 
-        {dialect === 'Template' && (
+        {/* ⛔ Перелік, зібраний із відмови, не малюється зовсім (`D15-06`):
+            причина вже стоїть банером угорі. Доки версії в дорозі — поле
+            недоступне, а не порожнє: порожнє означало б «версій немає». */}
+        {dialect === 'Template' && templates.error === null && versions.error === null && (
           <Select
             label={t('expressions.templateVersion')}
             placeholder={t('expressions.anyVersion')}
             miw={260}
             clearable
+            disabled={versionsPending}
             value={templateVersionId}
             /*
              * ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
@@ -142,12 +178,13 @@ export function ExpressionsPage(): JSX.Element {
           />
         )}
 
-        {dialect === 'Methodology' && (
+        {dialect === 'Methodology' && methodologies.error === null && (
           <Select
             label={t('expressions.methodologyVersion')}
             placeholder={t('expressions.anyVersion')}
             miw={260}
             clearable
+            disabled={methodologies.isPending}
             value={methodologyVersionId}
             data={(methodologies.data ?? []).flatMap((m) =>
               m.versions.map((v) => ({
