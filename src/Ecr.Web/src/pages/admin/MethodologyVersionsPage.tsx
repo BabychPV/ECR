@@ -44,6 +44,7 @@ import {
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -597,22 +598,45 @@ export function MethodologyVersionsPage(): JSX.Element {
             data-autofocus
           />
 
-          <Select
-            label={t('methodologies.copyFrom')}
-            description={t('methodologies.copyFromHint')}
-            placeholder={t('methodologies.emptyDraft')}
-            clearable
-            value={copyFrom}
-            data={all.map((version) => ({
-              value: String(version.id),
-              // ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
-              // Тому підпис береться тим самим ключем каталогу, яким малює
-              // `StatusBadge`: інакше та сама версія називалася б у таблиці
-              // мовою користувача, а тут — англійським `Published`.
-              label: `${version.versionNumber} · ${t(statusKey('version', version.status))}`,
-            }))}
-            onChange={setCopyFrom}
-          />
+          {/*
+           * ⛔ Відмова `GET …/versions` робила цей перелік ПОРОЖНІМ і мовчала
+           * (`D15-00`, L10). Порожнеча тут має готове хибне прочитання, і воно
+           * коштує найдорожче саме в цьому діалозі: поруч стоїть плейсхолдер
+           * «порожня чернетка», тож нуль варіантів читається як «копіювати нема
+           * з чого — це перша версія методології». Людина, яка прийшла сюди
+           * ЄДИНИМ дозволеним шляхом зміни опублікованої версії (`ФВ-9.1`,
+           * клон), натомість заводить порожню чернетку — і далі пише формули з
+           * нуля замість того, щоб правити копію чинних.
+           *
+           * ⚠ Банер сторінки під модалкою (`AsyncBoundary` над таблицею) цього
+           * не рятує: модалка перекриває сторінку, і користувач бачить лише її
+           * вміст.
+           *
+           * ⚠ Порядок — `error` → `isPending` → дані. Під час першого запиту
+           * перелік НЕДОСТУПНИЙ, а не порожній: вимкнений контрол не обіцяє
+           * фактів, яких ще ніхто не читав.
+           */}
+          {versions.error !== null ? (
+            <ErrorAlert error={versions.error} onRetry={() => void versions.refetch()} />
+          ) : (
+            <Select
+              label={t('methodologies.copyFrom')}
+              description={t('methodologies.copyFromHint')}
+              placeholder={t('methodologies.emptyDraft')}
+              clearable
+              disabled={versions.isPending}
+              value={copyFrom}
+              data={all.map((version) => ({
+                value: String(version.id),
+                // ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
+                // Тому підпис береться тим самим ключем каталогу, яким малює
+                // `StatusBadge`: інакше та сама версія називалася б у таблиці
+                // мовою користувача, а тут — англійським `Published`.
+                label: `${version.versionNumber} · ${t(statusKey('version', version.status))}`,
+              }))}
+              onChange={setCopyFrom}
+            />
+          )}
 
           {/* ⛔ Показується лише для ПОРОЖНЬОЇ чернетки: клон бере рівень із
               джерела, і поле вводу поруч із обраним джерелом обіцяло б вибір,
@@ -727,26 +751,43 @@ export function MethodologyVersionsPage(): JSX.Element {
               }
             />
 
-            {editing.resultType === 'Number' && (
-              <Select
-                label={t('methodologies.outputUnit')}
-                description={t('methodologies.outputUnitHint')}
-                placeholder={t('methodologies.noUnit')}
-                clearable
-                searchable
-                value={editing.outputUnitId === null ? null : String(editing.outputUnitId)}
-                data={(units.data ?? []).map((unit) => ({
-                  value: String(unit.id),
-                  label: unit.code,
-                }))}
-                onChange={(value) =>
-                  setEditing({
-                    ...editing,
-                    outputUnitId: value === null ? null : Number(value),
-                  })
-                }
-              />
-            )}
+            {/*
+             * ⛔ `GET /api/v1/units` збирався через `?? []`, і його відмова
+             * давала перелік із нуля варіантів (`D15-00`, L10). Прочитання
+             * порожнечі тут однозначне й хибне: плейсхолдер каже «без одиниці»,
+             * тож людина читає «жодної одиниці в системі не заведено» — і
+             * зберігає ЧИСЛОВУ формулу безрозмірною. Сервер таку формулу
+             * приймає (`outputUnitId` необов'язковий), тож помилка не
+             * спливає ніде: вимір — властивість числа (`ФВ-16.6`), і число без
+             * нього доїжджає до звіту як є.
+             *
+             * ⚠ Перелік не малюється зовсім: вимкнений `Select` із нулем
+             * варіантів однаково виглядав би як факт про світ.
+             */}
+            {editing.resultType === 'Number' &&
+              (units.error !== null ? (
+                <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
+              ) : (
+                <Select
+                  label={t('methodologies.outputUnit')}
+                  description={t('methodologies.outputUnitHint')}
+                  placeholder={t('methodologies.noUnit')}
+                  clearable
+                  searchable
+                  disabled={units.isPending}
+                  value={editing.outputUnitId === null ? null : String(editing.outputUnitId)}
+                  data={(units.data ?? []).map((unit) => ({
+                    value: String(unit.id),
+                    label: unit.code,
+                  }))}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      outputUnitId: value === null ? null : Number(value),
+                    })
+                  }
+                />
+              ))}
 
             <Button
               disabled={
