@@ -454,7 +454,14 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
-        DomainException e when e.ErrorCode == ErrorCodes.ReportImmutable =>
+        // ⛔ Правило, а не арм на код: сутності `Ecr.Domain` кидають голий
+        // `DomainException`, і кожен `…-0409` (`DOC`, `TMPL`, `CALC`, `PRD`, `RPT`)
+        // без власного арма доїжджав як 422 — «дані невірні» там, де вводити
+        // нічого. §7 контракту для всіх них каже 409. Справжнім HTTP це було
+        // видно на `PUT /projects/{id}/timezone` після активації.
+        // ⚠ Це не розбір числа з коду, від якого застерігає коментар вище: збіг
+        // із РІВНО одним суфіксом; `-4091` чи `-0422` сюди не потрапляють.
+        DomainException e when e.ErrorCode.EndsWith(ConflictCodeSuffix, StringComparison.Ordinal) =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         DomainException e =>
@@ -465,6 +472,9 @@ public sealed partial class ExceptionHandlingMiddleware(
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
               "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", InternalDetails),
     };
+
+    /// <summary>Суфікс доменних кодів «конфлікт стану» (<c>ECR-&lt;ДОМЕН&gt;-0409</c>).</summary>
+    private const string ConflictCodeSuffix = "-0409";
 
     /// <summary>Подробиця 500-ї: лише ключ каталогу, жодних даних винятку.</summary>
     private static readonly IReadOnlyDictionary<string, object?> InternalDetails =

@@ -290,6 +290,53 @@ export default [
             'Час доби не складається руками — D15-09: getHours()/getMinutes() дають запис, ' +
             'який не залежить від мови продукту. Використовуйте formatTime/formatDateTime із shared/format.',
         },
+        {
+          /*
+           * D15-09, четвертий канал: мить із сервера, надрукована В РОЗМІТЦІ
+           * як є.
+           *
+           * ⛔ Три заборони вище стережуть те, як дату ФОРМАТУЮТЬ. Тут її не
+           * форматують узагалі: `<Text>{row.createdAt}</Text>` виводить
+           * `2026-09-20T08:15:42.1234567Z` — рядок, у якому людині потрібні
+           * два числа з дев'яти. Так було в СІМНАДЦЯТИ місцях, і жодне з трьох
+           * правил цього не бачило: порушення тут — ВІДСУТНІСТЬ виклику, а не
+           * неправильний виклик.
+           *
+           * ⚠ Правило стало можливим лише зараз. Доки ті сімнадцять місць
+           * існували, воно зупиняло б збірку на першому ж — і його завели б із
+           * придушеннями, тобто вимкненим. Тепер їх нуль, тож заборона не
+           * заводить боргу й не потребує жодного `eslint-disable` (лічильник у
+           * `lintRules.test.ts` не зрушив).
+           *
+           * ⛔ Селектор навмисно ВУЗЬКИЙ — лише прямий друк у тілі елемента:
+           *  - `<Timestamp value={row.createdAt} />` не чіпається: контейнер
+           *    там належить `JSXAttribute`, а не елементу. Це і є правильний
+           *    спосіб, і правило не має проти нього заперечувати;
+           *  - `{rows.map((row) => <Timestamp value={row.createdAt} />)}` теж
+           *    ні — інакше найчастіший взірець переліку падав би щоразу. Саме
+           *    тому тут `>` (прямий нащадок), а не нащадок узагалі.
+           *
+           * ⚠ Дві форми додано окремо, бо вони так само ДРУКУЮТЬ: права
+           * частина `&&` (`{ok && row.createdAt}`) і гілки тернарника
+           * (`{c ? row.createdAt : '—'}`). Ліва частина `&&` і умова тернарника
+           * НЕ заборонені: там мить перевіряють на наявність, а не показують.
+           *
+           * ⚠ Названа межа: шаблонний рядок (`{`${row.createdAt} UTC`}`) це
+           * правило не ловить. Жодного такого місця в `src` немає, а ловити
+           * його означало б розбирати вміст літерала — ціна вища за ризик.
+           */
+          selector: [
+            'JSXElement > JSXExpressionContainer > MemberExpression[property.name=/(?:At|From|To)$/]',
+            'JSXFragment > JSXExpressionContainer > MemberExpression[property.name=/(?:At|From|To)$/]',
+            'JSXExpressionContainer > LogicalExpression > MemberExpression.right[property.name=/(?:At|From|To)$/]',
+            'JSXExpressionContainer > ConditionalExpression > MemberExpression.consequent[property.name=/(?:At|From|To)$/]',
+            'JSXExpressionContainer > ConditionalExpression > MemberExpression.alternate[property.name=/(?:At|From|To)$/]',
+          ].join(', '),
+          message:
+            'Мить із сервера надрукована в розмітці як є — D15-09: на екрані буде ' +
+            '2026-09-20T08:15:42.1234567Z замість «20 вер. 2026, 11:15». ' +
+            'Використовуйте <Timestamp value={…} /> із shared/ui (або formatDate/formatDateTime).',
+        },
       ],
     },
   },

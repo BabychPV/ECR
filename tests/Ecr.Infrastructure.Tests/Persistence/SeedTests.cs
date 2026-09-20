@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 41;
+    private const int ExpectedPermissions = 40;
 
     private const int ExpectedDangerous = 9;
 
@@ -80,6 +80,38 @@ public sealed class SeedTests(SqlServerFixture sql)
         // рядка каталогу.
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.EditDefinition' AND IsDangerous = 1"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.15")]
+    public async Task Seed_прибирає_зняте_право_Template_Migrate_разом_із_роздачами()
+    {
+        // Чиста база: права немає взагалі (директива №15, рішення 4).
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Template.Migrate'"));
+
+        // ⚠ Стара база: MERGE лише додає, тож без явного DELETE право й роздача
+        // пережили б оновлення. Роздача — і вбудованій ролі, і власній: шаблон
+        // `Template.%` колись видав його обом шляхам.
+        await ExecuteAsync("""
+            INSERT sec.Permission (Code, [Group], NameL10n, IsDangerous)
+            VALUES (N'Template.Migrate', N'Template', N'{"en":"Template.Migrate"}', 0);
+            INSERT sec.RolePermission (RoleId, PermissionCode)
+            SELECT Id, N'Template.Migrate' FROM sec.Role WHERE Code IN (N'TemplateAdministrator', N'Viewer');
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Template.Migrate'"));
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Template.Migrate'"));
+        Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
     }
 
     [Fact]
