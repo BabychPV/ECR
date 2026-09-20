@@ -2366,6 +2366,25 @@ public interface INotificationSender
 }
 ```
 
+#### `INotificationDispatchStore`
+
+Дані РОЗСИЛКИ каналами (`BE-34`): знімок конфігурації «подія × канал» і журнал доставок `itg.NotificationDelivery`. Окремо від `INotificationStore` навмисно — той обслуговує екран керування каналами, а цей фонову задачу без користувача. У тому ж файлі — `NotificationEvent`, `NotificationMessage`, `NotificationDispatchPlan`, `NotificationDispatchResult` і порт `INotificationChannelSender` (доставка в конкретний канал із бази, на відміну від `INotificationSender` — транспорту процесу).
+
+```csharp
+public interface INotificationDispatchStore
+{
+    public Task<NotificationDispatchPlan> GetPlanAsync(CancellationToken ct);
+    public Task<bool> WasSentSinceAsync(int channelId, string eventKey, DateTime since, CancellationToken ct);
+    public Task AppendDeliveryAsync(NotificationDelivery delivery, CancellationToken ct);
+}
+
+public interface INotificationChannelSender
+{
+    public NotificationChannelKind Kind { get; }
+    public Task SendAsync(NotificationChannel channel, NotificationMessage message, CancellationToken ct);
+}
+```
+
 #### `IPeriodStore`
 
 Доступ до проєктів і їхніх періодів для календаря і адміністративних операцій над періодами.

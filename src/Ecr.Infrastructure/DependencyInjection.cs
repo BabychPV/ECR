@@ -266,6 +266,20 @@ public static class DependencyInjection
         services.AddSingleton(new Application.Notifications.WebhookUrlPolicy(
             (configuration["Notifications:WebhookAllowedHostSuffixes"] ?? string.Empty).Split(';', ',')));
 
+        // BE-34. Диспетчер каналів і відправник Teams.
+        // ⚠ Відправники реєструються як КОЛЕКЦІЯ (`IEnumerable<INotificationChannelSender>`):
+        // диспетчер обирає за транспортом каналу, а незареєстрований транспорт
+        // дає рядок `Failed` у журналі доставок, не тишу.
+        services.AddScoped<INotificationDispatchStore, Notifications.NotificationDispatchStore>();
+        services.AddScoped<Notifications.NotificationDispatcher>();
+        services.AddScoped<INotificationChannelSender, Notifications.TeamsWebhookSender>();
+
+        // ⛔ Іменований клієнт, а не `new HttpClient`: власноруч створений тримає
+        // з'єднання після зміни DNS. Таймаут виставляє САМ відправник
+        // (`TeamsWebhookSender.Timeout`) — тут лише реєстрація фабрики, щоб
+        // забута тут лямбда не могла мовчки повернути типові 100 секунд.
+        services.AddHttpClient(Notifications.TeamsWebhookSender.HttpClientName);
+
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
         // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би
