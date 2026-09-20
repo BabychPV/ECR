@@ -387,7 +387,8 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
             new Uri($"/api/v1/projects/{projectId}/timezone", UriKind.Relative),
             new { timeZoneId = "UTC" });
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, changeAfterActivation.StatusCode);
+        // ⚠ 409, як і каже §7 контракту: доти голий `DomainException` їхав як 422.
+        Assert.Equal(HttpStatusCode.Conflict, changeAfterActivation.StatusCode);
         var body = await changeAfterActivation.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("ECR-PRD-0409", body.GetProperty("errorCode").GetString());
     }
