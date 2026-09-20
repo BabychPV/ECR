@@ -57,6 +57,7 @@ import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -640,6 +641,27 @@ export function TemplateVersionPage(): JSX.Element {
        * ховає форму аркуша (`canEditSheets` вище читає той самий
        * `structure.data?.isEditable`).
        */}
+      {/*
+        ⛔ Директива D15 §0, правило L10: стан версії рахується як
+        `versionsList.data?.items.find(…)?.status`, тож при відмові
+        `GET /templates/{id}/versions` він `undefined` — рівно те саме
+        значення, що й «версії немає в переліку». Обидві кнопки нижче
+        (`canPublish`, `canWithdraw`) через це ЗНИКАЛИ, і адміністратор із
+        правом `Template.Publish` читав це як «версію вже опубліковано» або
+        «права немає» — і йшов шукати іншу версію чи іншу людину.
+
+        ⚠ Самі кнопки лишаються схованими: коли стан невідомий, дія має
+        деградувати в бік ЗАБОРОНИ (той самий висновок, що в `PeriodsPage`,
+        #452). Нове тут — видима причина замість мовчання.
+
+        ⚠ Банер лише тому, хто має право публікувати: решта цих кнопок не
+        бачить ніколи, і повідомлення про перелік, яким вони не
+        користуються, було б шумом.
+      */}
+      {can(session.data, 'Template.Publish') && versionsList.error !== null && (
+        <ErrorAlert error={versionsList.error} onRetry={() => void versionsList.refetch()} />
+      )}
+
       {can(session.data, 'Template.Edit') && structure.data?.isEditable === false && (
         <Alert color="statusWarning" variant="light" mb="sm">
           {t('version.structureFrozen')}
