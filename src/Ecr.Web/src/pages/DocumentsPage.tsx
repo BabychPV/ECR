@@ -1,5 +1,5 @@
 ﻿import { useState, type JSX } from 'react';
-import { Button, Group, NumberInput, Stack, Table, Text } from '@mantine/core';
+import { Button, Code, Group, NumberInput, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -10,6 +10,7 @@ import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -52,8 +53,22 @@ export function DocumentsPage(): JSX.Element {
     queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
   });
 
-  const projectCodeOf = (projectId: number): string =>
-    projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
+  /**
+   * ⛔ Директива D15 §0, правило L10. Тут стояло
+   * `…?.code ?? String(projectId)`, тож відмова `GET /api/v1/projects`
+   * повертала колонку рівно в той стан, який прибрав аудит-пас 5: голий
+   * числовий ідентифікатор у переліку на десятки рядків. Оператор відкриває
+   * не той документ — і ніщо не каже, що підпис просто не прочитався.
+   *
+   * ⚠ Число з екрана не ховається: без коду воно єдине, що лишається від
+   * адреси документа. Змінюється ФОРМА — `<Code>` замість тексту, тобто
+   * «це ідентифікатор», а не «це назва проєкту», плюс видима причина над
+   * таблицею.
+   */
+  const projectCodeOf = (projectId: number): JSX.Element | string =>
+    projects.data?.items.find((project) => project.id === projectId)?.code ?? (
+      <Code>{projectId}</Code>
+    );
 
   /**
    * ⛔ UI-walkthrough F3: посилання було зібране як `/documents/${id}` — без
@@ -127,6 +142,14 @@ export function DocumentsPage(): JSX.Element {
       >
         {(page) => (
           <>
+            {/* ⛔ Відмова переліку проєктів — окрема від відмови переліку
+                документів (та під власною межею вище): сама таблиця приїхала,
+                не прочиталися лише підписи проєктів. Тому банер тут, а не
+                замість таблиці. */}
+            {projects.error !== null && (
+              <ErrorAlert error={projects.error} onRetry={() => void projects.refetch()} />
+            )}
+
             <DocumentListSummaryStrip periodKey={periodKey} />
 
             <Table striped highlightOnHover className="ecr-sticky-head">
@@ -162,7 +185,16 @@ export function DocumentsPage(): JSX.Element {
                         <Link to={documentHref(document.id)}>{document.businessKey}</Link>
                       )}
                     </Table.Td>
-                    <Table.Td>{projectCodeOf(document.projectId)}</Table.Td>
+                    <Table.Td>
+                      {/* ⚠ Доки перелік у дорозі, місце тримає скелет, а не
+                          число: інакше на кожному відкритті сторінки колонка
+                          на мить показувала б ідентифікатори. */}
+                      {projects.isPending ? (
+                        <Skeleton height={12} width={60} radius="sm" data-projects="pending" />
+                      ) : (
+                        projectCodeOf(document.projectId)
+                      )}
+                    </Table.Td>
                     <Table.Td>{document.sheetCount}</Table.Td>
                     <Table.Td>
                       {/* ⛔ UI-walkthrough F6: за період, якого немає в
