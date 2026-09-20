@@ -128,6 +128,34 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
     setMetadataAttempt((n) => n + 1);
   }, []);
 
+  // ── Відмова запиту перевірки ──────────────────────────────────────────────
+  //
+  // ⛔ Те саме правило `L10` (**відмова ≠ порожньо**) і для другого запиту.
+  // `POST /api/v1/expressions/validate` — ЄДИНЕ джерело підкреслень: доки
+  // відповіді немає, `showDiagnostics` не викликано, і редактор виглядає
+  // точнісінько так, як на бездоганній формулі. Автор бачить чисте поле й
+  // робить єдиний можливий висновок — «помилок немає», — тоді як насправді
+  // ніхто нічого не перевіряв.
+  //
+  // ⛔ До цього тут стояв `throw error` усередині `void (async () => …)()`.
+  // Кинуте звідти не доходить до ЖОДНОЇ межі помилок React: async-IIFE нікому
+  // не віддає свій проміс, тож це просто неопрацьоване відхилення
+  // (`unhandledrejection` у браузері, «шум», що нічого не валить, у тестах).
+  // На екрані — рівно ніщо, як і до сусіднього фіксу складу мови.
+  //
+  // ⚠ `prev ?? error` — з тієї ж причини, що й у складі мови: новий об'єкт
+  // помилки в стані дає новий рендер, а рендер перезапускає цей самий ефект.
+  // Тотожне значення React відкидає без рендера, і цикл не починається.
+  const [validateError, setValidateError] = useState<unknown>(null);
+
+  // Лічильник спроб: зміна значення перезапускає ефект перевірки.
+  const [validateAttempt, setValidateAttempt] = useState(0);
+
+  const retryValidate = useCallback(() => {
+    setValidateError(null);
+    setValidateAttempt((n) => n + 1);
+  }, []);
+
   // ── Створення редактора ───────────────────────────────────────────────────
   useEffect(() => {
     let disposed = false;
@@ -278,13 +306,19 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
             monaco.showDiagnostics(model, result.diagnostics);
           }
 
+          setValidateError(null);
           onValidated?.(result);
         } catch (error) {
           // ⚠ Скасований запит — не помилка перевірки, а очікуваний наслідок
           // того, що текст змінився знову: користувача нема чим повідомляти.
+          // Це НОРМАЛЬНИЙ стан при швидкому введенні — банер на кожне
+          // натискання клавіші був би другою неправдою замість першої.
           if (isAbortError(error)) return;
 
-          throw error;
+          // ⛔ Справжня відмова стає ВИДИМОЮ: причина з кодом поруч із
+          // редактором. Тихе `throw` у цьому місці означало, що перевірка не
+          // відбулася, а екран про це не сказав нічого.
+          setValidateError((prev: unknown) => prev ?? error);
         }
       })();
     }, ValidateDelay);
@@ -297,7 +331,7 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
     // ⚠ `onValidated` навмисно поза переліком: викликач найчастіше передає
     // стрілку, і залежність від неї перезапускала б перевірку на кожен
     // перерендер батька — тобто перетворила б затримку на ніщо.
-  }, [ready, value, dialect, placement]);
+  }, [ready, value, dialect, placement, validateAttempt]);
 
   if (failed) {
     return (
@@ -320,6 +354,15 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
         `a11y (dark)`/`a11y (light)`.
       */}
       {metadataError !== null && <ErrorAlert error={metadataError} onRetry={retryMetadata} />}
+
+      {/*
+        ⛔ Так само ПОРУЧ, а не ЗАМІСТЬ: писати вираз без перевірки законно —
+        остаточне слово однаково за сервером у мить збереження, а редактор без
+        підкреслень лишається придатним для введення. Сховати чи заблокувати
+        поле через недоступну перевірку означало б відібрати роботу замість
+        того, щоб назвати причину.
+      */}
+      {validateError !== null && <ErrorAlert error={validateError} onRetry={retryValidate} />}
 
       <div ref={host} style={{ height: height ?? '8rem', width: '100%' }} />
     </Stack>
