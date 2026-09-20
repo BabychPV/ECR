@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, Tabs, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Group, Skeleton, Tabs, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -32,6 +32,7 @@ import { language, t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
@@ -247,6 +248,18 @@ export function RegistryConstructorPage(): JSX.Element {
               </Tabs.List>
 
               <Tabs.Panel value="fields" pt="sm">
+                {/*
+                  ⛔ Директива D15 §0, правило L10: відмова `GET /api/v1/registries`
+                  давала `registryOptions === []`, тобто перелік цілей для поля
+                  `Lookup` складався з самого «—». Автор поля бачив рівно те саме,
+                  що й при довіднику без жодного сусіда, а зберегти не міг
+                  (`isFieldComplete` вимагає цілі) — і підказка внизу казала
+                  «поле неповне», тобто називала НЕ ту причину.
+                */}
+                {registries.error !== null && (
+                  <ErrorAlert error={registries.error} onRetry={() => void registries.refetch()} />
+                )}
+
                 <RegistryFields
                   definition={loaded}
                   canEdit={mayEdit}
@@ -282,11 +295,34 @@ export function RegistryConstructorPage(): JSX.Element {
               </Tabs.Panel>
 
               <Tabs.Panel value="history" pt="sm">
-                <RegistryHistory
-                  entries={history.data ?? []}
-                  userNames={userNames}
-                  usersResolved={!users.isPending}
-                />
+                {/*
+                  ⛔ Найдорожче місце цієї сторінки: `history.data ?? []` при
+                  відмові давало `entries.length === 0`, а `RegistryHistory`
+                  на нулі записів каже «змін не було». Тобто відмова читалася
+                  як ТВЕРДЖЕННЯ про журнал змін — саме там, куди приходять із
+                  питанням «хто і навіщо це змінив». Порядок той самий, що в
+                  `AsyncBoundary`: `error` → `isPending` → дані.
+
+                  ⚠ `AsyncBoundary` тут не годиться: вона малює власний
+                  `<Title order={4}>`, а сторінка вже має заголовок і `<Title
+                  order={2}>` у самій вкладці — вставка розірвала б порядок
+                  заголовків (`heading-order`, гейти `a11y`).
+                */}
+                {history.error !== null && (
+                  <ErrorAlert error={history.error} onRetry={() => void history.refetch()} />
+                )}
+
+                {history.error === null && history.isPending && (
+                  <Skeleton height={120} radius="sm" data-registry-history="pending" />
+                )}
+
+                {history.error === null && !history.isPending && (
+                  <RegistryHistory
+                    entries={history.data}
+                    userNames={userNames}
+                    usersResolved={!users.isPending}
+                  />
+                )}
               </Tabs.Panel>
             </Tabs>
           </>
