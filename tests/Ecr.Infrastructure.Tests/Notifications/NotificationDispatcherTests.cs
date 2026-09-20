@@ -165,6 +165,53 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
         Assert.Empty(await DeliveriesAsync(channelId, key));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-34")]
+    public async Task Канал_Smtp_доставляє_листа_адресатам_каналу_а_відмова_транспорту_лишає_Failed()
+    {
+        // Канал, чий адресат приймає, і канал, чий адресат відбиває: обидва
+        // йдуть ОДНИМ прогоном, тобто перевіряється й те, що відмова другого
+        // не з'їдає доставку першого.
+        var deliveredId = await AddChannelAsync(
+            "smtp-ok", NotificationChannelKind.Smtp, settingsJson: Mailbox("ops@corp.example", "ECR NCOC"))
+            .ConfigureAwait(true);
+        var refusedId = await AddChannelAsync(
+            "smtp-bad", NotificationChannelKind.Smtp, settingsJson: Mailbox("dead@corp.example", title: null))
+            .ConfigureAwait(true);
+
+        var transport = new FakeTransport(refuses: "dead@corp.example");
+        var key = $"consistency:{_tag}";
+
+        await using var db = Context();
+
+        // Жодного винятку назовні: відмова релея — це рядок журналу.
+        await Dispatcher(db, new TestClock(Start), new SmtpChannelSender(transport))
+            .DispatchAsync(Event(key), CancellationToken.None);
+
+        var sent = Assert.Single(await DeliveriesAsync(deliveredId, key));
+        Assert.Equal(NotificationDeliveryStatus.Sent, sent.Status);
+        Assert.Null(sent.Error);
+
+        var failed = Assert.Single(await DeliveriesAsync(refusedId, key));
+        Assert.Equal(NotificationDeliveryStatus.Failed, failed.Status);
+        Assert.Contains("550", failed.Error!, StringComparison.Ordinal);
+
+        // ⛔ Адресат і тема беруться з КАНАЛУ, а не з конфігурації процесу:
+        // саме це відрізняє відправника каналу від транспорту під ним.
+        var letter = Assert.Single(transport.Delivered);
+        Assert.Equal(["ops@corp.example"], letter.Recipients);
+        Assert.Equal("ECR NCOC: ECR: розбіжності", letter.Subject);
+        Assert.Equal("[consistency] 3 розбіжності.", letter.Body);
+    }
+
+    /// <summary>Несекретні параметри SMTP-каналу: адресат і заголовок.</summary>
+    private static string Mailbox(string recipient, string? title)
+        => title is null
+            ? $$"""{"host":"mail.corp.example","port":25,"recipients":["{{recipient}}"]}"""
+            : $$"""{"host":"mail.corp.example","port":25,"recipients":["{{recipient}}"],"title":"{{title}}"}""";
+
     private static NotificationEvent Event(string key)
         => new(Kind, NotificationSeverity.Error, key, "ECR: розбіжності", "[consistency] 3 розбіжності.");
 
@@ -179,11 +226,13 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
     /// <param name="suffix">Частина назви, унікальна в межах тесту.</param>
     /// <param name="kind">Транспорт.</param>
     /// <param name="enabled">Чи ввімкнений сам канал.</param>
-    private async Task<int> AddChannelAsync(string suffix, NotificationChannelKind kind, bool enabled = true)
+    /// <param name="settingsJson">Несекретні параметри каналу.</param>
+    private async Task<int> AddChannelAsync(
+        string suffix, NotificationChannelKind kind, bool enabled = true, string settingsJson = "{}")
     {
         await using var db = Context();
 
-        var channel = new NotificationChannel(kind, $"be34-{_tag}-{suffix}", "{}", Start, byUserId: null);
+        var channel = new NotificationChannel(kind, $"be34-{_tag}-{suffix}", settingsJson, Start, byUserId: null);
 
         if (!enabled)
         {
@@ -208,6 +257,31 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
             .Where(d => d.ChannelId == channelId && d.EventKey == eventKey)
             .OrderBy(d => d.Id)
             .ToListAsync();
+    }
+
+    /// <summary>Транспорт процесу: приймає листа або відбиває його за адресатом.</summary>
+    /// <param name="refuses">Адресат, на якому релей відповідає відмовою.</param>
+    private sealed class FakeTransport(string refuses) : INotificationSender
+    {
+        public List<(IReadOnlyList<string> Recipients, string Subject, string Body)> Delivered { get; } = [];
+
+        public bool IsConfigured => true;
+
+        public Task SendAsync(
+            IReadOnlyList<string> recipients, string subject, string body, CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(recipients);
+
+            if (recipients.Contains(refuses, StringComparer.Ordinal))
+            {
+                return Task.FromException(
+                    new InvalidOperationException("Relay refused the recipient: 550 5.1.1."));
+            }
+
+            Delivered.Add((recipients, subject, body));
+
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>Відправник, який нічого не шле, а лише запам'ятовує — або падає.</summary>

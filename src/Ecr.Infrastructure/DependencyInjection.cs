@@ -266,13 +266,19 @@ public static class DependencyInjection
         services.AddSingleton(new Application.Notifications.WebhookUrlPolicy(
             (configuration["Notifications:WebhookAllowedHostSuffixes"] ?? string.Empty).Split(';', ',')));
 
-        // BE-34. Диспетчер каналів і відправник Teams.
+        // BE-34. Диспетчер каналів і відправники транспортів.
         // ⚠ Відправники реєструються як КОЛЕКЦІЯ (`IEnumerable<INotificationChannelSender>`):
         // диспетчер обирає за транспортом каналу, а незареєстрований транспорт
         // дає рядок `Failed` у журналі доставок, не тишу.
         services.AddScoped<INotificationDispatchStore, Notifications.NotificationDispatchStore>();
         services.AddScoped<Notifications.NotificationDispatcher>();
         services.AddScoped<INotificationChannelSender, Notifications.TeamsWebhookSender>();
+
+        // ⚠ SMTP-канал іде поверх транспорту ПРОЦЕСУ, вибраного вище: адресатів
+        // дає канал, сервер і облікові дані — конфігурація. Без цього рядка
+        // кожне правило на SMTP-канал лишало б рядок `Failed` «відправника не
+        // зареєстровано» — чесний, але марний.
+        services.AddScoped<INotificationChannelSender, Notifications.SmtpChannelSender>();
 
         // ⛔ Іменований клієнт, а не `new HttpClient`: власноруч створений тримає
         // з'єднання після зміни DNS. Таймаут виставляє САМ відправник
