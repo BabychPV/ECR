@@ -191,4 +191,19 @@ describe('GroupAssignmentsPanel', () => {
       );
     });
   });
+
+  it('перелік не приїхав — причина з кодом, а НЕ порожня таблиця «нічого не призначено»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes('/ui-strings/')
+        ? json({ languageCode: 'en', revision: 1, strings: Strings })
+        : json({ type: 'about:blank', title: 'Error', status: 500, errorCode: 'ECR-SYS-0500', correlationId: 'c' }, 500, 'application/problem+json'),
+    ));
+    await renderPanel();
+
+    expect((await screen.findByRole('alert')).textContent ?? '').toContain('ECR-SYS-0500');
+    // ⛔ Після банера: заголовки порожньої таблиці — і є «нормальний порожній стан».
+    expect(screen.queryByRole('table')).toBeNull();
+    // Форма призначення від переліку не залежить і лишається.
+    expect(screen.getByRole('button', { name: 'Assign role to group' })).not.toBeNull();
+  });
 });

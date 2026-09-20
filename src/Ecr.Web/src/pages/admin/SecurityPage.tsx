@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, useState, type JSX } from 'react';
+import { Suspense, lazy, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -34,6 +34,7 @@ import type {
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -272,9 +273,18 @@ export function SecurityPage(): JSX.Element {
     queryFn: () => apiFetch<PermissionCatalogItem[]>('/api/v1/permissions'),
   });
 
+  // ⚠ `?? []` лишається лише для «ще їде» й заглушок із `null`. ВІДМОВА сюди
+  // не доходить: матриця стоїть за `AsyncBoundary` з `permissionCatalog.error`,
+  // форма ролі — за `ErrorAlert`. Інакше відмова каталогу малювала матрицю без
+  // жодної колонки прав, і це читалося як «у ролей немає прав».
   const permissions = [...(permissionCatalog.data ?? [])].sort((a, b) =>
     a.code.localeCompare(b.code),
   );
+
+  const retryReferences = (): void => {
+    if (roles.error !== null) void roles.refetch();
+    if (permissionCatalog.error !== null) void permissionCatalog.refetch();
+  };
 
   return (
     <>
@@ -313,14 +323,17 @@ export function SecurityPage(): JSX.Element {
 
       {tab === 'roles' && (
         <AsyncBoundary<RoleView[]>
-          isPending={roles.isPending}
-          error={roles.error}
+          isPending={roles.isPending || permissionCatalog.isPending}
+          // ⛔ Матриця — це ролі × права: без каталогу прав її немає, є лише
+          // перелік ролей із порожніми рядками. Тому відмова БУДЬ-ЯКОГО з двох
+          // запитів — відмова матриці, а не «малюємо, що приїхало».
+          error={roles.error ?? permissionCatalog.error}
           data={roles.data}
           isEmpty={(all) => all.length === 0}
           emptyTitle={t('security.noRoles')}
           emptyHint={t('security.noRolesHint')}
           skeleton="table"
-          onRetry={() => void roles.refetch()}
+          onRetry={retryReferences}
         >
           {(all) => (
           // ⛔ `overflowX` тут стояв НА самій `<Table>` — без обмеження
@@ -405,6 +418,11 @@ export function SecurityPage(): JSX.Element {
       {/* ⛔ Гранти — окрема вкладка, а не колонка в матриці прав. Права
           відповідають на питання «що людина вміє», гранти — «до чого саме»;
           без другої відповіді перша не відкриває нічого (`A7-22`). */}
+      {/* ⛔ Ролі потрібні ВСІМ вкладкам (вибір ролі в грантах, групах, доступі),
+          а межа помилки вище живе лише на «Ролях». Без цього банера відмова
+          `GET /roles` на інших вкладках давала порожні випадні списки мовчки. */}
+      {tab !== 'roles' && <ErrorAlert error={roles.error} onRetry={retryReferences} />}
+
       {tab === 'grants' && (
         <Suspense fallback={null}>
           <GrantsPanel roles={roles.data ?? []} />
@@ -578,6 +596,10 @@ export function SecurityPage(): JSX.Element {
             клієнті все одно не можна — сервер приймає лише коди з каталогу,
             і показувати поле вільного вводу означало б обіцяти те, що
             завершиться відмовою. */}
+        {/* ⛔ Каталог не приїхав — причина замість порожнього місця, і «Зберегти»
+            вимкнено: роль без прав, збережена тому, що прапорців не було, —
+            не вибір адміністратора. */}
+        <ErrorAlert error={permissionCatalog.error} onRetry={retryReferences} />
         <ScrollArea h={220}>
           <Stack gap="xs">
             {permissions.map((permission) => (
@@ -624,7 +646,9 @@ export function SecurityPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={roleCode.trim().length === 0 || !hasAnyText(roleName)}
+            disabled={
+              roleCode.trim().length === 0 || !hasAnyText(roleName) || permissionCatalog.error !== null
+            }
             loading={createRole.isPending}
             onClick={() => createRole.mutate()}
           >
@@ -713,6 +737,7 @@ export function SecurityPage(): JSX.Element {
 
         {/* ⛔ Ролі задаються ОДРАЗУ. Обліковий запис без жодної ролі
             виглядає працездатним і не може нічого. */}
+        <ErrorAlert error={roles.error} onRetry={retryReferences} />
         <MultiSelect
           mt="sm"
           label={t('security.roles')}
@@ -728,9 +753,12 @@ export function SecurityPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
+            // ⛔ Ролі не приїхали (банер сторінки каже чому) — не зберігаємо:
+            // порожній перелік ролей тут не вибір, а відмова довідника.
             disabled={
               userName.trim().length === 0
               || (provider === 'Local' && oneTimePassword.length === 0)
+              || roles.error !== null
             }
             loading={createUser.isPending}
             onClick={() => createUser.mutate()}

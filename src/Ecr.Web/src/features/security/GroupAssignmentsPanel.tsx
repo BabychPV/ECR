@@ -5,6 +5,7 @@ import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleView } from '@/api/types';
 import { DateInput } from '@mantine/dates';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
@@ -109,6 +110,12 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
     <Stack gap="xs" mb="lg">
       <Title order={5}>{t('groupRoles.title')}</Title>
 
+      {/* ⛔ Відмова переліку — НЕ «групам нічого не призначено»: порожня таблиця
+          під заголовком читалася саме так. Форма нижче лишається — вона від
+          переліку не залежить. */}
+      <ErrorAlert error={list.error} onRetry={() => void list.refetch()} />
+
+      {list.error === null && (
       <Table striped>
         <Table.Thead>
           <Table.Tr>
@@ -148,6 +155,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           ))}
         </Table.Tbody>
       </Table>
+      )}
 
       <Group align="flex-end" gap="xs">
         <Select

@@ -16,6 +16,7 @@ import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -82,10 +83,22 @@ export function SnapshotsPage(): JSX.Element {
   // опублікованою версією. Показати решту означало б пропонувати варіанти,
   // кожен другий з яких відмовляє без пояснення (побудова бере лише
   // `Published`).
+  //
+  // ⛔ `?? []` — лише для «ще їде»: ВІДМОВУ переліку показує `referenceError`
+  // нижче, а не «опублікованих звітів немає» (це була б неправда про дані).
   const buildable = (reportDefs.data ?? []).filter(
     (definition) =>
       definition.isActive && definition.versions.some((v) => v.status === 'Published'),
   );
+
+  // Довідники сторінки (проєкти у фільтрі, описи звітів у двох вікнах): їхня
+  // відмова — банер над переліком; сам перелік зрізів від них не залежить.
+  const referenceError = projects.error ?? reportDefs.error;
+
+  const retryReferences = (): void => {
+    if (projects.error !== null) void projects.refetch();
+    if (reportDefs.error !== null) void reportDefs.refetch();
+  };
 
   const snapshots = useQuery({
     queryKey: ['snapshots', projectId, periodKey],
@@ -203,8 +216,15 @@ export function SnapshotsPage(): JSX.Element {
               onChange={(value) => setPeriodKey(typeof value === 'number' ? value : null)}
             />
 
+            {/* ⛔ Вікно описів на відмові показало б «описів немає» — і запросило б
+                завести дублікат. Вимкнено, доки перелік не приїде. */}
             {can(session.data, 'Report.EditDefinition') && (
-              <Button size="xs" variant="default" onClick={() => setManaging(true)}>
+              <Button
+                size="xs"
+                variant="default"
+                disabled={reportDefs.error !== null}
+                onClick={() => setManaging(true)}
+              >
                 {t('reportDefs.manage')}
               </Button>
             )}
@@ -217,6 +237,8 @@ export function SnapshotsPage(): JSX.Element {
           </Group>
         }
       />
+
+      <ErrorAlert error={referenceError} onRetry={retryReferences} />
 
       <AsyncBoundary<ReportSnapshotSummary[]>
         isPending={snapshots.isPending}
@@ -316,7 +338,7 @@ export function SnapshotsPage(): JSX.Element {
           label={t('snapshots.code')}
           description={t('snapshots.codeHint')}
           placeholder={t('snapshots.pickReport')}
-          nothingFoundMessage={t('snapshots.noPublished')}
+          nothingFoundMessage={reportDefs.isSuccess ? t('snapshots.noPublished') : null}
           data={buildable.map((definition) => ({
             value: definition.code,
             label: `${localized(definition.nameL10n) || definition.code} (${definition.code})`,
@@ -326,7 +348,11 @@ export function SnapshotsPage(): JSX.Element {
           data-autofocus
         />
 
-        {buildable.length === 0 && (
+        {/* ⛔ «Опублікованих немає» — твердження про ДАНІ; на відмові (і поки
+            перелік їде) його казати не можна. */}
+        <ErrorAlert error={reportDefs.error} onRetry={retryReferences} />
+
+        {reportDefs.isSuccess && buildable.length === 0 && (
           <Text size="xs" c="dimmed" mt="xs">
             {t('snapshots.noPublished')}
           </Text>
