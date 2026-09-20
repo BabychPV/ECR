@@ -95,8 +95,22 @@ export interface DataTableProps<Row> {
   /** Клац по рядку — зазвичай відкриття шухляди подробиць. */
   readonly onRowClick?: ((row: Row) => void) | undefined;
 
-  /** `aria-label` рядка: чим цей рядок є для того, хто не бачить екрана. */
-  readonly rowLabel?: ((row: Row) => string) | undefined;
+  /**
+   * `aria-label` рядка: чим цей рядок є для того, хто не бачить екрана.
+   *
+   * ⛔ Повертає `null` для рядка, якому власне ім'я НЕ потрібне — і це не
+   * зручність, а вимога. `aria-label` на `<tr>` ЗАМІНЮЄ собою читання
+   * клітинок, тож підпис виду «назва джерела» на кожному рядку відібрав би в
+   * читалки решту колонок і лишив саму назву. Ім'я ставлять там, де рядок
+   * несе щось понад свої клітинки (позначка «вимкнене», яку видно лише
+   * кольором чи прозорістю).
+   *
+   * ⚠ Тип розширено `null` після ПЕРШОГО справжнього споживача
+   * (`SourcesPage`): із сигнатурою `=> string` єдиним способом «не ставити
+   * підпис» був порожній рядок, а `aria-label=""` — це теж атрибут, і
+   * поводиться він саме так, як описано вище.
+   */
+  readonly rowLabel?: ((row: Row) => string | null) | undefined;
 
   /** Ключ виділеного рядка. */
   readonly selectedKey?: string | undefined;
@@ -356,7 +370,11 @@ export function DataTable<Row>({
                         key={key}
                         data-row-key={key}
                         data-selected={selectedKey === key ? 'true' : undefined}
-                        aria-label={rowLabel === undefined ? undefined : rowLabel(row)}
+                        // ⚠ `?? undefined`, а не `?? ''`: порожній рядок теж
+                        // ставить атрибут, а `aria-label=""` на `<tr>` лишає
+                        // рядок без доступного імені замість того, щоб дати
+                        // читалці прочитати клітинки.
+                        aria-label={(rowLabel === undefined ? null : rowLabel(row)) ?? undefined}
                         style={{ cursor: onRowClick === undefined ? 'default' : 'pointer' }}
                         onClick={
                           onRowClick === undefined
