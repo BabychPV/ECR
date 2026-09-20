@@ -28,3 +28,29 @@ export function useWorkflowHistory(
     enabled,
   });
 }
+
+/** Тіло відкликання аркуша (`BE-31`). */
+export type RecallSheetRequest = components['schemas']['RecallSheetRequest'];
+
+/**
+ * Чи може ПОТОЧНИЙ користувач відкликати аркуш: автор подання, рівень `Submit`,
+ * жоден крок маршруту не підписано. Рішення сервера — клієнт його не вгадує.
+ *
+ * ⚠ Ключ під префіксом `['document', id, period]` — з тієї ж причини, що й
+ * історія: будь-яка дія робочого процесу скидає і цю відповідь.
+ */
+export function useRecallAvailability(
+  documentId: number,
+  sheetDefId: number,
+  periodKey: number,
+  enabled: boolean,
+): UseQueryResult<components['schemas']['RecallAvailabilityDto']> {
+  return useQuery({
+    queryKey: ['document', documentId, periodKey, 'recall', sheetDefId],
+    queryFn: () =>
+      apiFetch<components['schemas']['RecallAvailabilityDto']>(
+        `/api/v1/documents/${String(documentId)}/recall?sheetDefId=${String(sheetDefId)}&periodKey=${String(periodKey)}`,
+      ),
+    enabled,
+  });
+}

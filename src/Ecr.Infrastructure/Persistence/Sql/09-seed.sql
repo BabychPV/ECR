@@ -569,6 +569,13 @@ USING (VALUES
     (N'err.ECR-DOC-0409.rejectWrongState',      N'en', N'Only a submitted sheet can be rejected; the sheet is {status}.', 1),
     (N'err.ECR-DOC-0422.reopenReasonRequired',  N'en', N'A reason is required to return the sheet to work.', 1),
     (N'err.ECR-DOC-0422.rejectCommentRequired', N'en', N'A comment is required to reject the sheet.', 1),
+
+    -- BE-31: recall of a submitted sheet by its author.
+    (N'err.ECR-ACCS-0403.recallDenied',         N'en', N'Sheet {sheetDefId} cannot be recalled: the Submit grant level is required.', 1),
+    (N'err.ECR-ACCS-0403.recallNotAuthor',      N'en', N'Only the person who submitted the sheet can recall it.', 1),
+    (N'err.ECR-DOC-0409.recallWrongState',      N'en', N'Only a submitted sheet can be recalled; the sheet is {status}.', 1),
+    (N'err.ECR-DOC-0409.recallStepSigned',      N'en', N'The sheet can no longer be recalled: approval has already started.', 1),
+    (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
     (N'err.ECR-ROW-0409.rowsFromTemplate',      N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so rows cannot be added.', 1),
@@ -1261,6 +1268,10 @@ USING (VALUES
     (N'workflow.rejectHint',             N'en', N'Say what has to be corrected: the author sees this text and nothing else.', 1),
     (N'workflow.reopenTitle',            N'en', N'Return the sheet for edits', 1),
     (N'workflow.reopenHint',             N'en', N'Submitted figures are about to change. The reason stays in the audit trail for good.', 1),
+    (N'workflow.recall',                 N'en', N'Recall', 1),
+    (N'workflow.recalled',               N'en', N'The submission has been recalled: the sheet is a draft again.', 1),
+    (N'workflow.recallTitle',            N'en', N'Recall the submission', 1),
+    (N'workflow.recallHint',             N'en', N'Possible only until the first approver signs. The reason stays in the approval history.', 1),
 
     -- Імпорт із обов'язковим переглядом diff (модуль 6.10).
     (N'import.pick',                     N'en', N'Import from Excel', 1),

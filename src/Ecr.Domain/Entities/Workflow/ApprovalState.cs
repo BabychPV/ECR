@@ -233,4 +233,59 @@ public sealed class ApprovalState : Entity<long>
         // правки, — тобто підпис стосувався б не того тексту.
         CurrentStepId = null;
     }
+
+    /// <summary>
+    /// Чи стоїть поданий аркуш іще на ПЕРШОМУ кроці маршруту, тобто жоден крок
+    /// не підписано (<c>BE-31</c>).
+    /// </summary>
+    /// <param name="firstStepId">Перший крок чинного маршруту; <c>null</c> — маршруту немає.</param>
+    /// <remarks>
+    /// ⚠ Окремої позначки «підписано» на рядку немає: <see cref="Submit"/> ставить
+    /// аркуш на перший крок, а <see cref="ApproveStep"/> зсуває на наступний.
+    /// Маршрут, змінений посеред погодження, дає розбіжність — і відмову:
+    /// помилка в обережний бік.
+    /// </remarks>
+    public bool IsRecallable(int? firstStepId)
+        => Status == DocumentStatus.Submitted && CurrentStepId == firstStepId;
+
+    /// <summary>Відкликання поданого аркуша автором (<c>BE-31</c>): <c>Submitted → Draft</c>.</summary>
+    /// <param name="reason">Причина; обов'язкова.</param>
+    /// <param name="firstStepId">Перший крок чинного маршруту; <c>null</c> — маршруту немає.</param>
+    /// <exception cref="DomainException">Аркуш не поданий, крок уже підписано або причина порожня.</exception>
+    /// <remarks>
+    /// ⚠ Хто відкликає — перевіряє обробник (це відмова доступу, не стану); у
+    /// журнал автор іде подією <c>ApprovalAction.Recall</c>. Поля
+    /// <c>Reopened*</c> не чіпаються: це інша дія з іншим правом.
+    /// </remarks>
+    public void Recall(string reason, int? firstStepId)
+    {
+        if (Status != DocumentStatus.Submitted)
+        {
+            throw new DomainException(
+                "ECR-DOC-0409",
+                $"Відкликати можна лише поданий аркуш; поточний стан — {Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.recallWrongState",
+                    ["status"] = Status.ToString(),
+                });
+        }
+
+        if (!IsRecallable(firstStepId))
+        {
+            throw new DomainException(
+                "ECR-DOC-0409", "Відкликати вже не можна: погодження почалося.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0409.recallStepSigned" });
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new DomainException(
+                "ECR-DOC-0422", "Причина відкликання обов'язкова.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0422.recallReasonRequired" });
+        }
+
+        Status = DocumentStatus.Draft;
+        CurrentStepId = null;
+    }
 }
