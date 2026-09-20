@@ -130,7 +130,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         Assert.Equal(1, row.RowNo);
         Assert.Equal("E_CO2", row.Cells["OutputCode"]);
 
-        // Число без хвостових нулів масштабу `decimal(28,10)`.
+        // Число без хвостових нулів масштабу `decimal(28,16)`.
         Assert.Equal("12.5", ((decimal)row.Cells["Value"]!).ToString(CultureInfo.InvariantCulture));
         Assert.Equal(1, first.NextCursor);
 
