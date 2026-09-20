@@ -29,6 +29,7 @@ import type {
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { normalizeDecimal } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -244,7 +245,12 @@ export function MethodologyConstantsPanel({
         // поля означало б, що константа, переведена з тексту в число, тягне за
         // собою суперечливий рядок — а `IsResolved` вважав би розібраним те,
         // що ним не є.
-        value: draft.kind === 'Numeric' ? Number(draft.value) : null,
+        //
+        // ⛔ Тут стояло `Number(draft.value)`, і воно коштувало двічі: 16-й
+        // знак коефіцієнта зникав дорогою, а порожнє поле їхало як `0` —
+        // тобто правдоподібне й неправильне число замість відмови. Рядок
+        // іде на сервер як є, а порожнє поле кнопка не випускає.
+        value: draft.kind === 'Numeric' ? draft.value.trim() : null,
         unitId: draft.kind === 'Numeric' ? draft.unitId : null,
         textValue: draft.kind === 'Numeric' ? null : draft.textValue,
         validFrom: draft.validFrom === '' ? null : draft.validFrom,
@@ -460,7 +466,12 @@ export function MethodologyConstantsPanel({
             />
 
             <Button
-              disabled={editing.code.trim().length === 0}
+              disabled={
+                editing.code.trim().length === 0 ||
+                // ⚠ Числова константа без розбірного числа не зберігається:
+                // доти порожнє поле мовчки їхало нулем.
+                (editing.kind === 'Numeric' && normalizeDecimal(editing.value) === null)
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >
@@ -1162,7 +1173,9 @@ interface TestDraft {
   readonly code: string;
   readonly inputJson: string;
   readonly expectedJson: string;
-  readonly tolerance: number;
+
+  /** ⚠ Рядок, не число: допуск — `decimal` контракту (`e470777a`). */
+  readonly tolerance: string;
   readonly isNew: boolean;
 }
 
@@ -1191,7 +1204,7 @@ export function MethodologyTestsPanel({
       saveMethodologyTestCase(methodologyId, versionId, draft.code, {
         inputJson: draft.inputJson,
         expectedJson: draft.expectedJson,
-        tolerance: draft.tolerance,
+        tolerance: draft.tolerance.trim(),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.tests(versionId) });
@@ -1214,7 +1227,7 @@ export function MethodologyTestsPanel({
                 code: '',
                 inputJson: '{"periodKey":{"value":0},"arguments":[]}',
                 expectedJson: '{}',
-                tolerance: 0.0001,
+                tolerance: '0.0001',
                 isNew: true,
               })
             }
@@ -1313,21 +1326,24 @@ export function MethodologyTestsPanel({
               onChange={(event) => setEditing({ ...editing, expectedJson: event.currentTarget.value })}
             />
 
-            <NumberInput
+            {/* ⛔ `TextInput`, а не `NumberInput`: останній віддає в `onChange`
+                `floatValue`, тобто проганяє введене через IEEE-754 ще до
+                стану компонента. Допуск — `decimal` контракту, і його знаки
+                мають дійти до сервера тими самими, якими їх надрукували. */}
+            <TextInput
               label={t('methodologies.tolerance')}
               description={t('methodologies.toleranceHint')}
+              inputMode="decimal"
               value={editing.tolerance}
-              decimalScale={6}
-              onChange={(value) =>
-                setEditing({
-                  ...editing,
-                  tolerance: typeof value === 'number' ? value : editing.tolerance,
-                })
+              onChange={(event) =>
+                setEditing({ ...editing, tolerance: event.currentTarget.value })
               }
             />
 
             <Button
-              disabled={editing.code.trim().length === 0}
+              disabled={
+                editing.code.trim().length === 0 || normalizeDecimal(editing.tolerance) === null
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >

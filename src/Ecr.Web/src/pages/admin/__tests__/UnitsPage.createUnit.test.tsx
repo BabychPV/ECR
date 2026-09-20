@@ -47,9 +47,28 @@ const SeededStrings: Record<string, string> = {
   'common.cancel': 'Cancel',
 };
 
+/**
+ * ⚠ Множники — РЯДКИ з масштабом колонки, бо саме так їх і віддає сервер
+ * (`decimal` у відповідях їде рядком, `e470777a`). Фікстура з числами
+ * перевіряла б форму, якої на дроті більше немає.
+ */
 const seededUnits = [
-  { id: 1, code: 'kg', dimensionId: 1, factorToBase: 1, offsetToBase: 0, dimensionCode: 'Mass' },
-  { id: 2, code: 'm3', dimensionId: 2, factorToBase: 1, offsetToBase: 0, dimensionCode: 'Volume' },
+  {
+    id: 1,
+    code: 'kg',
+    dimensionId: 1,
+    factorToBase: '1.0000000000',
+    offsetToBase: '0.0000000000',
+    dimensionCode: 'Mass',
+  },
+  {
+    id: 2,
+    code: 'm3',
+    dimensionId: 2,
+    factorToBase: '1.0000000000',
+    offsetToBase: '0.0000000000',
+    dimensionCode: 'Volume',
+  },
 ];
 
 function mockApi(options: { permissions: string[] }): { createCalls: unknown[] } {
@@ -98,8 +117,8 @@ function mockApi(options: { permissions: string[] }): { createCalls: unknown[] }
           id: 3,
           code: body.code,
           dimensionId: 1,
-          factorToBase: 0.001,
-          offsetToBase: 0,
+          factorToBase: '0.0010000000',
+          offsetToBase: '0.0000000000',
           dimensionCode: 'Mass',
         };
         units = [...units, created];

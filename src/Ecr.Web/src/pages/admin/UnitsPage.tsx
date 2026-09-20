@@ -1,9 +1,10 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, NumberInput, Select, Stack, Table, Text, TextInput } from '@mantine/core';
+import { Badge, Button, Group, Modal, Select, Stack, Table, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
+import { decimalEquals, normalizeDecimal } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -33,7 +34,16 @@ export function UnitsPage(): JSX.Element {
   const session = useSession();
   const queryClient = useQueryClient();
 
-  const [value, setValue] = useState(1);
+  /*
+   * ⛔ Усі три десяткові поля цього екрана — РЯДКИ, і вводяться теж рядком
+   * (`TextInput`, не `NumberInput`). `NumberInput` Mantine повертає в
+   * `onChange` `floatValue`, тобто проганяє введене через IEEE-754 ще до
+   * стану компонента: множник `0.4535923700000000` втратив би хвіст просто
+   * від того, що його надрукували. Контракт віддає й приймає `decimal`
+   * рядком саме тому (`e470777a`), і на клієнті цей рядок ніде не
+   * перетворюється на число — ані туди, ані назад.
+   */
+  const [value, setValue] = useState('1');
   const [fromUnit, setFromUnit] = useState<string | null>(null);
   const [toUnit, setToUnit] = useState<string | null>(null);
   const [result, setResult] = useState<ConvertUnitResponse | null>(null);
@@ -58,7 +68,7 @@ export function UnitsPage(): JSX.Element {
       apiFetch<ConvertUnitResponse>('/api/v1/units/convert', {
         method: 'POST',
         body: JSON.stringify({
-          value,
+          value: value.trim(),
           fromUnit: fromUnit ?? '',
           toUnit: toUnit ?? '',
         } satisfies ConvertUnitRequest),
@@ -84,8 +94,8 @@ export function UnitsPage(): JSX.Element {
   const [newSymbol, setNewSymbol] = useState('');
   const [newName, setNewName] = useState('');
   const [newDimensionId, setNewDimensionId] = useState<string | null>(null);
-  const [newFactor, setNewFactor] = useState(1);
-  const [newOffset, setNewOffset] = useState(0);
+  const [newFactor, setNewFactor] = useState('1');
+  const [newOffset, setNewOffset] = useState('0');
 
   const dimensions = Array.from(
     new Map(all.map((unit) => [unit.dimensionId, unit.dimensionCode])).entries(),
@@ -98,8 +108,12 @@ export function UnitsPage(): JSX.Element {
         symbolL10n: { en: newSymbol },
         nameL10n: { en: newName },
         dimensionId: Number(newDimensionId ?? 0),
-        factorToBase: newFactor,
-        offsetToBase: newOffset,
+
+        // ⚠ Рядок іде як є (після `trim`). `Number(newFactor)` тут коштував
+        // би 16-го знака множника, а саме він і відрізняє точний коефіцієнт
+        // від округленого.
+        factorToBase: newFactor.trim(),
+        offsetToBase: newOffset.trim(),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['units'] });
@@ -108,8 +122,8 @@ export function UnitsPage(): JSX.Element {
       setNewSymbol('');
       setNewName('');
       setNewDimensionId(null);
-      setNewFactor(1);
-      setNewOffset(0);
+      setNewFactor('1');
+      setNewOffset('0');
       showDone(t('units.created'));
     },
     onError: showApiError,
@@ -149,12 +163,13 @@ export function UnitsPage(): JSX.Element {
         title={t('units.title')}
         actions={
           <Group gap="xs" align="end">
-            <NumberInput
+            <TextInput
               size="xs"
               miw={120}
+              inputMode="decimal"
               label={t('units.value')}
               value={value}
-              onChange={(next) => setValue(typeof next === 'number' ? next : value)}
+              onChange={(event) => setValue(event.currentTarget.value)}
             />
 
             <Select
@@ -188,7 +203,9 @@ export function UnitsPage(): JSX.Element {
 
             <Button
               size="xs"
-              disabled={fromUnit === null || toUnit === null}
+              // ⚠ Поле тепер текстове, тож «не число» стало можливим станом:
+              // кнопка, яка веде у відому відмову сервера, гірша за вимкнену.
+              disabled={fromUnit === null || toUnit === null || normalizeDecimal(value) === null}
               loading={convert.isPending}
               onClick={() => convert.mutate()}
             >
@@ -243,12 +260,19 @@ export function UnitsPage(): JSX.Element {
                       {unit.code}
                       {/* ⚠ Базова одиниця розмірності видно окремо: саме через
                           неї йде кожна конверсія, і множник решти — це
-                          множник ДО НЕЇ. */}
-                      {unit.factorToBase === 1 && unit.offsetToBase === 0 && (
-                        <Badge ml="xs" size="xs" variant="light">
-                          {t('units.base')}
-                        </Badge>
-                      )}
+                          множник ДО НЕЇ.
+
+                          ⛔ Порівняння — `decimalEquals`, не `Number(x) === 1`.
+                          Множник приходить із масштабом колонки
+                          (`"1.0000000000"`), тож рівність рядків тут не
+                          працює; а `Number` не відрізнив би базову одиницю від
+                          такої, що відходить від неї на 17-му знаку. */}
+                      {decimalEquals(unit.factorToBase, '1') &&
+                        decimalEquals(unit.offsetToBase, '0') && (
+                          <Badge ml="xs" size="xs" variant="light">
+                            {t('units.base')}
+                          </Badge>
+                        )}
                     </Table.Td>
                     {/* Q-297: до фіксу тут був голий `unit.dimensionId` — число
                         без жодного сенсу для людини, що дивиться на екран. */}
@@ -368,18 +392,20 @@ export function UnitsPage(): JSX.Element {
             onChange={setNewDimensionId}
           />
 
-          <NumberInput
+          <TextInput
             label={t('units.factor')}
             description={t('units.factorHint')}
+            inputMode="decimal"
             value={newFactor}
-            onChange={(next) => setNewFactor(typeof next === 'number' ? next : newFactor)}
+            onChange={(event) => setNewFactor(event.currentTarget.value)}
           />
 
-          <NumberInput
+          <TextInput
             label={t('units.offset')}
             description={t('units.offsetHint')}
+            inputMode="decimal"
             value={newOffset}
-            onChange={(next) => setNewOffset(typeof next === 'number' ? next : newOffset)}
+            onChange={(event) => setNewOffset(event.currentTarget.value)}
           />
 
           <Group justify="flex-end" mt="sm">
@@ -391,7 +417,11 @@ export function UnitsPage(): JSX.Element {
                 newCode.trim().length === 0 ||
                 newSymbol.trim().length === 0 ||
                 newName.trim().length === 0 ||
-                newDimensionId === null
+                newDimensionId === null ||
+                // ⚠ Наслідок переходу на текстове поле: те, що `NumberInput`
+                // не давав ввести взагалі, тепер треба перевірити самому.
+                normalizeDecimal(newFactor) === null ||
+                normalizeDecimal(newOffset) === null
               }
               loading={create.isPending}
               onClick={() => create.mutate()}

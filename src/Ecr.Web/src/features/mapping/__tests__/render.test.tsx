@@ -39,7 +39,10 @@ const Preview: MappingPreview = {
       sourceUnitCode: 'kg',
       targetUnitCode: 't',
       pointCount: 2,
-      foldedValue: 42.5,
+      // ⚠ Рядок, як і на дроті: `decimal` у відповідях їде рядком
+      // (`e470777a`), тому й фікстура має бути такою — інакше вона перевіряла
+      // б форму, якої сервер уже не надсилає.
+      foldedValue: '42.5',
     },
     {
       fieldMapId: 2,
@@ -59,7 +62,7 @@ const Preview: MappingPreview = {
     {
       sourcePath: 'Flare_01_CO',
       timestamp: '2026-09-02T01:00:00Z',
-      valueNumeric: 10,
+      valueNumeric: '10',
       valueString: null,
       quality: 'Good',
       outcome: 'Materialized',

@@ -108,7 +108,7 @@ describe('styleDraftOf: зворотне читання наявного сти�
     const original = dto({
       code: 'Header1',
       isBold: true,
-      fontSize: 12,
+      fontSize: '12',
       foregroundArgb: (0xff445566 | 0),
       horizontalAlign: 2,
     });
@@ -116,7 +116,11 @@ describe('styleDraftOf: зворотне читання наявного сти�
     const roundTripped = styleBody(styleDraftOf(original));
 
     expect(roundTripped.isBold).toBe(true);
-    expect(roundTripped.fontSize).toBe(12);
+
+    // ⛔ `'12'`, а не `12`: кругообіг має зберегти те, що прийшло, БЕЗ
+    // перетворення на число — `decimal` контракту їде рядком (`e470777a`), і
+    // `Number` по дорозі був би точкою втрати знаків.
+    expect(roundTripped.fontSize).toBe('12');
     expect(roundTripped.foregroundArgb).toBe(0xff445566 | 0);
     expect(roundTripped.horizontalAlign).toBe(2);
   });

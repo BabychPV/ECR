@@ -33,9 +33,24 @@ function mockApi(options: {
   deleteStatus: 204 | 409;
 }): Api {
   const deleteCalls: string[] = [];
+  // ⚠ Множники рядками: `decimal` у відповідях їде рядком (`e470777a`).
   let units = [
-    { id: 1, code: 'kg', dimensionId: 1, factorToBase: 1, offsetToBase: 0, dimensionCode: 'Mass' },
-    { id: 5, code: 'lb', dimensionId: 1, factorToBase: 0.45, offsetToBase: 0, dimensionCode: 'Mass' },
+    {
+      id: 1,
+      code: 'kg',
+      dimensionId: 1,
+      factorToBase: '1.0000000000',
+      offsetToBase: '0.0000000000',
+      dimensionCode: 'Mass',
+    },
+    {
+      id: 5,
+      code: 'lb',
+      dimensionId: 1,
+      factorToBase: '0.4535923700',
+      offsetToBase: '0.0000000000',
+      dimensionCode: 'Mass',
+    },
   ];
 
   vi.stubGlobal(

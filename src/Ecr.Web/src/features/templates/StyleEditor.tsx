@@ -91,9 +91,9 @@ export function StyleEditor({
           label={t('styles.fontSize')}
           min={1}
           value={draft.fontSize ?? ''}
-          onChange={(value) =>
-            onChange({ ...draft, fontSize: typeof value === 'number' ? value : null })
-          }
+          // ⚠ Розмір шрифту — `decimal` контракту, тобто рядок: у чернетку він
+          // кладеться рядком і рядком же їде назад (`style.ts`).
+          onChange={(value) => onChange({ ...draft, fontSize: value === '' ? null : String(value) })}
         />
       </Group>
 
