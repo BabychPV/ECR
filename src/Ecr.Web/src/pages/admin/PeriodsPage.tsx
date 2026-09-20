@@ -34,6 +34,7 @@ import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
@@ -114,6 +115,23 @@ export function PeriodsPage(): JSX.Element {
   // періодів уже завантажені на цій сторінці (`periods` вище), новий запит
   // не потрібен.
   const openPeriods = (periods.data?.periods ?? []).filter((p) => p.state !== 'Closed');
+
+  /*
+   * ⛔ Чи ВІДОМО, які періоди відкриті. Без цього запобіжник вище деградував у
+   * бік ДОЗВОЛУ: при відмові `GET /projects/{id}/periods` (чи поки він у
+   * дорозі) `periods.data` — `undefined`, `openPeriods` стає порожнім, і з
+   * діалогу архівації зникає попередження, а кнопка «Архівувати»
+   * РОЗБЛОКОВУЄТЬСЯ. Тобто рівно тоді, коли клієнт не знає стану періодів, він
+   * повідомляв, що архівувати безпечно.
+   *
+   * ⚠ Сервер усе одно відмовить (`ECR-PRD-0409`), тож дані цілі — але
+   * інтерфейс активно казав протилежне тому, що знав. Це гірше за мовчання:
+   * попередження, яке зникає саме в невизначеності, вчить йому не вірити.
+   *
+   * ⚠ Запобіжник має деградувати в бік ЗАБОРОНИ: не знаємо — не пускаємо, і
+   * кажемо чому.
+   */
+  const openPeriodsUnknown = periods.error !== null || periods.data === undefined;
 
   /** Перечитує проєкти і календар після будь-якої зміни. */
   const refresh = async (): Promise<void> => {
@@ -758,6 +776,13 @@ export function PeriodsPage(): JSX.Element {
           </Alert>
         )}
 
+        {/* ⛔ Стан періодів НЕВІДОМИЙ — кнопка лишається заблокованою, і
+            причину видно. Раніше саме тут запобіжник мовчки перевертався:
+            відмова запиту прибирала попередження й розблоковувала дію. */}
+        {openPeriodsUnknown && periods.error !== null && (
+          <ErrorAlert error={periods.error} onRetry={() => void periods.refetch()} />
+        )}
+
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={() => setArchiving(false)}>
             {t('common.cancel')}
@@ -765,7 +790,7 @@ export function PeriodsPage(): JSX.Element {
           <Button
             color="statusError"
             loading={archive.isPending}
-            disabled={openPeriods.length > 0}
+            disabled={openPeriods.length > 0 || openPeriodsUnknown}
             onClick={() => {
               if (selected !== undefined) archive.mutate(selected.id);
             }}
