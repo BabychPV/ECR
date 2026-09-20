@@ -147,7 +147,7 @@ export function ChannelsPanel(): JSX.Element {
       )}
 
       {channels.error === null && !channels.isPending && channels.data.length === 0 && (
-        <Stack gap={4}>
+        <Stack gap="xs">
           <Text c="dimmed">{t('notifications.noChannels')}</Text>
           <Text size="sm" c="dimmed">
             {t('notifications.noChannelsHint')}
