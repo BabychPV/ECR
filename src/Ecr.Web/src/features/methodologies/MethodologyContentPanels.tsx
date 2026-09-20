@@ -625,6 +625,28 @@ export function MethodologyRulesPanel({
           // редактор міг згодом додати друге правило й ніколи не помітити,
           // що воно вже недосяжне, — доти, доки хтось не почне з'ясовувати,
           // чому розрахунок не бачить рядків, які має бачити.
+          // ⛔ А тепер те, що робило саме ці два попередження гіршими за їх
+          // відсутність. Кнопка «Додати правило» стоїть ПОЗА `AsyncBoundary`,
+          // тож при відмові `GET …/rules` таблиця показує банер, а діалог усе
+          // одно відкривається — з `otherRules`, зібраним через `?? []`, тобто
+          // ПОРОЖНІМ. Обидві перевірки нижче мовчать (`maxOtherPriority === null`,
+          // `blockingCatchAll === undefined`), і catch-all із пріоритетом 1
+          // зберігається без жодного слова, перекривши всі точніші правила.
+          //
+          // ⛔ Тобто рівно тоді, коли клієнт НЕ ЗНАЄ, які правила вже є, він
+          // повідомляє, що конфлікту немає. Запобіжник, який деградує в бік
+          // ДОЗВОЛУ, — гірший за відсутній: він ще й заспокоює.
+          //
+          // ⚠ Ховати «Додати правило» не треба: завести правило законно й при
+          // недоступному переліку. Недоступним стає лише ЗБЕРЕЖЕННЯ — і поруч
+          // стоїть причина з кодом відмови, а не мертва кнопка (той самий
+          // висновок, що в `pages/admin/PeriodsPage.tsx` про архівацію).
+          //
+          // ⚠ `data === undefined` тут не зайве поруч із `error`: доки запит у
+          // дорозі, перелік так само невідомий, і висновок «конфлікту немає»
+          // так само не має підстав.
+          const rulesUnknown = rules.error !== null || rules.data === undefined;
+
           const otherRules = (rules.data ?? []).filter((rule) => editing.isNew || rule.code !== editing.code);
           const editingIsCatchAll = isCatchAllMatchJson(editing.matchJson);
           const maxOtherPriority =
@@ -642,6 +664,16 @@ export function MethodologyRulesPanel({
 
           return (
           <Stack gap="sm">
+            {/* ⚠ Помилка ПЕРШОЮ — той самий порядок, що в `AsyncBoundary` і в
+                `ChoiceField` вище. Сама `AsyncBoundary` тут не годиться: її
+                `<Title order={4}>` усередині модалки рве `heading-order` і
+                валить гейти `a11y (dark)`/`a11y (light)`.
+
+                ⚠ Доки запит у дорозі, `rules.error === null`, і банера немає
+                зовсім (`ErrorAlert` повертає `null`) — недоступна кнопка там
+                самоусувається за секунду, як і `disabled` у `ChoiceField`. */}
+            <ErrorAlert error={rules.error} onRetry={() => void rules.refetch()} />
+
             <TextInput
               label={t('methodologies.code')}
               value={editing.code}
@@ -695,8 +727,15 @@ export function MethodologyRulesPanel({
               onChange={(event) => setEditing({ ...editing, isActive: event.currentTarget.checked })}
             />
 
+            {/* ⛔ `rulesUnknown` — не зручність, а межа: без переліку правил
+                обидва попередження вище нічого не перевіряють, тож зберегти
+                означало б зберегти НАОСЛІП. Причина стоїть банером угорі. */}
             <Button
-              disabled={editing.code.trim().length === 0 || editing.matchJson.trim().length === 0}
+              disabled={
+                rulesUnknown ||
+                editing.code.trim().length === 0 ||
+                editing.matchJson.trim().length === 0
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >
