@@ -4,7 +4,6 @@ import {
   Button,
   Group,
   Modal,
-  NumberInput,
   Select,
   Skeleton,
   Stack,
@@ -162,7 +161,7 @@ export function ChannelsPanel(): JSX.Element {
               <Table.Th>{t('notifications.channelName')}</Table.Th>
               <Table.Th>{t('notifications.channelKind')}</Table.Th>
               <Table.Th>{t('notifications.enabled')}</Table.Th>
-              <Table.Th>{t('notifications.secret')}</Table.Th>
+              <Table.Th>{t('notifications.webhookUrl')}</Table.Th>
               <Table.Th>{t('notifications.modified')}</Table.Th>
               <Table.Th />
             </Table.Tr>
@@ -176,13 +175,27 @@ export function ChannelsPanel(): JSX.Element {
                   {channel.isEnabled ? t('notifications.enabledYes') : t('notifications.enabledNo')}
                 </Table.Td>
                 <Table.Td>
-                  {/* ⚠ Канал без секрету — попередження, а не порожня комірка:
-                      він ввімкнений і не доставить нічого. */}
-                  {channel.hasSecret ? (
-                    <Text size="sm">{t('notifications.secretSet')}</Text>
+                  {/*
+                    ⛔ Секрет каналу читає РІВНО ОДИН відправник — `TeamsWebhookSender`,
+                    і для нього це сама адреса вебхука (без неї він відмовляє:
+                    «адресу вебхука не задано»). `SmtpChannelSender` секрету
+                    каналу не торкається взагалі — пароль бере транспорт процесу.
+                    Тому для пошти тут не «немає секрету» (це читалося б як
+                    незавершене налаштування), а «не застосовується».
+
+                    ⚠ Для Teams навпаки: відсутня адреса — саме попередження.
+                    Канал ввімкнений і не доставить нічого, а дізнаються про це
+                    тоді, коли сповіщення були потрібні.
+                  */}
+                  {channel.kind !== 'TeamsWebhook' ? (
+                    <Text size="sm" c="dimmed" title={t('notifications.secretNotUsedSmtp')}>
+                      {t('notifications.notApplicable')}
+                    </Text>
+                  ) : channel.hasSecret ? (
+                    <Text size="sm">{t('notifications.webhookSet')}</Text>
                   ) : (
                     <Badge color="statusWarning" variant="light">
-                      {t('notifications.secretMissing')}
+                      {t('notifications.webhookMissing')}
                     </Badge>
                   )}
                 </Table.Td>
@@ -198,16 +211,21 @@ export function ChannelsPanel(): JSX.Element {
                     <Button size="compact-xs" variant="subtle" onClick={() => setDraft(draftOf(channel))}>
                       {t('notifications.editChannel')}
                     </Button>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      onClick={() => {
-                        setSecretFor(channel);
-                        setSecret('');
-                      }}
-                    >
-                      {t('notifications.setSecret')}
-                    </Button>
+                    {/* ⚠ Дія є лише там, де секрет справді читають: для пошти
+                        збережене значення нікуди не піде, а кнопка обіцяла б
+                        налаштування. */}
+                    {channel.kind === 'TeamsWebhook' && (
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        onClick={() => {
+                          setSecretFor(channel);
+                          setSecret('');
+                        }}
+                      >
+                        {t('notifications.setWebhook')}
+                      </Button>
+                    )}
                     <Button
                       size="compact-xs"
                       variant="subtle"
@@ -271,46 +289,50 @@ export function ChannelsPanel(): JSX.Element {
               />
             )}
 
-            {draft.kind === 'Smtp' ? (
+            {/*
+              ⛔ Форма показує РІВНО ті поля, які сервер справді читає, і це
+              перевірено в коді відправників, а не за назвами в контракті:
+              `SmtpChannelSender` бере з каналу `settings.Recipients` і
+              `settings.Title` (префікс теми), а транспорт — сервер, відправника
+              й пароль — із конфігурації ПРОЦЕСУ (`Smtp:Host`, `Smtp:From`).
+              Поля `host`/`port`/`from`/`useTls` у контракті є, але їх не читає
+              ніхто: показані, вони обіцяли б налаштування, якого не станеться —
+              лист однаково пішов би через процесний транспорт. Форма, яка дає
+              натиснути там, де сервер не подивиться, гірша за відсутнє поле.
+            */}
+            {draft.kind === 'Smtp' && (
               <>
-                <TextInput
-                  label={t('notifications.smtpHost')}
-                  value={draft.host}
-                  onChange={(event) => setDraft({ ...draft, host: event.currentTarget.value })}
-                />
-                <NumberInput
-                  label={t('notifications.smtpPort')}
-                  value={draft.port ?? ''}
-                  min={1}
-                  onChange={(value) =>
-                    setDraft({ ...draft, port: typeof value === 'number' ? value : null })
-                  }
-                />
-                <TextInput
-                  label={t('notifications.smtpFrom')}
-                  value={draft.from}
-                  onChange={(event) => setDraft({ ...draft, from: event.currentTarget.value })}
-                />
+                <Text size="sm" c="dimmed">
+                  {t('notifications.smtpTransportHint')}
+                </Text>
+
                 <TextInput
                   label={t('notifications.smtpRecipients')}
                   description={t('notifications.smtpRecipientsHint')}
                   value={draft.recipients}
                   onChange={(event) => setDraft({ ...draft, recipients: event.currentTarget.value })}
                 />
-                <Switch
-                  label={t('notifications.smtpUseTls')}
-                  checked={draft.useTls}
-                  onChange={(event) => setDraft({ ...draft, useTls: event.currentTarget.checked })}
-                />
               </>
-            ) : (
-              <TextInput
-                label={t('notifications.teamsTitle')}
-                description={t('notifications.teamsTitleHint')}
-                value={draft.title}
-                onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
-              />
             )}
+
+            {/* ⚠ Поле одне (`settings.title`), а значить різне: у листі це
+                ПРЕФІКС теми (`SmtpChannelSender.SubjectOf`), у Teams —
+                заголовок картки (`TeamsWebhookSender.TitleOf`). Тому підпис і
+                підказка залежать від транспорту. */}
+            <TextInput
+              label={
+                draft.kind === 'Smtp'
+                  ? t('notifications.subjectPrefix')
+                  : t('notifications.teamsTitle')
+              }
+              description={
+                draft.kind === 'Smtp'
+                  ? t('notifications.subjectPrefixHint')
+                  : t('notifications.teamsTitleHint')
+              }
+              value={draft.title}
+              onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
+            />
 
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setDraft(null)}>
@@ -331,19 +353,23 @@ export function ChannelsPanel(): JSX.Element {
       <Modal
         opened={secretFor !== null}
         onClose={() => setSecretFor(null)}
-        title={t('notifications.setSecret')}
+        title={t('notifications.setWebhook')}
       >
         {secretFor !== null && (
           <Stack gap="sm">
             {/* ⛔ Чинного значення тут не показано й показати нічим: сервер
-                секрет не віддає. Тому підпис говорить про ЗАМІНУ, а не про
-                правку. */}
+                адреси не віддає (лише ознаку `hasSecret`). Тому підпис
+                говорить про ЗАМІНУ, а не про правку.
+
+                ⚠ Названо й межу сервера: хост вебхука перевіряється переліком
+                дозволених суфіксів, і недозволений дає `422 ECR-REQ-0422` —
+                дізнатися про це з мовчазної відмови було б дорожче. */}
             <Text size="sm" c="dimmed">
-              {t('notifications.secretHint')}
+              {t('notifications.webhookHint')}
             </Text>
 
             <TextInput
-              label={t('notifications.secret')}
+              label={t('notifications.webhookUrl')}
               type="password"
               value={secret}
               data-autofocus
@@ -358,7 +384,7 @@ export function ChannelsPanel(): JSX.Element {
                 disabled={!secretFor.hasSecret}
                 onClick={() => saveSecret.mutate({ id: secretFor.id, secret: null })}
               >
-                {t('notifications.clearSecret')}
+                {t('notifications.clearWebhook')}
               </Button>
               <Button
                 loading={saveSecret.isPending}
@@ -375,33 +401,25 @@ export function ChannelsPanel(): JSX.Element {
   );
 }
 
-/** Чернетка каналу у формі: рядки, бо форма працює з текстом, а не з `null`. */
+/**
+ * Чернетка каналу у формі: рядки, бо форма працює з текстом, а не з `null`.
+ *
+ * ⚠ Полів `host`/`port`/`from`/`useTls` тут НЕМАЄ навмисно, хоча контракт їх
+ * носить: жоден відправник їх не читає (див. коментар у формі). Тримати їх у
+ * чернетці означало б возити на сервер значення, яких ніхто не спитає, і
+ * першому ж читачеві коду здалося б, що вони на щось впливають.
+ */
 interface ChannelDraft {
   readonly id: number | null;
   readonly name: string;
   readonly kind: 'Smtp' | 'TeamsWebhook';
   readonly isEnabled: boolean;
-  readonly host: string;
-  readonly port: number | null;
-  readonly from: string;
   readonly recipients: string;
-  readonly useTls: boolean;
   readonly title: string;
 }
 
 function emptyDraft(): ChannelDraft {
-  return {
-    id: null,
-    name: '',
-    kind: 'Smtp',
-    isEnabled: true,
-    host: '',
-    port: null,
-    from: '',
-    recipients: '',
-    useTls: true,
-    title: '',
-  };
+  return { id: null, name: '', kind: 'Smtp', isEnabled: true, recipients: '', title: '' };
 }
 
 function draftOf(channel: NotificationChannel): ChannelDraft {
@@ -410,11 +428,7 @@ function draftOf(channel: NotificationChannel): ChannelDraft {
     name: channel.name,
     kind: channel.kind,
     isEnabled: channel.isEnabled,
-    host: channel.settings.host ?? '',
-    port: channel.settings.port ?? null,
-    from: channel.settings.from ?? '',
     recipients: (channel.settings.recipients ?? []).join(', '),
-    useTls: channel.settings.useTls ?? true,
     title: channel.settings.title ?? '',
   };
 }
@@ -428,14 +442,11 @@ function draftOf(channel: NotificationChannel): ChannelDraft {
 function settingsOf(draft: ChannelDraft): NotificationChannelSettings {
   if (draft.kind === 'Smtp') {
     return {
-      host: blankToNull(draft.host),
-      port: draft.port,
-      from: blankToNull(draft.from),
       recipients: draft.recipients
         .split(',')
         .map((one) => one.trim())
         .filter((one) => one.length > 0),
-      useTls: draft.useTls,
+      title: blankToNull(draft.title),
     };
   }
 

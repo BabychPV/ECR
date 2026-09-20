@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChannelsPanel } from '@/features/notifications/ChannelsPanel';
@@ -123,18 +123,56 @@ describe('ChannelsPanel: відмова переліку ≠ «каналів н
     expect(screen.queryByRole('alert')).toBeNull();
   }, 30_000);
 
-  it('канал без секрету названий попередженням, а не порожньою коміркою', async () => {
+  it('канал Teams без адреси вебхука названий попередженням, а не порожньою коміркою', async () => {
     mockServer('ok');
     show();
 
     const row = await screen.findByRole('row', { name: /Duty channel/ });
 
-    // ⛔ Саме в рядку каналу без секрету — пошук по всьому екрану лишався б
+    // ⛔ Саме в рядку каналу без адреси — пошук по всьому екрану лишався б
     // зеленим, якби попередження стояло не там.
-    expect(row.textContent ?? '').toContain('notifications.secretMissing');
+    expect(row.textContent ?? '').toContain('notifications.webhookMissing');
+  }, 30_000);
 
-    const withSecret = screen.getByRole('row', { name: /Ops mailbox/ });
-    expect(withSecret.textContent ?? '').not.toContain('notifications.secretMissing');
+  it('для поштового каналу секрет — «не застосовується», а не «немає секрету»', async () => {
+    mockServer('ok');
+    show();
+
+    const row = await screen.findByRole('row', { name: /Ops mailbox/ });
+
+    /*
+     * ⛔ Перевірено в коді сервера, а не за назвами контракту: секрет каналу
+     * читає лише `TeamsWebhookSender` (для нього це адреса вебхука), а
+     * `SmtpChannelSender` бере пароль із транспорту процесу. Тому «немає
+     * секрету» для пошти читалося б як незавершене налаштування — і
+     * адміністратор шукав би пароль, якого цей канал не спитає ніколи.
+     */
+    expect(row.textContent ?? '').toContain('notifications.notApplicable');
+    expect(row.textContent ?? '').not.toContain('notifications.webhookMissing');
+
+    // ⚠ І дії теж немає: збережена адреса для пошти нікуди не піде.
+    expect(within(row).queryByText(/notifications\.setWebhook/)).toBeNull();
+  }, 30_000);
+
+  it('форма поштового каналу не показує полів, яких сервер не читає', async () => {
+    mockServer('ok');
+    show();
+
+    fireEvent.click(await screen.findByText(/notifications\.addChannel/));
+
+    // ⚠ Спершу дочекатися самої форми — інакше твердження про відсутність
+    // полів зелене просто тому, що модалка ще не відкрилася.
+    await screen.findByLabelText(/notifications\.smtpRecipients/);
+
+    /*
+     * ⛔ `host`/`port`/`from`/`useTls` у контракті є, але `SmtpChannelSender`
+     * їх не читає: транспорт береться з конфігурації процесу. Показані, вони
+     * обіцяли б налаштування, якого не станеться.
+     */
+    expect(screen.queryByLabelText(/notifications\.smtpHost/)).toBeNull();
+    expect(screen.queryByLabelText(/notifications\.smtpPort/)).toBeNull();
+    expect(screen.queryByLabelText(/notifications\.smtpFrom/)).toBeNull();
+    expect(screen.queryByLabelText(/notifications\.smtpUseTls/)).toBeNull();
   }, 30_000);
 
   it('каналів справді немає — пояснення, а не порожня таблиця', async () => {

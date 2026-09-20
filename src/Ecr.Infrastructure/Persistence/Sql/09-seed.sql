@@ -2431,25 +2431,30 @@ USING (VALUES
     (N'notifications.noChannels',          N'en', N'No channels yet', 1),
     (N'notifications.noChannelsHint',      N'en', N'Until a channel exists, nobody is notified: rules have nowhere to send.', 1),
 
-    -- ⛔ Секрет каналу сервер не віддає НІКОЛИ — лише ознаку `hasSecret`.
-    -- Тому підписи говорять про ЗАМІНУ, а не про правку значення.
-    (N'notifications.secret',              N'en', N'Secret', 1),
-    (N'notifications.secretHint',          N'en', N'The stored secret is never shown. Typing a new one replaces it.', 1),
-    (N'notifications.secretSet',           N'en', N'Set', 1),
-    (N'notifications.secretMissing',       N'en', N'No secret', 1),
-    (N'notifications.secretSaved',         N'en', N'Secret replaced.', 1),
-    (N'notifications.setSecret',           N'en', N'Secret', 1),
-    (N'notifications.clearSecret',         N'en', N'Remove secret', 1),
+    -- ⛔ Секрет каналу читає РІВНО ОДИН відправник — `TeamsWebhookSender`, і
+    -- для нього це сама адреса вебхука (без неї він відмовляє). Пошта секрету
+    -- каналу не торкається: пароль бере транспорт процесу. Тому підписи
+    -- говорять про АДРЕСУ, а для пошти в переліку стоїть «не застосовується».
+    (N'notifications.webhookUrl',          N'en', N'Webhook URL', 1),
+    (N'notifications.webhookHint',         N'en', N'The stored URL is never shown; typing a new one replaces it. The host must be on the allow-list, otherwise the server refuses with ECR-REQ-0422.', 1),
+    (N'notifications.webhookSet',          N'en', N'Set', 1),
+    (N'notifications.webhookMissing',      N'en', N'No URL', 1),
+    (N'notifications.setWebhook',          N'en', N'Webhook URL', 1),
+    (N'notifications.clearWebhook',        N'en', N'Remove URL', 1),
+    (N'notifications.secretSaved',         N'en', N'Saved.', 1),
+    (N'notifications.notApplicable',       N'en', N'Not applicable', 1),
+    (N'notifications.secretNotUsedSmtp',   N'en', N'Email channels use the application SMTP credentials; a channel secret would never be read.', 1),
     (N'notifications.testChannel',         N'en', N'Send test', 1),
     (N'notifications.testOk',              N'en', N'The channel accepted the test message.', 1),
     (N'notifications.testFailed',          N'en', N'The channel refused the test message.', 1),
 
-    (N'notifications.smtpHost',            N'en', N'Server', 1),
-    (N'notifications.smtpPort',            N'en', N'Port', 1),
-    (N'notifications.smtpFrom',            N'en', N'From', 1),
+    -- ⚠ Полів `host`/`port`/`from`/`useTls` на екрані немає: контракт їх
+    -- носить, але не читає жоден відправник (перевірено в `SmtpChannelSender`).
+    (N'notifications.smtpTransportHint',   N'en', N'The server, sender address and password come from the application configuration; the channel only adds recipients.', 1),
     (N'notifications.smtpRecipients',      N'en', N'Recipients', 1),
     (N'notifications.smtpRecipientsHint',  N'en', N'Comma-separated addresses.', 1),
-    (N'notifications.smtpUseTls',          N'en', N'Require TLS', 1),
+    (N'notifications.subjectPrefix',       N'en', N'Subject prefix', 1),
+    (N'notifications.subjectPrefixHint',   N'en', N'Prepended to the subject of every message from this channel.', 1),
     (N'notifications.teamsTitle',          N'en', N'Card title', 1),
     (N'notifications.teamsTitleHint',      N'en', N'Shown above the message in Teams.', 1),
 
