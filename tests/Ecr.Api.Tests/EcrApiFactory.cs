@@ -1,7 +1,11 @@
 using System.Collections.Concurrent;
+using System.Net;
+using Ecr.Infrastructure.Notifications;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Api.Tests;
@@ -45,6 +49,18 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
     public string ErrorsText => ServerErrors.IsEmpty
         ? "(сервер не записав жодної помилки)"
         : string.Join("\n", ServerErrors);
+
+    /// <summary>
+    /// Адреси, на які застосунок спробував надіслати вебхук Teams.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Транспорт вебхука підмінений на весь стенд, а не в окремому тесті.
+    /// Відправник Teams (<c>BE-34</c>) бере адресу з секрету каналу, тож будь-який
+    /// тест, який заведе канал із реальним секретом і торкнеться проби чи
+    /// розсилки, пішов би в СПРАВЖНЮ мережу — повільно, ненадійно й назовні.
+    /// Підміна тут робить це неможливим за побудовою, а не за домовленістю.
+    /// </remarks>
+    public ConcurrentQueue<Uri> WebhookCalls { get; } = new();
 
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -115,6 +131,28 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             logging.ClearProviders();
             logging.AddProvider(new CapturingLoggerProvider(ServerErrors, ServerLog));
         });
+
+        builder.ConfigureTestServices(services => services
+            .AddHttpClient(TeamsWebhookSender.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new OfflineWebhookHandler(WebhookCalls)));
+    }
+
+    /// <summary>Транспорт вебхука, який нікуди не ходить і завжди приймає.</summary>
+    /// <param name="calls">Куди записати адресу спроби.</param>
+    private sealed class OfflineWebhookHandler(ConcurrentQueue<Uri> calls) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (request.RequestUri is { } uri)
+            {
+                calls.Enqueue(uri);
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
     }
 
     private sealed class CapturingLoggerProvider(

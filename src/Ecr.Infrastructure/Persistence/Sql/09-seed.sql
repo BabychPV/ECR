@@ -1267,7 +1267,10 @@ USING (VALUES
     (N'health.facts.notificationTransport', N'en', N'Notification transport', 1),
     (N'health.facts.transportNotConfigured', N'en', N'Not configured: notifications stay in the queue', 1),
     (N'health.facts.logDirectory',       N'en', N'Log directory', 1),
-    (N'notifications.test.teamsNotImplemented', N'en', N'Test messages to Teams are not available yet: the webhook sender is not implemented.', 1),
+    -- BE-34: `teamsNotImplemented` прибрано — відправник вебхука є, і проба йде
+    -- ним самим. Лишився стан, у якому транспорт каналу не має відправника
+    -- взагалі: те саме, що рядок `Failed` у журналі доставок.
+    (N'notifications.test.senderNotRegistered', N'en', N'No sender is registered for this channel transport: messages to it never arrive.', 1),
     (N'notifications.test.smtpNotConfigured',   N'en', N'The SMTP transport is not configured on the server.', 1),
     (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
     (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),

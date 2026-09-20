@@ -137,10 +137,9 @@ public sealed class NotificationChannelHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-33")]
-    public async Task Проба_SMTP_іде_адресатам_каналу_відмова_транспорту_це_відповідь_а_Teams_чесно_не_реалізовано()
+    public async Task Проба_SMTP_іде_адресатам_каналу_а_відмова_транспорту_це_відповідь_а_не_помилка_запиту()
     {
         var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
-        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
 
         var unconfigured = await Test().HandleAsync(mail.Id, CancellationToken.None);
         Assert.Equal((false, "notifications.test.smtpNotConfigured"), (unconfigured.Ok, unconfigured.MessageKey));
@@ -154,11 +153,37 @@ public sealed class NotificationChannelHandlersTests
         _sender.SendAsync(default!, default!, default!, default).ThrowsAsyncForAnyArgs(new InvalidOperationException("relay refused"));
         var refused = await Test().HandleAsync(mail.Id, CancellationToken.None);
         Assert.Equal((false, "relay refused"), (refused.Ok, refused.Error));
+    }
 
-        _sender.ClearReceivedCalls();
-        var notYet = await Test().HandleAsync(teams.Id, CancellationToken.None);
-        Assert.Equal((false, "notifications.test.teamsNotImplemented"), (notYet.Ok, notYet.MessageKey));
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-34")]
+    public async Task Проба_Teams_іде_відправником_каналу_а_без_відправника_каже_це_ключем()
+    {
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+
+        // ⛔ Відправника в переліку немає — те саме, що рядок `Failed` у журналі
+        // доставок: канал увімкнений, а доставити його нічим.
+        var orphan = await Test().HandleAsync(teams.Id, CancellationToken.None);
+        Assert.Equal((false, "notifications.test.senderNotRegistered"), (orphan.Ok, orphan.MessageKey));
+
+        var webhook = new SpyChannelSender(NotificationChannelKind.TeamsWebhook);
+        var probe = await Test(webhook).HandleAsync(teams.Id, CancellationToken.None);
+
+        Assert.True(probe.Ok);
+        Assert.Null(probe.Error);
+        var (sent, message) = Assert.Single(webhook.Calls);
+        Assert.Equal(teams.Id, sent.Id);
+        Assert.Contains("Teams", message.Body, StringComparison.Ordinal);
+
+        // ⛔ Транспорт процесу до Teams не має стосунку: проба, яка тихо пішла
+        // поштою, зеленіла б там, де вебхук не працює.
         await _sender.DidNotReceiveWithAnyArgs().SendAsync(default!, default!, default!, default);
+
+        // Відмова транспорту — це ВІДПОВІДЬ проби, а не помилка запиту.
+        webhook.Fails = new InvalidOperationException("Канал «Teams»: вебхук відповів 500.");
+        var failed = await Test(webhook).HandleAsync(teams.Id, CancellationToken.None);
+        Assert.Equal((false, "Канал «Teams»: вебхук відповів 500."), (failed.Ok, failed.Error));
     }
 
     [Fact]
@@ -188,7 +213,25 @@ public sealed class NotificationChannelHandlersTests
 
     private DeleteNotificationChannelHandler Delete() => new(_store, _access, _uow, _audit, _user, _clock);
 
-    private TestNotificationChannelHandler Test() => new(_store, _sender, _access, _user);
+    private TestNotificationChannelHandler Test(params INotificationChannelSender[] channelSenders)
+        => new(_store, _sender, channelSenders, _access, _user);
+
+    /// <summary>Відправник каналу, який нічого не шле — лише запам'ятовує або падає.</summary>
+    private sealed class SpyChannelSender(NotificationChannelKind kind) : INotificationChannelSender
+    {
+        public List<(NotificationChannel Channel, NotificationMessage Message)> Calls { get; } = [];
+
+        public Exception? Fails { get; set; }
+
+        public NotificationChannelKind Kind => kind;
+
+        public Task SendAsync(NotificationChannel channel, NotificationMessage message, CancellationToken ct)
+        {
+            Calls.Add((channel, message));
+
+            return Fails is null ? Task.CompletedTask : Task.FromException(Fails);
+        }
+    }
 
     // ⚠ Суфікси — літералом, а не з appsettings: тест тримає ПРАВИЛО, не дефолт.
     private ReplaceNotificationChannelSecretHandler Secret(string suffixes = ".logic.azure.com;webhook.office.com")

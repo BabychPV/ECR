@@ -237,12 +237,23 @@ public sealed class ReplaceNotificationChannelSecretHandler(
 
 /// <summary>Пробне повідомлення в канал. Право <c>System.ManageNotifications</c>.</summary>
 /// <remarks>
-/// ⚠ SMTP іде через наявний <see cref="INotificationSender"/> (налаштування
-/// процесу) на адресатів каналу; відправника з параметрів каналу й відправника
-/// Teams ще немає — це <c>BE-34</c>, і тут про це сказано чесно, без мережі.
+/// ⚠ Два шляхи, і вони РІЗНІ навмисно. SMTP іде через
+/// <see cref="INotificationSender"/> — транспорт процесу, у якого є стан «ще не
+/// налаштовано»; його треба показати окремим ключем, бо це конфігурація
+/// сервера, а не відмова каналу. Решта транспортів іде тим самим
+/// <see cref="INotificationChannelSender"/>, яким користується розсилка
+/// (<c>BE-34</c>): проба, що ходить іншою дорогою, ніж бойова доставка, зеленіє
+/// саме тоді, коли доставка не працює.
+///
+/// ⛔ Ні адреси вебхука, ні пароля у відповіді немає: текст відмови формує сам
+/// відправник і секрету в нього не кладе (`ФВ-6.11`).
 /// </remarks>
 public sealed class TestNotificationChannelHandler(
-    INotificationStore store, INotificationSender sender, IAccessDecisionService access, ICurrentUser currentUser)
+    INotificationStore store,
+    INotificationSender sender,
+    IEnumerable<INotificationChannelSender> channelSenders,
+    IAccessDecisionService access,
+    ICurrentUser currentUser)
 {
     /// <summary>Шле пробу й повертає підсумок; відмова каналу — не виняток.</summary>
     public async Task<NotificationTestResult> HandleAsync(int id, CancellationToken ct)
@@ -252,25 +263,46 @@ public sealed class TestNotificationChannelHandler(
 
         var channel = await ListNotificationChannelsHandler.FindAsync(store, id, ct).ConfigureAwait(false);
 
-        if (channel.Kind != NotificationChannelKind.Smtp)
+        if (channel.Kind == NotificationChannelKind.Smtp)
         {
-            return new NotificationTestResult(
-                false, "The Teams webhook sender is not implemented yet.", "notifications.test.teamsNotImplemented");
+            return !sender.IsConfigured
+                ? new NotificationTestResult(
+                    false, "The SMTP transport is not configured.", "notifications.test.smtpNotConfigured")
+                : await TryAsync(
+                    () => sender.SendAsync(
+                        ListNotificationChannelsHandler.ToView(channel).Settings.Recipients ?? [],
+                        Subject, BodyFor(channel), ct))
+                    .ConfigureAwait(false);
         }
 
-        if (!sender.IsConfigured)
+        var transport = channelSenders.FirstOrDefault(s => s.Kind == channel.Kind);
+
+        if (transport is null)
         {
+            // ⚠ Той самий стан, що й рядок `Failed` у журналі доставок: канал
+            // увімкнений, а доставити його нічим. Проба має називати це так
+            // само, інакше екран каналів і журнал розповідали б різне.
             return new NotificationTestResult(
-                false, "The SMTP transport is not configured.", "notifications.test.smtpNotConfigured");
+                false, $"No sender is registered for the {channel.Kind} transport.",
+                "notifications.test.senderNotRegistered");
         }
 
+        return await TryAsync(
+            () => transport.SendAsync(channel, new NotificationMessage(Subject, BodyFor(channel)), ct))
+            .ConfigureAwait(false);
+    }
+
+    private const string Subject = "ECR test notification";
+
+    private static string BodyFor(NotificationChannel channel)
+        => $"Test message for channel \"{channel.Name}\".";
+
+    /// <summary>Виконує відправку; відмова транспорту стає відповіддю, не винятком.</summary>
+    private static async Task<NotificationTestResult> TryAsync(Func<Task> send)
+    {
         try
         {
-            await sender
-                .SendAsync(
-                    ListNotificationChannelsHandler.ToView(channel).Settings.Recipients ?? [],
-                    "ECR test notification", $"Test message for channel \"{channel.Name}\".", ct)
-                .ConfigureAwait(false);
+            await send().ConfigureAwait(false);
 
             return new NotificationTestResult(true, null);
         }

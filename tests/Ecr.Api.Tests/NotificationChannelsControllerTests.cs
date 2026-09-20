@@ -75,10 +75,13 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
         Assert.True(row.GetProperty("hasSecret").GetBoolean());
         Assert.Equal("ECR", row.GetProperty("settings").GetProperty("title").GetString());
 
-        // Teams-відправника ще немає (BE-34): чесна відмова без мережі.
+        // BE-34: проба йде САМИМ відправником вебхука — на адресу з секрету, яку
+        // жодна відповідь не показувала. Транспорт підмінений стендом, тобто
+        // мережі тут немає; перевіряється рівно те, що запит пішов туди, куди
+        // вказує секрет, і що відповідь про це мовчить.
         var probe = await BodyAsync(await client.PostAsync(At($"{id}/test"), null).ConfigureAwait(true), seen).ConfigureAwait(true);
-        Assert.False(probe.GetProperty("ok").GetBoolean());
-        Assert.Equal("notifications.test.teamsNotImplemented", probe.GetProperty("messageKey").GetString());
+        Assert.True(probe.GetProperty("ok").GetBoolean(), $"{app.ErrorsText}");
+        Assert.Equal(new Uri(url), Assert.Single(app.WebhookCalls));
 
         // ⛔ Головне: значення секрету немає НІДЕ, куди воно могло б просочитися.
         Assert.DoesNotContain(Marker, seen.ToString(), StringComparison.Ordinal);
