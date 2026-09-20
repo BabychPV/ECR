@@ -306,6 +306,108 @@ describe('D15-09 — сира мить у розмітці', { timeout: 10_000 }
   });
 });
 
+/**
+ * Директива №15 §2, шар 1 — СТАН із сервера, надрукований як текст.
+ *
+ * ⛔ Рідний брат правила про сиру мить, і знайдено його тим самим способом:
+ * ґрепом ПІСЛЯ того, як дефект полагодили вручну в десяти місцях
+ * (`SourcesPage`, `JobsPage`, `HealthPage`, `PeriodsPage`, `DocumentsPage`,
+ * `TemplatesPage`, `ValidationPanel`, `MethodologyVersionsPage`,
+ * `SnapshotsPage`, `ReportDefinitionsModal`). Десять однакових правок вручну —
+ * це не десять помилок різних людей, це відсутнє правило.
+ *
+ * ⚠ Наслідок щоразу був гірший за мову: `Deprecated` не відрізнявся від чинної
+ * версії, `Failed` малювався попередженням, невідомий стан мовчки ставав синім.
+ */
+describe('Директива №15 §2 — сирий стан у розмітці', { timeout: 10_000 }, () => {
+  const RawState = 'Стан із сервера показаний як текст';
+
+  it.each(['status', 'state'])('{row.%s} у тілі елемента відхиляється', async (field) => {
+    const messages = await lint(
+      wrap(`    <Text>{row.${field}}</Text>`),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).toContain(RawState);
+  });
+
+  it('гілка тернарника друкує стан — заборонено', async () => {
+    const messages = await lint(
+      wrap("    <Text>{row.state === null ? '—' : row.state}</Text>"),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).toContain(RawState);
+  });
+
+  it('ШАБЛОННИЙ рядок теж ловиться — і це не зайве', async () => {
+    /*
+     * ⛔ На відміну від правила про дати, тут другий канал обов'язковий.
+     * Варіант випадного списку не може містити компонента — потрібен РЯДОК, —
+     * і саме там код сервера тримався найдовше: підписи в `PeriodsPage`,
+     * `ExpressionsPage` і `MethodologyVersionsPage` показували `Active` і
+     * `Published` англійською на будь-якій мові інтерфейсу.
+     */
+    const messages = await lint(
+      'export const label = (p: { code: string; status: string }): string =>\n' +
+        '  `${p.code} · ${p.status}`;\n',
+      'src/features/probe/probe.ts',
+    );
+
+    expect(messages.join('\n')).toContain(RawState);
+  });
+
+  /*
+   * ⛔ Нижче — МЕЖІ правила. Заборона, що ловить і правильний спосіб, не
+   * переживе тижня: її вимкнуть цілком.
+   */
+  it('<StatusBadge state={row.state} /> — правильний спосіб, проходить', async () => {
+    const messages = await lint(
+      wrap('    <StatusBadge kind="job" state={row.state} />'),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).not.toContain(RawState);
+  });
+
+  it('t(statusKey(...)) у підписі варіанта — правильний спосіб, проходить', async () => {
+    const messages = await lint(
+      "import { t } from '@/shared/i18n';\n" +
+        "import { statusKey } from '@/shared/ui/StatusBadge';\n" +
+        'export const label = (p: { code: string; status: string }): string =>\n' +
+        "  `${p.code} · ${t(statusKey('project', p.status))}`;\n",
+      'src/features/probe/probe.ts',
+    );
+
+    expect(messages.join('\n')).not.toContain(RawState);
+  });
+
+  it('response.status — код HTTP, а не стан предметної області', async () => {
+    /*
+     * ⚠ Межа названа, а не випадкова. Це ЧИСЛО відповіді, воно ніколи не їде
+     * на екран підписом — лише в діагностику (`HealthPage` складає ним текст
+     * `Error`). Заборонити й це означало б зробити правило шумом, який
+     * вимикають цілком.
+     */
+    const messages = await lint(
+      'export const probe = (response: Response): string =>\n' +
+        '  `${response.status} ${response.statusText}`;\n',
+      'src/features/probe/probe.ts',
+    );
+
+    expect(messages.join('\n')).not.toContain(RawState);
+  });
+
+  it('поле, що не є станом, не чіпається', async () => {
+    const messages = await lint(
+      wrap('    <Text>{row.code}</Text>'),
+      'src/features/probe/Probe.tsx',
+    );
+
+    expect(messages.join('\n')).not.toContain(RawState);
+  });
+});
+
 describe('борг D15-09 обмежений і може лише скорочуватися', () => {
   /*
    * ⛔ Вісім наявних місць `<TextInput type="date">` не переводяться на
