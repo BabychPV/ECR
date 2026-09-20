@@ -48,7 +48,7 @@ public sealed class ReportDefinitionDrivesBuildTests
         Assert.Equal(2, ReportRules.Parse("""{"rowSource":"CalculationResults","schema":2}""").Schema);
 
         Assert.Throws<BusinessRuleException>(
-            () => ReportDefinitionSpec.RulesJson(new ReportRulesCommand("CalculationResults", 2)));
+            () => ReportDefinitionSpec.RulesJson(new ReportRulesCommand("CalculationResults", 3)));
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]

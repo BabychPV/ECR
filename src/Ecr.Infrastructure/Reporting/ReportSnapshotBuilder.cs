@@ -54,6 +54,11 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         // відмова після нього лишила б у `rpt.ReportSnapshot` порожній рядок.
         var layout = LayoutOf(version);
 
+        // ⛔ R5: правила застосовуються до рядка джерела ДО запису й до суми — і ДО
+        // створення зрізу: помилка правила на рядку не лишає порожнього зрізу.
+        var rowRules = ReportRowRules.Parse(version.RulesJson, [.. layout.Select(c => c.Code)]);
+        var cells = await AggregateAsync(layout, rowRules, projectId, periodKey, ct).ConfigureAwait(false);
+
         // ⚠ Статус УСПАДКОВУЄТЬСЯ від даних (D-65). Окреме поле «статус звіту»
         // стало б другим джерелом істини і рано чи пізно показало б регулятору
         // Approved на чернетці.
@@ -68,7 +73,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         // Агрегації виконуються ТУТ, одним набором запитів. Вʼюха rpt.v_*
         // нічого не рахує (ФВ-0.3): індексована вʼюха з обчисленнями не
         // перебудовується інкрементно і зупиняє запис у джерело.
-        var rows = await AggregateAsync(layout, projectId, periodKey, snapshot.Id, ct).ConfigureAwait(false);
+        var rows = cells.ConvertAll(c => Cell(snapshot.Id, c.RowNo, c.Code, c.Text, c.Number));
 
         db.ReportRows.AddRange(rows);
 
@@ -396,8 +401,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     }
 
     /// <summary>Агрегує результати розрахунку в рядки зрізу.</summary>
-    private async Task<List<ReportRow>> AggregateAsync(
-        IReadOnlyList<ReportColumnSpec> layout, int projectId, PeriodKey? periodKey, long snapshotId,
+    private async Task<List<CellValue>> AggregateAsync(
+        IReadOnlyList<ReportColumnSpec> layout, ReportRowRules rowRules, int projectId, PeriodKey? periodKey,
         CancellationToken ct)
     {
         var query =
@@ -440,27 +445,41 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var rows = new List<ReportRow>(results.Count * layout.Count);
+        var rows = new List<CellValue>(results.Count * layout.Count);
         var rowNo = 0;
 
         foreach (var result in results)
         {
+            // Без правил (схема 1) рядок читається прямо з джерела, як до R5.
+            var ruled = rowRules.IsEmpty
+                ? null
+                : Readers.ToDictionary(r => r.Key, r => r.Value(result), StringComparer.Ordinal);
+
+            if (ruled is not null && !rowRules.Apply(ruled))
+            {
+                // Прихований рядок номера не займає: `RowNo` лишається суцільним.
+                continue;
+            }
+
             rowNo++;
 
             // ⛔ Лише описані колонки і в порядку опису (D-52a): за цим порядком
             // рахується сума, і за ним її перераховує `VerifyAsync`.
             foreach (var column in layout)
             {
-                var value = Readers[column.Code](result);
+                var value = ruled is null ? Readers[column.Code](result) : ruled[column.Code];
 
                 rows.Add(column.Kind == ReportSourceColumns.Number
-                    ? Cell(snapshotId, rowNo, column.Code, null, (decimal?)value)
-                    : Cell(snapshotId, rowNo, column.Code, (string?)value, null));
+                    ? new CellValue(rowNo, column.Code, null, (decimal?)value)
+                    : new CellValue(rowNo, column.Code, (string?)value, null));
             }
         }
 
         return rows;
     }
+
+    /// <summary>Значення комірки до появи зрізу: ідентифікатор зрізу додається після правил.</summary>
+    private readonly record struct CellValue(int RowNo, string Code, string? Text, decimal? Number);
 
     /// <summary>Як прочитати кожне поле джерела <c>CalculationResults</c>.</summary>
     /// <remarks>
@@ -500,7 +519,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             !Readers.ContainsKey(c.Code)
             || !string.Equals(ReportSourceColumns.KindOf(rules.RowSource, c.Code), c.Kind, StringComparison.Ordinal));
 
-        if (columns.Count == 0 || rules.Schema != ReportRules.CurrentSchema || broken is not null)
+        if (columns.Count == 0 || !ReportRowRules.IsSupported(rules.Schema) || broken is not null)
         {
             throw new InvalidOperationException(
                 $"Версія звіту {version.Id}: за описом зріз не будується "

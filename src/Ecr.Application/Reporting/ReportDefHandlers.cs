@@ -122,9 +122,14 @@ public static class ReportDefinitionSpec
     /// <summary>Складає <c>RulesJson</c> з правил відбору рядків.</summary>
     /// <param name="rules">Правила; <c>null</c> — джерело за замовчуванням.</param>
     /// <exception cref="BusinessRuleException">Джерело рядків невідоме будівнику.</exception>
-    public static string RulesJson(ReportRulesCommand? rules)
+    /// <param name="columns">Колонки версії: правило присвоює лише описаній колонці.</param>
+    public static string RulesJson(ReportRulesCommand? rules, IReadOnlyList<ReportColumnCommand>? columns = null)
     {
         var effective = rules ?? new ReportRulesCommand(CalculationResults);
+
+        // Без явної схеми: правила є — схема 2, немає — схема 1, побайтно як до R5.
+        var schema = effective.Schema
+            ?? (effective.Rules is { Count: > 0 } ? ReportRowRules.Schema : ReportRules.CurrentSchema);
 
         if (!string.Equals(effective.RowSource, CalculationResults, StringComparison.Ordinal))
         {
@@ -134,21 +139,26 @@ public static class ReportDefinitionSpec
                 + $"на сьогодні є одне — «{CalculationResults}» (результати чинного прогону).");
         }
 
-        if ((effective.Schema ?? ReportRules.CurrentSchema) != ReportRules.CurrentSchema)
+        if (!ReportRowRules.IsSupported(schema))
         {
             throw new BusinessRuleException(
                 ErrorCodes.ReportInvalid,
-                $"Схему правил {effective.Schema} побудова не читає: чинна — {ReportRules.CurrentSchema}.",
+                $"Схему правил {schema} побудова не читає: чинна — {ReportRowRules.Schema}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-RPT-0422.rulesSchema",
-                    ["schema"] = effective.Schema?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["currentSchema"] = ReportRules.CurrentSchema.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["schema"] = schema.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["currentSchema"] = ReportRowRules.Schema.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
 
+        // ⛔ Вирази правил перевіряються ТУТ, при створенні версії, тим самим кодом,
+        // яким їх застосує побудова: зламане правило не доживає до нічного зрізу.
+        _ = ReportRowRules.Compile(
+            schema, effective.RowSource, effective.Rules, [.. (columns ?? []).Select(c => c.Code)]);
+
         // Версія схеми пишеться ЗАВЖДИ: опис без неї — це опис до D-52a.
-        return JsonSerializer.Serialize(effective with { Schema = ReportRules.CurrentSchema }, Options);
+        return JsonSerializer.Serialize(effective with { Schema = schema }, Options);
     }
 
     /// <summary>Складає назву мовами каталогу.</summary>
@@ -201,7 +211,15 @@ public sealed record ReportColumnCommand(string Code, string Kind);
 /// <param name="Schema">
 /// Версія схеми правил; <c>null</c> — чинна (<see cref="ReportRules.CurrentSchema"/>).
 /// </param>
-public sealed record ReportRulesCommand(string RowSource, int? Schema = null);
+/// <param name="Rules">
+/// Правила рядка (схема 2) у порядку застосування; у JSON схеми 1 поля немає взагалі.
+/// </param>
+public sealed record ReportRulesCommand(
+    string RowSource,
+    int? Schema = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<ReportRuleCommand>? Rules = null);
 
 /// <summary>
 /// Перелік описів звітів. Право <c>Report.ViewRegulatory</c>.
@@ -274,7 +292,7 @@ public sealed class CreateReportDefHandler(
         var code = EcrCode.Create(command.Code);
         var name = ReportDefinitionSpec.Name(command.NameL10n);
         var versionNumber = ReportDefinitionSpec.Version(command.Version);
-        var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules);
+        var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules, command.Columns);
         var columnsJson = ReportDefinitionSpec.ColumnsJson(command.Columns, command.Rules);
 
         if (await definitions.ExistsAsync(code.Value, ct).ConfigureAwait(false))
@@ -368,7 +386,7 @@ public sealed class CreateReportVersionHandler(
                 ErrorCodes.ReportNotFound, $"Опису звіту {reportDefId} немає.");
 
         // Правила першими: від джерела рядків залежить, які колонки можливі.
-        var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules);
+        var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules, command.Columns);
 
         var version = new ReportVersion(
             reportDefId,

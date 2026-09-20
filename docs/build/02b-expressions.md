@@ -824,6 +824,33 @@ IN([UnitCode], 't', 'kg') ? ROUND([Value], 2) : NULL
 ⚠ Рядковий літерал — в **одинарних** лапках, як у всій мові (§1); `"t"` — помилка
 лексера.
 
+**Де правила живуть — `rpt.ReportVersion.RulesJson`.** Схем дві, обидві чинні
+(`D-53`: зміна лише адитивна, схема БД не мінялась):
+
+```json
+{ "rowSource": "CalculationResults", "schema": 1 }
+
+{ "rowSource": "CalculationResults", "schema": 2, "rules": [
+  { "when": "[Value] < 0",       "then": { "set": { "column": "Value", "value": "0" } } },
+  { "when": "[UnitCode] = 'kg'", "then": { "hideRow": true } } ] }
+```
+
+- Схема 1 — без правил; зріз за нею побайтно той самий, що й до правил. Запит
+  без `schema` пишеться схемою 2, якщо `rules` непорожній, інакше — схемою 1.
+- Правила застосовуються до рядка **по порядку**; `set` бачать наступні правила.
+  Дія — рівно одна: `set` або `hideRow: true`. Стеля — 100 правил на версію.
+- Вираз бачить **усі поля джерела** (`ReportSourceColumns`), не лише описані
+  колонки; `set.column` — лише **описана** колонка версії, тип `value` сумісний
+  із типом колонки (`NULL` сумісний з усім). Параметрів (`@Name`) схема 2 не має.
+- Перевірка — **при створенні версії** (`ReportRowRules.Compile`): відмова
+  `ECR-RPT-0422`, ключ `err.ECR-RPT-0422.rule` з `ruleNo` (від 1), `part`
+  (`when`/`value`/`column`/`then`/`schema`/`count`) і `reason`.
+- Застосування — у `ReportSnapshotBuilder` після читання рядка джерела, **до**
+  запису в `rpt.ReportRow` і до `ContentHash`, тож `verify` сходиться. Прихований
+  рядок номера не займає (`RowNo` суцільний). `when = null` (§6.2) правила **не
+  запускає**. Помилка обчислення на рядку (`#DIV/0` тощо) валить побудову тим
+  самим `ECR-RPT-0422` із номером правила, і зрізу не лишається.
+
 **Перевірка назовні.** `POST /api/v1/expressions/validate` з `dialect = Report`
 структури шаблону не потребує: оточення приходить у необов'язковому полі
 `report` — `columns` і `parameters` (`name` + `type`: `Number`/`Text`/`Boolean`/`Date`)

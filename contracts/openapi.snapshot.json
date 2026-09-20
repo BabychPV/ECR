@@ -5885,12 +5885,82 @@
         ],
         "type": "object"
       },
+      "ReportRuleCommand": {
+        "description": "Правило рядка зрізу: «умова → значення» або «умова → приховати рядок» (`D-52a`).",
+        "properties": {
+          "then": {
+            "$ref": "#/components/schemas/ReportRuleThenCommand",
+            "description": "Дія: рівно одна з `set` і `hideRow`."
+          },
+          "when": {
+            "description": "Умова — вираз діалекту `Report` типу `Boolean` (`02b` §8a).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "when",
+          "then"
+        ],
+        "type": "object"
+      },
+      "ReportRuleSetCommand": {
+        "description": "Присвоєння колонці рядка.",
+        "properties": {
+          "column": {
+            "description": "Код ОПИСАНОЇ колонки версії.",
+            "type": "string"
+          },
+          "value": {
+            "description": "Вираз діалекту `Report`; тип сумісний із типом колонки.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "column",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ReportRuleThenCommand": {
+        "description": "Дія правила.",
+        "properties": {
+          "hideRow": {
+            "description": "`true` — рядок у зріз не потрапляє.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "set": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportRuleSetCommand",
+                "description": "Присвоїти колонці значення."
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ReportRulesCommand": {
         "description": "Правила відбору рядків зрізу.",
         "properties": {
           "rowSource": {
             "description": "Звідки беруться рядки. Єдине відоме будівнику значення —\nstring ReportDefinitionSpec.CalculationResults.",
             "type": "string"
+          },
+          "rules": {
+            "description": "Правила рядка (схема 2) у порядку застосування; у JSON схеми 1 поля немає взагалі.",
+            "items": {
+              "$ref": "#/components/schemas/ReportRuleCommand"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "schema": {
             "description": "Версія схеми правил; `null` — чинна (int ReportRules.CurrentSchema).",

@@ -3052,6 +3052,11 @@ public sealed class NotFoundException(string errorCode, string message)
 > методології (`ФВ-9.1`). Опублікована версія незмінна, бо на її колонки
 > посилаються вже побудовані зрізи, які читає SSRS.
 >
+> ✎ R5 (`D-52a`): `rules` у `POST /reports` і `POST …/versions` приймає
+> необов'язкове `rules: [{ when, then: { set: { column, value } } | { hideRow: true } }]`
+> (схема 2 `RulesJson`, `02b` §8a). Зламане правило — `422 ECR-RPT-0422`,
+> ключ `err.ECR-RPT-0422.rule` (`ruleNo`, `part`, `reason`), при СТВОРЕННІ версії.
+>
 > ⚠ Публікація (`POST …/publish`) стоїть під тим самим правом, що й
 > редагування, а не під власним. Це НЕ те саме, що публікація методології
 > (`Calculation.Publish`, `D-40`, правило чотирьох очей): та тихо змінює числа
