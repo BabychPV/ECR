@@ -235,13 +235,14 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             .FirstOrDefault(r => string.Equals(r.GetProperty("rowKey").GetString(), rowKey, StringComparison.Ordinal));
 
         if (row.ValueKind != JsonValueKind.Object
-            || !row.GetProperty("cells").TryGetProperty(columnCode, out var cell)
-            || cell.ValueKind != JsonValueKind.Number)
+            || !row.GetProperty("cells").TryGetProperty(columnCode, out var cell))
         {
             return null;
         }
 
-        return cell.GetDecimal();
+        // ⚠ Комірка приїжджає РЯДКОМ (`D-30`): сценарій перевіряє значення,
+        // а не форму на дроті, тому читає обидві.
+        return JsonNumber.AsDecimalOrNull(cell);
     }
 
     /// <summary>
@@ -331,7 +332,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
             new { value = 2m, fromUnit = "t", toUnit = "kg" });
         Assert.Equal(HttpStatusCode.OK, convert.StatusCode);
         var converted = await convert.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(2000m, converted.GetProperty("value").GetDecimal());
+        Assert.Equal(2000m, JsonNumber.AsDecimal(converted.GetProperty("value")));
 
         // Недосяжна половина: формула CONVERT(...) у РЕАЛЬНІЙ колонці версії.
         var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, "S22");
@@ -483,7 +484,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
 
         // ⛔ Саме ЧИСЛО, а не «щось порахувалося»: 4 (комірка A) × 2.5
         // (константа EF) = 10. Перевірка «результат є» пройшла б і на нулі.
-        Assert.Equal(10m, emission.GetProperty("value").GetDecimal());
+        Assert.Equal(10m, JsonNumber.AsDecimal(emission.GetProperty("value")));
         Assert.Equal(stand.RowKey, emission.GetProperty("sourceRowKey").GetString());
         Assert.Equal(versionId, emission.GetProperty("methodologyVersionId").GetInt32());
     }
@@ -599,7 +600,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.True(
             emission1.ValueKind != JsonValueKind.Undefined,
             $"документ {stand.DocumentId}: немає EMISSION після проєктного перерахунку: {results1.GetRawText()}");
-        Assert.Equal(10m, emission1.GetProperty("value").GetDecimal());
+        Assert.Equal(10m, JsonNumber.AsDecimal(emission1.GetProperty("value")));
 
         // ⛔ ДРУГИЙ документ — те, чого до Q-151/Q-162 не могло статися:
         // фільтр `DocumentId == 0` не знаходив НІ ОДНОГО документа проєкту, і
@@ -610,7 +611,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.True(
             emission2.ValueKind != JsonValueKind.Undefined,
             $"документ {documentId2}: немає EMISSION після проєктного перерахунку: {results2.GetRawText()}");
-        Assert.Equal(25m, emission2.GetProperty("value").GetDecimal());
+        Assert.Equal(25m, JsonNumber.AsDecimal(emission2.GetProperty("value")));
     }
 
     /// <summary>
@@ -882,7 +883,7 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.True(
             masked.ValueKind != JsonValueKind.Undefined,
             $"Legacy мав дати замаскований нуль, а не відсутність результату: {legacyResults.GetRawText()}; {app.ErrorsText}");
-        Assert.Equal(0m, masked.GetProperty("value").GetDecimal());
+        Assert.Equal(0m, JsonNumber.AsDecimal(masked.GetProperty("value")));
 
         // ⛔ Друга половина обіцянки Legacy: число те саме, що дала б чинна
         // система, але ПРИЧИНА названа. Прогін без запису (`ФВ-13.5`) — єдиний

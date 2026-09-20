@@ -113,6 +113,66 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-30")]
+    public async Task Множник_їде_рядком_і_доносить_шістнадцятий_знак_після_коми()
+    {
+        // ⛔ Справжній HTTP, а не серіалізатор у пам'яті: між `decimal` і
+        // клієнтом лежать ДВА незалежні набори опцій (MVC і мінімальні API),
+        // і розійтися вони можуть непомітно. Значення з 16 знаками після коми
+        // у JSON-ЧИСЛІ клієнт прочитав би як 1.2345678901234568 — саме цього
+        // й вимагає уникнути контракт (`docs/build/02-contracts.md` §10).
+        //
+        // ⚠ `uom.Unit.FactorToBase` — `decimal(38,18)`, тобто всі 16 знаків
+        // переживають і запис у базу, і читання з неї.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        const string factor = "1.2345678901234567";
+        var code = $"p{Guid.NewGuid():N}"[..8];
+
+        // Множник надсилається РЯДКОМ, зсув — ЧИСЛОМ: читання мусить приймати
+        // обидві форми, інакше формат відповіді ламає наявних клієнтів запису.
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/v1/units", UriKind.Relative),
+            new
+            {
+                code,
+                symbolL10n = new Dictionary<string, string> { ["en"] = code },
+                nameL10n = new Dictionary<string, string> { ["en"] = code },
+                dimensionId = 1,
+                factorToBase = factor,
+                offsetToBase = 0,
+            }).ConfigureAwait(true);
+
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("factorToBase");
+
+        Assert.Equal(JsonValueKind.String, created.ValueKind);
+        Assert.Equal(factor, created.GetString());
+
+        // Другий прохід — уже з бази, іншим обробником: значення не зрізалося
+        // ні на записі, ні на читанні.
+        var listed = (await ReadAsync(client, "/api/v1/units").ConfigureAwait(true))
+            .EnumerateArray()
+            .Single(u => string.Equals(u.GetProperty("code").GetString(), code, StringComparison.Ordinal))
+            .GetProperty("factorToBase");
+
+        Assert.Equal(JsonValueKind.String, listed.ValueKind);
+
+        // ⚠ Хвостові нулі — це МАСШТАБ колонки (`decimal(38,18)`), а не втрата:
+        // `decimal` носить масштаб у собі, і `ToString` його друкує. Так само
+        // робив і попередній формат — `System.Text.Json` писав JSON-число
+        // `1.234567890123456700`; просто `JSON.parse` їх прибирав, а рядок —
+        // ні. Нормалізує подання клієнт (`shared/format/number.ts`), сервер
+        // не вигадує за нього, скільки знаків значущі.
+        Assert.Equal(factor, listed.GetString()!.TrimEnd('0'));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Недодатний_множник_у_запиті_відхиляється_422_а_не_зберігається()
     {
         // ⛔ Аудит §5.2 через справжній HTTP: порожнє числове поле форми

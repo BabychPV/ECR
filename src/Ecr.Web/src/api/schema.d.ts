@@ -10446,10 +10446,10 @@ export interface components {
              */
             unitId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення.
              */
-            value: number;
+            value: string;
         };
         /**
          * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
@@ -10776,20 +10776,20 @@ export interface components {
             /** @description Код цільової одиниці. */
             toUnit: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення; `decimal`, бо `float` заборонений (`D-30`).
              */
-            value: number;
+            value: string;
         };
         /** @description Результат конверсії одиниць. */
         ConvertUnitResponse: {
             /** @description Код цільової одиниці. */
             unit: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення у цільовій одиниці.
              */
-            value: number;
+            value: string;
         };
         /** @description Тіло створення розкладу. */
         CreateCollectionScheduleRequest: {
@@ -11047,19 +11047,19 @@ export interface components {
              */
             dimensionId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Множник переходу до базової одиниці розмірності.
              */
-            factorToBase: number;
+            factorToBase: string;
             /** @description Назва мовами каталогу. */
             nameL10n: {
                 [key: string]: string;
             };
             /**
-             * Format: double
+             * Format: decimal
              * @description Зсув; ненульовий лише для одиниць температури.
              */
-            offsetToBase: number;
+            offsetToBase: string;
             /** @description Позначення мовами каталогу. */
             symbolL10n: {
                 [key: string]: string;
@@ -11668,10 +11668,10 @@ export interface components {
              */
             fieldMapId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число, яке лягло б у комірку; `null` — нічого згортати.
              */
-            foldedValue: null | number;
+            foldedValue: null | string;
             /** @description Стан мапінгу. */
             outcome: components["schemas"]["MappingOutcome"];
             /**
@@ -11757,10 +11757,10 @@ export interface components {
              */
             timestamp: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число в одиниці ДЖЕРЕЛА.
              */
-            valueNumeric: null | number;
+            valueNumeric: null | string;
             /** @description Текст для нечислових атрибутів. */
             valueString: null | string;
         };
@@ -11808,10 +11808,10 @@ export interface components {
              */
             validTo: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число; `null` — нечислова або нерозібрана.
              */
-            value: null | number;
+            value: null | string;
         };
         /** @description Версія методології в **конфігураторі** — на відміну від
          *     MethodologyVersionDto, тут є і чернетки. */
@@ -11981,22 +11981,22 @@ export interface components {
         /** @description Одна розбіжність результату на золотому наборі. */
         MethodologyResultDelta: {
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення нової версії.
              */
-            after: number;
+            after: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення попередньої версії; `null` — виходу не було.
              */
-            before: null | number;
+            before: null | string;
             /** @description Вихід методології. */
             outputCode: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Відносна зміна; `null`, якщо порівнювати нема з чим або було нуль.
              */
-            relativeChange?: null | number;
+            relativeChange?: null | string;
             /**
              * Format: int32
              * @description Речовина; `null` — вихід без речовини.
@@ -12058,10 +12058,10 @@ export interface components {
             /** @description Вхід прогону у формі `CalculationInput`. */
             inputJson: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Допуск порівняння; нуль — точна рівність.
              */
-            tolerance: number;
+            tolerance: string;
         };
         /** @description Версія методології. */
         MethodologyVersionDto: {
@@ -13528,10 +13528,10 @@ export interface components {
              */
             validTo: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число; обов'язкове для `Numeric`.
              */
-            value: null | number;
+            value: null | string;
         };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {
@@ -13601,12 +13601,12 @@ export interface components {
             /** @description Вхід прогону у формі `CalculationInput`. */
             inputJson: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Допуск порівняння; нуль — точна рівність. ⚠ Потрібен саме тому, що числа
              *     рахуються з округленням: очікувати побітової рівності означало б червоний
              *     тест від зміни порядку доданків.
              */
-            tolerance: number;
+            tolerance: string;
         };
         /** @description Вид і налаштування нового правила доступу до періоду (`ФВ-2.15`). */
         SavePeriodAccessRuleRequest: {
@@ -13711,10 +13711,10 @@ export interface components {
             /** @description `null`/порожнє — шрифт теми за замовчуванням. */
             fontName: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description `null` — розмір теми за замовчуванням.
              */
-            fontSize: null | number;
+            fontSize: null | string;
             /**
              * Format: int32
              * @description Колір тексту, ARGB.
@@ -13927,7 +13927,7 @@ export interface components {
             /** @description Різниця з чинною опублікованою версією. Порожня — версія нічого не змінює;
              *     саме це і треба бачити перед публікацією (`ФВ-9.6`). */
             diffWithPublished: {
-                [key: string]: number;
+                [key: string]: string;
             };
             /** @description Чи зійшовся набір цілком. ⛔ Порожній набір — **не** зелений: «тестів
              *     немає, отже все гаразд» — саме та підміна, через яку публікація без
@@ -13935,7 +13935,7 @@ export interface components {
             isGreen: boolean;
             /** @description Код виходу → значення й одиниця. */
             outputs: {
-                [key: string]: number;
+                [key: string]: string;
             };
             /** @description Вердикт кожного тесту золотого набору (`ФВ-13.7`) — тим самим правилом,
              *     яким публікація вирішує, чи набір зелений. */
@@ -14120,8 +14120,8 @@ export interface components {
             borderJson: null | string;
             code: string;
             fontName: null | string;
-            /** Format: double */
-            fontSize: null | number;
+            /** Format: decimal */
+            fontSize: null | string;
             /** Format: int32 */
             foregroundArgb: null | number;
             /** Format: uint8 */
@@ -14476,15 +14476,15 @@ export interface components {
         /** @description Одна розбіжність: очікували одне, отримали інше. */
         TestCaseMismatch: {
             /**
-             * Format: double
+             * Format: decimal
              * @description Що вийшло; `null` — виходу не було взагалі.
              */
-            actual: null | number;
+            actual: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Що мало вийти.
              */
-            expected: number;
+            expected: string;
             /** @description Який вихід розійшовся. */
             outputCode: string;
             /**
@@ -14495,10 +14495,10 @@ export interface components {
              */
             substanceEntryId: null | number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Допуск порівняння; нуль означає точний збіг.
              */
-            tolerance: number;
+            tolerance: string;
         };
         /** @description Вердикт одного тесту золотого набору. */
         TestCaseVerdict: {
@@ -14618,22 +14618,22 @@ export interface components {
              */
             dimensionId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Множник переходу до базової одиниці розмірності.
              * @default 1
              */
-            factorToBase: number;
+            factorToBase: string;
             /**
              * Format: int32
              * @description Ідентифікатор.
              */
             id: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Зсув до базової; ненульовий лише в температури.
              * @default 0
              */
-            offsetToBase: number;
+            offsetToBase: string;
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {

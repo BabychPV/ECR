@@ -147,8 +147,8 @@ public sealed class CalculationOrchestratorConcurrencyScenarios(SqlServerFixture
         // методології незалежні й рахують ОДНАКОВИЙ вхід: збіг довів би, що
         // жодна гілка не отримала «чужий» чи пошкоджений результат через
         // спільний DbContext іншої гілки.
-        Assert.Equal(4m, out1.GetProperty("value").GetDecimal());
-        Assert.Equal(4m, out2.GetProperty("value").GetDecimal());
+        Assert.Equal(4m, JsonNumber.AsDecimal(out1.GetProperty("value")));
+        Assert.Equal(4m, JsonNumber.AsDecimal(out2.GetProperty("value")));
     }
 
     /// <summary>Заводить методологію з тотожною формулою <c>@A</c>, публікує і прив'язує до колонки.</summary>

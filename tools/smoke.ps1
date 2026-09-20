@@ -290,11 +290,16 @@ try {
 
     # ⛔ Читання назад: число мусить лишитися ЧИСЛОМ (`A7-01`), а лягти саме в
     # ту таблицю, куди писали (`A7-27`).
+    #
+    # ⚠ На дроті воно тепер РЯДКОМ (`D-30`): JSON-число на клієнті проходить
+    # через `JSON.parse` і втрачає знаки за межею IEEE-754. Тому звіряється
+    # ЗНАЧЕННЯ, а не текст — «4242.4200000000» несе масштаб колонки
+    # `decimal(28,10)` і рівне тому, що записали.
     Step 'читання назад'
     $after = Call GET "/api/v1/documents/$documentId/tables/$instance`?periodKey=$periodKey"
     $written = ($after.rows | Where-Object { $_.rowKey -eq $row.rowKey }).cells.C2
 
-    if ($written -ne 4242.42) { Fail "прочитано '$written' замість 4242.42" }
+    if ([decimal] $written -ne [decimal] 4242.42) { Fail "прочитано '$written' замість 4242.42" }
 
     # ⛔ Перерахунок і ЧЕКАННЯ КІНЦЕВОГО СТАНУ, а не самого лише `202`. Задача
     # ставилася в чергу з payload, що губив `ProjectId`, і `SaveChangesAsync`

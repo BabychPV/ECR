@@ -129,7 +129,15 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         var afterCreate = await ReadRowAsync(client, sliceUri, newRow, app).ConfigureAwait(true);
 
         Assert.Equal("мазут", afterCreate.GetProperty("cells").GetProperty(textColumn).GetString());
-        Assert.Equal(12.5m, afterCreate.GetProperty("cells").GetProperty(numberColumn).GetDecimal());
+
+        // ⛔ Числова комірка їде РЯДКОМ (`D-30`, `DecimalAsStringJsonConverter`):
+        // JSON-число на клієнті проходить через `JSON.parse`, тобто через
+        // IEEE-754, і 16-й знак `decimal(28,16)` зникає ще до того, як до
+        // нього можна дотягнутися. Хвостові нулі — масштаб самої колонки.
+        var createdNumber = afterCreate.GetProperty("cells").GetProperty(numberColumn);
+
+        Assert.Equal(JsonValueKind.String, createdNumber.ValueKind);
+        Assert.Equal("12.5", createdNumber.GetString()!.TrimEnd('0'));
 
         // ⚠ Версія рядка зі зрізу має збігатися з тією, яку віддав PATCH:
         // клієнт бере `baseVersion` саме звідси, і розбіжність означала б, що
@@ -174,7 +182,10 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         // ── 5. І оновлене значення теж видно наступним читанням ──────────
         var afterUpdate = await ReadRowAsync(client, sliceUri, newRow, app).ConfigureAwait(true);
 
-        Assert.Equal(41.75m, afterUpdate.GetProperty("cells").GetProperty(numberColumn).GetDecimal());
+        var updatedNumber = afterUpdate.GetProperty("cells").GetProperty(numberColumn);
+
+        Assert.Equal(JsonValueKind.String, updatedNumber.ValueKind);
+        Assert.Equal("41.75", updatedNumber.GetString()!.TrimEnd('0'));
 
         // ⚠ Текст залишився недоторканим: у батчі його не було, а «поле
         // відсутнє в запиті» означає «не чіпати», а не «стерти» (R-B4).

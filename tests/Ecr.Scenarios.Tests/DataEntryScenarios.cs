@@ -228,9 +228,15 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         var writtenRow = rereadBody.GetProperty("rows").EnumerateArray().First(r => r.GetProperty("rowKey").GetString() == rowKey);
         var cellValue = writtenRow.GetProperty("cells").GetProperty(columnCode);
 
-        // Доказ сценарію: JSON-число, а не рядок.
-        Assert.Equal(JsonValueKind.Number, cellValue.ValueKind);
-        Assert.Equal(42.5m, cellValue.GetDecimal());
+        // ⚠ Доказ сценарію мусив змінитися разом із контрактом: `decimal` їде
+        // РЯДКОМ (`D-30`), тож «число проти тексту» більше не видно за типом
+        // JSON. Видно за ФОРМОЮ: числова колонка повертає значення з
+        // масштабом СВОЄЇ колонки (`decimal(28,10)`), а комірка, що лягла б у
+        // `ValueString`, повернулася б тим самим текстом, який надіслав
+        // клієнт, — «42.5».
+        Assert.Equal(JsonValueKind.String, cellValue.ValueKind);
+        Assert.Equal(42.5m, JsonNumber.AsDecimal(cellValue));
+        Assert.NotEqual("42.5", cellValue.GetString());
     }
 
     [Fact]

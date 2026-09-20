@@ -72,6 +72,18 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
         // decimal(28,10) не поміщається в double: JSON-число на клієнті стає
         // IEEE-754, і зрізана цифра з'являється у звіті. Тому всі грошові й
         // вимірювані величини їдуть рядком (D-30).
+        //
+        // ⛔ Донедавна цей сторож забороняв лише `double`/`float`, а `decimal`
+        // пропускав — тобто перевіряв НЕ те, що обіцяє назвою: `decimal`
+        // спокійно їхав JSON-числом, і контракт
+        // (`docs/build/02-contracts.md` §10, «decimal рядком, щоб не втратити
+        // точність у JS») лишався невиконаним. Тепер перевіряється саме
+        // ФОРМА НА ДРОТІ, а не тип властивості: забороняти `decimal` у DTO
+        // безглуздо — він там і має бути, бо `float` заборонений тим самим
+        // `D-30`.
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        Ecr.Api.Startup.EcrJsonSerialization.Configure(options);
+
         var dtoTypes = typeof(Ecr.Application.Documents.Dto.TableSliceDto).Assembly
             .GetTypes()
             .Where(t => t.Namespace?.Contains(".Dto", StringComparison.Ordinal) == true)
@@ -79,17 +91,94 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
 
         Assert.NotEmpty(dtoTypes);
 
-        var offenders = dtoTypes
+        var properties = dtoTypes
             .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                               .Select(p => (Type: t, Property: p)))
+            .ToList();
+
+        var offenders = properties
             .Where(x => x.Property.PropertyType == typeof(double)
                         || x.Property.PropertyType == typeof(float)
                         || x.Property.PropertyType == typeof(double?)
                         || x.Property.PropertyType == typeof(float?))
-            .Select(x => $"{x.Type.Name}.{x.Property.Name}")
+            .Select(x => $"{x.Type.Name}.{x.Property.Name}: {x.Property.PropertyType.Name}")
             .ToList();
 
+        // ⚠ Кожна decimal-властивість контракту серіалізується СВОЇМ типом —
+        // саме так, як її серіалізує відповідь, — і має дати рядок.
+        var decimalProperties = properties
+            .Where(x => x.Property.PropertyType == typeof(decimal)
+                        || x.Property.PropertyType == typeof(decimal?))
+            .ToList();
+
+        // Без жодного decimal у контрактах правило не мало б предмета і
+        // лишалося б зеленим від порожнечі — так і виглядає сторож, що
+        // перестав стерегти.
+        Assert.NotEmpty(decimalProperties);
+
+        foreach (var (type, property) in decimalProperties)
+        {
+            var json = JsonSerializer.Serialize(
+                Probe, property.PropertyType, options);
+
+            if (!json.StartsWith('"'))
+            {
+                offenders.Add($"{type.Name}.{property.Name}: серіалізується як {json}, а не рядком");
+            }
+        }
+
+        // ⛔ Гарячий шлях комірок іде через `object?`
+        // (`TableSliceDto.Cells`), тобто через РУНТАЙМ-тип значення. Якщо
+        // конвертер не застосовується до боксованого decimal, значення
+        // комірки їде числом, хоч би що було в типах DTO, — а це рівно те,
+        // що доходить до сітки документа.
+        var boxed = JsonSerializer.Serialize<object?>(Probe, options);
+
+        if (!string.Equals(boxed, "\"1.2345678901234567\"", StringComparison.Ordinal))
+        {
+            offenders.Add($"object?-комірка: {boxed}, а не \"1.2345678901234567\"");
+        }
+
         Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// Значення з 16 знаками після коми: рівно та точність, заради якої
+    /// потрібен рядок. У <c>double</c> воно не поміщається.
+    /// </summary>
+    private const decimal Probe = 1.2345678901234567m;
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Порожнє_число_лишається_null_а_не_стає_рядком()
+    {
+        // ⚠ `null` означає «виходу не було» (`TestCaseMismatch.Actual`,
+        // `MappingPreviewRow.FoldedValue`). Перетворити його на «"0"» або
+        // «""» означало б зробити з «немає значення» значення.
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        Ecr.Api.Startup.EcrJsonSerialization.Configure(options);
+
+        Assert.Equal("null", JsonSerializer.Serialize((decimal?)null, options));
+        Assert.Null(JsonSerializer.Deserialize<decimal?>("null", options));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Читання_приймає_і_рядок_і_число()
+    {
+        // ⛔ Наявні клієнти й тести надсилають `2.5`, а не `"2.5"`. Якби
+        // конвертер приймав лише рядок, формат ВІДПОВІДІ зламав би ЗАПИС —
+        // ціна, якої зміна подання платити не повинна.
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        Ecr.Api.Startup.EcrJsonSerialization.Configure(options);
+
+        Assert.Equal(Probe, JsonSerializer.Deserialize<decimal>("\"1.2345678901234567\"", options));
+        Assert.Equal(Probe, JsonSerializer.Deserialize<decimal>("1.2345678901234567", options));
+        Assert.Equal(Probe, JsonSerializer.Deserialize<decimal?>("\"1.2345678901234567\"", options));
+        Assert.Equal(Probe, JsonSerializer.Deserialize<decimal?>("1.2345678901234567", options));
+
+        // Нечислове значення — помилка формату, а не мовчазний нуль.
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<decimal>("\"—\"", options));
     }
 
     [Fact]
