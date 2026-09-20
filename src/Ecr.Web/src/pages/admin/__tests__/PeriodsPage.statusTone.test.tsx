@@ -146,6 +146,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('PeriodsPage: статус проєкту у списку — теж із каталогу', () => {
+  it(
+    'варіант списку називає статус мовою інтерфейсу, а не кодом сервера',
+    async () => {
+      /*
+       * ⛔ Тут стояло `label: `${p.code} · ${p.status}`` — тобто код сервера
+       * (`Active`, `Archived`) як видимий текст у випадному списку. Той самий
+       * дефект, що й `{period.state}` у таблиці нижче, лише у варіанті
+       * `Select`, куди компонент поставити не можна: потрібен РЯДОК.
+       *
+       * ⚠ Тому підпис береться тим самим ключем каталогу, яким малює
+       * `StatusBadge` — `statusKey('project', …)`. Без завантаженого каталогу
+       * `t()` чесно повертає позначений ключ, і саме з ним тут і звіряємося:
+       * `PRJ-7 · Active` на екрані означало б, що правку скасовано.
+       */
+      mockFetch();
+      show();
+      await ready();
+
+      /*
+       * ⚠ Підпис обраного варіанта живе у ЗНАЧЕННІ поля, а не в тексті
+       * сторінки: випадний блок Mantine змонтований лише поки відкритий
+       * (тема тестів знімає `keepMounted` — коментар у
+       * `expressions-page.render.test.tsx`). Тому дивимося на сам `input`.
+       */
+      const picker = await screen.findByLabelText(/periods\.project/, {}, {
+        timeout: SlowEnvTimeout,
+      });
+
+      expect((picker as HTMLInputElement).value).toBe('PRJ-7 · ⟦status.project.Active⟧');
+    },
+    SlowEnvTimeout,
+  );
+});
+
 describe('PeriodsPage: тон стану періоду приходить із набору', () => {
   it(
     'чотири стани домену — і вони РІЗНІ, а не один колір на всіх',
