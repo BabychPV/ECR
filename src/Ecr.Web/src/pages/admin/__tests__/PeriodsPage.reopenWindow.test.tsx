@@ -269,9 +269,13 @@ describe('PeriodsPage: строк перевідкриття періоду', ()
       // закриє період наступним прогоном `PeriodStateJob`, тобто мовчки.
       await waitFor(() => expect(confirm.disabled).toBe(true), { timeout: Ceiling });
 
-      // ⛔ Причина ВИДИМА: поле називає момент, на який людина щойно попросила
-      // відкрити період. Прибрати `error={…}` — і цей рядок падає.
-      expect(within(dialog).getByText(/⟦periods\.reopenedUntil \(until=/)).toBeDefined();
+      /*
+       * ⛔ Причина ВИДИМА, і це власний рядок каталогу, а не підпис стану:
+       * `periods.reopenedUntil` («open until …») читався б як «період уже
+       * відкрито до», хоча його ще не відкривали — опис наслідку замість
+       * причини відмови. Прибрати `error={…}` — і цей рядок падає.
+       */
+      expect(within(dialog).getByText('⟦periods.reopenUntilPast⟧')).toBeDefined();
 
       await user.click(confirm);
 
@@ -295,7 +299,7 @@ describe('PeriodsPage: строк перевідкриття періоду', ()
 
       await waitFor(() => expect(confirm.disabled).toBe(false), { timeout: Ceiling });
 
-      expect(within(dialog).queryByText(/⟦periods\.reopenedUntil \(until=/)).toBeNull();
+      expect(within(dialog).queryByText('⟦periods.reopenUntilPast⟧')).toBeNull();
     },
     TestTimeout,
   );
