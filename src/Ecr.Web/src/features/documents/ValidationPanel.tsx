@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { Alert, Badge, Group, Stack, Table, Text } from '@mantine/core';
 import type { ValidationFindingDto } from '@/api/types';
 import { t } from '@/shared/i18n';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 /** Що показувати в панелі зауважень. */
 export interface ValidationPanelProps {
@@ -88,9 +89,19 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
                 key={`${message.tableDefId}:${message.ruleCode}:${message.rowKey ?? ''}:${message.columnCode ?? ''}:${index}`}
               >
                 <Table.Td>
-                  <Badge size="sm" color={colorOf(message.severity)} variant="light">
-                    {message.severity}
-                  </Badge>
+                  {/*
+                   * ⛔ Тут стояла власна `colorOf(severity)` — шістнадцята за
+                   * ліком локальна таблиця кольору статусу, і з тією самою
+                   * вадою, що й решта: невідомий рівень отримував `'blue'`,
+                   * тобто новий рівень із сервера виглядав би як `Info`.
+                   * Набір дає невідомому `warning` — «я цього не знаю» помітно,
+                   * а не тихо.
+                   *
+                   * ⚠ І текст: `{message.severity}` друкував код сервера
+                   * (`Error`, `Warning`) англійською на будь-якій мові
+                   * інтерфейсу. Підпис тепер із каталогу — `status.severity.*`.
+                   */}
+                  <StatusBadge kind="severity" state={message.severity} />
                 </Table.Td>
                 <Table.Td>{message.rowKey ?? '—'}</Table.Td>
                 <Table.Td>{message.columnCode ?? '—'}</Table.Td>
@@ -105,10 +116,10 @@ export function ValidationPanel({ messages }: ValidationPanelProps): JSX.Element
   );
 }
 
-/** Колір рівня; невідомий рівень лишається нейтральним, а не червоним. */
-function colorOf(severity: string): string {
-  if (severity === 'Error') return 'statusError';
-  if (severity === 'Warning') return 'statusWarning';
-
-  return 'blue';
-}
+/*
+ * ✎ Тут була `colorOf(severity)`. Її прибрано цілком, а не поправлено:
+ * директива №15 §2 вимагає, щоб «іншого способу намалювати статус у
+ * застосунку не лишалося», і локальна таблиця на три рядки — це саме той
+ * другий спосіб, який розходиться з першим мовчки. Розподіл тепер один на
+ * застосунок — `statusTable.severity` у `shared/ui/StatusBadge.tsx`.
+ */

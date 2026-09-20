@@ -36,7 +36,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { formatDateTime } from '@/shared/format';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -358,9 +358,17 @@ export function PeriodsPage(): JSX.Element {
               miw={220}
               label={t('periods.project')}
               placeholder={t('periods.pickProject')}
+              /*
+               * ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
+               * Тому підпис береться тим самим ключем каталогу, що й у
+               * `StatusBadge` (`statusKey`), а не кодом сервера: `Archived`
+               * англійською посеред казахського інтерфейсу — це той самий
+               * дефект, що й `{period.state}` у таблиці нижче, лише в
+               * випадному списку.
+               */
               data={(projects.data?.items ?? []).map((p) => ({
                 value: String(p.id),
-                label: `${p.code} · ${p.status}`,
+                label: `${p.code} · ${t(statusKey('project', p.status))}`,
               }))}
               value={projectId === null ? null : String(projectId)}
               onChange={(value) => setProjectId(value === null ? null : Number(value))}

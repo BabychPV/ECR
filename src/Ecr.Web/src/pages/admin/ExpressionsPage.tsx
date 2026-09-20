@@ -17,6 +17,7 @@ import type { ExpressionPlacement } from '@/features/expressions/api';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { statusKey } from '@/shared/ui/StatusBadge';
 
 /**
  * Редактор виразів (`ФВ-9.15a`, область 10 у `ФВ-14.3`).
@@ -126,9 +127,16 @@ export function ExpressionsPage(): JSX.Element {
             miw={260}
             clearable
             value={templateVersionId}
+            /*
+             * ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
+             * Тому підпис береться тим самим ключем каталогу, що й у
+             * `StatusBadge` (`statusKey`), а не кодом сервера: інакше та сама
+             * версія називалася б у переліку шаблонів мовою користувача, а
+             * тут — англійським `Published`.
+             */
             data={(versions.data?.items ?? []).map((v) => ({
               value: String(v.id),
-              label: `${v.version} · ${v.status}`,
+              label: `${v.version} · ${t(statusKey('version', v.status))}`,
             }))}
             onChange={setTemplateVersionId}
           />
