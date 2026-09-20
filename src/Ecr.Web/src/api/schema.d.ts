@@ -1119,6 +1119,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/recall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чи може поточний користувач відкликати аркуш саме зараз — рішення сервера для кнопки. */
+        get: {
+            parameters: {
+                query?: {
+                    sheetDefId?: number;
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecallAvailabilityDto"];
+                        "text/json": components["schemas"]["RecallAvailabilityDto"];
+                        "text/plain": components["schemas"]["RecallAvailabilityDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Відкликання поданого аркуша автором: `Submitted → Draft` з причиною.
+         *     Рівень гранта — той самий, що для подання.
+         * @description `409` — аркуш не поданий або перший крок маршруту вже підписано.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RecallSheetRequest"];
+                    "application/json": components["schemas"]["RecallSheetRequest"];
+                    "text/json": components["schemas"]["RecallSheetRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/reopen": {
         parameters: {
             query?: never;
@@ -11599,6 +11694,26 @@ export interface components {
              * @description Період; перерахунок завжди адресує пару документ × період.
              */
             periodKey: number;
+        };
+        /** @description Чи може поточний користувач відкликати аркуш (`BE-31`). */
+        RecallAvailabilityDto: {
+            /** @description Рішення сервера; клієнт його не відтворює. */
+            canRecall: boolean;
+        };
+        /** @description Тіло відкликання аркуша. */
+        RecallSheetRequest: {
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Причина; обов'язкова. */
+            reason: string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
         };
         /** @description Опис довідника для конфігуратора і для клієнта. */
         RegistryDefDto: {

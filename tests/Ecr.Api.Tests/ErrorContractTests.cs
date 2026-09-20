@@ -280,6 +280,76 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         using var client = app.CreateClient();
 
         var (_, documentId, sheetDefId) = await ArrangeAsync().ConfigureAwait(true);
+        var displayName = await SubmitAsNewSubmitterAsync(app, client, documentId, sheetDefId).ConfigureAwait(true);
+
+        var response = await client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId}/workflow/history?periodKey=202601", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var events = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+        var only = Assert.Single(events.EnumerateArray());
+        Assert.Equal("Submit", only.GetProperty("action").GetString());
+        Assert.Equal("Draft", only.GetProperty("fromState").GetString());
+        Assert.Equal("Submitted", only.GetProperty("toState").GetString());
+        Assert.Equal(displayName, only.GetProperty("byDisplayName").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-31")]
+    public async Task Відкликання_справжнім_HTTP_повертає_чернетку_і_лишає_дві_події()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var (_, documentId, sheetDefId) = await ArrangeAsync().ConfigureAwait(true);
+        await SubmitAsNewSubmitterAsync(app, client, documentId, sheetDefId).ConfigureAwait(true);
+
+        var recallUri = new Uri($"/api/v1/documents/{documentId}/recall", UriKind.Relative);
+        var canUri = new Uri($"{recallUri}?sheetDefId={sheetDefId}&periodKey=202601", UriKind.Relative);
+
+        async Task<bool> CanRecallAsync()
+            => JsonDocument.Parse(await client.GetStringAsync(canUri).ConfigureAwait(true))
+                           .RootElement.GetProperty("canRecall").GetBoolean();
+
+        Assert.True(await CanRecallAsync().ConfigureAwait(true));
+
+        var recall = await client.PostAsJsonAsync(
+            recallUri, new { sheetDefId, periodKey = 202601, reason = "wrong month" }).ConfigureAwait(true);
+        Assert.True(recall.StatusCode == HttpStatusCode.NoContent, $"{recall.StatusCode}: {app.ErrorsText}");
+
+        Assert.False(await CanRecallAsync().ConfigureAwait(true));
+
+        var document = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{documentId}?periodKey=202601", UriKind.Relative)).ConfigureAwait(true));
+        Assert.All(
+            document.RootElement.GetProperty("sheetStates").EnumerateObject(),
+            sheet => Assert.Equal("Draft", sheet.Value.GetString()));
+
+        var events = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{documentId}/workflow/history?periodKey=202601", UriKind.Relative))
+            .ConfigureAwait(true)).RootElement.EnumerateArray().ToList();
+
+        // Найновіші перші.
+        Assert.Equal(["Recall", "Submit"], events.Select(e => e.GetProperty("action").GetString()));
+        Assert.Equal("wrong month", events[0].GetProperty("reason").GetString());
+        Assert.Equal("Draft", events[0].GetProperty("toState").GetString());
+
+        // Повторне відкликання — уже не з `Submitted`: 409 із власним ключем.
+        var again = await client.PostAsJsonAsync(
+            recallUri, new { sheetDefId, periodKey = 202601, reason = "again" }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    }
+
+    /// <summary>Заводить користувача з грантом <c>Submit</c>, входить ним і подає аркуш.</summary>
+    /// <returns>Відображуване ім'я користувача.</returns>
+    private async Task<string> SubmitAsNewSubmitterAsync(
+        EcrApiFactory app, HttpClient client, long documentId, int sheetDefId)
+    {
         var name = $"submitter_{Guid.NewGuid():N}"[..20];
         var displayName = $"Olena Koval {name[^6..]}";
 
@@ -318,19 +388,7 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
             new { sheetDefId, periodKey = 202601 }).ConfigureAwait(true);
         Assert.True(submit.StatusCode == HttpStatusCode.NoContent, $"{submit.StatusCode}: {app.ErrorsText}");
 
-        var response = await client.GetAsync(
-            new Uri($"/api/v1/documents/{documentId}/workflow/history?periodKey=202601", UriKind.Relative))
-            .ConfigureAwait(true);
-        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
-
-        var events = JsonDocument.Parse(
-            await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
-
-        var only = Assert.Single(events.EnumerateArray());
-        Assert.Equal("Submit", only.GetProperty("action").GetString());
-        Assert.Equal("Draft", only.GetProperty("fromState").GetString());
-        Assert.Equal("Submitted", only.GetProperty("toState").GetString());
-        Assert.Equal(displayName, only.GetProperty("byDisplayName").GetString());
+        return displayName;
     }
 
     [Fact]

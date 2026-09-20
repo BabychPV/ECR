@@ -4968,6 +4968,44 @@
         ],
         "type": "object"
       },
+      "RecallAvailabilityDto": {
+        "description": "Чи може поточний користувач відкликати аркуш (`BE-31`).",
+        "properties": {
+          "canRecall": {
+            "description": "Рішення сервера; клієнт його не відтворює.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canRecall"
+        ],
+        "type": "object"
+      },
+      "RecallSheetRequest": {
+        "description": "Тіло відкликання аркуша.",
+        "properties": {
+          "periodKey": {
+            "description": "Період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина; обов'язкова.",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "periodKey",
+          "reason"
+        ],
+        "type": "object"
+      },
       "RegistryDefDto": {
         "description": "Опис довідника для конфігуратора і для клієнта.",
         "properties": {
@@ -10640,6 +10678,148 @@
         "summary": "Перерахунок документа, або лише одного його аркуша. Право `Calculation.Recalculate`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/recall": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecallAvailabilityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecallAvailabilityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecallAvailabilityDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Чи може поточний користувач відкликати аркуш саме зараз — рішення сервера для кнопки.",
+        "tags": [
+          "DocumentWorkflowHistory"
+        ]
+      },
+      "post": {
+        "description": "`409` — аркуш не поданий або перший крок маршруту вже підписано.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallSheetRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallSheetRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecallSheetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Відкликання поданого аркуша автором: `Submitted → Draft` з причиною.\nРівень гранта — той самий, що для подання.",
+        "tags": [
+          "DocumentWorkflowHistory"
         ]
       }
     },

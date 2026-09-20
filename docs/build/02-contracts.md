@@ -2893,6 +2893,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `POST` | `/api/v1/documents/{id}/recall` | — | 3 |
+| `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
