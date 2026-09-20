@@ -1809,6 +1809,22 @@ USING (VALUES
     (N'snapshots.rowsMore',              N'en', N'Show more', 1),
     (N'snapshots.rowsEmpty',             N'en', N'This snapshot has no rows.', 1),
 
+    -- R8: макет зрізу — групи й підсумки. ⚠ Підпис функції підсумку береться
+    -- з каталогу, а не з коду сервера (`sum`/`count`/…): число без предмета —
+    -- це не підсумок. `rowsFnOther` — арм на функцію, якої клієнт ще не знає.
+    -- ⛔ Ключі однорівневі (`rowsFnSum`, не `rowsFn.sum`): сторож
+    -- `Кожен_рядок_якого_просить_клієнт_є_в_каталозі` регуляркою двокрапкових
+    -- ключів не бачить, тож дволанковий ключ проїхав би повз перевірку.
+    (N'snapshots.rowsGroup',             N'en', N'Group by {column}', 1),
+    (N'snapshots.rowsTotalGroup',        N'en', N'Group total', 1),
+    (N'snapshots.rowsTotalAll',          N'en', N'Snapshot total', 1),
+    (N'snapshots.rowsFnSum',             N'en', N'Sum', 1),
+    (N'snapshots.rowsFnCount',           N'en', N'Count', 1),
+    (N'snapshots.rowsFnAvg',             N'en', N'Average', 1),
+    (N'snapshots.rowsFnMin',             N'en', N'Minimum', 1),
+    (N'snapshots.rowsFnMax',             N'en', N'Maximum', 1),
+    (N'snapshots.rowsFnOther',           N'en', N'Total', 1),
+
     -- R7: вивантаження зрізу в книгу. ⚠ Межа Excel названа ПОРУЧ із дією:
     -- числа в книзі мають 15 значущих цифр, і той, хто звіряє до останнього
     -- знаку, мусить дізнатися про це ДО вивантаження, а не після.
