@@ -20,7 +20,12 @@ import {
 import { EcrApiError } from '@/api/client';
 import { cellStateClass, type CellStateName } from '@/features/grid/cellState';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { DataTable } from '@/shared/ui/DataTable';
+import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatStrip } from '@/shared/ui/StatStrip';
+import { Timestamp } from '@/shared/ui/Timestamp';
+import { Wizard } from '@/shared/ui/Wizard';
 import { applyDensity, density, setDensity, type Density } from '@/shared/theme/preferences';
 import { cellState } from '@/shared/theme/theme';
 import { loadCatalog, preferredLanguage } from '@/shared/i18n';
@@ -43,10 +48,35 @@ import { useCatalog } from '@/shared/i18n/useCatalog';
  * поза `AppLayout`: інакше він потребував би входу, тобто був би недоступний
  * саме тоді, коли потрібен — при налаштуванні вигляду.
  */
+/** Рядок зразкового переліку для шару 3. */
+interface KitRow {
+  readonly code: string;
+  readonly name: string;
+  readonly cells: number;
+  readonly changedAt: string;
+}
+
+/** Дані майстра-зразка. */
+interface KitDraft {
+  readonly name: string;
+}
+
+/*
+ * ⚠ Мить у зразку — СТАЛА, а не `new Date()`. Знімок екрана з поточним часом
+ * відрізнявся б від попереднього щопрогону, і `screenshots.spec.ts` показував
+ * би різницю там, де нічого не змінилося.
+ */
+const KitRows: readonly KitRow[] = [
+  { code: 'ECR-2026-001', name: 'Викиди, цех 1', cells: 169440, changedAt: '2026-09-18T09:15:00Z' },
+  { code: 'ECR-2026-002', name: 'Викиди, цех 2', cells: 84720, changedAt: '2026-09-17T16:40:00Z' },
+];
+
 export function KitchenSinkPage(): JSX.Element {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const [rows, setRows] = useState<Density>(density);
   const [grey, setGrey] = useState(false);
+  const [stat, setStat] = useState<string | null>(null);
+  const [wizard, setWizard] = useState(false);
 
   // ⚠ Каталог тягнеться і тут: сторінка живе поза AppLayout, тобто рядків їй
   // ніхто не завантажить. Без цього зразок стану помилки показував би
@@ -288,6 +318,113 @@ export function KitchenSinkPage(): JSX.Element {
           </Badge>
           <Badge color="statusError">Помилка</Badge>
         </Group>
+      </Section>
+
+      <Section title="Набір, шар 3 (директива №15 §2)">
+        <Text size="sm" c="dimmed">
+          Чотири компоненти, з яких збираються переліки. Увімкніть «градації
+          сірого»: тон показника-проблеми має лишитися розрізненним, бо його
+          несе не лише колір.
+        </Text>
+
+        <StatStrip
+          label="Показники переліку"
+          items={[
+            { id: 'all', label: 'усього', value: 128 },
+            { id: 'running', label: 'виконуються', value: 3 },
+            { id: 'failed', label: 'помилок', value: 7, tone: 'danger' },
+            { id: 'ok', label: 'помилок валідації', value: 0, tone: 'danger' },
+          ]}
+          active={stat}
+          onSelect={setStat}
+        />
+
+        {/*
+         * ⚠ Четвертий показник має `tone: 'danger'` і значення НУЛЬ — і саме
+         * тому він нейтральний. Це `L3` на екрані: «0 помилок» — це «все
+         * гаразд», і фарбувати його червоним означало б знецінити червоний там,
+         * де він потрібен.
+         */}
+        <FilterBar
+          search={{ label: 'Пошук', param: 'ks-q', placeholder: 'код або назва' }}
+          filters={[
+            {
+              id: 'ks-state',
+              label: 'Стан',
+              options: [
+                { value: 'Draft', label: 'Чернетка' },
+                { value: 'Submitted', label: 'Подано' },
+              ],
+            },
+          ]}
+        />
+
+        <DataTable<KitRow>
+          columns={[
+            { key: 'code', label: 'Код', mono: true, minWidth: 140 },
+            { key: 'name', label: 'Назва', minWidth: 200 },
+            { key: 'cells', label: 'Комірок', num: true },
+            {
+              key: 'changedAt',
+              label: 'Змінено',
+              render: (row) => <Timestamp value={row.changedAt} />,
+            },
+          ]}
+          rows={KitRows}
+          rowKey={(row) => row.code}
+          caption="Зразок переліку: чотири колонки з семи дозволених (L5)"
+        />
+
+        <Group>
+          <Button variant="default" onClick={() => setWizard(true)}>
+            Відкрити майстер
+          </Button>
+          <Text size="xs" c="dimmed">
+            Майстер закритий за замовчуванням — `L2`.
+          </Text>
+        </Group>
+
+        <Wizard<KitDraft>
+          opened={wizard}
+          title="Publish version 3"
+          initialData={{ name: '' }}
+          applyLabel="Publish version"
+          labels={{ back: 'Назад', next: 'Далі', review: 'Перевірка' }}
+          summary={(data) => (data.name === '' ? null : <Text size="sm">{data.name}</Text>)}
+          onClose={() => setWizard(false)}
+          onApply={() => setWizard(false)}
+          onExitUnsaved={() => true}
+          steps={[
+            {
+              id: 'name',
+              label: 'Назва',
+              validate: (data) =>
+                data.name.trim() === ''
+                  ? { message: 'Без назви публікувати нічого', focus: 'input' }
+                  : null,
+              render: ({ data, update }) => (
+                <TextInput
+                  label="Назва"
+                  value={data.name}
+                  onChange={(event) => update({ name: event.currentTarget.value })}
+                />
+              ),
+            },
+          ]}
+        />
+
+        {/*
+         * ⛔ `ListPage` у каталозі НЕ показується, і це не пропуск. Шаблон малює
+         * `PageHeader`, тобто `<Title order={3}>`, а кожен розділ цієї сторінки
+         * — `<Title order={4}>`. Вкладений шаблон дав би h3 усередині h4, тобто
+         * `heading-order` у `axe` — і гейт `a11y` почервонів би на сторінці, яка
+         * саме доступність і перевіряє.
+         *
+         * ⚠ Але це не «не влізло»: сама неможливість вкласти шаблон у чужу
+         * сторінку і є властивістю, яку він гарантує — рівно одна шапка на
+         * маршрут. Його місце — маршрут, і перший такий маршрут названо в
+         * Next steps PR.
+         */}
       </Section>
 
       <Section title="Типографіка (ФВ-14.13)">
