@@ -6,6 +6,7 @@ import type { components } from '@/api/schema';
 import type { SetUiStringRequest, UiStringCatalog, UiStringRevisionResponse } from '@/api/types';
 import { useLanguages } from '@/shared/i18n/useLanguages';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -229,18 +230,28 @@ export function UiStringsPage(): JSX.Element {
         title={t('uiStrings.title')}
         actions={
           <Group gap="xs" align="end">
-            <Select
-              size="xs"
-              miw={160}
-              label={t('uiStrings.language')}
-              data={(languages.data ?? []).map((language) => ({
-                value: language.code,
-                label: language.nameNative,
-              }))}
-              value={lang}
-              onChange={(value) => setLang(value)}
-              allowDeselect={false}
-            />
+            {/* ⛔ Директива D15 §0, правило L10: перелік мов збирався через
+                `?? []`, тож відмова `GET /api/v1/languages` давала порожній
+                `Select` — «мов у системі немає». На екрані, де ПЕРЕКЛАДАЮТЬ,
+                це найгірше з можливих тверджень: людина не може обрати мову
+                призначення і не знає чому. Елемент без даних не малюється
+                (`D15-06`), причина стоїть банером під заголовком. */}
+            {languages.error === null && (
+              <Select
+                size="xs"
+                miw={160}
+                label={t('uiStrings.language')}
+                // ⚠ Доки перелік у дорозі — поле недоступне, а не порожнє.
+                disabled={languages.isPending}
+                data={(languages.data ?? []).map((language) => ({
+                  value: language.code,
+                  label: language.nameNative,
+                }))}
+                value={lang}
+                onChange={(value) => setLang(value)}
+                allowDeselect={false}
+              />
+            )}
 
             <TextInput
               size="xs"
@@ -271,6 +282,14 @@ export function UiStringsPage(): JSX.Element {
           </Group>
         }
       />
+
+      {/* ⚠ Банер саме тут, а не в шапці: у `PageHeader.actions` він стиснувся
+          б у вузьку колонку поруч із фільтром. Сторінка при цьому лишається
+          робочою для мови з адреси — відмова переліку забирає ВИБІР мови, а
+          не редактор. */}
+      {languages.error !== null && (
+        <ErrorAlert error={languages.error} onRetry={() => void languages.refetch()} />
+      )}
 
       {/* ⚠ `Array.isArray`, а не довіра типові: тип обіцяє компілятор, а не
           мережа, і відповідь іншої форми мала б лишити сторінку без лічильників,
