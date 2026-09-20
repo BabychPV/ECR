@@ -6150,7 +6150,7 @@
             "type": "string"
           },
           "until": {
-            "description": "До якого моменту період лишається відкритим; `null` — безстроково.",
+            "description": "До якого моменту період лишається відкритим; `null` — до кінця\nпоточної доби в поясі майданчика.",
             "format": "date-time",
             "type": [
               "null",
@@ -16082,7 +16082,7 @@
     },
     "/api/v1/periods/{id}/reopen": {
       "post": {
-        "description": "Відкриття періоду і відкриття документа — <b>різні</b> операції з\nрізними правами (`D-67`). Причина обов'язкова: закритий період —\nце поданий стан звітності, і його зміна має бути пояснена в аудиті.",
+        "description": "    Відкриття періоду і відкриття документа — <b>різні</b> операції з\n    різними правами (`D-67`). Причина обов'язкова: закритий період —\n    це поданий стан звітності, і його зміна має бути пояснена в аудиті.\n    ⚠ Це єдина ручна зміна стану періоду (рішення людини\nQ15-02, директива №15 BE-29). Open, Close і\nArchive лишаються за PeriodStateJob — стан періоду має\nодин календар, а не два джерела.\n    ⛔ Відкриття не закритого періоду — 409 ECR-PRD-0409, причина з\nсамих пробілів — 422 ECR-PRD-0422. Обидві відмови ухвалює домен\n(Period.Reopen), а не цей контролер.",
         "parameters": [
           {
             "in": "path",
@@ -16138,6 +16138,66 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Відкриває закритий період. Право `Period.Reopen`.",

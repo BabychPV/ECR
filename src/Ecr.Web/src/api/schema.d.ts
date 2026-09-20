@@ -4562,9 +4562,16 @@ export interface paths {
         put?: never;
         /**
          * Відкриває закритий період. Право `Period.Reopen`.
-         * @description Відкриття періоду і відкриття документа — <b>різні</b> операції з
-         *     різними правами (`D-67`). Причина обов'язкова: закритий період —
-         *     це поданий стан звітності, і його зміна має бути пояснена в аудиті.
+         * @description     Відкриття періоду і відкриття документа — <b>різні</b> операції з
+         *         різними правами (`D-67`). Причина обов'язкова: закритий період —
+         *         це поданий стан звітності, і його зміна має бути пояснена в аудиті.
+         *         ⚠ Це єдина ручна зміна стану періоду (рішення людини
+         *     Q15-02, директива №15 BE-29). Open, Close і
+         *     Archive лишаються за PeriodStateJob — стан періоду має
+         *     один календар, а не два джерела.
+         *         ⛔ Відкриття не закритого періоду — 409 ECR-PRD-0409, причина з
+         *     самих пробілів — 422 ECR-PRD-0422. Обидві відмови ухвалює домен
+         *     (Period.Reopen), а не цей контролер.
          */
         post: {
             parameters: {
@@ -4592,6 +4599,39 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13085,7 +13125,8 @@ export interface components {
             reason: string;
             /**
              * Format: date-time
-             * @description До якого моменту період лишається відкритим; `null` — безстроково.
+             * @description До якого моменту період лишається відкритим; `null` — до кінця
+             *     поточної доби в поясі майданчика.
              */
             until: null | string;
         };
