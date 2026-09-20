@@ -1,5 +1,19 @@
 import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
+import {
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  Modal,
+  NumberInput,
+  ScrollArea,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -15,6 +29,16 @@ import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { snapshotExportUrl } from '@/features/reports/api';
+import {
+  NoParameters,
+  defaultDraft,
+  missingRequired,
+  readReportParameters,
+  toParametersBody,
+  type ParameterDraft,
+  type ParameterValue,
+  type ReportParameterDeclaration,
+} from '@/features/reports/parameters';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -28,6 +52,22 @@ import { localized } from '@/shared/i18n/localized';
 
 // ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
 const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
+
+/**
+ * Поле дати — теж за `import()`, і не заради стилю.
+ *
+ * ⛔ `@mantine/dates` тягне за собою `dayjs`, і зі СТАТИЧНИМ імпортом цей
+ * маршрут важив 259.3 КБ gzip — тобто ламав гейт `D-132` (межа 250; за
+ * `import()` вийшло 245.4).
+ * Поле з'являється лише в діалозі побудови й лише для звіту, що оголосив
+ * параметр типу `Date`; вантажити його всім, хто просто дивиться перелік
+ * зрізів, нема за що — рівно той аргумент, яким винесений Monaco.
+ */
+const DateInput = lazy(async () => {
+  const module = await import('@mantine/dates');
+
+  return { default: module.DateInput };
+});
 
 /**
  * Зрізи регламентної звітності.
@@ -92,6 +132,52 @@ export function SnapshotsPage(): JSX.Element {
       definition.isActive && definition.versions.some((v) => v.status === 'Published'),
   );
 
+  // ⛔ `R6`: параметри звіту (`@Name`). Оголошення читаються з `rulesJson`
+  // ОПУБЛІКОВАНОЇ версії — саме її бере побудова
+  // (`IReportDefinitionStore.FindCurrentVersionAsync`), і чернетка опису тут ні
+  // до чого.
+  const selectedDefinition = code === null ? undefined : buildable.find((d) => d.code === code);
+  const publishedVersion = selectedDefinition?.versions.find((v) => v.status === 'Published');
+
+  // ⚠ Доки звіт не обрано, питання «які в нього параметри» не стоїть — це не
+  // «прочитати не вдалося». Кнопку побудови й так тримає `code === null`.
+  const parameters =
+    code === null ? NoParameters : readReportParameters(publishedVersion?.rulesJson);
+
+  // ⛔ Чернетка тримається РАЗОМ із кодом звіту, а не окремим станом, який
+  // скидає ефект: ефект виконується ПІСЛЯ рендера, тобто існував би кадр, у
+  // якому поля вже від нового звіту, а значення ще від старого — і саме такий
+  // кадр поїхав би в запит, натисни людина побудову досить швидко.
+  const [draft, setDraft] = useState<{ code: string | null; values: ParameterDraft }>({
+    code: null,
+    values: {},
+  });
+
+  const values =
+    draft.code === code
+      ? draft.values
+      : defaultDraft(parameters.kind === 'declared' ? parameters.items : []);
+
+  const setValue = (name: string, value: ParameterValue): void =>
+    setDraft({ code, values: { ...values, [name]: value } });
+
+  /*
+   * ⛔ Деградація в бік ЗАБОРОНИ (`D15` §0, `L10`). Два стани блокують
+   * побудову, і причини в них РІЗНІ:
+   *   - оголошення прочитати не вдалося — побудова наосліп або впаде `422`,
+   *     або пройде без параметра й дасть зріз, який виглядає нормальним;
+   *   - обов'язковий параметр без значення — сервер однаково відмовить `422`,
+   *     але дізнатися про це з екрана ДО кліку дешевше, ніж із невдалої задачі.
+   *
+   * ⚠ «Параметрів немає» — ТРЕТІЙ стан, і він нічого не блокує.
+   */
+  const blockedReason =
+    parameters.kind === 'unreadable'
+      ? 'snapshots.parametersUnknown'
+      : missingRequired(parameters.items, values).length > 0
+        ? 'snapshots.parametersBlocked'
+        : null;
+
   // Довідники сторінки (проєкти у фільтрі, описи звітів у двох вікнах): їхня
   // відмова — банер над переліком; сам перелік зрізів від них не залежить.
   const referenceError = projects.error ?? reportDefs.error;
@@ -122,11 +208,18 @@ export function SnapshotsPage(): JSX.Element {
   const [jobId, setJobId] = useState<string | null>(null);
 
   const build = useMutation({
-    mutationFn: () =>
-      apiEnqueue(`/api/v1/reports/${encodeURIComponent(code ?? '')}/build`, {
+    mutationFn: () => {
+      // ⚠ Поле `parameters` з'являється в тілі ЛИШЕ коли параметри оголошені:
+      // для звіту без них запит лишається побайтно таким, яким був до `R6`.
+      const declared = parameters.kind === 'declared' ? parameters.items : [];
+      const body = toParametersBody(declared, values);
+
+      return apiEnqueue(`/api/v1/reports/${encodeURIComponent(code ?? '')}/build`, {
         projectId: projectId ?? 0,
         periodKey: buildPeriod,
-      } satisfies BuildSnapshotRequest),
+        ...(body === undefined ? {} : { parameters: body }),
+      } satisfies BuildSnapshotRequest);
+    },
     onSuccess: (job) => {
       setJobId(job.jobId);
       setBuilding(false);
@@ -396,6 +489,35 @@ export function SnapshotsPage(): JSX.Element {
           onChange={(value) => setBuildPeriod(typeof value === 'number' ? value : buildPeriod)}
         />
 
+        {/* ⛔ Поля параметрів — лише коли їх СПРАВДІ оголошено. «Прочитати не
+            вдалося» не малює порожньої секції: порожня секція читається як
+            «параметрів немає», тобто як протилежне твердження. */}
+        {parameters.kind === 'declared' && parameters.items.length > 0 && (
+          <Stack gap="xs" mt="sm">
+            <Text size="sm" fw={600}>
+              {t('snapshots.parameters')}
+            </Text>
+
+            {parameters.items.map((declaration) => (
+              <ParameterField
+                key={declaration.code}
+                declaration={declaration}
+                value={values[declaration.code] ?? null}
+                onChange={(value) => setValue(declaration.code, value)}
+              />
+            ))}
+          </Stack>
+        )}
+
+        {/* ⛔ `AsyncBoundary` тут навмисно НЕ використано: її `<Title order={4}>`
+            всередині модалки рве `heading-order` і валить гейт `a11y`. Причина
+            блокування — текстом, і вона названа, а не «побудова недоступна». */}
+        {blockedReason !== null && (
+          <Text size="xs" c="statusError" mt="sm" role="alert">
+            {t(blockedReason)}
+          </Text>
+        )}
+
         <Text size="xs" c="dimmed" mt="sm">
           {t('snapshots.buildHint')}
         </Text>
@@ -405,7 +527,7 @@ export function SnapshotsPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={code === null}
+            disabled={code === null || blockedReason !== null}
             loading={build.isPending}
             onClick={() => build.mutate()}
           >
@@ -430,6 +552,83 @@ export function SnapshotsPage(): JSX.Element {
 }
 
 type SnapshotVerifyResponse = components['schemas']['SnapshotVerifyResponse'];
+
+/**
+ * Поле одного параметра звіту (`R6`).
+ *
+ * ⛔ Вид поля диктує ОГОЛОШЕННЯ, а не здогад: сервер приведення не робить
+ * (рядок `"5"` у параметр `Number` — відмова), тож єдине текстове поле на всі
+ * типи гарантувало б `422` для кожного числа й кожної дати.
+ *
+ * ⛔ Дата — `DateInput`, а не `<TextInput type="date">`: нативне поле бере
+ * формат з ОС, а не з локалі продукту (`D15-09`), і той самий запис читався б
+ * як третє вересня в одного користувача і як дев'яте березня в іншого.
+ */
+function ParameterField(props: {
+  declaration: ReportParameterDeclaration;
+  value: ParameterValue;
+  onChange: (value: ParameterValue) => void;
+}): JSX.Element {
+  const { declaration, value } = props;
+
+  // ⚠ Обов'язковість названа СЛОВОМ, а не самою зірочкою: зірочка поруч із
+  // іменем параметра, яке придумав методолог, читається як частина імені.
+  const description = declaration.required ? t('snapshots.parameterRequired') : undefined;
+
+  if (declaration.type === 'Boolean') {
+    return (
+      <Switch
+        label={declaration.code}
+        description={description}
+        checked={value === true}
+        onChange={(event) => props.onChange(event.currentTarget.checked)}
+      />
+    );
+  }
+
+  if (declaration.type === 'Number') {
+    return (
+      <NumberInput
+        label={declaration.code}
+        description={description}
+        withAsterisk={declaration.required}
+        value={typeof value === 'number' ? value : ''}
+        onChange={(next) => props.onChange(typeof next === 'number' ? next : '')}
+      />
+    );
+  }
+
+  if (declaration.type === 'Date') {
+    return (
+      // ⚠ `fallback={null}`: заглушка на місці одного поля форми блимала б
+      // рівно ті мілісекунди, за які їде чанк, і читалася б як збій. Побудову
+      // це не відкриває — обов'язкове поле лишається порожнім, доки поле не
+      // змонтоване, а порожнє обов'язкове тримає кнопку заблокованою.
+      <Suspense fallback={null}>
+        <DateInput
+          label={declaration.code}
+          description={description}
+          withAsterisk={declaration.required}
+          // Формат заданий кодом — однозначний і не залежить від локалі браузера.
+          valueFormat="YYYY-MM-DD"
+          clearable
+          value={value instanceof Date ? value : null}
+          onChange={(next) => props.onChange(next)}
+        />
+      </Suspense>
+    );
+  }
+
+  return (
+    <TextInput
+      label={declaration.code}
+      description={description}
+      withAsterisk={declaration.required}
+      value={typeof value === 'string' ? value : ''}
+      onChange={(event) => props.onChange(event.currentTarget.value)}
+    />
+  );
+}
 
 /**
  * Дія «Перевірити» й її підсумок у рядку зрізу (BE-17).
