@@ -17,6 +17,7 @@ import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModa
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
@@ -280,19 +281,11 @@ export function SnapshotsPage(): JSX.Element {
                         `Draft` існує, але регулятор його не бачить —
                         вʼюха `rpt.v_*` віддає лише `Approved` і `Submitted`
                         (`ФВ-10.11`). */}
-                    {/* ⛔ UI-аудит-пас 8, lane6, п.9: той самий дефект, що вже
-                        виправлено для бейджа стану `PeriodsPage.tsx`
-                        (`miw="fit-content"` вище в тому файлі) — без нього
-                        `table-layout: auto` дає стовпцю ширину з того, що
-                        РЕНДЕРИТЬСЯ, а `.mantine-Badge-label`'s власний
-                        `overflow:hidden; text-overflow:ellipsis` дозволяє
-                        бейджу «поміститись» у будь-яку ширину замість того,
-                        щоб змусити таблицю прокручуватись. Наслідок —
-                        «DRAFT» ставало нечитабельним «D…» на типовій ширині
-                        вікна. */}
-                    <Badge variant="light" miw="fit-content">
-                      {snapshot.status}
-                    </Badge>
+                    {/* ⛔ Бейдж набору, а не сирий код сервера: підпис — із
+                        каталогу (`status.snapshot.*`), а `miw="fit-content"`
+                        (UI-аудит-пас 8, lane6, п.9) тепер живе в самому
+                        `StatusBadge`, а не на сторінці. */}
+                    <StatusBadge kind="snapshot" state={snapshot.status} />
                   </Table.Td>
                   <Table.Td>
                     {/* ⛔ Контрольна сума показується цілком, а не обрізаною:

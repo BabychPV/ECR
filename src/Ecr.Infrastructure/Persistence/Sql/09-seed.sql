@@ -2341,7 +2341,13 @@ USING (VALUES
     -- окремий від `status.health.*`: спільне в них лише слово `Degraded`.
     (N'status.collectionRun.Succeeded',    N'en', N'Succeeded', 1),
     (N'status.collectionRun.Degraded',     N'en', N'Completed with warnings', 1),
-    (N'status.collectionRun.Failed',       N'en', N'Failed', 1)
+    (N'status.collectionRun.Failed',       N'en', N'Failed', 1),
+
+    -- `SnapshotStatus` (Enums.cs, D-65). Словник окремий від `status.sheet.*`:
+    -- `Rejected` у зрізі немає, а `Submitted` — кінцевий іммутабельний стан.
+    (N'status.snapshot.Draft',             N'en', N'Draft', 1),
+    (N'status.snapshot.Approved',          N'en', N'Approved', 1),
+    (N'status.snapshot.Submitted',         N'en', N'Submitted', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
