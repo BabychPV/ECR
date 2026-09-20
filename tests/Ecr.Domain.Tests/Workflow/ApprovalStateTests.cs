@@ -102,4 +102,65 @@ public sealed class ApprovalStateTests
         Assert.Equal(DocumentStatus.Rejected, state.Status);
         Assert.Equal("не сходиться баланс за березень", state.RejectedReason);
     }
+
+    // ───────────────────────── BE-31: Recall ─────────────────────────
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Recall_повертає_поданий_аркуш_у_чернетку_поки_крок_не_підписано()
+    {
+        var state = Sheet();
+        state.Submit(User, Now, firstStepId: 11);
+
+        state.Recall("подав не той місяць", firstStepId: 11);
+
+        Assert.Equal(DocumentStatus.Draft, state.Status);
+        Assert.Null(state.CurrentStepId);
+
+        // Відкликаний аркуш подається знову — і знову з першого кроку.
+        state.Submit(User, Now, firstStepId: 11);
+        Assert.Equal(11, state.CurrentStepId);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Recall_після_підписаного_кроку_відхиляється()
+    {
+        var state = Sheet();
+        state.Submit(User, Now, firstStepId: 11);
+        state.ApproveStep(userId: 8, Now, nextStepId: 12);
+
+        var error = Assert.Throws<DomainException>(() => state.Recall("передумав", firstStepId: 11));
+
+        Assert.Equal("ECR-DOC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0409.recallStepSigned", error.Details!["messageKey"]);
+        Assert.Equal(DocumentStatus.Submitted, state.Status);
+        Assert.Equal(12, state.CurrentStepId);
+    }
+
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Recall_не_з_Submitted_відхиляється(bool approved)
+    {
+        var state = approved ? Submitted() : Sheet();
+        if (approved)
+        {
+            state.Approve(User, Now);
+        }
+
+        var error = Assert.Throws<DomainException>(() => state.Recall("причина", firstStepId: null));
+
+        Assert.Equal("ECR-DOC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0409.recallWrongState", error.Details!["messageKey"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Recall_без_причини_відхиляється()
+    {
+        var state = Submitted();
+
+        var error = Assert.Throws<DomainException>(() => state.Recall(" ", firstStepId: null));
+
+        Assert.Equal("ECR-DOC-0422", error.ErrorCode);
+        Assert.Equal(DocumentStatus.Submitted, state.Status);
+    }
 }

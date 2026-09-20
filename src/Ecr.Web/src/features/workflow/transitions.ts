@@ -20,7 +20,7 @@
 export type SheetState = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
 
 /** Дія робочого процесу. */
-export type WorkflowAction = 'submit' | 'approve' | 'reject' | 'reopen';
+export type WorkflowAction = 'submit' | 'approve' | 'reject' | 'reopen' | 'recall';
 
 /**
  * Стани, у яких дія має сенс.
@@ -42,6 +42,10 @@ export const AllowedIn: Readonly<Record<WorkflowAction, readonly SheetState[]>> 
   // Повернути в роботу — подане або затверджене; повторне подання створює
   // НОВИЙ зріз, старий лишається назавжди (ФВ-9.17).
   reopen: ['Submitted', 'Approved'],
+
+  // Відкликати — лише подане (`BE-31`). ⚠ Стан — не вся умова: «автор подання»
+  // і «жоден крок не підписано» вирішує сервер (`GET …/recall`), не ця таблиця.
+  recall: ['Submitted'],
 };
 
 /** Чи має сенс дія в цьому стані. */
@@ -56,7 +60,7 @@ export function isAllowed(action: WorkflowAction, state: string): boolean {
  * а не відмова сервера. Відхилення без пояснення повертає роботу тому, хто не
  * знає, що виправляти, — і цикл повторюється (ФВ-5.15).
  */
-export const NeedsReason: readonly WorkflowAction[] = ['reject', 'reopen'];
+export const NeedsReason: readonly WorkflowAction[] = ['reject', 'reopen', 'recall'];
 
 /** Чи потрібна причина для дії. */
 export function needsReason(action: WorkflowAction): boolean {

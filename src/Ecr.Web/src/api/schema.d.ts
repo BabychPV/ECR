@@ -1119,6 +1119,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/recall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чи може поточний користувач відкликати аркуш саме зараз — рішення сервера для кнопки. */
+        get: {
+            parameters: {
+                query?: {
+                    sheetDefId?: number;
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecallAvailabilityDto"];
+                        "text/json": components["schemas"]["RecallAvailabilityDto"];
+                        "text/plain": components["schemas"]["RecallAvailabilityDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Відкликання поданого аркуша автором: `Submitted → Draft` з причиною.
+         *     Рівень гранта — той самий, що для подання.
+         * @description `409` — аркуш не поданий або перший крок маршруту вже підписано.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RecallSheetRequest"];
+                    "application/json": components["schemas"]["RecallSheetRequest"];
+                    "text/json": components["schemas"]["RecallSheetRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/reopen": {
         parameters: {
             query?: never;
@@ -5865,6 +5960,161 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/group-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі групові призначення з резолвленими іменами груп. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GroupRoleAssignmentView"][];
+                        "text/json": components["schemas"]["GroupRoleAssignmentView"][];
+                        "text/plain": components["schemas"]["GroupRoleAssignmentView"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Призначає роль групі за SID або іменем `ДОМЕН\Група`.
+         * @description ⛔ Роль із небезпечними правами — лише з `confirmDangerous: true`,
+         *     інакше `409 ECR-SEC-0409` з переліком у `details`. Дублікат —
+         *     той самий код; ім'я, що не резолвиться, — `422 ECR-REQ-0422`.
+         *
+         *     ⚠ `effectiveAfterNextSignIn: true` — на цей SID раніше не було
+         *     призначень, тож у cookie вже залогінених членів групи його немає (`#419`),
+         *     і роль подіє для них з наступного входу. Відкликання діє негайно.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["AssignGroupRoleRequest"];
+                    "application/json": components["schemas"]["AssignGroupRoleRequest"];
+                    "text/json": components["schemas"]["AssignGroupRoleRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GroupRoleAssignedResult"];
+                        "text/json": components["schemas"]["GroupRoleAssignedResult"];
+                        "text/plain": components["schemas"]["GroupRoleAssignedResult"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/security/group-assignments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Відкликає роль у групи; діє на вже залогінених негайно. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/my-groups": {
         parameters: {
             query?: never;
@@ -9180,6 +9430,28 @@ export interface components {
              */
             sheetDefId: number;
         };
+        /** @description Тіло призначення ролі групі. */
+        AssignGroupRoleRequest: {
+            /** @description Підтвердження видачі ролі з небезпечними правами. */
+            confirmDangerous?: null | boolean;
+            /** @description SID (`S-1-…`) або ім'я `ДОМЕН\Група`. */
+            principal: string;
+            /**
+             * Format: int32
+             * @description Роль.
+             */
+            roleId: number;
+            /**
+             * Format: date
+             * @description Початок дії; `null` — від завжди.
+             */
+            validFrom?: null | string;
+            /**
+             * Format: date
+             * @description Кінець дії (включно); `null` — безстроково.
+             */
+            validTo?: null | string;
+        };
         /**
          * @description Провайдер автентифікації. Нижче рівня входу не використовується.
          * @enum {unknown}
@@ -10227,6 +10499,51 @@ export interface components {
             roleCodes: string[];
             /** @description SID AD-групи. */
             sid: string;
+        };
+        /** @description Наслідок призначення ролі групі. */
+        GroupRoleAssignedResult: {
+            /** @description `true` — на цей SID досі не було жодного призначення, тож у cookie вже
+             *             залогінених членів групи його немає (`#419`: у квиток кладуться лише групи
+             *             з призначеннями), і роль подіє для них з НАСТУПНОГО входу. */
+            effectiveAfterNextSignIn: boolean;
+            /**
+             * Format: int32
+             * @description Ідентифікатор нового призначення.
+             */
+            id: number;
+            /** @description Ім'я групи; `null` — не резолвиться. */
+            principalName: null | string;
+            /** @description SID, під яким воно збережене. */
+            principalSid: string;
+        };
+        /** @description Призначення ролі групі каталогу — рядок екрана керування. */
+        GroupRoleAssignmentView: {
+            /**
+             * Format: int32
+             * @description Ідентифікатор призначення; ним і відкликають.
+             */
+            id: number;
+            /** @description Ім'я групи; `null` — каталог його не назвав. */
+            principalName: null | string;
+            /** @description SID групи — зберігається завжди він. */
+            principalSid: string;
+            /** @description Код ролі. */
+            roleCode: string;
+            /**
+             * Format: int32
+             * @description Роль.
+             */
+            roleId: number;
+            /**
+             * Format: date
+             * @description Початок дії; `null` — від завжди.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Кінець дії (включно); `null` — безстроково.
+             */
+            validTo: null | string;
         };
         /** @description SID групи з квитка і те, що він дав. */
         GroupSidView: {
@@ -11316,6 +11633,26 @@ export interface components {
              * @description Період; перерахунок завжди адресує пару документ × період.
              */
             periodKey: number;
+        };
+        /** @description Чи може поточний користувач відкликати аркуш (`BE-31`). */
+        RecallAvailabilityDto: {
+            /** @description Рішення сервера; клієнт його не відтворює. */
+            canRecall: boolean;
+        };
+        /** @description Тіло відкликання аркуша. */
+        RecallSheetRequest: {
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Причина; обов'язкова. */
+            reason: string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
         };
         /** @description Опис довідника для конфігуратора і для клієнта. */
         RegistryDefDto: {
