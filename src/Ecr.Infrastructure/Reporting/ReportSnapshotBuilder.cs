@@ -732,17 +732,26 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         return SHA256.HashData(Encoding.UTF8.GetBytes(text));
     }
 
-    /// <summary>Число без хвостових нулів, із точністю колонки <c>decimal(28,10)</c>.</summary>
+    /// <summary>Число без хвостових нулів, із точністю колонки значень.</summary>
     /// <remarks>
     /// ⛔ BE-17. <c>decimal</c> у .NET несе МАСШТАБ: <c>5m</c> друкується «5», а
     /// те саме число, прочитане з <c>decimal(28,10)</c>, — «5.0000000000». Поки
     /// суму рахували лише при побудові, цього не було видно; перерахунок за
     /// збереженими рядками давав би іншу суму на КОЖНОМУ зрізі з числами, тобто
     /// перевірка завжди казала б «вміст змінено».
+    /// <para>
+    /// ⚠ Знаків **16**, а не 10, — на випередження переходу
+    /// <c>rpt.ReportRow.ValueNumeric</c> на <c>decimal(28,16)</c>. Формат
+    /// обрізає хвостові нулі, тому для значень із ≤ 10 знаками рядок
+    /// ПОБАЙТНО той самий, що й до розширення, і вже збережені суми лишаються
+    /// чинними. Розширити ПІСЛЯ колонки означало б вікно, у якому два різні
+    /// числа (різниця на 11–16 знаку) дають одну суму — тобто «вміст не
+    /// змінювався» там, де він змінився.
+    /// </para>
     /// </remarks>
     private static string Canonical(decimal? value)
         => value is { } number
-            ? number.ToString("0.##########", CultureInfo.InvariantCulture)
+            ? number.ToString("0.################", CultureInfo.InvariantCulture)
             : string.Empty;
 
     /// <summary>Результат розрахунку для агрегації.</summary>
