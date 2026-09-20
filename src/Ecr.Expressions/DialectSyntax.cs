@@ -89,7 +89,12 @@ public sealed record DialectSyntax(
     /// </param>
     public static DialectSyntax Of(
         ExpressionDialect dialect, ExpressionParseMode mode = ExpressionParseMode.Editor)
-        => dialect == ExpressionDialect.Template
-            ? TemplateSyntax
-            : mode == ExpressionParseMode.Import ? MethodologyImportSyntax : MethodologySyntax;
+        => dialect switch
+        {
+            // ⚠ Діалект звітів — граматика ШАБЛОНІВ (кома, `^` — степінь): чужого
+            // рушія, який треба відтворювати, у нього немає. Режим імпорту до
+            // нього не застосовний: голе ім'я лишається помилкою.
+            ExpressionDialect.Template or ExpressionDialect.Report => TemplateSyntax,
+            _ => mode == ExpressionParseMode.Import ? MethodologyImportSyntax : MethodologySyntax,
+        };
 }

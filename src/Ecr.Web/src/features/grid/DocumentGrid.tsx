@@ -42,6 +42,7 @@ import {
   type GridSelection,
 } from './selection';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
@@ -568,6 +569,31 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return map;
   }, [lookupRegistryCodes, lookupEntriesQueries]);
 
+  /*
+   * ⛔ Відмова довідника — НЕ те саме, що «довідник ще їде» і не те саме, що
+   * «колонку налаштовано без довідника». Коментар нижче (`gridColumns`) каже
+   * правильну річ: редактор деградує до порожнього переліку, а не падає — і це
+   * лишається. Але третій випадок — сервер ВІДМОВИВ — потрапляв у ту саму
+   * гілку мовчки, і саме він коштує найдорожче.
+   *
+   * ⚠ Чому дорожче за решту цього класу: це єдине місце, яке щодня бачить
+   * ОПЕРАТОР, а не адміністратор. Порожній список у комірці `Lookup` він читає
+   * як «довідник не наповнили» — і або зупиняє заповнення й пише
+   * конфігураторові неправдиву скаргу, або (комірка ж деградувала до тексту)
+   * вписує значення руками, і в документ їде рядок, якого в довіднику немає.
+   *
+   * ⚠ Банер, а не тост: тост зникає за кілька секунд, а заповнення аркуша йде
+   * годинами. Комірки при цьому лишаються робочими — відмова довідника не
+   * привід забрати в оператора решту таблиці.
+   */
+  const lookupError =
+    registriesList.error ?? lookupEntriesQueries.find((query) => query.error !== null)?.error ?? null;
+
+  const refetchLookups = (): void => {
+    void registriesList.refetch();
+    lookupEntriesQueries.forEach((query) => void query.refetch());
+  };
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -985,6 +1011,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     >
       {() => (
     <Stack gap="xs" onPaste={onPaste} onCopy={onCopy} onKeyDown={onKeyDown}>
+      {/*
+       * ⛔ Перше, що видно: довідник не завантажився. Раніше тут не було
+       * НІЧОГО — випадний список у комірці просто ставав порожнім, і оператор
+       * читав це як «довідник не наповнили».
+       */}
+      {lookupError !== null && <ErrorAlert error={lookupError} onRetry={refetchLookups} />}
+
       <Group gap="xs" key={historyRevision}>
         <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
           {t('grid.undo')}

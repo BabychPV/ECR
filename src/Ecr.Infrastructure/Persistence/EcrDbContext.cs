@@ -1,6 +1,7 @@
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Entities.Notifications;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
@@ -138,6 +139,11 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Позиції відновлюваних сканувань (див. <see cref="ScanCursor"/>).</summary>
     public DbSet<ScanCursor> ScanCursors => Set<ScanCursor>();
+
+    // Сповіщення, налаштовані в застосунку (BE-32): канали й правила — sys_ecr, журнал доставок — itg.
+    public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
+    public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();
+    public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
 
     // doc — індекс фільтрів
     public DbSet<DocumentIndexValue> DocumentIndexValues => Set<DocumentIndexValue>();

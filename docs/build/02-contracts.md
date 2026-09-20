@@ -163,7 +163,9 @@ public enum ExpressionDialect : byte
     /// <summary>Формули шаблону: 11 Excel-сумісних функцій, посилання на аркуші й рядки.</summary>
     Template = 0,
     /// <summary>Формули методології: NCalc-діалект, аргументи <c>@Arg</c>, константи <c>CST.</c>.</summary>
-    Methodology = 1
+    Methodology = 1,
+    /// <summary>Правила звіту (<c>D-52a</c>): колонки рядка зрізу <c>[Code]</c>, параметри <c>@Name</c> (<c>02b</c> §8a).</summary>
+    Report = 2
 }
 
 /// <summary>Рівень результату валідації.</summary>
@@ -1419,6 +1421,21 @@ public interface IBackgroundJobScheduler
 
     /// <summary>Планує задачу за cron-виразом.</summary>
     public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+
+    /// <summary>
+    /// Знімає періодичну задачу за тим самим ключем (тип + payload), яким її
+    /// поставив ScheduleAsync; false — такої не було. Cron у ключ не входить,
+    /// тож повторний ScheduleAsync з новим cron розклад ЗАМІНЮЄ (ФВ-14.3).
+    /// </summary>
+    public Task<bool> UnscheduleAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+
+    /// <summary>
+    /// Перевіряє cron Quartz: 6 полів (секунди хвилини години день місяць
+    /// день-тижня) + необов'язковий рік, напр. «0 15 2 * * ?». Unix-cron із
+    /// 5 полів не приймається. ScheduleAsync з невалідним виразом кидає
+    /// ArgumentException до звернення до планувальника.
+    /// </summary>
+    public bool IsValidCron(string expression, out string? error);
 
     /// <summary>Скасовує задачу.</summary>
     public Task CancelAsync(string jobId, CancellationToken ct);

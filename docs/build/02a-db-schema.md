@@ -2411,6 +2411,58 @@ CREATE TABLE itg.NotificationOutbox
     CONSTRAINT PK_NotificationOutbox PRIMARY KEY (Id)
 );
 
+-- Сповіщення, що налаштовуються в застосунку (BE-32, міграція
+-- BE32NotificationTables). ⚠ Канал і правило лежать у sys_ecr, але, на відміну
+-- від решти цієї схеми (§2, 08-system-tables.sql), мають доменні сутності й
+-- створюються МІГРАЦІЄЮ EF. Усі три таблиці починаються порожніми.
+CREATE TABLE sys_ecr.NotificationChannel
+(
+    Id               int            IDENTITY(1,1) NOT NULL,
+    Kind             tinyint        NOT NULL,   -- NotificationChannelKind: 1 Smtp, 2 TeamsWebhook
+    Name             nvarchar(100)  NOT NULL,
+    IsEnabled        bit            NOT NULL DEFAULT(1),
+    SettingsJson     nvarchar(max)  NOT NULL,   -- НЕсекретне: host, port, useTls, from, recipients[] | заголовок картки Teams
+    SecretProtected  varbinary(max) NULL,       -- пароль SMTP | URL вебхука; блоб DataProtection. API його НЕ повертає
+    RowVersion       rowversion     NOT NULL,
+    ModifiedAt       datetime2(3)   NOT NULL,
+    ModifiedByUserId int            NULL,       -- зовнішнього ключа немає
+    CONSTRAINT PK_NotificationChannel PRIMARY KEY (Id),
+    CONSTRAINT CK_NotificationChannel_Kind CHECK (Kind IN (1, 2))
+);
+CREATE UNIQUE INDEX UQ_NotificationChannel_Name ON sys_ecr.NotificationChannel (Name);
+
+-- Клітинка матриці «подія × канал».
+CREATE TABLE sys_ecr.NotificationRule
+(
+    Id          int     IDENTITY(1,1) NOT NULL,
+    EventKind   tinyint NOT NULL,   -- NotificationEventKind: 1 JobFailed, 2 ConsistencyIssuesFound,
+                                    -- 3 PartitionsRunningOut, 4 CollectionFailed, 5 ExportFailed
+    ChannelId   int     NOT NULL,
+    MinSeverity tinyint NOT NULL,   -- NotificationSeverity: 0 Info, 1 Warning, 2 Error
+    IsEnabled   bit     NOT NULL DEFAULT(1),
+    CONSTRAINT PK_NotificationRule PRIMARY KEY (Id),
+    CONSTRAINT FK_NotificationRule_Channel FOREIGN KEY (ChannelId) REFERENCES sys_ecr.NotificationChannel (Id)
+);
+CREATE UNIQUE INDEX UQ_NotificationRule_EventChannel ON sys_ecr.NotificationRule (EventKind, ChannelId);
+CREATE INDEX IX_NotificationRule_Channel ON sys_ecr.NotificationRule (ChannelId);
+
+-- Журнал доставок: лише вставка (у сутності немає методів зміни; тригера немає —
+-- як і в wf.ApprovalEvent). ⚠ Зовнішнього ключа на канал немає навмисно: журнал
+-- мусить пережити видалення каналу.
+CREATE TABLE itg.NotificationDelivery
+(
+    Id        bigint        IDENTITY(1,1) NOT NULL,
+    At        datetime2(3)  NOT NULL,
+    ChannelId int           NOT NULL,
+    EventKind tinyint       NOT NULL,
+    EventKey  nvarchar(200) NOT NULL,   -- ключ дедуплікації (BE-34)
+    Status    tinyint       NOT NULL,   -- NotificationDeliveryStatus: 1 Sent, 2 Failed, 3 Suppressed
+    Error     nvarchar(400) NULL,       -- без стека й без секрету
+    CONSTRAINT PK_NotificationDelivery PRIMARY KEY (Id),
+    CONSTRAINT CK_NotificationDelivery_Status CHECK (Status IN (1, 2, 3))
+);
+CREATE INDEX IX_NotificationDelivery_Dedup ON itg.NotificationDelivery (ChannelId, EventKey, At DESC);
+
 -- Розподілений кеш ASP.NET Core.
 --
 -- ⛔ Таблиця НЕ наша за формою: її вигляд задає SqlServerCache, і міняти в ній
@@ -2825,7 +2877,8 @@ USING (VALUES
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
-  (N'System.ManageLocalization', N'System',     0)
+  (N'System.ManageLocalization', N'System',     0),
+  (N'System.ManageNotifications', N'System',    1)   -- BE-32: небезпечне, як Integration.Manage
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)

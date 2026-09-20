@@ -68,7 +68,8 @@ public sealed class ExpressionsController(
                     request.TemplateVersionId,
                     request.TableDefId,
                     request.RowKey,
-                    request.ColumnDefId),
+                    request.ColumnDefId,
+                    request.Report),
                 ct)
             .ConfigureAwait(false);
 
@@ -107,10 +108,12 @@ public sealed class ExpressionsController(
 /// <param name="TableDefId">Таблиця, в якій живе вираз.</param>
 /// <param name="RowKey">Рядок формули; <c>null</c> для формул рівня колонки.</param>
 /// <param name="ColumnDefId">Колонка — для підстановки <c>{Month}</c>.</param>
+/// <param name="Report">Оточення діалекту <c>Report</c>: колонки, параметри, очікуваний тип.</param>
 public sealed record ValidateExpressionBody(
     string Expression,
     ExpressionDialect Dialect,
     int? TemplateVersionId,
     int? TableDefId,
     string? RowKey,
-    int? ColumnDefId);
+    int? ColumnDefId,
+    ReportExpressionContext? Report = null);

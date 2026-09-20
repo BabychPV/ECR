@@ -68,6 +68,22 @@ public sealed class CollectionSchedule : Entity<int>
         }
     }
 
+    /// <summary>Змінює cron розкладу.</summary>
+    /// <param name="cronExpression">Новий вираз.</param>
+    /// <remarks>
+    /// ⚠ Формат домен НЕ перевіряє — як і конструктор: синтаксис cron належить
+    /// планувальнику (інфраструктура). Перевіряє прикладний шар через
+    /// <c>IBackgroundJobScheduler.IsValidCron</c> ДО виклику цього методу.
+    /// </remarks>
+    public void Reschedule(string cronExpression)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(cronExpression);
+        CronExpression = cronExpression.Trim();
+    }
+
+    /// <summary>Вмикає розклад.</summary>
+    public void Enable() => IsEnabled = true;
+
     /// <summary>Вимикає розклад; сутність лишається налаштованою.</summary>
     public void Disable() => IsEnabled = false;
 }

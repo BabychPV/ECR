@@ -153,12 +153,58 @@ public sealed partial class RecurringScheduleService(
             .Where(s => s.IsEnabled)
             .OrderBy(s => s.Id)
             .Take(MaxCollectionSchedules)
-            .Select(s => new { s.SourceEntityId, s.CronExpression })
             .ToListAsync()
             .ConfigureAwait(false);
 
+        var applied = await ApplyCollectionSchedulesAsync(
+                schedules,
+                scheduler,
+                scope.ServiceProvider.GetRequiredService<Application.Integration.CollectionScheduleApplier>(),
+                logger,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+        LogSchedulesDone(logger, applied, nightlyRecalcCount);
+    }
+
+    /// <summary>
+    /// Ставить розклади збору; повертає, скільки поставлено.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Невалідний cron ОДНОГО розкладу старту НЕ валить: розклад
+    /// пропускається з помилкою в журналі, решта ставляться. Відколи cron
+    /// редагується з інтерфейсу, інакше одна описка була б «кнопкою зламати
+    /// прод із затримкою» — до найближчого перезапуску. Збій САМОГО
+    /// планувальника — як і раніше виняток, і старт він валить.
+    /// </remarks>
+    public static async Task<int> ApplyCollectionSchedulesAsync(
+        IReadOnlyList<Domain.Entities.External.CollectionSchedule> schedules,
+        IBackgroundJobScheduler scheduler,
+        Application.Integration.CollectionScheduleApplier applier,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(schedules);
+        ArgumentNullException.ThrowIfNull(scheduler);
+        ArgumentNullException.ThrowIfNull(applier);
+
+        // ⚠ Рівно стеля — майже напевно обрізано: `.Take()` мовчить про решту.
+        if (schedules.Count >= MaxCollectionSchedules)
+        {
+            LogCollectionSchedulesTruncated(logger, MaxCollectionSchedules);
+        }
+
+        var applied = 0;
+
         foreach (var schedule in schedules)
         {
+            if (!scheduler.IsValidCron(schedule.CronExpression, out var cronError))
+            {
+                LogCollectionCronInvalid(
+                    logger, schedule.SourceEntityId, schedule.CronExpression, cronError ?? string.Empty);
+                continue;
+            }
+
             // ⛔ Q-235: тут мав бути порт `ICollectionJob`, а не конкретний
             // клас `Infrastructure.Jobs.CollectionJob`. DI реєструє задачу
             // ЛИШЕ під портом (`DependencyInjection.cs`:
@@ -174,17 +220,27 @@ public sealed partial class RecurringScheduleService(
             // відбувався ЖОДНОГО разу: ні ретраїв, ні `itg.CollectionRun`, ні
             // рядка в зведенні `NotificationJob` — збір мовчав місяцями, а не
             // «затримувався» (ФВ-11.3 порушено найгіршим способом: тиша
-            // замість затримки).
-            await scheduler
-                .ScheduleAsync<ICollectionJob>(
-                    schedule.CronExpression,
-                    new Application.Integration.CollectionTask(schedule.SourceEntityId, null, null),
-                    CancellationToken.None)
-                .ConfigureAwait(false);
+            // замість затримки). Тепер тип і payload знає лише
+            // `CollectionScheduleApplier` — той самий, що його кличе редагування.
+            await applier.ApplyAsync(schedule, ct).ConfigureAwait(false);
+            applied++;
         }
 
-        LogSchedulesDone(logger, schedules.Count, nightlyRecalcCount);
+        return applied;
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Старт: розклад збору сутності {SourceEntityId} ПРОПУЩЕНО — невалідний cron "
+            + "«{CronExpression}»: {CronError}. Збір за ним не відбувається, доки cron не виправлять.")]
+    private static partial void LogCollectionCronInvalid(
+        ILogger logger, int sourceEntityId, string cronExpression, string cronError);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Старт: увімкнених розкладів збору не менше за стелю {Max} — перелік обрізано, "
+            + "решта розкладів НЕ поставлена.")]
+    private static partial void LogCollectionSchedulesTruncated(ILogger logger, int max);
 
     [LoggerMessage(
         Level = LogLevel.Information,

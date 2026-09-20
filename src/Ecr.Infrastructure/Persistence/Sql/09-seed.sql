@@ -80,7 +80,12 @@ USING (VALUES
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
-  (N'System.ManageLocalization', N'System',     0)
+  (N'System.ManageLocalization', N'System',     0),
+  -- НЕБЕЗПЕЧНЕ (1), як `Integration.Manage`: носій вирішує, КУДИ сервер шле
+  -- повідомлення про збої (адресати SMTP, URL вебхука), і замінює секрети
+  -- каналів. Тому шаблон `%` системного адміністратора його не роздає —
+  -- видається свідомо, зі слідом у журналі безпеки (`BE-32`).
+  (N'System.ManageNotifications', N'System',    1)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -2194,6 +2199,8 @@ USING (VALUES
     -- ПОВІДОМЛЕННЯ в редакторі формул, а не смерть процесу від
     -- StackOverflowException, якого в .NET не перехоплює жоден catch.
     (N'expr.nestingTooDeep',                   N'en', N'The expression is nested deeper than {max} levels.', 1),
+    -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
+    (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
 
     -- /admin/health (`Q-304`): статуси перевірок будувалися одразу готовим
     -- українським реченням (`HealthCheckResult.Description`) — не через
