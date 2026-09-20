@@ -143,34 +143,39 @@ describe('Розрізнення станів БЕЗ кольору (ФВ-14.18)
 });
 
 describe('Округлення при вставці (ФВ-9.16c, D-116)', () => {
+  // ⚠ Вхід і вихід `roundToScale` — РЯДОК (2026-09-20): число тут уже пройшло
+  // б через `Number(text)` і втратило знаки, яких у `decimal(25,16)` рівно
+  // шістнадцять. Повний доказ — у `rounding.test.ts`; нижче лишається те, що
+  // цей файл і перевіряв: зв'язок стану комірки з округленням.
+
   it('ФВ-9.16c: значення, що вкладається в масштаб, не округлюється і не позначається', () => {
     // ⛔ `null` тут значуще: позначка ставиться ЛИШЕ на змінені комірки,
     // інакше лічильник «округлено N значень» показував би всю таблицю.
-    expect(roundToScale(12.34, column({ scale: 2 }))).toBeNull();
+    expect(roundToScale('12.34', column({ scale: 2 }))).toBeNull();
   });
 
   it('ФВ-9.16b: зайві знаки округлюються до масштабу колонки', () => {
-    expect(roundToScale(12.3456, column({ scale: 2 }))).toBe(12.35);
+    expect(roundToScale('12.3456', column({ scale: 2 }))).toBe('12.35');
   });
 
   it("від'ємне значення округлюється від нуля — як на сервері", () => {
     // ⛔ `Math.round(-2.5)` дає −2 (до +∞), а .NET з `AwayFromZero` — −3.
     // Розбіжність в один знак означала б, що клієнт надішле число, яке сервер
     // вважатиме неокругленим, і вставка відхилиться там, де мала пройти.
-    expect(roundToScale(-2.5, column({ scale: 0 }))).toBe(-3);
-    expect(roundToScale(2.5, column({ scale: 0 }))).toBe(3);
+    expect(roundToScale('-2.5', column({ scale: 0 }))).toBe('-3');
+    expect(roundToScale('2.5', column({ scale: 0 }))).toBe('3');
   });
 
   it('половина на межі подвійної точності округлюється вгору', () => {
     // `1.005 * 100` у подвійній точності дає 100.49999999999999.
-    expect(roundToScale(1.005, column({ scale: 2 }))).toBe(1.01);
+    expect(roundToScale('1.005', column({ scale: 2 }))).toBe('1.01');
   });
 
   it('колонка без масштабу не округлюється', () => {
-    expect(roundToScale(12.3456, column({ scale: null }))).toBeNull();
+    expect(roundToScale('12.3456', column({ scale: null }))).toBeNull();
   });
 
   it('нечислова колонка не округлюється', () => {
-    expect(roundToScale(12.3456, column({ dataType: 'Text', scale: 2 }))).toBeNull();
+    expect(roundToScale('12.3456', column({ dataType: 'Text', scale: 2 }))).toBeNull();
   });
 });

@@ -663,21 +663,32 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         const column = byCode.get(target.columnCode);
         const value = coerce(target.value, column?.dataType);
 
-        if (typeof value === 'number' && column !== undefined) {
-          const fixed = roundToScale(value, column);
+        if (column !== undefined) {
+          // ⛔ Сюди йде СИРИЙ текст буфера, а не `coerce`-нуте число:
+          // `Number(text)` уже втратив би знаки, яких у `decimal(25,16)`
+          // рівно шістнадцять (`rounding.ts`).
+          const fixed = roundToScale(target.value, column);
 
           if (fixed !== null) {
+            // ⚠ БОРГ, прив'язаний до контракту: `PendingEdit.value` і
+            // `RoundedCell.applied` — число, бо сервер десяткове рядком ще не
+            // приймає (`JsonConverter<decimal>` додається окремо). Рядковий
+            // шлях округлення вже є; лишилося дати йому доїхати до мережі —
+            // тоді цей `Number(...)` зникає, і межа відправлення перестає
+            // бути другою точкою втрати точності.
+            const applied = Number(fixed);
+
             roundedNow.push({
               rowKey: target.rowKey,
               columnCode: target.columnCode,
               original: target.value,
-              applied: fixed,
+              applied,
             });
 
             return {
               rowKey: target.rowKey,
               columnCode: target.columnCode,
-              value: fixed,
+              value: applied,
               isEmpty: false,
               baseVersion: versions.get(target.rowKey) ?? null,
             };
