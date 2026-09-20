@@ -2,6 +2,7 @@
 import { Center, Code, Skeleton, Stack, Text, Title, VisuallyHidden } from '@mantine/core';
 import { EcrApiError } from '@/api/client';
 import { ErrorAlert } from './ErrorAlert';
+import { logSuppressedDetail, problemText } from './problemText';
 import { t } from '@/shared/i18n';
 
 /**
@@ -271,16 +272,34 @@ export function ForbiddenState({ error }: { readonly error: EcrApiError }): JSX.
   // сенсу, тому пояснення тут просто немає (як `ErrorAlert`, де `hint`
   // необов'язковий).
   const isRawFallback = error.problem.title === `HTTP ${String(error.problem.status)}`;
-  const title = isRawFallback ? t('err.ECR-AUTH-0403') : error.problem.title;
+  const shown = problemText(error);
+
+  // ⚠ `shown.title`, а не `error.problem.title`: заголовок може прийти
+  // КЛЮЧЕМ (`401` без тіла, див. `problemText`), і тут він має бути вже
+  // текстом — як і в `ErrorAlert`.
+  const title = isRawFallback ? t('err.ECR-AUTH-0403') : shown.title;
+
+  logSuppressedDetail(shown);
 
   return (
     <Center py="xl">
       <Stack gap="xs" align="center" maw={420} role="alert">
         <Title order={4}>{title}</Title>
 
-        {!isRawFallback && (
+        {/*
+          ✎ 2026-09-20. Тут стояв `error.message` — тобто `detail ?? title`
+          без розбору мови. Тепер подробиця береться тим самим хелпером, що
+          й у `ErrorAlert`/`showApiError`: показується лише локалізований
+          сервером текст (є `messageKey`), сирий — у діагностику.
+
+          ⚠ Дві умови, а не одна: `isRawFallback` знімає ДУБЛЮВАННЯ заголовка
+          («HTTP 403» двічі), а `detail !== null` — чужу мову. Це різні
+          причини мовчати, і звести їх в одну означало б, що зникнення рядка
+          більше нічого не пояснює.
+        */}
+        {!isRawFallback && shown.detail !== null && (
           <Text size="sm" c="dimmed" ta="center">
-            {error.message}
+            {shown.detail}
           </Text>
         )}
 
