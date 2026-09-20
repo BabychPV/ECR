@@ -104,6 +104,15 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
 
         var entity = new SourceEntity(dataSource.Id, $"Ent{tag}", RegistrySourceKind.External);
+
+        // ⛔ Неактивне НАВМИСНО, і це не дрібниця оформлення. База тестів спільна
+        // на весь прогін: активне джерело, яке жодного разу не збиралося, для
+        // `SourcesHealthCheck` — прогалина, тобто `Degraded`, і після цього
+        // `HealthTests.Health_ready_зелений…` падає «Expected Healthy, actual
+        // Degraded» у КОЖНОМУ повному прогоні, проходячи поодинці. Саме так воно
+        // й було, і виглядало як плаваючий тест. Розкладу активність не потрібна:
+        // перевіряється запис стану постановки, а не збір.
+        entity.Deactivate();
         db.SourceEntities.Add(entity);
         await db.SaveChangesAsync();
 
