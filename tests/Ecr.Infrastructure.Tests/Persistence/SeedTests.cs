@@ -17,9 +17,9 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 40;
+    private const int ExpectedPermissions = 41;
 
-    private const int ExpectedDangerous = 9;
+    private const int ExpectedDangerous = 10;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -80,6 +80,24 @@ public sealed class SeedTests(SqlServerFixture sql)
         // рядка каталогу.
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.EditDefinition' AND IsDangerous = 1"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Право_на_сповіщення_є_в_каталозі_небезпечне_і_нікому_не_роздане()
+    {
+        // `BE-32`: носій вирішує, куди сервер шле повідомлення, і замінює
+        // секрети каналів — той самий клас, що `Integration.Manage`.
+        Assert.Equal(1, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.Permission
+            WHERE Code = N'System.ManageNotifications' AND [Group] = N'System' AND IsDangerous = 1
+            """));
+
+        // ⛔ Шаблон `%` системного адміністратора його не видає: фільтр
+        // `IsDangerous = 0` стоїть у самому MERGE роздач.
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'System.ManageNotifications'"));
     }
 
     [Fact]
