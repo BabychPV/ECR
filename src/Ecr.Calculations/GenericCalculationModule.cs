@@ -23,7 +23,8 @@ public sealed class GenericCalculationModule(
     ConstantResolver constants,
     CalendarContext calendar,
     IUnitCatalog unitCatalog,
-    IPeriodStore periods) : ICalculationModule
+    IPeriodStore periods,
+    ICalculationBindingStore bindingStore) : ICalculationModule
 {
     private UnitTable? _units;
     /// <inheritdoc />
@@ -65,9 +66,23 @@ public sealed class GenericCalculationModule(
 
         var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
+        // ⚠ Масштаб колонок-приймачів читається ТУТ, разом зі складом версії:
+        // він однаковий для всієї прив'язки, а `ExecuteAsync` кличуть на кожен
+        // рядок (`CAL-06`). Питання йде за `MethodologyId`, а не за версією:
+        // `cfg.CalculationBinding` належить шаблону і переживає всі версії
+        // методології одразу.
+        var scales = await bindingStore
+            .ListOutputScalesAsync(methodology.MethodologyId, ct)
+            .ConfigureAwait(false);
+
         return new CalculationBindingContext(
-            methodology, documentId, periodKey, ordered, substances, outputs, period);
+            methodology, documentId, periodKey, ordered, substances, outputs, period,
+            scales ?? EmptyScales);
     }
+
+    /// <summary>Порожній словник масштабів — усі виходи беруть замовчування.</summary>
+    private static readonly IReadOnlyDictionary<string, byte?> EmptyScales =
+        new Dictionary<string, byte?>(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public async Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct)
@@ -183,11 +198,22 @@ public sealed class GenericCalculationModule(
                     trace.Masked(output.Code, null, number, masked.Reason);
                 }
 
+                // ⛔ Скільки знаків несе результат — КОНФІГУРАЦІЯ КОЛОНКИ, у
+                // яку він потрапляє (рішення людини 2026-09-20), а не спільна
+                // константа рушія. Колонка мовчить — беруться всі шістнадцять
+                // (`NumericPolicy.DefaultOutputScale`), бо саме стільки несе
+                // конвеєр чинної системи; обрізати до шести «на всяк випадок»
+                // означало б змінити число у звіті там, де ніхто про це не
+                // просив.
+                var scale = binding.OutputScales.TryGetValue(output.Code, out var declared)
+                    ? declared
+                    : null;
+
                 values.Add(new CalculationOutputValue(
                     version.MethodologyVersionId,
                     substance is null ? null : checked((int)substance.SubstanceEntryId),
                     output.Code,
-                    numeric.RoundOutput(number),
+                    numeric.RoundOutput(number, scale),
                     output.UnitId));
             }
         }

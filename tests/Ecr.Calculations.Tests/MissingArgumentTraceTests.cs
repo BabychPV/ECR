@@ -81,7 +81,8 @@ public sealed class MissingArgumentTraceTests
             new ConstantResolver(Substitute.For<IConstantStore>()),
             new CalendarContext(),
             Units(),
-            Periods());
+            Periods(),
+            Substitute.For<ICalculationBindingStore>());
 
         var descriptor = new MethodologyDescriptor(
             MethodologyId: 9,

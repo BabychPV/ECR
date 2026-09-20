@@ -44,7 +44,8 @@ public sealed class ArgumentNameCaseTests
             new ConstantResolver(Substitute.For<IConstantStore>()),
             new CalendarContext(),
             Units(),
-            Periods());
+            Periods(),
+            Substitute.For<ICalculationBindingStore>());
 
         var descriptor = new MethodologyDescriptor(
             MethodologyId: 6,

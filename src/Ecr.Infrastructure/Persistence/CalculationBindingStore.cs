@@ -113,5 +113,34 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, byte?>> ListOutputScalesAsync(
+        int methodologyId, CancellationToken ct)
+    {
+        var rows = await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.MethodologyId == methodologyId && binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking()
+                    on binding.ColumnDefId equals column.Id
+                where !column.IsDeleted
+                select new { binding.OutputCode, column.Scale })
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Порівняння кодів — без урахування регістру: `MethodologyOutput.Code`
+        // і `CalculationBinding.OutputCode` — це той самий `EcrCode`, який
+        // СУБД зіставляє за своїм collation, а .NET за замовчуванням — ні.
+        // Ordinal тут означав би «прив'язки немає» на різниці в одній літері.
+        return rows
+            .GroupBy(r => r.OutputCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+
+                // Колонка без масштабу просить усі знаки — вона й перемагає.
+                g => g.Any(r => r.Scale is null) ? (byte?)null : g.Max(r => r.Scale),
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <inheritdoc />
     public void Add(CalculationBinding binding) => db.CalculationBindings.Add(binding);
 }

@@ -55,8 +55,21 @@ public sealed class NumericPolicyTests
         //
         // 0.0000005 на шести знаках: банківське дає 0.000000, від нуля —
         // 0.000001.
-        Assert.Equal(0.000000m, new NumericPolicy(NumericMode.Legacy).RoundOutput(0.0000005m));
-        Assert.Equal(0.000001m, new NumericPolicy(NumericMode.Strict).RoundOutput(0.0000005m));
+        //
+        // ⚠ Шістка тепер приходить ПАРАМЕТРОМ (масштаб колонки-приймача), а не
+        // з константи політики. Числа ті самі навмисно: перехід на
+        // конфігурацію комірки не сміє зсунути межовий випадок «.5» — інакше
+        // разом із кількістю знаків тихо змінилося б і правило округлення.
+        Assert.Equal(0.000000m, new NumericPolicy(NumericMode.Legacy).RoundOutput(0.0000005m, 6));
+        Assert.Equal(0.000001m, new NumericPolicy(NumericMode.Strict).RoundOutput(0.0000005m, 6));
+
+        // Те саме правило на масштабі за замовчуванням: сімнадцятий знак — «5».
+        Assert.Equal(
+            0.0000000000000000m,
+            new NumericPolicy(NumericMode.Legacy).RoundOutput(0.00000000000000005m, null));
+        Assert.Equal(
+            0.0000000000000001m,
+            new NumericPolicy(NumericMode.Strict).RoundOutput(0.00000000000000005m, null));
     }
 
     [Fact]
@@ -78,10 +91,32 @@ public sealed class NumericPolicyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Вихідних_знаків_шість()
+    public void Без_масштабу_колонки_знаків_шістнадцять()
     {
-        // ⚠ Шість — це ПОДАННЯ. Конвеєр чинної системи несе шістнадцять:
-        // проміжні колонки газового складу оголошені `decimal(25,16)`.
-        Assert.Equal(6, new NumericPolicy(NumericMode.Legacy).OutputScale);
+        // ⛔ Шістнадцять закріплене ЛІТЕРАЛОМ, а не посиланням на ту саму
+        // константу: `Assert.Equal(NumericPolicy.DefaultOutputScale, …)`
+        // рухалося б разом із нею і лишило б набір зеленим після заміни 16 на
+        // будь-що інше. Число — вимога (рішення людини 2026-09-20: «має бути
+        // 16 знаків у звіті»), а не деталь реалізації.
+        Assert.Equal(16, NumericPolicy.DefaultOutputScale);
+
+        // І те саме як поведінка, а не як константа: сімнадцятий знак зрізано,
+        // шістнадцятий на місці.
+        Assert.Equal(
+            0.1234567890123456m,
+            new NumericPolicy(NumericMode.Strict).RoundOutput(0.12345678901234561m, null));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Масштаб_колонки_має_перевагу_над_замовчуванням()
+    {
+        // Колонка, оголошена з двома знаками, отримує два — інакше її
+        // конфігурація не означала б нічого.
+        Assert.Equal(0.13m, new NumericPolicy(NumericMode.Strict).RoundOutput(0.125m, 2));
+
+        // ⚠ Контрольний випадок: те саме число без масштабу колонки лишається
+        // як є. Без нього тест вище проходив би й на «завжди два знаки».
+        Assert.Equal(0.125m, new NumericPolicy(NumericMode.Strict).RoundOutput(0.125m, null));
     }
 }

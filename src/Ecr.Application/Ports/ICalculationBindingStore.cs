@@ -110,6 +110,33 @@ public interface ICalculationBindingStore
     public Task<IReadOnlySet<int>> ListBoundColumnIdsAsync(
         int templateVersionId, CancellationToken ct);
 
+    /// <summary>
+    /// Код виходу методології → масштаб колонки, у яку цей вихід потрапляє
+    /// (<c>cfg.ColumnDef.Scale</c>).
+    /// </summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Коди активно прив'язаних виходів; значення <c>null</c> — колонка
+    /// масштабу не оголошує. Виходу без жодної активної прив'язки в результаті
+    /// немає взагалі.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Питання ставиться саме сховищу, а не знімку метаданих: скільки знаків
+    /// несе результат — це конфігурація колонки-приймача (рішення людини
+    /// 2026-09-20), а зв'язок «вихід → колонка» живе лише в
+    /// <c>cfg.CalculationBinding</c>, якого в <c>TemplateVersionSnapshot</c>
+    /// немає.
+    ///
+    /// ⛔ Один вихід може бути прив'язаний до КІЛЬКОХ колонок (різні таблиці,
+    /// різні шаблони). Округлювати за найвужчою з них означало б, що колонка з
+    /// двома знаками мовчки ріже число і для тієї, яка просила шістнадцять, —
+    /// тому береться найширший масштаб, а колонка без оголошеного масштабу
+    /// (тобто «усі знаки») перемагає будь-яке число.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, byte?>> ListOutputScalesAsync(
+        int methodologyId, CancellationToken ct);
+
     /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);

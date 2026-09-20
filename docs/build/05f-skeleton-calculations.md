@@ -263,6 +263,14 @@ public sealed class NumericPolicy(NumericMode mode)
 }
 ```
 
+✎ **2026-09-20: `OutputScale` властивістю більше немає** (`D-148`, пряме
+рішення людини: «має бути 16 знаків у звіті, це конфігурація комірки»).
+У чинному коді `RoundOutput(value, scale)` приймає масштаб ПАРАМЕТРОМ —
+`cfg.ColumnDef.Scale` колонки-приймача, а за її мовчання
+`NumericPolicy.DefaultOutputScale = 16`. Скелет лишено як є: він описує стан
+до реалізації, і правити його заднім числом означало б стерти, звідки
+взялася шістка.
+
 ---
 
 ### `src/Ecr.Calculations/CalculationInputBuilder.cs`
