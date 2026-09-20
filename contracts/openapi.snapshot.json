@@ -2304,7 +2304,8 @@
         "description": "Діалект виразу. Визначає набір дозволених функцій і посилань.",
         "enum": [
           "Template",
-          "Methodology"
+          "Methodology",
+          "Report"
         ]
       },
       "ExpressionFunctionDto": {
@@ -5846,6 +5847,44 @@
         ],
         "type": "object"
       },
+      "ReportExpressionContext": {
+        "description": "На що може послатися правило звіту і що воно має повернути.",
+        "properties": {
+          "columns": {
+            "description": "Колонки рядка зрізу — `[Code]`.",
+            "items": {
+              "$ref": "#/components/schemas/ReportSymbolDeclaration"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "expectedType": {
+            "description": "Очікуваний тип результату: `Boolean` для умови `when`; `null` — довільний.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "parameters": {
+            "description": "Параметри звіту — `@Name`.",
+            "items": {
+              "$ref": "#/components/schemas/ReportSymbolDeclaration"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "columns",
+          "parameters",
+          "expectedType"
+        ],
+        "type": "object"
+      },
       "ReportRulesCommand": {
         "description": "Правила відбору рядків зрізу.",
         "properties": {
@@ -5929,6 +5968,24 @@
           "rowCount",
           "contentHash",
           "builtAt"
+        ],
+        "type": "object"
+      },
+      "ReportSymbolDeclaration": {
+        "description": "Оголошення колонки або параметра.",
+        "properties": {
+          "name": {
+            "description": "Код колонки або ім'я параметра (без `@`).",
+            "type": "string"
+          },
+          "type": {
+            "description": "`Number`, `Text`, `Boolean` або `Date`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
         ],
         "type": "object"
       },
@@ -8920,6 +8977,17 @@
           "expression": {
             "description": "Текст виразу.",
             "type": "string"
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportExpressionContext",
+                "description": "Оточення діалекту `Report`: колонки, параметри, очікуваний тип."
+              }
+            ]
           },
           "rowKey": {
             "description": "Рядок формули; `null` для формул рівня колонки.",

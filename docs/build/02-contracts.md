@@ -163,7 +163,9 @@ public enum ExpressionDialect : byte
     /// <summary>Формули шаблону: 11 Excel-сумісних функцій, посилання на аркуші й рядки.</summary>
     Template = 0,
     /// <summary>Формули методології: NCalc-діалект, аргументи <c>@Arg</c>, константи <c>CST.</c>.</summary>
-    Methodology = 1
+    Methodology = 1,
+    /// <summary>Правила звіту (<c>D-52a</c>): колонки рядка зрізу <c>[Code]</c>, параметри <c>@Name</c> (<c>02b</c> §8a).</summary>
+    Report = 2
 }
 
 /// <summary>Рівень результату валідації.</summary>

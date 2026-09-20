@@ -151,6 +151,16 @@ public sealed class GetExpressionMetadataHandler(
             ];
         }
 
+        if (dialect == ExpressionDialect.Report)
+        {
+            return
+            [
+                .. ReportFunctions.Names
+                    .OrderBy(name => name, StringComparer.Ordinal)
+                    .Select(name => Function(name, ReportFunctions.Find(name), FunctionTier.Core)),
+            ];
+        }
+
         return
         [
             .. DialectCatalog.Names

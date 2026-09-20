@@ -10474,7 +10474,7 @@ export interface components {
          * @description Діалект виразу. Визначає набір дозволених функцій і посилань.
          * @enum {unknown}
          */
-        ExpressionDialect: "Template" | "Methodology";
+        ExpressionDialect: "Template" | "Methodology" | "Report";
         /** @description Функція діалекту та її сигнатура. */
         ExpressionFunctionDto: {
             /** @description Чи приймає діапазон рядків замість скалярів. */
@@ -12121,6 +12121,15 @@ export interface components {
             /** @description Версії, найновіша першою. */
             versions: components["schemas"]["ReportVersionDto"][];
         };
+        /** @description На що може послатися правило звіту і що воно має повернути. */
+        ReportExpressionContext: {
+            /** @description Колонки рядка зрізу — `[Code]`. */
+            columns: null | components["schemas"]["ReportSymbolDeclaration"][];
+            /** @description Очікуваний тип результату: `Boolean` для умови `when`; `null` — довільний. */
+            expectedType: null | string;
+            /** @description Параметри звіту — `@Name`. */
+            parameters: null | components["schemas"]["ReportSymbolDeclaration"][];
+        };
         /** @description Правила відбору рядків зрізу. */
         ReportRulesCommand: {
             /** @description Звідки беруться рядки. Єдине відоме будівнику значення —
@@ -12170,6 +12179,13 @@ export interface components {
             rowCount: number;
             /** @description Статус даних зрізу (D-65). */
             status: string;
+        };
+        /** @description Оголошення колонки або параметра. */
+        ReportSymbolDeclaration: {
+            /** @description Код колонки або ім'я параметра (без `@`). */
+            name: string;
+            /** @description `Number`, `Text`, `Boolean` або `Date`. */
+            type: string;
         };
         /** @description Версія опису звіту. */
         ReportVersionDto: {
@@ -13608,6 +13624,7 @@ export interface components {
             dialect: components["schemas"]["ExpressionDialect"];
             /** @description Текст виразу. */
             expression: string;
+            report?: null | components["schemas"]["ReportExpressionContext"];
             /** @description Рядок формули; `null` для формул рівня колонки. */
             rowKey: null | string;
             /**

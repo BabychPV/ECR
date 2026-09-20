@@ -2194,6 +2194,8 @@ USING (VALUES
     -- ПОВІДОМЛЕННЯ в редакторі формул, а не смерть процесу від
     -- StackOverflowException, якого в .NET не перехоплює жоден catch.
     (N'expr.nestingTooDeep',                   N'en', N'The expression is nested deeper than {max} levels.', 1),
+    -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
+    (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
 
     -- /admin/health (`Q-304`): статуси перевірок будувалися одразу готовим
     -- українським реченням (`HealthCheckResult.Description`) — не через
