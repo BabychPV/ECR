@@ -1,7 +1,6 @@
 import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
 import {
   Alert,
-  Badge,
   Button,
   Code,
   Group,
@@ -46,6 +45,7 @@ import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
@@ -332,7 +332,24 @@ export function MethodologyVersionsPage(): JSX.Element {
                 <Table.Tr key={version.id}>
                   <Table.Td>{version.versionNumber}</Table.Td>
                   <Table.Td>
-                    <Badge variant={version.isEditable ? 'light' : 'filled'}>{version.status}</Badge>
+                    {/*
+                     * ⛔ Тут стояв `<Badge variant={version.isEditable ? …}>
+                     * {version.status}</Badge>` — дві вади в одному рядку. Код
+                     * сервера (`Draft`, `Published`, `Deprecated`) друкувався
+                     * як видимий текст; а колір ніс `isEditable`, тобто
+                     * означав «чи можна правити», а не статус — застаріла
+                     * версія й чернетка різнилися не тим, чим вони є.
+                     *
+                     * ⚠ `statusTable.version` навмисно один на обидва
+                     * словники: `TemplateVersion.Status` і
+                     * `MethodologyVersion.Status` — це той самий перелік
+                     * (`StatusBadge.tsx`), тож і підпис у них один.
+                     *
+                     * ⚠ Що саме можна робити з версією, каже колонка дій
+                     * праворуч, і це чесніше: право залежить не лише від
+                     * стану, а й від профілю (`mayEditContent`).
+                     */}
+                    <StatusBadge kind="version" state={version.status} />
                   </Table.Td>
                   <Table.Td>
                     {/* ⚠ Режими стоять поруч зі статусом, а не в налаштуваннях:
@@ -588,7 +605,11 @@ export function MethodologyVersionsPage(): JSX.Element {
             value={copyFrom}
             data={all.map((version) => ({
               value: String(version.id),
-              label: `${version.versionNumber} · ${version.status}`,
+              // ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
+              // Тому підпис береться тим самим ключем каталогу, яким малює
+              // `StatusBadge`: інакше та сама версія називалася б у таблиці
+              // мовою користувача, а тут — англійським `Published`.
+              label: `${version.versionNumber} · ${t(statusKey('version', version.status))}`,
             }))}
             onChange={setCopyFrom}
           />
