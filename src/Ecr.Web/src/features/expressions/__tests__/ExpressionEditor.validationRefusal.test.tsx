@@ -60,8 +60,15 @@ function validationRefusal(): EcrApiError {
  * `DOMException`. А код дає дзеркалу прив'язатися до банера точно: `role`
  * `alert` у Mantine носить не лише потрібний банер, і шукати за роллю означало
  * б твердження, яке не відрізняє один банер від іншого.
+ *
+ * ⚠ Код мусить бути з КАТАЛОГУ (`ErrorCodes.cs`), хоч він тут і принада:
+ * сторож `ClientErrorCodeTests.Клієнт_не_згадує_кодів_яких_немає_в_каталозі`
+ * читає ВЕСЬ `src/Ecr.Web/src`, не розрізняючи продукт і тест. Вигаданий
+ * `ECR-SYS-0499` червонив гейти `test` і `server` на спільній гілці. Беремо
+ * `ECR-SYS-0503` — чинний код, і саме тому, що він НЕ той, що в `refusal()`:
+ * дзеркало й далі відрізняє скасування від відмови.
  */
-const AbortDecoyCode = 'ECR-SYS-0499';
+const AbortDecoyCode = 'ECR-SYS-0503';
 
 function abortRefusal(): EcrApiError {
   const error = new EcrApiError({
@@ -71,7 +78,7 @@ function abortRefusal(): EcrApiError {
     detail: 'запит скасовано',
     errorCode: AbortDecoyCode,
     correlationId: 'cid-expr-validate-abort',
-    extensions2: { messageKey: 'err.ECR-SYS-0499.contactAdmin' },
+    extensions2: { messageKey: 'err.ECR-SYS-0503.contactAdmin' },
   });
 
   error.name = 'AbortError';
