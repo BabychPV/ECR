@@ -1465,6 +1465,15 @@ USING (VALUES
     (N'periods.reopenUntil',             N'en', N'Open until', 1),
     (N'periods.reopenUntilHint',         N'en', N'Leave empty to reopen until the end of the site day — the period closes itself at midnight.', 1),
 
+    -- ⚠ Окремий рядок, а не позичений `periods.reopenedUntil`: причина відмови
+    -- і підпис стану — різні твердження, і другий у ролі першого читається як
+    -- «період відкрито до…», хоча його ще не відкривали.
+    -- ⛔ Сервер минулий строк НЕ відхиляє (`Period.Reopen`): період пішов би в
+    -- `Grace` із межею в минулому і закрився наступним прогоном `PeriodStateJob`
+    -- — мовчки. Тобто клієнтський запобіжник тут не дублює сервер, а закриває
+    -- те, чого на сервері немає.
+    (N'periods.reopenUntilPast',         N'en', N'The chosen date has already passed: a window that ends in the past closes the period straight away.', 1),
+
     -- Безпека: ролі, користувачі, перегляд чужими правами.
     (N'security.createRole',             N'en', N'New role', 1),
     (N'security.roleCreated',            N'en', N'The role has been created. Grants say which projects it opens.', 1),
