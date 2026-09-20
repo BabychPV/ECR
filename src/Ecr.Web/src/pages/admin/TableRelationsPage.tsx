@@ -20,6 +20,7 @@ import {
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 
@@ -188,14 +189,33 @@ export function TableRelationsPage(): JSX.Element {
           <Stack gap="sm">
             <Text fw={600}>{t('tables.relationForm')}</Text>
 
-            <RelationForm
-              draft={draft}
-              tables={tables}
-              disabled={!editable}
-              saving={save.isPending}
-              onChange={setDraft}
-              onSubmit={() => save.mutate(draft)}
-            />
+            {/*
+              ⛔ Директива D15 §0, правило L10: перелік таблиць збирався як
+              `tableOptions(structure.data)`, тож відмова `GET …/structure`
+              давала ПОРОЖНІ переліки «таблиця-джерело» й «таблиця-ціль».
+              Читається це однозначно й хибно — «у цій версії таблиць немає»,
+              — і адміністратор іде перевіряти структуру версії замість
+              повторити запит. Межа (`AsyncBoundary` вище) стосується ЗВ'ЯЗКІВ,
+              а не структури, і цієї відмови не показувала ніде.
+
+              ⚠ Форма не малюється зовсім: обидва переліки в ній обов'язкові, і
+              форма без них не дає завести нічого — лише обіцяє.
+
+              ⚠ Доки структура в дорозі, форма на місці, але недоступна:
+              порожній перелік означав би факт, якого ще ніхто не читав.
+            */}
+            {structure.error !== null ? (
+              <ErrorAlert error={structure.error} onRetry={() => void structure.refetch()} />
+            ) : (
+              <RelationForm
+                draft={draft}
+                tables={tables}
+                disabled={!editable || structure.isPending}
+                saving={save.isPending}
+                onChange={setDraft}
+                onSubmit={() => save.mutate(draft)}
+              />
+            )}
           </Stack>
         </Paper>
       )}
