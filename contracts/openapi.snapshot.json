@@ -819,6 +819,80 @@
         ],
         "type": "object"
       },
+      "CollectionScheduleView": {
+        "description": "Розклад збору — рядок екрана конфігуратора (ФВ-14.3, `BE-21b`).",
+        "properties": {
+          "cron": {
+            "description": "Вираз cron (формат Quartz, 6–7 полів).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор розкладу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isEnabled": {
+            "description": "Чи стоїть розклад у планувальнику.",
+            "type": "boolean"
+          },
+          "lastError": {
+            "description": "Чому розклад НЕ поставлено; `null` — поставлено. ⚠ Це стан ПОСТАНОВКИ,\nа не збору: відмови самого збору живуть у `itg.CollectionRun`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastErrorAt": {
+            "description": "Коли постановка не вдалася.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastRunAt": {
+            "description": "Коли збір за цим розкладом відпрацював востаннє.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowVersion": {
+            "description": "Версія рядка в Base64 — її ж клієнт повертає заголовком `If-Match`.",
+            "type": "string"
+          },
+          "sourceEntityCode": {
+            "description": "Код сутності в джерелі.",
+            "type": "string"
+          },
+          "sourceEntityId": {
+            "description": "Сутність джерела, яку збирають за цим розкладом.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceEntityName": {
+            "description": "Підпис сутності; `null` — каталог джерела його не дав.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sourceEntityId",
+          "sourceEntityCode",
+          "sourceEntityName",
+          "cron",
+          "isEnabled",
+          "lastRunAt",
+          "lastError",
+          "lastErrorAt",
+          "rowVersion"
+        ],
+        "type": "object"
+      },
       "ColumnDefDto": {
         "description": "Колонка у відповіді на запис/читання через цей обробник.",
         "properties": {
@@ -9178,6 +9252,24 @@
         ],
         "type": "object"
       },
+      "UpdateCollectionScheduleRequest": {
+        "description": "Тіло зміни розкладу.",
+        "properties": {
+          "cron": {
+            "description": "Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`.",
+            "type": "string"
+          },
+          "isEnabled": {
+            "description": "Чи має розклад стояти в планувальнику.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cron",
+          "isEnabled"
+        ],
+        "type": "object"
+      },
       "UpdateNotificationChannelRequest": {
         "description": "Тіло зміни каналу.",
         "properties": {
@@ -10122,6 +10214,231 @@
         "summary": "Зміна власного пароля.",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/collection-schedules": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CollectionScheduleView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CollectionScheduleView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CollectionScheduleView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі розклади разом із кодом сутності джерела і станом постановки.",
+        "tags": [
+          "CollectionSchedules"
+        ]
+      }
+    },
+    "/api/v1/collection-schedules/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає розклад і знімає задачу з планувальника; потребує `If-Match`.",
+        "tags": [
+          "CollectionSchedules"
+        ]
+      },
+      "put": {
+        "description": "Невалідний або задовгий cron — `422 ECR-REQ-0422` ДО запису;\nчужа версія рядка — `409 ECR-JOB-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollectionScheduleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollectionScheduleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollectionScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionScheduleView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionScheduleView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionScheduleView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює cron і вмикає/вимикає розклад; потребує `If-Match`.",
+        "tags": [
+          "CollectionSchedules"
         ]
       }
     },
@@ -22464,6 +22781,9 @@
     },
     {
       "name": "Cells"
+    },
+    {
+      "name": "CollectionSchedules"
     },
     {
       "name": "ColumnDefs"

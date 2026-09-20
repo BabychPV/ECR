@@ -1,0 +1,44 @@
+// src/Ecr.Infrastructure/Persistence/CollectionScheduleStore.cs
+using Ecr.Application.Ports;
+using Ecr.Domain.Entities.External;
+using Microsoft.EntityFrameworkCore;
+
+namespace Ecr.Infrastructure.Persistence;
+
+/// <summary>Реалізація <see cref="ICollectionScheduleStore"/> над <see cref="EcrDbContext"/>.</summary>
+public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionScheduleStore
+{
+    /// <summary>
+    /// Стеля переліку — та сама, що й у старті (<c>MaxCollectionSchedules</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Число повторене, а не позичене: <c>Ecr.Api</c> посилається на
+    /// <c>Ecr.Infrastructure</c>, а не навпаки. Розбіжність не мовчазна —
+    /// екран, який показує більше, ніж старт ставить, одразу видно за
+    /// <c>lastError</c> у рядках понад стелю.
+    /// </remarks>
+    public const int MaxSchedules = 1_000;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(CancellationToken ct)
+        => await (from s in db.CollectionSchedules.AsNoTracking()
+                  join e in db.SourceEntities.AsNoTracking() on s.SourceEntityId equals e.Id
+                  orderby e.Code
+                  select new ScheduledSourceEntity(s, e.Code, e.DisplayName))
+            .Take(MaxSchedules)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>⚠ БЕЗ <c>AsNoTracking</c>: цей розклад зараз правитимуть.</remarks>
+    public async Task<ScheduledSourceEntity?> FindAsync(int collectionScheduleId, CancellationToken ct)
+        => await (from s in db.CollectionSchedules
+                  join e in db.SourceEntities on s.SourceEntityId equals e.Id
+                  where s.Id == collectionScheduleId
+                  select new ScheduledSourceEntity(s, e.Code, e.DisplayName))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void Remove(CollectionSchedule schedule) => db.CollectionSchedules.Remove(schedule);
+}

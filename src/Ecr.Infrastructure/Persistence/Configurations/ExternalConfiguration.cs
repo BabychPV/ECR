@@ -129,7 +129,7 @@ public sealed class CollectionScheduleConfiguration : IEntityTypeConfiguration<C
 
         builder.ToTable("CollectionSchedule", "ext");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.CronExpression).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.CronExpression).HasMaxLength(CollectionSchedule.MaxCronLength).IsRequired();
         builder.Property(x => x.LookbackDays).HasDefaultValue(7);
         builder.Property(x => x.IsEnabled).HasDefaultValue(true);
         builder.Property(x => x.LastRunAt).HasColumnType("datetime2(3)");

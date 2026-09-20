@@ -263,6 +263,169 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collection-schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі розклади разом із кодом сутності джерела і станом постановки. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionScheduleView"][];
+                        "text/json": components["schemas"]["CollectionScheduleView"][];
+                        "text/plain": components["schemas"]["CollectionScheduleView"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює cron і вмикає/вимикає розклад; потребує `If-Match`.
+         * @description Невалідний або задовгий cron — `422 ECR-REQ-0422` ДО запису;
+         *     чужа версія рядка — `409 ECR-JOB-0409`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateCollectionScheduleRequest"];
+                    "application/json": components["schemas"]["UpdateCollectionScheduleRequest"];
+                    "text/json": components["schemas"]["UpdateCollectionScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionScheduleView"];
+                        "text/json": components["schemas"]["CollectionScheduleView"];
+                        "text/plain": components["schemas"]["CollectionScheduleView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає розклад і знімає задачу з планувальника; потребує `If-Match`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/column-defs/search": {
         parameters: {
             query?: never;
@@ -10271,6 +10434,42 @@ export interface components {
             /** @description Статус: `Succeeded`, `Degraded`, `Failed`. */
             status: string;
         };
+        /** @description Розклад збору — рядок екрана конфігуратора (ФВ-14.3, `BE-21b`). */
+        CollectionScheduleView: {
+            /** @description Вираз cron (формат Quartz, 6–7 полів). */
+            cron: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор розкладу.
+             */
+            id: number;
+            /** @description Чи стоїть розклад у планувальнику. */
+            isEnabled: boolean;
+            /** @description Чому розклад НЕ поставлено; `null` — поставлено. ⚠ Це стан ПОСТАНОВКИ,
+             *     а не збору: відмови самого збору живуть у `itg.CollectionRun`. */
+            lastError: null | string;
+            /**
+             * Format: date-time
+             * @description Коли постановка не вдалася.
+             */
+            lastErrorAt: null | string;
+            /**
+             * Format: date-time
+             * @description Коли збір за цим розкладом відпрацював востаннє.
+             */
+            lastRunAt: null | string;
+            /** @description Версія рядка в Base64 — її ж клієнт повертає заголовком `If-Match`. */
+            rowVersion: string;
+            /** @description Код сутності в джерелі. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність джерела, яку збирають за цим розкладом.
+             */
+            sourceEntityId: number;
+            /** @description Підпис сутності; `null` — каталог джерела його не дав. */
+            sourceEntityName: null | string;
+        };
         /** @description Колонка у відповіді на запис/читання через цей обробник. */
         ColumnDefDto: {
             code: string;
@@ -14177,6 +14376,13 @@ export interface components {
             pointCount: number;
             /** @description Шлях атрибута в джерелі. */
             sourcePath: string;
+        };
+        /** @description Тіло зміни розкладу. */
+        UpdateCollectionScheduleRequest: {
+            /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
+            cron: string;
+            /** @description Чи має розклад стояти в планувальнику. */
+            isEnabled: boolean;
         };
         /** @description Тіло зміни каналу. */
         UpdateNotificationChannelRequest: {

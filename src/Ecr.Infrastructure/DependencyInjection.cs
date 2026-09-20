@@ -278,6 +278,7 @@ public static class DependencyInjection
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
         services.AddScoped<ICollectionStore, CollectionStore>();
+        services.AddScoped<ICollectionScheduleStore, CollectionScheduleStore>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();

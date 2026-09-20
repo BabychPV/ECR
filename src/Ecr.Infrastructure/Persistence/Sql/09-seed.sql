@@ -549,6 +549,20 @@ USING (VALUES
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
 
+    -- BE-21b: розклад збору редагується з інтерфейсу.
+    -- ⚠ Cron перевіряється ДО запису, тому відмова називає і сам вираз, і
+    -- причину, яку повернув планувальник: без причини «invalid cron» не
+    -- підказує, що бракує саме знака «?» в одному з полів дня.
+    -- ⚠ `collectionScheduleNotApplied` — випадок, коли рядок УЖЕ збережено, а
+    -- планувальник його не взяв; мовчазне «ок» тут показувало б увімкнений
+    -- збір, якого не відбудеться жодного разу.
+    (N'err.ECR-INT-0404.collectionSchedule',              N'en', N'Collection schedule {id} does not exist.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleCron',          N'en', N'The cron expression "{cron}" was refused by the scheduler: {reason}', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleCronLength',    N'en', N'The cron expression must be between 1 and {max} characters long.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleIfMatch',       N'en', N'This request needs an If-Match header carrying the rowVersion of the schedule you read.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleNotApplied',    N'en', N'The schedule was saved, but the scheduler did not accept it: {reason}', 1),
+    (N'err.ECR-JOB-0409.collectionScheduleChanged',       N'en', N'Someone else changed this schedule after you read it: reload the list and repeat the change.', 1),
+
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
     -- не знайдено». Для оператора це не назва нічого — у продукті немає
@@ -713,6 +727,11 @@ USING (VALUES
     (N'err.ECR-INT-0422',   N'en', N'The source unit of measure changed', 1),
     (N'err.ECR-INT-0502',   N'en', N'The data source refused authentication', 1),
     (N'err.ECR-INT-0503',   N'en', N'The data source is unavailable', 1),
+    -- ⚠ `ECR-JOB-0409` живе рядковим літералом, не константою `ErrorCodes`, тому
+    -- сторож заголовків його не вимагав — і заголовком плашки їхав сам код.
+    -- Фраза покриває обидва стани цього коду: задача не в тому стані для дії
+    -- (BE-02) і розклад збору, змінений паралельно (BE-21b).
+    (N'err.ECR-JOB-0409',   N'en', N'Conflicting state', 1),
 
     -- Звіти.
     (N'err.ECR-RPT-0404',   N'en', N'Report not found', 1),

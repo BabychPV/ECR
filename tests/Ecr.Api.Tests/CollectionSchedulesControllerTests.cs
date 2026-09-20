@@ -1,0 +1,271 @@
+// tests/Ecr.Api.Tests/CollectionSchedulesControllerTests.cs
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Security;
+using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
+using Xunit;
+
+namespace Ecr.Api.Tests;
+
+/// <summary>
+/// Розклад збору крізь справжній HTTP і справжню базу (<c>BE-21b</c>): право,
+/// перевірка cron справжнім планувальником, <c>If-Match</c>, видалення.
+/// </summary>
+/// <remarks>
+/// ⚠ Cron увімкнених розкладів навмисно веде в 2099 рік: планувальник у
+/// тестовому хості СПРАВЖНІЙ і запущений, а задача збору, яка спрацювала б під
+/// час прогону, пішла б у неіснуюче джерело і лишила б помилки в чужих тестах.
+/// </remarks>
+[Collection("SqlServer")]
+public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
+{
+    private const string Password = "Api-Schedule-Probe-2026!";
+    private const string FarFuture = "0 0 3 1 1 ? 2099";
+    private const string FarFutureLater = "0 30 4 1 1 ? 2099";
+
+    /// <summary>П'ятипольний unix-cron: Quartz його не приймає.</summary>
+    private const string Unsupported = "30 4 * * *";
+
+    private static readonly Uri Schedules = new("/api/v1/collection-schedules", UriKind.Relative);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21b")]
+    public async Task Без_права_403_на_кожному_маршруті()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage").ConfigureAwait(true);
+
+        HttpResponseMessage[] responses =
+        [
+            await client.GetAsync(Schedules).ConfigureAwait(true),
+            await client.PutAsJsonAsync(At(1), new { cron = FarFuture, isEnabled = true }).ConfigureAwait(true),
+            await client.DeleteAsync(At(1)).ConfigureAwait(true),
+        ];
+
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21b")]
+    public async Task Перелік_несе_код_сутності_і_версію_рядка_а_зміна_доїжджає_до_бази()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (id, code) = await AddScheduleAsync(FarFuture).ConfigureAwait(true);
+
+        var row = await RowAsync(client, id).ConfigureAwait(true);
+        Assert.Equal(code, row.GetProperty("sourceEntityCode").GetString());
+        Assert.Equal(FarFuture, row.GetProperty("cron").GetString());
+        Assert.True(row.GetProperty("isEnabled").GetBoolean());
+
+        var rowVersion = row.GetProperty("rowVersion").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(rowVersion));
+
+        var saved = await PutAsync(client, id, FarFutureLater, isEnabled: false, rowVersion).ConfigureAwait(true);
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, $"{saved.StatusCode}: {app.ErrorsText}");
+
+        var body = await BodyAsync(saved).ConfigureAwait(true);
+        Assert.Equal(FarFutureLater, body.GetProperty("cron").GetString());
+        Assert.False(body.GetProperty("isEnabled").GetBoolean());
+        Assert.NotEqual(rowVersion, body.GetProperty("rowVersion").GetString());
+
+        await using var db = NewDb();
+        var stored = await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true);
+        Assert.Equal((FarFutureLater, false, (string?)null), (stored.CronExpression, stored.IsEnabled, stored.LastError));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21b")]
+    public async Task Невалідний_cron_дає_422_і_розклад_у_базі_не_змінюється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (id, _) = await AddScheduleAsync(FarFuture).ConfigureAwait(true);
+        var rowVersion = (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+
+        var refused = await PutAsync(client, id, Unsupported, isEnabled: true, rowVersion).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var problem = await BodyAsync(refused).ConfigureAwait(true);
+        Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleCron", problem.GetProperty("messageKey").GetString());
+
+        // ⛔ Перевірка стоїть ДО бази: cron у рядку лишився попереднім.
+        await using var db = NewDb();
+        Assert.Equal(
+            FarFuture,
+            (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).CronExpression);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21b")]
+    public async Task Стара_версія_рядка_дає_409_а_неіснуючий_розклад_404()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (id, _) = await AddScheduleAsync(FarFuture).ConfigureAwait(true);
+        var stale = (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+
+        // Хтось інший зберіг правку раніше — версія рядка вже не та.
+        var first = await PutAsync(client, id, FarFutureLater, isEnabled: true, stale).ConfigureAwait(true);
+        Assert.True(first.StatusCode == HttpStatusCode.OK, $"{first.StatusCode}: {app.ErrorsText}");
+
+        var second = await PutAsync(client, id, FarFuture, isEnabled: true, stale).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        var problem = await BodyAsync(second).ConfigureAwait(true);
+        Assert.Equal("ECR-JOB-0409", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-JOB-0409.collectionScheduleChanged", problem.GetProperty("messageKey").GetString());
+
+        await using var db = NewDb();
+        Assert.Equal(
+            FarFutureLater,
+            (await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true)).CronExpression);
+
+        var missing = await PutAsync(client, id: 0, FarFuture, isEnabled: true, stale).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21b")]
+    public async Task Видалення_прибирає_розклад_а_повторне_дає_404()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (id, _) = await AddScheduleAsync(FarFuture).ConfigureAwait(true);
+        var rowVersion = (await RowAsync(client, id).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+
+        var removed = await SendAsync(client, HttpMethod.Delete, At(id), rowVersion, body: null).ConfigureAwait(true);
+        Assert.True(removed.StatusCode == HttpStatusCode.NoContent, $"{removed.StatusCode}: {app.ErrorsText}");
+
+        await using var db = NewDb();
+        Assert.False(await db.CollectionSchedules.AnyAsync(s => s.Id == id).ConfigureAwait(true));
+
+        var again = await SendAsync(client, HttpMethod.Delete, At(id), rowVersion, body: null).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
+    }
+
+    private static Uri At(int id) => new($"{Schedules}/{id}", UriKind.Relative);
+
+    private static Task<HttpResponseMessage> PutAsync(
+        HttpClient client, int id, string cron, bool isEnabled, string? ifMatch)
+        => SendAsync(client, HttpMethod.Put, At(id), ifMatch, new { cron, isEnabled });
+
+    private static async Task<HttpResponseMessage> SendAsync(
+        HttpClient client, HttpMethod method, Uri path, string? ifMatch, object? body)
+    {
+        using var request = new HttpRequestMessage(method, path);
+
+        if (ifMatch is not null)
+        {
+            // ⚠ У лапках — як вимагає HTTP від ETag; сервер приймає й голе значення.
+            request.Headers.TryAddWithoutValidation("If-Match", $"\"{ifMatch}\"");
+        }
+
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await client.SendAsync(request).ConfigureAwait(false);
+    }
+
+    /// <summary>Рядок переліку з цим ідентифікатором.</summary>
+    private static async Task<JsonElement> RowAsync(HttpClient client, int id)
+    {
+        var listed = await BodyAsync(await client.GetAsync(Schedules).ConfigureAwait(false)).ConfigureAwait(false);
+
+        return listed.EnumerateArray().Single(s => s.GetProperty("id").GetInt32() == id);
+    }
+
+    private static async Task<JsonElement> BodyAsync(HttpResponseMessage response)
+        => JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false)).RootElement;
+
+    private EcrDbContext NewDb()
+        => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+
+    /// <summary>Джерело, сутність і розклад; повертає ключ розкладу і код сутності.</summary>
+    /// <remarks>
+    /// ⛔ Сутність НЕАКТИВНА навмисно: база тестів спільна, і активне джерело,
+    /// яке жодного разу не збиралося, робить <c>/health/ready</c> жовтим для
+    /// кожного наступного тесту прогону. Розкладу активність не потрібна —
+    /// перевіряється його редагування, а не збір.
+    /// </remarks>
+    private async Task<(int Id, string Code)> AddScheduleAsync(string cron)
+    {
+        var tag = Guid.NewGuid().ToString("N")[..10];
+        await using var db = NewDb();
+
+        var dataSource = new DataSource(
+            EcrCode.Create($"Sch{tag}"),
+            new LocalizedText(new Dictionary<string, string>(StringComparer.Ordinal) { ["en"] = "Source" }),
+            ExternalTransport.PiWebApi,
+            "https://example.test",
+            "secret");
+        db.DataSources.Add(dataSource);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var entity = new SourceEntity(dataSource.Id, $"Ent{tag}", RegistrySourceKind.External);
+        entity.Describe($"Entity {tag}", null);
+        entity.Deactivate();
+        db.SourceEntities.Add(entity);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var schedule = new CollectionSchedule(entity.Id, cron);
+        db.CollectionSchedules.Add(schedule);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (schedule.Id, entity.Code);
+    }
+
+    /// <summary>Клієнт із сеансом локального користувача з одним правом.</summary>
+    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, string permission)
+    {
+        var name = $"sch_{Guid.NewGuid():N}"[..20];
+
+        await using (var db = NewDb())
+        {
+            var user = new User(name, name, AuthProvider.Local);
+            user.SetPassword(new PasswordHasher().Hash(Password));
+            var role = new Role(
+                EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
+                new LocalizedText(new Dictionary<string, string>(StringComparer.Ordinal) { ["en"] = "Schedule test" }));
+            db.Users.Add(user);
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            db.RolePermissions.Add(new RolePermission(role.Id, permission));
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = name, password = Password }).ConfigureAwait(false);
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        return client;
+    }
+}

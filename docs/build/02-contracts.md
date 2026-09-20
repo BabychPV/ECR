@@ -2134,6 +2134,19 @@ public interface ICollectionRunner
 }
 ```
 
+#### `ICollectionScheduleStore`
+
+Розклади збору (`ext.CollectionSchedule`) для редагування з інтерфейсу (`BE-21b`, ФВ-14.3). Окремо від `ICollectionStore`: той обслуговує ПРОГІН збору і живе в адаптерах джерела, а цей — конфігурацію, яку править людина. Розклад завжди віддається разом із кодом і підписом сутності джерела (`ScheduledSourceEntity`): сам по собі він має лише `SourceEntityId`, і перелік із голими числами не каже, ЩО збирається за цим cron.
+
+```csharp
+public interface ICollectionScheduleStore
+{
+    public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(CancellationToken ct);
+    public Task<ScheduledSourceEntity?> FindAsync(int collectionScheduleId, CancellationToken ct);
+    public void Remove(CollectionSchedule schedule);
+}
+```
+
 #### `IConsistencyIssueReader`
 
 Знахідка перевірки узгодженості, як її бачить читач. Ідентифікатор рядка
@@ -2809,7 +2822,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
 | `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
-| `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40) **або** скасування задачі, яка вже не `Queued`/`Running` (BE-02) |
+| `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40), скасування задачі, яка вже не `Queued`/`Running` (BE-02), **або** розклад збору, змінений іншим редактором між читанням і записом — `If-Match` не збігся з `rowVersion` (BE-21b) |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
 | `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`) |
 
@@ -2994,6 +3007,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
+| `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
+| `DELETE` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |

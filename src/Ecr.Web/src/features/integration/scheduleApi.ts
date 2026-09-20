@@ -1,0 +1,53 @@
+import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
+
+/** Розклад збору для сутності джерела (ФВ-14.3). */
+export type CollectionSchedule = components['schemas']['CollectionScheduleView'];
+export type UpdateCollectionScheduleBody = components['schemas']['UpdateCollectionScheduleRequest'];
+
+/*
+ * ⛔ Адреси записані повністю, а не збираються з помічника — той самий прийом,
+ * що й `features/notifications/api.ts`: сторож
+ * `Кожна_дія_сервера_має_споживача_в_інтерфейсі` шукає літерал `/api/v1/…`
+ * разом із методом поруч.
+ *
+ * ⚠ Екрана розкладу ще НЕМАЄ — модуль поки має єдиного споживача, власний тест.
+ * Сказано навмисно: коментар, що обіцяє неіснуючий екран, дорожчий за відсутній.
+ */
+
+/**
+ * `If-Match` із версією рядка, прочитаної перед правкою.
+ *
+ * ⛔ Заголовок обов'язковий для зміни й видалення: сервер відповідає
+ * `409 ECR-JOB-0409`, якщо розклад устигли змінити, і `422`, якщо заголовка
+ * немає взагалі. Передавати треба саме `rowVersion` того рядка, який показали
+ * користувачеві, — а не перечитаний перед самим збереженням.
+ */
+function ifMatch(rowVersion: string): HeadersInit {
+  return { 'If-Match': `"${rowVersion}"` };
+}
+
+export function listCollectionSchedules(): Promise<CollectionSchedule[]> {
+  return apiFetch<CollectionSchedule[]>('/api/v1/collection-schedules');
+}
+
+/** Змінює cron і вмикає/вимикає розклад. Невалідний cron — `422`, ДО запису. */
+export function updateCollectionSchedule(
+  id: number,
+  body: UpdateCollectionScheduleBody,
+  rowVersion: string,
+): Promise<CollectionSchedule> {
+  return apiFetch<CollectionSchedule>(`/api/v1/collection-schedules/${id}`, {
+    method: 'PUT',
+    headers: ifMatch(rowVersion),
+    body: JSON.stringify(body),
+  });
+}
+
+/** Прибирає розклад; сервер сам знімає задачу з планувальника. */
+export function deleteCollectionSchedule(id: number, rowVersion: string): Promise<void> {
+  return apiFetch<void>(`/api/v1/collection-schedules/${id}`, {
+    method: 'DELETE',
+    headers: ifMatch(rowVersion),
+  });
+}

@@ -21,6 +21,15 @@ public sealed class CollectionSchedule : Entity<int>
     /// <summary>Ширина стовпця <c>LastError</c>.</summary>
     public const int MaxLastErrorLength = 400;
 
+    /// <summary>Ширина стовпця <c>CronExpression</c>.</summary>
+    /// <remarks>
+    /// ⚠ Межу перевіряє прикладний шар ДО бази: без неї довший вираз із
+    /// інтерфейсу доїжджав би до <c>SaveChanges</c> і повертався б
+    /// <c>500 SqlException</c> «String or binary data would be truncated» —
+    /// тобто про описку в cron користувач дізнавався б як про аварію сервера.
+    /// </remarks>
+    public const int MaxCronLength = 100;
+
     private CollectionSchedule() { }
 
     /// <summary>Створює розклад.</summary>
