@@ -2128,6 +2128,12 @@ USING (VALUES
     (N'columns.errCodeInvalid',          N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'columns.errHeader',               N'en', N'Give the column a header in at least one language.', 1),
     (N'columns.errScale',                N'en', N'Scale cannot exceed precision.', 1),
+
+    -- ⛔ Обидві причини доти падали в `default` у `blockerLabel` і показувалися
+    -- ГОЛИМ кодом (`StyleCode`, `StyleFontSize`) — тобто людина бачила слово з
+    -- переліку розробника замість речення про те, що саме виправити.
+    (N'columns.errStyleCode',            N'en', N'Give the style a code: Latin letters, digits and underscores, starting with a letter.', 1),
+    (N'columns.errStyleFontSize',        N'en', N'Font size must be a number.', 1),
     -- ⛔ Директива registry-lookup / cell-style, PR B1: раніше жоден екран не
     -- давав автору шаблону задати StyleDef колонки — стиль долітав лише до
     -- Excel-експорту (`StyleMapper.cs`), заведеного в базу лише seed-ом.
