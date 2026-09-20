@@ -28,9 +28,14 @@ function miss(key: string, params?: string): string {
   return `⟦${key}${params === undefined ? '' : ` (${params})`}⟧`;
 }
 
+/*
+ * ⚠ `name` — обов'язкове поле контракту (`R9`): сервер розгортає фолбек
+ * «мова запиту → en → код» сам. Тут підпис навмисно дорівнює коду, бо цей файл
+ * про макет (групи й підсумки), а не про підписи.
+ */
 const columns = [
-  { code: 'OutputCode', kind: 'text' },
-  { code: 'Value', kind: 'number' },
+  { code: 'OutputCode', kind: 'text', name: 'OutputCode' },
+  { code: 'Value', kind: 'number', name: 'Value' },
 ];
 
 const rows = [

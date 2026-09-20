@@ -96,9 +96,22 @@ export default function SnapshotRowsModal(props: {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>#</Table.Th>
+                  {/*
+                    ⛔ `R9`: підпис колонки, а не її код. `column.name` приходить
+                    із сервера вже з розгорнутим фолбеком «мова запиту → en →
+                    код» (`ReportColumnNames`) і НІКОЛИ не порожній — опис без
+                    назв підписує колонку її кодом. Тому власного фолбеку тут
+                    немає й бути не повинно: друга копія того самого правила
+                    розійшлася б із першою, і шапка на екрані перестала б
+                    збігатися з шапкою книги XLSX, яку читає регулятор.
+
+                    ⚠ `key` лишається КОДОМ: він унікальний за контрактом
+                    (`SnapshotRow.Cells` індексується ним), а підпис — ні; дві
+                    колонки з однаковою назвою різними мовами цілком законні.
+                  */}
                   {columns.map((column) => (
                     <Table.Th key={column.code} ta={column.kind === NumberKind ? 'right' : undefined}>
-                      {column.code}
+                      {column.name}
                     </Table.Th>
                   ))}
                 </Table.Tr>
