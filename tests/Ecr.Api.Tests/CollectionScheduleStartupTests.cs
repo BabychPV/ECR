@@ -24,6 +24,8 @@ public sealed class CollectionScheduleStartupTests
 {
     private const string Hourly = "0 5 * * * ?";
 
+    private static readonly DateTime Now = new(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc);
+
     private static async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
     {
         var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
@@ -45,11 +47,22 @@ public sealed class CollectionScheduleStartupTests
         var (jobs, quartz) = await SchedulerAsync();
         var logger = new RecordingLogger<RecurringScheduleService>();
 
+        var broken = new CollectionSchedule(7, "15 2 * * *");
+        var repaired = new CollectionSchedule(8, Hourly);
+        repaired.MarkInvalid("stale error from the previous start", Now.AddDays(-1));
+
         var applied = await RecurringScheduleService.ApplyCollectionSchedulesAsync(
-            [new CollectionSchedule(7, "15 2 * * *"), new CollectionSchedule(8, Hourly)],
-            jobs, new CollectionScheduleApplier(jobs), logger, CancellationToken.None);
+            [broken, repaired], jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
 
         Assert.Equal(1, applied);
+
+        // Пропущений розклад несе причину на собі — її покаже API, не лише журнал.
+        Assert.False(string.IsNullOrWhiteSpace(broken.LastError));
+        Assert.Equal(Now, broken.LastErrorAt);
+
+        // Поставлений — чистий, хоч би що лишилося з минулого старту.
+        Assert.Null(repaired.LastError);
+        Assert.Null(repaired.LastErrorAt);
         Assert.Equal(1, await JobCountAsync(quartz));
 
         // Оператор має побачити, ЯКИЙ розклад пропущено і чому.
@@ -72,7 +85,7 @@ public sealed class CollectionScheduleStartupTests
         var schedules = Enumerable.Range(1, count).Select(i => new CollectionSchedule(i, Hourly)).ToList();
 
         var applied = await RecurringScheduleService.ApplyCollectionSchedulesAsync(
-            schedules, jobs, new CollectionScheduleApplier(jobs), logger, CancellationToken.None);
+            schedules, jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
 
         Assert.Equal(count, applied);
         Assert.Equal(count, await JobCountAsync(quartz));

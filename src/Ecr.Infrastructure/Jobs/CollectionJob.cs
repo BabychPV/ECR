@@ -90,8 +90,7 @@ public sealed class CollectionJob(
         if (schedule is not null)
         {
             // Watermark рухається лише за успішним прогоном і лише вперед.
-            schedule.MarkRun(now, to);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await SaveRunAsync(db, schedule, now, to, ct).ConfigureAwait(false);
         }
 
         await EnqueueMaterializationAsync(request.SourceEntityId, from, to, ct).ConfigureAwait(false);
@@ -244,6 +243,37 @@ public sealed class CollectionJob(
     /// найгіршою: обидва «працюють», а дані різні.
     /// </remarks>
     private const int DefaultLookbackDays = 7;
+
+    /// <summary>Фіксує успішний прогін на розкладі.</summary>
+    /// <remarks>
+    /// ⛔ Розклад прочитано ДО збору, а збір триває години: відколи рядок має
+    /// <c>rowversion</c>, правка cron посеред збору дала б конфлікт версії — і
+    /// успішний збір став би <c>Failed</c>. Тому на конфлікт рядок
+    /// перечитується і прогін фіксується поверх чужої правки, не затираючи її.
+    /// </remarks>
+    public static async Task SaveRunAsync(
+        EcrDbContext db,
+        Domain.Entities.External.CollectionSchedule schedule,
+        DateTime now,
+        DateTime? watermark,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(schedule);
+
+        schedule.MarkRun(now, watermark);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await db.Entry(schedule).ReloadAsync(ct).ConfigureAwait(false);
+            schedule.MarkRun(now, watermark);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+    }
 
     /// <summary>Розклад сутності; <c>null</c> — збір запустили руками.</summary>
     private Task<Domain.Entities.External.CollectionSchedule?> ScheduleAsync(

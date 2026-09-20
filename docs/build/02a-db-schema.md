@@ -1741,6 +1741,11 @@ CREATE TABLE ext.CollectionSchedule
     IsEnabled      bit          NOT NULL CONSTRAINT DF_CS_En   DEFAULT(1),
     LastRunAt      datetime2(3) NULL,
     Watermark      datetime2(3) NULL,   -- оптимізація, не стан: втрата не коштує даних
+    -- Стан ПОСТАНОВКИ в планувальник (не збору): розклад із невалідним cron
+    -- на старті пропускається, і без цих полів це видно лише в журналі.
+    LastError      nvarchar(400) NULL,
+    LastErrorAt    datetime2(3) NULL,
+    RowVersion     rowversion   NOT NULL,   -- оптимістична конкуренція редагування
     CONSTRAINT PK_CollectionSchedule PRIMARY KEY (Id),
     CONSTRAINT UQ_CollectionSchedule UNIQUE (SourceEntityId),
     CONSTRAINT FK_CS_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id)

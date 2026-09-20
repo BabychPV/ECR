@@ -134,6 +134,9 @@ public sealed class CollectionScheduleConfiguration : IEntityTypeConfiguration<C
         builder.Property(x => x.IsEnabled).HasDefaultValue(true);
         builder.Property(x => x.LastRunAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.Watermark).HasColumnType("datetime2(3)");
+        builder.Property(x => x.LastError).HasMaxLength(CollectionSchedule.MaxLastErrorLength);
+        builder.Property(x => x.LastErrorAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.RowVersion).IsRowVersion();
 
         // Один розклад на сутність: два означали б два незалежні watermark, і
         // проміжок між ними не покривав би ніхто.
