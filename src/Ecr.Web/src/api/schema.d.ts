@@ -13127,6 +13127,13 @@ export interface components {
             code: string;
             /** @description Тип значення: `text`, `number` або `date`. */
             kind: string;
+            /** @description Підписи колонки мовами каталогу (`R9`); `null` — колонка
+             *     підписується КОДОМ, тобто рівно як до `R9`. У JSON опису поля тоді
+             *     немає взагалі, і `ColumnsJson` лишається побайтно тим самим.
+             *     ⚠ На `rpt.ReportRow` і на `ContentHash` не впливає — це подання. */
+            nameL10n?: null | {
+                [key: string]: string;
+            };
         };
         /** @description Опис звіту разом із його версіями. */
         ReportDefinitionDto: {
@@ -13957,6 +13964,11 @@ export interface components {
             code: string;
             /** @description Тип значення: `text`, `number`, `date`. */
             kind: string;
+            /** @description Підпис колонки мовою запиту (`R9`), уже з розгорнутим фолбеком
+             *     `мова → en → код` (ReportColumnNames). ⚠ Ніколи
+             *     не порожній: опис без назв підписує колонку її КОДОМ, тож споживачеві не
+             *     треба знати про фолбек і тримати другу його копію. */
+            name: string;
         };
         /** @description Рядок зрізу. */
         SnapshotRow: {

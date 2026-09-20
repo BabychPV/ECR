@@ -89,6 +89,10 @@ public static class ReportDefinitionSpec
             // решти кодів конфігурації.
             _ = EcrCode.Create(column.Code);
 
+            // ⛔ R9: назви перевіряються ТУТ, при створенні версії, — зламана
+            // назва інакше знайшлася б аж у заголовку вивантаженої книги.
+            ReportColumnNames.Require(column.Code, column.NameL10n);
+
             if (!Array.Exists(ColumnKinds, k => string.Equals(k, column.Kind, StringComparison.Ordinal)))
             {
                 throw new BusinessRuleException(
@@ -213,7 +217,18 @@ public static class ReportDefinitionSpec
 /// <summary>Колонка зрізу в описі версії звіту.</summary>
 /// <param name="Code">Код колонки; він же ключ у рядку зрізу.</param>
 /// <param name="Kind">Тип значення: <c>text</c>, <c>number</c> або <c>date</c>.</param>
-public sealed record ReportColumnCommand(string Code, string Kind);
+/// <param name="NameL10n">
+/// Підписи колонки мовами каталогу (<c>R9</c>); <c>null</c> — колонка
+/// підписується КОДОМ, тобто рівно як до <c>R9</c>. У JSON опису поля тоді
+/// немає взагалі, і <c>ColumnsJson</c> лишається побайтно тим самим.
+/// ⚠ На <c>rpt.ReportRow</c> і на <c>ContentHash</c> не впливає — це подання.
+/// </param>
+public sealed record ReportColumnCommand(
+    string Code,
+    string Kind,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyDictionary<string, string>? NameL10n = null);
 
 /// <summary>Правила відбору рядків зрізу.</summary>
 /// <param name="RowSource">

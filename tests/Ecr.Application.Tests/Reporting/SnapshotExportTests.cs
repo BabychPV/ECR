@@ -27,6 +27,9 @@ public sealed class SnapshotExportTests
     private const long SnapshotId = 77;
     private const int ProjectId = 4;
 
+    /// <summary>Мова того, хто вивантажує: книга підписується нею ж (<c>R9</c>).</summary>
+    private const string Language = "ru";
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Без_права_Report_Export_книга_не_будується()
     {
@@ -63,7 +66,7 @@ public sealed class SnapshotExportTests
         // ⚠ Не «віддав 404», а «НЕ ЧИТАВ»: відмова після читання чужих рядків
         // лишилася б витоком у журналі запитів і в часі відповіді.
         await world.Snapshots.DidNotReceive().RowsAsync(
-            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await world.Workbooks.DidNotReceive()
             .WriteAsync(Arg.Any<SnapshotWorkbook>(), Arg.Any<CancellationToken>());
     }
@@ -88,6 +91,12 @@ public sealed class SnapshotExportTests
         Assert.Equal(1, book.Rows[0].RowNo);
         Assert.Equal(GetSnapshotRowsHandler.MaxLimit + 3, book.Rows[^1].RowNo);
         Assert.Equal(SnapshotId, book.SnapshotId);
+
+        // ⛔ R9: книга просить рядки МОВОЮ ТОГО, ХТО ВИВАНТАЖУЄ, а не мовою за
+        // замовчуванням — інакше заголовки у файлі розійшлися б із екраном.
+        await world.Snapshots.Received().RowsAsync(
+            SnapshotId, Arg.Any<int>(), Arg.Any<int>(), Language, Arg.Any<CancellationToken>());
+        Assert.Equal("Pollutant", book.Columns[0].Name);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -127,6 +136,7 @@ public sealed class SnapshotExportTests
 
             var user = Substitute.For<ICurrentUser>();
             user.UserId.Returns(9);
+            user.Language.Returns(Language);
 
             var access = Substitute.For<IAccessDecisionService>();
             access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
@@ -156,7 +166,9 @@ public sealed class SnapshotExportTests
         /// <summary>Розкладає <paramref name="rowCount"/> рядків на сторінки порту.</summary>
         public void Pages(int rowCount)
             => Snapshots
-                .RowsAsync(SnapshotId, Arg.Any<int>(), GetSnapshotRowsHandler.MaxLimit, Arg.Any<CancellationToken>())
+                .RowsAsync(
+                    SnapshotId, Arg.Any<int>(), GetSnapshotRowsHandler.MaxLimit,
+                    Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(call => Task.FromResult<SnapshotRowsPage?>(Page(call.ArgAt<int>(1), rowCount)));
 
         /// <summary>Книга, яку обробник віддав порту.</summary>
@@ -187,9 +199,9 @@ public sealed class SnapshotExportTests
         /// <summary>Порядок навмисно НЕ алфавітний: перевіряється саме опис.</summary>
         private static readonly SnapshotColumn[] Columns =
         [
-            new("OutputCode", ReportSourceColumns.Text),
-            new("Value", ReportSourceColumns.Number),
-            new("RowKey", ReportSourceColumns.Text),
+            new("OutputCode", ReportSourceColumns.Text, "Pollutant"),
+            new("Value", ReportSourceColumns.Number, "Value"),
+            new("RowKey", ReportSourceColumns.Text, "RowKey"),
         ];
     }
 }

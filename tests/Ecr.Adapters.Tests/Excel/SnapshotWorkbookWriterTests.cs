@@ -24,9 +24,11 @@ public sealed class SnapshotWorkbookWriterTests
     private static readonly SnapshotColumn[] Columns =
     [
         // ⚠ Порядок НЕ алфавітний навмисно: перевіряється опис, а не сортування.
-        new("OutputCode", ReportSourceColumns.Text),
-        new("Value", ReportSourceColumns.Number),
-        new("RowKey", ReportSourceColumns.Text),
+        // ⚠ Підпис дорівнює коду: опис без назв (`R9`) приходить саме таким, і
+        // решта перевірок цього файлу лишається про те, про що була.
+        new("OutputCode", ReportSourceColumns.Text, "OutputCode"),
+        new("Value", ReportSourceColumns.Number, "Value"),
+        new("RowKey", ReportSourceColumns.Text, "RowKey"),
     ];
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -59,6 +61,39 @@ public sealed class SnapshotWorkbookWriterTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Заголовок_книги_це_НАЗВА_колонки_а_не_її_код()
+    {
+        // ⛔ Мутація, якою перевірено цей тест: у `SnapshotWorkbookWriter.WriteAsync`
+        // повернути заголовок на `workbook.Columns[c].Code`. Падає РІВНО цей
+        // тест — решта файлу описує колонки без назв, де підпис дорівнює коду.
+        //
+        // ⚠ Заради цього R9 і робився: регулятор читає книгу, а не наші коди
+        // полів, і `OutputCode` у шапці держформи для нього не означає нічого.
+        SnapshotColumn[] columns =
+        [
+            new("OutputCode", ReportSourceColumns.Text, "Загрязняющее вещество"),
+            new("Value", ReportSourceColumns.Number, "Объём, т"),
+        ];
+
+        var row = new SnapshotRow(
+            1,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["OutputCode"] = "CO2",
+                ["Value"] = 12.5m,
+            });
+
+        using var sheet = await SheetOf(new SnapshotWorkbook(7, columns, [row])).ConfigureAwait(true);
+
+        Assert.Equal("Загрязняющее вещество", sheet.Cell(1, 1).GetString());
+        Assert.Equal("Объём, т", sheet.Cell(1, 2).GetString());
+
+        // Дані під підписаною шапкою лишаються тими самими й на своїх місцях.
+        Assert.Equal("CO2", sheet.Cell(2, 1).GetString());
+        Assert.Equal(12.5, sheet.Cell(2, 2).GetDouble());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Число_лягає_ЧИСЛОМ_а_не_текстом()
     {
         // ⛔ Мутація, якою перевірено цей тест: у `SnapshotWorkbookWriter.Write`
@@ -80,7 +115,7 @@ public sealed class SnapshotWorkbookWriterTests
     {
         // ⚠ Порт віддає дату РЯДКОМ у форматі `O` (відповідь `…/rows` — JSON),
         // тож книга мусить її розібрати, інакше дата приїде текстом.
-        SnapshotColumn[] columns = [new("StartedAt", ReportSourceColumns.Date)];
+        SnapshotColumn[] columns = [new("StartedAt", ReportSourceColumns.Date, "StartedAt")];
 
         var row = new SnapshotRow(
             1,
@@ -107,7 +142,7 @@ public sealed class SnapshotWorkbookWriterTests
         // знайдена колись звіркою звіту з базою.
         const decimal exact = 1234567890.1234567890m;
 
-        SnapshotColumn[] columns = [new("Value", ReportSourceColumns.Number)];
+        SnapshotColumn[] columns = [new("Value", ReportSourceColumns.Number, "Value")];
         var row = new SnapshotRow(
             1, new Dictionary<string, object?>(StringComparer.Ordinal) { ["Value"] = exact });
 

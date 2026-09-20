@@ -61,14 +61,14 @@ public sealed class ReportDefinitionDrivesBuildTests
 
         Assert.Equal(ErrorCodes.ReportNotFound, error.ErrorCode);
         await snapshots.DidNotReceive().RowsAsync(
-            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Розмір_сторінки_обрізається_до_стелі_а_курсор_не_буває_відʼємним()
     {
         var (handler, snapshots) = RowsHandler(new() { [$"{ResourceKind.Project}:4"] = GrantLevel.Read });
-        snapshots.RowsAsync(77, 0, GetSnapshotRowsHandler.MaxLimit, Arg.Any<CancellationToken>())
+        snapshots.RowsAsync(77, 0, GetSnapshotRowsHandler.MaxLimit, Arg.Any<string>(), Arg.Any<CancellationToken>())
                  .Returns(new SnapshotRowsPage([], [], null));
 
         var page = await handler.HandleAsync(77, -5, 100_000, CancellationToken.None);
@@ -76,14 +76,32 @@ public sealed class ReportDefinitionDrivesBuildTests
         Assert.Empty(page.Rows);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Колонки_підписуються_мовою_запиту_а_не_мовою_за_замовчуванням()
+    {
+        // ⛔ R9: мову видачі бере сам обробник із `ICurrentUser`. Якби він її не
+        // передавав, порт підписав би колонки мовою за замовчуванням — тобто
+        // кожен користувач бачив би англійські заголовки незалежно від вибору.
+        var (handler, snapshots) = RowsHandler(
+            new() { [$"{ResourceKind.Project}:4"] = GrantLevel.Read }, language: "kz");
+
+        snapshots.RowsAsync(77, 0, GetSnapshotRowsHandler.DefaultLimit, "kz", Arg.Any<CancellationToken>())
+                 .Returns(new SnapshotRowsPage([new("Value", "number", "Мөлшері")], [], null));
+
+        var page = await handler.HandleAsync(77, null, null, CancellationToken.None);
+
+        Assert.Equal("Мөлшері", Assert.Single(page.Columns).Name);
+    }
+
     private static (GetSnapshotRowsHandler Handler, IReportSnapshotBuilder Snapshots) RowsHandler(
-        Dictionary<string, GrantLevel> grants)
+        Dictionary<string, GrantLevel> grants, string language = "en")
     {
         var snapshots = Substitute.For<IReportSnapshotBuilder>();
         var access = Substitute.For<IAccessDecisionService>();
         var user = Substitute.For<ICurrentUser>();
 
         user.UserId.Returns(9);
+        user.Language.Returns(language);
         snapshots.FindProjectIdAsync(77, Arg.Any<CancellationToken>()).Returns(4);
         access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {

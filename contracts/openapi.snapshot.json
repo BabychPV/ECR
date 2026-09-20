@@ -6265,6 +6265,16 @@
           "kind": {
             "description": "Тип значення: `text`, `number` або `date`.",
             "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підписи колонки мовами каталогу (`R9`); `null` — колонка\nпідписується КОДОМ, тобто рівно як до `R9`. У JSON опису поля тоді\nнемає взагалі, і `ColumnsJson` лишається побайтно тим самим.\n⚠ На `rpt.ReportRow` і на `ContentHash` не впливає — це подання.",
+            "type": [
+              "null",
+              "object"
+            ]
           }
         },
         "required": [
@@ -8040,11 +8050,16 @@
           "kind": {
             "description": "Тип значення: `text`, `number`, `date`.",
             "type": "string"
+          },
+          "name": {
+            "description": "Підпис колонки мовою запиту (`R9`), уже з розгорнутим фолбеком\n`мова → en → код` (ReportColumnNames). ⚠ Ніколи\nне порожній: опис без назв підписує колонку її КОДОМ, тож споживачеві не\nтреба знати про фолбек і тримати другу його копію.",
+            "type": "string"
           }
         },
         "required": [
           "code",
-          "kind"
+          "kind",
+          "name"
         ],
         "type": "object"
       },

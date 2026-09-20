@@ -255,7 +255,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     }
 
     /// <inheritdoc />
-    public async Task<SnapshotRowsPage?> RowsAsync(long snapshotId, int afterRowNo, int limit, CancellationToken ct)
+    public async Task<SnapshotRowsPage?> RowsAsync(
+        long snapshotId, int afterRowNo, int limit, string language, CancellationToken ct)
     {
         var version = await VersionOfAsync(snapshotId, ct).ConfigureAwait(false);
 
@@ -273,7 +274,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 
         if (!layout.IsEmpty)
         {
-            return await LaidOutRowsAsync(snapshotId, described, layout, afterRowNo, limit, ct).ConfigureAwait(false);
+            return await LaidOutRowsAsync(snapshotId, described, layout, afterRowNo, limit, language, ct)
+                .ConfigureAwait(false);
         }
 
         // Номери рядків окремим запитом: сторінка рахується в РЯДКАХ звіту, а
@@ -301,7 +303,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         var stored = StoredLayout(described, cells);
 
         return new SnapshotRowsPage(
-            [.. stored.Select(c => new SnapshotColumn(c.Code, c.Kind))],
+            Titled(stored, language),
             WideRows(cells, stored),
             rowNos.Count > limit ? last : null);
     }
@@ -324,7 +326,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
     /// </remarks>
     private async Task<SnapshotRowsPage> LaidOutRowsAsync(
         long snapshotId, IReadOnlyList<ReportColumnSpec> described, ReportLayout layout,
-        int delivered, int limit, CancellationToken ct)
+        int delivered, int limit, string language, CancellationToken ct)
     {
         var cells = await db.ReportRows
             .AsNoTracking()
@@ -339,13 +341,24 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         var page = view.Rows.Skip(delivered).Take(limit).ToList();
 
         return new SnapshotRowsPage(
-            [.. stored.Select(c => new SnapshotColumn(c.Code, c.Kind))],
+            Titled(stored, language),
             page,
             delivered + page.Count < view.Rows.Count ? delivered + page.Count : null,
             view.Groups,
             view.Totals,
             layout.ShowGroupHeader);
     }
+
+    /// <summary>Колонки зрізу, підписані мовою запиту (<c>R9</c>).</summary>
+    /// <remarks>
+    /// ⚠ Фолбек лежить в <see cref="ReportColumnNames"/>, а не тут: книга бере
+    /// вже підписані колонки з цієї самої сторінки, і друга копія ланцюга
+    /// розійшлася б із першою мовчки.
+    /// </remarks>
+    private static IReadOnlyList<SnapshotColumn> Titled(
+        IReadOnlyList<ReportColumnSpec> columns, string language)
+        => [.. columns.Select(c => new SnapshotColumn(
+            c.Code, c.Kind, ReportColumnNames.Of(c.Code, c.NameL10n, language)))];
 
     /// <summary>Комірки зрізу, зведені в рядки: значення за кодом колонки в порядку опису.</summary>
     private static List<SnapshotRow> WideRows(
@@ -768,7 +781,13 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 /// <summary>Опис колонок звіту, що зберігається у <c>ReportVersion.ColumnsJson</c>.</summary>
 /// <param name="Code">Код колонки — він же ключ у рядку зрізу.</param>
 /// <param name="Kind">Тип значення: <c>text</c>, <c>number</c>, <c>date</c>.</param>
-public sealed record ReportColumnSpec(string Code, string Kind)
+/// <param name="NameL10n">
+/// Підписи колонки мовами каталогу (<c>R9</c>); <c>null</c> — опис назв не має,
+/// і колонка підписується КОДОМ, як до <c>R9</c>. Читається тим самим іменем
+/// поля, яким його пише <see cref="ReportColumnCommand"/>.
+/// </param>
+public sealed record ReportColumnSpec(
+    string Code, string Kind, IReadOnlyDictionary<string, string>? NameL10n = null)
 {
     /// <summary>Налаштування розбору; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);

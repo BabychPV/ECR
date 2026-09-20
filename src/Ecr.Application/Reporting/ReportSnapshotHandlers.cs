@@ -287,9 +287,12 @@ public sealed class GetSnapshotRowsHandler(
             throw NotFound(snapshotId);
         }
 
+        // ⚠ Мова — та сама, якою відповідають решта ендпоінтів
+        // (`ICurrentUser.Language`: профіль → `Accept-Language` → `en`).
         return await snapshots
                    .RowsAsync(
-                       snapshotId, Math.Max(cursor ?? 0, 0), Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit), ct)
+                       snapshotId, Math.Max(cursor ?? 0, 0), Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit),
+                       currentUser.Language, ct)
                    .ConfigureAwait(false)
                ?? throw NotFound(snapshotId);
     }

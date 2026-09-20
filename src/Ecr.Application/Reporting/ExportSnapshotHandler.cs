@@ -115,9 +115,15 @@ public sealed class ExportSnapshotHandler(
     }
 
     /// <summary>Сторінка рядків; зріз, що зник між викликами, — той самий 404.</summary>
+    /// <remarks>
+    /// ⚠ Мова та сама, що й у <c>GET …/rows</c> (<c>R9</c>): книга й екран
+    /// мусять підписувати колонки однаково, інакше «звірити у файлі» перестає
+    /// бути звіркою.
+    /// </remarks>
     private async Task<SnapshotRowsPage> Page(long snapshotId, int afterRowNo, CancellationToken ct)
         => await snapshots
-               .RowsAsync(snapshotId, afterRowNo, GetSnapshotRowsHandler.MaxLimit, ct)
+               .RowsAsync(
+                   snapshotId, afterRowNo, GetSnapshotRowsHandler.MaxLimit, currentUser.Language, ct)
                .ConfigureAwait(false)
            ?? throw NotFound(snapshotId);
 

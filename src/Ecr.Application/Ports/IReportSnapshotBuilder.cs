@@ -73,9 +73,16 @@ public interface IReportSnapshotBuilder
     /// число: <c>RowNo</c> суцільний і починається з одиниці.
     /// </param>
     /// <param name="limit">Скільки рядків щонайбільше.</param>
+    /// <param name="language">
+    /// Мова, якою підписати колонки (<c>R9</c>): внутрішній код із
+    /// <c>ICurrentUser.Language</c>. ⚠ Параметр запиту, а не властивість зрізу —
+    /// той самий зріз двом користувачам віддається з різними заголовками й
+    /// однаковими даними.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <returns><c>null</c> — зрізу немає.</returns>
-    public Task<SnapshotRowsPage?> RowsAsync(long snapshotId, int afterRowNo, int limit, CancellationToken ct);
+    public Task<SnapshotRowsPage?> RowsAsync(
+        long snapshotId, int afterRowNo, int limit, string language, CancellationToken ct);
 }
 
 /// <summary>Сторінка рядків зрізу.</summary>
@@ -124,7 +131,13 @@ public sealed record SnapshotTotal(string Column, string Fn, object? Value);
 /// <summary>Колонка зрізу.</summary>
 /// <param name="Code">Код — ключ у <see cref="SnapshotRow.Cells"/>.</param>
 /// <param name="Kind">Тип значення: <c>text</c>, <c>number</c>, <c>date</c>.</param>
-public sealed record SnapshotColumn(string Code, string Kind);
+/// <param name="Name">
+/// Підпис колонки мовою запиту (<c>R9</c>), уже з розгорнутим фолбеком
+/// <c>мова → en → код</c> (<see cref="Reporting.ReportColumnNames"/>). ⚠ Ніколи
+/// не порожній: опис без назв підписує колонку її КОДОМ, тож споживачеві не
+/// треба знати про фолбек і тримати другу його копію.
+/// </param>
+public sealed record SnapshotColumn(string Code, string Kind, string Name);
 
 /// <summary>Рядок зрізу.</summary>
 /// <param name="RowNo">Номер рядка в зрізі.</param>
