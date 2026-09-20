@@ -147,8 +147,38 @@ export function CreateDocumentModal({
   // правди про всяк випадок, якщо ця копія колись розійдеться з оригіналом.
   const violations = groupRuleViolations(structure.data, sheets);
 
+  /*
+   * ⛔ Обидва верхні переліки — проєкт і версія шаблону — збиралися через
+   * `?? []`, тобто відмова сервера робила їх порожніми і мовчала.
+   *
+   * ⚠ Нижче вже стоїть `ErrorAlert` на `structure.error`, і коментар біля
+   * нього каже: «`AsyncBoundary` тут не потрібна — „вантажиться“ вже видно по
+   * порожньому переліку». Для аркушів це правда, бо їхню відмову показує той
+   * самий банер. Для ЦИХ двох запитів — ні: порожній перелік однаково означав
+   * і «ще їде», і «сервер відмовив», і другий випадок не показувало ніщо.
+   *
+   * ⚠ Наслідок той самий, що в `CreateProjectModal`: людина читає порожній
+   * перелік як «активних проєктів немає» чи «опублікованих версій немає» — і
+   * йде заводити ще один проєкт або публікувати ще одну версію.
+   */
+  const sourceError =
+    projects.error ??
+    templates.error ??
+    versionQueries.find((query) => query.error !== null)?.error ??
+    null;
+
+  const refetchSources = (): void => {
+    void projects.refetch();
+    void templates.refetch();
+    versionQueries.forEach((query) => void query.refetch());
+  };
+
   return (
     <Modal opened={opened} onClose={onClose} title={t('documents.create')} size="lg">
+      {/* ⛔ Перед полями: причину видно ДО того, як людина почне гадати, чому
+          переліки порожні. Решта діалогу лишається робочою. */}
+      {sourceError !== null && <ErrorAlert error={sourceError} onRetry={refetchSources} />}
+
       <Select
         label={t('documents.project')}
         placeholder={t('periods.pickProject')}
