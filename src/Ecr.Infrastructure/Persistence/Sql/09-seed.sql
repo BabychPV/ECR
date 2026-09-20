@@ -1808,6 +1808,13 @@ USING (VALUES
     -- R7: вивантаження зрізу в книгу. ⚠ Межа Excel названа ПОРУЧ із дією:
     -- числа в книзі мають 15 значущих цифр, і той, хто звіряє до останнього
     -- знаку, мусить дізнатися про це ДО вивантаження, а не після.
+    -- R6: параметри звіту `@Name`. Оголошені в `RulesJson` версії (схема 2),
+    -- значення задаються при побудові зрізу.
+    (N'snapshots.parameters',            N'en', N'Report parameters', 1),
+    (N'snapshots.parameterRequired',     N'en', N'Required', 1),
+    (N'snapshots.parametersBlocked',     N'en', N'Fill in every required parameter — the server refuses a build without them.', 1),
+    (N'snapshots.parametersUnknown',     N'en', N'The parameters of this report could not be read, so a build would go out blind. Retry, and build once they are known.', 1),
+
     (N'snapshots.export',                N'en', N'Download .xlsx', 1),
     (N'snapshots.exportHint',            N'en', N'Numbers in the workbook are rounded to 15 significant digits; use "View rows" to reconcile without loss.', 1),
 
