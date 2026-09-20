@@ -4965,7 +4965,12 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Змінює назву, стан і несекретні параметри. */
+        /**
+         * Змінює назву, стан і несекретні параметри.
+         * @description ⛔ `settings.host`, `port`, `useTls`, `from` не
+         *     приймаються: транспорт SMTP — налаштування застосунку, і канал його не
+         *     перевизначає (`422 ECR-REQ-0422`).
+         */
         put: {
             parameters: {
                 query?: never;
@@ -12196,7 +12201,7 @@ export interface components {
             kind: components["schemas"]["NotificationChannelKind"];
             /** @description Назва, унікальна серед каналів. */
             name: string;
-            settings?: null | components["schemas"]["NotificationChannelSettings"];
+            settings?: null | components["schemas"]["NotificationChannelSettingsInput"];
         };
         /** @description Запит на створення політики періодів (T6/#37). */
         CreatePeriodPolicyRequest: {
@@ -13434,20 +13439,27 @@ export interface components {
         NotificationChannelKind: "Smtp" | "TeamsWebhook";
         /** @description Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`. */
         NotificationChannelSettings: {
-            /** @description SMTP: адреса відправника. */
+            /** @description SMTP: адресати. */
+            recipients?: null | string[];
+            /** @description SMTP: префікс теми; Teams: заголовок картки. */
+            title?: null | string;
+        };
+        /** @description Несекретні параметри каналу так, як їх надсилає клієнт. */
+        NotificationChannelSettingsInput: {
+            /** @description ⛔ Не приймається: відправник — із налаштувань застосунку. */
             from?: null | string;
-            /** @description SMTP: сервер. */
+            /** @description ⛔ Не приймається: сервер — із налаштувань застосунку. */
             host?: null | string;
             /**
              * Format: int32
-             * @description SMTP: порт.
+             * @description ⛔ Не приймається: порт — із налаштувань застосунку.
              */
             port?: null | number;
             /** @description SMTP: адресати. */
             recipients?: null | string[];
-            /** @description Teams: заголовок картки. */
+            /** @description SMTP: префікс теми; Teams: заголовок картки. */
             title?: null | string;
-            /** @description SMTP: чи вимагати TLS. */
+            /** @description ⛔ Не приймається: TLS — із налаштувань застосунку. */
             useTls?: null | boolean;
         };
         /** @description Канал сповіщень — рядок екрана. Секрету тут немає й не буде. */
@@ -13472,6 +13484,11 @@ export interface components {
             name: string;
             /** @description Несекретні параметри. */
             settings: components["schemas"]["NotificationChannelSettings"];
+            /** @description Чи бере канал транспорт із налаштувань застосунку. `true` для пошти:
+             *     сервера в каналі немає й задати його нічим — екран має сказати це словами,
+             *     а не лишати порожнє місце там, де колись було поле. `false` для Teams,
+             *     де адреса доставки живе в секреті САМОГО каналу. */
+            transportFromConfiguration: boolean;
         };
         /**
          * @description Підсумок спроби доставки. Числа зберігаються в базі — не перенумеровувати.
@@ -16098,7 +16115,7 @@ export interface components {
             isEnabled: boolean;
             /** @description Назва. */
             name: string;
-            settings?: null | components["schemas"]["NotificationChannelSettings"];
+            settings?: null | components["schemas"]["NotificationChannelSettingsInput"];
         };
         /** @description Прив'язка й поведінка наявного правила доступу до періоду (`ФВ-2.15`). */
         UpdatePeriodAccessRuleRequest: {

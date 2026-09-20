@@ -1,5 +1,6 @@
 // src/Ecr.Application/Notifications/NotificationChannelHandlers.cs
 using System.Globalization;
+using System.Net.Mail;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -16,16 +17,48 @@ namespace Ecr.Application.Notifications;
 /// ⛔ Типізований запис, а не довільний JSON: поля «password» чи «webhookUrl»
 /// тут немає, тож секрет не може приїхати несекретним шляхом і повернутися в
 /// <c>GET</c>.
+///
+/// ⛔ Полів транспорту (<c>host</c>, <c>port</c>, <c>useTls</c>, <c>from</c>)
+/// тут теж немає (рішення 2026-09-20). Сервер SMTP бере ПРОЦЕС із
+/// конфігурації (<c>Smtp:*</c>), і жоден відправник не читав цих полів ніколи:
+/// у контракті вони обіцяли налаштування, якого не ставалося.
+///
+/// ⚠ Канали, збережені ДО цієї зміни, читаються далі: <c>host</c> у старому
+/// <c>SettingsJson</c> — невідомий член, <c>System.Text.Json</c> його
+/// пропускає, і на видачі його просто немає.
 /// </remarks>
-/// <param name="Host">SMTP: сервер.</param>
-/// <param name="Port">SMTP: порт.</param>
-/// <param name="UseTls">SMTP: чи вимагати TLS.</param>
-/// <param name="From">SMTP: адреса відправника.</param>
 /// <param name="Recipients">SMTP: адресати.</param>
-/// <param name="Title">Teams: заголовок картки.</param>
+/// <param name="Title">SMTP: префікс теми; Teams: заголовок картки.</param>
 public sealed record NotificationChannelSettings(
-    string? Host = null, int? Port = null, bool? UseTls = null, string? From = null,
     IReadOnlyList<string>? Recipients = null, string? Title = null);
+
+/// <summary>Несекретні параметри каналу так, як їх надсилає клієнт.</summary>
+/// <remarks>
+/// ⚠ Поля транспорту названі тут НАВМИСНО, хоча канал їх не зберігає.
+/// Проковтнути їх мовчки означало б прийняти <c>200</c> на налаштування, яке
+/// нікуди не піде, — рівно та розбіжність, яку прибрали. Названі — і
+/// відхилені <c>422</c> ключем, що каже, звідки транспорт береться насправді.
+/// </remarks>
+/// <param name="Recipients">SMTP: адресати.</param>
+/// <param name="Title">SMTP: префікс теми; Teams: заголовок картки.</param>
+/// <param name="Host">⛔ Не приймається: сервер — із налаштувань застосунку.</param>
+/// <param name="Port">⛔ Не приймається: порт — із налаштувань застосунку.</param>
+/// <param name="UseTls">⛔ Не приймається: TLS — із налаштувань застосунку.</param>
+/// <param name="From">⛔ Не приймається: відправник — із налаштувань застосунку.</param>
+public sealed record NotificationChannelSettingsInput(
+    IReadOnlyList<string>? Recipients = null, string? Title = null,
+    string? Host = null, int? Port = null, bool? UseTls = null, string? From = null)
+{
+    /// <summary>Чи названо бодай одне поле транспорту.</summary>
+    /// <remarks>
+    /// ⚠ <c>JsonIgnore</c> обов'язковий: без нього обчислювана властивість
+    /// їде в схему OpenAPI полем запиту й у деталі журналу безпеки — клієнт
+    /// побачив би «параметр», якого не існує.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool NamesTransport
+        => Host is not null || Port is not null || UseTls is not null || From is not null;
+}
 
 /// <summary>Канал сповіщень — рядок екрана. Секрету тут немає й не буде.</summary>
 /// <param name="Id">Ідентифікатор.</param>
@@ -35,9 +68,16 @@ public sealed record NotificationChannelSettings(
 /// <param name="Settings">Несекретні параметри.</param>
 /// <param name="HasSecret">Чи задано секрет — єдине, що про нього відомо клієнтові.</param>
 /// <param name="ModifiedAt">Остання зміна, UTC.</param>
+/// <param name="TransportFromConfiguration">
+/// Чи бере канал транспорт із налаштувань застосунку. <c>true</c> для пошти:
+/// сервера в каналі немає й задати його нічим — екран має сказати це словами,
+/// а не лишати порожнє місце там, де колись було поле. <c>false</c> для Teams,
+/// де адреса доставки живе в секреті САМОГО каналу.
+/// </param>
 public sealed record NotificationChannelView(
     int Id, NotificationChannelKind Kind, string Name, bool IsEnabled,
-    NotificationChannelSettings Settings, bool HasSecret, DateTime ModifiedAt);
+    NotificationChannelSettings Settings, bool HasSecret, DateTime ModifiedAt,
+    bool TransportFromConfiguration);
 
 /// <summary>Наслідок пробного повідомлення.</summary>
 /// <param name="Ok">Чи прийняв канал повідомлення.</param>
@@ -71,7 +111,8 @@ public sealed class ListNotificationChannelsHandler(
         => new(
             channel.Id, channel.Kind, channel.Name, channel.IsEnabled,
             JsonSerializer.Deserialize<NotificationChannelSettings>(channel.SettingsJson, Json) ?? new(),
-            channel.HasSecret, channel.ModifiedAt);
+            channel.HasSecret, channel.ModifiedAt,
+            channel.Kind == NotificationChannelKind.Smtp);
 
     internal static async Task<NotificationChannel> FindAsync(INotificationStore store, int id, CancellationToken ct)
         => await store.FindChannelAsync(id, ct).ConfigureAwait(false)
@@ -105,7 +146,7 @@ public sealed class SaveNotificationChannelHandler(
 {
     /// <summary>Створює ввімкнений канал без секрету.</summary>
     public async Task<NotificationChannelView> CreateAsync(
-        NotificationChannelKind kind, string name, NotificationChannelSettings? settings, CancellationToken ct)
+        NotificationChannelKind kind, string name, NotificationChannelSettingsInput? settings, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, ListNotificationChannelsHandler.Permission, ct).ConfigureAwait(false);
@@ -130,7 +171,7 @@ public sealed class SaveNotificationChannelHandler(
 
     /// <summary>Змінює назву, стан і несекретні параметри; транспорт і секрет не чіпає.</summary>
     public async Task<NotificationChannelView> UpdateAsync(
-        int id, string name, bool isEnabled, NotificationChannelSettings? settings, CancellationToken ct)
+        int id, string name, bool isEnabled, NotificationChannelSettingsInput? settings, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, ListNotificationChannelsHandler.Permission, ct).ConfigureAwait(false);
@@ -148,23 +189,45 @@ public sealed class SaveNotificationChannelHandler(
     }
 
     private async Task<string> ValidateAsync(
-        NotificationChannelKind kind, string name, NotificationChannelSettings? settings, int? exceptId,
+        NotificationChannelKind kind, string name, NotificationChannelSettingsInput? settings, int? exceptId,
         CancellationToken ct)
     {
         var trimmed = (name ?? string.Empty).Trim();
-        settings ??= new NotificationChannelSettings();
+        settings ??= new NotificationChannelSettingsInput();
 
-        var smtpIncomplete = kind == NotificationChannelKind.Smtp
-            && (string.IsNullOrWhiteSpace(settings.Host)
-                || settings.Port is < 1 or > 65535
-                || settings.Recipients is not { Count: > 0 }
-                || settings.Recipients.Any(string.IsNullOrWhiteSpace));
+        // ⛔ Транспорт — конфігурація ПРОЦЕСУ (`Smtp:Host`, `Smtp:From`, пароль
+        // за іменем секрету, `ФВ-6.11`). Прийняти `host` у канал означало б
+        // зберегти налаштування, якого не застосує ніхто: `SmtpChannelSender`
+        // шле через транспорт процесу, а окремий `SmtpClient` на канал дав би
+        // ще одне місце для облікових даних пошти.
+        // ⚠ Перевірка ПЕРША: відмова «бракує адресатів» на тілі з `host`
+        // відповідала б не на те питання, яке насправді поставив клієнт.
+        if (settings.NamesTransport)
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.notificationChannelTransportFromConfiguration",
+                "Сервер, порт, TLS і адресу відправника SMTP задають налаштування застосунку, не канал.",
+                trimmed);
+        }
 
-        if (trimmed.Length is 0 or > NotificationChannel.NameMaxLength || smtpIncomplete)
+        var recipients = (settings.Recipients ?? []).Select(r => (r ?? string.Empty).Trim()).ToList();
+        var smtpWithoutRecipients = kind == NotificationChannelKind.Smtp && recipients.Count == 0;
+
+        if (trimmed.Length is 0 or > NotificationChannel.NameMaxLength || smtpWithoutRecipients)
         {
             throw ListNotificationChannelsHandler.Invalid(
                 "err.ECR-REQ-0422.notificationChannelInvalid",
-                "Канал потребує назви до 100 символів; SMTP — ще й сервера, порту 1–65535 і адресатів.", trimmed);
+                "Канал потребує назви до 100 символів; поштовий — ще й щонайменше одного адресата.", trimmed);
+        }
+
+        // ⚠ Адресат перевіряється ЯК АДРЕСА, а не «непорожній рядок»: друкарська
+        // помилка інакше лягала б у базу й спливала аж у журналі доставок
+        // рядком `Failed` від поштового сервера.
+        if (recipients.FirstOrDefault(r => !MailAddress.TryCreate(r, out _)) is { } broken)
+        {
+            throw ListNotificationChannelsHandler.Invalid(
+                "err.ECR-REQ-0422.notificationChannelRecipientInvalid",
+                $"«{broken}» не є поштовою адресою.", trimmed);
         }
 
         if (await store.IsChannelNameTakenAsync(trimmed, exceptId, ct).ConfigureAwait(false))
@@ -173,7 +236,13 @@ public sealed class SaveNotificationChannelHandler(
                 "err.ECR-REQ-0422.notificationChannelNameTaken", $"Канал «{trimmed}» уже є.", trimmed);
         }
 
-        return JsonSerializer.Serialize(settings, ListNotificationChannelsHandler.Json);
+        // ⛔ Записується САНІТОВАНИЙ запис, а не те, що прийшло: поля транспорту
+        // до `SettingsJson` не потрапляють навіть як `null`.
+        return JsonSerializer.Serialize(
+            new NotificationChannelSettings(
+                recipients.Count == 0 ? null : recipients,
+                string.IsNullOrWhiteSpace(settings.Title) ? null : settings.Title.Trim()),
+            ListNotificationChannelsHandler.Json);
     }
 }
 

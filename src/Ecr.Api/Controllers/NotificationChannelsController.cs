@@ -38,6 +38,11 @@ public sealed class NotificationChannelsController(
     }
 
     /// <summary>Змінює назву, стан і несекретні параметри.</summary>
+    /// <remarks>
+    /// ⛔ <c>settings.host</c>, <c>port</c>, <c>useTls</c>, <c>from</c> не
+    /// приймаються: транспорт SMTP — налаштування застосунку, і канал його не
+    /// перевизначає (<c>422 ECR-REQ-0422</c>).
+    /// </remarks>
     [HttpPut("{id:int}")]
     [ProducesResponseType<NotificationChannelView>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -90,16 +95,16 @@ public sealed class NotificationChannelsController(
 /// <summary>Тіло створення каналу.</summary>
 /// <param name="Kind">Транспорт; після створення не змінюється.</param>
 /// <param name="Name">Назва, унікальна серед каналів.</param>
-/// <param name="Settings">Несекретні параметри.</param>
+/// <param name="Settings">Несекретні параметри; поля транспорту — <c>422</c>.</param>
 public sealed record CreateNotificationChannelRequest(
-    NotificationChannelKind Kind, string Name, NotificationChannelSettings? Settings = null);
+    NotificationChannelKind Kind, string Name, NotificationChannelSettingsInput? Settings = null);
 
 /// <summary>Тіло зміни каналу.</summary>
 /// <param name="Name">Назва.</param>
 /// <param name="IsEnabled">Чи ввімкнений.</param>
-/// <param name="Settings">Несекретні параметри.</param>
+/// <param name="Settings">Несекретні параметри; поля транспорту — <c>422</c>.</param>
 public sealed record UpdateNotificationChannelRequest(
-    string Name, bool IsEnabled, NotificationChannelSettings? Settings = null);
+    string Name, bool IsEnabled, NotificationChannelSettingsInput? Settings = null);
 
 /// <summary>Тіло заміни секрету.</summary>
 /// <param name="Secret">Новий секрет; <c>null</c> або порожній — прибрати.</param>

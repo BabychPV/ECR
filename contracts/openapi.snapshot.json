@@ -1615,8 +1615,8 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/NotificationChannelSettings",
-                "description": "Несекретні параметри."
+                "$ref": "#/components/schemas/NotificationChannelSettingsInput",
+                "description": "Несекретні параметри; поля транспорту — `422`."
               }
             ]
           }
@@ -4294,22 +4294,45 @@
       "NotificationChannelSettings": {
         "description": "Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`.",
         "properties": {
+          "recipients": {
+            "description": "SMTP: адресати.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "title": {
+            "description": "SMTP: префікс теми; Teams: заголовок картки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "NotificationChannelSettingsInput": {
+        "description": "Несекретні параметри каналу так, як їх надсилає клієнт.",
+        "properties": {
           "from": {
-            "description": "SMTP: адреса відправника.",
+            "description": "⛔ Не приймається: відправник — із налаштувань застосунку.",
             "type": [
               "null",
               "string"
             ]
           },
           "host": {
-            "description": "SMTP: сервер.",
+            "description": "⛔ Не приймається: сервер — із налаштувань застосунку.",
             "type": [
               "null",
               "string"
             ]
           },
           "port": {
-            "description": "SMTP: порт.",
+            "description": "⛔ Не приймається: порт — із налаштувань застосунку.",
             "format": "int32",
             "type": [
               "null",
@@ -4327,14 +4350,14 @@
             ]
           },
           "title": {
-            "description": "Teams: заголовок картки.",
+            "description": "SMTP: префікс теми; Teams: заголовок картки.",
             "type": [
               "null",
               "string"
             ]
           },
           "useTls": {
-            "description": "SMTP: чи вимагати TLS.",
+            "description": "⛔ Не приймається: TLS — із налаштувань застосунку.",
             "type": [
               "null",
               "boolean"
@@ -4375,6 +4398,10 @@
           "settings": {
             "$ref": "#/components/schemas/NotificationChannelSettings",
             "description": "Несекретні параметри."
+          },
+          "transportFromConfiguration": {
+            "description": "Чи бере канал транспорт із налаштувань застосунку. `true` для пошти:\nсервера в каналі немає й задати його нічим — екран має сказати це словами,\nа не лишати порожнє місце там, де колись було поле. `false` для Teams,\nде адреса доставки живе в секреті САМОГО каналу.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4384,7 +4411,8 @@
           "isEnabled",
           "settings",
           "hasSecret",
-          "modifiedAt"
+          "modifiedAt",
+          "transportFromConfiguration"
         ],
         "type": "object"
       },
@@ -9921,8 +9949,8 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/NotificationChannelSettings",
-                "description": "Несекретні параметри."
+                "$ref": "#/components/schemas/NotificationChannelSettingsInput",
+                "description": "Несекретні параметри; поля транспорту — `422`."
               }
             ]
           }
@@ -17049,6 +17077,7 @@
         ]
       },
       "put": {
+        "description": "⛔ `settings.host`, `port`, `useTls`, `from` не\nприймаються: транспорт SMTP — налаштування застосунку, і канал його не\nперевизначає (`422 ECR-REQ-0422`).",
         "parameters": [
           {
             "in": "path",

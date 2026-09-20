@@ -1,9 +1,23 @@
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 
-/** Канал сповіщень. ⛔ Секрету тут немає й не буде — лише `hasSecret`. */
+/**
+ * Канал сповіщень. ⛔ Секрету тут немає й не буде — лише `hasSecret`.
+ *
+ * ⚠ `transportFromConfiguration` — `true` для пошти: сервер, порт, TLS і
+ * адресу відправника задають налаштування застосунку, і полів під них у каналі
+ * немає (рішення 2026-09-20). Екран має сказати це словами, а не лишити
+ * порожнє місце.
+ */
 export type NotificationChannel = components['schemas']['NotificationChannelView'];
+/** Те, що канал справді зберігає: адресати й підпис. */
 export type NotificationChannelSettings = components['schemas']['NotificationChannelSettings'];
+/**
+ * Те, що приймає `POST`/`PUT`. ⛔ `host`/`port`/`useTls`/`from` названі в схемі
+ * рівно для того, щоб бути відхиленими: `422 ECR-REQ-0422`
+ * (`notificationChannelTransportFromConfiguration`). Не надсилати.
+ */
+export type NotificationChannelSettingsInput = components['schemas']['NotificationChannelSettingsInput'];
 export type CreateNotificationChannelBody = components['schemas']['CreateNotificationChannelRequest'];
 export type UpdateNotificationChannelBody = components['schemas']['UpdateNotificationChannelRequest'];
 /** `ok: false` — відповідь каналу, а не помилка запиту; `messageKey` — ключ каталогу, якщо причина відома. */

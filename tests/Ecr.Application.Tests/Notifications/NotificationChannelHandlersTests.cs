@@ -20,8 +20,8 @@ public sealed class NotificationChannelHandlersTests
     private const int Actor = 7;
     private const string Webhook = "https://prod-17.westeurope.logic.azure.com/workflows/abc?sig=TopSecretSig";
 
-    private static readonly NotificationChannelSettings Smtp =
-        new(Host: "mail.corp.example", Port: 25, Recipients: ["ops@corp.example"]);
+    private static readonly NotificationChannelSettingsInput Smtp =
+        new(Recipients: ["ops@corp.example"]);
 
     private readonly FakeNotificationStore _store = new();
     private readonly List<SecurityEventRecord> _events = [];
@@ -107,7 +107,7 @@ public sealed class NotificationChannelHandlersTests
     {
         var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, " Mail ", Smtp, CancellationToken.None);
         Assert.Equal("Mail", mail.Name);
-        Assert.Equal("mail.corp.example", mail.Settings.Host);
+        Assert.Equal(["ops@corp.example"], mail.Settings.Recipients);
 
         var taken = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None));
@@ -132,6 +132,104 @@ public sealed class NotificationChannelHandlersTests
 
         var missing = await Assert.ThrowsAsync<NotFoundException>(() => Delete().HandleAsync(mail.Id, CancellationToken.None));
         Assert.Equal("err.ECR-INT-0404.notificationChannel", missing.Details!["messageKey"]);
+    }
+
+    /// <summary>
+    /// Транспорт SMTP задає застосунок: канал його не приймає, але й не
+    /// ламається об те, що вже збережено.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обидва боки в одному випадку навмисно. Сама відмова <c>422</c> нічого
+    /// не доводить, поки не показано, що канали, записані ДО зміни, лишилися
+    /// читабельними: «прибрали поле з контракту» і «зламали наявні рядки» —
+    /// різні наслідки одного коміту.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Поля_транспорту_дають_422_а_канал_зі_старим_SettingsJson_читається_і_працює()
+    {
+        const string legacy = """
+            {"host":"mail.corp.example","port":25,"useTls":true,"from":"ecr@corp.example","recipients":["ops@corp.example"],"title":"ECR"}
+            """;
+        _store.AddChannel(new NotificationChannel(
+            NotificationChannelKind.Smtp, "Legacy", legacy, _clock.UtcNow, Actor));
+
+        var listed = Assert.Single(
+            await new ListNotificationChannelsHandler(_store, _access, _user).HandleAsync(CancellationToken.None));
+
+        // Читається: адресати й підпис на місці, транспорту у видачі немає, а
+        // екран має чим пояснити порожнє місце там, де колись було поле.
+        Assert.Equal(["ops@corp.example"], listed.Settings.Recipients);
+        Assert.Equal("ECR", listed.Settings.Title);
+        Assert.True(listed.TransportFromConfiguration);
+        Assert.DoesNotContain(
+            "mail.corp.example", System.Text.Json.JsonSerializer.Serialize(listed), StringComparison.Ordinal);
+
+        // Повторне збереження БЕЗ транспорту проходить і прибирає старі поля.
+        var saved = await Save().UpdateAsync(listed.Id, "Legacy", isEnabled: true, Smtp, CancellationToken.None);
+        Assert.Equal(["ops@corp.example"], saved.Settings.Recipients);
+        Assert.DoesNotContain("mail.corp.example", _store.Channels.Single().SettingsJson, StringComparison.Ordinal);
+
+        // А з транспортом — 422 названим ключем, і збережене не змінилося.
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().UpdateAsync(
+                listed.Id, "Legacy", true, Smtp with { Host = "mail.corp.example", Port = 25 },
+                CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+        Assert.Equal(
+            "err.ECR-REQ-0422.notificationChannelTransportFromConfiguration", refused.Details!["messageKey"]);
+        Assert.DoesNotContain("mail.corp.example", _store.Channels.Single().SettingsJson, StringComparison.Ordinal);
+
+        // Кожне поле транспорту — окремо: спільна умова, яка ловить лише `host`,
+        // лишила б три інші дороги до того самого нездійсненного налаштування.
+        NotificationChannelSettingsInput[] transports =
+        [
+            Smtp with { Host = "mail.corp.example" }, Smtp with { Port = 25 },
+            Smtp with { UseTls = true }, Smtp with { From = "ecr@corp.example" },
+        ];
+
+        foreach (var one in transports)
+        {
+            var each = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Save().CreateAsync(NotificationChannelKind.Smtp, "Other", one, CancellationToken.None));
+            Assert.Equal(
+                "err.ECR-REQ-0422.notificationChannelTransportFromConfiguration", each.Details!["messageKey"]);
+        }
+    }
+
+    /// <summary>Адресати каналу — саме адреси, а не будь-який непорожній рядок.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Порожній_перелік_адресатів_і_рядок_що_не_є_адресою_дають_різні_422()
+    {
+        var empty = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = [] }, CancellationToken.None));
+        var garbage = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = ["ops(at)corp.example"] },
+                CancellationToken.None));
+        var blank = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = ["ops@corp.example", "   "] },
+                CancellationToken.None));
+
+        // ⚠ Ключі РІЗНІ: «адресатів немає» і «ось цей рядок не адреса» ведуть до
+        // різних дій користувача, і один ключ на двох сказав би не те.
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelInvalid", empty.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelRecipientInvalid", garbage.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelRecipientInvalid", blank.Details!["messageKey"]);
+        Assert.Empty(_store.Channels);
+
+        // Адреса з підписом — теж адреса: звуження до «щось@щось» відхиляло б
+        // чинні значення, і перевірка почала б заважати замість допомагати.
+        var ok = await Save().CreateAsync(
+            NotificationChannelKind.Smtp, "Mail", Smtp with { Recipients = ["Ops <ops@corp.example>"] },
+            CancellationToken.None);
+        Assert.Equal(["Ops <ops@corp.example>"], ok.Settings.Recipients);
     }
 
     [Fact]

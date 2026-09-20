@@ -275,7 +275,7 @@ public sealed class NotificationRulesControllerTests(SqlServerFixture sql)
             {
                 kind = "Smtp",
                 name = $"rules-{Guid.NewGuid():N}",
-                settings = new { host = "mail.corp.example", port = 25, recipients = Recipients },
+                settings = new { recipients = Recipients },
             }).ConfigureAwait(false);
 
         Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");

@@ -2429,7 +2429,7 @@ CREATE TABLE sys_ecr.NotificationChannel
     Kind             tinyint        NOT NULL,   -- NotificationChannelKind: 1 Smtp, 2 TeamsWebhook
     Name             nvarchar(100)  NOT NULL,
     IsEnabled        bit            NOT NULL DEFAULT(1),
-    SettingsJson     nvarchar(max)  NOT NULL,   -- НЕсекретне: host, port, useTls, from, recipients[] | заголовок картки Teams
+    SettingsJson     nvarchar(max)  NOT NULL,   -- НЕсекретне: recipients[], title. ⚠ 2026-09-20: полів транспорту (host/port/useTls/from) тут більше немає — сервер SMTP бере процес із Smtp:*; у рядках, записаних раніше, вони лишилися й просто не читаються
     SecretProtected  varbinary(max) NULL,       -- пароль SMTP | URL вебхука; блоб DataProtection. API його НЕ повертає
     RowVersion       rowversion     NOT NULL,
     ModifiedAt       datetime2(3)   NOT NULL,

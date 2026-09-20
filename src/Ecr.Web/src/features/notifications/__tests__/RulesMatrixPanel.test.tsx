@@ -36,7 +36,8 @@ const Channels: NotificationChannel[] = [
     isEnabled: true,
     hasSecret: true,
     modifiedAt: '2026-09-01T10:00:00Z',
-    settings: { host: 'smtp.local', port: 25 },
+    settings: { recipients: ['ops@corp.example'] },
+    transportFromConfiguration: true,
   },
   {
     id: 9,
@@ -46,6 +47,7 @@ const Channels: NotificationChannel[] = [
     hasSecret: true,
     modifiedAt: '2026-09-01T10:00:00Z',
     settings: { title: 'ECR' },
+    transportFromConfiguration: false,
   },
 ];
 

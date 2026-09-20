@@ -37,7 +37,8 @@ const channels = [
     isEnabled: true,
     hasSecret: true,
     modifiedAt: '2026-09-01T10:00:00Z',
-    settings: { host: 'smtp.example.org', port: 587, from: 'ecr@example.org', recipients: ['ops@example.org'], useTls: true },
+    settings: { recipients: ['ops@example.org'] },
+    transportFromConfiguration: true,
   },
   {
     id: 2,
@@ -47,6 +48,7 @@ const channels = [
     hasSecret: false,
     modifiedAt: '2026-09-02T10:00:00Z',
     settings: { title: 'ECR' },
+    transportFromConfiguration: false,
   },
 ];
 
@@ -165,9 +167,10 @@ describe('ChannelsPanel: відмова переліку ≠ «каналів н
     await screen.findByLabelText(/notifications\.smtpRecipients/);
 
     /*
-     * ⛔ `host`/`port`/`from`/`useTls` у контракті є, але `SmtpChannelSender`
-     * їх не читає: транспорт береться з конфігурації процесу. Показані, вони
-     * обіцяли б налаштування, якого не станеться.
+     * ⛔ Полів `host`/`port`/`from`/`useTls` немає ні у формі, ні в контракті
+     * (рішення 2026-09-20): транспорт береться з налаштувань застосунку, а
+     * спроба зберегти їх — `422`. Показані, вони обіцяли б налаштування, якого
+     * не станеться.
      */
     expect(screen.queryByLabelText(/notifications\.smtpHost/)).toBeNull();
     expect(screen.queryByLabelText(/notifications\.smtpPort/)).toBeNull();

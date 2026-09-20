@@ -142,7 +142,7 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
             {
                 kind = "Smtp",
                 name = $"mail-{Guid.NewGuid():N}",
-                settings = new { host = "mail.corp.example", port = 25, recipients = Recipients },
+                settings = new { recipients = Recipients },
             }).ConfigureAwait(true);
         Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
         var id = (await BodyAsync(created, null).ConfigureAwait(true)).GetProperty("id").GetInt32();
@@ -167,6 +167,54 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
 
         var again = await client.DeleteAsync(At($"{id}")).ConfigureAwait(true);
         Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
+    }
+
+    /// <summary>
+    /// Транспорт SMTP крізь справжній HTTP: поля сервера не приймаються, а у
+    /// видачі видно, звідки він береться.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Тут — саме конвеєр: код, <c>messageKey</c> і те, що в <c>SettingsJson</c>
+    /// бази не лишилося транспорту. Обробник це вже стереже на подвійниках;
+    /// що відмова доїхала до клієнта саме <c>422</c>, а не <c>400</c> від
+    /// прив'язувача моделі, видно лише звідси.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Сервер_SMTP_у_налаштуваннях_каналу_дає_422_а_відповідь_каже_звідки_транспорт()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "System.ManageNotifications").ConfigureAwait(true);
+
+        var name = $"mail-{Guid.NewGuid():N}";
+        var refused = await client.PostAsJsonAsync(
+            Channels,
+            new { kind = "Smtp", name, settings = new { host = "mail.corp.example", port = 25, recipients = Recipients } })
+            .ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var problem = await BodyAsync(refused, null).ConfigureAwait(true);
+        Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal(
+            "err.ECR-REQ-0422.notificationChannelTransportFromConfiguration",
+            problem.GetProperty("messageKey").GetString());
+
+        // Без транспорту — той самий канал створюється, і у відповіді видно,
+        // що сервер задає застосунок: екрану не треба це вгадувати.
+        var created = await client.PostAsJsonAsync(
+            Channels, new { kind = "Smtp", name, settings = new { recipients = Recipients } }).ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+
+        var body = await BodyAsync(created, null).ConfigureAwait(true);
+        Assert.True(body.GetProperty("transportFromConfiguration").GetBoolean());
+        Assert.False(body.GetProperty("settings").TryGetProperty("host", out _));
+
+        await using var db = NewDb();
+        var stored = await db.NotificationChannels.AsNoTracking()
+            .SingleAsync(c => c.Id == body.GetProperty("id").GetInt32()).ConfigureAwait(true);
+        Assert.DoesNotContain("mail.corp.example", stored.SettingsJson, StringComparison.Ordinal);
     }
 
     private static Uri At(string tail) => new($"{Channels}/{tail}", UriKind.Relative);

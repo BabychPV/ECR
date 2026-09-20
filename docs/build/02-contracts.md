@@ -3227,6 +3227,31 @@ public sealed class NotFoundException(string errorCode, string message)
 > несе `dataSourceId` і `dataSourceCode`; ті самі два поля має й
 > `GET /api/v1/sources`.
 
+> ✎ **2026-09-20 — `settings` каналу Smtp: транспорт із налаштувань застосунку.**
+> Канал тримає рівно `recipients` (адресати) і `title` (для пошти — префікс
+> теми, для Teams — заголовок картки). Сервер, порт, TLS і адресу відправника
+> бере ПРОЦЕС (`Smtp:Host`, `Smtp:Port`, `Smtp:UseStartTls`, `Smtp:From`;
+> пароль — за іменем секрету, `ФВ-6.11`).
+>
+> ⛔ `host`, `port`, `useTls`, `from` у тілі `POST`/`PUT …/channels` — `422
+> ECR-REQ-0422`, ключ `err.ECR-REQ-0422.notificationChannelTransportFromConfiguration`.
+> Досі форма їх приймала, а `SmtpChannelSender` ігнорував: екран обіцяв
+> налаштування, якого не ставалося, і лист однаково йшов транспортом процесу.
+> Мовчки відкинути їх було б тим самим обманом, лише тихішим.
+>
+> ⚠ Канали, збережені ДО зміни, читаються далі: зайві поля старого
+> `SettingsJson` — невідомі члени, `System.Text.Json` їх пропускає, і у видачі
+> їх просто немає. Перше ж збереження такого каналу прибирає їх і зі сховища.
+>
+> ⚠ Адресати перевіряються ЯК АДРЕСИ (`MailAddress.TryCreate`): для Smtp
+> порожній перелік — `422` (`…notificationChannelInvalid`), рядок, що адресою
+> не є, — `422` (`…notificationChannelRecipientInvalid`). Друкарська помилка
+> інакше спливала б аж рядком `Failed` у журналі доставок.
+>
+> ⚠ У відповіді кожного каналу є `transportFromConfiguration`: `true` для
+> Smtp — екрану є чим пояснити відсутність полів сервера; `false` для Teams,
+> де адреса доставки живе в секреті самого каналу.
+
 > ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
 > ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
 > `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,

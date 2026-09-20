@@ -20,8 +20,8 @@ public sealed class NotificationRuleHandlersTests
 {
     private const int Actor = 7;
 
-    private static readonly NotificationChannelSettings Smtp =
-        new(Host: "mail.corp.example", Port: 25, Recipients: ["ops@corp.example"]);
+    private static readonly NotificationChannelSettingsInput Smtp =
+        new(Recipients: ["ops@corp.example"]);
 
     private readonly FakeNotificationStore _store = new();
     private readonly List<SecurityEventRecord> _events = [];

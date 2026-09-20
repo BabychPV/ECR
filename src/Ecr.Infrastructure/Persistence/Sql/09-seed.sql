@@ -582,9 +582,14 @@ USING (VALUES
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
     (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),
     -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
-    (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs a host, a port between 1 and 65535 and recipients.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs at least one recipient.', 1),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed',         N'en', N'The webhook address must use https and point to an allowed host.', 1),
+    -- ⛔ 2026-09-20: транспорт SMTP задає застосунок, не канал. Речення має
+    -- сказати це прямо: користувач, який щойно ввів адресу сервера, інакше
+    -- шукатиме друкарську помилку там, де її немає.
+    (N'err.ECR-REQ-0422.notificationChannelTransportFromConfiguration', N'en', N'The SMTP server, port, TLS and sender address come from the application settings; a channel cannot set them.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelRecipientInvalid',           N'en', N'One of the recipients is not an email address.', 1),
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
     -- ⚠ Той самий вибір, що в `jobState`: невідомий фільтр — відмова, а не
