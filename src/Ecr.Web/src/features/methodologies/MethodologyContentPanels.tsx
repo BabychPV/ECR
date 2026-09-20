@@ -32,6 +32,7 @@ import { queryKeys } from '@/api/queryKeys';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
@@ -61,17 +62,81 @@ import {
  * колонки (`SaveCalculationBindingHandler`), тому й колонку для вибору
  * потрібно шукати серед усіх, а не лише в межах контексту цього екрана.
  */
-function useColumnDefOptions(): { value: string; label: string }[] {
+interface ColumnDefChoices {
+  /**
+   * Пункти `Select`.
+   *
+   * ⛔ Порожньо тут означає РІВНО ОДНЕ — колонок справді немає. Доки запит їде
+   * або відмовив, викликач не малює `Select` узагалі (`error`/`isPending`
+   * нижче), тож порожній перелік більше не є трьома різними станами одразу.
+   */
+  readonly options: { value: string; label: string }[];
+
+  /** Відмова читання; `null` — запит удався. */
+  readonly error: unknown;
+
+  /** Чи перелік іще їде. */
+  readonly isPending: boolean;
+
+  /** Повторити читання. */
+  readonly refetch: () => void;
+}
+
+function useColumnDefOptions(): ColumnDefChoices {
   const columns = useQuery({
     queryKey: ['column-defs-search'],
     queryFn: () => apiFetch<ColumnDefSearchResultDto[]>('/api/v1/column-defs/search?limit=200'),
     staleTime: 60 * 1000,
   });
 
-  return (columns.data ?? []).map((column) => ({
-    value: String(column.id),
-    label: `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`,
-  }));
+  return {
+    options: (columns.data ?? []).map((column) => ({
+      value: String(column.id),
+      label: `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`,
+    })),
+    error: columns.error,
+    isPending: columns.isPending,
+    refetch: () => {
+      void columns.refetch();
+    },
+  };
+}
+
+/**
+ * Вибір із допоміжного довідника, який МОЖЕ не приїхати (директива №15, §0,
+ * `L10`).
+ *
+ * ⛔ Раніше кожен такий `Select` наповнювався через `?? []`, і порожній перелік
+ * означав три різні речі одразу: «довідник порожній», «ще їде», «сервер
+ * відмовив». Людина читає найгірше з трьох — ПЕРШЕ, бо саме воно схоже на
+ * факт: «колонки такої немає», «одиниць у системі немає». І діє за цим фактом:
+ * іде перевіряти, чи опублікована версія шаблону, або зберігає константу без
+ * одиниці, або вирішує, що виходи тут завести неможливо.
+ *
+ * ⚠ Порядок той самий, що в `AsyncBoundary`: помилка ПЕРШОЮ, бо невдалий запит
+ * теж лишає дані порожніми. Різниця лише в тому, що сама `AsyncBoundary` тут
+ * не годиться — вона малює власний `<Title order={4}>` порожнього стану, а
+ * всередині модалки це рве `heading-order` і валить гейт `a11y`.
+ *
+ * ⚠ «Ще їде» — НЕДОСТУПНИЙ контрол, а не порожній: людина бачить поле на його
+ * місці (розмітка не стрибає), але не може обрати з переліку, якого ще немає.
+ */
+function ChoiceField({
+  error,
+  isPending,
+  onRetry,
+  children,
+}: {
+  readonly error: unknown;
+  readonly isPending: boolean;
+  readonly onRetry: () => void;
+  readonly children: (disabled: boolean) => JSX.Element;
+}): JSX.Element {
+  if (error !== null && error !== undefined) {
+    return <ErrorAlert error={error} onRetry={onRetry} />;
+  }
+
+  return children(isPending);
 }
 
 /**
@@ -326,19 +391,34 @@ export function MethodologyConstantsPanel({
                   value={editing.value}
                   onChange={(event) => setEditing({ ...editing, value: event.currentTarget.value })}
                 />
-                <Select
-                  label={t('methodologies.outputUnit')}
-                  description={t('methodologies.constantUnitHint')}
-                  searchable
-                  value={editing.unitId === null ? null : String(editing.unitId)}
-                  data={(units.data ?? []).map((unit) => ({
-                    value: String(unit.id),
-                    label: unit.code,
-                  }))}
-                  onChange={(value) =>
-                    setEditing({ ...editing, unitId: value === null ? null : Number(value) })
-                  }
-                />
+                {/* ⛔ Тут ціна порожнечі — ТИХО БЕЗРОЗМІРНА КОНСТАНТА. Одиниця
+                    в константі необов'язкова (`unitId: number | null`), тож
+                    сервер приймає запис без неї й нічого не каже. Порожній
+                    перелік читався як «одиниць у системі немає», людина
+                    зберігала коефіцієнт без одиниці — і відмова ЧИТАННЯ
+                    довідника перетворювалася на неправильні дані. */}
+                <ChoiceField
+                  error={units.error}
+                  isPending={units.isPending}
+                  onRetry={() => void units.refetch()}
+                >
+                  {(disabled) => (
+                    <Select
+                      label={t('methodologies.outputUnit')}
+                      description={t('methodologies.constantUnitHint')}
+                      searchable
+                      disabled={disabled}
+                      value={editing.unitId === null ? null : String(editing.unitId)}
+                      data={(units.data ?? []).map((unit) => ({
+                        value: String(unit.id),
+                        label: unit.code,
+                      }))}
+                      onChange={(value) =>
+                        setEditing({ ...editing, unitId: value === null ? null : Number(value) })
+                      }
+                    />
+                  )}
+                </ChoiceField>
               </>
             ) : (
               <TextInput
@@ -656,7 +736,7 @@ export function MethodologyRequiredInputsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<RequiredInputDraft | null>(null);
-  const columnOptions = useColumnDefOptions();
+  const columns = useColumnDefOptions();
 
   const requiredInputs = useQuery({
     queryKey: queryKeys.methodologies.requiredInputs(versionId),
@@ -782,20 +862,33 @@ export function MethodologyRequiredInputsPanel({
                 ColumnDefId": адміністратор більше не має пам'ятати
                 внутрішній ідентифікатор — вибір за назвою чи кодом,
                 той самий прийом, що вибір довідника в `ColumnEditor.tsx`. */}
-            <Select
-              label={t('methodologies.columnDefId')}
-              description={t('methodologies.requiredInputColumnHint')}
-              searchable
-              disabled={!editing.isNew}
-              value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
-              data={columnOptions}
-              onChange={(value) =>
-                setEditing({
-                  ...editing,
-                  columnDefId: value === null ? 0 : Number(value),
-                })
-              }
-            />
+            {/* ⛔ Відмова пошуку робила перелік порожнім, і пошук за назвою
+                відповідав «нічого не знайдено» на БУДЬ-ЯКИЙ запит. Людина
+                читає це як факт («такої колонки в шаблонах немає») і йде
+                перевіряти, чи опублікована версія шаблону, — замість
+                повторити запит. */}
+            <ChoiceField
+              error={columns.error}
+              isPending={columns.isPending}
+              onRetry={columns.refetch}
+            >
+              {(disabled) => (
+                <Select
+                  label={t('methodologies.columnDefId')}
+                  description={t('methodologies.requiredInputColumnHint')}
+                  searchable
+                  disabled={!editing.isNew || disabled}
+                  value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
+                  data={columns.options}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      columnDefId: value === null ? 0 : Number(value),
+                    })
+                  }
+                />
+              )}
+            </ChoiceField>
 
             <Select
               label={t('methodologies.severity')}
@@ -924,6 +1017,14 @@ export function MethodologyOutputsPanel({
                 <Table.Tr key={output.id}>
                   <Table.Td>{output.code}</Table.Td>
                   <Table.Td>
+                    {/* ✎ Це `?? []` лишено НАВМИСНО, і межа тут чесна: коли
+                        довідник не приїхав, комірка показує сам `unitId` —
+                        тобто каже щось, а не мовчить. Людина бачить число
+                        замість коду й розуміє, що підпис не розв'язався;
+                        хибного факту («одиниці немає») тут не виникає, бо
+                        одиниця виходу обов'язкова й НЕпорожня за побудовою.
+                        Банер відмови в кожному рядку таблиці коштував би
+                        дорожче за користь. */}
                     {(units.data ?? []).find((u) => u.id === output.unitId)?.code ?? output.unitId}
                   </Table.Td>
                   <Table.Td>{output.ordinal}</Table.Td>
@@ -967,16 +1068,33 @@ export function MethodologyOutputsPanel({
               onChange={(event) => setEditing({ ...editing, code: event.currentTarget.value })}
             />
 
-            <Select
-              label={t('methodologies.outputUnit')}
-              description={t('methodologies.outputUnitRequiredHint')}
-              searchable
-              value={editing.unitId === null ? null : String(editing.unitId)}
-              data={(units.data ?? []).map((unit) => ({ value: String(unit.id), label: unit.code }))}
-              onChange={(value) =>
-                setEditing({ ...editing, unitId: value === null ? null : Number(value) })
-              }
-            />
+            {/* ⛔ Тут одиниця ОБОВ'ЯЗКОВА (кнопка нижче недоступна, доки
+                `unitId === null`), тож порожній перелік не псував даних — він
+                мовчав. Людина бачила порожній вибір і мертву кнопку
+                «Зберегти» й читала з цього, що виходи тут завести неможливо;
+                причини — відмови читання довідника — не бачив ніхто. */}
+            <ChoiceField
+              error={units.error}
+              isPending={units.isPending}
+              onRetry={() => void units.refetch()}
+            >
+              {(disabled) => (
+                <Select
+                  label={t('methodologies.outputUnit')}
+                  description={t('methodologies.outputUnitRequiredHint')}
+                  searchable
+                  disabled={disabled}
+                  value={editing.unitId === null ? null : String(editing.unitId)}
+                  data={(units.data ?? []).map((unit) => ({
+                    value: String(unit.id),
+                    label: unit.code,
+                  }))}
+                  onChange={(value) =>
+                    setEditing({ ...editing, unitId: value === null ? null : Number(value) })
+                  }
+                />
+              )}
+            </ChoiceField>
 
             <NumberInput
               label={t('methodologies.ordinal')}
@@ -1212,7 +1330,7 @@ export function MethodologyBindingsPanel({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<BindingDraft | null>(null);
-  const columnOptions = useColumnDefOptions();
+  const columns = useColumnDefOptions();
 
   const bindings = useQuery({
     queryKey: queryKeys.methodologies.bindings(methodologyId),
@@ -1327,20 +1445,32 @@ export function MethodologyBindingsPanel({
                 ColumnDefId": той самий прийом, що вибір довідника в
                 `ColumnEditor.tsx` — пошук наскрізь по всіх версіях, бо
                 прив'язка не обмежена ОДНІЄЮ таблицею. */}
-            <Select
-              label={t('methodologies.columnDefId')}
-              description={t('methodologies.columnDefIdHint')}
-              searchable
-              disabled={!editing.isNew}
-              value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
-              data={columnOptions}
-              onChange={(value) =>
-                setEditing({
-                  ...editing,
-                  columnDefId: value === null ? 0 : Number(value),
-                })
-              }
-            />
+            {/* ⛔ Той самий запит, та сама ціна, що в обов'язкових входах — і
+                саме тому обидва споживачі полагоджені разом: полагодити один
+                означало б лишити другий екран із тією самою мовчазною
+                порожнечею. */}
+            <ChoiceField
+              error={columns.error}
+              isPending={columns.isPending}
+              onRetry={columns.refetch}
+            >
+              {(disabled) => (
+                <Select
+                  label={t('methodologies.columnDefId')}
+                  description={t('methodologies.columnDefIdHint')}
+                  searchable
+                  disabled={!editing.isNew || disabled}
+                  value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
+                  data={columns.options}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      columnDefId: value === null ? 0 : Number(value),
+                    })
+                  }
+                />
+              )}
+            </ChoiceField>
 
             <TextInput
               label={t('methodologies.outputCode')}
