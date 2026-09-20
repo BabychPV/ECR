@@ -87,7 +87,6 @@ export const FullAccessPermissions: readonly string[] = [
   'Template.View',
   'Template.Edit',
   'Template.Publish',
-  'Template.Migrate',
   'Registry.View',
   'Registry.EditData',
   'Registry.EditDefinition',
