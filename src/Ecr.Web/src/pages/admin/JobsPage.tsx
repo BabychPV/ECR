@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import {
   Button,
   Card,
@@ -7,7 +7,6 @@ import {
   Modal,
   Progress,
   Stack,
-  Table,
   Text,
   TextInput,
 } from '@mantine/core';
@@ -15,6 +14,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { DataTable } from '@/shared/ui/DataTable';
+import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -254,96 +255,112 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
        * задачі, і без пояснення відмова 403 у того, хто права не має,
        * читається як збій екрана, а не як межа доступу.
        */}
-      <Group align="center" gap="xs" mb="sm">
-        <Checkbox
-          label={t('jobs.mineOnly')}
-          checked={mineOnly}
-          onChange={(event) => setMineOnly(event.currentTarget.checked)}
-        />
-        <Text size="xs" c="dimmed">
-          {t('jobs.mineOnlyHint')}
-        </Text>
-      </Group>
+      {/*
+       * ⚠ Прапорець переїхав у правий слот `FilterBar`, а не зник: рядок
+       * фільтрів набору тримає СВОЇ поля в адресі, а цей — у `useState`, і
+       * змішувати два джерела в одному компоненті означало б, що «Назад»
+       * повертає половину подання.
+       *
+       * ⛔ Перевести його в адресу цей PR НЕ може: варіанти перемикача
+       * («усі»/«мої») потребують двох нових рядків каталогу, а `09-seed.sql`
+       * зараз змінює сусідня робота — правка туди дала б конфлікт мержу на
+       * рівному місці (CLAUDE.md, пріоритет 0). Названо в Next steps.
+       */}
+      <FilterBar
+        right={
+          <Group align="center" gap="xs">
+            <Checkbox
+              label={t('jobs.mineOnly')}
+              checked={mineOnly}
+              onChange={(event) => setMineOnly(event.currentTarget.checked)}
+            />
+            <Text size="xs" c="dimmed">
+              {t('jobs.mineOnlyHint')}
+            </Text>
+          </Group>
+        }
+      />
 
-      <AsyncBoundary<JobSummary[]>
+      {/*
+       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` разом, а не лише
+       * розмітку: стани «триває», «порожньо» і «відмова» тепер малює він сам,
+       * і саме тому тут більше немає `data?.items ?? []` — взірця, через який
+       * невдалий запит перетворювався на «даних немає» у п'ятнадцяти областях.
+       *
+       * ⚠ Сортування прийшло разом із таблицею і його тут раніше не було:
+       * шапка стала клікабельною для трьох перших колонок. Колонка дій
+       * `sortable: false` — у кнопок немає скалярного значення, і сортування
+       * за ними мовчки не робило б нічого.
+       */}
+      <DataTable<JobSummary>
+        columns={[
+          {
+            key: 'jobCode',
+            label: t('jobs.recentCode'),
+            render: (job) => jobKindLabel(job.jobCode),
+            sortValue: (job) => jobKindLabel(job.jobCode),
+            minWidth: 180,
+          },
+          {
+            key: 'state',
+            label: t('jobs.recentState'),
+            /* ⚠ `sortValue` тут НЕ потрібен, і це перевірено мутацією, а не
+               вгадано: ключ колонки — `state`, тобто `DataTable` бере
+               `row['state']` сам. Зайвий проп виглядав би як необхідний і
+               спонукав би копіювати його в колонки, де він теж зайвий. */
+            render: (job) => <StatusBadge kind="job" state={job.state} />,
+          },
+          {
+            /* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin` перезаписує
+               цей стовпець при запуску, і називати його «створено» означало б
+               брехати про кожну задачу, що вже працює.
+
+               ⛔ `Timestamp` тримає ОБИДВІ форми одночасно: видимий текст
+               читабельний мовою набору, а рівно той рядок, що віддав сервер,
+               лишається в `dateTime`/`title` — тобто в DOM, у копії розмітки і
+               в e2e-локаторі. Перелік задач читають поруч із журналом аудиту й
+               момент із нього копіюють у запит до бази: звіряти є з чим,
+               дивитися — на що. */
+            key: 'startedAt',
+            label: t('jobs.recentStarted'),
+            render: (job) => <Timestamp value={job.startedAt} />,
+          },
+          {
+            key: 'actions',
+            label: '',
+            sortable: false,
+            render: (job) => (
+              /* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не мають
+                 переносити одна одну на другий рядок і рвати висоту рядків. */
+              <Group gap="xs" wrap="nowrap">
+                <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                  {t('jobs.recentWatch')}
+                </Button>
+
+                {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
+                    нічого, і сервер відповів би `409` (`ECR-JOB-0409`) —
+                    кнопка, приречена на відмову, гірша за її відсутність. */}
+                {isCancellable(job.state) && (
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    color="statusError"
+                    onClick={() => setConfirming(job)}
+                  >
+                    {t('jobs.cancel')}
+                  </Button>
+                )}
+              </Group>
+            ),
+          },
+        ]}
+        rows={jobs.data}
+        rowKey={(job) => job.jobId}
         isPending={jobs.isPending}
         error={jobs.error}
-        data={jobs.data}
-        isEmpty={(list) => list.length === 0}
-        emptyTitle={t('jobs.recentEmpty')}
         onRetry={() => void jobs.refetch()}
-      >
-        {(list) => (
-          <Table>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('jobs.recentCode')}</Table.Th>
-                <Table.Th>{t('jobs.recentState')}</Table.Th>
-                <Table.Th>{t('jobs.recentStarted')}</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {list.map((job) => (
-                <Table.Tr key={job.jobId}>
-                  <Table.Td>{jobKindLabel(job.jobCode)}</Table.Td>
-                  <Table.Td>
-                    <StatusBadge kind="job" state={job.state} />
-                  </Table.Td>
-                  {/* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin`
-                      перезаписує цей стовпець при запуску, і називати його
-                      «створено» означало б брехати про кожну задачу, що вже
-                      працює.
-
-                      ✎ 2026-09-19. Тут стояв сирий рядок сервера
-                      (`{job.startedAt}` → `2026-09-19T09:58:00Z`), і
-                      виправдання було таке: «формат — той самий сирий ISO, що
-                      в журналі аудиту й у знімках звітності». Аргумент
-                      СЛУШНИЙ і не скасований: перелік задач читають поруч із
-                      журналом, момент із нього копіюють у запит до бази й
-                      звіряють із `aud.*` — а доказ мусить бути однозначним,
-                      без «о котрій це за чиїм поясом».
-
-                      ⛔ Знімає його не відмова від точності, а те, що
-                      `Timestamp` тримає ОБИДВІ форми одночасно: видимий текст
-                      читабельний мовою набору, а РІВНО той рядок, що віддав
-                      сервер, лишається в `dateTime`/`title` — тобто в DOM, у
-                      копії розмітки і в e2e-локаторі. Звіряти є з чим,
-                      дивитися — на що. */}
-                  <Table.Td>
-                    <Timestamp value={job.startedAt} />
-                  </Table.Td>
-                  <Table.Td>
-                    {/* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не
-                        мають переносити одна одну на другий рядок і рвати
-                        висоту рядків переліку. */}
-                    <Group gap="xs" wrap="nowrap">
-                      <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
-                        {t('jobs.recentWatch')}
-                      </Button>
-
-                      {/* ⛔ Лише `Queued`/`Running`: термінальній задачі
-                          скасовувати нічого, і сервер відповів би `409`
-                          (`ECR-JOB-0409`) — кнопка, приречена на відмову, гірша
-                          за її відсутність. */}
-                      {isCancellable(job.state) && (
-                        <Button
-                          variant="subtle"
-                          size="xs"
-                          color="statusError"
-                          onClick={() => setConfirming(job)}
-                        >
-                          {t('jobs.cancel')}
-                        </Button>
-                      )}
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
-      </AsyncBoundary>
+        emptyTitle={t('jobs.recentEmpty')}
+      />
     </>
   );
 }
