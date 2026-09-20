@@ -80,7 +80,12 @@ USING (VALUES
   (N'Security.ManageUsers',     N'Security',    1), (N'Security.ManageRoles', N'Security',    1),
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
-  (N'System.ManageLocalization', N'System',     0)
+  (N'System.ManageLocalization', N'System',     0),
+  -- НЕБЕЗПЕЧНЕ (1), як `Integration.Manage`: носій вирішує, КУДИ сервер шле
+  -- повідомлення про збої (адресати SMTP, URL вебхука), і замінює секрети
+  -- каналів. Тому шаблон `%` системного адміністратора його не роздає —
+  -- видається свідомо, зі слідом у журналі безпеки (`BE-32`).
+  (N'System.ManageNotifications', N'System',    1)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
