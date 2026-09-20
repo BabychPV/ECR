@@ -227,7 +227,10 @@ describe('D14-12: перемикання аркуша не губить прав
     expect(patched).toHaveLength(1);
     expect(patched[0]?.url).toBe(`/api/v1/documents/${String(DocumentId)}/cells`);
     expect(patched[0]?.body).toContain('"rowKey":"r1"');
-    expect(patched[0]?.body).toContain('"value":5');
+    // ✎ 2026-09-21: було `'"value":5'`. Після `e470777a` десяткове їде РЯДКОМ,
+    // тож у тілі запиту стоїть `"value":"5"` — і саме рядок доводить, що
+    // `Number` на цьому шляху більше немає.
+    expect(patched[0]?.body).toContain('"value":"5"');
 
     // ⚠ І сервер підтвердив: незбереженого в документі більше немає. Без
     // цього рядка тест був би зелений і тоді, коли правка надсилається по

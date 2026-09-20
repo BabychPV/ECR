@@ -7,6 +7,7 @@ import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
+import { cellDisplay, cellText, isNumericColumn } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -670,25 +671,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           const fixed = roundToScale(target.value, column);
 
           if (fixed !== null) {
-            // ⚠ БОРГ, прив'язаний до контракту: `PendingEdit.value` і
-            // `RoundedCell.applied` — число, бо сервер десяткове рядком ще не
-            // приймає (`JsonConverter<decimal>` додається окремо). Рядковий
-            // шлях округлення вже є; лишилося дати йому доїхати до мережі —
-            // тоді цей `Number(...)` зникає, і межа відправлення перестає
-            // бути другою точкою втрати точності.
-            const applied = Number(fixed);
-
+            // ✎ 2026-09-21: борг закрито. Тут стояло `const applied =
+            // Number(fixed)` з поясненням «сервер десяткове рядком ще не
+            // приймає» — тобто весь рядковий шлях округлення закінчувався
+            // поверненням у `double` за один крок до мережі, і шістнадцятий
+            // знак зникав саме на головному шляху введення. Після `e470777a`
+            // сервер приймає `decimal` рядком, а `PatchCell.value` — `unknown`,
+            // тож рядок їде як є: те, що показано оператору в переліку
+            // «округлено», і те, що лежить у тілі запиту, — один і той самий
+            // текст.
             roundedNow.push({
               rowKey: target.rowKey,
               columnCode: target.columnCode,
               original: target.value,
-              applied,
+              applied: fixed,
             });
 
             return {
               rowKey: target.rowKey,
               columnCode: target.columnCode,
-              value: applied,
+              value: fixed,
               isEmpty: false,
               baseVersion: versions.get(target.rowKey) ?? null,
             };
@@ -882,9 +884,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
 
       event.preventDefault();
+
+      // ⛔ `cellText`, а не `String(...)`: після `e470777a` десяткове приходить
+      // рядком у масштабі колонки, і `String()` клав би в буфер
+      // `5.0000000000` замість `5` — у КОЖНУ комірку аркуша, який оператор
+      // потім вставляє в Excel. Число те саме, аркуш — нечитабельний.
       event.clipboardData.setData(
         'text/plain',
-        toClipboard(rows.map((row) => columns.map((column) => String(row.cells[column.code] ?? '')))),
+        toClipboard(rows.map((row) => columns.map((column) => cellText(row.cells[column.code])))),
       );
     },
     [data],
@@ -1163,10 +1170,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
                 {t('grid.conflictItem', {
                   row: conflict.rowKey,
                   column: conflict.columnCode,
+                  // ⚠ `cellText`, не `String(...)`: чуже значення приходить тим
+                  // самим десятковим рядком, і «їхнє значення 12.4000000000»
+                  // у реченні, за яким людина вирішує «беру їхнє / лишаю
+                  // своє», читалося б як інше число.
                   value:
                     conflict.theirValue === null || conflict.theirValue === undefined
                       ? t('grid.conflictNoValue')
-                      : String(conflict.theirValue),
+                      : cellText(conflict.theirValue),
 
                   // ⚠ `null` означає «невідомо», і воно так і написано словом.
                   // Порожнє місце на цьому рядку читалося б як «ніхто».
@@ -1240,7 +1251,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <List size="sm">
           {rounded.map((cell) => (
             <List.Item key={cellKey(cell.rowKey, cell.columnCode)}>
-              {cell.rowKey} · {cell.columnCode} — {cell.original} → {String(cell.applied)}
+              {cell.rowKey} · {cell.columnCode} — {cell.original} → {cell.applied}
             </List.Item>
           ))}
         </List>
@@ -1374,6 +1385,32 @@ export function gridColumns(
             editor: createLookupCellEditor(lookupEntries),
             cellTemplate: (_h, props: { value?: unknown }) =>
               lookupCellDisplay(props.value, lookupEntries),
+          }),
+
+      /*
+       * ⛔ Показ десяткового (`e470777a`). Доти числова комірка малювалася
+       * тим, що RevoGrid зробить із значення моделі сама, — і це працювало
+       * рівно доти, доки `decimal` був JSON-числом: `JSON.parse` мовчки
+       * прибирав хвостові нулі, тож `5.0000000000` доїжджало як `5`. Тепер
+       * значення приходить РЯДКОМ і малюється як є: оператор бачить
+       * `5.0000000000` у кожній комірці, де ввів `5`.
+       *
+       * ⚠ Формат — `shared/format` і жодного власного правила: `en` →
+       * `1,234.5`, `ru`/`kk` → `1 234,5`. І жодного `Number(...)` на шляху:
+       * шістнадцятий знак має дійти до екрана, а `double` його не тримає.
+       *
+       * ⚠ Лише ПОКАЗ. Редактор RevoGrid бере значення з моделі рядка, а не з
+       * шаблону, тож у полі введення лишається сам запис — і Ctrl+C віддає
+       * його ж (`cellText`, вище), бо групування розрядів Excel прочитав би
+       * як текст.
+       *
+       * ⚠ Колонка `Lookup` сюди не потрапляє: її шаблон уже заданий вище, і
+       * порядок полів це гарантує — `dataType` у них різний.
+       */
+      ...(lookupEntries !== null || !isNumericColumn(column)
+        ? {}
+        : {
+            cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
           }),
 
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і

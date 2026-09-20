@@ -195,7 +195,10 @@ describe('DocumentGrid: вставка йде у ВИДІЛЕНУ комірку
     // комірки перезаписувалися мовчки.
     expect(patched[0]?.rowKey).toBe('r3');
     expect(patched[0]?.cells.map((cell) => cell.columnCode)).toEqual(['C2', 'C3']);
-    expect(patched[0]?.cells.map((cell) => cell.value)).toEqual([11, 12]);
+    // ✎ 2026-09-21: було `[11, 12]`. Після `e470777a` десяткова комірка їде на
+    // сервер РЯДКОМ — `Number` на цьому шляху був другою точкою втрати знаків
+    // (див. `DocumentGrid.decimalStrings.test.tsx`).
+    expect(patched[0]?.cells.map((cell) => cell.value)).toEqual(['11', '12']);
   });
 
   it('без жодного виділення вставка лишається від (0,0) — попередня поведінка', async () => {

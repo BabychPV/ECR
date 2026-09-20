@@ -30,13 +30,14 @@ export interface RoundedCell {
   /**
    * Те, що піде на сервер.
    *
-   * ⚠ БОРГ (прив'язаний до `JsonConverter<decimal>` на сервері): тут число, а
-   * не рядок, бо контракт `PendingEdit.value` десяткове рядком ще не приймає.
-   * Рядковий шлях округлення вже є — лишилося дати йому доїхати до мережі; до
-   * того моменту `DocumentGrid` робить `Number(...)` на межі відправлення, і
-   * саме там (а вже не в округленні) значення знову стає `double`.
+   * ✎ 2026-09-21: борг закрито. Тут стояло ЧИСЛО з поясненням «контракт
+   * десяткове рядком ще не приймає», і `DocumentGrid` робив `Number(...)` на
+   * межі відправлення — тобто весь рядковий шлях округлення закінчувався
+   * поверненням у `double` за один крок до мережі. Після `e470777a` сервер
+   * приймає й віддає `decimal` рядком (`PatchCell.value` — `unknown`), тож
+   * рядок їде як є, і другої точки втрати точності більше немає.
    */
-  applied: number;
+  applied: string;
 }
 
 /**
@@ -88,7 +89,7 @@ interface DecimalParts {
  *
  * ⚠ Не захист від «дивного вводу», а захист пам'яті: `1e+1000000` розгорнувся
  * б у мільйон нулів. 400 із запасом перекриває діапазон `double` (~1e308), за
- * яким `Number(...)` на межі відправлення однаково дасть `Infinity` або `0`.
+ * яким `parseNumber` (`clipboard.ts`) однаково віддає `null`.
  */
 const MaxExponent = 400;
 
@@ -151,6 +152,38 @@ function parseDecimal(text: string): DecimalParts | null {
 }
 
 /**
+ * Ввід оператора чи буфера → десятковий ЗАПИС, який приймає контракт.
+ *
+ * ⛔ Заведено тут, а не поруч із `normalizeDecimal` (`shared/format/decimal.ts`),
+ * і це межа відповідальності, а не зручність. Той канон описує ДРІТ: сервер
+ * друкує `decimal` інваріантною культурою, тобто ні коми, ні розрядних
+ * пробілів, ні експоненти там не буває — і він їх свідомо відхиляє. А в буфері
+ * Excel усі три є щодня. Отже розгортає їх той, хто ввід і читає, — цей файл,
+ * у якому потрібний розбір уже стояв для округлення.
+ *
+ * ⚠ Результат `parseDecimal` уже канонічний (ведучі нулі цілої й хвостові нулі
+ * дробу зрізані), тож `normalizeDecimal` над ним був би тотожним: ці дві
+ * функції зобов'язані давати той самий канон, і це твердження в тесті, а не
+ * домовленість.
+ *
+ * @returns Десятковий запис без експоненти; `null` — вхід не є числом.
+ */
+export function decimalTextOf(text: string): string | null {
+  const parts = parseDecimal(text);
+
+  return parts === null ? null : magnitudeOf(parts);
+}
+
+/** Знак і цифри в один рядок; `-0` зводиться до `0`. */
+function magnitudeOf(parts: DecimalParts): string {
+  const magnitude = parts.frac.length > 0 ? `${parts.int}.${parts.frac}` : parts.int;
+
+  // ⚠ `-0.4` при масштабі 0 дає `0`, а не `-0`: `decimal` від'ємного нуля не
+  // має, тож знак тут лише зашумив би і позначку «округлено», і порівняння.
+  return magnitude === '0' ? '0' : parts.sign + magnitude;
+}
+
+/**
  * Округлення «половина від нуля» — те саме правило, що й на сервері
  * (`ColumnDef.Validate`: `decimal.Round(dec, scale, MidpointRounding.AwayFromZero)`).
  *
@@ -173,14 +206,12 @@ function roundHalfAwayFromZero(parts: DecimalParts, scale: number): string {
     : parts.int + kept;
 
   const cut = digits.length - scale;
-  const int = digits.slice(0, cut).replace(/^0+(?=\d)/, '');
-  const frac = digits.slice(cut).replace(/0+$/, '');
 
-  const magnitude = frac.length > 0 ? `${int}.${frac}` : int;
-
-  // ⚠ `-0.4` при масштабі 0 дає `0`, а не `-0`: `decimal` від'ємного нуля не
-  // має, тож знак тут лише зашумив би позначку «округлено».
-  return magnitude === '0' ? '0' : parts.sign + magnitude;
+  return magnitudeOf({
+    sign: parts.sign,
+    int: digits.slice(0, cut).replace(/^0+(?=\d)/, ''),
+    frac: digits.slice(cut).replace(/0+$/, ''),
+  });
 }
 
 /** Додає одиницю до рядка цифр; `'999'` → `'1000'`. */
