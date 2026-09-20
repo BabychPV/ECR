@@ -413,7 +413,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
                     (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
                 VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {run.Id}, {methodologyVersion.Id},
                         {document.PeriodKey.Value}, {document.DocumentId}, {rowKey}, {output},
-                        CAST({text} AS decimal(28,10)), {unit.Id})
+                        CAST({text} AS decimal(28,16)), {unit.Id})
                 """);
         }
 

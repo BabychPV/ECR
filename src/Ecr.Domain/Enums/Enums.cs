@@ -435,7 +435,7 @@ public enum ConstantKind : byte
 /// </remarks>
 public enum FormulaResultType : byte
 {
-    /// <summary>Число. Лягає в <c>calc.CalculationResult.Value decimal(28,10)</c>.</summary>
+    /// <summary>Число. Лягає в <c>calc.CalculationResult.Value decimal(28,16)</c>.</summary>
     Number = 0,
 
     /// <summary>Текст. Числової колонки не бачить.</summary>

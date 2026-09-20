@@ -115,7 +115,7 @@ CREATE TABLE arc.CalculationResult
     SourceRowKey         nvarchar(100)  NULL,
     SubstanceEntryId     int            NULL,
     OutputCode           nvarchar(64)   NOT NULL,
-    Value                decimal(28,10) NOT NULL,
+    Value                decimal(28,16) NOT NULL,   -- дзеркало calc.CalculationResult (D-148)
     UnitId               int            NOT NULL,
     INDEX CCI_arc_CalculationResult CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -131,7 +131,7 @@ CREATE TABLE arc.CalculationStep
     StepOrder        int            NOT NULL,
     StepCode         nvarchar(64)   NOT NULL,
     Expression       nvarchar(2000) NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(28,16) NULL,       -- дзеркало calc.CalculationStep (D-148)
     TraceJson        nvarchar(max)  NULL,
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];

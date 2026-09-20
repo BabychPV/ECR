@@ -1339,7 +1339,7 @@ CREATE TABLE calc.MethodologyFormula
     OutputUnitId          int            NULL,
     -- Формула діалекту B повертає і ТЕКСТ: у корпусі це 'В пределе норматива',
     -- 'Сверхнорматив', 'Превышение!!!' (02b §8, поправка 2-біс). Без оголошеного
-    -- типу такий результат пішов би в calc.CalculationResult.Value decimal(28,10).
+    -- типу такий результат пішов би в calc.CalculationResult.Value decimal(28,16).
     ResultType            tinyint        NOT NULL CONSTRAINT DF_MF_Result DEFAULT(0),  -- FormulaResultType
     -- Порядок НЕ зберігається: він топологічний і рахується при Publish (ФВ-9.4).
     -- Це поле — результат обчислення, а не введення користувача.
@@ -1367,7 +1367,7 @@ CREATE TABLE calc.MethodologyConstant
     Code                 nvarchar(64)   NOT NULL,
     Category             nvarchar(64)   NULL,
     Kind                 tinyint        NOT NULL CONSTRAINT DF_MC_Kind DEFAULT(0),  -- ConstantKind
-    Value                decimal(28,10) NULL,      -- лише Kind = Numeric і лише коли розібралося
+    Value                decimal(28,16) NULL,      -- лише Kind = Numeric і лише коли розібралося
     TextValue            nvarchar(400)  NULL,      -- текст, мітка або СИРИЙ рядок джерела
     UnitId               int            NULL,      -- лише Kind = Numeric: вимір — властивість числа
     -- Напівінтервал [ValidFrom, ValidTo): ValidTo — перший НЕчинний день
@@ -1473,7 +1473,7 @@ CREATE TABLE calc.CalculationResult
     SourceRowKey         nvarchar(100)  NULL,
     SubstanceEntryId     int            NULL,
     OutputCode           nvarchar(64)   NOT NULL,
-    Value                decimal(28,10) NOT NULL,   -- float заборонений (D-30)
+    Value                decimal(28,16) NOT NULL,   -- float заборонений (D-30); 16 знаків — D-148
     UnitId               int            NOT NULL,
     CONSTRAINT PK_CalculationResult PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CRes_Run    FOREIGN KEY (CalculationRunId)     REFERENCES calc.CalculationRun (Id),
@@ -1498,7 +1498,7 @@ CREATE TABLE calc.CalculationInput
     DocumentId       bigint         NOT NULL,
     SourceRowKey     nvarchar(100)  NULL,
     ArgumentCode     nvarchar(64)   NOT NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(28,16) NULL,
     ValueString      nvarchar(400)  NULL,
     UnitId           int            NULL,
     CONSTRAINT PK_CalculationInput PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
@@ -1520,7 +1520,7 @@ CREATE TABLE calc.CalculationStep
     StepOrder        int            NOT NULL,
     StepCode         nvarchar(64)   NOT NULL,
     Expression       nvarchar(2000) NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(28,16) NULL,
     TraceJson        nvarchar(max)  NULL,
     CONSTRAINT PK_CalculationStep PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CStep_Run FOREIGN KEY (CalculationRunId) REFERENCES calc.CalculationRun (Id)
@@ -2387,7 +2387,10 @@ CREATE TABLE calc.TestCase
     -- Допуск потрібен саме тому, що числа рахуються в decimal з округленням
     -- на кожному кроці: побітова рівність дала б червоний тест від зміни
     -- порядку доданків, яка нічого не змінює по суті.
-    Tolerance            decimal(18,10) NOT NULL,
+    -- ⚠ Тут стояло decimal(18,10), а в CalculationsConfiguration.cs — (28,10):
+    -- розбіжність жила з самого початку й видно її не було. Переведено разом
+    -- із рештою calc.* на (28,16) (D-148), тепер документ і код збігаються.
+    Tolerance            decimal(28,16) NOT NULL,
     CONSTRAINT PK_TestCase PRIMARY KEY (Id),
     CONSTRAINT UQ_TestCase UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT CK_TC_Tolerance CHECK (Tolerance >= 0),
@@ -2568,7 +2571,7 @@ CREATE TABLE arc.CalculationResult
     SourceRowKey         nvarchar(100)  NULL,
     SubstanceEntryId     int            NULL,
     OutputCode           nvarchar(64)   NOT NULL,
-    Value                decimal(28,10) NOT NULL,
+    Value                decimal(28,16) NOT NULL,
     UnitId               int            NOT NULL,
     INDEX CCI_arc_CalculationResult CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -2583,7 +2586,7 @@ CREATE TABLE arc.CalculationStep
     StepOrder        int            NOT NULL,
     StepCode         nvarchar(64)   NOT NULL,
     Expression       nvarchar(2000) NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(28,16) NULL,
     TraceJson        nvarchar(max)  NULL,
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];

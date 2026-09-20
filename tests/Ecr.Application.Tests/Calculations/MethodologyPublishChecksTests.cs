@@ -103,7 +103,7 @@ public sealed class MethodologyPublishChecksTests
         const string verdict = "if(@Excess > 0, 'Сверхнорматив', 'В пределе норматива')";
 
         // ⛔ Оголошена числовою, така формула пише текст у
-        // `calc.CalculationResult.Value decimal(28,10)`.
+        // `calc.CalculationResult.Value decimal(28,16)`.
         var wrong = Check([Formula("Verdict", verdict, FormulaResultType.Number)], [], []);
         Assert.Contains(wrong, p => p.Contains("лише текст", StringComparison.Ordinal));
 
