@@ -6,6 +6,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import {
   type ColumnBlocker,
@@ -100,6 +101,26 @@ export function ColumnEditor({
   });
 
   const existingStyle = styles.data?.find((s) => s.id === draft.styleId) ?? null;
+
+  /**
+   * ⛔ Директива D15 §0, правило L10: «стан стилю невідомий» — це НЕ «стилю
+   * немає». Колонка вже має `styleId`, а перелік стилів або відмовлено, або
+   * ще в дорозі: `existingStyle` тоді `null` — рівно те саме значення, що й у
+   * колонки БЕЗ стилю. Увімкнення перемикача в цьому стані відкривало порожню
+   * чернетку з кодом `${code}Style` — тобто саме той стиль, який форма й
+   * створила колись, — і `saveColumn` (`columnApi.ts`) записував його першим
+   * `PUT …/styles/{code}`, мовчки затираючи збережені значення дефолтами.
+   * Той самий запобіжник, що в `PeriodsPage` (#452): доки не знаємо — не
+   * пускаємо, і кажемо чому.
+   *
+   * ⚠ Збереження колонки при цьому НЕ блокується: `columnBody` везе
+   * `styleId: draft.styleId`, тобто вже персистентний ідентифікатор, і поки
+   * чернетки стилю немає (`draft.style === null`), `saveColumn` до
+   * `…/styles/{code}` взагалі не звертається. Заблокувати ще й «Зберегти»
+   * означало б відняти правку решти полів, не відвернувши жодного затирання.
+   */
+  const styleStateUnknown =
+    draft.styleId !== null && (styles.error !== null || styles.data === undefined);
 
   // ⛔ Живий перегляд (не тест) знайшов реальну шорсткість: без цього ефекту
   // перемикач «власний стиль» показував ВИМКНЕНО для колонки, яка НАСПРАВДІ
@@ -215,7 +236,29 @@ export function ColumnEditor({
         </Group>
       )}
 
-      {isLookup && (
+      {/*
+        ⛔ Директива D15 §0, правило L10: відмова `GET /api/v1/registries`
+        давала порожній `Select` із підписом «довідників не знайдено» — автор
+        шаблону читав це як «довідників не завели» і йшов заводити ще один.
+        Порядок той самий, що в `AsyncBoundary` і в `LocalizedInput` (#444):
+        `error` → `isPending` → дані. Елемент, для якого даних немає, не
+        малюється зовсім (`D15-06`).
+      */}
+      {isLookup && registries.error !== null && (
+        <ErrorAlert error={registries.error} onRetry={() => void registries.refetch()} />
+      )}
+
+      {/*
+        ⚠ «Ще вантажиться» теж не «порожньо»: до цієї правки перелік у дорозі
+        показував той самий `nothingFoundMessage`, що й насправді порожній
+        довідник, — і встигав спокусити відкрити випадний список раніше, ніж
+        приїдуть опції.
+      */}
+      {isLookup && registries.error === null && registries.isPending && (
+        <Skeleton height={60} radius="sm" data-registry-select="pending" />
+      )}
+
+      {isLookup && registries.error === null && !registries.isPending && (
         <Select
           label={t('columns.lookupRegistryDefId')}
           description={t('columns.lookupRegistryDefIdHint')}
@@ -235,10 +278,16 @@ export function ColumnEditor({
         />
       )}
 
+      {/* ⛔ Причина, з якої перемикач нижче недоступний, має бути видимою —
+          інакше «не натискається» читається як поломка форми. */}
+      {styleStateUnknown && styles.error !== null && (
+        <ErrorAlert error={styles.error} onRetry={() => void styles.refetch()} />
+      )}
+
       <Switch
         label={t('columns.customStyle')}
         description={t('columns.customStyleHint')}
-        disabled={disabled}
+        disabled={disabled || styleStateUnknown}
         checked={draft.style !== null}
         onChange={(event) => {
           if (event.currentTarget.checked) {
