@@ -1,4 +1,6 @@
 // src/Ecr.Infrastructure/Notifications/NotificationStore.cs
+using Ecr.Application.Common;
+using Ecr.Application.Notifications;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Notifications;
 using Ecr.Infrastructure.Persistence;
@@ -39,6 +41,68 @@ public sealed class NotificationStore(EcrDbContext db) : INotificationStore
         db.NotificationChannels.Remove(channel);
 
         return rules.Count;
+    }
+
+    /// <summary>Стеля матриці: види подій × <see cref="MaxChannels"/> каналів.</summary>
+    public const int MaxRules = 1000;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<NotificationRule>> ListRulesAsync(CancellationToken ct)
+        => await db.NotificationRules.OrderBy(r => r.EventKind).ThenBy(r => r.ChannelId).Take(MaxRules)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddRule(NotificationRule rule) => db.NotificationRules.Add(rule);
+
+    /// <inheritdoc />
+    public void RemoveRules(IEnumerable<NotificationRule> rules) => db.NotificationRules.RemoveRange(rules);
+
+    /// <inheritdoc />
+    public async Task<PagedResult<NotificationDeliveryView>> ReadDeliveriesAsync(
+        CursorRequest page, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        // ⚠ Курсор іде ВНИЗ (`Id < before`), бо й порядок спадний: журнал
+        // читають із кінця. Порожній курсор — `long.MaxValue`, а не 0: із нулем
+        // перша сторінка була б порожня завжди (той самий підводний камінь, що
+        // в `ConsistencyIssueReader`).
+        var decoded = Cursor.Decode(page.Cursor);
+        var before = decoded == 0 ? long.MaxValue : decoded;
+
+        // ⚠ Беремо на рядок більше за сторінку — це й є ознака «є ще», без COUNT.
+        var rows = await db.NotificationDeliveries.AsNoTracking()
+            .Where(d => d.Id < before)
+            .OrderByDescending(d => d.Id)
+            .Take(page.Limit + 1)
+            .Select(d => new
+            {
+                d.Id,
+                d.At,
+                d.ChannelId,
+                d.EventKind,
+                d.EventKey,
+                d.Status,
+                d.Error,
+
+                // ⚠ Підзапит, а не `Join`: зовнішнього ключа на канал немає
+                // навмисно (журнал переживає видалення каналу), тож назва тут
+                // буває відсутня — і це не помилка даних.
+                ChannelName = db.NotificationChannels
+                    .Where(c => c.Id == d.ChannelId).Select(c => c.Name).FirstOrDefault(),
+            })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var items = rows.Take(page.Limit)
+            .Select(r => new NotificationDeliveryView(
+                r.Id, DateTime.SpecifyKind(r.At, DateTimeKind.Utc), r.ChannelId, r.ChannelName,
+                r.EventKind, r.EventKey, r.Status, r.Error))
+            .ToList();
+
+        return new PagedResult<NotificationDeliveryView>(
+            items,
+            rows.Count > page.Limit ? Cursor.Encode(items[^1].Id) : null,
+            TotalCount: null);
     }
 }
 

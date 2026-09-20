@@ -23,6 +23,28 @@ public interface INotificationStore
     /// журнал доставок лишається. Повертає кількість прибраних правил.
     /// </summary>
     public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct);
+
+    /// <summary>
+    /// Усі правила «подія × канал» — ВІДСТЕЖУВАНІ: той самий перелік і читається,
+    /// і переписується заміною матриці. Правил одиниці (види подій × канали).
+    /// </summary>
+    public Task<IReadOnlyList<NotificationRule>> ListRulesAsync(CancellationToken ct);
+
+    /// <summary>Додає правило; зберігає <c>IUnitOfWork</c>.</summary>
+    public void AddRule(NotificationRule rule);
+
+    /// <summary>Прибирає правила, яких у новій матриці немає.</summary>
+    public void RemoveRules(IEnumerable<NotificationRule> rules);
+
+    /// <summary>
+    /// Сторінка журналу доставок, новіші першими.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Повертає ПРОЄКЦІЮ, а не сутність: у журналі немає ні секрету каналу,
+    /// ні тіла повідомлення, і тип відповіді це закріплює.
+    /// </remarks>
+    public Task<Common.PagedResult<Notifications.NotificationDeliveryView>> ReadDeliveriesAsync(
+        Common.CursorRequest page, CancellationToken ct);
 }
 
 /// <summary>Захист секрету каналу (пароль SMTP, URL вебхука) перед записом у базу.</summary>

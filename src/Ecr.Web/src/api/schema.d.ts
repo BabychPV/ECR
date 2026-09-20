@@ -4121,6 +4121,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Журнал доставок, новіші першими.
+         * @description ⛔ Ні секрету каналу, ні тіла повідомлення в журналі немає — лише
+         *     подія, канал, підсумок і причина відмови.
+         *
+         *     ⚠ Стеля сторінки — 200 (int ListNotificationDeliveriesHandler.MaxLimit),
+         *     менша за спільну: більше тут не читає ніхто, а базі коштує.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Розмір сторінки 1..200; `0` — типове значення 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfNotificationDeliveryView"];
+                        "text/json": components["schemas"]["PagedResultOfNotificationDeliveryView"];
+                        "text/plain": components["schemas"]["PagedResultOfNotificationDeliveryView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Матриця «подія × канал» цілком.
+         * @description ⚠ `eventKinds` перелічує УСІ види подій, навіть ті, на які правила
+         *     ще немає: порожня клітинка матриці — це «правила немає», а не «такої
+         *     події не буває».
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/plain": components["schemas"]["NotificationRuleMatrix"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює матрицю цілком; клітинка, якої немає в тілі, зникає.
+         * @description ⚠ Ідемпотентно: те саме тіло двічі дає той самий стан і не дублює
+         *     правил. Правило на неіснуючий канал — `404`, дві клітинки з однією
+         *     парою «подія + канал» — `422`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceNotificationRulesRequest"];
+                    "application/json": components["schemas"]["ReplaceNotificationRulesRequest"];
+                    "text/json": components["schemas"]["ReplaceNotificationRulesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/plain": components["schemas"]["NotificationRuleMatrix"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/periods/{id}/reopen": {
         parameters: {
             query?: never;
@@ -11564,6 +11756,72 @@ export interface components {
             /** @description Несекретні параметри. */
             settings: components["schemas"]["NotificationChannelSettings"];
         };
+        /**
+         * @description Підсумок спроби доставки. Числа зберігаються в базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        NotificationDeliveryStatus: "Sent" | "Failed" | "Suppressed";
+        /** @description Запис журналу доставок — рядок екрана. */
+        NotificationDeliveryView: {
+            /**
+             * Format: date-time
+             * @description Момент спроби, UTC.
+             */
+            at: string;
+            /**
+             * Format: int32
+             * @description Канал.
+             */
+            channelId: number;
+            /** @description Назва каналу; `null` — канал уже видалено, а журнал лишився. */
+            channelName: null | string;
+            /** @description Причина відмови — без стека й без секрету. */
+            error: null | string;
+            /** @description Ключ дедуплікації. */
+            eventKey: string;
+            /** @description Подія. */
+            eventKind: components["schemas"]["NotificationEventKind"];
+            /**
+             * Format: int64
+             * @description Ідентифікатор; він же курсор сторінки.
+             */
+            id: number;
+            /** @description Підсумок спроби. */
+            status: components["schemas"]["NotificationDeliveryStatus"];
+        };
+        /**
+         * @description Подія, про яку сповіщають. Числа зберігаються в базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        NotificationEventKind: "JobFailed" | "ConsistencyIssuesFound" | "PartitionsRunningOut" | "CollectionFailed" | "ExportFailed";
+        /** @description Матриця правил цілком. */
+        NotificationRuleMatrix: {
+            /** @description УСІ види подій, а не лише ті, на які правило вже є: інакше клієнт не мав би
+             *     з чого намалювати порожню клітинку, і «правила немає» виглядало б як
+             *     «події не існує». */
+            eventKinds: components["schemas"]["NotificationEventKind"][];
+            /** @description Заповнені клітинки. */
+            rules: components["schemas"]["NotificationRuleView"][];
+        };
+        /** @description Клітинка матриці «подія × канал». */
+        NotificationRuleView: {
+            /**
+             * Format: int32
+             * @description Канал.
+             */
+            channelId: number;
+            /** @description Подія. */
+            eventKind: components["schemas"]["NotificationEventKind"];
+            /** @description Чи діє правило. */
+            isEnabled: boolean;
+            /** @description Межа серйозності: правило пропускає події не нижчі за неї. */
+            minSeverity: components["schemas"]["NotificationSeverity"];
+        };
+        /**
+         * @description Серйозність події; правило пропускає події не нижчі за свою межу.
+         * @enum {unknown}
+         */
+        NotificationSeverity: "Info" | "Warning" | "Error";
         /** @description Наслідок пробного повідомлення. */
         NotificationTestResult: {
             /** @description Причина відмови — без секрету; `null` за успіху. */
@@ -11622,6 +11880,19 @@ export interface components {
         PagedResultOfDocumentSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["DocumentSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfNotificationDeliveryView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["NotificationDeliveryView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
@@ -12450,6 +12721,11 @@ export interface components {
         ReplaceNotificationChannelSecretRequest: {
             /** @description Новий секрет; `null` або порожній — прибрати. */
             secret: null | string;
+        };
+        /** @description Тіло заміни матриці правил. */
+        ReplaceNotificationRulesRequest: {
+            /** @description Заповнені клітинки; порожній перелік прибирає всі правила. */
+            rules: components["schemas"]["NotificationRuleView"][];
         };
         /** @description Запит на заміну набору ролей користувача. */
         ReplaceUserRolesRequest: {

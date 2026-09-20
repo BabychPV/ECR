@@ -4062,6 +4062,142 @@
         ],
         "type": "object"
       },
+      "NotificationDeliveryStatus": {
+        "description": "Підсумок спроби доставки. Числа зберігаються в базі — не перенумеровувати.",
+        "enum": [
+          "Sent",
+          "Failed",
+          "Suppressed"
+        ]
+      },
+      "NotificationDeliveryView": {
+        "description": "Запис журналу доставок — рядок екрана.",
+        "properties": {
+          "at": {
+            "description": "Момент спроби, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "channelId": {
+            "description": "Канал.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "channelName": {
+            "description": "Назва каналу; `null` — канал уже видалено, а журнал лишився.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "error": {
+            "description": "Причина відмови — без стека й без секрету.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventKey": {
+            "description": "Ключ дедуплікації.",
+            "type": "string"
+          },
+          "eventKind": {
+            "$ref": "#/components/schemas/NotificationEventKind",
+            "description": "Подія."
+          },
+          "id": {
+            "description": "Ідентифікатор; він же курсор сторінки.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationDeliveryStatus",
+            "description": "Підсумок спроби."
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "channelId",
+          "channelName",
+          "eventKind",
+          "eventKey",
+          "status",
+          "error"
+        ],
+        "type": "object"
+      },
+      "NotificationEventKind": {
+        "description": "Подія, про яку сповіщають. Числа зберігаються в базі — не перенумеровувати.",
+        "enum": [
+          "JobFailed",
+          "ConsistencyIssuesFound",
+          "PartitionsRunningOut",
+          "CollectionFailed",
+          "ExportFailed"
+        ]
+      },
+      "NotificationRuleMatrix": {
+        "description": "Матриця правил цілком.",
+        "properties": {
+          "eventKinds": {
+            "description": "УСІ види подій, а не лише ті, на які правило вже є: інакше клієнт не мав би\nз чого намалювати порожню клітинку, і «правила немає» виглядало б як\n«події не існує».",
+            "items": {
+              "$ref": "#/components/schemas/NotificationEventKind"
+            },
+            "type": "array"
+          },
+          "rules": {
+            "description": "Заповнені клітинки.",
+            "items": {
+              "$ref": "#/components/schemas/NotificationRuleView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "eventKinds",
+          "rules"
+        ],
+        "type": "object"
+      },
+      "NotificationRuleView": {
+        "description": "Клітинка матриці «подія × канал».",
+        "properties": {
+          "channelId": {
+            "description": "Канал.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "eventKind": {
+            "$ref": "#/components/schemas/NotificationEventKind",
+            "description": "Подія."
+          },
+          "isEnabled": {
+            "description": "Чи діє правило.",
+            "type": "boolean"
+          },
+          "minSeverity": {
+            "$ref": "#/components/schemas/NotificationSeverity",
+            "description": "Межа серйозності: правило пропускає події не нижчі за неї."
+          }
+        },
+        "required": [
+          "eventKind",
+          "channelId",
+          "minSeverity",
+          "isEnabled"
+        ],
+        "type": "object"
+      },
+      "NotificationSeverity": {
+        "description": "Серйозність події; правило пропускає події не нижчі за свою межу.",
+        "enum": [
+          "Info",
+          "Warning",
+          "Error"
+        ]
+      },
       "NotificationTestResult": {
         "description": "Наслідок пробного повідомлення.",
         "properties": {
@@ -4200,6 +4336,39 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/DocumentSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfNotificationDeliveryView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/NotificationDeliveryView"
             },
             "type": "array"
           },
@@ -5935,6 +6104,22 @@
         },
         "required": [
           "secret"
+        ],
+        "type": "object"
+      },
+      "ReplaceNotificationRulesRequest": {
+        "description": "Тіло заміни матриці правил.",
+        "properties": {
+          "rules": {
+            "description": "Заповнені клітинки; порожній перелік прибирає всі правила.",
+            "items": {
+              "$ref": "#/components/schemas/NotificationRuleView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules"
         ],
         "type": "object"
       },
@@ -14984,6 +15169,256 @@
         ]
       }
     },
+    "/api/v1/notifications/deliveries": {
+      "get": {
+        "description": "⛔ Ні секрету каналу, ні тіла повідомлення в журналі немає — лише\nподія, канал, підсумок і причина відмови.\n\n⚠ Стеля сторінки — 200 (int ListNotificationDeliveriesHandler.MaxLimit),\nменша за спільну: більше тут не читає ніхто, а базі коштує.",
+        "parameters": [
+          {
+            "description": "Розмір сторінки 1..200; `0` — типове значення 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfNotificationDeliveryView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfNotificationDeliveryView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfNotificationDeliveryView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Журнал доставок, новіші першими.",
+        "tags": [
+          "NotificationRules"
+        ]
+      }
+    },
+    "/api/v1/notifications/rules": {
+      "get": {
+        "description": "⚠ `eventKinds` перелічує УСІ види подій, навіть ті, на які правила\nще немає: порожня клітинка матриці — це «правила немає», а не «такої\nподії не буває».",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleMatrix"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleMatrix"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleMatrix"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Матриця «подія × канал» цілком.",
+        "tags": [
+          "NotificationRules"
+        ]
+      },
+      "put": {
+        "description": "⚠ Ідемпотентно: те саме тіло двічі дає той самий стан і не дублює\nправил. Правило на неіснуючий канал — `404`, дві клітинки з однією\nпарою «подія + канал» — `422`.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNotificationRulesRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNotificationRulesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNotificationRulesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleMatrix"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleMatrix"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRuleMatrix"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює матрицю цілком; клітинка, якої немає в тілі, зникає.",
+        "tags": [
+          "NotificationRules"
+        ]
+      }
+    },
     "/api/v1/periods/{id}/reopen": {
       "post": {
         "description": "Відкриття періоду і відкриття документа — <b>різні</b> операції з\nрізними правами (`D-67`). Причина обов'язкова: закритий період —\nце поданий стан звітності, і його зміна має бути пояснена в аудиті.",
@@ -22062,6 +22497,9 @@
     },
     {
       "name": "NotificationChannels"
+    },
+    {
+      "name": "NotificationRules"
     },
     {
       "name": "Periods"

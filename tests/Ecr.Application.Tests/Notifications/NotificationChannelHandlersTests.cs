@@ -23,7 +23,7 @@ public sealed class NotificationChannelHandlersTests
     private static readonly NotificationChannelSettings Smtp =
         new(Host: "mail.corp.example", Port: 25, Recipients: ["ops@corp.example"]);
 
-    private readonly FakeStore _store = new();
+    private readonly FakeNotificationStore _store = new();
     private readonly List<SecurityEventRecord> _events = [];
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
@@ -199,33 +199,5 @@ public sealed class NotificationChannelHandlersTests
         public const string Mark = "protected:";
 
         public byte[] Protect(string secret) => Encoding.UTF8.GetBytes(Mark + secret);
-    }
-
-    private sealed class FakeStore : INotificationStore
-    {
-        public List<NotificationChannel> Channels { get; } = [];
-
-        public int RuleCount { get; set; }
-
-        public Task<IReadOnlyList<NotificationChannel>> ListChannelsAsync(CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<NotificationChannel>>(Channels);
-
-        public Task<NotificationChannel?> FindChannelAsync(int id, CancellationToken ct)
-            => Task.FromResult(Channels.Find(c => c.Id == id));
-
-        public Task<bool> IsChannelNameTakenAsync(string name, int? exceptChannelId, CancellationToken ct)
-            => Task.FromResult(Channels.Exists(c => c.Name == name && c.Id != exceptChannelId));
-
-        public void AddChannel(NotificationChannel channel)
-        {
-            typeof(NotificationChannel).GetProperty(nameof(NotificationChannel.Id))!.SetValue(channel, Channels.Count + 1);
-            Channels.Add(channel);
-        }
-
-        public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct)
-        {
-            Channels.Remove(channel);
-            return Task.FromResult(RuleCount);
-        }
     }
 }

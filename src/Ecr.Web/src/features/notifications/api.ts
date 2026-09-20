@@ -58,3 +58,31 @@ export function replaceNotificationChannelSecret(id: number, secret: string | nu
 export function testNotificationChannel(id: number): Promise<NotificationTestResult> {
   return apiFetch<NotificationTestResult>(`/api/v1/notifications/channels/${id}/test`, { method: 'POST' });
 }
+
+/** Клітинка матриці «подія × канал». */
+export type NotificationRule = components['schemas']['NotificationRuleView'];
+/** `eventKinds` — УСІ види подій; клітинка без правила порожня, а не відсутня. */
+export type NotificationRuleMatrix = components['schemas']['NotificationRuleMatrix'];
+/** Рядок журналу доставок. ⛔ Ні секрету, ні тіла повідомлення тут немає. */
+export type NotificationDelivery = components['schemas']['NotificationDeliveryView'];
+export type NotificationDeliveryPage = components['schemas']['PagedResultOfNotificationDeliveryView'];
+
+export function getNotificationRules(): Promise<NotificationRuleMatrix> {
+  return apiFetch<NotificationRuleMatrix>('/api/v1/notifications/rules');
+}
+
+/**
+ * Замінює матрицю цілком: клітинка, якої немає в `rules`, зникає.
+ * Ідемпотентно — та сама матриця двічі дає той самий стан.
+ */
+export function replaceNotificationRules(rules: NotificationRule[]): Promise<NotificationRuleMatrix> {
+  return apiFetch<NotificationRuleMatrix>('/api/v1/notifications/rules', { method: 'PUT', ...json({ rules }) });
+}
+
+/** Журнал доставок, новіші першими; `limit` — 1..200. */
+export function listNotificationDeliveries(limit = 50, cursor: string | null = null): Promise<NotificationDeliveryPage> {
+  return apiFetch<NotificationDeliveryPage>(
+    `/api/v1/notifications/deliveries?limit=${String(limit)}` +
+      (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
+  );
+}

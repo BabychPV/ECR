@@ -547,6 +547,7 @@ USING (VALUES
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
     (N'err.ECR-REQ-0422.webhookUrlNotAllowed',         N'en', N'The webhook address must use https and point to an allowed host.', 1),
     (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
+    (N'err.ECR-REQ-0422.notificationRuleInvalid',      N'en', N'A rule matrix accepts a known event and severity, and at most one rule per event and channel.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5

@@ -3019,6 +3019,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/notifications/channels/{id}` | `System.ManageNotifications` | 7 |
 | `PUT` | `/api/v1/notifications/channels/{id}/secret` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/notifications/channels/{id}/test` | `System.ManageNotifications` | 7 |
+| `GET` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
+| `GET` | `/api/v1/notifications/deliveries` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |

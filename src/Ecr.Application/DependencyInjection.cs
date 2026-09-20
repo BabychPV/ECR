@@ -147,6 +147,9 @@ public static class DependencyInjection
         services.AddScoped<Notifications.DeleteNotificationChannelHandler>();
         services.AddScoped<Notifications.ReplaceNotificationChannelSecretHandler>();
         services.AddScoped<Notifications.TestNotificationChannelHandler>();
+        services.AddScoped<Notifications.GetNotificationRulesHandler>();
+        services.AddScoped<Notifications.ReplaceNotificationRulesHandler>();
+        services.AddScoped<Notifications.ListNotificationDeliveriesHandler>();
         services.AddScoped<Security.CloneRoleHandler>();
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();
