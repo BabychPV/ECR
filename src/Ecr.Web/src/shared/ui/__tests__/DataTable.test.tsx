@@ -506,4 +506,36 @@ describe('Розмітка таблиці', () => {
     fireEvent.click(screen.getByRole('row', { name: 'Документ Gamma' }));
     expect(open).toHaveBeenCalledWith(docs[2]);
   });
+
+  it('rowLabel повернув null — рядок лишається БЕЗ aria-label, а не з порожнім', () => {
+    /*
+     * ⛔ Цей випадок з'явився після ПЕРШОГО справжнього споживача
+     * (`SourcesPage`). Із сигнатурою `=> string` єдиним способом «не ставити
+     * підпис цьому рядку» був порожній рядок — а `aria-label=""` це теж
+     * атрибут, і на `<tr>` він ЗАМІНЮЄ собою читання клітинок: рядок лишився
+     * б узагалі без доступного імені. Тобто спроба НЕ зіпсувати доступність
+     * псувала б її сильніше, ніж підпис на кожному рядку.
+     *
+     * ⚠ Перевіряється саме ВІДСУТНІСТЬ атрибута, а не його значення:
+     * `getAttribute` поверне `''` і для `aria-label=""` теж, і жодне
+     * порівняння рядків цих двох випадків не розрізнить.
+     */
+    renderWithMantine(
+      <DataTable<Doc>
+        columns={columns}
+        rows={docs}
+        rowKey={(row) => row.id}
+        rowLabel={(row) => (row.code === 'Gamma' ? `Документ ${row.code}` : null)}
+      />,
+    );
+
+    const named = document.querySelector('[data-row-key="3"]');
+    const plain = document.querySelector('[data-row-key="1"]');
+
+    expect(named?.getAttribute('aria-label')).toBe('Документ Gamma');
+    expect(plain?.hasAttribute('aria-label')).toBe(false);
+
+    // ⚠ І дзеркало: рядок без власного імені читається своїми клітинками.
+    expect(plain?.textContent ?? '').toContain('alpha');
+  });
 });
