@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
+import { Anchor, Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -14,6 +14,7 @@ import type {
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
+import { snapshotExportUrl } from '@/features/reports/api';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -296,6 +297,36 @@ export function SnapshotsPage(): JSX.Element {
                       >
                         {t('snapshots.viewRows')}
                       </Button>
+
+                      {/*
+                        ⛔ Посилання, а не `fetch` із кнопки: вивантаження
+                        автентифікується тією самою cookie, що й сторінка, тож
+                        браузер завантажує книгу сам (`snapshotExportUrl` — це
+                        URL-білдер, не запит). Кнопка, яка тягла б файл у
+                        пам'ять і віддавала його `Blob`-посиланням, додала б
+                        крок, який нічого не вирішує.
+
+                        ⚠ Право `Report.Export` — окреме від перегляду рядків:
+                        книга виходить за межі системи, і той, хто може
+                        подивитися зріз на екрані, не обов'язково може винести
+                        його назовні.
+
+                        ⚠ Межа Excel названа ПОРУЧ із дією, а не у довідці:
+                        числа в книзі мають 15 значущих цифр, і той, хто звіряє
+                        до останнього знаку, мусить дізнатися про це ДО
+                        вивантаження, а не після. Для звірки без утрат лишається
+                        перегляд рядків поруч.
+                      */}
+                      {can(session.data, 'Report.Export') && (
+                        <Anchor
+                          size="xs"
+                          href={snapshotExportUrl(snapshot.id)}
+                          download
+                          title={t('snapshots.exportHint')}
+                        >
+                          {t('snapshots.export')}
+                        </Anchor>
+                      )}
                     </Group>
                   </Table.Td>
                   <Table.Td>

@@ -1801,6 +1801,12 @@ USING (VALUES
     (N'snapshots.rowsMore',              N'en', N'Show more', 1),
     (N'snapshots.rowsEmpty',             N'en', N'This snapshot has no rows.', 1),
 
+    -- R7: вивантаження зрізу в книгу. ⚠ Межа Excel названа ПОРУЧ із дією:
+    -- числа в книзі мають 15 значущих цифр, і той, хто звіряє до останнього
+    -- знаку, мусить дізнатися про це ДО вивантаження, а не після.
+    (N'snapshots.export',                N'en', N'Download .xlsx', 1),
+    (N'snapshots.exportHint',            N'en', N'Numbers in the workbook are rounded to 15 significant digits; use "View rows" to reconcile without loss.', 1),
+
     -- Описи звітів (ФВ-10.4, W7). ⛔ Не конструктор звітів: вигляд лишається
     -- в SSRS (ФВ-10.6), тут лише рядок даних, за яким будується зріз.
     (N'reportDefs.title',                N'en', N'Report definitions', 1),
