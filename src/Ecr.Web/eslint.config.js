@@ -337,6 +337,56 @@ export default [
             '2026-09-20T08:15:42.1234567Z замість «20 вер. 2026, 11:15». ' +
             'Використовуйте <Timestamp value={…} /> із shared/ui (або formatDate/formatDateTime).',
         },
+        {
+          /*
+           * Директива №15 §2, шар 1: СТАН із сервера, надрукований як текст.
+           *
+           * ⛔ Рідний брат заборони вище, і знайдено його тим самим способом —
+           * ґрепом після того, як дефект уже полагодили вручну у ВОСЬМИ місцях
+           * (`SourcesPage`, `JobsPage`, `HealthPage`, `PeriodsPage`,
+           * `DocumentsPage`, `TemplatesPage`, `ValidationPanel`,
+           * `MethodologyVersionsPage`, `SnapshotsPage`, `ReportDefinitionsModal`).
+           * `Published`, `Deprecated`, `Failed` — це члени `enum` із
+           * `Ecr.Domain/Enums`, а не текст інтерфейсу: вони не перекладаються,
+           * і продукт із трьома мовами (`D-95`) показував їх англійською всім.
+           *
+           * ⚠ Наслідок щоразу був гірший за мову. `Deprecated` не відрізнявся
+           * від чинної версії нічим, окрім `variant` бейджа, якого ніхто не
+           * пояснює; `Failed` малювався попередженням; невідомий стан мовчки
+           * ставав синім, тобто схожим на «усе гаразд». Правильний спосіб —
+           * `<StatusBadge kind="…" state={…} />`: тон і підпис беруться з
+           * ОДНІЄЇ таблиці (`statusTable`), і невідоме там помітне.
+           *
+           * ⛔ Правило завелося лише тепер, коли всі десять місць закриті —
+           * рівно та сама умова, що й для дат вище: заборона поверх наявних
+           * порушень завелася б із придушеннями, тобто вимкненою.
+           *
+           * ⚠ ДРУГИЙ селектор — про шаблонний рядок, і він тут НЕ зайвий (на
+           * відміну від дат). Варіант випадного списку не може містити
+           * компонента — потрібен рядок, — і саме там код сервера тримався
+           * найдовше: `label: `${p.code} · ${p.status}``. Правильний спосіб —
+           * `t(statusKey(kind, state))`, той самий ключ, яким малює
+           * `StatusBadge`.
+           *
+           * ⚠ `response.status` виключено НАЗВАНО, а не випадково: це код
+           * відповіді HTTP (число), а не стан предметної області, і він ніколи
+           * не їде на екран підписом — лише в діагностику (`HealthPage.tsx`
+           * складає ним текст `Error`). Заборонити й це означало б зробити
+           * правило шумом, який вимикають цілком.
+           */
+          selector: [
+            'JSXElement > JSXExpressionContainer > MemberExpression[property.name=/^(?:status|state)$/]',
+            'JSXFragment > JSXExpressionContainer > MemberExpression[property.name=/^(?:status|state)$/]',
+            'JSXExpressionContainer > LogicalExpression > MemberExpression.right[property.name=/^(?:status|state)$/]',
+            'JSXExpressionContainer > ConditionalExpression > MemberExpression.consequent[property.name=/^(?:status|state)$/]',
+            'JSXExpressionContainer > ConditionalExpression > MemberExpression.alternate[property.name=/^(?:status|state)$/]',
+            'TemplateLiteral > MemberExpression[property.name=/^(?:status|state)$/]:not([object.name=/^(?:response|res)$/])',
+          ].join(', '),
+          message:
+            'Стан із сервера показаний як текст — директива №15 §2: «Published», «Failed» це члени ' +
+            'enum, вони не перекладаються й не несуть тону. Використовуйте <StatusBadge kind="…" ' +
+            'state={…} /> із shared/ui, а в підписі варіанта списку — t(statusKey(kind, state)).',
+        },
       ],
     },
   },
