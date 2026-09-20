@@ -1,6 +1,7 @@
 ﻿using Ecr.Api.Auth;
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
+using Ecr.Api.Observability;
 using Ecr.Api.Security;
 using Ecr.Api.Startup;
 using Ecr.Application;
@@ -39,6 +40,11 @@ builder.Configuration.AddProgramDataConfig(
 // Конфігурація: змінні оточення з префіксом ECR_ перекривають файли
 // (тому й секрети — лише сюди, ніколи в жоден із файлів вище, D-11).
 builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
+
+// Файловий журнал (`D14-09`): під Windows-службою консолі немає, і без файлу
+// стек винятку з CorrelationId не зберігався ніде. Консоль і EventLog лишаються
+// типовими постачальниками хоста — файл додається поруч, не замість.
+builder.Logging.AddEcrFileLog();
 
 builder.Services.AddEcrInfrastructure(builder.Configuration);
 builder.Services.AddEcrCalculations();
@@ -164,6 +170,10 @@ builder.Services.AddHealthChecks()
     .AddCheck<Ecr.Api.Health.SourcesHealthCheck>("sources", tags: ["ready"]);
 
 var app = builder.Build();
+
+// ⚠ ДО послідовності старту: якщо в теку журналу не вдається писати, про це
+// треба сказати раніше, ніж старт упаде з іншої причини й пояснення не лишиться.
+app.ReportFileLog();
 
 // ⚠ ПОСЛІДОВНІСТЬ СТАРТУ (B01 §6.3) — порядок значущий:
 // 1) retry-очікування БД  2) звірка міграцій  3) Validate/Migrate

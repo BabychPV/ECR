@@ -65,6 +65,18 @@
     <PackageVersion Include="Quartz.Serialization.Json" Version="3.13.1" />
   </ItemGroup>
 
+  <!--
+    Файловий журнал (D14-09, рішення №10 директиви №15). Serilog підключений
+    як ПОСТАЧАЛЬНИК ILogger поруч із типовими (консоль, EventLog), а не замість
+    фабрики: тому ні Serilog.AspNetCore, ні Serilog.Sinks.Console тут немає —
+    консоль лишається за хостом, і рядок не пишеться двічі.
+  -->
+  <ItemGroup Label="Файловий журнал — Apache-2.0">
+    <PackageVersion Include="Serilog" Version="4.3.1" />
+    <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Тести">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.2" />

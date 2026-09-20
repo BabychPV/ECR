@@ -1812,7 +1812,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Версія, час старту, середовище, транспорт сповіщень. Право `System.ViewHealth`. */
+        /** Версія, час старту, середовище, транспорт сповіщень, тека журналу. Право `System.ViewHealth`. */
         get: {
             parameters: {
                 query?: never;
@@ -12997,6 +12997,8 @@ export interface components {
         SystemFactsResponse: {
             /** @description Ім'я середовища хосту (`Production`, `Development`). */
             environment: string;
+            /** @description Тека файлового журналу; `null`, коли файл не пишеться. */
+            logDirectory: null | string;
             /** @description Стан транспорту сповіщень. */
             notificationTransport: components["schemas"]["NotificationTransportDto"];
             /** @description Версія продукту без метаданих збірки. */

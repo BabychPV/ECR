@@ -23,6 +23,10 @@
     <!-- Windows-служба (docs/build/10-installer.md): без UseWindowsService()
          процес не відповідає на запити SCM старт/стоп правильно. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <!-- Файловий журнал (D14-09): постачальник ILogger, див. Observability/FileLog.cs. -->
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
 
 </Project>

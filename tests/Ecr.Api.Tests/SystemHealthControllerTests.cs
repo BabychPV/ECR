@@ -7,6 +7,7 @@ using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -80,6 +81,11 @@ public sealed class SystemHealthControllerTests(SqlServerFixture sql)
         var transport = root.GetProperty("notificationTransport");
         Assert.False(transport.GetProperty("isConfigured").GetBoolean());
         Assert.Equal(JsonValueKind.Null, transport.GetProperty("kind").ValueKind);
+
+        // ⚠ Фабрика прибирає всіх постачальників журналу, файлового теж — і
+        // відповідь не називає теку, в яку ніхто не пише. Активний приймач —
+        // у `FileLogTests`.
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("logDirectory").ValueKind);
     }
 
     [Fact]
@@ -148,7 +154,12 @@ public sealed class SystemHealthControllerTests(SqlServerFixture sql)
     }
 
     /// <summary>Клієнт із сеансом локального користувача з названими правами.</summary>
-    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, params string[] permissions)
+    private Task<HttpClient> SignedInAsync(EcrApiFactory app, params string[] permissions)
+        => SignedInAsync(sql, app, permissions);
+
+    /// <summary>Те саме для похідного хоста (<c>WithWebHostBuilder</c>) — потрібне <c>FileLogTests</c>.</summary>
+    internal static async Task<HttpClient> SignedInAsync(
+        SqlServerFixture sql, WebApplicationFactory<Program> app, params string[] permissions)
     {
         var name = $"hlth_{Guid.NewGuid():N}"[..20];
 
@@ -188,7 +199,7 @@ public sealed class SystemHealthControllerTests(SqlServerFixture sql)
             new Uri("/api/v1/login/local", UriKind.Relative),
             new { userName = name, password = Password });
 
-        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {(app as EcrApiFactory)?.ErrorsText}");
 
         return client;
     }

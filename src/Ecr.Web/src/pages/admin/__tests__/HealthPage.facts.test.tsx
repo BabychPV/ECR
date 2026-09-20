@@ -18,6 +18,7 @@ const Facts = {
   startedAt: '2026-09-19T03:00:00Z',
   environment: 'Production',
   notificationTransport: { isConfigured: false, kind: null },
+  logDirectory: null,
 };
 
 /** `/health/*` — порожній звіт; факти й скрипт — те, що задав тест. */
@@ -80,6 +81,22 @@ describe('Дашборд здоров’я — факти про процес і
 
     expect(await screen.findByText('Smtp')).toBeDefined();
     expect(screen.queryByText('⟦health.facts.transportNotConfigured⟧')).toBeNull();
+  });
+
+  it('тека журналу показується, коли файл пишеться', async () => {
+    serve({ ...Facts, logDirectory: 'C:\\ProgramData\\ECR\\logs' });
+    show();
+
+    expect(await screen.findByText('C:\\ProgramData\\ECR\\logs')).toBeDefined();
+    expect(screen.getByText('⟦health.facts.logDirectory⟧')).toBeDefined();
+  });
+
+  it('без файлового журналу рядка про теку немає — ні підпису, ні прочерку', async () => {
+    serve(Facts);
+    show();
+
+    await screen.findByText('1.4.2');
+    expect(screen.queryByText('⟦health.facts.logDirectory⟧')).toBeNull();
   });
 
   it('без фактів секція не малюється взагалі — ні заголовка, ні порожніх рядків', async () => {

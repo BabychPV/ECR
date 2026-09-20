@@ -608,7 +608,7 @@ W4 — останньою
 | `problems.md` `P-02` | ролі на AD-групу не працюють | ~~✔ працюють: `AccessDecisionService.cs:170`~~ ✎ 2026-09-19: хибно — профіль читав групи, але cookie їх не несла, тож після входу групові ролі не діяли; закрито (`WindowsGroupRolesTests`, `problems.md` `P-02`) |
 | `unreachable-mechanisms.md` | 12 перевірених тверджень | ◐ 8 хибні (напр. `EnsureStructurallyMutable` «кличе лише тест» — 21 виклик) |
 | `roadmap.md:197-200` | екрана редагування методологій не існує | ◐ `MethodologyVersionsPage.tsx` існує |
-| `11-install-guide.md:358` | лог у `%ProgramData%\ECR\logs` | ◐ файлового логера немає |
+| `11-install-guide.md:358` | лог у `%ProgramData%\ECR\logs` | ◐ ~~файлового логера немає~~ ✎ 2026-09-20: файловий журнал додано (`src/Ecr.Api/Observability/FileLog.cs`; рішення №10 директиви №15: Serilog, добова ротація, **30** файлів — не 14, як у `D14-09`). Із `D14-09` лишилось: джерело Event Log `ECR` (`R-03`), час останнього запису Error на `/admin/health` |
 | `11-install-guide.md:39` | «Express достатньо» | ◐ без Agent партиції не створюються після `202712` |
 | `Q-298.md:53` | локалі `ru`/`kz` позначені `is_active=0` | ✔ `IsActive = 1` (`09-seed.sql:32`) |
 | `02-requirements-addendum.md` | ТЗ не редагується, накрите сумами | ◐ редагується, суми не збігаються, сторожа немає |
