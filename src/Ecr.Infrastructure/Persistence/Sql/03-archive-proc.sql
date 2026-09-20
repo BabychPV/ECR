@@ -52,8 +52,12 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @k int, @srcCount bigint, @srcSum decimal(38,10);
-    DECLARE @dstCount bigint, @dstSum decimal(38,10);
+    -- ⛔ Масштаб сум — 16, як у `doc.CellValue.ValueNumeric` (`D-148`). З 10
+    -- знаками звірка не падала б, а ТИХО СЛАБШАЛА: обидві суми однаково
+    -- округлилися б, збіг лишився б, і знаки 11–16 перестали б доводити
+    -- будь-що. Precision 38 дає 22 цілі розряди — з запасом на 10⁸ рядків.
+    DECLARE @k int, @srcCount bigint, @srcSum decimal(38,16);
+    DECLARE @dstCount bigint, @dstSum decimal(38,16);
     DECLARE @p1 int, @p12 int, @range nvarchar(40), @sql nvarchar(600);
     DECLARE @periods int = @ToPeriodKey - @FromPeriodKey + 1;
 
@@ -335,7 +339,7 @@ BEGIN
         --    джерелі, вже лежить в архіві».
         --------------------------------------------------------------------
         DECLARE @gapSrcCells bigint, @gapDstCells bigint;
-        DECLARE @gapSrcSum decimal(38,10), @gapDstSum decimal(38,10);
+        DECLARE @gapSrcSum decimal(38,16), @gapDstSum decimal(38,16);
         DECLARE @gapSrcRows bigint, @gapDstRows bigint;
         DECLARE @gapSrcInst bigint, @gapDstInst bigint;
 

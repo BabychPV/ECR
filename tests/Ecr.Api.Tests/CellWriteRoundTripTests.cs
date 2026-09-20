@@ -42,6 +42,12 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Write-RoundTrip-2026!";
 
+    /// <summary>
+    /// Шістнадцять знаків після коми, усі різні й жоден не нуль: обрізання на
+    /// будь-якому з них змінює РЯДОК, а не лише масштаб (<c>D-148</c>).
+    /// </summary>
+    private const string SixteenDigits = "0.1234567890123456";
+
     /// <summary>Пояс майданчика; той самий, який ставить <see cref="TestDocumentBuilder"/>.</summary>
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
 
@@ -190,6 +196,91 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         // ⚠ Текст залишився недоторканим: у батчі його не було, а «поле
         // відсутнє в запиті» означає «не чіпати», а не «стерти» (R-B4).
         Assert.Equal("мазут", afterUpdate.GetProperty("cells").GetProperty(textColumn).GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-148")]
+    public async Task Шістнадцятий_знак_доживає_від_HTTP_до_бази_і_назад()
+    {
+        // ⛔ Наскрізний доказ `D-148` («усюди 16 знаків»). Ланок, кожна з яких
+        // ріже МОВЧКИ, чотири: `JSON.parse`-подібна втрата на числі в тілі
+        // запиту (тому значення їде РЯДКОМ), `SqlMetaData` в
+        // `NormalizedCellStore`, тип `doc.CellValueTvp` і сам стовпець
+        // `doc.CellValue.ValueNumeric`. Жодна з них не відмовляє — усі
+        // округлюють і повертають `200`. Тому твердження одне й просте:
+        // введений текст і прочитаний текст збігаються ПОСИМВОЛЬНО.
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        // Друга колонка будівника — числова (перша `String`).
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        var rowKey = $"D16{Guid.NewGuid():N}"[..12];
+
+        var applied = await client.PatchAsJsonAsync(patchUri, new
+        {
+            tableInstanceId = scenario.Document.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows = new[]
+            {
+                new
+                {
+                    rowKey,
+                    baseVersion = (string?)null,
+                    cells = new object[] { new { columnCode = numberColumn, value = (object)SixteenDigits } },
+                },
+            },
+        }).ConfigureAwait(true);
+
+        Assert.True(
+            applied.StatusCode == HttpStatusCode.OK,
+            $"PATCH із 16 знаками: {applied.StatusCode}\n"
+            + $"{await applied.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        // ⚠ Читання йде тим самим шляхом, що й у клієнта, — зрізом, а не
+        // запитом до таблиці. Значення, яке доїхало до бази цілим, але
+        // втратило знак на видачі, — той самий дефект для того, хто звіряє
+        // звіт із базою.
+        var row = await ReadRowAsync(client, sliceUri, rowKey, app).ConfigureAwait(true);
+        var cell = row.GetProperty("cells").GetProperty(numberColumn);
+
+        Assert.Equal(JsonValueKind.String, cell.ValueKind);
+        Assert.Equal(SixteenDigits, cell.GetString());
+
+        // І в самій базі теж шістнадцять знаків, а не «щось, що зріз гарно
+        // надрукував»: зріз бере число зі сховища, і обидва твердження разом
+        // відрізняють цілий шлях від збігу на форматуванні.
+        await using var db = scenario.Builder.CreateContext();
+        var stored = await db.CellValues
+            .AsNoTracking()
+            .Where(c => c.PeriodKeyValue == scenario.PeriodKey
+                        && c.ColumnDefId == scenario.Document.ColumnDefIds[1])
+            .Select(c => c.ValueNumeric)
+            .SingleAsync()
+            .ConfigureAwait(true);
+
+        Assert.Equal(
+            SixteenDigits,
+            stored!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Fact]

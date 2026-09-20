@@ -66,7 +66,7 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
             () => ArchiveAsync(doc.ProjectId, 202602, 202602));
 
         await ExecuteAsync(
-            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,10) NULL;");
+            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,16) NULL;");
 
         // ⛔ Процес ЗУПИНЯЄТЬСЯ. Продовжити «бо майже збіглося» означало б
         // видалити джерело під архів, у якому чогось бракує.
@@ -100,7 +100,7 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
             () => ArchiveAsync(doc.ProjectId, 202603, 202603));
 
         await ExecuteAsync(
-            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,10) NULL;");
+            "ALTER TABLE arc.CellValue ALTER COLUMN ValueNumeric decimal(28,16) NULL;");
 
         // ⛔ ГОЛОВНЕ ПРАВИЛО процедури: джерело не видаляється, поки суми не
         // збіглися. Саме воно відрізняє відновлювану операцію від такої, що

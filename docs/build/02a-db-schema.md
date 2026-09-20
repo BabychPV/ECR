@@ -1192,7 +1192,7 @@ CREATE TABLE doc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,   -- денормалізовано під складений FK
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,10) NULL,
+    ValueNumeric         decimal(28,16) NULL,        -- D-148; precision 28 → ті самі 13 Б на рядок
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,
@@ -2528,7 +2528,7 @@ CREATE TABLE arc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,10) NULL,
+    ValueNumeric         decimal(28,16) NULL,        -- дзеркало doc.CellValue (D-148)
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,
@@ -2705,8 +2705,10 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcChk bigint, @srcSum decimal(38,10);
-    DECLARE @dstCount bigint, @dstChk bigint, @dstSum decimal(38,10);
+    -- Масштаб сум — як у джерела (D-148). З 10 знаками обидві суми округлилися б
+    -- однаково, збіг лишився б, і знаки 11–16 перестали б доводити будь-що.
+    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcChk bigint, @srcSum decimal(38,16);
+    DECLARE @dstCount bigint, @dstChk bigint, @dstSum decimal(38,16);
 
     INSERT INTO itg.ArchiveRun (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status)
     VALUES (@ProjectId, N'ToArchive', @FromPeriodKey, @ToPeriodKey, SYSUTCDATETIME(), N'Running');

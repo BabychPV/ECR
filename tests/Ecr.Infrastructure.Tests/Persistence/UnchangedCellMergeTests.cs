@@ -63,7 +63,7 @@ public sealed class UnchangedCellMergeTests(SqlServerFixture sql)
         await store.ApplyAsync(Set(doc, new CellValueData { ValueNumeric = 42.5m }), ct);
         await store.ApplyAsync(Set(doc, new CellValueData { ValueNumeric = 42.5000000001m }), ct);
 
-        // ⚠ Різниця в десятому знаку — на межі decimal(28,10). Округли
+        // ⚠ Різниця в десятому знаку — усередині decimal(28,16). Округли
         // порівняння до дев'ятого, і правка мовчки зникла б.
         Assert.Equal(1, store.LastUpsertRowsAffected);
         var read = await store.ReadCellsAsync([Address(doc)], ct);
