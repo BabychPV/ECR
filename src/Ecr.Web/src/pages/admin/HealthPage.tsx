@@ -198,6 +198,8 @@ function factItems(facts: SystemFacts): { label: string; value: ReactNode }[] {
       label: t('health.facts.notificationTransport'),
       value: transport.isConfigured ? transport.kind : t('health.facts.transportNotConfigured'),
     },
+    // `null` — файл журналу не пишеться; пару без значення `KeyValue` не малює.
+    { label: t('health.facts.logDirectory'), value: facts.logDirectory },
   ];
 }
 

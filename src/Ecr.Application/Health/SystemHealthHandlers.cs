@@ -18,10 +18,9 @@ namespace Ecr.Application.Health;
 /// <see cref="INotificationSender.IsConfigured"/>, — а не як «працює». Чи
 /// доходять листи, звідси не видно, і поле, яке це обіцяло б, брехало б.
 ///
-/// ⚠ Каталогу логів у відповіді НЕМАЄ, хоча директива його називає: застосунок
-/// не має файлового приймача логів (лише типові постачальники хосту — консоль
-/// і журнал подій ОС), тож поле було б <c>null</c> назавжди. З'явиться
-/// файловий приймач — з'явиться й поле.
+/// ⚠ <c>LogDirectory</c> — тека, в яку файловий приймач СПРАВДІ пише
+/// (<c>D14-09</c>), а не значення з конфігурації: якщо в теку писати не
+/// вдалося, поле <c>null</c>, і це правда, яку адміністратор має побачити.
 /// </remarks>
 public sealed class GetSystemFactsHandler(
     INotificationSender notifications, IAccessDecisionService access, ICurrentUser currentUser)
@@ -56,7 +55,8 @@ public sealed class GetSystemFactsHandler(
             GetPublicBootstrapHandler.MarketingVersion(host.InformationalVersion),
             host.StartedAtUtc,
             host.EnvironmentName,
-            TransportOf(notifications.IsConfigured));
+            TransportOf(notifications.IsConfigured),
+            host.LogDirectory);
     }
 
     /// <summary>Стан транспорту за відповіддю порту.</summary>
@@ -105,19 +105,22 @@ public sealed class GetPartitionScriptHandler(IAccessDecisionService access, ICu
 /// <param name="InformationalVersion">Сирий <c>AssemblyInformationalVersion</c> збірки API.</param>
 /// <param name="StartedAtUtc">Коли стартував процес, UTC.</param>
 /// <param name="EnvironmentName">Ім'я середовища хосту.</param>
+/// <param name="LogDirectory">Тека файлового журналу; <c>null</c> — приймач не активний.</param>
 public sealed record SystemHostFacts(
-    string? InformationalVersion, DateTime StartedAtUtc, string EnvironmentName);
+    string? InformationalVersion, DateTime StartedAtUtc, string EnvironmentName, string? LogDirectory);
 
 /// <summary>Факти про піднятий процес.</summary>
 /// <param name="ProductVersion">Версія продукту без метаданих збірки.</param>
 /// <param name="StartedAt">Коли стартував процес, UTC.</param>
 /// <param name="Environment">Ім'я середовища хосту (<c>Production</c>, <c>Development</c>).</param>
 /// <param name="NotificationTransport">Стан транспорту сповіщень.</param>
+/// <param name="LogDirectory">Тека файлового журналу; <c>null</c>, коли файл не пишеться.</param>
 public sealed record SystemFactsResponse(
     string ProductVersion,
     DateTime StartedAt,
     string Environment,
-    NotificationTransportDto NotificationTransport);
+    NotificationTransportDto NotificationTransport,
+    string? LogDirectory);
 
 /// <summary>Транспорт сповіщень: що відомо з конфігурації, не більше.</summary>
 /// <param name="IsConfigured">Чи налаштований транспорт.</param>

@@ -1232,6 +1232,7 @@ USING (VALUES
     (N'health.facts.environment',        N'en', N'Environment', 1),
     (N'health.facts.notificationTransport', N'en', N'Notification transport', 1),
     (N'health.facts.transportNotConfigured', N'en', N'Not configured: notifications stay in the queue', 1),
+    (N'health.facts.logDirectory',       N'en', N'Log directory', 1),
     (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
     (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),

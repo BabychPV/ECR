@@ -18,10 +18,11 @@ namespace Ecr.Api.Controllers;
 public sealed class SystemHealthController(
     GetSystemFactsHandler facts,
     GetPartitionScriptHandler partitionScript,
-    IHostEnvironment environment) : ControllerBase
+    IHostEnvironment environment,
+    Ecr.Api.Observability.FileLogStatus fileLog) : ControllerBase
 {
     /// <summary>
-    /// Версія, час старту, середовище, транспорт сповіщень. Право <c>System.ViewHealth</c>.
+    /// Версія, час старту, середовище, транспорт сповіщень, тека журналу. Право <c>System.ViewHealth</c>.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("facts")]
@@ -36,7 +37,8 @@ public sealed class SystemHealthController(
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion,
             process.StartTime.ToUniversalTime(),
-            environment.EnvironmentName);
+            environment.EnvironmentName,
+            fileLog.Directory);
 
         return Ok(await facts.HandleAsync(host, ct).ConfigureAwait(false));
     }

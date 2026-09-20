@@ -7740,6 +7740,13 @@
             "description": "Ім'я середовища хосту (`Production`, `Development`).",
             "type": "string"
           },
+          "logDirectory": {
+            "description": "Тека файлового журналу; `null`, коли файл не пишеться.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "notificationTransport": {
             "$ref": "#/components/schemas/NotificationTransportDto",
             "description": "Стан транспорту сповіщень."
@@ -7758,7 +7765,8 @@
           "productVersion",
           "startedAt",
           "environment",
-          "notificationTransport"
+          "notificationTransport",
+          "logDirectory"
         ],
         "type": "object"
       },
@@ -11598,7 +11606,7 @@
             "description": "Forbidden"
           }
         },
-        "summary": "Версія, час старту, середовище, транспорт сповіщень. Право `System.ViewHealth`.",
+        "summary": "Версія, час старту, середовище, транспорт сповіщень, тека журналу. Право `System.ViewHealth`.",
         "tags": [
           "SystemHealth"
         ]
