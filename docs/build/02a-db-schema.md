@@ -9,7 +9,7 @@
 > * автор дії — `…ByUserId int` → `sec.User(Id)`, **ніколи не SID** (`R-A2`);
 > * коди — `nvarchar(64)`, шаблон `^[A-Za-z][A-Za-z0-9_]{0,63}$` (`R-B6`);
 > * локалізовані назви — одна колонка `…L10n nvarchar(max)` з JSON;
-> * емісії й обчислені величини — `decimal(28,10)`; **`float` заборонений**;
+> * емісії й обчислені величини — `decimal(28,16)` (`D-148`); **`float` заборонений**;
 > * soft delete — `IsDeleted bit` + `DeletedAt` + `DeletedByUserId`.
 
 ## Зміст
