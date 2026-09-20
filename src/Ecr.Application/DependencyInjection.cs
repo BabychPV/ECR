@@ -262,6 +262,7 @@ public static class DependencyInjection
         services.AddScoped<Integration.ListJobsHandler>();
         services.AddScoped<Integration.RestartJobHandler>();
         services.AddScoped<Integration.CancelJobHandler>();
+        services.AddScoped<Integration.CollectionScheduleApplier>();
 
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();

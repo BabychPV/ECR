@@ -57,7 +57,36 @@ public interface IBackgroundJobScheduler
         where TJob : IBackgroundJob;
 
     /// <summary>Планує задачу за cron-виразом.</summary>
+    /// <remarks>
+    /// Ключ періодичної задачі — тип плюс payload; cron у нього НЕ входить, тож
+    /// повторний виклик із новим cron на тому самому payload ЗАМІНЮЄ розклад, а
+    /// не плодить двійника. Невалідний cron (<see cref="IsValidCron"/>) —
+    /// <see cref="ArgumentException"/> ще до звернення до планувальника.
+    /// </remarks>
     public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+
+    /// <summary>
+    /// Знімає періодичну задачу, поставлену <see cref="ScheduleAsync{TJob}"/>
+    /// з тим самим типом і payload.
+    /// </summary>
+    /// <returns><c>false</c> — такої задачі в планувальнику не було.</returns>
+    /// <remarks>
+    /// ⛔ <see cref="CancelAsync"/> тут не годиться: він приймає <c>jobId</c>,
+    /// якого в розкладу зовні немає. Без цього методу вимкнений в інтерфейсі
+    /// розклад збирав би далі аж до перезапуску застосунку (ФВ-14.3).
+    /// </remarks>
+    public Task<bool> UnscheduleAsync<TJob>(object? payload, CancellationToken ct) where TJob : IBackgroundJob;
+
+    /// <summary>Перевіряє cron-вираз, не ставлячи нічого.</summary>
+    /// <param name="expression">Вираз.</param>
+    /// <param name="error">Чому вираз не приймається; <c>null</c>, коли він валідний.</param>
+    /// <remarks>
+    /// Формат — cron Quartz: 6 полів «секунди хвилини години день-місяця місяць
+    /// день-тижня» плюс необов'язковий 7-й — рік; рівно одне з полів дня має
+    /// бути <c>?</c>. Приклад: <c>0 15 2 * * ?</c> — щодня о 02:15:00.
+    /// ⚠ П'ятипольний unix-cron (<c>15 2 * * *</c>) НЕ приймається.
+    /// </remarks>
+    public bool IsValidCron(string expression, out string? error);
 
     /// <summary>Скасовує задачу.</summary>
     public Task CancelAsync(string jobId, CancellationToken ct);
