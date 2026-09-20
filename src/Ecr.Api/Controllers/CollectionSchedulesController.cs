@@ -20,6 +20,7 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class CollectionSchedulesController(
     ListCollectionSchedulesHandler list,
+    CreateCollectionScheduleHandler create,
     SaveCollectionScheduleHandler save,
     DeleteCollectionScheduleHandler delete) : ControllerBase
 {
@@ -28,6 +29,29 @@ public sealed class CollectionSchedulesController(
     [ProducesResponseType<IReadOnlyList<CollectionScheduleView>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(CancellationToken ct)
         => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
+
+    /// <summary>Заводить розклад для сутності джерела, у якої його ще немає.</summary>
+    /// <remarks>
+    /// ⚠ <c>If-Match</c> тут не потрібен: створення нічого не перезаписує.
+    /// Невалідний cron — <c>422 ECR-REQ-0422</c> ДО запису; сутності немає —
+    /// <c>404 ECR-INT-0404</c>; розклад у неї вже є — <c>409 ECR-JOB-0409</c>.
+    /// </remarks>
+    [HttpPost]
+    [ProducesResponseType<CollectionScheduleView>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Create(
+        [FromBody] CreateCollectionScheduleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await create
+            .HandleAsync(request.SourceEntityId, request.Cron, request.IsEnabled, ct)
+            .ConfigureAwait(false);
+
+        return Created(new Uri("/api/v1/collection-schedules", UriKind.Relative), created);
+    }
 
     /// <summary>Змінює cron і вмикає/вимикає розклад; потребує <c>If-Match</c>.</summary>
     /// <remarks>
@@ -70,6 +94,12 @@ public sealed class CollectionSchedulesController(
         return NoContent();
     }
 }
+
+/// <summary>Тіло створення розкладу.</summary>
+/// <param name="SourceEntityId">Сутність джерела, яку збиратимуть за цим розкладом.</param>
+/// <param name="Cron">Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — <c>?</c>.</param>
+/// <param name="IsEnabled">Чи має розклад одразу стояти в планувальнику.</param>
+public sealed record CreateCollectionScheduleRequest(int SourceEntityId, string Cron, bool IsEnabled);
 
 /// <summary>Тіло зміни розкладу.</summary>
 /// <param name="Cron">Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — <c>?</c>.</param>

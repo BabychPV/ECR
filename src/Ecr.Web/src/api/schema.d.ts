@@ -294,7 +294,73 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Заводить розклад для сутності джерела, у якої його ще немає.
+         * @description ⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.
+         *     Невалідний cron — `422 ECR-REQ-0422` ДО запису; сутності немає —
+         *     `404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateCollectionScheduleRequest"];
+                    "application/json": components["schemas"]["CreateCollectionScheduleRequest"];
+                    "text/json": components["schemas"]["CreateCollectionScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionScheduleView"];
+                        "text/json": components["schemas"]["CollectionScheduleView"];
+                        "text/plain": components["schemas"]["CollectionScheduleView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -10685,6 +10751,18 @@ export interface components {
              * @description Значення у цільовій одиниці.
              */
             value: number;
+        };
+        /** @description Тіло створення розкладу. */
+        CreateCollectionScheduleRequest: {
+            /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
+            cron: string;
+            /** @description Чи має розклад одразу стояти в планувальнику. */
+            isEnabled: boolean;
+            /**
+             * Format: int32
+             * @description Сутність джерела, яку збиратимуть за цим розкладом.
+             */
+            sourceEntityId: number;
         };
         /** @description Запит на створення документа. */
         CreateDocumentRequest: {

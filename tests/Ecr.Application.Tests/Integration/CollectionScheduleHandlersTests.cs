@@ -176,20 +176,72 @@ public sealed class CollectionScheduleHandlersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21c")]
+    public async Task Створення_заводить_розклад_ставить_його_в_планувальник_а_другий_на_ту_саму_сутність_дає_409()
+    {
+        _store.Entities[77] = ("ENT-77", "Entity 77");
+
+        var created = await Create().HandleAsync(77, Nightly, isEnabled: true, CancellationToken.None);
+
+        Assert.Equal((77, Nightly, true), (created.SourceEntityId, created.Cron, created.IsEnabled));
+        Assert.Equal(("ENT-77", "Entity 77"), (created.SourceEntityCode, created.SourceEntityName));
+
+        var placed = _scheduler.Scheduled.Single();
+        Assert.Equal(Nightly, placed.Cron);
+        Assert.Equal(CollectionScheduleApplier.PayloadOf(77), placed.Payload);
+
+        // ⛔ Головне твердження. Другий розклад на ту саму сутність — це другий
+        // тригер планувальника з ТИМ САМИМ завданням, тобто подвійний збір,
+        // якого не видно ніде, крім кількості прогонів.
+        var duplicate = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Create().HandleAsync(77, Hourly, isEnabled: true, CancellationToken.None));
+
+        Assert.Equal("ECR-JOB-0409", duplicate.ErrorCode);
+        Assert.Equal("err.ECR-JOB-0409.collectionScheduleExists", duplicate.Details!["messageKey"]);
+        Assert.Single(_store.Rows);
+        Assert.Single(_scheduler.Scheduled);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21c")]
+    public async Task Створення_з_невалідним_cron_або_для_неіснуючої_сутності_не_доходить_до_бази()
+    {
+        _store.Entities[77] = ("ENT-77", null);
+
+        var badCron = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Create().HandleAsync(77, Unsupported, isEnabled: true, CancellationToken.None));
+        var missing = await Assert.ThrowsAsync<NotFoundException>(
+            () => Create().HandleAsync(999, Nightly, isEnabled: true, CancellationToken.None));
+
+        Assert.Equal("err.ECR-REQ-0422.collectionScheduleCron", badCron.Details!["messageKey"]);
+        Assert.Equal("err.ECR-INT-0404.sourceEntity", missing.Details!["messageKey"]);
+
+        Assert.Empty(_store.Rows);
+        Assert.Empty(_scheduler.Scheduled);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-21b")]
     public async Task Без_права_Integration_EditSchedule_жодна_дія_не_виконується()
     {
         var schedule = Add(Hourly);
+        _store.Entities[77] = ("ENT-77", null);
         Allow("Integration.Manage");
 
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => new ListCollectionSchedulesHandler(_store, _access, _user).HandleAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Create().HandleAsync(77, Nightly, isEnabled: true, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Save().HandleAsync(schedule.Id, Nightly, isEnabled: false, Version(schedule), CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Delete().HandleAsync(schedule.Id, Version(schedule), CancellationToken.None));
 
         Assert.Equal(Hourly, schedule.CronExpression);
+        Assert.Single(_store.Rows);
         Assert.Empty(_store.Removed);
         Assert.Empty(_scheduler.Unscheduled);
     }
@@ -197,6 +249,9 @@ public sealed class CollectionScheduleHandlersTests
     private void Allow(string permission)
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
+
+    private CreateCollectionScheduleHandler Create()
+        => new(_store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock);
 
     private SaveCollectionScheduleHandler Save()
         => new(_store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock);
@@ -226,11 +281,33 @@ public sealed class CollectionScheduleHandlersTests
 
         public List<CollectionSchedule> Removed { get; } = [];
 
+        /// <summary>Сутності джерела, які «є в базі»: ключ → код і підпис.</summary>
+        public Dictionary<int, (string Code, string? Name)> Entities { get; } = [];
+
         public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ScheduledSourceEntity>>(Rows);
 
         public Task<ScheduledSourceEntity?> FindAsync(int collectionScheduleId, CancellationToken ct)
             => Task.FromResult(Rows.Find(r => r.Schedule.Id == collectionScheduleId));
+
+        public Task<SourceEntityScheduling?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct)
+            => Task.FromResult(
+                Entities.TryGetValue(sourceEntityId, out var entity)
+                    ? new SourceEntityScheduling(
+                        entity.Code,
+                        entity.Name,
+                        Rows.Find(r => r.Schedule.SourceEntityId == sourceEntityId)?.Schedule.Id)
+                    : null);
+
+        /// <summary>Ключ присвоюється одразу — базу тут заміняє цей список.</summary>
+        public void Add(CollectionSchedule schedule)
+        {
+            typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!
+                .SetValue(schedule, Rows.Count + 1);
+
+            var entity = Entities[schedule.SourceEntityId];
+            Rows.Add(new ScheduledSourceEntity(schedule, entity.Code, entity.Name));
+        }
 
         public void Remove(CollectionSchedule schedule)
         {

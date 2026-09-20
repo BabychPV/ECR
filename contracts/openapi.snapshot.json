@@ -1273,6 +1273,30 @@
         ],
         "type": "object"
       },
+      "CreateCollectionScheduleRequest": {
+        "description": "Тіло створення розкладу.",
+        "properties": {
+          "cron": {
+            "description": "Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`.",
+            "type": "string"
+          },
+          "isEnabled": {
+            "description": "Чи має розклад одразу стояти в планувальнику.",
+            "type": "boolean"
+          },
+          "sourceEntityId": {
+            "description": "Сутність джерела, яку збиратимуть за цим розкладом.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sourceEntityId",
+          "cron",
+          "isEnabled"
+        ],
+        "type": "object"
+      },
       "CreateDocumentRequest": {
         "description": "Запит на створення документа.",
         "properties": {
@@ -10251,6 +10275,115 @@
           }
         },
         "summary": "Усі розклади разом із кодом сутності джерела і станом постановки.",
+        "tags": [
+          "CollectionSchedules"
+        ]
+      },
+      "post": {
+        "description": "⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.\nНевалідний cron — `422 ECR-REQ-0422` ДО запису; сутності немає —\n`404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionScheduleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionScheduleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionScheduleView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionScheduleView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionScheduleView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить розклад для сутності джерела, у якої його ще немає.",
         "tags": [
           "CollectionSchedules"
         ]

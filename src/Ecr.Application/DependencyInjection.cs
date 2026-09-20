@@ -275,6 +275,7 @@ public static class DependencyInjection
 
         // BE-21b: розклад збору редагується з інтерфейсу (ФВ-14.3).
         services.AddScoped<Integration.ListCollectionSchedulesHandler>();
+        services.AddScoped<Integration.CreateCollectionScheduleHandler>();
         services.AddScoped<Integration.SaveCollectionScheduleHandler>();
         services.AddScoped<Integration.DeleteCollectionScheduleHandler>();
 

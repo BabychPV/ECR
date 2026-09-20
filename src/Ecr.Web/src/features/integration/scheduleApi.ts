@@ -3,6 +3,7 @@ import type { components } from '@/api/schema';
 
 /** Розклад збору для сутності джерела (ФВ-14.3). */
 export type CollectionSchedule = components['schemas']['CollectionScheduleView'];
+export type CreateCollectionScheduleBody = components['schemas']['CreateCollectionScheduleRequest'];
 export type UpdateCollectionScheduleBody = components['schemas']['UpdateCollectionScheduleRequest'];
 
 /*
@@ -29,6 +30,23 @@ function ifMatch(rowVersion: string): HeadersInit {
 
 export function listCollectionSchedules(): Promise<CollectionSchedule[]> {
   return apiFetch<CollectionSchedule[]>('/api/v1/collection-schedules');
+}
+
+/**
+ * Заводить розклад для сутності джерела, у якої його ще немає.
+ *
+ * ⛔ Без `If-Match`: створення нічого не перезаписує, і версії рядка, якого ще
+ * немає, взяти нізвідки. Сутність із уже наявним розкладом — `409`
+ * (`ECR-JOB-0409`), а не другий рядок: два розклади на одну сутність означають
+ * подвійний збір.
+ */
+export function createCollectionSchedule(
+  body: CreateCollectionScheduleBody,
+): Promise<CollectionSchedule> {
+  return apiFetch<CollectionSchedule>('/api/v1/collection-schedules', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 /** Змінює cron і вмикає/вимикає розклад. Невалідний cron — `422`, ДО запису. */

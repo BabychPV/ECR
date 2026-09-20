@@ -565,6 +565,11 @@ USING (VALUES
     (N'err.ECR-REQ-0422.collectionScheduleIfMatch',       N'en', N'This request needs an If-Match header carrying the rowVersion of the schedule you read.', 1),
     (N'err.ECR-REQ-0422.collectionScheduleNotApplied',    N'en', N'The schedule was saved, but the scheduler did not accept it: {reason}', 1),
     (N'err.ECR-JOB-0409.collectionScheduleChanged',       N'en', N'Someone else changed this schedule after you read it: reload the list and repeat the change.', 1),
+    -- ⚠ Створення розкладу. Дублікат — це 409, а не мовчазне створення другого
+    -- рядка: два розклади на одну сутність означають два тригери планувальника
+    -- з тим самим завданням, тобто подвійний збір, якого не видно ніде.
+    (N'err.ECR-INT-0404.sourceEntity',                    N'en', N'Source entity {id} does not exist.', 1),
+    (N'err.ECR-JOB-0409.collectionScheduleExists',        N'en', N'This source entity already has schedule {scheduleId}: edit it instead of adding a second one.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5

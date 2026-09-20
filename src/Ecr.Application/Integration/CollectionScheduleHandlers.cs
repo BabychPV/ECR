@@ -138,6 +138,98 @@ public sealed class ListCollectionSchedulesHandler(
         }
     }
 
+    /// <summary>
+    /// Перевіряє вираз cron ДО бази і повертає його обрізаним.
+    /// </summary>
+    /// <param name="scheduler">Планувальник — єдиний, хто знає синтаксис.</param>
+    /// <param name="cron">Вираз із запиту.</param>
+    /// <exception cref="BusinessRuleException">Порожній, задовгий або невалідний — 422.</exception>
+    /// <remarks>
+    /// ⚠ Довжина — ПЕРШОЮ: 101 символ «*» невалідний і як cron, і як значення
+    /// стовпця, а користувачеві корисніша та відмова, яку він може виконати.
+    ///
+    /// ⛔ Спільна для створення і зміни навмисно. Дві копії цих двох перевірок
+    /// розійшлися б першою ж правкою, і тоді створити розклад, який не можна
+    /// зберегти правкою, було б можна.
+    /// </remarks>
+    internal static string RequireValidCron(IBackgroundJobScheduler scheduler, string? cron)
+    {
+        var text = (cron ?? string.Empty).Trim();
+
+        if (text.Length is 0 or > CollectionSchedule.MaxCronLength)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Вираз cron має бути від 1 до {CollectionSchedule.MaxCronLength} символів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleCronLength",
+                    ["max"] = CollectionSchedule.MaxCronLength.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        // ⛔ Саме тут, ДО бази. Прибрати цей рядок — і невалідний cron
+        // збережеться, а відмова прийде вже від планувальника, тобто після того,
+        // як запис у базі змінено.
+        if (!scheduler.IsValidCron(text, out var cronError))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Вираз cron «{text}» не приймається планувальником: {cronError}",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleCron",
+                    ["cron"] = text,
+                    ["reason"] = cronError ?? string.Empty,
+                });
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// Доводить уже збережений розклад до планувальника; невдача лишається в
+    /// рядку і у відповіді.
+    /// </summary>
+    /// <param name="applier">Постановка в планувальник.</param>
+    /// <param name="uow">Одиниця роботи — нею фіксується позначка невдачі.</param>
+    /// <param name="clock">Годинник.</param>
+    /// <param name="schedule">Розклад у вже збереженому стані.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Відповідь чесна: розклад уже збережено, а в планувальнику його немає —
+    /// і саме це користувач має побачити. Мовчазне <c>200</c> означало б екран,
+    /// на якому збір «увімкнено», хоча не відбудеться жодного разу.
+    /// </remarks>
+    internal static async Task ApplyOrFailAsync(
+        CollectionScheduleApplier applier,
+        IUnitOfWork uow,
+        IClock clock,
+        CollectionSchedule schedule,
+        CancellationToken ct)
+    {
+        try
+        {
+            await applier.ApplyAsync(schedule, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Відмова планувальника — це відповідь запиту, а не аварія процесу.
+        catch (Exception e) when (e is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            schedule.MarkInvalid(e.Message, clock.UtcNow);
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Розклад {schedule.Id} збережено, але планувальник його не прийняв: {e.Message}",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleNotApplied",
+                    ["reason"] = e.Message,
+                });
+        }
+    }
+
     /// <summary>Значення <c>If-Match</c> без лапок і слабкої позначки; <c>null</c> — порожнє.</summary>
     /// <remarks>
     /// ⚠ HTTP вимагає ETag у лапках (<c>"…"</c>), а частина клієнтів шле голе
@@ -199,37 +291,7 @@ public sealed class SaveCollectionScheduleHandler(
             .RequireAsync(access, currentUser, ListCollectionSchedulesHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        var text = (cron ?? string.Empty).Trim();
-
-        // ⚠ Довжина — ПЕРШОЮ: 101 символ «*» невалідний і як cron, і як значення
-        // стовпця, а користувачеві корисніша та відмова, яку він може виконати.
-        if (text.Length is 0 or > CollectionSchedule.MaxCronLength)
-        {
-            throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid,
-                $"Вираз cron має бути від 1 до {CollectionSchedule.MaxCronLength} символів.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleCronLength",
-                    ["max"] = CollectionSchedule.MaxCronLength.ToString(CultureInfo.InvariantCulture),
-                });
-        }
-
-        // ⛔ Саме тут, ДО бази. Прибрати цей рядок — і невалідний cron
-        // збережеться, а відмова прийде вже від планувальника, тобто після того,
-        // як запис у базі змінено.
-        if (!scheduler.IsValidCron(text, out var cronError))
-        {
-            throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid,
-                $"Вираз cron «{text}» не приймається планувальником: {cronError}",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleCron",
-                    ["cron"] = text,
-                    ["reason"] = cronError ?? string.Empty,
-                });
-        }
+        var text = ListCollectionSchedulesHandler.RequireValidCron(scheduler, cron);
 
         var row = await ListCollectionSchedulesHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         ListCollectionSchedulesHandler.RequireCurrentVersion(row.Schedule, ifMatch);
@@ -250,44 +312,97 @@ public sealed class SaveCollectionScheduleHandler(
         // ⚠ Постановка ПІСЛЯ збереження (`CollectionScheduleApplier`): до неї
         // розклади читалися з бази рівно раз, на старті, і правка не доходила до
         // планувальника до перезапуску.
-        await ApplyAsync(row.Schedule, ct).ConfigureAwait(false);
+        await ListCollectionSchedulesHandler
+            .ApplyOrFailAsync(applier, uow, clock, row.Schedule, ct).ConfigureAwait(false);
 
         row.Schedule.ClearError();
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return ListCollectionSchedulesHandler.ToView(row);
     }
+}
 
-    /// <summary>
-    /// Доводить розклад до планувальника; невдача лишається в рядку і у відповіді.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Відповідь чесна: розклад уже збережено, а в планувальнику його немає —
-    /// і саме це користувач має побачити. Мовчазне <c>200</c> означало б екран,
-    /// на якому збір «увімкнено», хоча не відбудеться жодного разу.
-    /// </remarks>
-    private async Task ApplyAsync(CollectionSchedule schedule, CancellationToken ct)
+/// <summary>
+/// Створення розкладу збору для сутності джерела. Право <c>Integration.EditSchedule</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Доти розклад заводився ЛИШЕ скриптом: сутність джерела можна було додати з
+/// інтерфейсу, а призначити їй збір — ні. Тобто конфігуратор інтеграції вмів
+/// правити й видаляти те, чого не вмів створити.
+///
+/// ⚠ Порядок кроків той самий, що й у правці: перевірка cron → перевірка
+/// сутності → запис → постановка. Дублікат ловиться ДО запису (<c>409</c>), і це
+/// не косметика: другий розклад на ту саму сутність — це другий тригер Quartz із
+/// тим самим payload, тобто подвійний збір, якого не видно ніде, крім кількості
+/// прогонів.
+///
+/// ⛔ <c>If-Match</c> тут НЕ вимагається: створення нічого не перезаписує, а
+/// вимагати версію рядка, якого ще немає, нема з чого. Захист від двох
+/// одночасних створень дає саме перевірка дубліката.
+/// </remarks>
+public sealed class CreateCollectionScheduleHandler(
+    ICollectionScheduleStore store,
+    IBackgroundJobScheduler scheduler,
+    CollectionScheduleApplier applier,
+    IAccessDecisionService access,
+    IUnitOfWork uow,
+    ICurrentUser currentUser,
+    IClock clock)
+{
+    /// <summary>Заводить розклад і ставить його в планувальник.</summary>
+    /// <param name="sourceEntityId">Сутність джерела, яку збиратимуть.</param>
+    /// <param name="cron">Вираз cron (формат Quartz).</param>
+    /// <param name="isEnabled">Чи має розклад одразу стояти в планувальнику.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="BusinessRuleException">Cron порожній, задовгий або невалідний — 422.</exception>
+    /// <exception cref="NotFoundException">Сутності джерела немає — 404.</exception>
+    /// <exception cref="ConcurrencyConflictException">Розклад у сутності вже є — 409.</exception>
+    public async Task<CollectionScheduleView> HandleAsync(
+        int sourceEntityId, string cron, bool isEnabled, CancellationToken ct)
     {
-        try
-        {
-            await applier.ApplyAsync(schedule, ct).ConfigureAwait(false);
-        }
-#pragma warning disable CA1031 // Відмова планувальника — це відповідь запиту, а не аварія процесу.
-        catch (Exception e) when (e is not OperationCanceledException)
-#pragma warning restore CA1031
-        {
-            schedule.MarkInvalid(e.Message, clock.UtcNow);
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        await PermissionCheck
+            .RequireAsync(access, currentUser, ListCollectionSchedulesHandler.Permission, ct)
+            .ConfigureAwait(false);
 
-            throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid,
-                $"Розклад {schedule.Id} збережено, але планувальник його не прийняв: {e.Message}",
+        var text = ListCollectionSchedulesHandler.RequireValidCron(scheduler, cron);
+
+        var entity = await store.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
+                     ?? throw new NotFoundException(
+                         ErrorCodes.SourceEntityNotFound,
+                         $"Сутності джерела {sourceEntityId} не існує.",
+                         new Dictionary<string, object?>
+                         {
+                             ["messageKey"] = "err.ECR-INT-0404.sourceEntity",
+                             ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+                         });
+
+        if (entity.ScheduleId is { } existing)
+        {
+            throw new ConcurrencyConflictException(
+                "ECR-JOB-0409",
+                $"Сутність джерела {sourceEntityId} уже має розклад {existing}.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleNotApplied",
-                    ["reason"] = e.Message,
+                    ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleExists",
+                    ["scheduleId"] = existing.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        var schedule = new CollectionSchedule(sourceEntityId, text);
+
+        if (!isEnabled)
+        {
+            schedule.Disable();
+        }
+
+        store.Add(schedule);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await ListCollectionSchedulesHandler
+            .ApplyOrFailAsync(applier, uow, clock, schedule, ct).ConfigureAwait(false);
+
+        return ListCollectionSchedulesHandler.ToView(
+            new ScheduledSourceEntity(schedule, entity.Code, entity.Name));
     }
 }
 

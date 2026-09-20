@@ -40,5 +40,22 @@ public sealed class CollectionScheduleStore(EcrDbContext db) : ICollectionSchedu
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Лівим приєднанням, а не двома запитами: сутність без розкладу — це
+    /// звичайний випадок створення, а не «не знайдено».
+    /// </remarks>
+    public async Task<SourceEntityScheduling?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct)
+        => await (from e in db.SourceEntities.AsNoTracking()
+                  where e.Id == sourceEntityId
+                  join s in db.CollectionSchedules.AsNoTracking() on e.Id equals s.SourceEntityId into schedules
+                  from s in schedules.DefaultIfEmpty()
+                  select new SourceEntityScheduling(e.Code, e.DisplayName, s == null ? null : s.Id))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void Add(CollectionSchedule schedule) => db.CollectionSchedules.Add(schedule);
+
+    /// <inheritdoc />
     public void Remove(CollectionSchedule schedule) => db.CollectionSchedules.Remove(schedule);
 }

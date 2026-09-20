@@ -29,9 +29,34 @@ public interface ICollectionScheduleStore
     /// </summary>
     public Task<ScheduledSourceEntity?> FindAsync(int collectionScheduleId, CancellationToken ct);
 
+    /// <summary>
+    /// Сутність джерела разом із тим, чи вже має вона розклад;
+    /// <c>null</c> — сутності немає.
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ ОДИН запит на обидва питання створення розкладу: «чи є така сутність»
+    /// (404) і «чи розклад у неї вже є» (409). Двома запитами вони роз'їхалися б
+    /// у часі, а відповідь на друге — саме те, що робить <c>POST</c>
+    /// ідемпотентним у сенсі, який має значення: другий розклад на ту саму
+    /// сутність означає ДВА тригери Quartz із тим самим payload, тобто подвійний
+    /// збір, якого ніде не видно.
+    /// </remarks>
+    public Task<SourceEntityScheduling?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct);
+
+    /// <summary>Додає розклад; зберігає <see cref="IUnitOfWork"/>.</summary>
+    public void Add(CollectionSchedule schedule);
+
     /// <summary>Прибирає розклад; зберігає <see cref="IUnitOfWork"/>.</summary>
     public void Remove(CollectionSchedule schedule);
 }
+
+/// <summary>Сутність джерела очима екрана розкладу.</summary>
+/// <param name="Code">Код сутності в джерелі.</param>
+/// <param name="Name">Підпис сутності; <c>null</c> — каталог джерела його не дав.</param>
+/// <param name="ScheduleId">Розклад, який у неї вже є; <c>null</c> — розкладу немає.</param>
+public sealed record SourceEntityScheduling(string Code, string? Name, int? ScheduleId);
 
 /// <summary>Розклад збору разом із сутністю джерела, якій він належить.</summary>
 /// <param name="Schedule">Сам розклад.</param>

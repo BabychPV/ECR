@@ -47,6 +47,8 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         HttpResponseMessage[] responses =
         [
             await client.GetAsync(Schedules).ConfigureAwait(true),
+            await client.PostAsJsonAsync(
+                Schedules, new { sourceEntityId = 1, cron = FarFuture, isEnabled = true }).ConfigureAwait(true),
             await client.PutAsJsonAsync(At(1), new { cron = FarFuture, isEnabled = true }).ConfigureAwait(true),
             await client.DeleteAsync(At(1)).ConfigureAwait(true),
         ];
@@ -84,6 +86,80 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         await using var db = NewDb();
         var stored = await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true);
         Assert.Equal((FarFutureLater, false, (string?)null), (stored.CronExpression, stored.IsEnabled, stored.LastError));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21c")]
+    public async Task Створення_заводить_розклад_сутності_без_нього_а_другий_на_ту_саму_сутність_дає_409()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (entityId, code) = await AddSourceEntityAsync().ConfigureAwait(true);
+
+        var created = await PostAsync(client, entityId, FarFuture).ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+
+        var body = await BodyAsync(created).ConfigureAwait(true);
+        Assert.Equal(code, body.GetProperty("sourceEntityCode").GetString());
+        Assert.Equal(FarFuture, body.GetProperty("cron").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("rowVersion").GetString()));
+
+        var id = body.GetProperty("id").GetInt32();
+
+        await using (var db = NewDb())
+        {
+            var stored = await db.CollectionSchedules.AsNoTracking()
+                .SingleAsync(s => s.Id == id).ConfigureAwait(true);
+
+            Assert.Equal(
+                (entityId, FarFuture, true, (string?)null),
+                (stored.SourceEntityId, stored.CronExpression, stored.IsEnabled, stored.LastError));
+        }
+
+        // ⛔ Другий розклад на ту саму сутність — це другий тригер планувальника
+        // з тим самим завданням, тобто подвійний збір.
+        var duplicate = await PostAsync(client, entityId, FarFutureLater).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        var conflict = await BodyAsync(duplicate).ConfigureAwait(true);
+        Assert.Equal("ECR-JOB-0409", conflict.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-JOB-0409.collectionScheduleExists", conflict.GetProperty("messageKey").GetString());
+
+        await using var check = NewDb();
+        Assert.Equal(
+            1, await check.CollectionSchedules.CountAsync(s => s.SourceEntityId == entityId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21c")]
+    public async Task Створення_з_невалідним_cron_дає_422_а_для_неіснуючої_сутності_404_і_рядка_не_зʼявляється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var (entityId, _) = await AddSourceEntityAsync().ConfigureAwait(true);
+
+        var refused = await PostAsync(client, entityId, Unsupported).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        Assert.Equal(
+            "err.ECR-REQ-0422.collectionScheduleCron",
+            (await BodyAsync(refused).ConfigureAwait(true)).GetProperty("messageKey").GetString());
+
+        var missing = await PostAsync(client, sourceEntityId: 0, FarFuture).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        Assert.Equal(
+            "err.ECR-INT-0404.sourceEntity",
+            (await BodyAsync(missing).ConfigureAwait(true)).GetProperty("messageKey").GetString());
+
+        // ⛔ Відмова ДО бази: рядка не зʼявилося ні від першої спроби, ні від другої.
+        await using var db = NewDb();
+        Assert.False(
+            await db.CollectionSchedules.AnyAsync(s => s.SourceEntityId == entityId).ConfigureAwait(true));
     }
 
     [Fact]
@@ -168,6 +244,9 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
 
     private static Uri At(int id) => new($"{Schedules}/{id}", UriKind.Relative);
 
+    private static Task<HttpResponseMessage> PostAsync(HttpClient client, int sourceEntityId, string cron)
+        => client.PostAsJsonAsync(Schedules, new { sourceEntityId, cron, isEnabled = true });
+
     private static Task<HttpResponseMessage> PutAsync(
         HttpClient client, int id, string cron, bool isEnabled, string? ifMatch)
         => SendAsync(client, HttpMethod.Put, At(id), ifMatch, new { cron, isEnabled });
@@ -214,6 +293,19 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
     /// </remarks>
     private async Task<(int Id, string Code)> AddScheduleAsync(string cron)
     {
+        var (entityId, code) = await AddSourceEntityAsync().ConfigureAwait(false);
+
+        await using var db = NewDb();
+        var schedule = new CollectionSchedule(entityId, cron);
+        db.CollectionSchedules.Add(schedule);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (schedule.Id, code);
+    }
+
+    /// <summary>Джерело і сутність БЕЗ розкладу; повертає ключ і код сутності.</summary>
+    private async Task<(int Id, string Code)> AddSourceEntityAsync()
+    {
         var tag = Guid.NewGuid().ToString("N")[..10];
         await using var db = NewDb();
 
@@ -232,11 +324,7 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         db.SourceEntities.Add(entity);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        var schedule = new CollectionSchedule(entity.Id, cron);
-        db.CollectionSchedules.Add(schedule);
-        await db.SaveChangesAsync().ConfigureAwait(false);
-
-        return (schedule.Id, entity.Code);
+        return (entity.Id, entity.Code);
     }
 
     /// <summary>Клієнт із сеансом локального користувача з одним правом.</summary>
