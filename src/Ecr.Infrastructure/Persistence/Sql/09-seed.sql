@@ -32,11 +32,21 @@ WHEN NOT MATCHED THEN INSERT (Code, NameNative, Ordinal, IsDefault, IsActive)
      VALUES (s.Code, s.NameNative, s.Ordinal, s.IsDefault, 1);
 GO
 
+-- ── Прибирання прав, яких більше немає ───────────────────────────────────
+-- ⚠ Єдиний виняток із «не чіпає наявних рядків»: MERGE нижче лише додає, тож
+-- право, прибране з каталогу, у вже розгорнутій базі жило б далі — разом із
+-- роздачами ролям. `Template.Migrate` знято рішенням (директива №15, рішення
+-- 4: документ назавжди на своїй версії шаблону); право нічого не відкривало.
+-- Спершу роздачі (`FK_RolePerm_Perm` без каскаду), потім саме право.
+DELETE FROM sec.RolePermission WHERE PermissionCode = N'Template.Migrate';
+DELETE FROM sec.Permission     WHERE Code           = N'Template.Migrate';
+GO
+
 -- Функціональні права
 MERGE sec.Permission AS t
 USING (VALUES
   (N'Template.View',            N'Template',    0), (N'Template.Edit',        N'Template',    0),
-  (N'Template.Publish',         N'Template',    0), (N'Template.Migrate',     N'Template',    0),
+  (N'Template.Publish',         N'Template',    0),
   (N'Registry.View',            N'Registry',    0), (N'Registry.EditData',    N'Registry',    0),
   (N'Registry.EditDefinition',  N'Registry',    0), (N'Registry.Publish',     N'Registry',    0),
   (N'Document.View',            N'Document',    0), (N'Document.Create',      N'Document',    0),
