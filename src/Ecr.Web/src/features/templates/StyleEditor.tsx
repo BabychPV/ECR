@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
-import { Alert, ColorInput, Fieldset, Group, NumberInput, Select, Switch, TextInput } from '@mantine/core';
+import { Alert, ColorInput, Fieldset, Group, Select, Switch, TextInput } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import { normalizeDecimal } from '@/shared/format';
 import { type BorderWeight, type StyleDraft, whyCannotSaveStyle } from './style';
 
 /**
@@ -87,13 +88,44 @@ export function StyleEditor({
           value={draft.fontName}
           onChange={(event) => onChange({ ...draft, fontName: event.currentTarget.value })}
         />
-        <NumberInput
+        {/* ⛔ `TextInput`, а не `NumberInput`; `String(value)` поверх
+            `NumberInput` цього НЕ рятував — він друкував уже зіпсоване число.
+            Розмір шрифту — `decimal` контракту
+            (`SaveStyleDefRequest.fontSize`, `Format: decimal`), а `decimal`
+            їде рядком (`e470777a`), тож тут він не перетворюється на число
+            взагалі.
+
+            ⚠ Механізм названо точно, бо він НЕ той, що здається (знято зондом
+            на `@mantine/core` 7.15.2, не взято з документації). У самому
+            `onChange` втрати немає: `isValidNumber` віддає СИРИЙ рядок, щойно
+            в значенні ≥ 14 цифр — `getDecimalPlaces` там рахує всі цифри, а
+            не лише дробові. Ламає ВТРАТА ФОКУСА: `trimLeadingZeroesOnBlur`
+            для значення з < 15 знаками після коми робить `parseFloat` і
+            кладе в стан ЧИСЛО (`NumberInput.mjs:324`). Тобто
+            `12345678901234.567` переживав набір і гинув на переході до
+            наступного поля — `12345678901234.566`, мовчки й без жодної дії
+            користувача. Тією ж дорогою `11.0000000000` із сервера ставало
+            `11`.
+
+            ⚠ Порожньо — це `null`, і саме `null` контракт називає «розмір
+            теми за замовчуванням»: тут порожнє поле має власне значення, на
+            відміну від множника одиниці, де воно було б вигаданим нулем.
+            А от нерозбірний текст мовчки `null`-ом НЕ стає — він блокує
+            збереження (`whyCannotSaveColumn`, `column.ts`), бо «шрифт теми»
+            замість «ви ввели не число» — це та сама правдоподібна неправда,
+            лише іншим значенням. */}
+        <TextInput
           label={t('styles.fontSize')}
-          min={1}
+          inputMode="decimal"
+          error={draft.fontSize !== null && normalizeDecimal(draft.fontSize) === null}
           value={draft.fontSize ?? ''}
-          // ⚠ Розмір шрифту — `decimal` контракту, тобто рядок: у чернетку він
-          // кладеться рядком і рядком же їде назад (`style.ts`).
-          onChange={(value) => onChange({ ...draft, fontSize: value === '' ? null : String(value) })}
+          onChange={(event) => {
+            // ⚠ `trim` саме тут: тіло запиту збирає `styleBody`, і воно везе
+            // `fontSize` як є, тож пробіли по краях доїхали б до сервера.
+            const next = event.currentTarget.value.trim();
+
+            onChange({ ...draft, fontSize: next.length === 0 ? null : next });
+          }}
         />
       </Group>
 
