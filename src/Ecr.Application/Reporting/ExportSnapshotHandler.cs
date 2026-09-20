@@ -100,8 +100,14 @@ public sealed class ExportSnapshotHandler(
                 });
         }
 
+        // ⚠ Групи й підсумки беруться з ПЕРШОЇ сторінки: макет (`R8`) рахується
+        // по всьому зрізу, тож на кожній сторінці він однаковий, а книга має
+        // показати рівно те, що показує екран.
         var content = await workbooks
-            .WriteAsync(new SnapshotWorkbook(snapshotId, first.Columns, rows), ct)
+            .WriteAsync(
+                new SnapshotWorkbook(
+                    snapshotId, first.Columns, rows, first.Groups, first.Totals, first.ShowGroupHeader),
+                ct)
             .ConfigureAwait(false);
 
         return new SnapshotExport(

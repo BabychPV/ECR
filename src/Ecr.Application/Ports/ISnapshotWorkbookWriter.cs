@@ -26,6 +26,21 @@ public interface ISnapshotWorkbookWriter
 /// <summary>Зріз, готовий до запису в книгу.</summary>
 /// <param name="SnapshotId">Зріз — з нього береться назва аркуша й файлу.</param>
 /// <param name="Columns">Колонки в порядку опису версії; порядок значущий.</param>
-/// <param name="Rows">Рядки за зростанням <c>RowNo</c>.</param>
+/// <param name="Rows">Рядки в порядку показу — тому самому, що й у <c>GET …/rows</c>.</param>
+/// <param name="Groups">
+/// Групи макета (<c>R8</c>) у порядку рядків; <c>null</c> — групування немає.
+/// </param>
+/// <param name="Totals">Підсумки по всьому зрізу; <c>null</c> — підсумків немає.</param>
+/// <param name="ShowGroupHeader">Чи малювати рядок заголовка групи.</param>
+/// <remarks>
+/// ⛔ Групи й підсумки приходять ПОРАХОВАНИМИ (<see cref="Reporting.ReportLayout"/>),
+/// а не рахуються тут: книга й екран мусять показувати те саме число, і друга
+/// реалізація розійшлася б із першою мовчки.
+/// </remarks>
 public sealed record SnapshotWorkbook(
-    long SnapshotId, IReadOnlyList<SnapshotColumn> Columns, IReadOnlyList<SnapshotRow> Rows);
+    long SnapshotId,
+    IReadOnlyList<SnapshotColumn> Columns,
+    IReadOnlyList<SnapshotRow> Rows,
+    IReadOnlyList<SnapshotRowGroup>? Groups = null,
+    IReadOnlyList<SnapshotTotal>? Totals = null,
+    bool ShowGroupHeader = false);

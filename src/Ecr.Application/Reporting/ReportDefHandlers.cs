@@ -127,10 +127,12 @@ public static class ReportDefinitionSpec
     {
         var effective = rules ?? new ReportRulesCommand(CalculationResults);
 
-        // Без явної схеми: правила або параметри є — схема 2, немає — схема 1,
-        // побайтно як до R5.
+        // Без явної схеми: правила, параметри або макет є — схема 2, немає —
+        // схема 1, побайтно як до R5.
         var schema = effective.Schema
-            ?? (effective.Rules is { Count: > 0 } || effective.Parameters is { Count: > 0 }
+            ?? (effective.Rules is { Count: > 0 }
+                || effective.Parameters is { Count: > 0 }
+                || effective.Layout is not null
                 ? ReportRowRules.Schema
                 : ReportRules.CurrentSchema);
 
@@ -161,6 +163,11 @@ public static class ReportDefinitionSpec
         _ = ReportRowRules.Compile(
             schema, effective.RowSource, effective.Rules, [.. (columns ?? []).Select(c => c.Code)],
             effective.Parameters);
+
+        // ⛔ R8: макет перевіряється ТИМ САМИМ кодом, яким його застосує видача.
+        // Підсумок над колонкою, якої в описі немає, інакше дійшов би до екрана
+        // порожнім числом замість відмови.
+        _ = ReportLayout.Compile(schema, effective.Layout, columns);
 
         // Версія схеми пишеться ЗАВЖДИ: опис без неї — це опис до D-52a.
         return JsonSerializer.Serialize(effective with { Schema = schema }, Options);
@@ -224,6 +231,11 @@ public sealed record ReportColumnCommand(string Code, string Kind);
 /// <c>@Code</c>, а значення задаються при побудові зрізу. У JSON схеми 1 поля
 /// немає взагалі.
 /// </param>
+/// <param name="Layout">
+/// Макет зрізу (схема 2, <c>R8</c>): одна група й підсумки. У JSON схеми 1 поля
+/// немає взагалі. ⚠ На <c>rpt.ReportRow</c> і на <c>ContentHash</c> не впливає —
+/// застосовується на видачі.
+/// </param>
 public sealed record ReportRulesCommand(
     string RowSource,
     int? Schema = null,
@@ -232,7 +244,10 @@ public sealed record ReportRulesCommand(
     IReadOnlyList<ReportRuleCommand>? Rules = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<ReportParameterCommand>? Parameters = null);
+    IReadOnlyList<ReportParameterCommand>? Parameters = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    ReportLayoutCommand? Layout = null);
 
 /// <summary>
 /// Перелік описів звітів. Право <c>Report.ViewRegulatory</c>.

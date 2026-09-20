@@ -13156,6 +13156,19 @@ export interface components {
             /** @description Параметри звіту — `@Name`. */
             parameters: null | components["schemas"]["ReportSymbolDeclaration"][];
         };
+        /** @description Макет зрізу (`RulesJson`, схема 2, секція `layout`). */
+        ReportLayoutCommand: {
+            /** @description Код колонки групування; `null` — плаский перелік, і тоді підсумки, якщо
+             *     вони задані, дають один підсумковий рядок. */
+            groupBy?: null | string;
+            /**
+             * @description Чи малювати рядок заголовка групи.
+             * @default false
+             */
+            showGroupHeader: boolean;
+            /** @description Підсумки в порядку опису. */
+            totals?: null | components["schemas"]["ReportTotalCommand"][];
+        };
         /** @description Оголошення параметра звіту в описі версії (`RulesJson`, схема 2). */
         ReportParameterCommand: {
             /** @description Ім'я параметра без `@`; у виразі — `@Code`. */
@@ -13194,6 +13207,7 @@ export interface components {
         };
         /** @description Правила відбору рядків зрізу. */
         ReportRulesCommand: {
+            layout?: null | components["schemas"]["ReportLayoutCommand"];
             /** @description Параметри звіту (схема 2, `R6`): на них посилаються вирази правил як
              *     `@Code`, а значення задаються при побудові зрізу. У JSON схеми 1 поля
              *     немає взагалі. */
@@ -13254,6 +13268,13 @@ export interface components {
             name: string;
             /** @description `Number`, `Text`, `Boolean` або `Date`. */
             type: string;
+        };
+        /** @description Підсумок над колонкою зрізу. */
+        ReportTotalCommand: {
+            /** @description Код ОПИСАНОЇ колонки версії. */
+            column: string;
+            /** @description Функція: `sum`, `count`, `avg`, `min`, `max`. */
+            fn: string;
         };
         /** @description Версія опису звіту. */
         ReportVersionDto: {
@@ -13949,17 +13970,53 @@ export interface components {
              */
             rowNo: number;
         };
+        /** @description Група рядків зрізу (`R8`, макет з однією групою). */
+        SnapshotRowGroup: {
+            /** @description Код колонки групування. */
+            column: string;
+            /**
+             * Format: int32
+             * @description Скільки рядків у групі. ⚠ По ВСЬОМУ зрізу — групи можуть не вміститися в
+             *     одну сторінку, і саме за цим числом книга знає, де група закінчується.
+             */
+            rowCount: number;
+            /** @description Підсумки цієї групи; порожньо — підсумків не оголошено. */
+            totals: components["schemas"]["SnapshotTotal"][];
+            /** @description Значення колонки, спільне для рядків групи; `null` — порожнє. */
+            value: unknown;
+        };
         /** @description Сторінка рядків зрізу. */
         SnapshotRowsPage: {
             /** @description Колонки в порядку опису версії. */
             columns: components["schemas"]["SnapshotColumn"][];
+            /** @description Групи макета по ВСЬОМУ зрізу в порядку показу; `null` — версія
+             *     групування не оголошує. */
+            groups?: null | components["schemas"]["SnapshotRowGroup"][];
             /**
              * Format: int32
              * @description Курсор наступної сторінки; `null` — рядків більше немає.
              */
             nextCursor: null | number;
-            /** @description Рядки за зростанням `RowNo`. */
+            /** @description Рядки за зростанням `RowNo`, а з макетом (`R8`) — у порядку груп. */
             rows: components["schemas"]["SnapshotRow"][];
+            /**
+             * @description Чи показувати рядок заголовка групи. ⚠ Групи й підсумки рахуються по ВСЬОМУ
+             *     зрізу й тому приходять однакові на кожній сторінці: підсумок, що міняється
+             *     від сторінки до сторінки, не є підсумком.
+             * @default false
+             */
+            showGroupHeader: boolean;
+            /** @description Підсумки по ВСЬОМУ зрізу; `null` — версія підсумків не оголошує. */
+            totals?: null | components["schemas"]["SnapshotTotal"][];
+        };
+        /** @description Порахований підсумок. */
+        SnapshotTotal: {
+            /** @description Код колонки. */
+            column: string;
+            /** @description Функція: `sum`, `count`, `avg`, `min`, `max`. */
+            fn: string;
+            /** @description Значення; `null` — рахувати не було з чого. */
+            value: unknown;
         };
         /** @description Підсумок перевірки зрізу. */
         SnapshotVerifyResponse: {

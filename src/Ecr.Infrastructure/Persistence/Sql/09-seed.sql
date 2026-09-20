@@ -488,6 +488,10 @@ USING (VALUES
     (N'err.ECR-RPT-0422.parameterUnknown',   N'en', N'The report version declares no parameter "{code}".', 1),
     (N'err.ECR-RPT-0422.parameterRequired',  N'en', N'Report parameter "{code}" is required: it has neither a value nor a default.', 1),
     (N'err.ECR-RPT-0422.parameterType',      N'en', N'Report parameter "{code}" ({part}) expects a value of type {expectedType}.', 1),
+    -- R8: макет зрізу (одна група й підсумки). Перевіряється при створенні
+    -- версії тим самим кодом, яким його застосує видача, тож підсумок над
+    -- колонкою, якої в описі немає, не доживає до екрана.
+    (N'err.ECR-RPT-0422.layout',             N'en', N'The report layout ({part}) is invalid: {reason}.', 1),
     (N'err.ECR-RPT-0404.snapshot',           N'en', N'Snapshot {snapshotId} does not exist.', 1),
     -- R7: книга зрізу будується в пам'яті цілком, тому стеля рядків — відмова,
     -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.

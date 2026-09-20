@@ -203,6 +203,82 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
 
     private const string RuledColumnsJson = """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""";
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Макет_не_чіпає_рядків_зрізу_і_суми_а_змінює_лише_видачу()
+    {
+        // ⛔ R8 цілиться рівно в це: макет — спосіб ПОКАЗУ. Якби він доїжджав
+        // до `rpt.ReportRow`, та сама версія з групуванням і без нього давала б
+        // різні контрольні суми — тобто сумою більше не можна було б довести,
+        // що звіт не змінився.
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        var plain = await PublishedAsync(db, RuledColumnsJson);
+        var grouped = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
+            new(
+                "CalculationResults",
+                Layout: new("OutputCode", [new("Value", "sum")], ShowGroupHeader: true)),
+            RuledColumns));
+
+        var plainId = await builder.BuildAsync(
+            plain.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+        var groupedId = await builder.BuildAsync(
+            grouped.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        Assert.Equal(await HashAsync(db, plainId), await HashAsync(db, groupedId));
+        Assert.Equal(
+            (await CellsAsync(db, plainId)).Select(Key), (await CellsAsync(db, groupedId)).Select(Key));
+
+        var page = await builder.RowsAsync(groupedId, 0, 10, CancellationToken.None);
+        var groups = page!.Groups!;
+
+        Assert.Equal(["E_CO2", "E_NOX"], groups.Select(g => g.Value as string));
+        Assert.Equal(12.5m, Assert.Single(groups[0].Totals).Value);
+        Assert.Equal(17.5m, Assert.Single(page.Totals!).Value);
+        Assert.True(page.ShowGroupHeader);
+        Assert.Null(page.NextCursor);
+
+        // Зріз без макета віддається як до R8: полів групи й підсумку немає взагалі.
+        var flat = await builder.RowsAsync(plainId, 0, 10, CancellationToken.None);
+        Assert.Null(flat!.Groups);
+        Assert.Null(flat.Totals);
+        Assert.False(flat.ShowGroupHeader);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Сторінка_зрізу_з_макетом_іде_за_групою_а_підсумок_не_залежить_від_сторінки()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        // Групування за `Value` ставить рядок 2 (5) перед рядком 1 (12.5).
+        var version = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
+            new("CalculationResults", Layout: new("Value", [new("Value", "sum")])), RuledColumns));
+
+        var snapshotId = await builder.BuildAsync(
+            version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        var first = await builder.RowsAsync(snapshotId, 0, 1, CancellationToken.None);
+        var second = await builder.RowsAsync(snapshotId, first!.NextCursor!.Value, 1, CancellationToken.None);
+
+        Assert.Equal(2, Assert.Single(first.Rows).RowNo);
+        Assert.Equal(1, Assert.Single(second!.Rows).RowNo);
+        Assert.Null(second.NextCursor);
+
+        // ⚠ Підсумок — по ВСЬОМУ зрізу, тож на обох сторінках він однаковий.
+        Assert.Equal(17.5m, Assert.Single(first.Totals!).Value);
+        Assert.Equal(17.5m, Assert.Single(second.Totals!).Value);
+    }
+
     /// <summary>Два зрізи тих самих даних: без правил (схема 1) і з правилом (схема 2).</summary>
     private async Task<(long Plain, long Ruled, ReportSnapshotBuilder Builder, EcrDbContext Db)> BuildPairAsync(
         ReportRuleCommand rule)

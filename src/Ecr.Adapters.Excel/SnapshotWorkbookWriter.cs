@@ -50,20 +50,35 @@ public sealed class SnapshotWorkbookWriter : ISnapshotWorkbookWriter
         sheet.Row(1).Style.Font.Bold = true;
         sheet.SheetView.FreezeRows(1);
 
-        for (var r = 0; r < workbook.Rows.Count; r++)
+        var line = 2;
+        var written = 0;
+
+        // ⛔ R8: групи й підсумки МАЛЮЮТЬСЯ тут, але не рахуються — вони
+        // приходять готовими з тієї самої сторінки, яку бачить екран.
+        foreach (var group in workbook.Groups ?? [])
         {
-            ct.ThrowIfCancellationRequested();
-
-            var cells = workbook.Rows[r].Cells;
-
-            for (var c = 0; c < workbook.Columns.Count; c++)
+            if (workbook.ShowGroupHeader)
             {
-                var column = workbook.Columns[c];
-                cells.TryGetValue(column.Code, out var value);
-
-                Write(sheet.Cell(r + 2, c + 1), value, column.Kind);
+                sheet.Cell(line, 1).Value = $"{group.Column}: {Text(group.Value)}";
+                sheet.Row(line).Style.Font.Bold = true;
+                line++;
             }
+
+            for (var i = 0; i < group.RowCount && written < workbook.Rows.Count; i++, written++)
+            {
+                Row(sheet, line++, workbook.Rows[written], workbook.Columns, ct);
+            }
+
+            line = Totals(sheet, line, group.Totals, workbook.Columns);
         }
+
+        // Рядки поза групами: макет без `groupBy` — і зріз без макета взагалі.
+        for (; written < workbook.Rows.Count; written++)
+        {
+            Row(sheet, line++, workbook.Rows[written], workbook.Columns, ct);
+        }
+
+        _ = Totals(sheet, line, workbook.Totals, workbook.Columns);
 
         // Ширина — по РЯДКУ ЗАГОЛОВКІВ, не по всьому аркушу: той самий урок,
         // що й в `ExcelExporter.AdjustHeaders` (482 мс проти 5 мс).
@@ -87,6 +102,89 @@ public sealed class SnapshotWorkbookWriter : ISnapshotWorkbookWriter
 
         return output;
     }
+
+    /// <summary>Підпис рядка підсумків у першій колонці.</summary>
+    /// <remarks>
+    /// ⚠ Без каталогу — як і заголовки колонок, які є КОДАМИ: у книзі немає ні
+    /// мови користувача, ні місця, де її спитати. Підпис потрібен, щоб рядок
+    /// чисел під таблицею не прочитався як ще один рядок звіту.
+    /// </remarks>
+    public const string TotalsLabel = "Total";
+
+    /// <summary>Малює рядок підсумків; повертає наступний вільний рядок аркуша.</summary>
+    /// <remarks>
+    /// ⚠ Значення лягає в КОЛОНКУ свого підсумку: підсумок під чужою колонкою
+    /// читався б як значення тієї колонки.
+    /// </remarks>
+    private static int Totals(
+        IXLWorksheet sheet, int line, IReadOnlyList<SnapshotTotal>? totals, IReadOnlyList<SnapshotColumn> columns)
+    {
+        if (totals is not { Count: > 0 })
+        {
+            return line;
+        }
+
+        var labelled = false;
+
+        foreach (var total in totals)
+        {
+            var index = IndexOf(columns, total.Column);
+
+            if (index < 0)
+            {
+                continue;
+            }
+
+            // ⚠ Тип комірки — тип КОЛОНКИ, окрім `count`: кількість рядків — це
+            // число, хоч би що стояло в самій колонці.
+            Write(
+                sheet.Cell(line, index + 1),
+                total.Value,
+                total.Fn == ReportLayout.Count ? ReportSourceColumns.Number : columns[index].Kind);
+
+            labelled |= index == 0;
+        }
+
+        if (!labelled)
+        {
+            sheet.Cell(line, 1).Value = TotalsLabel;
+        }
+
+        sheet.Row(line).Style.Font.Bold = true;
+
+        return line + 1;
+    }
+
+    private static int IndexOf(IReadOnlyList<SnapshotColumn> columns, string code)
+    {
+        for (var c = 0; c < columns.Count; c++)
+        {
+            if (string.Equals(columns[c].Code, code, StringComparison.Ordinal))
+            {
+                return c;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Малює один рядок зрізу.</summary>
+    private static void Row(
+        IXLWorksheet sheet, int line, SnapshotRow row, IReadOnlyList<SnapshotColumn> columns, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        for (var c = 0; c < columns.Count; c++)
+        {
+            row.Cells.TryGetValue(columns[c].Code, out var value);
+
+            Write(sheet.Cell(line, c + 1), value, columns[c].Kind);
+        }
+    }
+
+    /// <summary>Значення заголовка групи текстом; порожнє — порожньо.</summary>
+    private static string Text(object? value)
+        => value is null ? string.Empty : Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
 
     /// <summary>
     /// Кладе значення комірки ЙОГО ТИПОМ, а не текстом.

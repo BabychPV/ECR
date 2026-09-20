@@ -6353,6 +6353,34 @@
         ],
         "type": "object"
       },
+      "ReportLayoutCommand": {
+        "description": "Макет зрізу (`RulesJson`, схема 2, секція `layout`).",
+        "properties": {
+          "groupBy": {
+            "description": "Код колонки групування; `null` — плаский перелік, і тоді підсумки, якщо\nвони задані, дають один підсумковий рядок.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "showGroupHeader": {
+            "default": false,
+            "description": "Чи малювати рядок заголовка групи.",
+            "type": "boolean"
+          },
+          "totals": {
+            "description": "Підсумки в порядку опису.",
+            "items": {
+              "$ref": "#/components/schemas/ReportTotalCommand"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ReportParameterCommand": {
         "description": "Оголошення параметра звіту в описі версії (`RulesJson`, схема 2).",
         "properties": {
@@ -6442,6 +6470,17 @@
       "ReportRulesCommand": {
         "description": "Правила відбору рядків зрізу.",
         "properties": {
+          "layout": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportLayoutCommand",
+                "description": "Макет зрізу (схема 2, `R8`): одна група й підсумки. У JSON схеми 1 поля\nнемає взагалі. ⚠ На `rpt.ReportRow` і на `ContentHash` не впливає —\nзастосовується на видачі."
+              }
+            ]
+          },
           "parameters": {
             "description": "Параметри звіту (схема 2, `R6`): на них посилаються вирази правил як\n`@Code`, а значення задаються при побудові зрізу. У JSON схеми 1 поля\nнемає взагалі.",
             "items": {
@@ -6560,6 +6599,24 @@
         "required": [
           "name",
           "type"
+        ],
+        "type": "object"
+      },
+      "ReportTotalCommand": {
+        "description": "Підсумок над колонкою зрізу.",
+        "properties": {
+          "column": {
+            "description": "Код ОПИСАНОЇ колонки версії.",
+            "type": "string"
+          },
+          "fn": {
+            "description": "Функція: `sum`, `count`, `avg`, `min`, `max`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "column",
+          "fn"
         ],
         "type": "object"
       },
@@ -8011,6 +8068,37 @@
         ],
         "type": "object"
       },
+      "SnapshotRowGroup": {
+        "description": "Група рядків зрізу (`R8`, макет з однією групою).",
+        "properties": {
+          "column": {
+            "description": "Код колонки групування.",
+            "type": "string"
+          },
+          "rowCount": {
+            "description": "Скільки рядків у групі. ⚠ По ВСЬОМУ зрізу — групи можуть не вміститися в\nодну сторінку, і саме за цим числом книга знає, де група закінчується.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "totals": {
+            "description": "Підсумки цієї групи; порожньо — підсумків не оголошено.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotTotal"
+            },
+            "type": "array"
+          },
+          "value": {
+            "description": "Значення колонки, спільне для рядків групи; `null` — порожнє."
+          }
+        },
+        "required": [
+          "column",
+          "value",
+          "rowCount",
+          "totals"
+        ],
+        "type": "object"
+      },
       "SnapshotRowsPage": {
         "description": "Сторінка рядків зрізу.",
         "properties": {
@@ -8021,6 +8109,16 @@
             },
             "type": "array"
           },
+          "groups": {
+            "description": "Групи макета по ВСЬОМУ зрізу в порядку показу; `null` — версія\nгрупування не оголошує.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotRowGroup"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "nextCursor": {
             "description": "Курсор наступної сторінки; `null` — рядків більше немає.",
             "format": "int32",
@@ -8030,17 +8128,54 @@
             ]
           },
           "rows": {
-            "description": "Рядки за зростанням `RowNo`.",
+            "description": "Рядки за зростанням `RowNo`, а з макетом (`R8`) — у порядку груп.",
             "items": {
               "$ref": "#/components/schemas/SnapshotRow"
             },
             "type": "array"
+          },
+          "showGroupHeader": {
+            "default": false,
+            "description": "Чи показувати рядок заголовка групи. ⚠ Групи й підсумки рахуються по ВСЬОМУ\nзрізу й тому приходять однакові на кожній сторінці: підсумок, що міняється\nвід сторінки до сторінки, не є підсумком.",
+            "type": "boolean"
+          },
+          "totals": {
+            "description": "Підсумки по ВСЬОМУ зрізу; `null` — версія підсумків не оголошує.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotTotal"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
           "columns",
           "rows",
           "nextCursor"
+        ],
+        "type": "object"
+      },
+      "SnapshotTotal": {
+        "description": "Порахований підсумок.",
+        "properties": {
+          "column": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "fn": {
+            "description": "Функція: `sum`, `count`, `avg`, `min`, `max`.",
+            "type": "string"
+          },
+          "value": {
+            "description": "Значення; `null` — рахувати не було з чого."
+          }
+        },
+        "required": [
+          "column",
+          "fn",
+          "value"
         ],
         "type": "object"
       },

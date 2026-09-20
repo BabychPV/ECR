@@ -139,6 +139,68 @@ public sealed class SnapshotWorkbookWriterTests
         Assert.True(sheet.Cell(2, 3).IsEmpty());
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Книга_містить_заголовки_груп_і_рядки_підсумків_макета()
+    {
+        // ⛔ Мутація, якою перевірено цей тест: у `SnapshotWorkbookWriter.WriteAsync`
+        // прибрати обидва виклики `Totals(...)` (підсумки лишаються порахованими
+        // для `rows`, але в книгу не потрапляють). Падає РІВНО цей тест — і
+        // жоден інший у репозиторії.
+        //
+        // ⚠ Книга й екран мусять показувати ОДНЕ І ТЕ САМЕ: підсумок, який є в
+        // відповіді `…/rows` і якого немає у вивантаженому файлі, робить із
+        // «звірити у файлі» дію, що нічого не доводить.
+        SnapshotRow[] rows = [Row(2, "NOx", 4m, "kg-1"), Row(1, "CO2", 12.5m, "t-1"), Row(3, "SO2", 0.5m, "t-2")];
+
+        SnapshotRowGroup[] groups =
+        [
+            new("OutputCode", "NOx", 1, [new("Value", ReportLayout.Sum, 4m)]),
+            new("OutputCode", null, 2, [new("Value", ReportLayout.Sum, 13m)]),
+        ];
+
+        using var sheet = await SheetOf(
+            new SnapshotWorkbook(
+                7, Columns, rows, groups, [new("Value", ReportLayout.Sum, 17m)], ShowGroupHeader: true))
+            .ConfigureAwait(true);
+
+        // Заголовок групи → її рядок → підсумок групи; так само для другої.
+        Assert.Equal("OutputCode: NOx", sheet.Cell(2, 1).GetString());
+        Assert.Equal("NOx", sheet.Cell(3, 1).GetString());
+        Assert.Equal(4.0, sheet.Cell(4, 2).GetDouble());
+
+        // Порожнє значення групи — заголовок без нього, а не «—» і не пропуск рядка.
+        Assert.Equal("OutputCode: ", sheet.Cell(5, 1).GetString());
+        Assert.Equal("CO2", sheet.Cell(6, 1).GetString());
+        Assert.Equal("SO2", sheet.Cell(7, 1).GetString());
+        Assert.Equal(13.0, sheet.Cell(8, 2).GetDouble());
+
+        // Підсумок усього зрізу — останнім рядком, підписаним у першій колонці.
+        Assert.Equal(SnapshotWorkbookWriter.TotalsLabel, sheet.Cell(9, 1).GetString());
+        Assert.Equal(XLDataType.Number, sheet.Cell(9, 2).DataType);
+        Assert.Equal(17.0, sheet.Cell(9, 2).GetDouble());
+        Assert.Equal(9, sheet.LastRowUsed()!.RowNumber());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Макет_без_груп_дає_книгу_з_одним_рядком_підсумків()
+    {
+        using var sheet = await SheetOf(
+            new SnapshotWorkbook(
+                7,
+                Columns,
+                [Row(1, "CO2", 12.5m, "t-1")],
+                Groups: null,
+                Totals: [new("Value", ReportLayout.Count, 1m)]))
+            .ConfigureAwait(true);
+
+        Assert.Equal("CO2", sheet.Cell(2, 1).GetString());
+        Assert.Equal(SnapshotWorkbookWriter.TotalsLabel, sheet.Cell(3, 1).GetString());
+
+        // ⚠ `count` — число, хоч би якого типу була сама колонка.
+        Assert.Equal(XLDataType.Number, sheet.Cell(3, 2).DataType);
+        Assert.Equal(3, sheet.LastRowUsed()!.RowNumber());
+    }
+
     private static SnapshotRow Row(int rowNo, string outputCode, decimal value, string rowKey)
         => new(
             rowNo,
