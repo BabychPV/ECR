@@ -1449,6 +1449,14 @@ USING (VALUES
     (N'periods.reopened',                N'en', N'The period is open again.', 1),
     (N'periods.reopenedUntil',           N'en', N'open until {until}', 1),
 
+    -- ⛔ Вікно перевідкриття. Кнопка слала `until: null` із коментарем
+    -- «безстроково», а сервер відкриває період лише до кінця доби майданчика
+    -- (`EndOfSiteDay`, D-68) — тобто о півночі він закривався сам, і людина
+    -- дізнавалася про це вже по факту. Тепер строк задається явно, а порожнє
+    -- поле називає рівно те, що зробить сервер.
+    (N'periods.reopenUntil',             N'en', N'Open until', 1),
+    (N'periods.reopenUntilHint',         N'en', N'Leave empty to reopen until the end of the site day — the period closes itself at midnight.', 1),
+
     -- Безпека: ролі, користувачі, перегляд чужими правами.
     (N'security.createRole',             N'en', N'New role', 1),
     (N'security.roleCreated',            N'en', N'The role has been created. Grants say which projects it opens.', 1),
