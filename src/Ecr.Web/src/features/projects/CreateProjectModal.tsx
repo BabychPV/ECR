@@ -10,6 +10,7 @@ import type {
   TemplatePage,
   TemplateVersionPage,
 } from '@/api/types';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -277,8 +278,44 @@ export function CreateProjectModal({
   });
   const incomplete = missingFields.length > 0;
 
+  /*
+   * ⛔ Обидва обов'язкові переліки — версія шаблону й політика періодів —
+   * збиралися через `?? []`, тобто при відмові сервера ставали ПОРОЖНІМИ і
+   * мовчали. А підказка нижче (`periods.stillNeeded`) сумлінно перелічувала їх
+   * як «ще не заповнено».
+   *
+   * ⚠ Наслідок не «людина не зрозуміла»: конфігуратор читає порожній перелік
+   * як «опублікованих версій шаблону ще немає» чи «політик не заведено» — і
+   * йде створювати ЩЕ ОДНУ версію шаблону або ЩЕ ОДНУ політику. Відмова запиту
+   * штовхає його робити зайву, а потім дублюючу конфігурацію, яку хтось
+   * прибиратиме.
+   *
+   * ⚠ Версії живуть у `useQueries` — по запиту на шаблон; береться ПЕРША
+   * відмова з усіх трьох джерел. Три банери поруч розповідали б про
+   * влаштування клієнта замість того, що сталося.
+   */
+  const loadError =
+    templates.error ??
+    policies.error ??
+    versionQueries.find((query) => query.error !== null)?.error ??
+    null;
+
+  const refetchSources = (): void => {
+    void templates.refetch();
+    void policies.refetch();
+    versionQueries.forEach((query) => void query.refetch());
+  };
+
   return (
     <Modal opened={opened} onClose={onClose} title={t('periods.create')}>
+      {/*
+       * ⛔ Перед полями, а не після: людина має побачити причину ДО того, як
+       * почне гадати, чому переліки порожні. Решта форми лишається робочою —
+       * код, назву й пояс заповнити можна, а кнопка й так заблокована, бо
+       * обов'язкові поля не обрані.
+       */}
+      {loadError !== null && <ErrorAlert error={loadError} onRetry={refetchSources} />}
+
       <TextInput
         label={t('periods.code')}
         description={t('periods.codeHint')}
