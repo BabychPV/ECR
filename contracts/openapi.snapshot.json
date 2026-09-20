@@ -1379,6 +1379,35 @@
         ],
         "type": "object"
       },
+      "CreateNotificationChannelRequest": {
+        "description": "Тіло створення каналу.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/NotificationChannelKind",
+            "description": "Транспорт; після створення не змінюється."
+          },
+          "name": {
+            "description": "Назва, унікальна серед каналів.",
+            "type": "string"
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NotificationChannelSettings",
+                "description": "Несекретні параметри."
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
       "CreatePeriodPolicyRequest": {
         "description": "Запит на створення політики періодів (T6/#37).",
         "properties": {
@@ -3929,6 +3958,138 @@
         ],
         "type": "object"
       },
+      "NotificationChannelKind": {
+        "description": "Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.",
+        "enum": [
+          "Smtp",
+          "TeamsWebhook"
+        ]
+      },
+      "NotificationChannelSettings": {
+        "description": "Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`.",
+        "properties": {
+          "from": {
+            "description": "SMTP: адреса відправника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "host": {
+            "description": "SMTP: сервер.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "port": {
+            "description": "SMTP: порт.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "recipients": {
+            "description": "SMTP: адресати.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "title": {
+            "description": "Teams: заголовок картки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "useTls": {
+            "description": "SMTP: чи вимагати TLS.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "NotificationChannelView": {
+        "description": "Канал сповіщень — рядок екрана. Секрету тут немає й не буде.",
+        "properties": {
+          "hasSecret": {
+            "description": "Чи задано секрет — єдине, що про нього відомо клієнтові.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isEnabled": {
+            "description": "Чи ввімкнений.",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NotificationChannelKind",
+            "description": "Транспорт."
+          },
+          "modifiedAt": {
+            "description": "Остання зміна, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/NotificationChannelSettings",
+            "description": "Несекретні параметри."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "isEnabled",
+          "settings",
+          "hasSecret",
+          "modifiedAt"
+        ],
+        "type": "object"
+      },
+      "NotificationTestResult": {
+        "description": "Наслідок пробного повідомлення.",
+        "properties": {
+          "error": {
+            "description": "Причина відмови — без секрету; `null` за успіху.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageKey": {
+            "description": "Ключ каталогу для причини, якщо вона відома наперед.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ok": {
+            "description": "Чи прийняв канал повідомлення.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "error"
+        ],
+        "type": "object"
+      },
       "NotificationTransportDto": {
         "description": "Транспорт сповіщень: що відомо з конфігурації, не більше.",
         "properties": {
@@ -5758,6 +5919,22 @@
         },
         "required": [
           "grants"
+        ],
+        "type": "object"
+      },
+      "ReplaceNotificationChannelSecretRequest": {
+        "description": "Тіло заміни секрету.",
+        "properties": {
+          "secret": {
+            "description": "Новий секрет; `null` або порожній — прибрати.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "secret"
         ],
         "type": "object"
       },
@@ -8813,6 +8990,35 @@
           "sourcePath",
           "pointCount",
           "lastSeenUtc"
+        ],
+        "type": "object"
+      },
+      "UpdateNotificationChannelRequest": {
+        "description": "Тіло зміни каналу.",
+        "properties": {
+          "isEnabled": {
+            "description": "Чи ввімкнений.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NotificationChannelSettings",
+                "description": "Несекретні параметри."
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "isEnabled"
         ],
         "type": "object"
       },
@@ -14358,6 +14564,423 @@
         "summary": "Записує тест золотого набору. Право `Calculation.EditFormula`.",
         "tags": [
           "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/notifications/channels": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationChannelView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationChannelView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationChannelView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі канали за назвою.",
+        "tags": [
+          "NotificationChannels"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationChannelRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationChannelRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює ввімкнений канал без секрету.",
+        "tags": [
+          "NotificationChannels"
+        ]
+      }
+    },
+    "/api/v1/notifications/channels/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Видаляє канал разом із його правилами; журнал доставок лишається.",
+        "tags": [
+          "NotificationChannels"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationChannelRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationChannelRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює назву, стан і несекретні параметри.",
+        "tags": [
+          "NotificationChannels"
+        ]
+      }
+    },
+    "/api/v1/notifications/channels/{id}/secret": {
+      "put": {
+        "description": "⛔ URL вебхука: лише `https` і хост із переліку\n`Notifications:WebhookAllowedHostSuffixes`, інакше `422 ECR-REQ-0422`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNotificationChannelSecretRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNotificationChannelSecretRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNotificationChannelSecretRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює секрет (пароль SMTP або URL вебхука Teams); порожній — прибирає.",
+        "tags": [
+          "NotificationChannels"
+        ]
+      }
+    },
+    "/api/v1/notifications/channels/{id}/test": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Шле пробне повідомлення; відмова каналу — `ok: false`, а не помилка запиту.",
+        "tags": [
+          "NotificationChannels"
         ]
       }
     },
@@ -21436,6 +22059,9 @@
     },
     {
       "name": "Methodologies"
+    },
+    {
+      "name": "NotificationChannels"
     },
     {
       "name": "Periods"

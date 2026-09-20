@@ -3822,6 +3822,305 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі канали за назвою. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"][];
+                        "text/json": components["schemas"]["NotificationChannelView"][];
+                        "text/plain": components["schemas"]["NotificationChannelView"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Створює ввімкнений канал без секрету. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateNotificationChannelRequest"];
+                    "application/json": components["schemas"]["CreateNotificationChannelRequest"];
+                    "text/json": components["schemas"]["CreateNotificationChannelRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"];
+                        "text/json": components["schemas"]["NotificationChannelView"];
+                        "text/plain": components["schemas"]["NotificationChannelView"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Змінює назву, стан і несекретні параметри. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateNotificationChannelRequest"];
+                    "application/json": components["schemas"]["UpdateNotificationChannelRequest"];
+                    "text/json": components["schemas"]["UpdateNotificationChannelRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"];
+                        "text/json": components["schemas"]["NotificationChannelView"];
+                        "text/plain": components["schemas"]["NotificationChannelView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє канал разом із його правилами; журнал доставок лишається. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/channels/{id}/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Замінює секрет (пароль SMTP або URL вебхука Teams); порожній — прибирає.
+         * @description ⛔ URL вебхука: лише `https` і хост із переліку
+         *     `Notifications:WebhookAllowedHostSuffixes`, інакше `422 ECR-REQ-0422`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceNotificationChannelSecretRequest"];
+                    "application/json": components["schemas"]["ReplaceNotificationChannelSecretRequest"];
+                    "text/json": components["schemas"]["ReplaceNotificationChannelSecretRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"];
+                        "text/json": components["schemas"]["NotificationChannelView"];
+                        "text/plain": components["schemas"]["NotificationChannelView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/channels/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Шле пробне повідомлення; відмова каналу — `ok: false`, а не помилка запиту. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationTestResult"];
+                        "text/json": components["schemas"]["NotificationTestResult"];
+                        "text/plain": components["schemas"]["NotificationTestResult"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/periods/{id}/reopen": {
         parameters: {
             query?: never;
@@ -10016,6 +10315,14 @@ export interface components {
             /** @description Номер нової версії; унікальний у межах методології (`UQ_MethodologyVersion`). */
             versionNumber: string;
         };
+        /** @description Тіло створення каналу. */
+        CreateNotificationChannelRequest: {
+            /** @description Транспорт; після створення не змінюється. */
+            kind: components["schemas"]["NotificationChannelKind"];
+            /** @description Назва, унікальна серед каналів. */
+            name: string;
+            settings?: null | components["schemas"]["NotificationChannelSettings"];
+        };
         /** @description Запит на створення політики періодів (T6/#37). */
         CreatePeriodPolicyRequest: {
             /** @description Код політики; має бути унікальним. */
@@ -11211,6 +11518,61 @@ export interface components {
             /** @description Номер версії. */
             versionNumber: string;
         };
+        /**
+         * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        NotificationChannelKind: "Smtp" | "TeamsWebhook";
+        /** @description Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`. */
+        NotificationChannelSettings: {
+            /** @description SMTP: адреса відправника. */
+            from?: null | string;
+            /** @description SMTP: сервер. */
+            host?: null | string;
+            /**
+             * Format: int32
+             * @description SMTP: порт.
+             */
+            port?: null | number;
+            /** @description SMTP: адресати. */
+            recipients?: null | string[];
+            /** @description Teams: заголовок картки. */
+            title?: null | string;
+            /** @description SMTP: чи вимагати TLS. */
+            useTls?: null | boolean;
+        };
+        /** @description Канал сповіщень — рядок екрана. Секрету тут немає й не буде. */
+        NotificationChannelView: {
+            /** @description Чи задано секрет — єдине, що про нього відомо клієнтові. */
+            hasSecret: boolean;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Чи ввімкнений. */
+            isEnabled: boolean;
+            /** @description Транспорт. */
+            kind: components["schemas"]["NotificationChannelKind"];
+            /**
+             * Format: date-time
+             * @description Остання зміна, UTC.
+             */
+            modifiedAt: string;
+            /** @description Назва. */
+            name: string;
+            /** @description Несекретні параметри. */
+            settings: components["schemas"]["NotificationChannelSettings"];
+        };
+        /** @description Наслідок пробного повідомлення. */
+        NotificationTestResult: {
+            /** @description Причина відмови — без секрету; `null` за успіху. */
+            error: null | string;
+            /** @description Ключ каталогу для причини, якщо вона відома наперед. */
+            messageKey?: null | string;
+            /** @description Чи прийняв канал повідомлення. */
+            ok: boolean;
+        };
         /** @description Транспорт сповіщень: що відомо з конфігурації, не більше. */
         NotificationTransportDto: {
             /** @description Чи налаштований транспорт. */
@@ -12083,6 +12445,11 @@ export interface components {
         ReplaceGrantsRequest: {
             /** @description Новий набір; порожній прибирає доступ ролі повністю. */
             grants: components["schemas"]["ResourceGrantDto"][];
+        };
+        /** @description Тіло заміни секрету. */
+        ReplaceNotificationChannelSecretRequest: {
+            /** @description Новий секрет; `null` або порожній — прибрати. */
+            secret: null | string;
         };
         /** @description Запит на заміну набору ролей користувача. */
         ReplaceUserRolesRequest: {
@@ -13534,6 +13901,14 @@ export interface components {
             pointCount: number;
             /** @description Шлях атрибута в джерелі. */
             sourcePath: string;
+        };
+        /** @description Тіло зміни каналу. */
+        UpdateNotificationChannelRequest: {
+            /** @description Чи ввімкнений. */
+            isEnabled: boolean;
+            /** @description Назва. */
+            name: string;
+            settings?: null | components["schemas"]["NotificationChannelSettings"];
         };
         /** @description Прив'язка й поведінка наявного правила доступу до періоду (`ФВ-2.15`). */
         UpdatePeriodAccessRuleRequest: {

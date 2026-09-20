@@ -542,6 +542,11 @@ USING (VALUES
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
     (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),
+    -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
+    (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs a host, a port between 1 and 65535 and recipients.', 1),
+    (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
+    (N'err.ECR-REQ-0422.webhookUrlNotAllowed',         N'en', N'The webhook address must use https and point to an allowed host.', 1),
+    (N'err.ECR-INT-0404.notificationChannel',          N'en', N'Notification channel {id} does not exist.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -1239,6 +1244,8 @@ USING (VALUES
     (N'health.facts.notificationTransport', N'en', N'Notification transport', 1),
     (N'health.facts.transportNotConfigured', N'en', N'Not configured: notifications stay in the queue', 1),
     (N'health.facts.logDirectory',       N'en', N'Log directory', 1),
+    (N'notifications.test.teamsNotImplemented', N'en', N'Test messages to Teams are not available yet: the webhook sender is not implemented.', 1),
+    (N'notifications.test.smtpNotConfigured',   N'en', N'The SMTP transport is not configured on the server.', 1),
     (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
     (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),

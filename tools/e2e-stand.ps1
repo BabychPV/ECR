@@ -222,7 +222,8 @@ try {
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
             'Report.ViewRegulatory', 'Report.BuildSnapshot',
-            'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization')
+            'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization',
+            'System.ManageNotifications')
     } | Out-Null
 
     $roles = Call GET '/api/v1/roles'

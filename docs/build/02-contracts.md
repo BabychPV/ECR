@@ -2384,6 +2384,21 @@ public interface IPrincipalNameResolver
 }
 ```
 
+#### `INotificationStore`
+
+Канали сповіщень (`sys_ecr.NotificationChannel`, `BE-33`). У тому ж файлі — `INotificationSecretProtector`: захист секрету каналу перед записом; зворотної дії в порту немає навмисно — API секрету не читає.
+
+```csharp
+public interface INotificationStore
+{
+    public Task<IReadOnlyList<NotificationChannel>> ListChannelsAsync(CancellationToken ct);
+    public Task<NotificationChannel?> FindChannelAsync(int id, CancellationToken ct);
+    public Task<bool> IsChannelNameTakenAsync(string name, int? exceptChannelId, CancellationToken ct);
+    public void AddChannel(NotificationChannel channel);
+    public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct);
+}
+```
+
 #### `IProjectStore`
 
 ```csharp
@@ -2998,6 +3013,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `DELETE` | `/api/v1/security/group-assignments/{id}` | `Security.ManageUsers` | 3 |
+| `GET` | `/api/v1/notifications/channels` | `System.ManageNotifications` | 7 |
+| `POST` | `/api/v1/notifications/channels` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/channels/{id}` | `System.ManageNotifications` | 7 |
+| `DELETE` | `/api/v1/notifications/channels/{id}` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/channels/{id}/secret` | `System.ManageNotifications` | 7 |
+| `POST` | `/api/v1/notifications/channels/{id}/test` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |

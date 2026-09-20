@@ -259,6 +259,13 @@ public static class DependencyInjection
             services.AddSingleton<INotificationSender, Integration.SmtpNotificationSender>();
         }
 
+        // BE-33. ⛔ Перелік хостів вебхука — лише з конфігурації процесу:
+        // порожній перелік означає «жоден вебхук не приймається».
+        services.AddScoped<INotificationStore, Notifications.NotificationStore>();
+        services.AddSingleton<INotificationSecretProtector, Notifications.DataProtectionNotificationSecretProtector>();
+        services.AddSingleton(new Application.Notifications.WebhookUrlPolicy(
+            (configuration["Notifications:WebhookAllowedHostSuffixes"] ?? string.Empty).Split(';', ',')));
+
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
         // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би

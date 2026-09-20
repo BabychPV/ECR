@@ -142,6 +142,11 @@ public static class DependencyInjection
         services.AddScoped<Security.ListGroupRoleAssignmentsHandler>();
         services.AddScoped<Security.AssignGroupRoleHandler>();
         services.AddScoped<Security.RevokeGroupRoleHandler>();
+        services.AddScoped<Notifications.ListNotificationChannelsHandler>();
+        services.AddScoped<Notifications.SaveNotificationChannelHandler>();
+        services.AddScoped<Notifications.DeleteNotificationChannelHandler>();
+        services.AddScoped<Notifications.ReplaceNotificationChannelSecretHandler>();
+        services.AddScoped<Notifications.TestNotificationChannelHandler>();
         services.AddScoped<Security.CloneRoleHandler>();
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();
