@@ -6050,6 +6050,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/snapshots/{id}/export.xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Вивантажує зріз у `.xlsx`. Право `Report.Export`.
+         * @description ⚠ Файл у відповіді ОДРАЗУ, без `202` і фонової задачі, на відміну
+         *     від експорту документа: там книга на 500×60×12 не вкладається в жоден
+         *     таймаут, тут стеля — `ExportSnapshotHandler.MaxRows` рядків одного
+         *     плаского аркуша. Черга заради цього коштувала б користувачеві двох
+         *     зайвих кроків і GUID у руках.
+         *
+         *     ⛔ `D-52a` не зсувається: це ЗРІЗ, а не державна форма. PDF
+         *     держформи лишається в SSRS (`D-52`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зріз. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/snapshots/{id}/rows": {
         parameters: {
             query?: never;

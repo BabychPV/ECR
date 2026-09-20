@@ -17658,6 +17658,60 @@
         ]
       }
     },
+    "/api/v1/reports/snapshots/{id}/export.xlsx": {
+      "get": {
+        "description": "⚠ Файл у відповіді ОДРАЗУ, без `202` і фонової задачі, на відміну\nвід експорту документа: там книга на 500×60×12 не вкладається в жоден\nтаймаут, тут стеля — `ExportSnapshotHandler.MaxRows` рядків одного\nплаского аркуша. Черга заради цього коштувала б користувачеві двох\nзайвих кроків і GUID у руках.\n\n⛔ `D-52a` не зсувається: це ЗРІЗ, а не державна форма. PDF\nдержформи лишається в SSRS (`D-52`).",
+        "parameters": [
+          {
+            "description": "Зріз.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Вивантажує зріз у `.xlsx`. Право `Report.Export`.",
+        "tags": [
+          "Reports"
+        ]
+      }
+    },
     "/api/v1/reports/snapshots/{id}/rows": {
       "get": {
         "description": "D-52a: другий споживач `rpt.*` поруч із SSRS. Колонки — з опису\nверсії, за якою зріз побудовано; чужий зріз — той самий 404, що й неіснуючий.",

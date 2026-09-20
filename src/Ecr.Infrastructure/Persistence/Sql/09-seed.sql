@@ -482,6 +482,9 @@ USING (VALUES
     (N'err.ECR-RPT-0422.rulesSchema',        N'en', N'Rules schema {schema} is not supported: the current one is {currentSchema}.', 1),
     (N'err.ECR-RPT-0422.rule',               N'en', N'Rule {ruleNo} ({part}) is invalid: {reason}.', 1),
     (N'err.ECR-RPT-0404.snapshot',           N'en', N'Snapshot {snapshotId} does not exist.', 1),
+    -- R7: книга зрізу будується в пам'яті цілком, тому стеля рядків — відмова,
+    -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.
+    (N'err.ECR-RPT-0422.exportTooLarge',     N'en', N'Snapshot {snapshotId} has more than {limit} rows: a workbook that large is not built. Use the rows endpoint or the rpt.v_* view.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно

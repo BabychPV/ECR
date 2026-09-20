@@ -25,6 +25,7 @@ public sealed class ReportsController(
     BuildReportSnapshotHandler build,
     VerifyReportSnapshotHandler verify,
     GetSnapshotRowsHandler rows,
+    ExportSnapshotHandler exportSnapshot,
     ListReportDefsHandler definitions,
     CreateReportDefHandler createDefinition,
     CreateReportVersionHandler createVersion,
@@ -161,6 +162,37 @@ public sealed class ReportsController(
     public async Task<IActionResult> SnapshotRows(
         long id, [FromQuery] int? cursor, [FromQuery] int? limit, CancellationToken ct)
         => Ok(await rows.HandleAsync(id, cursor, limit, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Вивантажує зріз у <c>.xlsx</c>. Право <c>Report.Export</c>.
+    /// </summary>
+    /// <param name="id">Зріз.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Файл у відповіді ОДРАЗУ, без <c>202</c> і фонової задачі, на відміну
+    /// від експорту документа: там книга на 500×60×12 не вкладається в жоден
+    /// таймаут, тут стеля — <c>ExportSnapshotHandler.MaxRows</c> рядків одного
+    /// плаского аркуша. Черга заради цього коштувала б користувачеві двох
+    /// зайвих кроків і GUID у руках.
+    ///
+    /// ⛔ <c>D-52a</c> не зсувається: це ЗРІЗ, а не державна форма. PDF
+    /// держформи лишається в SSRS (<c>D-52</c>).
+    /// </remarks>
+    [HttpGet("snapshots/{id:long}/export.xlsx")]
+    // ⚠ Відповідь — ФАЙЛ, а не JSON: схеми в неї немає і бути не може.
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
+    [Produces(SnapshotExport.ContentType)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ExportSnapshot(long id, CancellationToken ct)
+    {
+        var book = await exportSnapshot.HandleAsync(id, ct).ConfigureAwait(false);
+
+        // ⚠ Потік, а не байти: вміст лежить у тимчасовому файлі, і `FileResult`
+        // закриває його сам після відправки — разом із самим файлом
+        // (`FileOptions.DeleteOnClose`).
+        return File(book.Content, SnapshotExport.ContentType, book.FileName);
+    }
 
     /// <summary>
     /// Будує зріз. Право <c>Report.BuildSnapshot</c>.

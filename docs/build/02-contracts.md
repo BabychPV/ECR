@@ -2531,6 +2531,20 @@ public interface ISecretProvider
 }
 ```
 
+#### `ISnapshotWorkbookWriter`
+
+Складає книгу `.xlsx` зі зрізу звітності (`R7`, `D-52a`). Окремий порт, а не
+метод `IExcelExporter`: той будує книгу ДОКУМЕНТА — аркуші шаблону, стилі,
+формули, карту для зворотного імпорту, — а зріз є одним пласким аркушем, який
+ніколи не повертається в систему.
+
+```csharp
+public interface ISnapshotWorkbookWriter
+{
+    public Task<Stream> WriteAsync(SnapshotWorkbook workbook, CancellationToken ct);
+}
+```
+
 #### `IStyleCatalog`
 
 Стилі версії шаблону (cfg.StyleDef) за їхніми ідентифікаторами.
@@ -3033,6 +3047,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
 | `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
+| `GET` | `/api/v1/reports/snapshots/{id}/export.xlsx` | `Report.Export` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
@@ -3091,6 +3106,21 @@ public sealed class NotFoundException(string errorCode, string message)
 > ⚠ Невідомий `state` і `limit` поза межами — `422` (`ECR-REQ-0422`), а не
 > мовчазне звуження: друкарська помилка у фільтрі інакше відповідала б
 > «таких задач немає».
+
+> ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
+> ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
+> `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,
+> ключ `err.ECR-RPT-0422.exportTooLarge`. Доступ — `Report.Export` ПЛЮС грант
+> `Read` на проєкт зрізу; чужий зріз = неіснуючий (`404`), як у `…/rows`.
+>
+> ⚠ **Числа в книзі мають 15 значущих цифр, а не 16.** Excel зберігає число
+> `double` — це формат книги, не наш вибір, — тож `decimal(38,16)` бази в неї
+> повністю не поміщається. Для звірки без утрат лишається `GET …/rows`, де
+> число їде десятковим. Рішення «усюди 16 знаків» стосується ЗБЕРІГАННЯ;
+> книга його не витримує, і мовчати про це дорожче, ніж назвати.
+>
+> ⛔ D-52a не зсувається: це вивантаження ЗРІЗУ, а не державної форми. PDF
+> держформи лишається в SSRS (`D-52`).
 
 > **Опис звіту — дані, а не конструктор звітів** (`ФВ-10.4`, `ФВ-10.6`,
 > директива №09 `W7`). Веб-переглядач і конструктор звітів ТЗ виносить за
