@@ -418,17 +418,30 @@ try {
         periodKey = $periodKey
     } -Expect @(202)
 
+    # ⚠ Стеля очікування — 300 с, і це не «про всяк випадок». Ретрай задачі
+    # спить 30 с, потім 60 с (`QuartzJobAdapter.MaxRetryAttempts` = 3), тобто
+    # задача, що падає з першого разу, доходить до `Failed` аж на ~95-й
+    # секунді. Стеля в 60 с обривала прогін РАНІШЕ, ніж стан ставав кінцевим,
+    # і причина провалу не потрапляла в повідомлення взагалі — перевірка
+    # казала «завершилася станом Running», тобто рівно те, чого бути не може.
     $snapshotState = $null
-    foreach ($i in 1..120) {
+    $snapshotWait = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($snapshotWait.Elapsed.TotalSeconds -lt 300) {
         Start-Sleep -Milliseconds 500
         $snapshotStatus = Call GET "/api/v1/jobs/$($snapshotJob.jobId)"
         $snapshotState = $snapshotStatus.state
-        if ($snapshotState -in @('Succeeded', 'Failed')) { break }
+        if ($snapshotState -in @('Succeeded', 'Failed', 'Cancelled')) { break }
     }
 
+    $snapshotWait.Stop()
+
     if ($snapshotState -ne 'Succeeded') {
-        Fail "побудова зрізу завершилася станом '$snapshotState': $($snapshotStatus.error)"
+        Fail ("побудова зрізу завершилася станом '$snapshotState' за " +
+            "$([math]::Round($snapshotWait.Elapsed.TotalSeconds)) с: $($snapshotStatus.error)")
     }
+
+    # Час побудови друкуємо завжди: «зелено, але 4 хвилини» — теж знахідка.
+    Write-Host "      зріз побудовано за $([math]::Round($snapshotWait.Elapsed.TotalSeconds, 1)) с"
 
     $snapshots = @(Call GET "/api/v1/reports/snapshots?projectId=$projectId&periodKey=$periodKey")
     if ($snapshots.Count -eq 0) { Fail 'зрізів немає, хоча побудова відзвітувала успіх' }
