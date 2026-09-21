@@ -22,6 +22,7 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
+import { JobAttempt, JobDocumentLink, JobFailure, jobAuthor } from '@/features/jobs/JobFacts';
 import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 
@@ -141,9 +142,27 @@ export function JobsPage(): JSX.Element {
               <StatusBadge kind="job" state={status.state} />
             </Group>
 
+            {/* ⚠ BE-08: спроба, момент постановки й документ задачі. Картка —
+                місце для всього, що не влізло в сім колонок переліку (L5). */}
+            <Group gap="md">
+              <JobAttempt attempt={status.attempt} maxAttempts={status.maxAttempts} />
+              {status.createdAt !== null && status.createdAt !== undefined && (
+                <Text size="xs" c="dimmed">
+                  {t('jobs.createdAt')}: <Timestamp value={status.createdAt} />
+                </Text>
+              )}
+              <JobDocumentLink documentId={status.documentId} />
+            </Group>
+
             <Progress value={status.percent} animated={status.state === 'Running'} />
 
             {status.message !== null && <Text size="sm">{status.message}</Text>}
+
+            <JobFailure
+              state={status.state}
+              errorCode={status.errorCode}
+              correlationId={status.correlationId}
+            />
 
             {/* ⛔ Текст помилки — без стека (ФВ-6.11): стек виносить назовні
                 шляхи, імена і подекуди значення. */}
@@ -297,7 +316,12 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
           {
             key: 'jobCode',
             label: t('jobs.recentCode'),
-            render: (job) => jobKindLabel(job.jobCode),
+            render: (job) => (
+              <Stack gap="xs">
+                <Text size="sm">{jobKindLabel(job.jobCode)}</Text>
+                <JobDocumentLink documentId={job.documentId} />
+              </Stack>
+            ),
             sortValue: (job) => jobKindLabel(job.jobCode),
             minWidth: 180,
           },
@@ -308,7 +332,44 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                вгадано: ключ колонки — `state`, тобто `DataTable` бере
                `row['state']` сам. Зайвий проп виглядав би як необхідний і
                спонукав би копіювати його в колонки, де він теж зайвий. */
-            render: (job) => <StatusBadge kind="job" state={job.state} />,
+            render: (job) => (
+              <Stack gap="xs">
+                <StatusBadge kind="job" state={job.state} />
+                {/* ⚠ У переліку `maxAttempts` немає — лише «спроба N». */}
+                <JobAttempt attempt={job.attempt} />
+                <JobFailure
+                  state={job.state}
+                  errorCode={job.errorCode}
+                  correlationId={job.correlationId}
+                />
+              </Stack>
+            ),
+          },
+          {
+            /* ⛔ Уже перекладене сервером мовою читача — показується як є.
+               `t()` над ним дав би `⟦…⟧` замість тексту. */
+            key: 'message',
+            label: t('jobs.recentMessage'),
+            sortable: false,
+            render: (job) => job.message ?? '',
+          },
+          {
+            key: 'createdByDisplayName',
+            label: t('jobs.createdBy'),
+            render: (job) => jobAuthor(job.createdByDisplayName),
+            sortValue: (job) => jobAuthor(job.createdByDisplayName),
+          },
+          {
+            /* ⚠ Постановка, не старт: сусідня колонка `startedAt` перезаписується
+               при запуску, ця — ні. `null` — задача за розкладом. */
+            key: 'createdAt',
+            label: t('jobs.createdAt'),
+            render: (job) =>
+              job.createdAt === null || job.createdAt === undefined ? (
+                ''
+              ) : (
+                <Timestamp value={job.createdAt} />
+              ),
           },
           {
             /* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin` перезаписує
