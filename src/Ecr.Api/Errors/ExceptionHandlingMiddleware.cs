@@ -430,6 +430,15 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryEntryInUse =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ Той самий клас, що й `ECR-REG-0409` вище, і той самий сценарій
+        // (директива №15, BE-27): «за мапінгом уже зібрано N точок» — конфлікт
+        // стану, а не невірні дані запиту. Повторювати видалення марно, треба
+        // призупинити мапінг. Правило суфікса нижче сюди не дістає: воно
+        // дивиться лише на `DomainException`, а лічильник зібраних точок знає
+        // обробник, не сутність.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.EntityFieldMapStateConflict =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // Той самий клас, що й `ECR-RPT-4091` вище: код політики періодів —
         // адреса вибору у формі створення проєкту (T6/#37), і дублікат має
         // читатися як «цей код зайнятий», а не як помилка введення.

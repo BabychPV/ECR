@@ -205,6 +205,52 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     }
 
     /// <inheritdoc />
+    public Task<EntityFieldMap?> FindFieldMapAsync(int fieldMapId, CancellationToken ct)
+        => db.EntityFieldMaps.FirstOrDefaultAsync(m => m.Id == fieldMapId, ct);
+
+    /// <inheritdoc />
+    public async Task RemoveFieldMapAsync(EntityFieldMap map, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+
+        db.EntityFieldMaps.Remove(map);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CollectedFieldStats> CountCollectedAsync(
+        int sourceEntityId, string sourceField, CancellationToken ct)
+    {
+        // ⚠ Один запит на три числа, а не три запити. Лічильник тут — це
+        // подробиця відмови, і платити за неї трьома походами в таблицю, у
+        // якій мільйони рядків, не варто.
+        var stats = await db.RawDataPoints
+            .AsNoTracking()
+            .Where(p => p.SourceEntityId == sourceEntityId && p.SourcePath == sourceField)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Points = g.Count(),
+                FirstAt = (DateTime?)g.Min(p => p.Timestamp),
+                LastAt = (DateTime?)g.Max(p => p.Timestamp),
+            })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return stats is null
+            ? new CollectedFieldStats(0, null, null)
+            : new CollectedFieldStats(stats.Points, stats.FirstAt, stats.LastAt);
+    }
+
+    /// <inheritdoc />
+    public Task<string?> FindUnitCodeAsync(int unitId, CancellationToken ct)
+        => db.Units
+            .AsNoTracking()
+            .Where(u => u.Id == unitId)
+            .Select(u => (string?)u.Code)
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct)
         => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
 

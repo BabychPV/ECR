@@ -2910,8 +2910,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-IMP-0422` | 422 | імпорт xlsx: структура файлу не відповідає шаблону |
 | `ECR-INT-0503` | 503 | зовнішнє джерело недоступне; збір перейде в catch-up |
 | `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9) |
-| `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена |
+| `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена; **або** немає самого мапінгу поля (`messageKey` розрізняє: `sourceEntity` / `fieldMap`) |
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
+| `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`) |
 | `ECR-INT-0502` | 502 | джерело **відмовило в автентифікації**: збір зупинено, у наздоганяння НЕ йде (`H-20`) |
 | `ECR-RPT-0404` | 404 | звіту з таким кодом немає або жодну версію не опубліковано |
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
@@ -3118,6 +3119,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps/{id}/pause` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps/{id}/resume` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps/{id}/accept-unit-change` | `Integration.Manage` | 5 |
+| `DELETE` | `/api/v1/entity-field-maps/{id}` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |

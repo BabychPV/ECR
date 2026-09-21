@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "AcceptSourceUnitChangeRequest": {
+        "description": "Запит на приймання зміни одиниці джерела (`ФВ-16.9`).",
+        "properties": {
+          "sourceUnitId": {
+            "description": "Одиниця довідника, яку джерело віддає тепер.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sourceUnitId"
+        ],
+        "type": "object"
+      },
       "AccessDiagnosticsView": {
         "description": "Відповідь на питання «чому в мене немає доступу» (`H-21`).",
         "properties": {
@@ -13628,6 +13642,345 @@
           }
         },
         "summary": "Заводить мапінг. Право `Integration.Manage`.",
+        "tags": [
+          "EntityFieldMaps"
+        ]
+      }
+    },
+    "/api/v1/entity-field-maps/{id}": {
+      "delete": {
+        "description": "⛔ Мапінг, за яким уже зібрано дані, НЕ видаляється —\n`409 ECR-INT-0409` з лічильником точок і межами вікна в\n`details`. Мовчазне зникнення лишило б точки\n`ext.RawDataPoint` без пояснення того, у якій вони одиниці й куди\nлягали. Клієнт у відповідь пропонує паузу, а не повтор запиту — той\nсамий шаблон, що й «на запис довідника посилаються N комірок».",
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє мапінг. Право `Integration.Manage` (`BE-27`).",
+        "tags": [
+          "EntityFieldMaps"
+        ]
+      }
+    },
+    "/api/v1/entity-field-maps/{id}/accept-unit-change": {
+      "post": {
+        "description": "⛔ Зміна одиниці в джерелі ЗУПИНЯЄ збір (`ECR-INT-0422`) і не\nприймається кодом: мовчазна конверсія «як здається» дає правдоподібні\nчисла, помилку в яких знаходять на звірці через місяць. Ця дія — єдиний\nвихід із того стану, і тому вона лишає слід у журналі безпеки: хто,\nколи, з якої одиниці на яку.",
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Приймає нову одиницю джерела (`ФВ-16.9`). Право `Integration.Manage`.",
+        "tags": [
+          "EntityFieldMaps"
+        ]
+      }
+    },
+    "/api/v1/entity-field-maps/{id}/pause": {
+      "post": {
+        "description": "⛔ Пауза — не видалення: мапінг лишається на місці разом з одиницями й\nадресою рядка, а збір за ним перестає писати значення. Це і є штатний\nвихід для мапінгу, який уже зібрав дані й тому не видаляється.",
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Призупиняє мапінг. Право `Integration.Manage` (`BE-27`).",
+        "tags": [
+          "EntityFieldMaps"
+        ]
+      }
+    },
+    "/api/v1/entity-field-maps/{id}/resume": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Мапінг.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityFieldMapDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Повертає призупинений мапінг у збір. Право `Integration.Manage`.",
         "tags": [
           "EntityFieldMaps"
         ]

@@ -127,6 +127,19 @@ public sealed class EntityFieldMap : Entity<int>
     /// </remarks>
     public string? TargetRowKey { get; private set; }
 
+    /// <summary>
+    /// Чи діє мапінг. <c>false</c> — «пауза»: мапінг лишається, збір за ним
+    /// значень не пише (<c>BE-27</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Пауза — це НЕ м'яке видалення. Обидва шляхи збору фільтрують за цим
+    /// прапорцем (<c>CollectionStore.GetFieldMapsAsync</c> — що читати з
+    /// джерела, <c>MaterializeCollectedDataJob</c> — що класти в комірки), а
+    /// сам запис лишається на місці разом з одиницями й адресою рядка. Саме
+    /// тому пауза й придатна там, де видалення заборонене: мапінг, за яким
+    /// уже зібрано дані, пояснює ці дані, і стерти його означало б лишити
+    /// точки в <c>ext.RawDataPoint</c> без жодного пояснення.
+    /// </remarks>
     public bool IsActive { get; private set; }
 
     /// <summary>Чи переносяться точки цього мапінгу в комірки.</summary>
@@ -175,6 +188,102 @@ public sealed class EntityFieldMap : Entity<int>
     public AggregationKind? Aggregation
         => Enum.TryParse<AggregationKind>(TransformCode, out var kind) ? kind : null;
 
-    /// <summary>Вимикає мапінг.</summary>
-    public void Deactivate() => IsActive = false;
+    /// <summary>Призупиняє мапінг: збір за ним більше не пише значень.</summary>
+    /// <exception cref="DomainException">
+    /// <c>ECR-INT-0409</c> — мапінг уже призупинено.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Повторна пауза — помилка, а не «нічого не сталося»: вона майже завжди
+    /// означає, що викликач вважає стан іншим, ніж він є, а в журналі безпеки
+    /// з'явився б другий запис про подію, якої не було (те саме міркування, що
+    /// в <c>Template.Archive</c>).
+    /// </remarks>
+    public void Pause()
+    {
+        if (!IsActive)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» уже призупинено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingAlreadyPaused",
+                    ["sourceField"] = SourceField,
+                });
+        }
+
+        IsActive = false;
+    }
+
+    /// <summary>Повертає призупинений мапінг у збір.</summary>
+    /// <exception cref="DomainException">
+    /// <c>ECR-INT-0409</c> — мапінг і так діє.
+    /// </exception>
+    public void Resume()
+    {
+        if (IsActive)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» не призупинено — відновлювати нема чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingNotPaused",
+                    ["sourceField"] = SourceField,
+                });
+        }
+
+        IsActive = true;
+    }
+
+    /// <summary>
+    /// Приймає нову одиницю джерела замість оголошеної (<c>ФВ-16.9</c>).
+    /// </summary>
+    /// <param name="newSourceUnitId">Одиниця, яку джерело віддає тепер.</param>
+    /// <returns>Одиниця, що була оголошена до цього — її називає журнал.</returns>
+    /// <exception cref="DomainException">
+    /// <c>ECR-INT-0409</c> — мапінг не оголошує одиниці джерела або нова
+    /// одиниця збігається з оголошеною.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Зміна одиниці в джерелі зупиняє збір (<c>ECR-INT-0422</c>,
+    /// <c>SourceUnitConverter.EnsureDeclaredUnit</c>) і НЕ приймається кодом:
+    /// мовчазна конверсія «як здається» дає правдоподібні числа, помилку в
+    /// яких знайдуть через місяць на звірці. Тому вихід із цього стану рівно
+    /// один — явне рішення людини, і саме воно записується тут.
+    ///
+    /// ⚠ Мапінг без оголошеної одиниці сюди не потрапляє: порівнювати нема з
+    /// чим, і жодної «зміни» для нього не існує. Оголосити одиницю вперше —
+    /// це редагування мапінгу, а не приймання зміни.
+    /// </remarks>
+    public int AcceptSourceUnitChange(int newSourceUnitId)
+    {
+        if (SourceUnitId is not { } declared)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» не оголошує одиниці джерела: приймати зміну нема з чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingUnitNotDeclared",
+                    ["sourceField"] = SourceField,
+                });
+        }
+
+        if (declared == newSourceUnitId)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» уже оголошує одиницю {newSourceUnitId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingUnitUnchanged",
+                    ["sourceField"] = SourceField,
+                });
+        }
+
+        SourceUnitId = newSourceUnitId;
+
+        return declared;
+    }
 }

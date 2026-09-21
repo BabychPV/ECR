@@ -1,4 +1,4 @@
-﻿-- ⚠ SET-опції задаються ЯВНО і першими.
+-- ⚠ SET-опції задаються ЯВНО і першими.
 -- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`, а `SqlClient` — `ON`.
 -- Через це скрипт, який проходить у тестах (їх виконує SqlClient), падає в
 -- розгортанні (його виконує DBA через sqlcmd, `09-commands.md` §3) на будь-якій
@@ -621,6 +621,17 @@ USING (VALUES
     (N'err.ECR-REQ-0422.dataSourceTestReason',            N'en', N'A reason of up to 400 characters is required to test the connection: the attempt is recorded in the security journal.', 1),
     (N'err.ECR-JOB-0409.dataSourceInUse',                 N'en', N'This data source still carries {sourceEntities} collection entities and {collectionSchedules} schedules: disable it instead of deleting it.', 1),
     (N'err.ECR-JOB-0409.dataSourceTestRunning',           N'en', N'A connection test for data source "{code}" is already running: wait for it to finish.', 1),
+    -- ⛔ `BE-27`: дії над мапінгом. Пауза існує, щоб мапінг можна було спинити,
+    -- НЕ стираючи пояснення вже зібраних точок, — тому речення про видалення
+    -- мусить назвати її прямо, інакше відмова виглядає глухим кутом.
+    -- ⚠ Зміну одиниці приймає лише людина (ФВ-16.9): мовчазна конверсія дає
+    -- правдоподібні числа, помилку в яких знаходять на звірці через місяць.
+    (N'err.ECR-INT-0404.fieldMap',                        N'en', N'Field mapping {fieldMapId} does not exist.', 1),
+    (N'err.ECR-INT-0409.mappingAlreadyPaused',            N'en', N'The mapping of field "{sourceField}" is already paused.', 1),
+    (N'err.ECR-INT-0409.mappingNotPaused',                N'en', N'The mapping of field "{sourceField}" is not paused: there is nothing to resume.', 1),
+    (N'err.ECR-INT-0409.mappingUnitNotDeclared',          N'en', N'The mapping of field "{sourceField}" declares no source unit, so there is no change to accept. Set the unit by editing the mapping instead.', 1),
+    (N'err.ECR-INT-0409.mappingUnitUnchanged',            N'en', N'The mapping of field "{sourceField}" already declares that unit.', 1),
+    (N'err.ECR-INT-0409.mappingHasCollectedData',         N'en', N'{collectedPoints} points have already been collected through the mapping of field "{sourceField}". Deleting it would leave those points without the unit and the target that explain them: pause the mapping instead.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -795,8 +806,13 @@ USING (VALUES
 
     -- Імпорт та інтеграція.
     (N'err.ECR-IMP-0422',   N'en', N'The workbook does not match the template', 1),
-    (N'err.ECR-INT-0404',   N'en', N'Source entity not found', 1),
+    -- ⚠ Заголовок покриває ОБИДВА стани коду: немає сутності джерела і немає
+    -- самого мапінгу поля (`BE-27`). Який саме — каже подробиця; заголовок
+    -- «Source entity not found» над реченням про мапінг відправляв би людину
+    -- шукати не те.
+    (N'err.ECR-INT-0404',   N'en', N'Source entity or field mapping not found', 1),
     (N'err.ECR-INT-0405',   N'en', N'Mapping target not found', 1),
+    (N'err.ECR-INT-0409',   N'en', N'The mapping is not in that state', 1),
     (N'err.ECR-INT-0422',   N'en', N'The source unit of measure changed', 1),
     (N'err.ECR-INT-0502',   N'en', N'The data source refused authentication', 1),
     (N'err.ECR-INT-0503',   N'en', N'The data source is unavailable', 1),

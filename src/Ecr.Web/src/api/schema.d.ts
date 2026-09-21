@@ -2415,6 +2415,281 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/entity-field-maps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє мапінг. Право `Integration.Manage` (`BE-27`).
+         * @description ⛔ Мапінг, за яким уже зібрано дані, НЕ видаляється —
+         *     `409 ECR-INT-0409` з лічильником точок і межами вікна в
+         *     `details`. Мовчазне зникнення лишило б точки
+         *     `ext.RawDataPoint` без пояснення того, у якій вони одиниці й куди
+         *     лягали. Клієнт у відповідь пропонує паузу, а не повтор запиту — той
+         *     самий шаблон, що й «на запис довідника посилаються N комірок».
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}/accept-unit-change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Приймає нову одиницю джерела (`ФВ-16.9`). Право `Integration.Manage`.
+         * @description ⛔ Зміна одиниці в джерелі ЗУПИНЯЄ збір (`ECR-INT-0422`) і не
+         *     приймається кодом: мовчазна конверсія «як здається» дає правдоподібні
+         *     числа, помилку в яких знаходять на звірці через місяць. Ця дія — єдиний
+         *     вихід із того стану, і тому вона лишає слід у журналі безпеки: хто,
+         *     коли, з якої одиниці на яку.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "application/json": components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "text/json": components["schemas"]["AcceptSourceUnitChangeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Призупиняє мапінг. Право `Integration.Manage` (`BE-27`).
+         * @description ⛔ Пауза — не видалення: мапінг лишається на місці разом з одиницями й
+         *     адресою рядка, а збір за ним перестає писати значення. Це і є штатний
+         *     вихід для мапінгу, який уже зібрав дані й тому не видаляється.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Повертає призупинений мапінг у збір. Право `Integration.Manage`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expressions/metadata": {
         parameters: {
             query?: never;
@@ -11079,6 +11354,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Запит на приймання зміни одиниці джерела (`ФВ-16.9`). */
+        AcceptSourceUnitChangeRequest: {
+            /**
+             * Format: int32
+             * @description Одиниця довідника, яку джерело віддає тепер.
+             */
+            sourceUnitId: number;
+        };
         /** @description Відповідь на питання «чому в мене немає доступу» (`H-21`). */
         AccessDiagnosticsView: {
             /** @description Ролі, які людина має насправді. */
