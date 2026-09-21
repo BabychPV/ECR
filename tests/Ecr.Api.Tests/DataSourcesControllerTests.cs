@@ -60,6 +60,36 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "BE-21")]
+    public async Task Manage_без_View_бачить_перелік_а_View_лише_читає()
+    {
+        using var app = new EcrApiFactory(sql);
+
+        // `Integration.Manage` включає `Integration.View`: хто заводить з'єднання,
+        // бачить їхній перелік (раніше — 403 під кнопкою «New connection»).
+        using (var manager = await SignedInAsync(app, "Integration.Manage").ConfigureAwait(true))
+        {
+            var listed = await manager.GetAsync(Sources).ConfigureAwait(true);
+            Assert.True(listed.StatusCode == HttpStatusCode.OK, $"{listed.StatusCode}: {app.ErrorsText}");
+        }
+
+        using var viewer = await SignedInAsync(app, "Integration.View").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, (await viewer.GetAsync(Sources).ConfigureAwait(true)).StatusCode);
+
+        HttpResponseMessage[] writes =
+        [
+            await viewer.PostAsJsonAsync(Sources, Body("X")).ConfigureAwait(true),
+            await viewer.PutAsJsonAsync(At("1"), Body("X")).ConfigureAwait(true),
+            await viewer.DeleteAsync(At("1")).ConfigureAwait(true),
+            await viewer.PostAsJsonAsync(At("1/test"), new { reason = Reason }).ConfigureAwait(true),
+        ];
+
+        Assert.All(writes, r => Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
     public async Task Секрет_середовища_не_виїжджає_жодною_відповіддю_і_не_лежить_у_базі()
     {
         var code = $"PI{Guid.NewGuid():N}"[..12].ToUpperInvariant();
