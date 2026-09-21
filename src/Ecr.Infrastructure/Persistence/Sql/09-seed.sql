@@ -873,6 +873,11 @@ USING (VALUES
     (N'nav.sources',                     N'en', N'Sources', 1),
     (N'nav.jobs',                        N'en', N'Jobs', 1),
     (N'nav.health',                      N'en', N'Health', 1),
+    -- Пошук даних у шапці (BE-19): кнопка й палітра Ctrl+K.
+    (N'search.open',                     N'en', N'Search data', 1),
+    (N'search.placeholder',              N'en', N'Documents, templates, registries…', 1),
+    (N'search.minLength',                N'en', N'Type at least {min} characters', 1),
+    (N'search.empty',                    N'en', N'Nothing found', 1),
     (N'documents.title',                 N'en', N'Documents', 1),
     (N'documents.key',                   N'en', N'Key', 1),
     (N'documents.project',               N'en', N'Project', 1),
