@@ -446,6 +446,10 @@ USING (VALUES
     -- ⚠ Публічна область (0): банер показано ДО входу, коли приватний зріз
     -- каталогу ще недоступний.
     (N'login.sessionInvalidated', N'en', N'Your session has ended because your permissions or password changed. Sign in again.', 0),
+    -- Втрачені незбережені правки після обриву сесії — теж до входу, тож 0.
+    (N'login.lostEdits.title',    N'en', N'Unsaved changes were lost', 0),
+    (N'login.lostEdits.text',     N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.', 0),
+    (N'login.lostEdits.continue', N'en', N'Continue', 0),
     (N'err.ECR-AUTH-0401', N'en', N'Sign in to continue.', 0),
     (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0403.requiresPermission', N'en', N'Requires permission', 1),
