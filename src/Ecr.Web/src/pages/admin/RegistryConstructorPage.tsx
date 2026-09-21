@@ -18,6 +18,7 @@ import {
   RegistryRelations,
   RegistryRules,
 } from '@/features/registries/RegistryConstructor';
+import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import {
   buildSaveRequest,
   emptyField,
@@ -245,6 +246,10 @@ export function RegistryConstructorPage(): JSX.Element {
                 <Tabs.Tab value="rules">{t('registries.tabRules')}</Tabs.Tab>
                 <Tabs.Tab value="mapping">{t('registries.tabMapping')}</Tabs.Tab>
                 <Tabs.Tab value="history">{t('registries.tabHistory')}</Tabs.Tab>
+                {/* ⚠ Лише з правом `Registry.EditDefinition` — те саме право, що
+                    на сервері (`GetRegistryUsageHandler`): вкладка без права
+                    вела б у відому відмову. */}
+                {mayEdit && <Tabs.Tab value="usage">{t('registries.tabUsage')}</Tabs.Tab>}
               </Tabs.List>
 
               <Tabs.Panel value="fields" pt="sm">
@@ -324,6 +329,12 @@ export function RegistryConstructorPage(): JSX.Element {
                   />
                 )}
               </Tabs.Panel>
+
+              {mayEdit && (
+                <Tabs.Panel value="usage" pt="sm">
+                  <RegistryUsagePanel code={loaded.code} />
+                </Tabs.Panel>
+              )}
             </Tabs>
           </>
         )}
