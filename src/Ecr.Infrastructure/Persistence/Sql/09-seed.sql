@@ -2055,6 +2055,21 @@ USING (VALUES
     (N'security.oneTimePassword',        N'en', N'One-time password', 1),
     (N'security.oneTimePasswordHint',    N'en', N'You will have to pass it on yourself. The server neither generates nor returns passwords, and the account must change it at first sign-in.', 1),
     (N'security.lastSignIn',             N'en', N'Last sign-in', 1),
+    -- Адміністрування облікових записів (BE-12): блокування з причиною в
+    -- журнал безпеки, розблокування, скидання пароля на одноразовий.
+    (N'security.lockUser',               N'en', N'Lock', 1),
+    (N'security.unlockUser',             N'en', N'Unlock', 1),
+    (N'security.resetPassword',          N'en', N'Reset password', 1),
+    (N'security.lockUserNamed',          N'en', N'Lock {userName}', 1),
+    (N'security.unlockUserNamed',        N'en', N'Unlock {userName}', 1),
+    (N'security.resetPasswordNamed',     N'en', N'Reset password for {userName}', 1),
+    (N'security.resetPasswordHint',      N'en', N'The user will have to change this password at next sign-in. It is not shown again.', 1),
+    (N'security.newPassword',            N'en', N'New password', 1),
+    (N'security.lockReasonHint',         N'en', N'Required, up to {max} characters. Recorded in the security log; the user''s sessions end immediately.', 1),
+    (N'security.reasonTooLong',          N'en', N'The reason is longer than {max} characters.', 1),
+    (N'security.userLocked',             N'en', N'Account locked', 1),
+    (N'security.userUnlocked',           N'en', N'Account unlocked', 1),
+    (N'security.passwordResetDone',      N'en', N'Password set; the user will change it at next sign-in.', 1),
 
     -- «Мої групи»: чому в мене немає доступу (`H-21`).
     (N'nav.myGroups',                    N'en', N'My groups', 1),
