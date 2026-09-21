@@ -1,12 +1,18 @@
-import { useState, type JSX } from 'react';
-import { Badge, Button, Tabs } from '@mantine/core';
+import { Suspense, useState, type JSX } from 'react';
+import { Badge, Button, Group, Stack, Tabs } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatNumber } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
+import { DataSourceFormModal } from './lazyDataSourceForm';
 import { TestDataSourceModal } from './TestDataSourceModal';
-import type { DataSource } from './dataSourceApi';
+import { deleteDataSource, type DataSource } from './dataSourceApi';
+import { DataSourcesQueryKey } from './dataSourcesKey';
 
 /**
  * Назва з'єднання мовою користувача; немає жодної — код.
@@ -57,14 +63,42 @@ export function connectionItems(source: DataSource): KeyValueItem[] {
  */
 export function DataSourceDrawer({
   source,
-  canTest,
+  canManage,
+  onDeleted,
 }: {
   readonly source: DataSource;
 
-  /** `Integration.Manage`: без нього кнопки проби НЕМАЄ, а не вимкнена. */
-  readonly canTest: boolean;
+  /**
+   * `Integration.Manage`: без нього кнопок проби, правки й видалення НЕМАЄ,
+   * а не вимкнені.
+   */
+  readonly canManage: boolean;
+
+  /** З'єднання видалено — шухляду треба закрити. */
+  readonly onDeleted: () => void;
 }): JSX.Element {
+  const queryClient = useQueryClient();
   const [testing, setTesting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  /*
+   * ⛔ Видалення не каскадне: з'єднання, на яке спираються сутності збору або
+   * розклади, сервер не видаляє — `409 ECR-JOB-0409`
+   * (`err.ECR-JOB-0409.dataSourceInUse`) з лічильниками. Причина показується
+   * в шухляді (`ErrorAlert` несе локалізований сервером текст із числами), а
+   * не «не вдалося»; перелік при цьому НЕ перечитується — нічого не змінилося.
+   */
+  const remove = useMutation({
+    mutationFn: () => deleteDataSource(source.id),
+    onSuccess: () => {
+      setConfirming(false);
+      void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
+      notifications.show({ message: t('sources.deleted') });
+      onDeleted();
+    },
+    onError: () => setConfirming(false),
+  });
 
   return (
     <>
@@ -81,13 +115,36 @@ export function DataSourceDrawer({
         }
         closeLabel={t('sources.closeDetails')}
         footer={
-          canTest ? (
-            <Button onClick={() => setTesting(true)} data-test-connection="">
-              {t('sources.testConnection')}
-            </Button>
+          canManage ? (
+            <Group gap="xs" justify="space-between" w="100%">
+              <Button
+                variant="subtle"
+                color="statusError"
+                onClick={() => setConfirming(true)}
+                data-delete-connection=""
+              >
+                {t('sources.deleteConnection')}
+              </Button>
+
+              <Group gap="xs">
+                <Button variant="default" onClick={() => setEditing(true)} data-edit-connection="">
+                  {t('sources.editConnection')}
+                </Button>
+
+                <Button onClick={() => setTesting(true)} data-test-connection="">
+                  {t('sources.testConnection')}
+                </Button>
+              </Group>
+            </Group>
           ) : undefined
         }
       >
+        {remove.error !== null && (
+          <Stack mb="sm" data-delete-failure="">
+            <ErrorAlert error={remove.error} />
+          </Stack>
+        )}
+
         <Tabs defaultValue="connection" keepMounted={false}>
           <Tabs.List>
             <Tabs.Tab value="connection">{t('sources.connection')}</Tabs.Tab>
@@ -99,13 +156,30 @@ export function DataSourceDrawer({
         </Tabs>
       </DetailDrawer>
 
-      {canTest && (
-        <TestDataSourceModal
-          opened={testing}
-          sourceId={source.id}
-          sourceName={dataSourceName(source)}
-          onClose={() => setTesting(false)}
-        />
+      {canManage && (
+        <>
+          <TestDataSourceModal
+            opened={testing}
+            sourceId={source.id}
+            sourceName={dataSourceName(source)}
+            onClose={() => setTesting(false)}
+          />
+
+          {editing && (
+            <Suspense fallback={null}>
+              <DataSourceFormModal opened source={source} onClose={() => setEditing(false)} />
+            </Suspense>
+          )}
+
+          <ConfirmModal
+            opened={confirming}
+            title={t('sources.deleteTitle', { name: dataSourceName(source) })}
+            verb={t('sources.deleteConnection')}
+            isPending={remove.isPending}
+            onConfirm={() => remove.mutate()}
+            onClose={() => setConfirming(false)}
+          />
+        </>
       )}
     </>
   );

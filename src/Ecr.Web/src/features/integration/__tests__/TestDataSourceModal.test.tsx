@@ -154,13 +154,14 @@ describe('TestDataSourceModal', () => {
   });
 
   it('409 — «проба вже йде», а не загальна помилка', async () => {
-    // ⚠ Без `errorCode`: гілка за статусом, а код відмови не заведений у
-    // каталозі кодів клієнта. `messageKey` робить `detail` показним.
+    // ⚠ Гілка за кодом `ECR-JOB-0409` (є в `ErrorCodes.cs`); `messageKey`
+    // робить `detail` показним.
     respond(() =>
       json(
         {
           title: 'Conflicting state',
           status: 409,
+          errorCode: 'ECR-JOB-0409',
           detail: 'A connection test for data source "PI-MAIN" is already running.',
           correlationId: 'c-409',
           messageKey: 'err.ECR-JOB-0409.dataSourceTestRunning',
@@ -177,6 +178,16 @@ describe('TestDataSourceModal', () => {
     expect(banner.textContent).toContain('sources.testRunning');
     expect(banner.textContent).toContain('is already running');
     expect(screen.getAllByRole('alert')).toEqual([banner]);
+  });
+
+  it('409 без коду ECR-JOB-0409 (проксі) — збій запиту, а не «проба йде»', async () => {
+    respond(() => new Response('conflict', { status: 409 }));
+    show();
+
+    runWith('перевірка');
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(document.querySelector('[data-test-outcome]')).toBeNull();
   });
 
   it('інша відмова (403) — справжній збій запиту, без банера результату', async () => {

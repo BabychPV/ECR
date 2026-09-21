@@ -39,14 +39,20 @@ export function outcomeOf(result: DataSourceTestResult): TestOutcome {
 }
 
 /**
- * `409` на цьому виклику — «проба вже йде».
+ * Код відмови «стан не дозволяє дію» (`ErrorCodes.JobStateConflict`): на цьому
+ * виклику — проба цього з'єднання вже йде.
+ */
+const TestRunningCode = 'ECR-JOB-0409';
+
+/**
+ * `ECR-JOB-0409` на цьому виклику — «проба вже йде».
  *
- * ⛔ Гілка за СТАТУСОМ, а не за кодом помилки: інших `409` цей ендпоінт не
- * віддає (`DataSourcesController`), а код відмови в каталозі кодів клієнта не
- * заведений. Подробиця — лише локалізована сервером (`problemText`).
+ * ⚠ Гілка за КОДОМ, а не за статусом: клієнт розрізняє причини кодом
+ * (`client.ts`), і `409` без нашого коду (проксі, шлюз) — не «проба йде», а
+ * збій запиту. Подробиця — лише локалізована сервером (`problemText`).
  */
 function runningOf(error: unknown): TestOutcome | null {
-  if (!(error instanceof EcrApiError) || error.problem.status !== 409) return null;
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== TestRunningCode) return null;
 
   return { kind: 'running', detail: problemText(error).detail };
 }

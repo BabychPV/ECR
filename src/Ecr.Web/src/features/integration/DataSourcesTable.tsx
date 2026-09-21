@@ -1,5 +1,5 @@
-import type { JSX, MouseEvent } from 'react';
-import { Anchor, Badge, Stack, Title } from '@mantine/core';
+import { Suspense, useState, type JSX, type MouseEvent } from 'react';
+import { Anchor, Badge, Button, Group, Stack, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
@@ -7,10 +7,9 @@ import { DataTable } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { DataSourceDrawer, dataSourceName } from './DataSourceDrawer';
+import { DataSourceFormModal } from './lazyDataSourceForm';
 import { listDataSources, type DataSource } from './dataSourceApi';
-
-/** Ключ кешу переліку з'єднань — один на екран і на майбутні правки. */
-export const DataSourcesQueryKey = ['data-sources'] as const;
+import { DataSourcesQueryKey } from './dataSourcesKey';
 
 /**
  * Перелік З'ЄДНАНЬ (джерел даних, `ФВ-14.3`) на екрані `/admin/sources`
@@ -26,6 +25,11 @@ export const DataSourcesQueryKey = ['data-sources'] as const;
 export function DataSourcesTable(): JSX.Element {
   const session = useSession();
   const [panel, setPanel] = useDetailPanel();
+  const [creating, setCreating] = useState(false);
+
+  // ⛔ `Integration.Manage`: без нього кнопок правки НЕМАЄ, а не вимкнені —
+  // сервер відповів би `403` на кожну.
+  const canManage = can(session.data, 'Integration.Manage');
 
   const sources = useQuery({ queryKey: DataSourcesQueryKey, queryFn: listDataSources });
 
@@ -39,9 +43,18 @@ export function DataSourcesTable(): JSX.Element {
 
   return (
     <Stack gap="sm" data-data-sources="">
-      <Title order={2} size="h4">
-        {t('sources.connections')}
-      </Title>
+      <Group justify="space-between" gap="sm">
+        <Title order={2} size="h4">
+          {t('sources.connections')}
+        </Title>
+
+        {/* ⚠ Єдина primary-кнопка в `main`: «Collect» у рядках — `default`. */}
+        {canManage && (
+          <Button onClick={() => setCreating(true)} data-new-connection="">
+            {t('sources.newConnection')}
+          </Button>
+        )}
+      </Group>
 
       <DataTable<DataSource>
         columns={[
@@ -117,7 +130,18 @@ export function DataSourcesTable(): JSX.Element {
       />
 
       {opened !== undefined && (
-        <DataSourceDrawer source={opened} canTest={can(session.data, 'Integration.Manage')} />
+        <DataSourceDrawer
+          source={opened}
+          canManage={canManage}
+          // Видалене з'єднання — закрита шухляда, а не застарілий `?panel=`.
+          onDeleted={() => setPanel(null)}
+        />
+      )}
+
+      {canManage && creating && (
+        <Suspense fallback={null}>
+          <DataSourceFormModal opened source={null} onClose={() => setCreating(false)} />
+        </Suspense>
       )}
     </Stack>
   );
