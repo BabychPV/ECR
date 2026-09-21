@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { testTheme } from '@/test/render';
@@ -255,6 +255,26 @@ describe('палітра: межа частоти пошуку (ECR-REQ-0429)', 
 
     await advance(10_000);
     expect(net.calls).toHaveLength(1);
+  });
+
+  it('повернення у вікно під час очікування не перезапитує заморожений текст', async () => {
+    const net = serve((_term, n) => (n === 1 ? limited(5) : json(Hits)));
+    mount();
+    const input = await openPalette();
+
+    type(input, 'Permit');
+    await advance(200);
+    expect(statusText()).toBe(t('search.rateLimited', { seconds: 5 }));
+
+    try {
+      act(() => focusManager.setFocused(false));
+      act(() => focusManager.setFocused(true));
+      await advance(1_000);
+
+      expect(net.calls).toHaveLength(1);
+    } finally {
+      focusManager.setFocused(undefined);
+    }
   });
 
   it('інша відмова — як і раніше ErrorAlert, без автоматичного повтору', async () => {

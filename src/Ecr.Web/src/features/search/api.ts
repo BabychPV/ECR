@@ -40,5 +40,7 @@ export function useDataSearch(query: string): UseQueryResult<SearchHit[]> {
     queryFn: () => searchData(term),
     enabled: term.length >= searchMinLength,
     staleTime: 30_000,
+    // Повернення у вікно під час очікування після 429 перезапитало б заморожений ключ.
+    refetchOnWindowFocus: false,
   });
 }
