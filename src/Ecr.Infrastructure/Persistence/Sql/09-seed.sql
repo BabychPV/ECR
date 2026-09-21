@@ -369,7 +369,8 @@ UPDATE t
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
-    (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion')
+    (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
+    (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -841,6 +842,29 @@ USING (VALUES
     (N'err.ECR-SYS-0500.contactAdmin',          N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
     -- FR-13.9: rule coverage matrix over real rows.
     (N'err.ECR-CALC-0422.coverageWindow',       N'en', N'The period window is empty: periodFrom {periodFrom} is after periodTo {periodTo}.', 1),
+    -- ECR-CALC-0422 has a neutral title: every reason carries its own detail.
+    (N'err.ECR-CALC-0422.publishNoEffectiveDate', N'en', N'Version {version} cannot be published without an effective date: it is unclear which periods it should calculate.', 1),
+    (N'err.ECR-CALC-0422.publishNoReason',      N'en', N'Version {version} cannot be published without a reason for the change.', 1),
+    (N'err.ECR-CALC-0422.publishNoGreenTest',   N'en', N'Version {version} cannot be published without a passing test.', 1),
+    (N'err.ECR-CALC-0422.publishChecksFailed',  N'en', N'The version failed pre-publication checks ({count} problems).', 1),
+    (N'err.ECR-CALC-0422.formulasNotSaved',     N'en', N'Save the formulas of the version before publishing it.', 1),
+    (N'err.ECR-CALC-0422.goldenSetEmpty',       N'en', N'Version {version} cannot be published: its golden set has no cases, so nothing was checked.', 1),
+    (N'err.ECR-CALC-0422.goldenSetDiverged',    N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.', 1),
+    (N'err.ECR-CALC-0422.deprecateNotPublished', N'en', N'Version {version} is not published, so there is nothing to withdraw.', 1),
+    (N'err.ECR-CALC-0422.versionNotInMethodology', N'en', N'Version {version} does not belong to methodology {code}.', 1),
+    (N'err.ECR-CALC-0422.noEffectiveVersion',   N'en', N'The methodology has no version in effect on {date}.', 1),
+    (N'err.ECR-CALC-0422.noModule',             N'en', N'No calculation module is available for methodology {code} at level {level}.', 1),
+    (N'err.ECR-CALC-0422.runNotFinished',       N'en', N'The calculation run has not finished yet, so it cannot be made current.', 1),
+    (N'err.ECR-CALC-0422.constantAmbiguous',    N'en', N'Constant "{code}" has {count} candidates on {date}: the choice is ambiguous.', 1),
+    (N'err.ECR-CALC-0422.constantNotNumeric',   N'en', N'Constant "{code}" is declared numeric, but its value is not a number.', 1),
+    (N'err.ECR-CALC-0422.constantIsCategoryLabel', N'en', N'Constant "{code}" is a category label and cannot be used in expressions.', 1),
+    (N'err.ECR-CALC-0422.constantKindNeedsNumber', N'en', N'Constant "{code}" is numeric and must be given a number, not text.', 1),
+    (N'err.ECR-CALC-0422.constantNoText',       N'en', N'Constant "{code}" needs text: an empty string is neither a category label nor a value.', 1),
+    (N'err.ECR-CALC-0422.formulaNoExpression',  N'en', N'Formula "{code}" needs an expression: an empty one would silently yield zero.', 1),
+    (N'err.ECR-CALC-0422.textFormulaUnit',      N'en', N'Formula "{code}" returns text, so it cannot have a result unit.', 1),
+    (N'err.ECR-CALC-0422.ruleNoPredicate',      N'en', N'Rule "{code}" needs a predicate; to match the whole table, use an empty JSON object.', 1),
+    (N'err.ECR-CALC-0422.selfDependency',       N'en', N'A methodology cannot depend on itself.', 1),
+    (N'err.ECR-CALC-0422.selfImport',           N'en', N'A methodology cannot import itself: its own formulas are already visible.', 1),
 
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --
@@ -927,7 +951,7 @@ USING (VALUES
     -- Фраза `ECR-CALC-0409` покриває всі його стани: чотири очі, видалення
     -- версії, зміна не-чернетки, зайнята дата. Який саме — каже подробиця.
     (N'err.ECR-CALC-0409',  N'en', N'Conflicting methodology state', 1),
-    (N'err.ECR-CALC-0422',  N'en', N'The methodology version cannot be published', 1),
+    (N'err.ECR-CALC-0422',  N'en', N'Invalid methodology request', 1),
     (N'err.ECR-CALC-0431',  N'en', N'Unsupported operator in a formula', 1),
     (N'err.ECR-CALC-0432',  N'en', N'Undeclared formula argument', 1),
     (N'err.ECR-CALC-0433',  N'en', N'Extension function in Legacy mode', 1),

@@ -161,6 +161,7 @@ public sealed class GoldenCalculationTests
             () => resolver.ResolveAsync(VersionId, "AMBIGUOUS", null, null, onDate, default));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.constantAmbiguous", error.Details!["messageKey"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

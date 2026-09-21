@@ -177,7 +177,13 @@ public sealed class CalculationOrchestrator(
             throw new Domain.Abstractions.DomainException(
                 "ECR-CALC-0422",
                 $"Немає модуля для методології {binding.Descriptor.Code} "
-                + $"рівня {binding.Descriptor.Level}.");
+                + $"рівня {binding.Descriptor.Level}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.noModule",
+                    ["code"] = binding.Descriptor.Code,
+                    ["level"] = $"{binding.Descriptor.Level}",
+                });
         }
 
         var rowKeys = await scopedResolver

@@ -89,6 +89,12 @@ public sealed class MethodologyConstantKindTests
             VersionId, EcrCode.Create("k22_HSE30X_Int_FG_"), "  ", ConstantKind.Text));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.constantNoText", error.Details!["messageKey"]);
+        Assert.Equal("k22_HSE30X_Int_FG_", error.Details["code"]);
+
+        var numeric = Assert.Throws<DomainException>(() => MethodologyConstant.OfText(
+            VersionId, EcrCode.Create("EF"), "1", ConstantKind.Numeric));
+        Assert.Equal("err.ECR-CALC-0422.constantKindNeedsNumber", numeric.Details!["messageKey"]);
     }
 
     [Fact]
@@ -136,6 +142,7 @@ public sealed class MethodologyConstantKindTests
 
         var error = Assert.Throws<DomainException>(() => formula.SetOutputUnit(TonneUnit));
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.textFormulaUnit", error.Details!["messageKey"]);
 
         // ⚠ Друга половина: порядок викликів не має вирішувати, спрацює
         // перевірка чи ні.
@@ -158,8 +165,10 @@ public sealed class MethodologyConstantKindTests
             () => new MethodologyImport(VersionId, importedMethodologyId: 4, ownerMethodologyId: 4));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.selfImport", error.Details!["messageKey"]);
 
         var edge = Assert.Throws<DomainException>(() => new MethodologyDependency(4, 4));
         Assert.Equal("ECR-CALC-0422", edge.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.selfDependency", edge.Details!["messageKey"]);
     }
 }

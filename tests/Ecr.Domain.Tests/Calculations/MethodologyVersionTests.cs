@@ -60,6 +60,7 @@ public sealed class MethodologyVersionTests
         var blank = Assert.Throws<DomainException>(
             () => version.Publish(Reviewer, "   ", From, testsPassed: true, Now));
         Assert.Equal("ECR-CALC-0422", blank.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.publishNoReason", blank.Details!["messageKey"]);
 
         Assert.False(version.IsPublished);
         Assert.Null(version.ChangeReason);
@@ -78,7 +79,12 @@ public sealed class MethodologyVersionTests
         // Публікація без них означала б, що правильність чисел перевіряє той,
         // хто відкриє звіт — тобто вже після того, як їх подали.
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.publishNoGreenTest", error.Details!["messageKey"]);
         Assert.False(version.IsPublished);
+
+        // Непублікована версія з обігу не виводиться — своєю подробицею.
+        var deprecate = Assert.Throws<DomainException>(version.Deprecate);
+        Assert.Equal("err.ECR-CALC-0422.deprecateNotPublished", deprecate.Details!["messageKey"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

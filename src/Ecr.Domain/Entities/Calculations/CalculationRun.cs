@@ -103,7 +103,9 @@ public sealed class CalculationRun : Entity<long>
         if (FinishedAt is null)
         {
             throw new DomainException(
-                "ECR-CALC-0422", $"Прогін {Id} ще не завершився: актуальним його зробити не можна.");
+                "ECR-CALC-0422",
+                $"Прогін {Id} ще не завершився: актуальним його зробити не можна.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.runNotFinished", ["runId"] = Id });
         }
 
         Status = CurrentStatus;

@@ -44,7 +44,13 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Методологія {methodologyId} не має версії, чинної на {onDate:yyyy-MM-dd}.");
+                $"Методологія {methodologyId} не має версії, чинної на {onDate:yyyy-MM-dd}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.noEffectiveVersion",
+                    ["methodologyId"] = methodologyId,
+                    ["date"] = onDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return new MethodologyDescriptor(

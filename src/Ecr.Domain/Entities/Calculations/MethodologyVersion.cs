@@ -178,7 +178,12 @@ public sealed class MethodologyVersion : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Публікація версії {Version} без причини зміни неможлива (ФВ-14.7).");
+                $"Публікація версії {Version} без причини зміни неможлива (ФВ-14.7).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.publishNoReason",
+                    ["version"] = Version,
+                });
         }
 
         // ⛔ Зелений тест обов'язковий (ФВ-9.12). Тести — це дані з очікуваним
@@ -188,7 +193,12 @@ public sealed class MethodologyVersion : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Публікація версії {Version} без зеленого тесту заборонена (ФВ-9.12).");
+                $"Публікація версії {Version} без зеленого тесту заборонена (ФВ-9.12).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.publishNoGreenTest",
+                    ["version"] = Version,
+                });
         }
 
         EffectiveFrom = effectiveFrom;
@@ -209,7 +219,13 @@ public sealed class MethodologyVersion : Entity<int>
         if (!IsPublished)
         {
             throw new DomainException(
-                "ECR-CALC-0422", $"Версія {Version} не опублікована: виводити з обігу нема чого.");
+                "ECR-CALC-0422",
+                $"Версія {Version} не опублікована: виводити з обігу нема чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.deprecateNotPublished",
+                    ["version"] = Version,
+                });
         }
 
         Status = TemplateVersionStatus.Deprecated;

@@ -74,6 +74,34 @@ public sealed class RuleCoverageTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Порожнє_вікно_періодів_422_з_нейтральним_заголовком_і_власною_подробицею()
+    {
+        var stand = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests
+            .SignedInAsync(sql, app, RuleCoverageHandler.Permission).ConfigureAwait(true);
+
+        var response = await client.GetAsync(new Uri(
+            $"/api/v1/methodologies/{stand.MethodologyId}/versions/{stand.VersionId}/rule-coverage?periodFrom=202612&periodTo=202601",
+            UriKind.Relative)).ConfigureAwait(true);
+
+        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {text}");
+
+        // Заголовок коду спільний із відмовами публікації: про публікацію над
+        // порожнім вікном він говорити не може — причину каже messageKey.
+        var problem = JsonDocument.Parse(text).RootElement;
+        Assert.Equal("ECR-CALC-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-CALC-0422.coverageWindow", problem.GetProperty("messageKey").GetString());
+        var title = problem.GetProperty("title").GetString();
+        Assert.Equal("Invalid methodology request", title);
+        Assert.DoesNotContain("publish", title, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record Stand(int MethodologyId, int VersionId, int ColumnId);
 
     /// <summary>

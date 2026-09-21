@@ -128,6 +128,7 @@ public sealed class MethodologyDraftEditingTests
                 () => version.EditFormula(formula, empty, FormulaResultType.Number, TonneUnit));
 
             Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+            Assert.Equal("err.ECR-CALC-0422.formulaNoExpression", error.Details!["messageKey"]);
         }
 
         Assert.Equal("@Flow", formula.Expression);

@@ -113,7 +113,12 @@ public sealed class MethodologyFormula : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Формула «{Code}» без виразу: порожній вираз не прибирає формулу з розрахунку, "
-                + "а робить її тихим нулем.");
+                + "а робить її тихим нулем.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.formulaNoExpression",
+                    ["code"] = Code,
+                });
         }
 
         Expression = expression;
@@ -143,7 +148,12 @@ public sealed class MethodologyFormula : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Формула «{Code}» повертає текст: одиниця результату для неї не має сенсу (ФВ-16.6).");
+                $"Формула «{Code}» повертає текст: одиниця результату для неї не має сенсу (ФВ-16.6).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.textFormulaUnit",
+                    ["code"] = Code,
+                });
         }
 
         OutputUnitId = unitId;
@@ -167,7 +177,12 @@ public sealed class MethodologyFormula : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Формула «{Code}» повертає текст і не може мати одиниці результату: "
-                + "вимір — властивість числа (ФВ-16.6).");
+                + "вимір — властивість числа (ФВ-16.6).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.textFormulaUnit",
+                    ["code"] = Code,
+                });
         }
 
         ResultType = resultType;
