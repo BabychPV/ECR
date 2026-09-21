@@ -69,13 +69,33 @@ public sealed class DataSourceHandlersTests
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Test().HandleAsync(source.Id, Reason, default));
 
-        Allow("Integration.Manage");
+        // …а перелік `Integration.View` відкриває.
+        Assert.Single(await List().HandleAsync(default));
 
-        await Assert.ThrowsAsync<AccessDeniedException>(() => List().HandleAsync(default));
+        // Без обох прав перелік закритий, і відмова називає право перегляду.
+        Allow("Integration.EditSchedule");
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => List().HandleAsync(default));
+        Assert.Equal("Integration.View", denied.Details!["permission"]);
 
         Assert.Single(_store.Sources);
         Assert.Empty(_store.Removed);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task Integration_Manage_без_View_бачить_перелік_зєднань()
+    {
+        // ⛔ Хто заводить і тестує з'єднання, мусить бачити їхній перелік:
+        // інакше кнопка «New connection» стоїть над відмовою 403.
+        Add("PI_MAIN");
+        Allow("Integration.Manage");
+
+        var rows = await List().HandleAsync(default);
+
+        Assert.Equal("PI_MAIN", Assert.Single(rows).Code);
     }
 
     [Fact]

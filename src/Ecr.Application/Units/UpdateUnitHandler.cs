@@ -151,7 +151,12 @@ public sealed class UpdateUnitHandler(
             throw new BusinessRuleException(
                 "ECR-UOM-0422",
                 $"Множник переходу до базової одиниці мусить бути додатним, а не {factorToBase}.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422", ["code"] = unit.Code });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-0422.factorMustBePositive",
+                    ["code"] = unit.Code,
+                    ["factorToBase"] = factorToBase.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         if (factorToBase != unit.FactorToBase || offsetToBase != unit.OffsetToBase)

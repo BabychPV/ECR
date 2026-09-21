@@ -49,7 +49,13 @@ public sealed class ConvertUnitHandler(IUnitCatalog catalog)
                 $"Конверсія {fromUnit} → {toUnit} неможлива: різні розмірності "
                 + $"({from.DimensionId} і {to.DimensionId}). Потрібен контекстний коефіцієнт, "
                 + "а він належить методології, не довіднику одиниць.",
-                new Dictionary<string, object?> { ["from"] = fromUnit, ["to"] = toUnit });
+                new Dictionary<string, object?>
+                {
+                    // Заголовок коду нейтральний — причину каже messageKey.
+                    ["messageKey"] = "err.ECR-UOM-0422.incompatibleDimensions",
+                    ["from"] = fromUnit,
+                    ["to"] = toUnit,
+                });
         }
 
         // ⛔ Захист СИМЕТРИЧНИЙ. Перевіряти лише `to` було тихо неправильним
@@ -61,14 +67,16 @@ public sealed class ConvertUnitHandler(IUnitCatalog catalog)
         {
             throw new BusinessRuleException(
                 "ECR-UOM-0422",
-                $"Одиниця {fromUnit} має нульовий множник переходу до бази: конверсія неможлива.");
+                $"Одиниця {fromUnit} має нульовий множник переходу до бази: конверсія неможлива.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422.zeroFactor", ["code"] = fromUnit });
         }
 
         if (to.FactorToBase == 0m)
         {
             throw new BusinessRuleException(
                 "ECR-UOM-0422",
-                $"Одиниця {toUnit} має нульовий множник переходу до бази: конверсія неможлива.");
+                $"Одиниця {toUnit} має нульовий множник переходу до бази: конверсія неможлива.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422.zeroFactor", ["code"] = toUnit });
         }
 
         // Маршрут через базову одиницю. Зсув потрібен лише температурі, але

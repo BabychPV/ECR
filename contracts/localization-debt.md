@@ -165,7 +165,7 @@
 | `src/Ecr.Application/Templates/TableRelationHandlers.cs` | 8 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
-| `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 4 |
+| `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 2 |
@@ -199,7 +199,6 @@
 | `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |
 | `src/Ecr.Domain/Entities/Security/User.cs` | 1 |
 | `src/Ecr.Domain/Services/PeriodCalendar.cs` | 3 |
-| `src/Ecr.Domain/Services/UnitConverter.cs` | 4 |
 | `src/Ecr.Domain/ValueObjects/PeriodKey.cs` | 1 |
 | `src/Ecr.Domain/ValueObjects/RowKey.cs` | 1 |
 | `src/Ecr.Domain/ValueObjects/SiteTimeZone.cs` | 1 |

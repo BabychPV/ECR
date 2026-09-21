@@ -5,8 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 import { CodeText } from '@/shared/ui/CodeText';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { searchMinLength, useDataSearch, type SearchHit } from './api';
+import { searchMinLength, type SearchHit } from './api';
 import { searchHitRoute, searchKinds, type SearchKind } from './searchRoute';
+import { useRateLimitedSearch } from './useRateLimitedSearch';
 
 /**
  * Командна палітра: пошук даних (BE-19).
@@ -22,7 +23,10 @@ import { searchHitRoute, searchKinds, type SearchKind } from './searchRoute';
  * тестом, а не довіряються бібліотеці.
  */
 
-/** Затримка між останнім натисканням і запитом: обмежувача частоти на сервері немає. */
+/**
+ * Затримка між останнім натисканням і запитом. Межу частоти сервера
+ * (`ECR-REQ-0429`, 30 за 10 с) обробляє `useRateLimitedSearch`.
+ */
 export const SearchDebounceMs = 200;
 
 export interface DataSearchPaletteProps {
@@ -83,7 +87,7 @@ export function DataSearchPalette({ opened, onClose, onPicked }: DataSearchPalet
 
   const [query, setQuery] = useState('');
   const [debounced] = useDebouncedValue(query, SearchDebounceMs);
-  const search = useDataSearch(debounced);
+  const { search, waitSeconds, failed, retry } = useRateLimitedSearch(opened, query, debounced);
 
   const sections = useMemo(() => groupHits(search.data ?? []), [search.data]);
   const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections]);
@@ -139,9 +143,16 @@ export function DataSearchPalette({ opened, onClose, onPicked }: DataSearchPalet
   let status: JSX.Element | null = null;
   if (tooShort) {
     status = <Text size="sm">{t('search.minLength', { min: searchMinLength })}</Text>;
-  } else if (search.isError) {
+  } else if (waitSeconds !== null) {
+    // ⛔ Межа частоти — не «нічого не знайдено» і не аварія: непомітний рядок.
+    status = (
+      <Text size="sm" c="dimmed">
+        {t('search.rateLimited', { seconds: waitSeconds })}
+      </Text>
+    );
+  } else if (failed) {
     status = null;
-  } else if (search.data === undefined) {
+  } else if (search.isError || search.data === undefined) {
     status = (
       <Group gap="xs">
         <Loader size="xs" />
@@ -179,9 +190,7 @@ export function DataSearchPalette({ opened, onClose, onPicked }: DataSearchPalet
         />
 
         {/* ⛔ Відмова — не «нічого не знайдено»: це два різні твердження. */}
-        {!tooShort && search.isError && (
-          <ErrorAlert error={search.error} onRetry={() => void search.refetch()} />
-        )}
+        {!tooShort && failed && <ErrorAlert error={search.error} onRetry={retry} />}
 
         <div role="status" aria-live="polite">
           {status}

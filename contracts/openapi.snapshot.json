@@ -12027,7 +12027,7 @@
             "description": "Forbidden"
           }
         },
-        "summary": "Перелік джерел. Право `Integration.View`.",
+        "summary": "Перелік джерел. Право `Integration.View` або `Integration.Manage`.",
         "tags": [
           "DataSources"
         ]

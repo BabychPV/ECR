@@ -778,7 +778,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Перелік джерел. Право `Integration.View`.
+         * Перелік джерел. Право `Integration.View` або `Integration.Manage`.
          * @description ⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,
          *     без них показував би порожнє місце замість причини.
          */

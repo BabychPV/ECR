@@ -367,7 +367,8 @@ UPDATE t
                                                 N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.'),
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
-    (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state')
+    (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
+    (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -535,6 +536,11 @@ USING (VALUES
     (N'err.ECR-UOM-0409.unitFactorInUse', N'en', N'The factor and offset of unit "{code}" cannot change: it is referenced in {total} place(s), and stored values would silently convert to different numbers.', 1),
     (N'err.ECR-REQ-0422.unitIfMatch', N'en', N'This request needs an If-Match header carrying the rowVersion of the unit you read.', 1),
     (N'err.ECR-REQ-0422.unitInvalid', N'en', N'Unit "{code}" needs a symbol and a name in at least one language, each up to 200 characters.', 1),
+    -- ECR-UOM-0422: the code title is neutral, each refusal carries its own detail.
+    (N'err.ECR-UOM-0422.factorMustBePositive', N'en', N'The factor to the base unit of unit "{code}" must be greater than zero, not {factorToBase}: zero turns every conversion into a constant, a negative factor flips the sign.', 1),
+    (N'err.ECR-UOM-0422.incompatibleDimensions', N'en', N'{from} cannot be converted to {to}: the units measure different dimensions. A context coefficient such as density belongs to the methodology, not to the unit catalog.', 1),
+    (N'err.ECR-UOM-0422.zeroFactor', N'en', N'Unit "{code}" has a zero factor to the base unit, so values cannot be converted from or to it.', 1),
+    (N'err.ECR-UOM-0422.explicitConversionMismatch', N'en', N'The explicit conversion rule does not describe the requested conversion {from} to {to}.', 1),
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),
@@ -892,7 +898,9 @@ USING (VALUES
     (N'err.ECR-REG-0404',   N'en', N'Registry entry not found', 1),
     (N'err.ECR-REG-0422',   N'en', N'The registry source cannot be switched in an open period', 1),
     (N'err.ECR-UOM-0404',   N'en', N'Unit not found', 1),
-    (N'err.ECR-UOM-0422',   N'en', N'Incompatible unit dimensions', 1),
+    -- Фраза `ECR-UOM-0422` покриває всі його випадки: різні розмірності,
+    -- множник ≤ 0 на заведенні й зміні одиниці. Який саме — каже подробиця.
+    (N'err.ECR-UOM-0422',   N'en', N'Invalid unit conversion', 1),
     (N'err.ECR-UOM-4221',   N'en', N'Contextual conversion coefficient', 1),
     (N'err.ECR-UOM-4041',   N'en', N'Unit dimension not found', 1),
 
@@ -959,6 +967,7 @@ USING (VALUES
     (N'search.placeholder',              N'en', N'Documents, templates, registries…', 1),
     (N'search.minLength',                N'en', N'Type at least {min} characters', 1),
     (N'search.empty',                    N'en', N'Nothing found', 1),
+    (N'search.rateLimited',              N'en', N'Too many searches — retrying in {seconds}s', 1),
     (N'documents.title',                 N'en', N'Documents', 1),
     (N'documents.key',                   N'en', N'Key', 1),
     (N'documents.project',               N'en', N'Project', 1),

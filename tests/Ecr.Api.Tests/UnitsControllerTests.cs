@@ -195,10 +195,8 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
                 offsetToBase = 0m,
             }).ConfigureAwait(true);
 
-        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
-
-        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
-        Assert.Contains("ECR-UOM-0422", body, StringComparison.Ordinal);
+        await AssertProblemAsync(response, 422, "ECR-UOM-0422", "err.ECR-UOM-0422.factorMustBePositive")
+            .ConfigureAwait(true);
     }
 
     [Fact]
@@ -358,7 +356,15 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
         await AssertProblemAsync(blank, 422, "ECR-REQ-0422", "err.ECR-REQ-0422.unitInvalid").ConfigureAwait(true);
 
         var zero = await PutAsync(editor, id, version, "Zero", 0m).ConfigureAwait(true);
-        await AssertProblemAsync(zero, 422, "ECR-UOM-0422", "err.ECR-UOM-0422").ConfigureAwait(true);
+        var zeroProblem = await AssertProblemAsync(zero, 422, "ECR-UOM-0422", "err.ECR-UOM-0422.factorMustBePositive")
+            .ConfigureAwait(true);
+
+        // Заголовок коду спільний із «різними розмірностями»: про розмірності
+        // над відмовою множника він говорити не може.
+        var title = zeroProblem.GetProperty("title").GetString();
+        Assert.Equal("Invalid unit conversion", title);
+        Assert.DoesNotContain("dimension", title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("greater than zero", zeroProblem.GetProperty("detail").GetString(), StringComparison.Ordinal);
 
         // Жодна з відмов не змінила рядка: версія та сама.
         var after = await ReadAsync(editor, $"/api/v1/units/{id}").ConfigureAwait(true);

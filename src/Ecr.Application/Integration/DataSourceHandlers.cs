@@ -44,7 +44,7 @@ public sealed record DataSourceView(
 public sealed record DataSourceTestResult(bool Ok, string? Error, int Entities, string? MessageKey = null);
 
 /// <summary>
-/// Перелік джерел. Право <c>Integration.View</c>.
+/// Перелік джерел. Право <c>Integration.View</c> або <c>Integration.Manage</c>.
 /// </summary>
 /// <remarks>
 /// ⛔ <c>Integration.View</c> — одне з восьми прав, які сід видавав і які не
@@ -60,7 +60,10 @@ public sealed class ListDataSourcesHandler(
     /// <summary>Віддає джерела разом із тим, що на них спирається.</summary>
     public async Task<IReadOnlyList<DataSourceView>> HandleAsync(CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        // `Integration.Manage` включає `Integration.View`: хто заводить і тестує
+        // з'єднання, мусить бачити їхній перелік (інакше екран «New connection» над 403).
+        await PermissionCheck.RequireAnyAsync(
+            access, currentUser, [Permission, SaveDataSourceHandler.Permission], ct).ConfigureAwait(false);
 
         var rows = await store.ListAsync(ct).ConfigureAwait(false);
 

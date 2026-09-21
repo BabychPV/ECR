@@ -20,6 +20,12 @@ export interface EcrProblem {
   errorCode: string;
   correlationId: string;
   extensions2?: Record<string, unknown>;
+  /**
+   * Лише для `429`: через скільки секунд сервер дозволяє повтор (`Retry-After`).
+   * Поля немає, якщо заголовка немає або він не є цілим невід'ємним числом
+   * секунд (HTTP-date свідомо не розбирається: сервер ECR шле секунди).
+   */
+  retryAfterSeconds?: number;
 }
 
 /** Виняток клієнта API. */
@@ -320,6 +326,32 @@ export async function apiEnqueue(path: string, body?: unknown): Promise<Accepted
  * що заборонено (`07-checkpoints` Етап 6).
  */
 async function problemOf(response: Response, correlationId: string): Promise<EcrProblem> {
+  const retryAfterSeconds = retryAfterOf(response);
+  const problem = await problemBodyOf(response, correlationId);
+
+  // ⚠ Лише за наявності — та сама причина, що й для `type`/`detail` нижче.
+  if (retryAfterSeconds !== undefined) problem.retryAfterSeconds = retryAfterSeconds;
+
+  return problem;
+}
+
+/**
+ * `Retry-After` відповіді `429` у секундах, або `undefined`.
+ *
+ * ⚠ Заголовок — єдине місце, де сервер передає строк: у тілі `problem+json`
+ * його немає. Без цього поля клієнт міг би лише вгадувати, коли повторити.
+ */
+function retryAfterOf(response: Response): number | undefined {
+  if (response.status !== 429) return undefined;
+
+  const raw = response.headers.get('Retry-After')?.trim();
+  if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
+
+  const seconds = Number(raw);
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
+
+async function problemBodyOf(response: Response, correlationId: string): Promise<EcrProblem> {
   const fallback: EcrProblem = {
     title: `HTTP ${response.status}`,
     status: response.status,
