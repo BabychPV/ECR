@@ -173,6 +173,21 @@ describe('usePreferenceSync — BE-20', () => {
     expect(preferenceCalls('PUT')).toEqual([]);
   });
 
+  it('відповідь GET не масивом → без винятку, локальні значення й жодних записів', async () => {
+    setDensity('comfortable');
+    server = { unexpected: true } as unknown as typeof server;
+
+    renderHook(() => useProbe(true), { wrapper });
+
+    await waitFor(() => {
+      expect(preferenceCalls('GET')).toHaveLength(1);
+    });
+    await settle();
+
+    expect(density()).toBe('comfortable');
+    expect(preferenceCalls('PUT')).toEqual([]);
+  });
+
   it('локальне значення без серверного → одноразовий PUT (міграція)', async () => {
     setDensity('comfortable');
 

@@ -53,6 +53,14 @@ export class PreferenceSync {
   reconcile(server: readonly UserPreference[]): string[] {
     const applied: string[] = [];
 
+    // ⛔ Відповідь сервера — не наш об'єкт: проксі чи заглушка можуть віддати
+    // не масив. Виняток тут падав би в ефекті оболонки, тобто білий екран
+    // через налаштування вигляду. Невідомий стан сервера = нічого не робимо.
+    if (!Array.isArray(server)) {
+      reportFailure('GET', new TypeError('preferences response is not an array'));
+      return applied;
+    }
+
     for (const binding of this.bindings) {
       if (this.touched.has(binding.key)) continue;
 
