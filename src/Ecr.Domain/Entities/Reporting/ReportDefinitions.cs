@@ -163,6 +163,14 @@ public sealed class ReportSnapshot : Entity<long>
     /// </remarks>
     public string? HashFormat { get; private set; }
 
+    /// <summary>Записує формат суми, якщо його ще не визначено; відомий не перезаписує.</summary>
+    /// <param name="format"><c>current</c> або <c>legacy</c>.</param>
+    public void RecordHashFormat(string format)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        HashFormat ??= format;
+    }
+
     public DateTime BuiltAt { get; private set; }
     public int? BuiltByUserId { get; private set; }
 

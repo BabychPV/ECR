@@ -97,6 +97,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             // не давав би відповіді на питання «з чим його рахували».
             parameters.Json ?? parametersJson);
 
+        // Сума щойно порахована `ComputeHash`, тобто поточним форматом: формат
+        // зберігається одразу, а не визначається потім перерахунком.
+        snapshot.RecordHashFormat(VerifyReportSnapshotHandler.FormatCurrent);
+
         await SwitchCurrentAsync(snapshot, ct).ConfigureAwait(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -191,7 +195,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                 // base64, який неможливо звірити очима з тим, що показує
                 // SSRS, — а звіряють їх саме очима.
                 s.ContentHash == null ? null : Convert.ToHexString(s.ContentHash),
-                s.BuiltAt))
+                s.BuiltAt)
+            {
+                HashFormat = s.HashFormat ?? VerifyReportSnapshotHandler.FormatUnknown,
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }
@@ -253,6 +260,18 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
 
         return new SnapshotHashes(storedHex, actualHex, legacyHex);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Умова <c>HashFormat IS NULL</c> стоїть у самому UPDATE, а не в перевірці
+    /// перед ним: звірка й нічна задача можуть писати той самий зріз одночасно.
+    /// Один рядок, автокоміт — жодної довгої транзакції.
+    /// </remarks>
+    public async Task<bool> RecordHashFormatAsync(long snapshotId, string format, CancellationToken ct)
+        => await db.ReportSnapshots
+            .Where(s => s.Id == snapshotId && s.HashFormat == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(s => s.HashFormat, format), ct)
+            .ConfigureAwait(false) > 0;
 
     /// <inheritdoc />
     public async Task<SnapshotRowsPage?> RowsAsync(

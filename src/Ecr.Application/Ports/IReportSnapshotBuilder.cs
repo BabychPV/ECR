@@ -64,6 +64,13 @@ public interface IReportSnapshotBuilder
     /// <returns><c>null</c> — зрізу немає.</returns>
     public Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct);
 
+    /// <summary>
+    /// Записує визначений формат суми (<c>current</c>/<c>legacy</c>) у зріз,
+    /// ЛИШЕ якщо там ще <c>NULL</c>: уже відомий формат не перезаписується.
+    /// </summary>
+    /// <returns>Чи змінено рядок.</returns>
+    public Task<bool> RecordHashFormatAsync(long snapshotId, string format, CancellationToken ct);
+
     /// <summary>Сторінка рядків зрізу в широкому вигляді (D-52a).</summary>
     /// <param name="snapshotId">Зріз.</param>
     /// <param name="afterRowNo">
@@ -173,4 +180,13 @@ public sealed record ReportSnapshotSummary(
     bool IsCurrent,
     int RowCount,
     string? ContentHash,
-    DateTime BuiltAt);
+    DateTime BuiltAt)
+{
+    /// <summary>
+    /// Яким форматом пораховано суму: <c>current</c>, <c>legacy</c> (до BE-17) або
+    /// <c>unknown</c> — формат ще не визначено (старий зріз, який не звіряли й не
+    /// класифікувала нічна задача; зріз без суми; вміст не збігся за жодним форматом).
+    /// </summary>
+    /// <remarks>Читається зі збереженої колонки; перелік нічого не перераховує.</remarks>
+    public string HashFormat { get; init; } = Reporting.VerifyReportSnapshotHandler.FormatUnknown;
+}

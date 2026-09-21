@@ -114,6 +114,12 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.ReportRetentionJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // Класифікація формату суми старих зрізів (рішення 2026-09-21): у запиті
+        // переліку її не робить ніхто, тож без цього рядка старі лишалися б `unknown`.
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.ReportSnapshotFormatJob>(NightlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);

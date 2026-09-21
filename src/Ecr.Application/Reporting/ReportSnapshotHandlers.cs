@@ -48,6 +48,8 @@ public sealed class ListReportSnapshotsHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⚠ Позначку формату (`HashFormat`) перелік бере зі збереженої колонки й
+        // нічого не перераховує: перерахунок читає всі рядки зрізу (рішення 2026-09-21).
         return await snapshots
             .ListAsync(projectId, periodKey, VisibleProjects(profile), ct)
             .ConfigureAwait(false);
@@ -216,6 +218,13 @@ public sealed class VerifyReportSnapshotHandler(
         // перевіряти»: зріз без суми довести свою незмінність не може.
         var format = MatchedFormat(hashes);
 
+        // Визначений формат зберігається для переліку; уже відомий не перезаписується
+        // (умова `IS NULL` — у самому UPDATE, див. `RecordHashFormatAsync`).
+        if (format is not null)
+        {
+            await snapshots.RecordHashFormatAsync(snapshotId, format, ct).ConfigureAwait(false);
+        }
+
         return new SnapshotVerifyResponse(format is not null, hashes.Stored, hashes.Actual, format);
     }
 
@@ -229,8 +238,17 @@ public sealed class VerifyReportSnapshotHandler(
     /// </remarks>
     public const string FormatLegacy = "legacy";
 
-    private static string? MatchedFormat(SnapshotHashes hashes)
+    /// <summary>Формат ще не визначено (лише в переліку зрізів; у базі це <c>NULL</c>).</summary>
+    public const string FormatUnknown = "unknown";
+
+    /// <summary>
+    /// Формат, за яким збігся вміст; <c>null</c> — суми немає або не збіглося за жодним.
+    /// ⛔ Єдине визначення на продукт: ним користуються і звірка, і нічна класифікація.
+    /// </summary>
+    public static string? MatchedFormat(SnapshotHashes hashes)
     {
+        ArgumentNullException.ThrowIfNull(hashes);
+
         if (hashes.Stored.Length == 0)
         {
             return null;

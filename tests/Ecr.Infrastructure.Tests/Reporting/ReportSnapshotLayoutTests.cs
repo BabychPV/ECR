@@ -62,6 +62,24 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Побудова_одразу_записує_формат_суми_current()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var version = await PublishedAsync(db, RuledColumnsJson);
+
+        var snapshotId = await new ReportSnapshotBuilder(db, new TestClock(Now)).BuildAsync(
+            version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        await using var fresh = chain.CreateContext();
+        Assert.Equal("current", await fresh.ReportSnapshots.AsNoTracking()
+            .Where(s => s.Id == snapshotId).Select(s => s.HashFormat).SingleAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.17")]
     public async Task Зріз_за_описом_IEC_із_сіду_має_той_самий_вміст_і_суму_що_й_до_D52a()
     {

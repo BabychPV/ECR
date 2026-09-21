@@ -160,7 +160,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
     /// (масштаб 0), значення — з <c>decimal(34,16)</c> (масштаб 16). Ціле
     /// значення взято навмисно: «5» проти «5.0000000000000000» — саме та пастка.
     /// </summary>
-    private static List<ReportRow> LegacyRows(long snapshotId) =>
+    internal static List<ReportRow> LegacyRows(long snapshotId) =>
     [
         Cell(snapshotId, "DocumentId", null, 4217L),
         Cell(snapshotId, "RowKey", "row-1", null),
@@ -174,7 +174,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
     /// (дослівна копія з коміту 34e5370). ⛔ Не виражати через продуктовий
     /// код: тоді тест порівнював би відтворення із самим собою.
     /// </summary>
-    private static byte[] HashBeforeBe17(IReadOnlyList<ReportRow> rows)
+    internal static byte[] HashBeforeBe17(IReadOnlyList<ReportRow> rows)
     {
         var text = string.Join(
             '\n',
@@ -185,7 +185,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
         return System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
     }
 
-    private static Task<long> SeedAsync(TestDocumentBuilder chain)
+    internal static Task<long> SeedAsync(TestDocumentBuilder chain)
         => SeedAsync(
             chain,
             id =>
@@ -204,10 +204,10 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
             ReportSnapshotBuilder.ComputeHash);
 
     /// <summary>Зріз з одним рядком результату — у тому ж вигляді, що дає побудова.</summary>
-    private static async Task<long> SeedAsync(
+    internal static async Task<long> SeedAsync(
         TestDocumentBuilder chain,
         Func<long, List<ReportRow>> cells,
-        Func<IReadOnlyList<ReportRow>, byte[]> hash)
+        Func<IReadOnlyList<ReportRow>, byte[]?> hash)
     {
         var document = await chain.BuildAsync();
 

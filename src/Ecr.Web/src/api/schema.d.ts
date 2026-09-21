@@ -14581,6 +14581,10 @@ export interface components {
             builtAt: string;
             /** @description Контрольна сума вмісту в hex; `null` — не рахувалася. */
             contentHash: null | string;
+            /** @description Яким форматом пораховано суму: `current`, `legacy` (до BE-17) або
+             *     `unknown` — формат ще не визначено (старий зріз, який не звіряли й не
+             *     класифікувала нічна задача; зріз без суми; вміст не збігся за жодним форматом). */
+            hashFormat?: string;
             /**
              * Format: int64
              * @description Ідентифікатор зрізу.
