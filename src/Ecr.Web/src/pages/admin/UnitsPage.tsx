@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
+import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
 import { decimalEquals, normalizeDecimal } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
@@ -369,7 +370,7 @@ export function UnitsPage(): JSX.Element {
                   {dependents.items.map((item) => (
                     <Text size="sm" key={`${item.kind}:${item.id}`}>
                       <Badge size="xs" variant="light" mr="xs">
-                        {item.kind}
+                        <UsageKindLabel kind={item.kind} />
                       </Badge>
                       {item.label}
                     </Text>

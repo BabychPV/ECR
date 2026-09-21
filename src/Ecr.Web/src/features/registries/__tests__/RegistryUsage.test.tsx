@@ -248,9 +248,10 @@ describe('Конструктор довідника: «де використан
 /**
  * Рід залежного об'єкта — людською назвою з каталогу, не сирим `kind`.
  *
- * ⚠ Перелік — рівно ті п'ять значень, які сервер пише в
- * `RegistryStore.FindDefinitionUsageAsync` (рядкові літерали, enum немає). Новий
- * рід на сервері без рядка тут покаже сире значення в `<code>` — не порожнечу.
+ * ⚠ Перелік — рівно ті п'ять видів (`UsageKinds`), які сервер пише в
+ * `RegistryStore.GetUsageAsync`. Назва — зі спільного простору `usageKind.*`
+ * (`UsageKindLabel`), того самого, що на екрані одиниць. Новий вид на сервері
+ * без рядка тут покаже сире значення в `<code>` — не порожнечу.
  */
 describe('«де використано»: назва роду залежного', () => {
   const Kinds = [
@@ -286,7 +287,7 @@ describe('«де використано»: назва роду залежног�
 
     for (const kind of Kinds) {
       const badge = badgeOf(`L-${kind}`);
-      expect(badge.textContent).toBe(`⟦registries.usageKind.${kind}⟧`);
+      expect(badge.textContent).toBe(`⟦usageKind.${kind}⟧`);
     }
   });
 
@@ -296,6 +297,6 @@ describe('«де використано»: назва роду залежног�
     const badge = badgeOf('X.Y');
     const code = badge.querySelector('code');
     expect(code?.textContent).toBe('futureThing');
-    expect(badge.textContent).not.toContain('registries.usageKind');
+    expect(badge.textContent).not.toContain('usageKind');
   });
 });

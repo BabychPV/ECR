@@ -19,6 +19,9 @@ const SeededStrings: Record<string, string> = {
   'units.deleteUsedIn': 'Referenced in {total} place(s):',
   'common.cancel': 'Cancel',
   'common.delete': 'Remove',
+  'usageKind.templateColumn': 'Template column',
+  'usageKind.derivedUnit': 'Derived unit',
+  'usageKind.unitConversion': 'Unit conversion rule',
 };
 
 const column = { kind: 'templateColumn', id: '7', label: 'Fuel.Mass', route: '/admin/templates/1/versions/2' };
@@ -156,6 +159,42 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
     // ⛔ Кнопки видалення немає: вона вела б у відому відмову.
     expect(within(dialog).queryByRole('button', { name: 'Remove' })).toBeNull();
     expect(api.deleteCalls).toHaveLength(0);
+  });
+
+  it('вид залежного — назвою з каталогу, невідомий — сирим значенням у <code>', async () => {
+    // ⛔ До спільного `UsageKindLabel` бейдж показував `kind` як є
+    // («derivedUnit»), хоча каталог назву вже мав би.
+    mockApi({
+      permissions: ['Uom.EditCatalog'],
+      usage: {
+        total: 4,
+        items: [
+          column,
+          { kind: 'derivedUnit', id: '9', label: 'kg/h', route: '/admin/units' },
+          { kind: 'unitConversion', id: '3', label: 'lb -> kg', route: '/admin/units' },
+          { kind: 'futureThing', id: '1', label: 'X.Y', route: null },
+        ],
+      },
+      deleteStatus: 204,
+    });
+
+    const dialog = await openDialog();
+    const list = await within(dialog).findByTestId('unit-references');
+
+    function badgeOf(label: string): HTMLElement {
+      const row = within(list).getByText(label);
+      const badge = row.querySelector('.mantine-Badge-root');
+      if (badge === null) throw new Error(`бейджа виду в ${label} немає`);
+      return badge as HTMLElement;
+    }
+
+    expect(badgeOf('Fuel.Mass').textContent).toBe('Template column');
+    expect(badgeOf('kg/h').textContent).toBe('Derived unit');
+    expect(badgeOf('lb -> kg').textContent).toBe('Unit conversion rule');
+
+    const unknown = badgeOf('X.Y');
+    expect(unknown.querySelector('code')?.textContent).toBe('futureThing');
+    expect(list.textContent).not.toContain('derivedUnit');
   });
 
   it('одиниця без залежних видаляється і зникає з переліку', async () => {

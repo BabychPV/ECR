@@ -1845,14 +1845,33 @@ USING (VALUES
     (N'registries.usageNone',            N'en', N'Not used anywhere', 1),
     (N'registries.usageTotal',           N'en', N'{total} references', 1),
     (N'registries.usageShown',           N'en', N'Showing {shown} of {total}', 1),
-    -- Рід залежного (`UsageItemDto.Kind`, `RegistryStore.GetUsageAsync`).
-    -- ⚠ `data` — не звіт: це значення комірок документів (`doc.CellValue`), що
-    -- посилаються на запис довідника; один рядок на всі документи, без числа.
-    (N'registries.usageKind.templateColumn',       N'en', N'Template column', 1),
-    (N'registries.usageKind.registryField',        N'en', N'Registry field', 1),
-    (N'registries.usageKind.methodologySubstance', N'en', N'Methodology substance', 1),
-    (N'registries.usageKind.sourceEntity',         N'en', N'Source entity', 1),
-    (N'registries.usageKind.data',                 N'en', N'Values in documents', 1),
+    -- Вид залежного (`UsageItemDto.Kind`) — спільний простір для обох «де
+    -- використано»: довідника (`RegistryStore.GetUsageAsync`) і одиниці
+    -- (`UnitStore`). Перелік — рівно `UsageKinds.All`; що кожен вид має тут
+    -- рядок, а в `UsageKindLabel.tsx` — гілку, стереже `UsageKindCatalogTests`.
+    -- ⚠ Колишні `registries.usageKind.*` (п'ять видів довідника) прибрані —
+    -- клієнт їх більше не просить. MERGE тут лише додає, тож у вже
+    -- розгорнутих базах ці рядки лишаються мертвими.
+    (N'usageKind.templateColumn',       N'en', N'Template column', 1),
+    (N'usageKind.registryField',        N'en', N'Registry field', 1),
+    (N'usageKind.methodologySubstance', N'en', N'Methodology substance', 1),
+    (N'usageKind.sourceEntity',         N'en', N'Source entity', 1),
+    (N'usageKind.methodologyConstant',  N'en', N'Methodology constant', 1),
+    (N'usageKind.methodologyFormula',   N'en', N'Methodology formula', 1),
+    (N'usageKind.methodologyOutput',    N'en', N'Methodology output', 1),
+    -- `fieldMap` — мапінг поля джерела, де одиниця стоїть на боці джерела або цілі.
+    (N'usageKind.fieldMap',             N'en', N'Source field mapping', 1),
+    (N'usageKind.unitConversion',       N'en', N'Unit conversion rule', 1),
+    -- `derivedUnit` — одиниця, у якої ця стоїть у чисельнику чи знаменнику.
+    (N'usageKind.derivedUnit',          N'en', N'Derived unit', 1),
+    -- ⚠ `dimensionBase` не видаляється ніколи: через базову одиницю йде кожна
+    -- конверсія розмірності. Назва каже саме це.
+    (N'usageKind.dimensionBase',        N'en', N'Base unit of dimension', 1),
+    -- ⚠ `data` — не звіт і не лише документи: для довідника це `doc.CellValue`,
+    -- для одиниці ще `dic.RegistryValue`, `calc.CalculationResult`,
+    -- `ext.RawData`. Один рядок на таблицю, без числа (підпис — ім'я таблиці).
+    -- Колишнє «Values in documents» для одиниці було б неправдою.
+    (N'usageKind.data',                 N'en', N'Stored data', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
