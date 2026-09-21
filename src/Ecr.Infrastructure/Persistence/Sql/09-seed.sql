@@ -1379,6 +1379,8 @@ USING (VALUES
     (N'documents.stateNeedsPeriod',      N'en', N'Choose a period first: a document''s state is defined only within a period.', 1),
     (N'documents.filterMine',            N'en', N'Mine — created or submitted by me', 1),
     (N'documents.lateEdits',             N'en', N'Late edits', 1),
+    -- ⚠ Без «for this period»: без вибраного періоду ознака рахується за будь-який.
+    (N'documents.lateEditsHint',         N'en', N'The document was edited after the submission deadline.', 1),
     (N'documents.noMatch',               N'en', N'No documents match the filters.', 1),
     (N'documents.noMatchHint',           N'en', N'Change the state or turn off "Mine".', 1),
     (N'documents.resetFilters',          N'en', N'Reset filters', 1),
