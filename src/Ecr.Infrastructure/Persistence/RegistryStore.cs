@@ -186,7 +186,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         }
 
         await AddAsync(
-            "templateColumn",
+            UsageKinds.TemplateColumn,
             from column in db.ColumnDefs.AsNoTracking()
             where column.LookupRegistryDefId == registryDefId
             join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
@@ -204,7 +204,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         // рахується: воно так само перестане резолвитися, якщо довідник
         // перевипустити. Підпис показує довідник-власника, тож рядок читається.
         await AddAsync(
-            "registryField",
+            UsageKinds.RegistryField,
             from field in db.RegistryFieldDefs.AsNoTracking()
             where field.RefRegistryDefId == registryDefId
             join owner in db.RegistryDefs.AsNoTracking() on field.RegistryDefId equals owner.Id
@@ -219,7 +219,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         // (`MethodologySubstance.SubstanceEntryId`, ФВ-8.8) — тому join через
         // `dic.RegistryEntry`, а не колонка з `RegistryDefId`.
         await AddAsync(
-            "methodologySubstance",
+            UsageKinds.MethodologySubstance,
             from substance in db.MethodologySubstances.AsNoTracking()
             join entry in db.RegistryEntries.AsNoTracking()
                 on substance.SubstanceEntryId equals entry.Id
@@ -234,7 +234,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "sourceEntity",
+            UsageKinds.SourceEntity,
             db.SourceEntities
                 .AsNoTracking()
                 .Where(entity => entity.RegistryDefId == registryDefId)
@@ -256,7 +256,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             total++;
             if (items.Count < take)
             {
-                items.Add(new UsageItemDto("data", "doc.CellValue", "doc.CellValue", null));
+                items.Add(new UsageItemDto(UsageKinds.Data, "doc.CellValue", "doc.CellValue", null));
             }
         }
 

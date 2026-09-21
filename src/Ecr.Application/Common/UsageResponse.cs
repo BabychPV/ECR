@@ -19,7 +19,7 @@ public sealed record UsageResponse(int Total, IReadOnlyList<UsageItemDto> Items)
 }
 
 /// <summary>Одне місце, що посилається на ресурс.</summary>
-/// <param name="Kind">Рід залежного об'єкта (<c>templateColumn</c>, <c>methodologyConstant</c>…).</param>
+/// <param name="Kind">Рід залежного об'єкта — одне зі значень <see cref="UsageKinds"/>.</param>
 /// <param name="Id">Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу.</param>
 /// <param name="Label">Те, чим об'єкт упізнає людина: код.</param>
 /// <param name="Route">Маршрут клієнта до об'єкта; <c>null</c> — окремого екрана немає.</param>
