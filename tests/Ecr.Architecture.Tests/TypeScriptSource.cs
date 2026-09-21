@@ -19,13 +19,13 @@ namespace Ecr.Architecture.Tests;
 /// <list type="bullet">
 /// <item>регулярний літерал (<c>/…/</c>) впізнається за попереднім значущим
 /// символом; <c>&lt;/</c> і <c>/&gt;</c> — завжди JSX, а не регулярка;</item>
-/// <item>одинарна чи подвійна лапка, що не закрилася до кінця рядка, — це
-/// апостроф у тексті JSX, а не рядок (у JS такий рядок неможливий);</item>
+/// <item>лапка одразу після ідентифікатора, числа, <c>)</c>, <c>]</c> чи
+/// <c>&gt;</c> (не <c>=&gt;</c>) — апостроф у тексті JSX, а не рядок; так само
+/// лапка, що не закрилася до кінця рядка (у JS такий рядок неможливий);</item>
+/// <item>⚠ апостроф у тексті JSX після пробілу чи розділового знака
+/// (<c>« 'цитата' »</c>) досі читається як рядок до наступної лапки на рядку;</item>
+/// <item><c>&gt; 'x'</c> як порівняння читається як текст JSX, а не рядок;</item>
 /// <item><c>//</c> у тексті JSX читається як коментар до кінця рядка.</item>
-/// <item>⚠ ДВА апострофи в тексті JSX на одному рядку (<c>Don't … it's</c>)
-/// читаються як рядок між ними; виклик <c>t(…)</c> між ними сторож не побачить.
-/// Ризик малий — текст інтерфейсу йде через каталог, а не літералами в
-/// розмітці, — але вичерпно не перевірений.</item>
 /// </list>
 /// </remarks>
 internal sealed partial class TypeScriptSource
@@ -406,7 +406,7 @@ internal sealed partial class TypeScriptSource
 
             if (c is '\'' or '"')
             {
-                var end = QuotedEnd(i, c);
+                var end = IsStringStart(i) ? QuotedEnd(i, c) : -1;
                 if (end < 0)
                 {
                     // Апостроф у тексті JSX: рядок у JS не переходить рядок.
@@ -542,6 +542,56 @@ internal sealed partial class TypeScriptSource
         return -1;
     }
 
+    /// <summary>
+    /// Чи може лапка на <paramref name="i"/> відкривати рядок, а не бути
+    /// апострофом у тексті JSX (<c>з'явився</c>, <c>Don't</c>, <c>&gt;'…'</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього апостроф у тексті JSX парувався з НАСТУПНОЮ лапкою на тому
+    /// ж рядку — зазвичай із <c>t('</c> — і «рядок» між ними ковтав виклик:
+    /// <c>&lt;Text&gt;з'явився {t('a.b')}&lt;/Text&gt;</c> ключа не давав. У
+    /// коді рядок не стоїть одразу після ідентифікатора, числа, <c>)</c>,
+    /// <c>]</c> чи закритого тега (<c>&gt;</c>, що не є <c>=&gt;</c>) — окрім
+    /// ключових слів (<c>return 'x'</c>, <c>from 'x'</c>, <c>as 'x'</c>).
+    /// </remarks>
+    private bool IsStringStart(int i)
+    {
+        var j = i - 1;
+        while (j >= 0 && (char.IsWhiteSpace(_text[j]) || _mask[j] == Comment))
+        {
+            j--;
+        }
+
+        if (j < 0 || _mask[j] != Code)
+        {
+            return true;
+        }
+
+        var previous = _text[j];
+        if (previous == '>')
+        {
+            return At(j - 1) == '=';
+        }
+
+        if (previous is ')' or ']')
+        {
+            return false;
+        }
+
+        if (!char.IsLetterOrDigit(previous) && previous is not ('_' or '$'))
+        {
+            return true;
+        }
+
+        var k = j;
+        while (k >= 0 && (char.IsLetterOrDigit(_text[k]) || _text[k] is '_' or '$'))
+        {
+            k--;
+        }
+
+        return StringKeywordBefore().IsMatch(_text[(k + 1)..(j + 1)]);
+    }
+
     /// <summary>Чи починає <c>/</c> регулярний літерал, а не ділення чи JSX.</summary>
     private bool IsRegexStart(int i)
     {
@@ -624,6 +674,9 @@ internal sealed partial class TypeScriptSource
 
     [GeneratedRegex(@"(?:^|[^A-Za-z0-9_$])(?:return|typeof|case|in|of|void|delete|throw|else|yield|await)$")]
     private static partial Regex RegexKeywordBefore();
+
+    [GeneratedRegex(@"^(?:return|typeof|case|in|of|void|delete|throw|else|yield|await|from|import|export|as|satisfies|extends|keyof|do|new|default)$")]
+    private static partial Regex StringKeywordBefore();
 
     /// <summary>Збирає статичний текст шаблону, поки сканер ходить у вставки й назад.</summary>
     private sealed class TemplateBuilder(int start)

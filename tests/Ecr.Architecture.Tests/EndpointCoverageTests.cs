@@ -333,12 +333,26 @@ public sealed partial class EndpointCoverageTests
             const j = formatCount(n, 'plural.base');
             const k = i18n.t('method.call');
             export function t(key: string) {}
+            // коментар, у якому щось з'явилося
+            const l = t('x.afterLineComment');
+            /* блок, у якому щось з'явилося */
+            const m = t('x.afterBlockComment');
+            const n = <Box>{/* JSX-коментар: з'явився */}{t('x.afterJsxComment')}</Box>;
+            const o = <Text>з'явився</Text>;
+            const p = t('x.afterJsxText');
+            const q = <Text>з'явився {t('x.sameLineAfterJsxText')}</Text>;
+            const r = <Text>Don't {t('x.betweenApostrophes')} — it's</Text>;
+            const s = <Text>'{t('x.quotedJsxText')}'</Text>;
             """;
 
         var scan = ClientKeyScan.Scan("sample.tsx", sample);
 
         Assert.Equal(
-            ["grid.saved", "grid.saving", "jsx.key", "plain.key", "status.sheet.Draft", "wrapped.no", "wrapped.yes"],
+            [
+                "grid.saved", "grid.saving", "jsx.key", "plain.key", "status.sheet.Draft", "wrapped.no", "wrapped.yes",
+                "x.afterBlockComment", "x.afterJsxComment", "x.afterJsxText", "x.afterLineComment",
+                "x.betweenApostrophes", "x.quotedJsxText", "x.sameLineAfterJsxText",
+            ],
             scan.Literals.Select(l => l.Key).Order(StringComparer.Ordinal));
 
         Assert.Equal(
