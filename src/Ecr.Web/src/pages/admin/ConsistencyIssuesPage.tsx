@@ -3,8 +3,17 @@ import { Badge, Button, Checkbox, Group, Table, Text, TextInput } from '@mantine
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
+import {
+  ConsistencyIssuesKey,
+  RunConsistencyPermission,
+  useConsistencyRun,
+  type ConsistencyRun,
+} from '@/features/jobs/useConsistencyRun';
+import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -38,8 +47,16 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const openOnly = showResolved !== '1';
   const rule = ruleCode ?? '';
 
+  // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
+  // (`System.RunJob`), а не тим, яким відкрито екран: інакше кнопка обіцяла б
+  // дію, на яку сервер гарантовано відповість `403`.
+  const session = useSession();
+  const runs = can(session.data, RunConsistencyPermission);
+  const [asking, setAsking] = useState(false);
+  const run = useConsistencyRun();
+
   const issues = useQuery({
-    queryKey: ['consistency-issues', rule, openOnly, cursor],
+    queryKey: [...ConsistencyIssuesKey, rule, openOnly, cursor],
     queryFn: () =>
       apiFetch<ConsistencyIssuePage>(
         `/api/v1/consistency/issues?limit=100&openOnly=${String(openOnly)}` +
@@ -73,8 +90,37 @@ export function ConsistencyIssuesPage(): JSX.Element {
                 setCursor(null);
               }}
             />
+            {runs && (
+              <Button
+                size="xs"
+                loading={run.isStarting}
+                disabled={run.outcome === 'running'}
+                onClick={() => setAsking(true)}
+              >
+                {t('consistency.runNow')}
+              </Button>
+            )}
           </Group>
         }
+      />
+
+      {/* ⛔ `L10`: відмова постановки — видима, з кодом і текстом сервера, а не
+          тост, що зникає, і не «нічого не сталося». */}
+      <ErrorAlert error={run.startError} />
+      <RunStatus run={run} />
+
+      <ReasonModal
+        opened={asking}
+        title={t('consistency.runNow')}
+        label={t('workflow.reason')}
+        description={t('consistency.runHint')}
+        confirmLabel={t('consistency.runNow')}
+        isPending={run.isStarting}
+        onConfirm={(reason) => {
+          setAsking(false);
+          run.start(reason);
+        }}
+        onClose={() => setAsking(false)}
       />
 
       <AsyncBoundary<ConsistencyIssuePage>
@@ -164,6 +210,36 @@ export function ConsistencyIssuesPage(): JSX.Element {
         )}
       </AsyncBoundary>
     </>
+  );
+}
+
+/**
+ * Стан ручного прогону — таким, яким його каже сервер.
+ *
+ * ⛔ Чотири стани, і `unknown` — окремий: «стан прочитати не вдалося» (брак
+ * `System.ViewHealth` на `GET /jobs/{id}`) не читається як «виконується».
+ * Інакше рядок «перевіряється…» висів би вічно над задачею, стан якої просто
+ * не показують.
+ */
+function RunStatus({ run }: { run: ConsistencyRun }): JSX.Element | null {
+  if (run.outcome === null) return null;
+
+  // ⚠ Ключі літералами, не складені з рядка: сторожі каталогу шукають саме
+  // виклик `t('…')` і складеного ключа не побачили б.
+  const tone = {
+    running: { color: 'gray', label: t('consistency.runRunning') },
+    succeeded: { color: 'statusSuccess', label: t('consistency.runSucceeded') },
+    failed: { color: 'statusError', label: t('consistency.runFailed') },
+    unknown: { color: 'statusWarning', label: t('consistency.runUnknown') },
+  }[run.outcome];
+
+  return (
+    <Group gap="xs" mb="xs" role="status" data-outcome={run.outcome}>
+      <Badge size="sm" variant="light" color={tone.color}>
+        {tone.label}
+      </Badge>
+      {run.failure !== null && <Text size="sm">{run.failure}</Text>}
+    </Group>
   );
 }
 

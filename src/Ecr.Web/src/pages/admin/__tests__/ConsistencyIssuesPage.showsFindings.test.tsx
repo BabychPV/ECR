@@ -32,15 +32,22 @@ const Finding = {
   resolvedByUserId: null,
 };
 
+/**
+ * ⚠ Профіль (`/api/v1/me`) — окрема відповідь: екран питає права для дії
+ * «перевірити зараз», і сторінка знахідок на місці профілю — не профіль.
+ */
 function respondWith(body: unknown): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(
-      async () =>
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+      async (input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify(String(input).endsWith('/api/v1/me') ? { permissions: [] } : body),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
     ),
   );
 }

@@ -33,12 +33,21 @@ const Finding = {
 function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
+    // ⚠ Профіль (`/api/v1/me`) — окрема відповідь: екран питає права для дії
+    // «перевірити зараз», і сторінка знахідок на місці профілю — не профіль.
     vi.fn(
-      async () =>
-        new Response(JSON.stringify({ items: [Finding], nextCursor: null, totalCount: null }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+      async (input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify(
+            String(input).endsWith('/api/v1/me')
+              ? { permissions: [] }
+              : { items: [Finding], nextCursor: null, totalCount: null },
+          ),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
     ),
   );
 }
