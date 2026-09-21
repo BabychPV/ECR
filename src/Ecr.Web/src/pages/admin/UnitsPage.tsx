@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -158,37 +158,12 @@ export function UnitsPage(): JSX.Element {
   const dependents = unitReferences(remove.error) ?? usage.data;
 
   /*
-   * Порядок, у якому перелік відкривається: розмірність, усередині неї — код.
-   *
-   * ⛔ Це НЕ друге сортування поруч із сортуванням набору. `DataTable` починає
-   * з `sort === null`, тобто «як прийшло», і клацання по шапці бере роботу на
-   * себе далі; тут задається рівно те, чим був порядок ДО переїзду. Прибрати
-   * цей рядок означало б показати одиниці в порядку рядків бази — зміну
-   * поведінки, а не спрощення.
-   *
-   * ⛔ `undefined` мусить лишатися `undefined`: `?? []` перетворило б «запиту
-   * ще не робили» на «порожньо», а саме цю підміну `AsyncBoundary` всередині
-   * таблиці й ловить.
-   */
-  const rows = useMemo<readonly UnitRef[] | undefined>(
-    () =>
-      units.data === undefined
-        ? undefined
-        : [...units.data].sort(
-            (a, b) =>
-              a.dimensionCode.localeCompare(b.dimensionCode) || a.code.localeCompare(b.code),
-          ),
-    [units.data],
-  );
-
-  /*
-   * ⛔ Обидві десяткові колонки мають `render`, що віддає РЯДОК СЕРВЕРА як є, і
-   * це не обхід набору, а єдиний тут правильний його режим. Клітинка `num` без
-   * `render` малюється `formatDecimal(raw, undefined, 3)` — стеля дробової
-   * частини переліку, — і множник `0.4535923700` поїхав би на екран як `0.454`.
-   * На будь-якому іншому переліку три знаки доречні; на довіднику одиниць
-   * множник — це і є те, заради чого контракт перевели на рядок (`e470777a`):
-   * округлити його означає стерти відповідь, по яку сюди приходять.
+   * ⛔ Обидві десяткові колонки — `num` + `exact`: рядок сервера показується
+   * дослівно. Без `exact` клітинка `num` малюється зі стелею дробової частини
+   * переліку (три знаки), і множник `0.4535923700` поїхав би на екран як
+   * `0.454`. На довіднику одиниць множник — це і є те, заради чого контракт
+   * перевели на рядок (`e470777a`): округлити його означає стерти відповідь,
+   * по яку сюди приходять.
    *
    * ⚠ Сам `num` лишається, і не заради вирівнювання: він вмикає ЧИСЛОВЕ
    * порівняння десяткових рядків (`compareDecimals`). Без нього колонка
@@ -222,18 +197,22 @@ export function UnitsPage(): JSX.Element {
       // сенсу для людини, що дивиться на екран.
       key: 'dimensionCode',
       label: t('units.dimension'),
+
+      // ⚠ Розмірність ГРУПУЄ, а всередині групи порядок задає код — і при
+      // відкритті (`defaultSort` нижче), і після клацання по шапці.
+      sortValue: (unit) => [unit.dimensionCode, unit.code],
     },
     {
       key: 'factorToBase',
       label: t('units.factor'),
       num: true,
-      render: (unit) => unit.factorToBase,
+      exact: true,
     },
     {
       key: 'offsetToBase',
       label: t('units.offset'),
       num: true,
-      render: (unit) => unit.offsetToBase,
+      exact: true,
     },
     // ⚠ Колонка дій з'являється лише з правом — рівно як і до переїзду; шапка в
     // неї порожня, а `sortable: false` тому, що в кнопки немає скалярного
@@ -342,8 +321,13 @@ export function UnitsPage(): JSX.Element {
        * порожньо» від цього не слабшає: воно переїхало разом із обгорткою.
        *
        * ⚠ Сортування шапкою прийшло з набором, і його тут не було: чотири
-       * перші колонки стали клікабельними. Порядок при відкритті — той самий
-       * (`rows` вище).
+       * перші колонки стали клікабельними. Порядок при відкритті — той самий,
+       * що й до переїзду (розмірність, усередині неї код), але тепер його
+       * задає `defaultSort`, а не пресортований масив: шапка «Dimension» на
+       * старті каже `aria-sort="ascending"`, тобто правду про порядок рядків.
+       *
+       * ⛔ `rows` — сам `units.data`: `undefined` мусить лишатися `undefined`,
+       * `?? []` перетворило б «запиту ще не робили» на «порожньо».
        *
        * ⚠ `clearFiltersLabel`/`showMoreLabel` цьому екрану передавати НЕМА
        * куди: фільтрів у нього немає (тож немає й `onClearFilters`), а
@@ -353,8 +337,9 @@ export function UnitsPage(): JSX.Element {
        */}
       <DataTable<UnitRef>
         columns={columns}
-        rows={rows}
+        rows={units.data}
         rowKey={(unit) => String(unit.id)}
+        defaultSort={{ key: 'dimensionCode', direction: 'asc' }}
         isPending={units.isPending}
         error={units.error}
         emptyTitle={t('units.empty')}
