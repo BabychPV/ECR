@@ -32,6 +32,17 @@ public interface IJobProgressStore
     /// <summary>Як часто процес-власник підтверджує, що задача жива.</summary>
     public static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Межа стовпця <c>itg.JobProgress.Error</c> — <c>nvarchar(2000)</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На відміну від <c>Message</c>, текст лягає сюди БЕЗ кодування, тож
+    /// межу видно напряму. Але джерело те саме — <c>ex.Message</c> довільної
+    /// довжини, — і пастка та сама: аварія, чиє повідомлення перелічує сотню
+    /// сутностей, зробила б із запису провалу другий виняток.
+    /// </remarks>
+    public const int MaxErrorLength = 2000;
+
     /// <summary>Реєструє початок задачі.</summary>
     /// <summary>
     /// Фіксує ПОСТАНОВКУ задачі в чергу.

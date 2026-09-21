@@ -183,6 +183,42 @@ public sealed class QuartzJobAdapterRetryTests
         await scheduler.DidNotReceive().DeleteJob(Arg.Any<JobKey>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ⛔ Збій САМОГО запису прогресу не сміє підмінити собою результат
+    /// задачі.
+    /// </summary>
+    /// <remarks>
+    /// Так і виглядав дефект, знайдений наскрізною перевіркою
+    /// (<c>tools/smoke.ps1</c>, крок 23): запис падав із <c>Msg 2628</c> прямо
+    /// з блоку <c>catch</c>, тож назовні летіла помилка ЗАПИСУ, стан ніколи не
+    /// ставав <c>Failed</c>, а справжня причина провалу губилася — при тому,
+    /// що триґер ретраю вже був поставлений рядком вище.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "T10-40")]
+    public async Task Збій_запису_прогресу_не_ховає_справжньої_причини_провалу()
+    {
+        var (adapter, progress) = Adapter();
+
+        progress.ReportAsync(default!, default, default, default, default)
+            .ReturnsForAnyArgs(Task.FromException(new InvalidOperationException("Msg 2628 (симуляція)")));
+        progress.FinishAsync(default!, default!, default, default, default)
+            .ReturnsForAnyArgs(Task.FromException(new InvalidOperationException("Msg 2628 (симуляція)")));
+
+        // Ретрай: запис падає, але планування ретраю це не скасовує.
+        var (retrying, scheduler) = ContextAt(0);
+        await adapter.Execute(retrying);
+        await scheduler.Received(1).ScheduleJob(Arg.Any<ITrigger>(), Arg.Any<CancellationToken>());
+
+        // Межа: назовні мусить піти провал ЗАДАЧІ, а не помилка запису про нього.
+        var (last, _) = ContextAt(QuartzJobAdapter.MaxRetryAttempts);
+        var thrown = await Assert.ThrowsAsync<JobExecutionException>(() => adapter.Execute(last));
+
+        Assert.Contains(
+            "транзієнтної", thrown.InnerException!.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-40")]

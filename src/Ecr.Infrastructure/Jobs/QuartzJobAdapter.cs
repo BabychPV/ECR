@@ -161,7 +161,18 @@ public sealed partial class QuartzJobAdapter(
 
             // ⚠ Текст помилки в прогрес — БЕЗ стека (ФВ-6.11, D-11): стек
             // виносить назовні шляхи, імена і подекуди значення.
-            await FinishAsync(progress, jobId, "Failed", ex.Message, clock, CancellationToken.None)
+            //
+            // ⚠ І вкорочений до межі стовпця: `Error` тримає 2000 символів, а
+            // `ex.Message` не обмежений нічим.
+            await WriteProgressAsync(
+                    jobId,
+                    () => FinishAsync(
+                        progress,
+                        jobId,
+                        "Failed",
+                        JobProgressMessageCodec.Shorten(ex.Message, IJobProgressStore.MaxErrorLength),
+                        clock,
+                        CancellationToken.None))
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—");
@@ -253,7 +264,7 @@ public sealed partial class QuartzJobAdapter(
     /// Планує новий одноразовий триґер того самого <c>JobKey</c> з
     /// експоненційним відступом і пише в прогрес, ЩО задача повторює спробу.
     /// </summary>
-    private static async Task ScheduleRetryAsync(
+    private async Task ScheduleRetryAsync(
         IJobExecutionContext context, int attempt, IJobProgressStore? progress, IClock clock, Exception ex)
     {
         var jobId = context.JobDetail.Key.Name;
@@ -298,9 +309,56 @@ public sealed partial class QuartzJobAdapter(
                     ["error"] = ex.Message,
                 });
 
-            await progress.ReportAsync(
-                jobId, 0, JobProgressMessageCodec.Encode(envelope), clock.UtcNow, CancellationToken.None)
+            // ⛔ Саме тут жила найдорожча частина дефекту, знайденого наскрізною
+            // перевіркою (`tools/smoke.ps1`, крок 23). `ex.Message` ішов у
+            // конверт як є; українське повідомлення в JSON екранується по шість
+            // символів на літеру, тож конверт легко переростав `nvarchar(400)`,
+            // і SQL Server відповідав `Msg 2628`. Виняток летів із блоку
+            // `catch`: стан НІКОЛИ не ставав `Failed` (клієнт вічно бачив
+            // «виконується»), а триґер ретраю вже був поставлений рядком вище —
+            // задача мовчки перезапускалася кожні 30/60 с і падала знову.
+            // Разом із записом губився й текст причини — тобто рівно те, що не
+            // влізло.
+            await WriteProgressAsync(
+                    jobId,
+                    () => progress.ReportAsync(
+                        jobId,
+                        0,
+                        JobProgressMessageCodec.EncodeWithinLimit(envelope, "error"),
+                        clock.UtcNow,
+                        CancellationToken.None))
                 .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Виконує запис у сховище прогресу так, щоб ЙОГО власний збій не підмінив
+    /// собою результат задачі.
+    /// </summary>
+    /// <param name="jobId">Ідентифікатор задачі — для журналу.</param>
+    /// <param name="write">Сам запис.</param>
+    /// <remarks>
+    /// ⛔ Прогрес — це РОЗПОВІДЬ про задачу, а не сама задача. Виняток звідси
+    /// раніше підміняв справжню причину провалу (і скасовував перехід у
+    /// <c>Failed</c>) — той самий принцип, що вже діє для насоса биття серця й
+    /// для резолву повідомлення (<c>JobProgressMessageResolver</c>): збій
+    /// спостерігача йде в журнал, а не в результат.
+    ///
+    /// ⚠ Ковтається саме ЗАПИС, не задача: <c>JobExecutionException</c> нижче
+    /// кидається в будь-якому разі, тож Quartz і ручний перезапуск бачать
+    /// провал так само, як бачили.
+    /// </remarks>
+    private async Task WriteProgressAsync(string jobId, Func<Task> write)
+    {
+        try
+        {
+            await write().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Причина — у ⛔ вище: результат задачі важливіший за запис про нього.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogProgressWriteFailed(logger, jobId, ex);
         }
     }
 
@@ -373,6 +431,11 @@ public sealed partial class QuartzJobAdapter(
         Level = LogLevel.Warning,
         Message = "Не вдалося записати биття серця задачі {JobId}; наступна спроба за інтервал.")]
     private static partial void LogHeartbeatFailed(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Не вдалося записати прогрес задачі {JobId}; на результат самої задачі це не впливає.")]
+    private static partial void LogProgressWriteFailed(ILogger logger, string jobId, Exception exception);
 }
 
 /// <summary>Прогрес, що пишеться у сховище.</summary>

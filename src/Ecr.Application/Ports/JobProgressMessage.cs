@@ -54,6 +54,19 @@ public sealed record JobProgressMessageEnvelope(
 public static class JobProgressMessageCodec
 {
     /// <summary>
+    /// Межа стовпця <c>itg.JobProgress.Message</c> — <c>nvarchar(400)</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Число, а не посилання на <c>HasMaxLength</c> із конфігурації EF: та
+    /// лежить в <c>Ecr.Infrastructure</c>, на яку цей шар не посилається за
+    /// побудовою. Розбіжність двох чисел стереже окремий тест на моделі.
+    /// </remarks>
+    public const int MaxEncodedLength = 400;
+
+    /// <summary>Позначка того, що текст обрізано.</summary>
+    private const string TruncationMark = "…";
+
+    /// <summary>
     /// Короткі імена властивостей (<c>k</c>/<c>p</c>/<c>i</c>) — навмисно, не
     /// заради стилю: конверт мусить вміщатися в <c>nvarchar(400)</c>
     /// (<c>Q-326</c>) навіть у найдовшому випадку композиції (кілька
@@ -71,6 +84,118 @@ public static class JobProgressMessageCodec
         ArgumentNullException.ThrowIfNull(envelope);
 
         return JsonSerializer.Serialize(ToDto(envelope), Options);
+    }
+
+    /// <summary>
+    /// Кодує конверт, укорочуючи ОДИН вільний параметр рівно настільки, щоб
+    /// результат гарантовано вліз у <see cref="MaxEncodedLength"/>.
+    /// </summary>
+    /// <param name="envelope">Конверт.</param>
+    /// <param name="freeTextParam">
+    /// Ім'я параметра з текстом ДОВІЛЬНОЇ довжини (<c>error</c> у
+    /// <c>jobs.retryScheduled</c>): решта параметрів — числа й коди, і різати
+    /// їх означало б зіпсувати саме те, що читабельне.
+    /// </param>
+    /// <remarks>
+    /// ⛔ Рахується довжина ПІСЛЯ кодування, і саме тут була пастка. У JSON
+    /// кирилиця виходить екранованою — шість символів на літеру, — тож
+    /// повідомлення з 70 українських слів має сирі ~300 символів (менше за
+    /// межу!) і закодовані ~1900 (утричі більше). Обрізання за сирою довжиною
+    /// не спрацювало б узагалі: воно нічого не обрізало б.
+    ///
+    /// ⚠ Двійковий пошук по кількості лишених символів: межа монотонна
+    /// (довший текст — довший конверт), тож ціна — логарифм серіалізацій
+    /// замість лінійного підбору.
+    /// </remarks>
+    public static string EncodeWithinLimit(JobProgressMessageEnvelope envelope, string freeTextParam)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentException.ThrowIfNullOrEmpty(freeTextParam);
+
+        var encoded = Encode(envelope);
+
+        if (encoded.Length <= MaxEncodedLength
+            || envelope.Params is null
+            || !envelope.Params.TryGetValue(freeTextParam, out var text)
+            || text.Length == 0)
+        {
+            return encoded;
+        }
+
+        // Найменший можливий варіант — сама позначка обрізання. Він же
+        // відповідь, якщо не вміщається навіть вона: краще завідомо коротке
+        // повідомлення, ніж виняток замість результату задачі.
+        var best = Encode(WithParam(envelope, freeTextParam, TruncationMark));
+
+        var low = 0;
+        var high = text.Length - 1;
+
+        while (low <= high)
+        {
+            var middle = low + ((high - low) / 2);
+            var candidate = Encode(WithParam(envelope, freeTextParam, TakeFirst(text, middle)));
+
+            if (candidate.Length <= MaxEncodedLength)
+            {
+                best = candidate;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Укорочує вільний текст до <paramref name="maxLength"/> символів,
+    /// лишаючи впізнаваний ПОЧАТОК і позначку обрізання.
+    /// </summary>
+    /// <param name="text">Текст.</param>
+    /// <param name="maxLength">Межа в символах; результат ніколи не довший.</param>
+    /// <remarks>
+    /// ⚠ Для стовпців, куди текст лягає БЕЗ кодування
+    /// (<c>itg.JobProgress.Error</c>, <c>nvarchar(2000)</c>) — там сира
+    /// довжина і є тією, яку перевіряє SQL Server.
+    /// </remarks>
+    public static string Shorten(string text, int maxLength)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxLength);
+
+        return text.Length <= maxLength
+            ? text
+            : TakeFirst(text, Math.Max(0, maxLength - TruncationMark.Length));
+    }
+
+    /// <summary>Перші <paramref name="keep"/> символів плюс позначка обрізання.</summary>
+    /// <remarks>
+    /// ⚠ Сурогатна пара, розрізана навпіл, дає недійсний рядок — на такій межі
+    /// беремо на символ менше. Кирилиці це не стосується, а от аварійне
+    /// повідомлення з емодзі чи рідкісним ієрогліфом цілком можливе.
+    /// </remarks>
+    private static string TakeFirst(string text, int keep)
+    {
+        if (keep > 0 && char.IsHighSurrogate(text[keep - 1]))
+        {
+            keep--;
+        }
+
+        return string.Concat(text.AsSpan(0, keep), TruncationMark);
+    }
+
+    /// <summary>Той самий конверт із підміненим значенням одного параметра.</summary>
+    private static JobProgressMessageEnvelope WithParam(
+        JobProgressMessageEnvelope envelope, string name, string value)
+    {
+        var parameters = new Dictionary<string, string>(envelope.Params!, StringComparer.Ordinal)
+        {
+            [name] = value,
+        };
+
+        return envelope with { Params = parameters };
     }
 
     /// <summary>

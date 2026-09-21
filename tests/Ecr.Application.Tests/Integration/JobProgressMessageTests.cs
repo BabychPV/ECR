@@ -67,6 +67,86 @@ public sealed class JobProgressMessageTests
         Assert.False(JobProgressMessageCodec.TryDecode(raw, out _));
     }
 
+    /// <summary>
+    /// ⛔ Дефект, знайдений наскрізною перевіркою (<c>tools/smoke.ps1</c>,
+    /// крок 23): причина провалу задачі йшла в конверт як є, конверт не влізав
+    /// у <c>nvarchar(400)</c>, SQL Server відповідав <c>Msg 2628</c> — і разом
+    /// із записом губилася сама причина.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Пастка тут не в довжині тексту, а в КОДУВАННІ: у JSON кирилиця
+    /// екранується по шість символів на літеру, тож 282 сирих символи дають
+    /// конверт за півтори тисячі. Обрізання за сирою довжиною не зробило б
+    /// нічого — 282 менше за 400.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Довга_кирилична_причина_провалу_вміщається_в_межу_стовпця()
+    {
+        var reason = string.Concat(
+            Enumerable.Repeat("Джерело даних недоступне, сервер не відповідає. ", 6));
+
+        Assert.True(reason.Length >= 200, $"Потрібно ≥ 200 літер, а є {reason.Length}.");
+
+        var envelope = new JobProgressMessageEnvelope(
+            "jobs.retryScheduled",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["attempt"] = "1",
+                ["max"] = "3",
+                ["delaySeconds"] = "30",
+                ["error"] = reason,
+            });
+
+        // Сама пастка, зафіксована твердженням: сирий текст КОРОТШИЙ за межу,
+        // а закодований конверт — набагато довший.
+        Assert.True(reason.Length < 400);
+        Assert.True(
+            JobProgressMessageCodec.Encode(envelope).Length > 400,
+            "Без обрізання конверт мав би переростати межу — інакше тест нічого не доводить.");
+
+        var encoded = JobProgressMessageCodec.EncodeWithinLimit(envelope, "error");
+
+        // ⛔ Літерал 400, а не посилання на `HasMaxLength`: межа тут — це
+        // вимога стовпця `itg.JobProgress.Message`, і вона мусить упасти, якщо
+        // константу кодека «підвищать», не чіпаючи схему.
+        Assert.True(
+            encoded.Length <= 400,
+            $"Закодований конверт — {encoded.Length} символів, стовпець тримає 400.");
+
+        Assert.True(JobProgressMessageCodec.TryDecode(encoded, out var decoded));
+        Assert.Equal("jobs.retryScheduled", decoded.Key);
+
+        // Причина лишається ВПІЗНАВАНОЮ: початок тексту плюс позначка.
+        Assert.StartsWith("Джерело даних недоступне", decoded.Params!["error"], StringComparison.Ordinal);
+        Assert.EndsWith("…", decoded.Params["error"], StringComparison.Ordinal);
+
+        // Різався рівно вільний параметр — числа спроби цілі.
+        Assert.Equal("1", decoded.Params["attempt"]);
+        Assert.Equal("30", decoded.Params["delaySeconds"]);
+    }
+
+    /// <summary>
+    /// ⚠ Зворотний бік: повідомлення, яке ВМІЩАЄТЬСЯ, не сміє втратити
+    /// жодного символу — інакше «виправлення» зіпсувало б кожну нормальну
+    /// причину провалу заради рідкісної довгої.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Коротка_причина_провалу_доходить_без_обрізання()
+    {
+        const string Reason = "Джерело недоступне.";
+
+        var encoded = JobProgressMessageCodec.EncodeWithinLimit(
+            new JobProgressMessageEnvelope(
+                "jobs.retryScheduled",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["error"] = Reason }),
+            "error");
+
+        Assert.True(JobProgressMessageCodec.TryDecode(encoded, out var decoded));
+        Assert.Equal(Reason, decoded.Params!["error"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Резолв_підставляє_параметри_в_шаблон_каталогу_мовою_читача()
