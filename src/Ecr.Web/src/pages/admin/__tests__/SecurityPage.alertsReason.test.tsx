@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
@@ -119,6 +119,15 @@ function isShown(el: HTMLElement): boolean {
 
   return true;
 }
+
+/**
+ * ⚠ Вкладка користувачів монтує поруч лінивий `GroupAssignmentsPanel`; його
+ * холодний `import()` (30–130 мс у спокої, 300–540 мс під навантаженням)
+ * інакше йшов усередині таймауту тесту. Прогрівається модуль, не обхід.
+ */
+beforeAll(async () => {
+  await import('@/features/security/GroupAssignmentsPanel');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

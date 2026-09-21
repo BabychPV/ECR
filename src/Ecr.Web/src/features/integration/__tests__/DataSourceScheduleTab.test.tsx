@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -147,6 +147,18 @@ async function openScheduleTab(): Promise<HTMLElement> {
 
   return drawer;
 }
+
+/**
+ * ⛔ Вкладка розкладів — окремий чанк (`lazyDataSourceForm.ts`), а тести
+ * чекають її типовою 1 с `find*`/`waitFor`. Холодний `import()` вкладки —
+ * 64–162 мс у спокої, 296–624 мс під навантаженням; 2026-09-21 у повному
+ * прогоні під навантаженням упали чотири тести файлу разом («Unable to find
+ * role="alert"», `expected null not to be null`). Прогрів модуля лінивості не
+ * обходить: вкладка й далі монтується через `lazy()` шухляди.
+ */
+beforeAll(async () => {
+  await import('@/features/integration/DataSourceScheduleTab');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

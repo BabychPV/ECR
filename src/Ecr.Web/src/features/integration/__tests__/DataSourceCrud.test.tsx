@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -182,6 +182,19 @@ async function openEdit(): Promise<HTMLElement> {
 
   return form();
 }
+
+/**
+ * ⛔ Форма з'єднання — окремий чанк (`lazyDataSourceForm.ts`), і `form()`
+ * чекає її типову 1 с `waitFor`. Холодний `import()` форми — 22–77 мс у
+ * спокої, 120–240 мс під навантаженням, а в повному прогоні ще й у черзі
+ * перетворення модулів разом з рештою воркерів; 2026-09-21 так упали всі
+ * шість тестів із формою одним прогоном («форма з'єднання: expected null not
+ * to be null»). Прогрів модуля не обходить лінивості: форма й далі
+ * монтується через `lazy()` сторінки.
+ */
+beforeAll(async () => {
+  await import('@/features/integration/DataSourceFormModal');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

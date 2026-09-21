@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
@@ -203,6 +203,16 @@ async function openReopen(): Promise<Session> {
 
   return { user, dialog, until, confirm };
 }
+
+/**
+ * ⛔ Прогрів чанка поля дати. Холодний `import('@mantine/dates')` — 200–280 мс
+ * у спокої й 440–560 мс під навантаженням (заміряно 2026-09-21), і перший
+ * тест файлу платив за нього всередині власного таймауту. Поле й далі
+ * монтується через `lazy()` сторінки — прогрівається модуль, не обхід.
+ */
+beforeAll(async () => {
+  await import('@mantine/dates');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
