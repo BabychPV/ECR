@@ -1,5 +1,5 @@
-import { Suspense, useState, type JSX } from 'react';
-import { Badge, Button, Group, Loader, Stack, Tabs } from '@mantine/core';
+import { Suspense, useId, useState, type JSX } from 'react';
+import { Badge, Button, Group, Loader, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -98,6 +98,18 @@ export function DataSourceDrawer({
   const [confirming, setConfirming] = useState(false);
 
   /*
+   * ⚠ Заздалегідь, за лічильниками рядка: та сама умова, що й на сервері
+   * (`sourceEntities > 0 || collectionSchedules > 0`). Причина — видимим
+   * текстом поруч і через `aria-describedby`, а не лише підказкою: вимкнена
+   * кнопка фокуса не отримує, тож підказки з клавіатури не побачити.
+   *
+   * ⛔ Лічильники могли застаріти — серверна відмова (`409 dataSourceInUse`)
+   * лишається остаточною й обробляється нижче, як і раніше.
+   */
+  const inUse = source.sourceEntities > 0 || source.collectionSchedules > 0;
+  const inUseReasonId = useId();
+
+  /*
    * ⛔ Видалення не каскадне: з'єднання, на яке спираються сутності збору або
    * розклади, сервер не видаляє — `409 ECR-JOB-0409`
    * (`err.ECR-JOB-0409.dataSourceInUse`) з лічильниками. Причина показується
@@ -142,14 +154,27 @@ export function DataSourceDrawer({
         footer={
           canManage ? (
             <Group gap="xs" justify="space-between" w="100%">
-              <Button
-                variant="subtle"
-                color="statusError"
-                onClick={() => setConfirming(true)}
-                data-delete-connection=""
-              >
-                {t('sources.deleteConnection')}
-              </Button>
+              <Group gap="xs" wrap="nowrap">
+                <Button
+                  variant="subtle"
+                  color="statusError"
+                  disabled={inUse}
+                  aria-describedby={inUse ? inUseReasonId : undefined}
+                  onClick={() => setConfirming(true)}
+                  data-delete-connection=""
+                >
+                  {t('sources.deleteConnection')}
+                </Button>
+
+                {inUse && (
+                  <Text id={inUseReasonId} size="xs" c="dimmed" data-delete-blocked-reason="">
+                    {t('err.ECR-JOB-0409.dataSourceInUse', {
+                      sourceEntities: formatNumber(source.sourceEntities),
+                      collectionSchedules: formatNumber(source.collectionSchedules),
+                    })}
+                  </Text>
+                )}
+              </Group>
 
               <Group gap="xs">
                 <Button variant="default" onClick={() => setEditing(true)} data-edit-connection="">

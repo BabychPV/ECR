@@ -144,3 +144,57 @@ describe("DataSourceDrawer: вкладка Connection", () => {
     expect(await within(drawer).findByRole('button', { name: /sources\.testConnection/ })).toBeTruthy();
   });
 });
+
+describe("DataSourceDrawer: видалення з'єднання, що використовується", () => {
+  async function deleteButton(): Promise<HTMLButtonElement> {
+    const drawer = await screen.findByRole('dialog');
+
+    return within(drawer).findByRole<HTMLButtonElement>('button', {
+      name: /sources\.deleteConnection/,
+    });
+  }
+
+  it.each([
+    ['сутності збору', { sourceEntities: 12, collectionSchedules: 0 }],
+    ['розклади', { sourceEntities: 0, collectionSchedules: 3 }],
+    ['обидва', { sourceEntities: 12, collectionSchedules: 3 }],
+  ])('спирається %s — кнопка вимкнена заздалегідь', async (_, counters) => {
+    respond(connection(counters), ['Integration.Manage']);
+    show();
+
+    expect((await deleteButton()).disabled).toBe(true);
+  });
+
+  it('причина — видимим текстом поруч і через aria-describedby, а не лише підказкою', async () => {
+    respond(connection({ sourceEntities: 12, collectionSchedules: 3 }), ['Integration.Manage']);
+    show();
+
+    const button = await deleteButton();
+    const describedBy = button.getAttribute('aria-describedby');
+
+    expect(describedBy).toBeTruthy();
+
+    const reason = document.getElementById(describedBy ?? '');
+
+    expect(reason).not.toBeNull();
+    // ⛔ Та сама причина, що й у серверній відмові, — з числами цього рядка.
+    expect(reason?.textContent).toContain('err.ECR-JOB-0409.dataSourceInUse');
+    expect(reason?.textContent).toContain('sourceEntities=12');
+    expect(reason?.textContent).toContain('collectionSchedules=3');
+    // Видимий текст у шухляді, а не атрибут кнопки.
+    expect(reason?.closest('[role="dialog"]')).not.toBeNull();
+    expect(button.contains(reason)).toBe(false);
+  });
+
+  it('обидва лічильники = 0 — кнопка активна, причини немає', async () => {
+    respond(connection({ sourceEntities: 0, collectionSchedules: 0 }), ['Integration.Manage']);
+    show();
+
+    const button = await deleteButton();
+    const drawer = await screen.findByRole('dialog');
+
+    expect(button.disabled).toBe(false);
+    expect(button.hasAttribute('aria-describedby')).toBe(false);
+    expect(drawer.querySelector('[data-delete-blocked-reason]')).toBeNull();
+  });
+});
