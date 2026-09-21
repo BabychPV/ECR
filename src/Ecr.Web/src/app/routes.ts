@@ -176,10 +176,11 @@ export const routes = {
   // `routeConfig.test.ts` стереже унікальність шляхів, а шлях листа — рівно
   // цей.
   //
-  // ⚠ `crumb.linkTo` лишився без змін (веде на перелік шаблонів), хоч ціль
-  // тепер існує й на самому сегменті. Це названа межа картки, а не недогляд:
-  // зміна цілі крихти — поведінка breadcrumbs, а не лист-маршрут, і їй
-  // місце в окремому PR разом із власним тестом.
+  // ✎ 2026-09-21: `crumb.linkTo: '/admin/templates'` знято. Він вів крихту з
+  // назвою шаблону на ПЕРЕЛІК, бо на самому сегменті сторінки не було. Тепер
+  // там картка, і крихта веде туди, куди вказує її власний `pathname` —
+  // перелік на рівень вище й так є окремою крихтою «Templates» поруч
+  // (`Breadcrumbs.test.tsx`, «крихта з назвою шаблону веде на КАРТКУ»).
   adminTemplateSection: {
     id: 'admin-template-section',
     path: '/admin/templates/:id',
@@ -189,7 +190,6 @@ export const routes = {
         ancestorIds: ['admin-templates'],
         resolveParam: 'id',
         resolveWith: 'templateName',
-        linkTo: '/admin/templates',
       },
     },
   },
