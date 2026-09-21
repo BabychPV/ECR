@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
@@ -15,6 +16,12 @@ namespace Ecr.Application.Tests.Integration;
 /// </summary>
 public sealed class JobProgressMessageTests
 {
+    /// <summary>
+    /// Кодування з ТИПОВИМ кодувальником — те, чим конверти писалися до
+    /// переходу кодека на <c>UnsafeRelaxedJsonEscaping</c>.
+    /// </summary>
+    private static readonly JsonSerializerOptions StandardEscaping = new() { PropertyNamingPolicy = null };
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Кодування_і_декодування_повертає_той_самий_ключ_і_параметри()
@@ -74,17 +81,24 @@ public sealed class JobProgressMessageTests
     /// із записом губилася сама причина.
     /// </summary>
     /// <remarks>
-    /// ⚠ Пастка тут не в довжині тексту, а в КОДУВАННІ: у JSON кирилиця
-    /// екранується по шість символів на літеру, тож 282 сирих символи дають
-    /// конверт за півтори тисячі. Обрізання за сирою довжиною не зробило б
-    /// нічого — 282 менше за 400.
+    /// ⚠ Пастка тут не в довжині тексту, а в КОДУВАННІ: конверт несе власні
+    /// ~90 символів (ключ каталогу, імена й значення числових параметрів,
+    /// лапки й дужки), тож причина, СИРА довжина якої ще менша за 400, дає
+    /// конверт понад 400. Обрізання за сирою довжиною не зробило б нічого.
+    /// <para>
+    /// ⚠ До переходу кодека на <c>UnsafeRelaxedJsonEscaping</c> розрив був
+    /// різкішим (кирилиця по шість символів на літеру: 282 сирих символи —
+    /// конверт за півтори тисячі), і тому тут стояло 6 повторів. Правило —
+    /// «міряй ПІСЛЯ кодування» — не змінилося, змінився лише поріг, за яким
+    /// воно видно.
+    /// </para>
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Довга_кирилична_причина_провалу_вміщається_в_межу_стовпця()
     {
         var reason = string.Concat(
-            Enumerable.Repeat("Джерело даних недоступне, сервер не відповідає. ", 6));
+            Enumerable.Repeat("Джерело даних недоступне, сервер не відповідає. ", 7));
 
         Assert.True(reason.Length >= 200, $"Потрібно ≥ 200 літер, а є {reason.Length}.");
 
@@ -144,6 +158,106 @@ public sealed class JobProgressMessageTests
             "error");
 
         Assert.True(JobProgressMessageCodec.TryDecode(encoded, out var decoded));
+        Assert.Equal(Reason, decoded.Params!["error"]);
+    }
+
+    /// <summary>
+    /// Заради чого кодек перевели на <c>UnsafeRelaxedJsonEscaping</c>: у ту
+    /// саму межу стовпця тепер влазить причина, яку можна прочитати.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ З типовим кодувальником кирилиця йшла послідовностями <c>\u04XX</c>
+    /// — шість символів на літеру, — і в бюджет конверта вміщалося близько
+    /// півсотні літер: причина обрізалася на пів речення й не пояснювала
+    /// нічого. Це не «гарніше в базі», це різниця між «сервер відповів
+    /// відмо…» і повним реченням.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void У_причину_провалу_влазить_щонайменше_250_кириличних_символів()
+    {
+        var reason = string.Concat(
+            Enumerable.Repeat("Джерело даних недоступне, сервер не відповідає. ", 20));
+
+        var envelope = new JobProgressMessageEnvelope(
+            "jobs.retryScheduled",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["attempt"] = "1",
+                ["max"] = "3",
+                ["delaySeconds"] = "30",
+                ["error"] = reason,
+            });
+
+        var encoded = JobProgressMessageCodec.EncodeWithinLimit(envelope, "error");
+
+        Assert.True(encoded.Length <= 400, $"Конверт — {encoded.Length} символів, стовпець тримає 400.");
+        Assert.True(JobProgressMessageCodec.TryDecode(encoded, out var decoded));
+
+        var kept = decoded.Params!["error"];
+
+        // ⛔ Літерал 250, а не «стільки, скільки вийде»: це вимога — причину
+        // має бути видно, — і вона мусить упасти, якщо екранування повернуть.
+        // З типовим кодувальником тут лишалося ~50 символів.
+        Assert.True(kept.Length >= 250, $"У причину влізло {kept.Length} символів, потрібно ≥ 250.");
+        Assert.StartsWith("Джерело даних недоступне", kept, StringComparison.Ordinal);
+
+        // Кирилиця лежить у стовпці ЛІТЕРАМИ — саме це й дало місце.
+        Assert.Contains("Джерело даних недоступне", encoded, StringComparison.Ordinal);
+
+        // ⚠ Не тавтологія: та сама причина з ТИПОВИМ екрануванням у межу не
+        // вміщається — тобто число вище тримається саме на кодувальнику.
+        var withStandardEscaping = JsonSerializer.Serialize(
+            new { k = decoded.Key, p = decoded.Params }, StandardEscaping);
+
+        Assert.True(
+            withStandardEscaping.Length > 400,
+            $"З типовим екрануванням той самий конверт мав би бути завеликим, а він — "
+            + $"{withStandardEscaping.Length} символів.");
+    }
+
+    /// <summary>
+    /// Записи, зроблені ДО зміни кодувальника, читаються далі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Стовпець не мігрують і не чистять: у <c>itg.JobProgress.Message</c>
+    /// лежать конверти обох форм одночасно. Кодувальник впливає лише на ЗАПИС,
+    /// а <c>\u04XX</c> лишається валідним JSON — але поки це не перевірено,
+    /// це лише припущення.
+    ///
+    /// ⚠ Стара форма будується серіалізацією з типовим кодувальником, а не
+    /// літералом у джерелі: так вона гарантовано та сама, що лежить у базі, і
+    /// не залежить від того, як редактор чи інструмент запису обійдеться з
+    /// екрануванням у тексті тесту.
+    ///
+    /// ⚠ Про ЗАПИС тут навмисно немає жодного твердження: читання старих
+    /// записів мусить пережити будь-яку подальшу зміну кодувальника, тож
+    /// повернення екранування цей тест не сміє чіпати. Те, що нова форма кладе
+    /// кирилицю літерами, стереже сусідній тест про 250 символів.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void Запис_у_старому_екрануванні_читається_далі()
+    {
+        const string Reason = "Джерело даних недоступне.";
+
+        var legacy = JsonSerializer.Serialize(
+            new
+            {
+                k = "jobs.retryScheduled",
+                p = new Dictionary<string, string>(StringComparer.Ordinal) { ["error"] = Reason },
+            },
+            StandardEscaping);
+
+        // Ознака старої форми, задана властивістю, а не пошуком підрядка:
+        // кирилиці як літер там немає взагалі, увесь рядок — ASCII.
+        Assert.True(legacy.All(char.IsAscii), $"Старий запис мав бути суто ASCII, а він: {legacy}.");
+        Assert.DoesNotContain(Reason, legacy, StringComparison.Ordinal);
+
+        Assert.True(
+            JobProgressMessageCodec.TryDecode(legacy, out var decoded),
+            $"Старий запис перестав декодуватися: {legacy}.");
+        Assert.Equal("jobs.retryScheduled", decoded.Key);
         Assert.Equal(Reason, decoded.Params!["error"]);
     }
 
