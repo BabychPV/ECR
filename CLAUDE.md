@@ -386,6 +386,15 @@ powershell -File tools\e2e-stand.ps1 -Server localhost -Database EcrE2EX   -Port
 `dotnet ef migrations script` падає з `NETSDK1004: Assets file … not found`,
 і це теж читається як «розгортання не пройшло».
 
+✎ 2026-09-21: коли на `H:` бракує ~16 ГБ, а на іншому диску є, стенд
+переноситься параметром `-DataPath` (обидва скрипти пробрасують його в
+`setup-dev-db.ps1`, як і `-RequireFreeGb`; без параметра — умовчання
+`setup-dev-db.ps1`, тобто `H:\EcrData`):
+
+```powershell
+powershell -File tools\e2e-stand.ps1 -Server localhost -Database EcrE2EX -Port 5080 -DataPath F:\EcrData
+```
+
 **Для `e2e-stand.ps1` додатково потрібні три речі, яких немає в жодному
 списку:**
 

@@ -26,15 +26,42 @@
 .PARAMETER Port
     Порт, на якому підняти застосунок.
 
+.PARAMETER DataPath
+    Каталог файлів бази; передається в `setup-dev-db.ps1`. Не задано — діє
+    його умовчання (`H:\EcrData`, якщо є `H:`); `''` — типовий каталог
+    інстансу. Потрібен, коли на `H:` бракує ~16 ГБ, а на іншому диску є.
+
+.PARAMETER RequireFreeGb
+    Скільки вільного місця вимагати на диску даних; передається в
+    `setup-dev-db.ps1`. Не задано — обчислюється за профілем; `0` — без перевірки.
+
 .EXAMPLE
     powershell -File tools/smoke.ps1
+    powershell -File tools/smoke.ps1 -Server localhost -DataPath F:\EcrData
 #>
 [CmdletBinding()]
 param(
     [string] $Server = 'localhost\SQLEXPRESS',
     [string] $Database = 'EcrSmoke',
-    [int] $Port = 5099
+    [int] $Port = 5099,
+
+    # ⚠ Без умовчання навмисно: передається далі ЛИШЕ якщо задано явно, тож
+    # запуск без параметра поводиться рівно як раніше (умовчання вирішує
+    # `setup-dev-db.ps1`, а не дублюється тут і не розходиться з ним).
+    [string] $DataPath,
+    [double] $RequireFreeGb = -1
 )
+
+# ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
+# процесом. Порожній рядок PowerShell 5.1 нативній команді не передає, тож
+# `-DataPath ''` («типовий каталог інстансу») їде як `""`.
+$setupExtra = @()
+if ($PSBoundParameters.ContainsKey('DataPath')) {
+    $setupExtra += @('-DataPath', $(if ($DataPath) { $DataPath } else { '""' }))
+}
+if ($PSBoundParameters.ContainsKey('RequireFreeGb')) {
+    $setupExtra += @('-RequireFreeGb', [string] $RequireFreeGb)
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -111,7 +138,7 @@ $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
-        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password | Out-Null
+        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password @setupExtra | Out-Null
 }
 finally {
     $ErrorActionPreference = $previousEap
