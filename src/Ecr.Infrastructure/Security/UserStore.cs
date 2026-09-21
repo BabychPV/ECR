@@ -55,6 +55,29 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             select user.Id).AnyAsync(ct);
 
     /// <inheritdoc />
+    public async Task<int> CountActivePermissionHoldersAsync(
+        string permissionCode, int? exceptUserId, DateTime utcNow, CancellationToken ct)
+    {
+        var candidates = await (
+                from user in db.Users.AsNoTracking()
+                join assignment in db.RoleAssignments.AsNoTracking() on user.Id equals assignment.UserId
+                join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                join permission in db.RolePermissions.AsNoTracking() on role.Id equals permission.RoleId
+                where user.IsActive
+                      && role.IsActive
+                      && permission.PermissionCode == permissionCode
+                      && (exceptUserId == null || user.Id != exceptUserId)
+                      && (user.LockedUntil == null || user.LockedUntil <= utcNow)
+                select new { user.Id, Assignment = assignment })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Чинність підміни рахує домен (`IsEffectiveOn`), а не друга копія умови в SQL (`H-23a`).
+        var today = DateOnly.FromDateTime(utcNow);
+        return candidates.Where(c => c.Assignment.IsEffectiveOn(today)).Select(c => c.Id).Distinct().Count();
+    }
+
+    /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
         => db.Users.FirstOrDefaultAsync(u => u.WindowsSid == sid, ct);
 

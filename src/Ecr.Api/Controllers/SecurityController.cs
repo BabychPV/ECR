@@ -29,6 +29,8 @@ public sealed class SecurityController(
     Ecr.Application.Security.ReplaceUserRolesHandler replaceRoles,
     Ecr.Application.Security.SetUserEmailHandler setEmail,
     Ecr.Application.Security.GetAccessDiagnosticsHandler accessDiagnostics,
+    Ecr.Application.Security.ResetUserPasswordHandler resetPassword,
+    Ecr.Application.Security.SetUserLockHandler setLock,
     Ecr.Domain.Abstractions.IClock clock) : ControllerBase
 {
     /// <summary>
@@ -312,6 +314,56 @@ public sealed class SecurityController(
         return NoContent();
     }
 
+    /// <summary>Скидає пароль локального запису на разовий. Право <c>Security.ManageUsers</c> (BE-12).</summary>
+    /// <remarks>
+    /// Пароль задає адміністратор; у відповіді його немає. Далі — <c>MustChangePassword</c>,
+    /// сесії цілі обриваються. Власний запис і останній адміністратор — <c>409 ECR-SEC-0409</c>,
+    /// доменний запис — <c>422 ECR-USR-0422</c>, коротший за політику — <c>422 ECR-PWD-0422</c>.
+    /// </remarks>
+    [HttpPost("users/{id:int}/reset-password")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ResetPassword(
+        int id, [FromBody] ResetPasswordRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await resetPassword.HandleAsync(id, request.NewPassword, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
+    /// <summary>Блокує запис безстроково й обриває його сесії. Право <c>Security.ManageUsers</c> (BE-12).</summary>
+    /// <remarks>Себе й останнього адміністратора — <c>409 ECR-SEC-0409</c>; без причини — <c>422 ECR-USR-0422</c>.</remarks>
+    [HttpPost("users/{id:int}/lock")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> LockUser(int id, [FromBody] UserLockRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await setLock.HandleAsync(id, locked: true, request.Reason, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Знімає блокування — адміністративне чи після невдалих спроб. Право <c>Security.ManageUsers</c> (BE-12).
+    /// </summary>
+    [HttpPost("users/{id:int}/unlock")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UnlockUser(int id, [FromBody] UserLockRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await setLock.HandleAsync(id, locked: false, request.Reason, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
     /// <summary>
     /// Починає сеанс симуляції. Право <c>Security.Simulate</c>.
     /// </summary>
@@ -437,6 +489,14 @@ public sealed record StartSimulationRequest(int SubjectUserId, string Reason);
 /// <param name="CurrentPassword">Поточний пароль.</param>
 /// <param name="NewPassword">Новий пароль.</param>
 public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+/// <summary>Адміністративне скидання пароля (BE-12).</summary>
+/// <param name="NewPassword">Разовий пароль; власник змінить його при першому вході.</param>
+public sealed record ResetPasswordRequest(string NewPassword);
+
+/// <summary>Блокування або розблокування запису (BE-12).</summary>
+/// <param name="Reason">Причина; обов'язкова, до 400 символів, іде в журнал безпеки.</param>
+public sealed record UserLockRequest(string Reason);
 
 /// <summary>Запит на заміну набору ролей користувача.</summary>
 /// <param name="RoleCodes">Коди ролей; порожній набір прибирає всі.</param>

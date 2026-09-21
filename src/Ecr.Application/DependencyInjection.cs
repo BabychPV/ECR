@@ -51,6 +51,8 @@ public static class DependencyInjection
         services.AddScoped<Security.ListUserRolesHandler>();
         services.AddScoped<Security.ReplaceUserRolesHandler>();
         services.AddScoped<Security.SetUserEmailHandler>();
+        services.AddScoped<Security.ResetUserPasswordHandler>();
+        services.AddScoped<Security.SetUserLockHandler>();
         services.AddScoped<Security.GetAccessDiagnosticsHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
