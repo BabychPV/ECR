@@ -7,22 +7,28 @@ import type { JSX } from 'react';
 import type { CurrentUserDto } from '@/api/types';
 import { RouteGuard } from '@/app/RouteGuard';
 import { routes } from '@/app/routes';
-import type { CampaignProject, CampaignSummary } from '@/features/campaign/api';
+import type { CampaignProgress, CampaignProject, CampaignSummary, CampaignTotals } from '@/features/campaign/api';
 import { CampaignOverview } from '@/features/campaign/CampaignOverview';
 import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
+import { formatDate } from '@/shared/format';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { testTheme } from '@/test/render';
 
 /**
  * Огляд звітної кампанії (`BE-22`, екран `/admin/campaign`).
  *
- * ⛔ Три твердження, заради яких цей файл існує:
+ * ⛔ Твердження, заради яких цей файл існує:
  *   1. обрізаний стелею перелік НАЗВАНИЙ обрізаним («показано N із M») — мовчки
  *      показати 200 із 300 означає відповісти на «хто затримує кампанію»
  *      неправдою; і дзеркало — повна відповідь банера не має;
- *   2. відмова сервера не виглядає ні як порожня кампанія, ні як старий
+ *   2. підсумки й лічильники класів — з `totals` СЕРВЕРА, по всіх проєктах
+ *      періоду, а не сума обрізаного переліку;
+ *   3. «хто затримує» — за серверним `progress` (`Overdue`, `AtRisk`), а не за
+ *      клієнтським правилом; останній день подання — доба перед
+ *      `submissionDeadline`, у поясі ПРОЄКТУ;
+ *   4. відмова сервера не виглядає ні як порожня кампанія, ні як старий
  *      перелік із кешу (`L10`: помилка → очікування → дані);
- *   3. без права `Report.ViewCampaign` екрана немає і запит не йде.
+ *   5. без права `Report.ViewCampaign` екрана немає і запит не йде.
  */
 
 const Period = 202601;
@@ -37,68 +43,78 @@ const Refusal = {
   messageKey: 'err.ECR-SYS-0500.unexpected',
 };
 
-/** Проєкт, що вже дійшов до кінця: усе затверджено, зріз є. */
-function done(id: number, code: string): CampaignProject {
+/**
+ * Строк подання майданчика в UTC+5 — опівніч, з якої проєкт прострочений.
+ *
+ * ⚠ Навмисно біля півночі й зі зсувом на схід від будь-якого поясу, де
+ * запускаються тести (UTC у CI, Київ локально): той самий момент там — ще
+ * 15 червня ввечері, тож дата, порахована в поясі браузера, з'їхала б на
+ * 14 червня.
+ */
+const DeadlineAt = '2026-06-16T00:00:00+05:00';
+
+/** Останній день подання для `DeadlineAt` — доба перед ним, у поясі проєкту. */
+const LastDay = '2026-06-15';
+
+/** Проєкт заданого класу; лічильники узгоджені з класом. */
+function project(id: number, code: string, progress: CampaignProgress, deadline: string | null = DeadlineAt): CampaignProject {
+  const counts =
+    progress === 'Done'
+      ? { documents: 4, draft: 0, submitted: 0, approved: 4, rejected: 0, snapshots: 1 }
+      : { documents: 6, draft: 2, submitted: 1, approved: 1, rejected: 2, snapshots: 0 };
+
   return {
     projectId: id,
     projectCode: code,
     nameL10n: { values: { en: `Project ${code}` } },
-    documents: 4,
-    draft: 0,
-    submitted: 0,
-    approved: 4,
-    rejected: 0,
-    snapshots: 1,
-    progress: 'Done',
-    submissionDeadline: null,
+    ...counts,
+    progress,
+    submissionDeadline: deadline,
   };
 }
 
-/** Проєкт, що затримує кампанію: чернетки, подані, відхилені, зрізу немає. */
-function behind(id: number, code: string): CampaignProject {
+/** Підсумки, які рахує сервер: по ВСІХ проєктах періоду. */
+function totalsOf(all: readonly CampaignProject[]): CampaignTotals {
+  const sum = (pick: (p: CampaignProject) => number): number => all.reduce((acc, p) => acc + pick(p), 0);
+  const count = (progress: CampaignProgress): number => all.filter((p) => p.progress === progress).length;
+
   return {
-    projectId: id,
-    projectCode: code,
-    nameL10n: { values: { en: `Project ${code}` } },
-    documents: 6,
-    draft: 2,
-    submitted: 1,
-    approved: 1,
-    rejected: 2,
-    snapshots: 0,
-    progress: 'InProgress',
-    submissionDeadline: null,
+    projects: all.length,
+    documents: sum((p) => p.documents),
+    draft: sum((p) => p.draft),
+    submitted: sum((p) => p.submitted),
+    approved: sum((p) => p.approved),
+    rejected: sum((p) => p.rejected),
+    snapshots: sum((p) => p.snapshots),
+    done: count('Done'),
+    overdue: count('Overdue'),
+    atRisk: count('AtRisk'),
+    inProgress: count('InProgress'),
   };
 }
 
-function summaryOf(projects: CampaignProject[], total: number): CampaignSummary {
-  // Екран поки рахує підсумки сам (`campaignTotals`) і `totals` не читає —
-  // нулі тут лише задовольняють обов'язкове поле контракту.
+/**
+ * Відповідь сервера: `listed` — у переліку, `hidden` — за стелею.
+ *
+ * ⚠ `totals` і `totalProjects` рахуються по ОБОХ, як на сервері; саме тому за
+ * непорожнього `hidden` вони відрізняються від суми переліку.
+ */
+function summaryOf(listed: CampaignProject[], hidden: CampaignProject[] = []): CampaignSummary {
   return {
     periodKey: Period,
-    totalProjects: total,
-    projects,
-    totals: {
-      projects: 0,
-      documents: 0,
-      draft: 0,
-      submitted: 0,
-      approved: 0,
-      rejected: 0,
-      snapshots: 0,
-      done: 0,
-      overdue: 0,
-      atRisk: 0,
-      inProgress: 0,
-    },
+    totalProjects: listed.length + hidden.length,
+    projects: listed,
+    totals: totalsOf([...listed, ...hidden]),
   };
 }
 
-/** Перелік потрібної довжини: кожен другий проєкт затримує кампанію. */
-function manyProjects(count: number): CampaignProject[] {
-  return Array.from({ length: count }, (_, i) =>
-    i % 2 === 0 ? behind(i + 1, `P${String(i + 1)}`) : done(i + 1, `P${String(i + 1)}`),
-  );
+/** Перелік потрібної довжини: кожен другий проєкт прострочений. */
+function manyProjects(count: number, from = 1): CampaignProject[] {
+  return Array.from({ length: count }, (_, i) => {
+    const id = from + i;
+
+    return project(id, `P${String(id)}`, i % 2 === 0 ? 'Overdue' : 'Done');
+  });
 }
 
 function json(body: unknown, status = 200): Response {
@@ -166,13 +182,33 @@ function laggingCodes(): string[] {
   );
 }
 
+/** Рядок таблиці за кодом проєкту. */
+function rowOf(code: string): Element {
+  const row = [...document.querySelectorAll('tbody tr[data-row-key]')].find(
+    (candidate) => candidate.querySelector('td')?.textContent === code,
+  );
+
+  if (row === undefined) throw new Error(`рядка ${code} немає`);
+
+  return row;
+}
+
+/** Число показника смуги; чекає, доки смуга з'явиться. */
+async function stat(id: string): Promise<string | null | undefined> {
+  return waitFor(() => {
+    const node = document.querySelector(`[data-stat="${id}"] [data-stat-value]`);
+    expect(node).not.toBeNull();
+    return node?.textContent;
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('огляд кампанії: усічення', () => {
-  it('сервер віддав 200 із 300 — екран каже «показано 200 із 300»', async () => {
-    mockServer(summaryOf(manyProjects(200), 300));
+  it('сервер віддав 200 із 300 — екран каже «показано 200 із 300» і що підсумки повні', async () => {
+    mockServer(summaryOf(manyProjects(200), manyProjects(100, 201)));
     show(<CampaignOverview periodKey={Period} />);
 
     const banner = await screen.findByTestId('campaign-truncated');
@@ -180,10 +216,13 @@ describe('огляд кампанії: усічення', () => {
     expect(banner.textContent).toContain('campaign.truncatedTitle');
     expect(banner.textContent).toContain('200');
     expect(banner.textContent).toContain('300');
+    // Обрізано лише перелік: підказка — про повні підсумки, не «лише показані».
+    expect(banner.textContent).toContain('campaign.truncatedListHint');
+    expect(banner.textContent).not.toContain('campaign.truncatedHint');
   });
 
   it('дзеркало: сервер віддав усе — банера усічення немає', async () => {
-    mockServer(summaryOf([behind(1, 'P1'), done(2, 'P2')], 2));
+    mockServer(summaryOf([project(1, 'P1', 'Overdue'), project(2, 'P2', 'Done')]));
     show(<CampaignOverview periodKey={Period} />);
 
     await waitFor(() => expect(laggingCodes()).toEqual(['P1']));
@@ -192,30 +231,107 @@ describe('огляд кампанії: усічення', () => {
   });
 });
 
-describe('огляд кампанії: хто затримує', () => {
-  it('у переліку лише ті, хто не дійшов до кінця; код — рядком, без роздільників', async () => {
-    const notStarted: CampaignProject = { ...behind(3, 'P-03'), documents: 0, draft: 0, submitted: 0, approved: 0, rejected: 0 };
-    const approvedNoSnapshot: CampaignProject = { ...done(4, 'P-04'), snapshots: 0 };
+describe('огляд кампанії: підсумки з сервера', () => {
+  /*
+   * ⛔ Перелік обрізано: у ньому 2 проєкти з 6. Суми переліку (approved 1+4=5,
+   * overdue 1) відрізняються від `totals` сервера (approved 15, overdue 2), тож
+   * екран, що складає підсумки сам, показав би інші числа.
+   */
+  const listed = [project(1, 'P1', 'Overdue'), project(2, 'P2', 'Done')];
+  const hidden = [
+    project(3, 'P3', 'Done'),
+    project(4, 'P4', 'Done'),
+    project(5, 'P5', 'AtRisk'),
+    project(6, 'P6', 'Overdue'),
+  ];
 
-    mockServer(summaryOf([done(1, 'P-01'), behind(2, '10000'), notStarted, approvedNoSnapshot], 4));
+  it('лічильники станів документів — з totals, а не сума обрізаного переліку', async () => {
+    mockServer(summaryOf(listed, hidden));
     show(<CampaignOverview periodKey={Period} />);
 
-    await waitFor(() => expect(laggingCodes()).toEqual(['10000', 'P-03', 'P-04']));
+    // 3 × Done по 4 затверджених + 3 × (Overdue/AtRisk) по 1 = 15; сума
+    // переліку дала б 5.
+    expect(await stat('approved')).toBe('15');
+    expect(await stat('draft')).toBe('6');
+    expect(await stat('rejected')).toBe('6');
+    expect(document.querySelector('[data-stat="rejected"]')?.getAttribute('data-stat-tone')).toBe('danger');
   });
 
-  it('лічильники станів складено по ВСІХ проєктах, включно з тими, що вже завершили', async () => {
-    mockServer(summaryOf([done(1, 'P1'), behind(2, 'P2'), behind(3, 'P3')], 3));
+  it('лічильники класів — з totals: прострочені, під загрозою, в роботі, завершені', async () => {
+    mockServer(summaryOf(listed, hidden));
     show(<CampaignOverview periodKey={Period} />);
 
-    const approved = await waitFor(() => {
-      const node = document.querySelector('[data-stat="approved"] [data-stat-value]');
-      expect(node).not.toBeNull();
-      return node;
-    });
+    expect(await stat('overdue')).toBe('2');
+    expect(await stat('atRisk')).toBe('1');
+    expect(await stat('inProgress')).toBe('0');
+    expect(await stat('done')).toBe('3');
+    expect(document.querySelector('[data-stat="overdue"]')?.getAttribute('data-stat-tone')).toBe('danger');
+    expect(document.querySelector('[data-stat="atRisk"]')?.getAttribute('data-stat-tone')).toBe('warning');
+  });
+});
 
-    // 4 від завершеного + по 1 від кожного з двох відстаючих.
-    expect(approved?.textContent).toBe('6');
-    expect(document.querySelector('[data-stat="rejected"]')?.getAttribute('data-stat-tone')).toBe('danger');
+describe('огляд кампанії: хто затримує', () => {
+  it('у переліку лише Overdue і AtRisk, прострочені вгорі; код — рядком, без роздільників', async () => {
+    mockServer(
+      summaryOf([
+        project(1, 'P-01', 'Done'),
+        project(2, 'P-02', 'InProgress'),
+        project(3, 'P-03', 'AtRisk'),
+        project(4, '10000', 'Overdue'),
+        project(5, 'P-05', 'Overdue'),
+      ]),
+    );
+    show(<CampaignOverview periodKey={Period} />);
+
+    await waitFor(() => expect(laggingCodes()).toEqual(['10000', 'P-05', 'P-03']));
+
+    expect(rowOf('10000').querySelector('[data-campaign-progress]')?.getAttribute('data-campaign-progress')).toBe('Overdue');
+    expect(rowOf('10000').querySelector('[data-campaign-progress]')?.getAttribute('data-status-tone')).toBe('danger');
+    expect(rowOf('P-03').querySelector('[data-campaign-progress]')?.getAttribute('data-campaign-progress')).toBe('AtRisk');
+    expect(rowOf('P-03').querySelector('[data-campaign-progress]')?.getAttribute('data-status-tone')).toBe('warning');
+  });
+
+  it('клас рахує сервер: InProgress із незатвердженими документами без зрізу — не затримує', async () => {
+    // Колишнє клієнтське правило («затверджено не все або зрізу немає») взяло
+    // б цей проєкт у перелік; серверне — ні, бо строк ще далеко.
+    mockServer(summaryOf([project(1, 'P1', 'InProgress'), project(2, 'P2', 'Done')]));
+    show(<CampaignOverview periodKey={Period} />);
+
+    expect(await screen.findByText('⟦campaign.nobodyLagging⟧')).toBeTruthy();
+    expect(laggingCodes()).toEqual([]);
+  });
+
+  it('дзеркало: усі Done — «ніхто не затримує»', async () => {
+    mockServer(summaryOf([project(1, 'P1', 'Done'), project(2, 'P2', 'Done')]));
+    show(<CampaignOverview periodKey={Period} />);
+
+    expect(await screen.findByText('⟦campaign.nobodyLagging⟧')).toBeTruthy();
+    expect(laggingCodes()).toEqual([]);
+    expect(await stat('done')).toBe('2');
+  });
+
+  it('останній день подання — доба перед строком, у поясі проєкту, а не браузера', async () => {
+    mockServer(summaryOf([project(1, 'P1', 'Overdue', DeadlineAt)]));
+    show(<CampaignOverview periodKey={Period} />);
+
+    await waitFor(() => expect(laggingCodes()).toEqual(['P1']));
+
+    const day = rowOf('P1').querySelector('[data-last-day]');
+
+    expect(day?.getAttribute('data-last-day')).toBe(LastDay);
+    expect(day?.textContent).toBe(formatDate(LastDay));
+  });
+
+  it('строк не пораховано (null) — «строк не визначено», а не вигадана дата', async () => {
+    mockServer(summaryOf([project(1, 'P1', 'AtRisk', null)]));
+    show(<CampaignOverview periodKey={Period} />);
+
+    await waitFor(() => expect(laggingCodes()).toEqual(['P1']));
+
+    const day = rowOf('P1').querySelector('[data-last-day]');
+
+    expect(day?.getAttribute('data-last-day')).toBe('');
+    expect(day?.textContent).toBe('⟦campaign.deadlineUnknown⟧');
   });
 });
 
@@ -233,7 +349,7 @@ describe('огляд кампанії: L10', () => {
 
   it('відмова при повторному запиті не показує старий перелік із кешу', async () => {
     mockServer('refuse');
-    show(<CampaignOverview periodKey={Period} />, clientWith(summaryOf([behind(1, 'STALE-1')], 1)));
+    show(<CampaignOverview periodKey={Period} />, clientWith(summaryOf([project(1, 'STALE-1', 'Overdue')])));
 
     const alert = await screen.findByRole('alert');
 
@@ -243,7 +359,7 @@ describe('огляд кампанії: L10', () => {
   });
 
   it('кампанія без проєктів — пояснення, а не таблиця з нулями', async () => {
-    mockServer(summaryOf([], 0));
+    mockServer(summaryOf([]));
     show(<CampaignOverview periodKey={Period} />);
 
     expect(await screen.findByText('⟦campaign.emptyTitle⟧')).toBeTruthy();
@@ -279,7 +395,7 @@ describe('огляд кампанії: право', () => {
   }
 
   it('без Report.ViewCampaign — відмова з назвою права, і запит огляду не йде', async () => {
-    const server = mockServer(summaryOf([behind(1, 'P1')], 1), me([]));
+    const server = mockServer(summaryOf([project(1, 'P1', 'Overdue')]), me([]));
     showGuarded([]);
 
     const denial = await screen.findByRole('alert');
@@ -290,7 +406,7 @@ describe('огляд кампанії: право', () => {
   });
 
   it('з правом — огляд відкривається', async () => {
-    const server = mockServer(summaryOf([behind(1, 'P1')], 1), me(['Report.ViewCampaign']));
+    const server = mockServer(summaryOf([project(1, 'P1', 'Overdue')]), me(['Report.ViewCampaign']));
     showGuarded(['Report.ViewCampaign']);
 
     await waitFor(() => expect(laggingCodes()).toEqual(['P1']));

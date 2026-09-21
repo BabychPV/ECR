@@ -355,7 +355,10 @@ export const DocumentTableStatusFixture = [
  * ⛔ `totalProjects` більший за довжину переліку навмисно: інакше банер
  * усічення не малюється, і гейт сканував би екран без його головного
  * попередження. Рядки різні: один проєкт завершений (у перелік відстаючих не
- * потрапляє), один із відхиленими (тон проблеми у смузі), один не починав.
+ * потрапляє), один прострочений із відхиленими (бейдж `danger`, тон проблеми у
+ * смузі), один під загрозою без пораханого строку («строк не визначено»).
+ * `totals` — по всіх п'яти проєктах, як їх рахує сервер: два невидимі за
+ * стелею завершені.
  */
 export const CampaignSummaryFixture = {
   periodKey: 202601,
@@ -371,6 +374,8 @@ export const CampaignSummaryFixture = {
       approved: 4,
       rejected: 0,
       snapshots: 1,
+      progress: 'Done',
+      submissionDeadline: '2026-02-16T00:00:00+05:00',
     },
     {
       projectId: 2,
@@ -382,6 +387,8 @@ export const CampaignSummaryFixture = {
       approved: 1,
       rejected: 1,
       snapshots: 0,
+      progress: 'Overdue',
+      submissionDeadline: '2026-02-16T00:00:00+05:00',
     },
     {
       projectId: 3,
@@ -393,8 +400,23 @@ export const CampaignSummaryFixture = {
       approved: 0,
       rejected: 0,
       snapshots: 0,
+      progress: 'AtRisk',
+      submissionDeadline: null,
     },
   ],
+  totals: {
+    projects: 5,
+    documents: 17,
+    draft: 1,
+    submitted: 2,
+    approved: 13,
+    rejected: 1,
+    snapshots: 3,
+    done: 3,
+    overdue: 1,
+    atRisk: 1,
+    inProgress: 0,
+  },
 };
 
 /**

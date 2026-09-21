@@ -1,19 +1,21 @@
 import type { JSX } from 'react';
-import { Stack, Text, Title } from '@mantine/core';
+import { Badge, Stack, Text, Title } from '@mantine/core';
 import {
   isCampaignTruncated,
   useCampaignSummary,
+  type CampaignProgress,
   type CampaignProject,
   type CampaignSummary,
 } from '@/features/campaign/api';
-import { campaignTotals, isLagging } from '@/features/campaign/campaignView';
+import { holdingUp, holdingUpRank, lastSubmissionDay } from '@/features/campaign/campaignView';
+import { formatDate } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { StatStrip } from '@/shared/ui/StatStrip';
-import { statusKey } from '@/shared/ui/StatusBadge';
+import { statusKey, toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 
 /** За який період зводити кампанію; `null` — період не обрано. */
 export interface CampaignOverviewProps {
@@ -28,6 +30,11 @@ export interface CampaignOverviewProps {
  * доступ дає окреме право `Report.ViewCampaign`, і без чужих проєктів питання
  * «хто затримує кампанію» не має відповіді. Фільтра проєктів тут немає й не
  * повинно бути.
+ *
+ * ⛔ Підсумки й класифікацію рахує СЕРВЕР (`totals`, `progress`). Клієнт їх не
+ * складає і не виводить: перелік обрізано стелею, і сума по ньому брехала б
+ * саме тоді, коли проєктів більше за стелю; а правило «хто затримує» залежить
+ * від строку подання в поясі проєкту, якого клієнт не знає.
  *
  * ⛔ Правило `L10`: помилка → очікування → дані, саме в такому порядку
  * (`AsyncBoundary`). Відмова сервера не малює ні нульових лічильників, ні
@@ -58,9 +65,8 @@ export function CampaignOverview({ periodKey }: CampaignOverviewProps): JSX.Elem
 
 /** Зміст огляду, коли відповідь є. */
 function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.Element {
-  const shown = summary.projects.length;
-  const totals = campaignTotals(summary.projects);
-  const lagging = summary.projects.filter(isLagging);
+  const { totals } = summary;
+  const lagging = holdingUp(summary.projects);
 
   return (
     <Stack gap="lg">
@@ -69,13 +75,16 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
         (`GetCampaignSummaryHandler.MaxProjects`), і відстаючий може бути саме в
         тій частині, якої не видно. Мовчки показати 200 рядків із 300 означало б
         відповісти на «хто затримує кампанію» неправдою.
+
+        ⚠ Обрізано ЛИШЕ перелік: підсумки нижче — з `totals`, по всіх проєктах
+        періоду, і підказка банера каже саме це, а не «підсумки неповні».
       */}
       {isCampaignTruncated(summary) && (
         <Banner
           tone="warning"
           testId="campaign-truncated"
-          title={t('campaign.truncatedTitle', { shown, total: summary.totalProjects })}
-          text={t('campaign.truncatedHint')}
+          title={t('campaign.truncatedTitle', { shown: summary.projects.length, total: summary.totalProjects })}
+          text={t('campaign.truncatedListHint', { total: totals.projects })}
         />
       )}
 
@@ -113,19 +122,93 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
       <Stack gap="xs">
         <Title order={4}>{t('campaign.laggingTitle')}</Title>
 
-        <Text size="sm" c="dimmed" data-campaign-lagging-count="">
-          {t('campaign.laggingCount', { lagging: lagging.length, shown })}
-        </Text>
+        {/*
+          ⚠ Лічильники класів — з `totals` сервера, по всіх проєктах періоду.
+          Колір — лише у тих, що затримують, і лише коли вони є (`L3`).
+        */}
+        <StatStrip
+          label={t('campaign.laggingTitle')}
+          items={[
+            { id: 'overdue', label: progressLabel('Overdue'), value: totals.overdue, tone: 'danger', filter: false },
+            { id: 'atRisk', label: progressLabel('AtRisk'), value: totals.atRisk, tone: 'warning', filter: false },
+            { id: 'inProgress', label: progressLabel('InProgress'), value: totals.inProgress, filter: false },
+            { id: 'done', label: progressLabel('Done'), value: totals.done, filter: false },
+          ]}
+        />
 
         <DataTable<CampaignProject>
           columns={laggingColumns()}
           rows={lagging}
           rowKey={(project) => String(project.projectId)}
           emptyTitle={t('campaign.nobodyLagging')}
-          emptyHint={t('campaign.nobodyLaggingHint')}
+          emptyHint={t('campaign.nobodyLaggingServerHint')}
         />
       </Stack>
     </Stack>
+  );
+}
+
+/**
+ * Підпис класу кампанії.
+ *
+ * ⚠ Ключі — ЛІТЕРАЛАМИ, а не шаблоном `campaign.progress.${progress}`: сторож
+ * каталогу (`Кожен_рядок_якого_просить_клієнт_є_в_каталозі`) бачить лише
+ * літерал, і складений ключ пройшов би повз нього.
+ */
+function progressLabel(progress: CampaignProgress): string {
+  switch (progress) {
+    case 'Overdue':
+      return t('campaign.progress.Overdue');
+    case 'AtRisk':
+      return t('campaign.progress.AtRisk');
+    case 'InProgress':
+      return t('campaign.progress.InProgress');
+    case 'Done':
+      return t('campaign.progress.Done');
+  }
+}
+
+/**
+ * Тон класу.
+ *
+ * ⚠ Різновиду `campaign` у `StatusBadge` немає, тому бейдж локальний, але
+ * кольори — з тієї самої таблиці токенів (`toneFills`), а не власні. Тон лише
+ * у тих, що затримують: прострочений — `danger`, під загрозою — `warning`.
+ */
+const ProgressTone: Readonly<Record<CampaignProgress, StatusTone>> = {
+  Overdue: 'danger',
+  AtRisk: 'warning',
+  InProgress: 'neutral',
+  Done: 'neutral',
+};
+
+function ProgressBadge({ progress }: { readonly progress: CampaignProgress }): JSX.Element {
+  const tone = ProgressTone[progress];
+  const fill = toneFills[tone];
+
+  return (
+    <Badge
+      size="sm"
+      miw="fit-content"
+      variant="default"
+      bg={fill.bg}
+      c={fill.text}
+      data-campaign-progress={progress}
+      data-status-tone={tone}
+    >
+      {progressLabel(progress)}
+    </Badge>
+  );
+}
+
+/** Останній день подання — датою набору, або «строк не визначено». */
+function LastDay({ project }: { readonly project: CampaignProject }): JSX.Element {
+  const day = lastSubmissionDay(project.submissionDeadline);
+
+  return (
+    <Text span size="sm" data-last-day={day ?? ''}>
+      {day === null ? t('campaign.deadlineUnknown') : formatDate(day)}
+    </Text>
   );
 }
 
@@ -136,8 +219,9 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
  * `10000` на екрані `10,000` був би кодом, якого в системі немає. Лічильники —
  * величини, тому `num`.
  *
- * ⚠ Затверджених окремої колонки немає: це `documents − draft − submitted −
- * rejected` (агрегат `BE-09`), а питання екрана — що ще НЕ дійшло до кінця.
+ * ⚠ Межа `L5` — сім колонок. Клас і останній день подання — відповідь на
+ * питання екрана, тому вони витіснили «чернетки» й «подані»: їхні суми є в
+ * смузі підсумків, а причину затримки називає клас.
  *
  * ⚠ Функція, а не константа модуля: підписи беруться з каталогу, який доїжджає
  * після завантаження модуля.
@@ -156,9 +240,19 @@ function laggingColumns(): readonly DataTableColumn<CampaignProject>[] {
       sortValue: (project) => localized(project.nameL10n),
       render: (project) => localized(project.nameL10n),
     },
+    {
+      key: 'progress',
+      label: t('campaign.progressColumn'),
+      sortValue: (project) => holdingUpRank(project.progress),
+      render: (project) => <ProgressBadge progress={project.progress} />,
+    },
+    {
+      key: 'lastDay',
+      label: t('campaign.lastSubmissionDay'),
+      sortValue: (project) => lastSubmissionDay(project.submissionDeadline),
+      render: (project) => <LastDay project={project} />,
+    },
     { key: 'documents', label: t('campaign.documents'), num: true },
-    { key: 'draft', label: t(statusKey('sheet', 'Draft')), num: true },
-    { key: 'submitted', label: t(statusKey('sheet', 'Submitted')), num: true },
     { key: 'rejected', label: t(statusKey('sheet', 'Rejected')), num: true },
     { key: 'snapshots', label: t('campaign.snapshots'), num: true },
   ];
