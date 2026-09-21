@@ -46,6 +46,34 @@ const StatusShade = { light: 6, dark: 3 } as const;
 
 type Scheme = keyof typeof surfaces;
 
+/** Статусні кольори теми, чий `variant="light"`/`"subtle"` фарбує текст. */
+const StatusColors = ['statusError', 'statusWarning', 'statusSuccess'] as const;
+
+/**
+ * Текст `variant="light"`/`"subtle"` статусних кольорів — темна схема.
+ *
+ * ⛔ Mantine бере цей текст за індексом `max(primaryShade.dark − 5, 0)`
+ * (`getCSSColorVariables` у `@mantine/core`). За `primaryShade.dark = 5` це
+ * `[0]` — `#fff5f5`/`#fff4e6`/`#ebfbee`, тобто майже білий: кнопка
+ * `color="statusError" variant="subtle"` у темній темі читалася як звичайний
+ * текст, а не як помилка. Контраст при цьому був високий (9–17), тому жоден
+ * поріг AA дефекту не бачив — ламався не контраст, а сам статусний відтінок.
+ *
+ * ⚠ Лише темна схема: у світлій Mantine бере `primaryShade.light` = 6, тобто
+ * рівно `StatusShade.light` — перевизначати нічого.
+ */
+function statusLightColor(theme: MantineTheme, scheme: Scheme): Record<string, string> {
+  if (scheme !== 'dark') return {};
+
+  const out: Record<string, string> = {};
+  for (const name of StatusColors) {
+    const shade = theme.colors[name]?.[StatusShade.dark];
+    if (shade !== undefined) out[`--mantine-color-${name}-light-color`] = shade;
+  }
+
+  return out;
+}
+
 /** Змінні однієї схеми. */
 function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, string> {
   const s = surfaces[scheme];
@@ -76,6 +104,9 @@ function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, st
      * `--ecr-border`. Числа й межа цієї правки — у коментарі до `surfaces`.
      */
     '--mantine-color-default-border': s.borderStrong,
+
+    // Текст `light`/`subtle` статусних кольорів — причина в `statusLightColor`.
+    ...statusLightColor(theme, scheme),
 
     // Поверхні: чотири рівні глибини.
     '--ecr-ground': s.ground,

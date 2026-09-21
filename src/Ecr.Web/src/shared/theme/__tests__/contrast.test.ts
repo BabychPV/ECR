@@ -1,8 +1,19 @@
 ﻿import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from '@mantine/core';
 import { describe, it, expect } from 'vitest';
-import { AA, contrast } from '../contrast';
-import { brand, cellState, statusError, statusSuccess, statusWarning, themeSurface } from '../theme';
+import { AA, contrast, flatten } from '../contrast';
+import { cssVariablesResolver } from '../cssVariables';
+import {
+  brand,
+  cellState,
+  statusError,
+  statusSuccess,
+  statusWarning,
+  surfaces,
+  theme,
+  themeSurface,
+} from '../theme';
 
 // ⚠ Шлях від кореня проєкту, а не від import.meta.url: під jsdom
 // він не має схеми file:, і fileURLToPath кидає виняток.
@@ -417,6 +428,111 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 5);
     expect(contrast('#777777', '#ffffff')).toBeCloseTo(4.48, 2);
     expect(contrast('#ffffff', '#ffffff')).toBeCloseTo(1, 5);
+  });
+});
+
+/**
+ * Текст `variant="subtle"`/`"light"` статусних кольорів — саме статусний, і
+ * читається на кожній поверхні сторінки.
+ *
+ * ⛔ Дефект, якого не бачив жоден поріг: у темній схемі Mantine бере текст
+ * `--mantine-color-<status>-light-color` за індексом
+ * `max(primaryShade.dark − 5, 0)` = `[0]` — майже білий (`#fff5f5` для помилки).
+ * Контраст такого тексту 9–17:1, тобто AA він проходить із запасом; зламано не
+ * читабельність, а сам зміст — кнопка «Видалити» виглядала як звичайний текст.
+ * Тому поруч із порогом стоїть вимога відтінку: текст мусить дорівнювати
+ * статусному тексту схеми (`--ecr-danger`/`-warning`/`-success`) і НЕ бути `[0]`.
+ *
+ * ⚠ Змінні беруться не з кортежу, а з того, що побачить браузер: вивід
+ * дефолтного резолвера Mantine, поверх нього — наш `cssVariablesResolver`
+ * (той самий порядок, що `getMergedVariables` у `@mantine/core`), з
+ * розгорнутими `var(...)`. Інакше тест перевіряв би індекс, який ми ВВАЖАЄМО
+ * взятим, а не той, що береться насправді.
+ */
+describe('статусні кольори: текст «subtle»/«light» — статусного відтінку', () => {
+  type Scheme = 'light' | 'dark';
+
+  /** Змінні схеми так, як їх злиє Mantine: дефолт, поверх — наш резолвер. */
+  function mergedVars(scheme: Scheme): Record<string, string> {
+    const full = mergeMantineTheme(DEFAULT_THEME, theme);
+    const base = defaultCssVariablesResolver(full);
+    const ours = cssVariablesResolver(full);
+
+    return { ...base.variables, ...base[scheme], ...ours.variables, ...ours[scheme] };
+  }
+
+  /** Значення змінної з розгорнутими `var(--x)`; відсутня — падіння. */
+  function deref(vars: Record<string, string>, name: string): string {
+    let value = vars[name];
+
+    for (let depth = 0; depth < 10 && value !== undefined; depth++) {
+      const ref = /^var\((--[\w-]+)\)$/.exec(value.trim());
+      if (ref === null) return value.trim().toLowerCase();
+      value = vars[ref[1]!];
+    }
+
+    throw new Error(`змінна «${name}» не розгортається в колір`);
+  }
+
+  const statuses = [
+    ['statusError', statusError, '--ecr-danger'],
+    ['statusWarning', statusWarning, '--ecr-warning'],
+    ['statusSuccess', statusSuccess, '--ecr-success'],
+  ] as const;
+
+  const cases = statuses.flatMap(([name, tuple, ecr]) =>
+    (['light', 'dark'] as const).map((scheme) => [name, scheme, tuple, ecr] as const),
+  );
+
+  /** Поверхні-«сторінки», на яких стоїть кнопка. */
+  const pages = ['ground', 'surface', 'sunken', 'raised'] as const;
+
+  it.each(cases)('«%s», схема «%s»: текст — статусний відтінок, не `[0]`', (name, scheme, tuple, ecr) => {
+    const vars = mergedVars(scheme);
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    expect(text, `${scheme}: ${name} light-color`).not.toBe(tuple[0].toLowerCase());
+    expect(text, `${scheme}: ${name} light-color ≠ ${ecr}`).toBe(deref(vars, ecr));
+  });
+
+  it.each(cases)('«%s», схема «%s»: «subtle» читається на кожній поверхні', (name, scheme) => {
+    const vars = mergedVars(scheme);
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    // `subtle` — прозоре тло, тобто текст лежить прямо на поверхні.
+    for (const page of pages) {
+      const bg = surfaces[scheme][page];
+
+      expect(contrast(text, bg), `${scheme}: ${name} на ${page}`).toBeGreaterThanOrEqual(AA.text);
+    }
+  });
+
+  /*
+   * ⚠ Композит `-light` (тло `variant="light"`) і `-light-hover` (тло наведення
+   * `subtle`) — лише темна схема. У світлій той самий композит на `sunken`
+   * (`#eef0f5`) дає помилці 4.11/3.99 і успіху 4.50/4.36 — це інший дефект
+   * (тло, а не текст; індекс тексту там правильний), і він названий у звіті
+   * PR, а не закритий тут мовчки.
+   */
+  it.each(statuses)('«%s», темна схема: «light»/hover-тло не зʼїдає текст', (name) => {
+    const vars = mergedVars('dark');
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    for (const page of pages) {
+      const bg = surfaces.dark[page];
+
+      for (const layer of ['light', 'light-hover'] as const) {
+        const tint = flatten(deref(vars, `--mantine-color-${name}-${layer}`), bg);
+
+        expect(contrast(text, tint), `dark: ${name} на ${layer} поверх ${page}`).toBeGreaterThanOrEqual(
+          AA.text,
+        );
+      }
+    }
+  });
+
+  it('лінійка: `deref` падає на відсутній змінній, а не повертає `undefined`', () => {
+    expect(() => deref({}, '--mantine-color-statusError-light-color')).toThrow(/не розгортається/);
   });
 });
 
