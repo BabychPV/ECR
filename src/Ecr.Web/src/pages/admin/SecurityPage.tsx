@@ -31,6 +31,7 @@ import type {
   UserView,
 } from '@/api/types';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
+import { UserAdminActions } from '@/features/security/UserAdminActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -574,6 +575,9 @@ export function SecurityPage(): JSX.Element {
                         user.id !== session.data?.userId && (
                           <StartSimulationButton userId={user.id} />
                         )}
+
+                      {/* Блокування й скидання пароля (`BE-12`); право і «не себе» — всередині. */}
+                      <UserAdminActions user={user} />
                     </Group>
                   </Table.Td>
                   <Table.Td>
