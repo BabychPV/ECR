@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, Modal, Text } from '@mantine/core';
 import { useBlocker, type BlockerFunction } from 'react-router-dom';
-import { AutosaveSettleMs, flushAutosaveAndSettle } from '@/features/grid/autosave';
-import { hasPending, pendingCount } from '@/features/grid/pendingStore';
 import { t } from '@/shared/i18n';
+import {
+  flushUnsaved,
+  hasUnsavedChanges,
+  UnsavedSettleMs,
+  unsavedCount,
+} from '@/shared/ui/unsavedSources';
 
 /**
  * Вихід із документа з незбереженими правками (`D14-12`, крок 3; `D15` `UI-00`).
@@ -28,8 +32,9 @@ import { t } from '@/shared/i18n';
  * рівня документа.
  *
  * ⚠ Компонент нічого не знає ні про сітку, ні про документ: рішення «є що
- * зберігати» ухвалює сховище (`hasPending()`), а «зберегти і дочекатися» —
- * `flushAutosaveAndSettle()`. Тому один екземпляр на весь застосунок (в
+ * зберігати» ухвалюють зареєстровані джерела (`unsavedSources.ts`;
+ * сітка реєструє себе в `features/grid/autosave.ts`), а «зберегти і
+ * дочекатися» — їхній `flush()`. Тому один екземпляр на весь застосунок (в
  * `AppLayout`) покриває будь-який маршрут, де щось редагується, і не змушує
  * кожну сторінку вигадувати власний вихід.
  */
@@ -45,18 +50,18 @@ interface UnsavedGuardProps {
 }
 
 export function UnsavedGuard({
-  settleTimeoutMs = AutosaveSettleMs,
+  settleTimeoutMs = UnsavedSettleMs,
 }: UnsavedGuardProps = {}): JSX.Element | null {
   /*
    * ⚠ `useCallback` із порожніми залежностями, а не вбудована стрілка:
    * `useBlocker` перереєстровує блокувальник у роутері на КОЖНУ зміну
    * ідентичності функції (див. його `useEffect` за `blockerFunction`). Свіжість
-   * даних від цього не страждає — `hasPending()` читає модульне сховище в
+   * даних від цього не страждає — `hasUnsavedChanges()` читає модульне сховище в
    * момент виклику, а не в момент оголошення.
    */
   const shouldBlock = useCallback<BlockerFunction>(
     ({ currentLocation, nextLocation }) =>
-      hasPending() && currentLocation.pathname !== nextLocation.pathname,
+      hasUnsavedChanges() && currentLocation.pathname !== nextLocation.pathname,
     [],
   );
 
@@ -98,7 +103,7 @@ export function UnsavedGuard({
     if (flushing.current) return;
     flushing.current = true;
 
-    void flushAutosaveAndSettle(settleTimeoutMs).then((saved) => {
+    void flushUnsaved(settleTimeoutMs).then((saved) => {
       flushing.current = false;
 
       // Користувач міг зняти блокування сам (`reset()`), доки запит летів.
@@ -125,13 +130,13 @@ export function UnsavedGuard({
   return (
     <Modal opened onClose={stay} title={t('unsaved.title')}>
       {/*
-       * ⛔ `pendingCount()`, а не хук `usePendingCount()`. Хук підписав би на
+       * ⛔ `unsavedCount()`, а не хук `usePendingCount()`. Хук підписав би на
        * сховище САМ КАРКАС застосунку — а сховище змінюється на кожне
        * натискання клавіші в сітці, тобто весь `AppLayout` перемальовувався б
        * при введенні числа в комірку. Тут потрібен знімок, і саме знімок:
        * доки діалог на екрані, ніхто нічого не редагує.
        */}
-      <Text size="sm">{t('unsaved.body', { count: pendingCount() })}</Text>
+      <Text size="sm">{t('unsaved.body', { count: unsavedCount() })}</Text>
 
       <Group justify="flex-end" mt="md">
         {/*

@@ -26,22 +26,26 @@ import type { PendingEdit } from '@/features/grid/useCellPatch';
  * ⛔ Третє твердження перевіряється не «сторінка відкрилася» — вона відкрилася б
  * і при безумовному блокуванні, бо порожнє сховище відстоюється миттєво і
  * блокувальник сам себе пропустив би. Перевіряється ФАКТ невтручання:
- * `flushAutosaveAndSettle` не було викликано жодного разу. Саме тому модуль
- * автозбереження тут обгорнутий лічильником, а не підмінений заглушкою —
+ * збереження (`flushUnsaved` реєстру) не було викликано жодного разу. Саме
+ * тому реєстр тут обгорнутий лічильником, а не підмінений заглушкою —
  * поведінка лишається справжньою, додається лише свідок.
+ *
+ * ⚠ Сітку сторож тепер бачить лише через реєстр (`unsavedSources.ts`), а
+ * джерело `grid` реєструється імпортом `@/features/grid/autosave` нижче. Свідок
+ * стоїть на реєстрі, бо саме його викликає сторож.
  */
 
 const settleCalls = vi.hoisted(() => ({ count: 0 }));
 
-vi.mock('@/features/grid/autosave', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/grid/autosave')>();
+vi.mock('@/shared/ui/unsavedSources', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/ui/unsavedSources')>();
 
   return {
     ...actual,
-    flushAutosaveAndSettle: async (timeoutMs?: number): Promise<boolean> => {
+    flushUnsaved: async (timeoutMs?: number): Promise<boolean> => {
       settleCalls.count += 1;
 
-      return await actual.flushAutosaveAndSettle(timeoutMs);
+      return await actual.flushUnsaved(timeoutMs);
     },
   };
 });
