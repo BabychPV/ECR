@@ -17,9 +17,9 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 42;
+    private const int ExpectedPermissions = 40;
 
-    private const int ExpectedDangerous = 11;
+    private const int ExpectedDangerous = 10;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -143,6 +143,46 @@ public sealed class SeedTests(SqlServerFixture sql)
         Assert.Equal(0, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Template.Migrate'"));
         Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.15")]
+    public async Task Seed_прибирає_зняті_права_EditScript_і_MarkSubmitted_разом_із_роздачами()
+    {
+        // Рішення людини 2026-09-21: обидва права нічого не відкривали.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.Permission
+            WHERE Code IN (N'Calculation.EditScript', N'Report.MarkSubmitted')
+            """));
+
+        // ⚠ Стара база: обидва права є, і роздані — `Report.MarkSubmitted` колись
+        // приходив погоджувачу шаблоном `Report.%`, EditScript — власній ролі вручну.
+        await ExecuteAsync("""
+            INSERT sec.Permission (Code, [Group], NameL10n, IsDangerous)
+            VALUES (N'Calculation.EditScript', N'Calculation', N'{"en":"Calculation.EditScript"}', 1),
+                   (N'Report.MarkSubmitted',   N'Report',      N'{"en":"Report.MarkSubmitted"}',   0);
+            INSERT sec.RolePermission (RoleId, PermissionCode)
+            SELECT r.Id, p.Code FROM sec.Role AS r
+            CROSS JOIN (VALUES (N'Calculation.EditScript'), (N'Report.MarkSubmitted')) AS p (Code)
+            WHERE r.Code IN (N'Approver', N'Viewer');
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        foreach (var code in (string[])["Calculation.EditScript", "Report.MarkSubmitted"])
+        {
+            Assert.Equal(0, await ScalarAsync(
+                $"SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'{code}'"));
+            Assert.Equal(0, await ScalarAsync(
+                $"SELECT COUNT(*) FROM sec.Permission WHERE Code = N'{code}'"));
+        }
+
+        Assert.Equal(40, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
     }
 
     [Fact]

@@ -40,6 +40,11 @@ GO
 -- Спершу роздачі (`FK_RolePerm_Perm` без каскаду), потім саме право.
 DELETE FROM sec.RolePermission WHERE PermissionCode = N'Template.Migrate';
 DELETE FROM sec.Permission     WHERE Code           = N'Template.Migrate';
+-- Рішення людини 2026-09-21 (сторож UncheckedPermissionTests): `Calculation.EditScript`
+-- — скриптів у системі немає; `Report.MarkSubmitted` — зріз стає поданим лише як
+-- наслідок подання аркуша, ручна позначка дала б позначити поданим неподане.
+DELETE FROM sec.RolePermission WHERE PermissionCode IN (N'Calculation.EditScript', N'Report.MarkSubmitted');
+DELETE FROM sec.Permission     WHERE Code           IN (N'Calculation.EditScript', N'Report.MarkSubmitted');
 GO
 
 -- Функціональні права
@@ -56,10 +61,10 @@ USING (VALUES
   (N'Period.Configure',         N'Period',      0), (N'Period.Reopen',        N'Period',      1),
   (N'Calculation.View',         N'Calculation', 0), (N'Calculation.EditFormula',  N'Calculation', 0),
   (N'Calculation.EditConstant', N'Calculation', 0), (N'Calculation.EditRule',     N'Calculation', 0),
-  (N'Calculation.EditScript',   N'Calculation', 1), (N'Calculation.Publish',      N'Calculation', 1),
+  (N'Calculation.Publish',      N'Calculation', 1),
   (N'Calculation.Recalculate',  N'Calculation', 0), (N'Calculation.ManageRequiredInputs', N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
-  (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
+  (N'Report.Export',            N'Report',      0),
   -- ⚠ НЕБЕЗПЕЧНЕ (1) навмисно, і не через ризик втратити дані. Причина в
   -- фільтрі нижче: `Approver` має шаблон `Report.%`, виданий тоді, коли всі
   -- права цієї родини були «дивитися, будувати, подавати, вивантажувати».

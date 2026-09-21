@@ -39,11 +39,7 @@ public sealed partial class UncheckedPermissionTests
     /// </remarks>
     private static readonly Dictionary<string, string> NotYetChecked = new(StringComparer.Ordinal)
     {
-        ["Registry.Publish"] = "у реєстрів немає дії «опублікувати»: жодного обробника чи ендпоінта.",
-        ["Document.Delete"] = "видалення документа немає: DocumentsController не має DELETE.",
-        ["Calculation.EditScript"] = "сценаріїв розрахунку немає; формули й правила йдуть під EditFormula/EditRule.",
-        ["Report.MarkSubmitted"] = "зріз позначається поданим побічно, поданням аркуша (рівень Submit); окремої дії немає.",
-    };
+        ["Registry.Publish"] = "BE-24 крок 2: викликача ще немає; рішення людини 2026-09-21 — право лишити.",    };
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
