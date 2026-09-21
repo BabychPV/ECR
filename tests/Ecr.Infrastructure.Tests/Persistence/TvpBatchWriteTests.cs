@@ -334,6 +334,9 @@ public sealed class TvpBatchWriteTests(SqlServerFixture sql)
     /// лінійці (<c>HttpLoadBenchmark.MergePlansAsync</c>): два різні способи
     /// рахувати те саме розійдуться до першої розбіжності, і тоді жодне з
     /// чисел не буде зіставним із §3.2 базової лінії.
+    ///
+    /// ⚠ Спершу відбір планів СВОЄЇ бази, і лише потім текст — чому, див.
+    /// <c>WritePathPlanCacheTests.PlanCountAsync</c>.
     /// </remarks>
     private async Task<int> PlanCountAsync(string pattern, CancellationToken ct)
     {
@@ -341,9 +344,16 @@ public sealed class TvpBatchWriteTests(SqlServerFixture sql)
         await connection.OpenAsync(ct);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT COUNT(*)
+            SET NOCOUNT ON;
+            DECLARE @own TABLE (plan_handle varbinary(64) PRIMARY KEY);
+            INSERT @own
+            SELECT cp.plan_handle
             FROM sys.dm_exec_cached_plans AS cp
-            CROSS APPLY sys.dm_exec_sql_text(cp.plan_handle) AS t
+            CROSS APPLY sys.dm_exec_plan_attributes(cp.plan_handle) AS a
+            WHERE a.attribute = 'dbid' AND CONVERT(int, a.value) = DB_ID();
+            SELECT COUNT(*)
+            FROM @own AS o
+            CROSS APPLY sys.dm_exec_sql_text(o.plan_handle) AS t
             WHERE t.text LIKE @pattern AND t.dbid = DB_ID();
             """;
         command.Parameters.Add("@pattern", System.Data.SqlDbType.NVarChar, 200).Value = pattern;
