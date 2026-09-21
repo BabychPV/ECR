@@ -6,6 +6,7 @@ import { normalizeDecimal } from '@/shared/format';
 import { language, t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
+import { problemText } from '@/shared/ui/problemText';
 import { getUnit, unitUsage, updateUnit, type UnitDetail, type UsageResponse } from './api';
 
 const UnitChanged = 'err.ECR-UOM-0409.unitChanged';
@@ -35,9 +36,21 @@ export function factorInUseOf(error: unknown): number | null {
   return Number.isFinite(total) ? total : 0;
 }
 
-/** `422 ECR-UOM-0422` на правці — множник не додатний; належить полю множника. */
-function isFactorRejected(error: unknown): boolean {
-  return error instanceof EcrApiError && error.problem.status === 422 && error.problem.errorCode === 'ECR-UOM-0422';
+/**
+ * Текст відмови, що належить полю множника; `null` — відмова не про нього.
+ *
+ * ⛔ Розрізнення — за `messageKey`, а не за `errorCode`: під `ECR-UOM-0422`
+ * живуть і причини, що до поля не стосуються (`incompatibleDimensions`,
+ * `explicitConversionMismatch`), і їм місце в `ErrorAlert`. `zeroFactor`
+ * кидає лише конверсія, не `PUT`, тож його тут немає.
+ *
+ * ⚠ Текст — сервера (`detail`, зібраний із каталогу мовою користувача), а не
+ * власний ключ: там уже є і код одиниці, і відхилене значення.
+ */
+function factorFailureOf(error: unknown): string | null {
+  if (messageKeyOf(error, 422) !== 'err.ECR-UOM-0422.factorMustBePositive') return null;
+  const shown = problemText(error);
+  return shown.detail ?? shown.title;
 }
 
 /**
@@ -172,8 +185,8 @@ function UnitEditForm({ unit, onDone }: { readonly unit: UnitDetail; readonly on
 
   const fresh = freshUnitVersionOf(save.error);
   const inUse = factorInUseOf(save.error);
-  const factorRejected = isFactorRejected(save.error);
-  const general = save.error !== null && fresh === null && inUse === null && !factorRejected ? save.error : null;
+  const factorFailure = factorFailureOf(save.error);
+  const general = save.error !== null && fresh === null && inUse === null && factorFailure === null ? save.error : null;
 
   const takeFresh = (version: string): void => {
     setRowVersion(version);
@@ -222,7 +235,7 @@ function UnitEditForm({ unit, onDone }: { readonly unit: UnitDetail; readonly on
         onChange={(event) => set('factor', event.currentTarget.value)}
         disabled={lock !== null}
         description={lock ?? t('units.factorHint')}
-        error={factorRejected ? t('units.factorMustBePositive') : undefined}
+        error={factorFailure ?? undefined}
         data-field="factor"
       />
 

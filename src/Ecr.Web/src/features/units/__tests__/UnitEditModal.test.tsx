@@ -29,7 +29,6 @@ const SeededStrings: Record<string, string> = {
   'units.factorLockedChecking': 'Checking where the unit is used...',
   'units.factorLockedUnknown': 'Could not check where the unit is used.',
   'units.factorLockedUsed': 'Referenced in {total} place(s): factor and offset are fixed.',
-  'units.factorMustBePositive': 'The factor must be greater than zero.',
   'units.reloadCurrent': 'Take the current version',
   'units.saved': 'Unit saved.',
   'err.ECR-UOM-0409.unitChanged': 'Someone else changed unit "{code}".',
@@ -344,10 +343,20 @@ describe('UnitEditModal: правка одиниці (BE-15 ч.2)', () => {
     expect(describedText(field(dialog, 'Factor to base'))).toContain('Referenced in 4 place(s)');
   });
 
-  it('422 ECR-UOM-0422 — під полем множника, не загальна помилка', async () => {
+  it('422 factorMustBePositive — текстом сервера під полем множника, не загальна помилка', async () => {
     mockApi({
       usage: { total: 0, items: [] },
-      puts: [() => problem(422, { errorCode: 'ECR-UOM-0422', messageKey: 'err.ECR-UOM-0422', code: 'lb' })],
+      puts: [
+        () =>
+          problem(422, {
+            title: 'Invalid unit conversion',
+            detail: 'The factor to the base unit of unit "lb" must be greater than zero, not 0.',
+            errorCode: 'ECR-UOM-0422',
+            messageKey: 'err.ECR-UOM-0422.factorMustBePositive',
+            code: 'lb',
+            factorToBase: '0',
+          }),
+      ],
     });
     const dialog = await openEdit();
 
@@ -359,9 +368,35 @@ describe('UnitEditModal: правка одиниці (BE-15 ч.2)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(describedText(field(dialog, 'Factor to base'))).toContain('The factor must be greater than zero.');
+      expect(describedText(field(dialog, 'Factor to base'))).toContain(
+        'The factor to the base unit of unit "lb" must be greater than zero, not 0.',
+      );
     });
     expect(within(dialog).queryByRole('alert')).toBeNull();
+  });
+
+  it('422 з іншою причиною (incompatibleDimensions) — ErrorAlert, а не під полем множника', async () => {
+    const detail = 'Units "lb" and "m" measure different things.';
+    mockApi({
+      usage: { total: 0, items: [] },
+      puts: [
+        () =>
+          problem(422, {
+            title: 'Invalid unit conversion',
+            detail,
+            errorCode: 'ECR-UOM-0422',
+            messageKey: 'err.ECR-UOM-0422.incompatibleDimensions',
+          }),
+      ],
+    });
+    const dialog = await openEdit();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert.textContent).toContain(detail);
+    expect(describedText(field(dialog, 'Factor to base'))).not.toContain(detail);
+    expect(field(dialog, 'Factor to base').getAttribute('aria-invalid')).not.toBe('true');
   });
 
   it('решта відмов — через ErrorAlert', async () => {
