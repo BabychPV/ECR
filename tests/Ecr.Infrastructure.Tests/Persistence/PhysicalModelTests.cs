@@ -85,14 +85,25 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         // ON ps_ByPeriodKey(PeriodKey) вона виставити не вміє. Якщо
         // 07-partition-tables.sql випаде з розгортання, архівація мовчки
         // перестане звільняти місце — без жодної помилки.
+        //
+        // ✎ 2026-09-21: до переліку додано три партиційовані таблиці `calc.*`.
+        // Причина конкретна: `calc.CalculationResult.Value` не можна змінити
+        // простим `ALTER COLUMN` (стовпець в `INCLUDE` індексу, помилка 5074),
+        // тож обидві міграції масштабу й precision знімають
+        // `IX_CalculationResult_Lookup` і ставлять його назад. `CREATE INDEX`
+        // без `ON` мовчки кладе індекс на `PRIMARY` — індекс лишається
+        // робочим, але НЕвирівняним, і партиційні операції по `calc.*`
+        // відпадають. Досі це перевіряли руками запитом після кожної міграції;
+        // тепер перевіряє тест.
         var misplaced = await QueryAsync("""
             SELECT SCHEMA_NAME(t.schema_id) + N'.' + t.name + N'.' + i.name + N' -> ' + ds.name
             FROM sys.indexes i
             JOIN sys.tables t ON t.object_id = i.object_id
             JOIN sys.data_spaces ds ON ds.data_space_id = i.data_space_id
             WHERE i.type IN (1, 2)
-              AND t.name IN (N'CellValue', N'TableRow', N'TableInstance')
-              AND SCHEMA_NAME(t.schema_id) = N'doc'
+              AND SCHEMA_NAME(t.schema_id) + N'.' + t.name COLLATE DATABASE_DEFAULT IN (
+                    N'doc.CellValue', N'doc.TableRow', N'doc.TableInstance',
+                    N'calc.CalculationResult', N'calc.CalculationInput', N'calc.CalculationStep')
               AND ds.type_desc <> N'PARTITION_SCHEME'
             """);
 

@@ -130,7 +130,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         Assert.Equal(1, row.RowNo);
         Assert.Equal("E_CO2", row.Cells["OutputCode"]);
 
-        // Число без хвостових нулів масштабу `decimal(28,16)`.
+        // Число без хвостових нулів масштабу `decimal(34,16)`.
         Assert.Equal("12.5", ((decimal)row.Cells["Value"]!).ToString(CultureInfo.InvariantCulture));
         Assert.Equal(1, first.NextCursor);
 
@@ -413,7 +413,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
                     (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
                 VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {run.Id}, {methodologyVersion.Id},
                         {document.PeriodKey.Value}, {document.DocumentId}, {rowKey}, {output},
-                        CAST({text} AS decimal(28,16)), {unit.Id})
+                        CAST({text} AS decimal(34,16)), {unit.Id})
                 """);
         }
 

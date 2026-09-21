@@ -50,14 +50,14 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
         { "rpt.ReportRow", "ValueNumeric", "decimal(28,16)" },
         { "ext.RawDataPoint", "ValueNumeric", "decimal(28,16)" },
         { "dic.RegistryValue", "ValueNumeric", "decimal(28,16)" },
-        { "calc.CalculationResult", "Value", "decimal(28,16)" },
-        { "calc.CalculationInput", "Value", "decimal(28,16)" },
-        { "calc.CalculationStep", "Value", "decimal(28,16)" },
-        { "calc.MethodologyConstant", "Value", "decimal(28,16)" },
-        { "calc.TestCase", "Tolerance", "decimal(28,16)" },
+        { "calc.CalculationResult", "Value", "decimal(34,16)" },
+        { "calc.CalculationInput", "Value", "decimal(34,16)" },
+        { "calc.CalculationStep", "Value", "decimal(34,16)" },
+        { "calc.MethodologyConstant", "Value", "decimal(34,16)" },
+        { "calc.TestCase", "Tolerance", "decimal(34,16)" },
         { "arc.CellValue", "ValueNumeric", "decimal(34,16)" },
-        { "arc.CalculationResult", "Value", "decimal(28,16)" },
-        { "arc.CalculationStep", "Value", "decimal(28,16)" },
+        { "arc.CalculationResult", "Value", "decimal(34,16)" },
+        { "arc.CalculationStep", "Value", "decimal(34,16)" },
     };
 
     [Theory]

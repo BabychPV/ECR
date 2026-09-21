@@ -50,7 +50,7 @@ public sealed class CalculationResultScaleTests
 
         // Літерал, а не складене з `EngineOutputScale` рядком: тоді твердження
         // рухалося б разом із константою й не тримало б нічого.
-        Assert.Equal("decimal(28,16)", property.GetColumnType());
+        Assert.Equal("decimal(34,16)", property.GetColumnType());
 
         // ⛔ Друга половина, без якої перша не доводить запису. Тип стовпця і
         // масштаб ПАРАМЕТРА — різні речі: EF бере масштаб із зіставлення типів,

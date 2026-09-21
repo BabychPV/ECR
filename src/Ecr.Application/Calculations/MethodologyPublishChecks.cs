@@ -405,7 +405,7 @@ public static class MethodologyPublishChecks
         }
 
         // ⛔ Оголошений вихід лягає в `calc.CalculationResult.Value
-        // decimal(28,16)` — колонка числова, іншої там немає. Текстовий
+        // decimal(34,16)` — колонка числова, іншої там немає. Текстовий
         // результат методології сьогодні нікуди подіти (див. `H-24b`, крок I.15),
         // і мовчазна спроба записати його дала б нуль у звіті.
         if (formula.ResultType == FormulaResultType.Text && outputCodes.Contains(formula.Code))
