@@ -1328,6 +1328,16 @@ USING (VALUES
     (N'health.database.partitionsAhead',  N'en', N'Partitions ahead', 1),
     (N'health.database.limitations',      N'en', N'Limitations in this mode', 1),
     (N'documents.emptyHint',             N'en', N'Documents appear once the period is open and a template version is published.', 1),
+    -- Фільтри переліку документів (BE-09b): стан — лише в межах періоду, «мої»
+    -- — створені або подані мною. `noMatch*` — порожньо ЧЕРЕЗ фільтри, а не
+    -- тому, що документів немає (`documents.empty*`).
+    (N'documents.stateAll',              N'en', N'All states', 1),
+    (N'documents.stateNeedsPeriod',      N'en', N'Choose a period first: a document''s state is defined only within a period.', 1),
+    (N'documents.filterMine',            N'en', N'Mine — created or submitted by me', 1),
+    (N'documents.lateEdits',             N'en', N'Late edits', 1),
+    (N'documents.noMatch',               N'en', N'No documents match the filters.', 1),
+    (N'documents.noMatchHint',           N'en', N'Change the state or turn off "Mine".', 1),
+    (N'documents.resetFilters',          N'en', N'Reset filters', 1),
     (N'document.noSheetsHint',           N'en', N'The period may not be open yet: sheet instances are created when it opens.', 1),
     (N'templates.empty',                 N'en', N'No templates yet', 1),
     (N'templates.emptyHint',             N'en', N'A template describes the sheets and columns operators fill in. Create one to start.', 1),
