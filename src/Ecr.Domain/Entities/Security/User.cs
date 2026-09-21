@@ -224,6 +224,31 @@ public sealed class User : Entity<int>
         return true;
     }
 
+    /// <summary>Межа адміністративного блокування: «доки не розблокують» (BE-12).</summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="DateTime.MaxValue"/>: його сьомий знак дробу не влазить у
+    /// <c>datetime2(3)</c> і округлився б за межу типу. Окремої колонки немає —
+    /// блокування лягає в ту саму <see cref="LockedUntil"/>, яку вже читають вхід і перелік.
+    /// </remarks>
+    public static readonly DateTime AdministrativeLockUntil = new(9999, 12, 31, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>Чи заблокував запис адміністратор (а не лічильник невдалих спроб).</summary>
+    public bool IsLockedByAdministrator => LockedUntil == AdministrativeLockUntil;
+
+    /// <summary>Блокує запис безстроково і обриває всі його сесії (BE-12).</summary>
+    public void LockByAdministrator()
+    {
+        LockedUntil = AdministrativeLockUntil;
+        RefreshSecurityStamp();
+    }
+
+    /// <summary>Знімає будь-яке блокування — адміністративне чи після невдалих спроб.</summary>
+    public void Unlock()
+    {
+        LockedUntil = null;
+        FailedAttempts = 0;
+    }
+
     /// <summary>Скидає лічильник після вдалого входу і запам'ятовує його момент.</summary>
     /// <param name="utcNow">Момент входу.</param>
     public void RegisterSuccessfulLogin(DateTime utcNow)

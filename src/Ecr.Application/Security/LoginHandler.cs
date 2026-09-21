@@ -80,10 +80,7 @@ public sealed partial class LoginHandler(
             // законний власник має дізнатися, що запис заблоковано, інакше він
             // підбиратиме пароль, який давно правильний. Ціна відома — стан
             // «запис існує» стає видимим після вичерпання спроб (ФВ-6.4a).
-            throw new BusinessRuleException(
-                "ECR-AUTH-0423",
-                "Обліковий запис тимчасово заблоковано після невдалих спроб входу.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0423.lockedAfterFailures" });
+            throw Locked(user);
         }
 
         if (user.PasswordHash is null || !hasher.Verify(password, user.PasswordHash))
@@ -145,6 +142,15 @@ public sealed partial class LoginHandler(
         {
             await FailAsync(userName, "Disabled", ipAddress, now, ct).ConfigureAwait(false);
             throw InvalidCredentials();
+        }
+
+        // ⛔ Без цієї перевірки адміністративне блокування (BE-12) доменного
+        // запису тривало б до наступного входу: RegisterSuccessfulLogin нижче
+        // сам знімає LockedUntil.
+        if (user.IsLockedOut(now))
+        {
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            throw Locked(user);
         }
 
         user.RegisterSuccessfulLogin(now);
@@ -263,6 +269,16 @@ public sealed partial class LoginHandler(
         _decoyHash ??= hasher.Hash("decoy-for-constant-time-comparison");
         hasher.Verify(password ?? string.Empty, _decoyHash);
     }
+
+    /// <summary>Відмова заблокованому запису: причина — лічильник спроб чи адміністратор.</summary>
+    private static BusinessRuleException Locked(User user)
+        => user.IsLockedByAdministrator
+            ? new BusinessRuleException(
+                "ECR-AUTH-0423", "Обліковий запис заблоковано адміністратором.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0423.lockedByAdministrator" })
+            : new BusinessRuleException(
+                "ECR-AUTH-0423", "Обліковий запис тимчасово заблоковано після невдалих спроб входу.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0423.lockedAfterFailures" });
 
     private static AccessDeniedException InvalidCredentials()
         => new("ECR-AUTH-0401", "Невірне ім'я користувача або пароль.");

@@ -362,7 +362,8 @@ UPDATE t
     (N'err.ECR-USR-0409',                N'en', N'A user named "{userName}" already exists.', N'User name already in use'),
     (N'err.ECR-REG-4091',                N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.',
                                                 N'Registry code already in use'),
-    (N'err.ECR-SEC-0409',                N'en', N'A role with code "{code}" already exists.', N'Role code already in use'),
+    (N'err.ECR-SEC-0409',                N'en', N'A role with code "{code}" already exists.', N'Conflicts with security settings'),
+    (N'err.ECR-SEC-0409',                N'en', N'Role code already in use', N'Conflicts with security settings'),
     (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it (ФВ-7.1).',
                                                 N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.'),
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
@@ -498,7 +499,7 @@ USING (VALUES
     -- ⛔ Q-30x: чотири варіанти «код/ім'я вже зайняте», кожен — своя сутність
     -- (роль/проєкт/довідниковий запис/користувач), кожен свій messageKey,
     -- усі приватної області (лише автентифіковані адмін-екрани).
-    (N'err.ECR-SEC-0409',  N'en', N'Role code already in use', 1),
+    (N'err.ECR-SEC-0409',  N'en', N'Conflicts with security settings', 1),
     (N'err.ECR-SEC-0409.roleCodeTaken', N'en', N'A role with code "{code}" already exists.', 1),
     -- ⛔ `BE-14`: та сама родина, інші причини — роль не видаляється, доки на
     -- ній щось тримається, а вбудована не видаляється й не перейменовується.
@@ -509,6 +510,12 @@ USING (VALUES
     (N'err.ECR-SEC-0409.dangerousRoleNeedsConfirmation', N'en', N'Role "{code}" carries dangerous permissions ({permissions}). Confirm to assign it to a group.', 1),
     (N'err.ECR-SEC-0409.groupAssignmentExists', N'en', N'Role "{code}" is already assigned to group {sid}.', 1),
     (N'err.ECR-SEC-0404.groupAssignmentNotFound', N'en', N'Group assignment {id} does not exist.', 1),
+    -- `BE-12`: адміністрування облікових записів — скидання пароля, блокування.
+    (N'err.ECR-SEC-0404.userNotFound', N'en', N'User {userId} does not exist.', 1),
+    (N'err.ECR-SEC-0409.cannotTargetSelf', N'en', N'You cannot lock your own account or reset its password here. Change your own password from your profile.', 1),
+    (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users.', 1),
+    (N'err.ECR-USR-0422.domainPasswordReset', N'en', N'"{userName}" is a domain account: its password is managed in the domain, not here.', 1),
+    (N'err.ECR-USR-0422.lockReasonRequired', N'en', N'A reason of up to {max} characters is required: it is recorded in the security journal.', 1),
     (N'err.ECR-REQ-0422.principalNotResolved', N'en', N'Group "{principal}" was not found in the directory. Check the name or enter its SID.', 1),
     (N'err.ECR-REQ-0422.principalSidMalformed', N'en', N'"{principal}" is not a valid SID.', 1),
     (N'err.ECR-REQ-0422.validityOrder', N'en', N'The start of the validity window is later than its end.', 1),
@@ -759,6 +766,7 @@ USING (VALUES
     (N'err.ECR-AUTH-0401.currentPasswordWrong', N'en', N'The current password is incorrect.', 1),
     (N'err.ECR-AUTH-0403.domainPassword',       N'en', N'The password of a domain account is changed in the domain, not here.', 1),
     (N'err.ECR-AUTH-0423.lockedAfterFailures',  N'en', N'The account is temporarily locked after failed sign-in attempts. Try again later.', 0),
+    (N'err.ECR-AUTH-0423.lockedByAdministrator', N'en', N'The account has been locked by an administrator. Contact your administrator.', 0),
     (N'err.ECR-PWD-0428.oneTimePassword',       N'en', N'Your password was issued for one-time use: until you change it, only changing the password and signing out are available.', 0),
     (N'err.ECR-PWD-0422.tooShort',              N'en', N'The new password is shorter than {minLength} characters.', 1),
     -- ⚠ Слово в слово як старший точковий шлях (`requiresPermission` + код
