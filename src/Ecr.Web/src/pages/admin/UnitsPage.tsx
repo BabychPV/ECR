@@ -1,12 +1,12 @@
-import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, Select, Stack, Table, Text, TextInput } from '@mantine/core';
+import { useMemo, useState, type JSX } from 'react';
+import { Badge, Button, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
 import { decimalEquals, normalizeDecimal } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
-import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -157,6 +157,112 @@ export function UnitsPage(): JSX.Element {
   // з'явитися, поки діалог стояв відкритий.
   const dependents = unitReferences(remove.error) ?? usage.data;
 
+  /*
+   * Порядок, у якому перелік відкривається: розмірність, усередині неї — код.
+   *
+   * ⛔ Це НЕ друге сортування поруч із сортуванням набору. `DataTable` починає
+   * з `sort === null`, тобто «як прийшло», і клацання по шапці бере роботу на
+   * себе далі; тут задається рівно те, чим був порядок ДО переїзду. Прибрати
+   * цей рядок означало б показати одиниці в порядку рядків бази — зміну
+   * поведінки, а не спрощення.
+   *
+   * ⛔ `undefined` мусить лишатися `undefined`: `?? []` перетворило б «запиту
+   * ще не робили» на «порожньо», а саме цю підміну `AsyncBoundary` всередині
+   * таблиці й ловить.
+   */
+  const rows = useMemo<readonly UnitRef[] | undefined>(
+    () =>
+      units.data === undefined
+        ? undefined
+        : [...units.data].sort(
+            (a, b) =>
+              a.dimensionCode.localeCompare(b.dimensionCode) || a.code.localeCompare(b.code),
+          ),
+    [units.data],
+  );
+
+  /*
+   * ⛔ Обидві десяткові колонки мають `render`, що віддає РЯДОК СЕРВЕРА як є, і
+   * це не обхід набору, а єдиний тут правильний його режим. Клітинка `num` без
+   * `render` малюється `formatDecimal(raw, undefined, 3)` — стеля дробової
+   * частини переліку, — і множник `0.4535923700` поїхав би на екран як `0.454`.
+   * На будь-якому іншому переліку три знаки доречні; на довіднику одиниць
+   * множник — це і є те, заради чого контракт перевели на рядок (`e470777a`):
+   * округлити його означає стерти відповідь, по яку сюди приходять.
+   *
+   * ⚠ Сам `num` лишається, і не заради вирівнювання: він вмикає ЧИСЛОВЕ
+   * порівняння десяткових рядків (`compareDecimals`). Без нього колонка
+   * сортувалася б колатором, тобто `'0.001'` стояло б після `'0.0001'`, а
+   * `'10'` — перед `'9'`.
+   */
+  const columns: readonly DataTableColumn<UnitRef>[] = [
+    {
+      key: 'code',
+      label: t('units.code'),
+      render: (unit) => (
+        <>
+          {unit.code}
+          {/* ⚠ Базова одиниця розмірності видно окремо: саме через неї йде
+              кожна конверсія, і множник решти — це множник ДО НЕЇ.
+
+              ⛔ Порівняння — `decimalEquals`, не `Number(x) === 1`. Множник
+              приходить із масштабом колонки (`"1.0000000000"`), тож рівність
+              рядків тут не працює; а `Number` не відрізнив би базову одиницю
+              від такої, що відходить від неї на 17-му знаку. */}
+          {decimalEquals(unit.factorToBase, '1') && decimalEquals(unit.offsetToBase, '0') && (
+            <Badge ml="xs" size="xs" variant="light">
+              {t('units.base')}
+            </Badge>
+          )}
+        </>
+      ),
+    },
+    {
+      // Q-297: до фіксу тут був голий `unit.dimensionId` — число без жодного
+      // сенсу для людини, що дивиться на екран.
+      key: 'dimensionCode',
+      label: t('units.dimension'),
+    },
+    {
+      key: 'factorToBase',
+      label: t('units.factor'),
+      num: true,
+      render: (unit) => unit.factorToBase,
+    },
+    {
+      key: 'offsetToBase',
+      label: t('units.offset'),
+      num: true,
+      render: (unit) => unit.offsetToBase,
+    },
+    // ⚠ Колонка дій з'являється лише з правом — рівно як і до переїзду; шапка в
+    // неї порожня, а `sortable: false` тому, що в кнопки немає скалярного
+    // значення і сортування за нею мовчки не робило б нічого.
+    ...(canEdit
+      ? [
+          {
+            key: 'actions',
+            label: '',
+            sortable: false,
+            render: (unit: UnitRef) => (
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="statusError"
+                aria-label={`${t('common.delete')} ${unit.code}`}
+                onClick={() => {
+                  remove.reset();
+                  setDeleting(unit);
+                }}
+              >
+                {t('common.delete')}
+              </Button>
+            ),
+          } satisfies DataTableColumn<UnitRef>,
+        ]
+      : []),
+  ];
+
   return (
     <>
       <PageHeader
@@ -227,80 +333,34 @@ export function UnitsPage(): JSX.Element {
         }
       />
 
-      <AsyncBoundary<UnitRef[]>
+      {/*
+       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` РАЗОМ, а не лише
+       * розмітку: обгортку станів набір тримає всередині себе (`DataTable.tsx`
+       * — той самий `AsyncBoundary`, `skeleton="table"`). Лишити зовнішню поруч
+       * означало б два перемикачі станів на одну таблицю — саме ту розбіжність,
+       * заради усунення якої таблиця й стала компонентом. Правило «відмова ≠
+       * порожньо» від цього не слабшає: воно переїхало разом із обгорткою.
+       *
+       * ⚠ Сортування шапкою прийшло з набором, і його тут не було: чотири
+       * перші колонки стали клікабельними. Порядок при відкритті — той самий
+       * (`rows` вище).
+       *
+       * ⚠ `clearFiltersLabel`/`showMoreLabel` цьому екрану передавати НЕМА
+       * куди: фільтрів у нього немає (тож немає й `onClearFilters`), а
+       * `GET /api/v1/units` віддає довідник одним масивом без курсора (тож
+       * немає `total`/`onShowMore`). Обидві кнопки в такому разі не
+       * малюються зовсім, і проп до них був би мертвим.
+       */}
+      <DataTable<UnitRef>
+        columns={columns}
+        rows={rows}
+        rowKey={(unit) => String(unit.id)}
         isPending={units.isPending}
         error={units.error}
-        data={units.data}
-        isEmpty={(list) => list.length === 0}
         emptyTitle={t('units.empty')}
         emptyHint={t('units.emptyHint')}
-        skeleton="table"
         onRetry={() => void units.refetch()}
-      >
-        {(list) => (
-          <Table striped className="ecr-sticky-head">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('units.code')}</Table.Th>
-                <Table.Th>{t('units.dimension')}</Table.Th>
-                <Table.Th>{t('units.factor')}</Table.Th>
-                <Table.Th>{t('units.offset')}</Table.Th>
-                {canEdit && <Table.Th />}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {[...list]
-                .sort(
-                  (a, b) =>
-                    a.dimensionCode.localeCompare(b.dimensionCode) || a.code.localeCompare(b.code),
-                )
-                .map((unit) => (
-                  <Table.Tr key={unit.id}>
-                    <Table.Td>
-                      {unit.code}
-                      {/* ⚠ Базова одиниця розмірності видно окремо: саме через
-                          неї йде кожна конверсія, і множник решти — це
-                          множник ДО НЕЇ.
-
-                          ⛔ Порівняння — `decimalEquals`, не `Number(x) === 1`.
-                          Множник приходить із масштабом колонки
-                          (`"1.0000000000"`), тож рівність рядків тут не
-                          працює; а `Number` не відрізнив би базову одиницю від
-                          такої, що відходить від неї на 17-му знаку. */}
-                      {decimalEquals(unit.factorToBase, '1') &&
-                        decimalEquals(unit.offsetToBase, '0') && (
-                          <Badge ml="xs" size="xs" variant="light">
-                            {t('units.base')}
-                          </Badge>
-                        )}
-                    </Table.Td>
-                    {/* Q-297: до фіксу тут був голий `unit.dimensionId` — число
-                        без жодного сенсу для людини, що дивиться на екран. */}
-                    <Table.Td>{unit.dimensionCode}</Table.Td>
-                    <Table.Td>{unit.factorToBase}</Table.Td>
-                    <Table.Td>{unit.offsetToBase}</Table.Td>
-                    {canEdit && (
-                      <Table.Td>
-                        <Button
-                          size="compact-xs"
-                          variant="subtle"
-                          color="statusError"
-                          aria-label={`${t('common.delete')} ${unit.code}`}
-                          onClick={() => {
-                            remove.reset();
-                            setDeleting(unit);
-                          }}
-                        >
-                          {t('common.delete')}
-                        </Button>
-                      </Table.Td>
-                    )}
-                  </Table.Tr>
-                ))}
-            </Table.Tbody>
-          </Table>
-        )}
-      </AsyncBoundary>
+      />
 
       <Modal
         opened={deleting !== null}
