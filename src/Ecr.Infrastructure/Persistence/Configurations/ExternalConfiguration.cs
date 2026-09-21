@@ -30,6 +30,7 @@ public sealed class DataSourceConfiguration : IEntityTypeConfiguration<DataSourc
         builder.Property(x => x.Catalog).HasColumnName("Catalog").HasMaxLength(200);
         builder.Property(x => x.MaxParallel).HasDefaultValue(4);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
+        builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_DataSource");
     }
 }

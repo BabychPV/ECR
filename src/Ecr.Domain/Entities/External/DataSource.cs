@@ -68,6 +68,9 @@ public sealed class DataSource : Entity<int>
     public int MaxParallel { get; private set; }
     public bool IsActive { get; private set; }
 
+    /// <summary>Версія рядка: дві правки одного з'єднання не затирають одна одну.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     /// <summary>Налаштовує транспорт.</summary>
     /// <param name="secondaryEndpoint">Запасна адреса.</param>
     /// <param name="catalog">Каталог джерела.</param>
