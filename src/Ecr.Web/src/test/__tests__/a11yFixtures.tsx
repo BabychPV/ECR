@@ -4,7 +4,7 @@ import { vi, beforeEach, afterEach } from 'vitest';
 import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { mantineProviderProps } from '@/shared/theme/provider';
 
 /**
@@ -46,6 +46,51 @@ export function Shell({
     <MantineProvider {...mantineProviderProps} forceColorScheme={colorScheme}>
       <QueryClientProvider client={client}>
         <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>
+  );
+}
+
+/**
+ * Та сама оболонка для сторінки, яка живе на маршруті З ПАРАМЕТРОМ (`UI-09`).
+ *
+ * ⛔ Доповнення, а не заміна {@link Shell}: двадцять три сторінки набору
+ * читають лише `useSearchParams`/нічого і чудово скануються під голим
+ * `MemoryRouter` на `/`. Картка шаблону — перша, чий зміст ЦІЛКОМ залежить від
+ * `useParams().id`: без збігу маршруту `id` там `undefined`, запит вимкнено
+ * (`useTemplateCard`), і axe сканував би вічний скелет — тобто сторінку без
+ * того, заради чого вона існує. Це той самий відмовний режим, що вже описаний
+ * тут для порожніх фікстур (`DocumentSliceFixture`), лише з боку адреси.
+ *
+ * ⚠ Вкласти `MemoryRouter` у `Shell` НЕ можна: React Router кидає «You cannot
+ * render a <Router> inside another <Router>». Тому це окрема оболонка з
+ * власним маршрутизатором, а не обгортка поверх наявної.
+ */
+export function RouteShell({
+  children,
+  colorScheme,
+  path,
+  entry,
+}: {
+  children: ReactNode;
+  colorScheme: 'light' | 'dark';
+
+  /** Шаблон маршруту, як він оголошений у реєстрі (`/admin/templates/:id`). */
+  path: string;
+
+  /** Конкретна адреса, на якій сторінка рендериться. */
+  entry: string;
+}): JSX.Element {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  return (
+    <MantineProvider {...mantineProviderProps} forceColorScheme={colorScheme}>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route path={path} element={children} />
+          </Routes>
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>
   );
@@ -390,6 +435,28 @@ export function emptyBodyFor(url: string): unknown {
       projectId: 1,
       sheetCount: 1,
       sheetStates: { GEN: 'Draft' },
+    };
+  }
+
+  /*
+   * ⛔ Картка ОДНОГО шаблону (`UI-09`) — ПЕРЕД переліком нижче: `/templates`
+   * входить у `paged`, тож без цього рядка картка отримала б `{items: []}`
+   * замість `TemplateCard`, і сторінка показала б не картку, а падіння на
+   * `dependents` — тобто гейт сканував би екран помилки.
+   *
+   * ⛔ Числа залежних НЕнульові й РІЗНІ (2 і 5): нуль сховав би сам рядок
+   * (`KeyValue`, `D15-06`), а однакові дозволили б сумі збігтися зі
+   * складовою. `isActive: true` — щоб у шапці був саме той стан, у якому
+   * малюється кнопка архівування з підтвердженням.
+   */
+  if (/\/templates\/\d+$/.test(url)) {
+    return {
+      code: 'TPL-A11Y',
+      createdAt: '2026-01-01T00:00:00Z',
+      dependents: { documents: 5, projects: 2, publishedVersions: 1, versions: 3 },
+      id: 1,
+      isActive: true,
+      nameL10n: { values: { en: 'Stationary sources' } },
     };
   }
 

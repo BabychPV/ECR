@@ -168,7 +168,15 @@ function header(table: HTMLElement, name: RegExp): HTMLElement {
   return cell as HTMLElement;
 }
 
-/** Посилання на версію в рядку з заданим кодом шаблону. */
+/**
+ * Посилання на версію в рядку з заданим кодом шаблону.
+ *
+ * ✎ 2026-09-21 (`UI-09`): у рядку стало ДВА посилання — код шаблону тепер веде
+ * на його картку (`/admin/templates/{id}`), і `getByRole('link')` без уточнення
+ * падав би на «знайдено два». Вибірка за `/versions/` у `href` — не
+ * послаблення: твердження нижче й далі звіряє ТОЧНИЙ `href` версії, тобто
+ * ловить рівно ту мутацію, заради якої написане (рядок бере версії сусіда).
+ */
 function versionLinkOf(table: HTMLElement, code: string): HTMLAnchorElement {
   const row = within(table)
     .getAllByRole('row')
@@ -177,7 +185,18 @@ function versionLinkOf(table: HTMLElement, code: string): HTMLAnchorElement {
 
   expect(row, `рядка «${code}» немає в таблиці`).toBeDefined();
 
-  const link = within(row as HTMLElement).getByRole('link');
+  const link = within(row as HTMLElement)
+    .getAllByRole('link')
+    .find((candidate) => (candidate.getAttribute('href') ?? '').includes('/versions/'));
+
+  expect(link, `у рядку «${code}» немає посилання на версію`).toBeDefined();
+
+  return link as HTMLAnchorElement;
+}
+
+/** Посилання на КАРТКУ шаблону в рядку з заданим кодом (`UI-09`). */
+function cardLinkOf(table: HTMLElement, code: string): HTMLAnchorElement {
+  const link = within(table).getByRole('link', { name: code });
 
   return link as HTMLAnchorElement;
 }
@@ -236,8 +255,12 @@ describe('TemplatesPage на DataTable: шапка сортує — того с�
      * падінням очікування, а не падінням ТВЕРДЖЕННЯ про `href` нижче.
      */
     await within(table).findByText('BRAVO');
+
+    // ⚠ Чотири, а не два (`UI-09`): по два посилання на рядок — картка шаблону
+    // і його версія. Число лишається точним навмисно: «принаймні два» не
+    // помітило б зниклої колонки версій.
     await waitFor(() => {
-      expect(within(table).getAllByRole('link')).toHaveLength(2);
+      expect(within(table).getAllByRole('link')).toHaveLength(4);
     });
 
     fireEvent.click(within(table).getByRole('button', { name: CodeHeader }));
@@ -256,6 +279,24 @@ describe('TemplatesPage на DataTable: шапка сортує — того с�
     expect(versionLinkOf(table, 'BRAVO').getAttribute('href')).toBe(
       '/admin/templates/7/versions/70',
     );
+  });
+
+  it('код шаблону веде на ЙОГО картку, а не на картку сусіда (UI-09)', async () => {
+    show({ kind: 'list' });
+
+    const table = await screen.findByRole('table');
+    await within(table).findByText('BRAVO');
+
+    fireEvent.click(within(table).getByRole('button', { name: CodeHeader }));
+
+    /*
+     * ⛔ Та сама мутація, що й для версій, лише на іншій колонці: адреса
+     * картки будується з `template.id` РЯДКА. Підстановка позиції рядка
+     * (`items[index].id`) після сортування дала б `ALPHA` адресу `…/7` —
+     * правдоподібну й чужу.
+     */
+    expect(cardLinkOf(table, 'ALPHA').getAttribute('href')).toBe('/admin/templates/3');
+    expect(cardLinkOf(table, 'BRAVO').getAttribute('href')).toBe('/admin/templates/7');
   });
 });
 

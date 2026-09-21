@@ -1448,6 +1448,29 @@ USING (VALUES
     (N'templates.versionCreated',        N'en', N'The version has been created from the latest one.', 1),
     (N'templates.versionNumber',         N'en', N'Version number', 1),
     (N'templates.versionNumberHint',     N'en', N'Major.Minor.Patch.Build — the number says what kind of change this is.', 1),
+
+    -- Картка шаблону (`UI-09`): перейменування, архівування, повернення в обіг.
+    -- ⚠ `templates.card` — назва РІВНЯ, а не заглушка замість назви шаблону:
+    -- показується лише доки картка їде, і на архівованому шаблоні без жодної
+    -- непорожньої назви (сервер вимагає непорожньою лише одну мову).
+    (N'templates.card',                  N'en', N'Template', 1),
+    (N'templates.rename',                N'en', N'Rename template', 1),
+    (N'templates.renamed',               N'en', N'The template has been renamed.', 1),
+    (N'templates.archive',               N'en', N'Archive template', 1),
+    (N'templates.archived',              N'en', N'The template has been archived.', 1),
+    (N'templates.archivedHint',          N'en', N'Archived: new documents are no longer created from it, while existing ones keep working.', 1),
+    (N'templates.archiveTitle',          N'en', N'Archive template "{name}"?', 1),
+    (N'templates.archiveText',           N'en', N'The template stops being offered for new documents.', 1),
+    (N'templates.archiveDependents',     N'en', N'{count} project(s) and document(s) already depend on this template.', 1),
+    (N'templates.archiveNote',           N'en', N'Reversible: you can bring the template back into use from this page.', 1),
+    (N'templates.restore',               N'en', N'Bring back into use', 1),
+    (N'templates.restored',              N'en', N'The template is back in use.', 1),
+    (N'templates.undo',                  N'en', N'Undo', 1),
+    (N'templates.dependentWork',         N'en', N'Dependent work', 1),
+    -- ⚠ Версії в це число НЕ входять: вони належать самому шаблону, а питання
+    -- перед архівуванням — скільки чужої роботи на нього спирається.
+    (N'templates.dependentBreakdown',    N'en', N'{projects} project(s) bound to a version, {documents} document(s) in them.', 1),
+
     (N'version.clone',                   N'en', N'Clone version', 1),
     (N'version.diff',                    N'en', N'Compare versions', 1),
     (N'version.diffOther',               N'en', N'Compare with version id', 1),

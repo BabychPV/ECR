@@ -1,10 +1,11 @@
 import { describe as suite, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { JSX } from 'react';
 import { describe as report, findViolations } from '@/test/a11y';
 import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
-import { Shell, Themes, registerA11yFetchMock } from '@/test/__tests__/a11yFixtures';
+import { RouteShell, Shell, Themes, registerA11yFetchMock } from '@/test/__tests__/a11yFixtures';
+import { TemplateCardPage } from '@/pages/admin/TemplateCardPage';
 import { AuditPage } from '@/pages/admin/AuditPage';
 import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
 import { UnitsPage } from '@/pages/admin/UnitsPage';
@@ -57,6 +58,56 @@ suite('Технічні ключі на екрані', () => {
         <Page />
       </Shell>,
     );
+
+    const hits = findKeyLikeText(container);
+
+    expect(hits, describeHits(hits)).toHaveLength(0);
+  });
+});
+
+/**
+ * Картка шаблону (`UI-09`) — окремим блоком, а не рядком у `Pages` вище.
+ *
+ * ⛔ Причина не в оформленні: це перший маршрут набору, чий зміст цілком
+ * залежить від `useParams().id`. Під голим `Shell` (`MemoryRouter` на `/`)
+ * параметра немає, запит вимкнено, і axe сканував би скелет — перевірка
+ * виглядала б повною й не була б нею. `RouteShell` дає той самий провайдер,
+ * ту саму заглушку мережі й ТОЙ САМИЙ каталог, але на справжній адресі.
+ */
+const TemplateCardPath = '/admin/templates/:id';
+const TemplateCardEntry = '/admin/templates/1';
+
+suite.each(Themes)('Доступність картки шаблону (%s)', (colorScheme) => {
+  it(`ФВ-14.16: ${TemplateCardPath} не має порушень critical і serious`, async () => {
+    const { container } = render(
+      <RouteShell colorScheme={colorScheme} path={TemplateCardPath} entry={TemplateCardEntry}>
+        <TemplateCardPage />
+      </RouteShell>,
+    );
+
+    await screen.findByRole('heading', { name: 'Stationary sources' });
+
+    const violations = await findViolations(container);
+
+    expect(violations, report(violations)).toHaveLength(0);
+  });
+});
+
+suite('Технічні ключі на картці шаблону', () => {
+  it(`ФВ-14.9: ${TemplateCardPath} показує людський текст, а не ключі`, async () => {
+    await loadCatalog('en', 'public');
+    await loadCatalog('en', 'private');
+
+    const { container } = render(
+      <RouteShell colorScheme="light" path={TemplateCardPath} entry={TemplateCardEntry}>
+        <TemplateCardPage />
+      </RouteShell>,
+    );
+
+    // ⚠ Чекаємо на ДАНІ, а не на рендер: ключі шапки й переліку пар
+    // з'являються лише після відповіді, і перевірка до неї дивилася б на
+    // скелет — тобто мовчки нічого не перевіряла б.
+    await screen.findByRole('heading', { name: 'Stationary sources' });
 
     const hits = findKeyLikeText(container);
 

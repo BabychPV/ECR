@@ -56,6 +56,19 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 
 /**
+ * Картка шаблону (`UI-09`) — лінива, як і решта сторінок.
+ *
+ * ⚠ Оголошена ТУТ, а не в `routePrefetch.ts`, свідомо: той реєстр існує для
+ * прогріву за наміром із НАВБАРУ (`useRoutePrefetch`), а на цю сторінку
+ * заходять із рядка переліку шаблонів. Запис у реєстрі прогріву, якого ніхто
+ * не кличе, — це третій спосіб адресувати той самий маршрут без жодного
+ * споживача.
+ */
+const TemplateCardPage = lazy(async () => ({
+  default: (await import('@/pages/admin/TemplateCardPage')).TemplateCardPage,
+}));
+
+/**
  * Межа очікування для маршрутів поза каркасом.
  *
  * ⚠ Сторінка входу рендериться поза `AppLayout`, тобто поза його `<Suspense>`.
@@ -227,6 +240,31 @@ export const router = createBrowserRouter([
             // breadcrumbs читають назву шаблону саме з цього `handle`).
             handle: routes.adminTemplateSection.handle,
             children: [
+              /**
+               * Лист самої секції (`UI-09`): картка шаблону.
+               *
+               * ⛔ `index: true`, а не окремий запис реєстру: `routes.ts`
+               * стереже УНІКАЛЬНІСТЬ шляхів (`routeConfig.test.ts`), а шлях
+               * цього листа — рівно `adminTemplateSection.path`. Другий запис
+               * із тією самою адресою завалив би сторожа, і це правильно: дві
+               * назви однієї адреси — це початок розходження.
+               *
+               * ⛔ `handle` тут НЕ ставиться — і це не пропуск. `useMatches()`
+               * віддав би індексний матч із тим самим `pathname`, що й
+               * layout-вузол вище, тож `Breadcrumbs` (`key:
+               * `match:${pathname}``) отримав би ДВІ однакові крихти поспіль і
+               * два однакові ключі React. Назву шаблону в ланцюжок уже кладе
+               * сам `adminTemplateSection`.
+               *
+               * ⚠ `lazy()` стоїть тут, а не в `routePrefetch.ts`, з тієї самої
+               * причини, що й `LoginPage` вище: прогрів за наміром гріє пункти
+               * НАВБАРУ, а на цю сторінку заходять із переліку шаблонів, тобто
+               * з рядка таблиці — реєстру прогріву вона не потребує.
+               */
+              {
+                index: true,
+                element: guarded(routes.adminTemplateSection.handle, <TemplateCardPage />),
+              },
               {
                 path: relativePath(routes.adminTemplateVersion, 'admin/templates/:id'),
                 element: guarded(routes.adminTemplateVersion.handle, <TemplateVersionPage />),

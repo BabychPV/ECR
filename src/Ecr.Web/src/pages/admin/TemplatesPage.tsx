@@ -157,10 +157,26 @@ export function TemplatesPage(): JSX.Element {
    */
   const columns: readonly DataTableColumn<TemplateSummary>[] = [
     {
-      // ⚠ `key` збігається з полем `TemplateSummary`, тож і клітинка, і ключ
-      // сортування беруться самим набором — без `render` і без `sortValue`.
       key: 'code',
       label: t('templates.code'),
+
+      /*
+       * ⛔ `UI-09`: код став ПОСИЛАННЯМ на картку шаблону. До цього з переліку
+       * не було входу на сам шаблон узагалі — лише на його версію, — і
+       * перейменування з архівуванням лишалися недосяжними з інтерфейсу,
+       * хоча сервер обидва вміє.
+       *
+       * ⚠ `sortValue` заданий явно: `render` перебиває клітинку вузлом, а
+       * сортувати перелік треба за самим кодом, не за розміткою. Без цього
+       * рядка шапка впорядкувала б стовпець за чимось, що не є текстом на
+       * екрані, — і порядок виглядав би випадковим.
+       */
+      render: (template) => (
+        <Anchor component={Link} size="sm" to={`/admin/templates/${String(template.id)}`}>
+          {template.code}
+        </Anchor>
+      ),
+      sortValue: (template) => template.code,
     },
     {
       key: 'versions',
