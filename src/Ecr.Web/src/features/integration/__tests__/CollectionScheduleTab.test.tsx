@@ -16,11 +16,10 @@ import type { CollectionSchedule } from '@/features/integration/scheduleApi';
  * що шле не те, що на екрані (або стару версію рядка), зеленіла б на
  * будь-якій перевірці виду «PUT викликано».
  *
- * ⚠ Заглушки відмов — БЕЗ `errorCode`: сервер відповідає на конфлікт
- * `ECR-JOB-0409`, якого в `ErrorCodes.cs` ще немає, і вигаданий код тут
- * валив би `ClientErrorCodeTests`. Клієнт розрізняє конфлікт за
+ * ⚠ Заглушки відмов — БЕЗ `errorCode`: клієнт розрізняє конфлікт за
  * `status === 409`, тож коду для доказу не потрібно; `problemOf` сам підставить
- * `HTTP-409`.
+ * `HTTP-409`. (`ECR-JOB-0409` у `ErrorCodes.cs` уже є — застереження про
+ * вигаданий код тут більше не діє.)
  */
 
 const Strings: Record<string, string> = {
@@ -136,7 +135,7 @@ async function show(): Promise<void> {
   render(
     <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <CollectionScheduleTab sourceEntityId={SourceEntityId} />
+        <CollectionScheduleTab sourceEntityId={SourceEntityId} dataSource="PI-WEST" />
       </QueryClientProvider>
     </MantineProvider>,
   );

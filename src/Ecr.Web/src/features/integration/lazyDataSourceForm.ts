@@ -11,3 +11,12 @@ import { lazy } from 'react';
 export const DataSourceFormModal = lazy(() =>
   import('./DataSourceFormModal').then((module) => ({ default: module.DataSourceFormModal })),
 );
+
+/**
+ * Вкладка розкладів шухляди з'єднання — за `import()` з тієї ж причини:
+ * редактор розкладу (`CollectionScheduleTab`, розбір cron) потрібен лише
+ * тому, хто відкрив вкладку.
+ */
+export const DataSourceScheduleTab = lazy(() =>
+  import('./DataSourceScheduleTab').then((module) => ({ default: module.DataSourceScheduleTab })),
+);

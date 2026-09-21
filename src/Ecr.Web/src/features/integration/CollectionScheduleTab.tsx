@@ -11,7 +11,7 @@ import {
 } from '@/features/integration/scheduleApi';
 import { checkCron } from '@/features/integration/cronFormat';
 import {
-  CollectionSchedulesKey,
+  collectionSchedulesKey,
   useCollectionSchedules,
 } from '@/features/integration/useCollectionSchedules';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -22,8 +22,9 @@ import { t } from '@/shared/i18n';
  * Розклад збору однієї сутності джерела (ФВ-14.3): переглянути, задати,
  * змінити, прибрати.
  *
- * ⚠ Самодостатній: сам читає й пише розклад, ззовні потрібен лише
- * `sourceEntityId`. Контракт розкладу ключований САМЕ сутністю джерела
+ * ⚠ Самодостатній: сам читає й пише розклад, ззовні потрібні лише
+ * `sourceEntityId` і код з'єднання (перелік читається з фільтром
+ * `?dataSource=` і кешується за ним). Контракт розкладу ключований САМЕ сутністю джерела
  * (`CreateCollectionScheduleRequest.sourceEntityId`), а не з'єднанням: у
  * `CollectionScheduleView` поля з'єднання немає.
  *
@@ -36,9 +37,18 @@ import { t } from '@/shared/i18n';
  *    видима з першого погляду. Розклад, який тихо не ставиться, гірший за
  *    відсутній: екран каже «збір є», а збору не буде жодного разу.
  */
-export function CollectionScheduleTab({ sourceEntityId }: { sourceEntityId: number }): JSX.Element {
+export function CollectionScheduleTab({
+  sourceEntityId,
+  dataSource,
+}: {
+  sourceEntityId: number;
+
+  /** Код з'єднання сутності: перелік читається й кешується саме за ним. */
+  dataSource: string;
+}): JSX.Element {
   const queryClient = useQueryClient();
-  const schedules = useCollectionSchedules();
+  const schedules = useCollectionSchedules(dataSource);
+  const schedulesKey = collectionSchedulesKey(dataSource);
 
   /*
    * ⚠ Відмова збереження живе ТУТ, а не у формі: форма перемонтовується, коли
@@ -51,7 +61,7 @@ export function CollectionScheduleTab({ sourceEntityId }: { sourceEntityId: numb
   const conflict = failure instanceof EcrApiError && failure.problem.status === 409;
 
   const replaceRow = (next: CollectionSchedule | null, removedId?: number): void => {
-    queryClient.setQueryData<CollectionSchedule[]>(CollectionSchedulesKey, (rows) => {
+    queryClient.setQueryData<CollectionSchedule[]>(schedulesKey, (rows) => {
       const rest = (rows ?? []).filter(
         (row) => row.sourceEntityId !== sourceEntityId && row.id !== removedId,
       );
@@ -71,7 +81,7 @@ export function CollectionScheduleTab({ sourceEntityId }: { sourceEntityId: numb
     // що рядок УЖЕ збережено (з новою версією й `lastError`), а `404` — що
     // його вже немає.
     if (!(error instanceof EcrApiError && error.problem.status === 409)) {
-      void queryClient.invalidateQueries({ queryKey: CollectionSchedulesKey });
+      void queryClient.invalidateQueries({ queryKey: schedulesKey });
     }
   };
 

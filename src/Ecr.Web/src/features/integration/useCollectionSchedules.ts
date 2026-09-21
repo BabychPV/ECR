@@ -1,11 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { listCollectionSchedules } from '@/features/integration/scheduleApi';
 
-/** Ключ переліку розкладів збору. */
+/** Префікс ключів переліку розкладів збору — для інвалідизації всіх з'єднань разом. */
 export const CollectionSchedulesKey = ['collection-schedules'] as const;
 
 /**
- * Перелік розкладів збору.
+ * Ключ переліку розкладів ОДНОГО з'єднання.
+ *
+ * ⛔ Код з'єднання — частина ключа, а не лише параметр запиту: зі спільним
+ * ключем дві шухляди ділили б один запис кешу, і розклади одного з'єднання
+ * показалися б під іншим, доки не прийде перечитування.
+ */
+export function collectionSchedulesKey(dataSource: string) {
+  return [...CollectionSchedulesKey, dataSource] as const;
+}
+
+/**
+ * Розклади збору одного з'єднання (сервер фільтрує `?dataSource=<code>`).
  *
  * ⛔ `refetchOnWindowFocus: false` — не косметика. Форма тримає `rowVersion`
  * рядка, який ПОКАЗАЛИ людині, і шле саме його в `If-Match`. Мовчазне
@@ -14,10 +25,10 @@ export const CollectionSchedulesKey = ['collection-schedules'] as const;
  * правки, так і не побачивши її. Свіжу версію беруть свідомо: кнопкою
  * перечитування після конфлікту.
  */
-export function useCollectionSchedules() {
+export function useCollectionSchedules(dataSource: string) {
   return useQuery({
-    queryKey: CollectionSchedulesKey,
-    queryFn: listCollectionSchedules,
+    queryKey: collectionSchedulesKey(dataSource),
+    queryFn: () => listCollectionSchedules({ dataSource }),
     refetchOnWindowFocus: false,
   });
 }

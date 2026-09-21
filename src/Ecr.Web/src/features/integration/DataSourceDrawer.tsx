@@ -1,5 +1,5 @@
 import { Suspense, useState, type JSX } from 'react';
-import { Badge, Button, Group, Stack, Tabs } from '@mantine/core';
+import { Badge, Button, Group, Loader, Stack, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatNumber } from '@/shared/format';
@@ -9,7 +9,7 @@ import { DetailDrawer } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
-import { DataSourceFormModal } from './lazyDataSourceForm';
+import { DataSourceFormModal, DataSourceScheduleTab } from './lazyDataSourceForm';
 import { TestDataSourceModal } from './TestDataSourceModal';
 import { deleteDataSource, type DataSource } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
@@ -54,9 +54,8 @@ export function connectionItems(source: DataSource): KeyValueItem[] {
 /**
  * Шухляда з'єднання (директива №15 §3 `UI-09`, шар 2).
  *
- * ⚠ Вкладка поки одна — Connection. Розклад збору прийде наступним кроком
- * окремим компонентом; вкладки заведені вже зараз, щоб він додав рядок, а не
- * переставляв розмітку шухляди.
+ * ⚠ Вкладки дві — Connection і Schedule (розклади збору сутностей цього
+ * з'єднання, `DataSourceScheduleTab`).
  *
  * ⛔ Багатокрокової «Check configuration» із макета тут немає: сервер цих
  * кроків не віддає, а елемент без даних не малюється.
@@ -148,10 +147,19 @@ export function DataSourceDrawer({
         <Tabs defaultValue="connection" keepMounted={false}>
           <Tabs.List>
             <Tabs.Tab value="connection">{t('sources.connection')}</Tabs.Tab>
+            <Tabs.Tab value="schedule">{t('sources.tabSchedule')}</Tabs.Tab>
           </Tabs.List>
 
           <Tabs.Panel value="connection" pt="sm">
             <KeyValue items={connectionItems(source)} />
+          </Tabs.Panel>
+
+          {/* ⚠ `L2`: закрита за замовчуванням, і `keepMounted={false}` означає,
+              що розклади не читаються, доки вкладку не відкрили. */}
+          <Tabs.Panel value="schedule" pt="sm">
+            <Suspense fallback={<Loader size="sm" />}>
+              <DataSourceScheduleTab source={source} />
+            </Suspense>
           </Tabs.Panel>
         </Tabs>
       </DetailDrawer>
