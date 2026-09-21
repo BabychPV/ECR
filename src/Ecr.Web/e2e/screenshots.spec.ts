@@ -75,6 +75,35 @@ async function signIn(page: Page, user: string, password: string): Promise<void>
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 }
 
+/**
+ * Відмова в праві на сторінці — усі три її подачі.
+ *
+ * ⛔ Без цього знімок відмови проходив: заголовок сторінки малюється й над
+ * `403`, а цикл нижче чекає саме заголовка. Так знімок адміна на
+ * `/admin/sources` був знімком `ECR-AUTH-0403` (роль стенда мала
+ * `Integration.Manage`, але не `Integration.View`).
+ *
+ * Подачі, і всі три — `role="alert"`:
+ * - `ErrorAlert` (відмова запиту всередині сторінки) — несе код
+ *   `ECR-AUTH-0403` у `<Code>`;
+ * - `ForbiddenState` (`AsyncBoundary`, стан `no-permission`) — теж код;
+ * - `AccessDeniedPage` (`RouteGuard`, відмова маршруту) — коду НЕ несе, лише
+ *   текст `err.ECR-AUTH-0403` і назву права. Тому другий шаблон — текст
+ *   каталогу англійською: стенд працює мовою `en`, інших мов цього ключа в
+ *   сіді немає.
+ */
+const AccessDenied = /ECR-AUTH-0403|You do not have permission for this action/;
+
+async function expectNoAccessDenied(page: Page, where: string): Promise<void> {
+  const denied = page.getByRole('alert').filter({ hasText: AccessDenied });
+
+  // ⚠ `soft`: прогін іде далі по маршрутах і називає ВСІ відмови, а не першу.
+  expect.soft(
+    await denied.count(),
+    `${where}: на сторінці відмова в праві — знімок показав би 403, а не екран`,
+  ).toBe(0);
+}
+
 test.describe('Знімки маршрутів (D-142)', () => {
   // ⚠ Цей гейт більше не вирішує долю набору: без стенда ВЕСЬ набір падає в
   // `globalSetup.ts`. Він лишається робочим лише під `ECR_E2E_OPTIONAL`, коли
@@ -125,6 +154,11 @@ test.describe('Знімки маршрутів (D-142)', () => {
             // прав — законно (пункт меню туди й не веде); аварія — ні.
             const crashed = await page.getByText(/Unhandled|TypeError|is not a function/i).count();
             expect(crashed, `${route.name}: на сторінці слід аварії`).toBe(0);
+
+            // ⚠ Лише під адміністратором: у ролі стенда всі права маршрутів,
+            // тож відмова тут — дефект стенда або продукту. Оператор на
+            // адмін-маршруті бачить відмову законно (див. шапку файла).
+            if (role.name === 'admin') await expectNoAccessDenied(page, route.name);
 
             const shot = await page.screenshot({ fullPage: true });
             const name = `${role.name}-${scheme}-${density}-${route.name}`;
@@ -194,6 +228,7 @@ test.describe('Знімки маршрутів (D-142)', () => {
 
         const crashed = await page.getByText(/Unhandled|TypeError|is not a function/i).count();
         expect(crashed, 'шухляда з\'єднання: на сторінці слід аварії').toBe(0);
+        await expectNoAccessDenied(page, 'шухляда з\'єднання');
 
         const shot = await page.screenshot();
 
